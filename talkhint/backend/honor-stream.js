@@ -1,8 +1,8 @@
-const { GPTRealtimeHandler } = require('./gpt-handler');
+import { GPTRealtimeHandler } from './gpt-handler.js';
 
 const activeSessions = new Map();
 
-function createHonorStreamHandler(uiBroadcast, getCurrentMode) {
+export function createHonorStreamHandler(uiBroadcast, getCurrentMode) {
   return async function honorStreamHandler(ws, request) {
     console.log('[honor-stream] Browser mic connected');
     
@@ -128,11 +128,6 @@ function createHonorStreamHandler(uiBroadcast, getCurrentMode) {
   };
 }
 
-function getActiveSessions() {
+export function getActiveSessions() {
   return activeSessions;
 }
-
-module.exports = {
-  createHonorStreamHandler,
-  getActiveSessions
-};

@@ -1,9 +1,13 @@
-const express = require('express');
-const http = require('http');
-const path = require('path');
-const { WebSocketServer } = require('ws');
-const { createTwilioStreamHandler } = require('./twilio-stream');
-const { createHonorStreamHandler } = require('./honor-stream');
+import express from 'express';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { WebSocketServer } from 'ws';
+import { createTwilioStreamHandler } from './twilio-stream.js';
+import { createHonorStreamHandler } from './honor-stream.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -108,6 +112,7 @@ app.get('/api/status', (req, res) => {
   res.json({
     status: 'ok',
     uiClients: uiClients.size,
+    mode: currentMode,
     timestamp: new Date().toISOString()
   });
 });
@@ -135,7 +140,7 @@ function sseBroadcast(message) {
   });
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] TalkHint running on port ${PORT}`);
@@ -147,16 +152,12 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] UI available at: /app`);
 });
 
-module.exports = {
+export {
   app,
   server,
   wss,
   uiBroadcast,
   sseBroadcast,
   getCurrentMode,
-  setCurrentMode,
-  registerWebSocket: (path, handler) => {
-    wsHandlers[path] = handler;
-    console.log(`[server] WebSocket handler registered: ${path}`);
-  }
+  setCurrentMode
 };

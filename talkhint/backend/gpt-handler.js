@@ -1,8 +1,7 @@
-const WebSocket = require('ws');
-const { convertPCM16ToMulaw } = require('./audio-convert');
-const { getRealtimePrompt } = require('../shared/prompt-realtime');
+import WebSocket from 'ws';
+import { getRealtimePrompt } from '../shared/prompt-realtime.js';
 
-class GPTRealtimeHandler {
+export class GPTRealtimeHandler {
   constructor(options = {}) {
     this.apiKey = options.apiKey || process.env.OPENAI_API_KEY;
     this.mode = options.mode || 'universal';
@@ -165,7 +164,6 @@ class GPTRealtimeHandler {
         break;
 
       default:
-        // Другие типы событий
         break;
     }
   }
@@ -178,5 +176,3 @@ class GPTRealtimeHandler {
     }
   }
 }
-
-module.exports = { GPTRealtimeHandler };

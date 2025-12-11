@@ -3,12 +3,20 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupWebSocket } from "./websocket";
 import { z } from "zod";
+import path from "path";
+import { fileURLToPath } from "url";
+import express from "express";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   setupWebSocket(httpServer);
+
+  app.use("/app", express.static(path.join(__dirname, "../talkhint/ui")));
 
   app.get("/api/calls", async (_req, res) => {
     try {

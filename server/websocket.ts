@@ -1,7 +1,12 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
+import { spawn } from "child_process";
 import { log } from "./index";
-import { storage } from "./storage";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 interface TwilioMediaMessage {
   event: string;
@@ -26,11 +31,312 @@ interface TwilioMediaMessage {
   };
 }
 
-interface SessionData {
-  callSid: string;
-  streamSid: string;
-  transcript: string[];
-  openaiWs?: WebSocket;
+const MODES: Record<string, { name: string; description: string }> = {
+  universal: { name: "Universal Assistant", description: "General purpose real-time assistant" },
+  massage: { name: "Massage Salon Assistant", description: "Helps massage therapists communicate with clients" },
+  dispatcher: { name: "Dispatcher Assistant", description: "Helps dispatchers handle calls efficiently" },
+};
+
+const BASE_RULES = `
+CRITICAL RULES:
+1. You are helping HON (the Host/Owner) during a live conversation
+2. GST (Guest) is the other person on the call - you hear them but NEVER speak for them
+3. You provide SHORT hints to HON only
+4. Never pretend to be GST or generate GST's responses
+5. Keep all suggestions under 15 words
+6. Use simple, clear language
+7. Respond in the same language as the conversation
+8. If you hear silence, stay silent
+9. Only provide hints when truly helpful
+`;
+
+const PROMPTS: Record<string, string> = {
+  universal: `You are TalkHint - a real-time voice assistant helping HON (Host) during phone calls.
+
+ROLES:
+- HON (Host/Owner): The person you're helping. They wear an earpiece and hear your hints.
+- GST (Guest): The caller on the other end. You hear them but NEVER speak as them.
+
+${BASE_RULES}
+
+YOUR CAPABILITIES:
+- Listen to both HON and GST in real-time
+- Provide quick hints, translations, or suggestions to HON
+- Help with difficult questions or forgotten information
+- Suggest polite phrases or responses
+- Translate if languages differ
+
+RESPONSE STYLE:
+- Whisper-like: short, direct hints
+- Format: "Say: [suggestion]" or "Hint: [info]"
+- Never full sentences unless translating
+- No greetings or pleasantries in hints
+
+EXAMPLES:
+- "Say: Let me check that for you"
+- "Hint: They want a refund"
+- "Price is $50/hour"
+- "Say: I understand, one moment"
+`,
+
+  massage: `You are TalkHint - a real-time assistant for massage salon staff.
+
+ROLES:
+- HON (Host): Massage therapist or receptionist you're helping
+- GST (Guest): Client calling to book or inquire
+
+${BASE_RULES}
+
+DOMAIN KNOWLEDGE:
+- Common massage types: Swedish, Deep Tissue, Hot Stone, Thai, Sports
+- Session lengths: 30, 60, 90, 120 minutes
+- Booking flow: date, time, type, therapist preference
+- Upsells: aromatherapy, hot stones, extended time
+
+RESPONSE STYLE:
+- Quick booking hints
+- Price suggestions
+- Availability phrases
+- Upsell opportunities
+- Polite rebooking scripts
+
+EXAMPLES:
+- "Say: We have 2pm available"
+- "Offer: Add hot stones for $20"
+- "Say: Swedish is great for relaxation"
+- "Ask: Preferred therapist?"
+- "60min deep tissue: $90"
+`,
+
+  dispatcher: `You are TalkHint - a real-time assistant for dispatchers and call center agents.
+
+ROLES:
+- HON (Host): Dispatcher handling incoming calls
+- GST (Guest): Customer or field worker calling in
+
+${BASE_RULES}
+
+DOMAIN KNOWLEDGE:
+- Call routing and transfers
+- Ticket/order status lookups
+- Escalation procedures
+- Common customer issues
+- ETA calculations
+
+RESPONSE STYLE:
+- Status updates
+- Routing suggestions
+- De-escalation phrases
+- Quick reference info
+- Next steps
+
+EXAMPLES:
+- "Say: Let me transfer you to billing"
+- "ETA: 15 minutes"
+- "Say: I apologize for the delay"
+- "Escalate to supervisor"
+- "Order status: shipped yesterday"
+`,
+};
+
+function getRealtimePrompt(mode: string = "universal"): string {
+  return (PROMPTS[mode] || PROMPTS.universal).trim();
+}
+
+let currentMode = "universal";
+const uiClients = new Set<WebSocket>();
+
+function uiBroadcast(message: object) {
+  const data = JSON.stringify(message);
+  uiClients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(data);
+    }
+  });
+}
+
+function convertMulawToPCM16(base64Payload: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const inputBuffer = Buffer.from(base64Payload, "base64");
+
+    const ffmpeg = spawn("ffmpeg", [
+      "-f", "mulaw", "-ar", "8000", "-ac", "1", "-i", "pipe:0",
+      "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
+    ], { stdio: ["pipe", "pipe", "pipe"] });
+
+    const chunks: Buffer[] = [];
+    ffmpeg.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(chunks).toString("base64"));
+      } else {
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
+    });
+    ffmpeg.on("error", reject);
+    ffmpeg.stdin.write(inputBuffer);
+    ffmpeg.stdin.end();
+  });
+}
+
+function convertPCM16ToMulaw(base64PCM: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const inputBuffer = Buffer.from(base64PCM, "base64");
+
+    const ffmpeg = spawn("ffmpeg", [
+      "-f", "s16le", "-ar", "16000", "-ac", "1", "-i", "pipe:0",
+      "-f", "mulaw", "-ar", "8000", "-ac", "1", "pipe:1",
+    ], { stdio: ["pipe", "pipe", "pipe"] });
+
+    const chunks: Buffer[] = [];
+    ffmpeg.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(chunks).toString("base64"));
+      } else {
+        reject(new Error(`ffmpeg exited with code ${code}`));
+      }
+    });
+    ffmpeg.on("error", reject);
+    ffmpeg.stdin.write(inputBuffer);
+    ffmpeg.stdin.end();
+  });
+}
+
+class GPTRealtimeHandler {
+  private apiKey: string;
+  private mode: string;
+  private ws: WebSocket | null = null;
+  private isConnected = false;
+  private sessionId: string | null = null;
+  private onTranscript: (data: { role: string; text: string }) => void;
+  private onResponse: (data: { type: string; text: string }) => void;
+  private onAudio: (data: string) => void;
+  private onError: (error: any) => void;
+
+  constructor(options: {
+    apiKey?: string;
+    mode?: string;
+    onTranscript?: (data: { role: string; text: string }) => void;
+    onResponse?: (data: { type: string; text: string }) => void;
+    onAudio?: (data: string) => void;
+    onError?: (error: any) => void;
+  }) {
+    this.apiKey = options.apiKey || process.env.OPENAI_API_KEY || "";
+    this.mode = options.mode || "universal";
+    this.onTranscript = options.onTranscript || (() => {});
+    this.onResponse = options.onResponse || (() => {});
+    this.onAudio = options.onAudio || (() => {});
+    this.onError = options.onError || (() => {});
+  }
+
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
+
+      this.ws = new WebSocket(url, {
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "OpenAI-Beta": "realtime=v1",
+        },
+      });
+
+      this.ws.on("open", () => {
+        log("Connected to OpenAI Realtime API", "openai");
+        this.isConnected = true;
+        this.initSession();
+        resolve();
+      });
+
+      this.ws.on("message", (data: Buffer) => {
+        this.handleMessage(JSON.parse(data.toString()));
+      });
+
+      this.ws.on("error", (err: Error) => {
+        log(`OpenAI WebSocket error: ${err.message}`, "openai");
+        this.onError(err);
+        reject(err);
+      });
+
+      this.ws.on("close", () => {
+        log("OpenAI WebSocket closed", "openai");
+        this.isConnected = false;
+      });
+    });
+  }
+
+  private initSession() {
+    this.send({
+      type: "session.update",
+      session: {
+        modalities: ["text", "audio"],
+        instructions: getRealtimePrompt(this.mode),
+        voice: "alloy",
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        input_audio_transcription: { model: "whisper-1" },
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 700,
+        },
+      },
+    });
+  }
+
+  private send(message: object) {
+    if (this.ws && this.isConnected) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  sendAudio(base64PCM: string) {
+    this.send({ type: "input_audio_buffer.append", audio: base64PCM });
+  }
+
+  private handleMessage(message: any) {
+    switch (message.type) {
+      case "session.created":
+        this.sessionId = message.session?.id;
+        log(`Session created: ${this.sessionId}`, "openai");
+        break;
+      case "conversation.item.input_audio_transcription.completed":
+        if (message.transcript) {
+          log(`User: ${message.transcript}`, "transcript");
+          this.onTranscript({ role: "user", text: message.transcript });
+        }
+        break;
+      case "response.audio_transcript.delta":
+        if (message.delta) {
+          this.onResponse({ type: "transcript_delta", text: message.delta });
+        }
+        break;
+      case "response.audio_transcript.done":
+        if (message.transcript) {
+          log(`Assistant: ${message.transcript}`, "transcript");
+          this.onTranscript({ role: "assistant", text: message.transcript });
+        }
+        break;
+      case "response.audio.delta":
+        if (message.delta) {
+          this.onAudio(message.delta);
+        }
+        break;
+      case "error":
+        log(`OpenAI API Error: ${JSON.stringify(message.error)}`, "openai");
+        this.onError(message.error);
+        break;
+    }
+  }
+
+  disconnect() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+      this.isConnected = false;
+    }
+  }
 }
 
 export function setupWebSocket(server: Server) {
@@ -38,185 +344,180 @@ export function setupWebSocket(server: Server) {
 
   server.on("upgrade", (request, socket, head) => {
     const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
-    
-    if (pathname === "/twilio-stream") {
+
+    if (["/twilio-stream", "/honor-stream", "/ui"].includes(pathname)) {
       wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit("connection", ws, request);
+        wss.emit("connection", ws, request, pathname);
       });
     } else {
       socket.destroy();
     }
   });
 
-  wss.on("connection", (ws: WebSocket) => {
-    log("New Twilio WebSocket connection", "twilio");
-    
-    const sessionData: SessionData = {
-      callSid: "",
-      streamSid: "",
-      transcript: [],
-    };
+  wss.on("connection", (ws: WebSocket, request: any, pathname: string) => {
+    if (pathname === "/ui") {
+      handleUIConnection(ws);
+    } else if (pathname === "/honor-stream") {
+      handleHonorStream(ws);
+    } else if (pathname === "/twilio-stream") {
+      handleTwilioStream(ws);
+    }
+  });
+
+  function handleUIConnection(ws: WebSocket) {
+    log("UI client connected", "server");
+    uiClients.add(ws);
+
+    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), mode: currentMode }));
+
+    ws.on("message", (data: Buffer) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === "set_mode") {
+          currentMode = message.mode;
+          log(`Mode changed to: ${currentMode}`, "server");
+          ws.send(JSON.stringify({ type: "mode_changed", mode: currentMode }));
+          uiBroadcast({ type: "mode_changed", mode: currentMode });
+        }
+      } catch (err) {}
+    });
+
+    ws.on("close", () => {
+      log("UI client disconnected", "server");
+      uiClients.delete(ws);
+    });
+  }
+
+  function handleHonorStream(ws: WebSocket) {
+    log("Browser mic connected", "honor");
+    let gptHandler: GPTRealtimeHandler | null = null;
+    let sessionId: string | null = null;
 
     ws.on("message", async (data: Buffer) => {
       try {
-        const message: TwilioMediaMessage = JSON.parse(data.toString());
-        
-        switch (message.event) {
-          case "start":
-            if (message.start) {
-              sessionData.callSid = message.start.callSid;
-              sessionData.streamSid = message.start.streamSid;
-              
-              log(`Call started: ${sessionData.callSid}`, "twilio");
-              
-              await storage.createCall({
-                callSid: sessionData.callSid,
-                fromNumber: message.start.customParameters?.From || "unknown",
-                toNumber: message.start.customParameters?.To || "unknown",
-                status: "active",
-                endedAt: null,
-                transcript: null,
-                metadata: null,
-              });
+        const message = JSON.parse(data.toString());
 
-              initializeOpenAI(ws, sessionData);
-            }
+        switch (message.type) {
+          case "start":
+            sessionId = message.sessionId || Date.now().toString(36);
+            log(`Honor session started: ${sessionId}`, "honor");
+
+            gptHandler = new GPTRealtimeHandler({
+              mode: currentMode,
+              onTranscript: (transcript) => {
+                ws.send(JSON.stringify({ type: "transcript", sessionId, ...transcript }));
+                uiBroadcast({ type: "hon_transcript", sessionId, ...transcript });
+              },
+              onResponse: (response) => {
+                ws.send(JSON.stringify({ type: "response", sessionId, ...response }));
+                uiBroadcast({ type: "hon_response", sessionId, ...response });
+              },
+              onAudio: (audio) => {
+                ws.send(JSON.stringify({ type: "audio", audio }));
+              },
+              onError: (error) => {
+                ws.send(JSON.stringify({ type: "error", error: error.message || error }));
+              },
+            });
+
+            await gptHandler.connect();
+            ws.send(JSON.stringify({ type: "ready", sessionId }));
             break;
 
-          case "media":
-            if (message.media && sessionData.openaiWs) {
-              const audioData = message.media.payload;
-              
-              sessionData.openaiWs.send(JSON.stringify({
-                type: "input_audio_buffer.append",
-                audio: audioData,
-              }));
+          case "audio":
+            if (gptHandler && message.audio) {
+              gptHandler.sendAudio(message.audio);
             }
             break;
 
           case "stop":
-            log(`Call ended: ${sessionData.callSid}`, "twilio");
-            
-            if (sessionData.openaiWs) {
-              sessionData.openaiWs.close();
-            }
-
-            const call = await storage.getCallByCallSid(sessionData.callSid);
-            if (call) {
-              await storage.updateCall(call.id, {
-                status: "completed",
-                endedAt: new Date(),
-                transcript: sessionData.transcript.join("\n"),
-              });
-            }
-            
-            ws.close();
+            log(`Honor session ended: ${sessionId}`, "honor");
+            if (gptHandler) gptHandler.disconnect();
+            ws.send(JSON.stringify({ type: "stopped", sessionId }));
             break;
         }
-      } catch (error) {
-        log(`Error processing message: ${error}`, "twilio");
+      } catch (err: any) {
+        log(`Honor error: ${err.message}`, "honor");
       }
     });
 
     ws.on("close", () => {
-      log("Twilio WebSocket closed", "twilio");
-      if (sessionData.openaiWs) {
-        sessionData.openaiWs.close();
-      }
+      if (gptHandler) gptHandler.disconnect();
     });
+  }
 
-    ws.on("error", (error) => {
-      log(`Twilio WebSocket error: ${error}`, "twilio");
-    });
-  });
+  function handleTwilioStream(ws: WebSocket) {
+    log("Twilio stream connected", "twilio");
+    let gptHandler: GPTRealtimeHandler | null = null;
+    let streamSid: string | null = null;
+    let callSid: string | null = null;
 
-  function initializeOpenAI(twilioWs: WebSocket, session: SessionData) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    
-    if (!apiKey) {
-      log("OpenAI API key not found", "openai");
-      return;
-    }
-
-    const openaiWs = new WebSocket("wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01", {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "OpenAI-Beta": "realtime=v1",
-      },
-    });
-
-    session.openaiWs = openaiWs;
-
-    openaiWs.on("open", () => {
-      log("Connected to OpenAI Realtime API", "openai");
-      
-      openaiWs.send(JSON.stringify({
-        type: "session.update",
-        session: {
-          modalities: ["text", "audio"],
-          instructions: "You are a helpful AI assistant in a phone call. Be conversational, friendly, and concise. Respond naturally to the caller's questions.",
-          voice: "alloy",
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
-          input_audio_transcription: {
-            model: "whisper-1",
-          },
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.5,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 500,
-          },
-        },
-      }));
-    });
-
-    openaiWs.on("message", (data: Buffer) => {
+    ws.on("message", async (data: Buffer) => {
       try {
-        const response = JSON.parse(data.toString());
-        
-        switch (response.type) {
-          case "response.audio.delta":
-            if (response.delta) {
-              twilioWs.send(JSON.stringify({
-                event: "media",
-                streamSid: session.streamSid,
-                media: {
-                  payload: response.delta,
+        const message: TwilioMediaMessage = JSON.parse(data.toString());
+
+        switch (message.event) {
+          case "start":
+            if (message.start) {
+              streamSid = message.start.streamSid;
+              callSid = message.start.callSid;
+              log(`Call started: ${callSid}`, "twilio");
+
+              gptHandler = new GPTRealtimeHandler({
+                mode: currentMode,
+                onTranscript: (transcript) => {
+                  uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
                 },
-              }));
+                onResponse: (response) => {
+                  uiBroadcast({ type: "response", callSid, ...response });
+                },
+                onAudio: async (pcm16Audio) => {
+                  try {
+                    const mulawAudio = await convertPCM16ToMulaw(pcm16Audio);
+                    ws.send(JSON.stringify({
+                      event: "media",
+                      streamSid,
+                      media: { payload: mulawAudio },
+                    }));
+                  } catch (err: any) {
+                    log(`Audio conversion error: ${err.message}`, "twilio");
+                  }
+                },
+                onError: (error) => {
+                  uiBroadcast({ type: "error", callSid, error: error.message || error });
+                },
+              });
+
+              await gptHandler.connect();
+              uiBroadcast({ type: "call_started", callSid, streamSid });
             }
             break;
 
-          case "conversation.item.input_audio_transcription.completed":
-            if (response.transcript) {
-              session.transcript.push(`User: ${response.transcript}`);
-              log(`User: ${response.transcript}`, "transcript");
+          case "media":
+            if (gptHandler && message.media?.payload) {
+              try {
+                const pcm16Audio = await convertMulawToPCM16(message.media.payload);
+                gptHandler.sendAudio(pcm16Audio);
+              } catch (err: any) {
+                log(`Conversion error: ${err.message}`, "twilio");
+              }
             }
             break;
 
-          case "response.text.delta":
-            if (response.delta) {
-              session.transcript.push(`Assistant: ${response.delta}`);
-              log(`Assistant: ${response.delta}`, "transcript");
-            }
-            break;
-
-          case "error":
-            log(`OpenAI error: ${JSON.stringify(response.error)}`, "openai");
+          case "stop":
+            log(`Call ended: ${callSid}`, "twilio");
+            if (gptHandler) gptHandler.disconnect();
+            uiBroadcast({ type: "call_ended", callSid });
             break;
         }
-      } catch (error) {
-        log(`Error processing OpenAI message: ${error}`, "openai");
+      } catch (err: any) {
+        log(`Twilio error: ${err.message}`, "twilio");
       }
     });
 
-    openaiWs.on("close", () => {
-      log("OpenAI WebSocket closed", "openai");
-    });
-
-    openaiWs.on("error", (error) => {
-      log(`OpenAI WebSocket error: ${error}`, "openai");
+    ws.on("close", () => {
+      if (gptHandler) gptHandler.disconnect();
+      if (callSid) uiBroadcast({ type: "call_ended", callSid });
     });
   }
 

@@ -1,9 +1,9 @@
-const { convertMulawToPCM16, convertPCM16ToMulaw } = require('./audio-convert');
-const { GPTRealtimeHandler } = require('./gpt-handler');
+import { convertMulawToPCM16, convertPCM16ToMulaw } from './audio-convert.js';
+import { GPTRealtimeHandler } from './gpt-handler.js';
 
 const activeSessions = new Map();
 
-function createTwilioStreamHandler(uiBroadcast, getCurrentMode) {
+export function createTwilioStreamHandler(uiBroadcast, getCurrentMode) {
   return async function twilioStreamHandler(ws, request) {
     console.log('[twilio-stream] New connection');
     
@@ -137,11 +137,6 @@ function createTwilioStreamHandler(uiBroadcast, getCurrentMode) {
   };
 }
 
-function getActiveSessions() {
+export function getActiveSessions() {
   return activeSessions;
 }
-
-module.exports = {
-  createTwilioStreamHandler,
-  getActiveSessions
-};

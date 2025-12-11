@@ -1,7 +1,7 @@
-const { spawn } = require('child_process');
-const { PassThrough } = require('stream');
+import { spawn } from 'child_process';
+import { PassThrough } from 'stream';
 
-class AudioConverter {
+export class AudioConverter {
   constructor() {
     this.ffmpeg = null;
     this.inputStream = null;
@@ -29,7 +29,6 @@ class AudioConverter {
     this.ffmpeg.stdout.pipe(this.outputStream);
 
     this.ffmpeg.stderr.on('data', (data) => {
-      // ffmpeg logs - можно игнорировать или логировать
     });
 
     this.ffmpeg.on('error', (err) => {
@@ -64,7 +63,7 @@ class AudioConverter {
   }
 }
 
-function convertMulawToPCM16(base64Payload) {
+export function convertMulawToPCM16(base64Payload) {
   return new Promise((resolve, reject) => {
     const inputBuffer = Buffer.from(base64Payload, 'base64');
     
@@ -103,7 +102,7 @@ function convertMulawToPCM16(base64Payload) {
   });
 }
 
-function convertPCM16ToMulaw(base64PCM) {
+export function convertPCM16ToMulaw(base64PCM) {
   return new Promise((resolve, reject) => {
     const inputBuffer = Buffer.from(base64PCM, 'base64');
     
@@ -141,9 +140,3 @@ function convertPCM16ToMulaw(base64PCM) {
     ffmpeg.stdin.end();
   });
 }
-
-module.exports = {
-  AudioConverter,
-  convertMulawToPCM16,
-  convertPCM16ToMulaw
-};

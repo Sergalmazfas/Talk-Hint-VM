@@ -115,26 +115,20 @@ EXAMPLES:
 `
 };
 
-function getRealtimePrompt(mode = 'universal') {
+export function getRealtimePrompt(mode = 'universal') {
   const prompt = PROMPTS[mode] || PROMPTS.universal;
   return prompt.trim();
 }
 
-function getAvailableModes() {
+export function getAvailableModes() {
   return Object.keys(MODES).map(key => ({
     id: key,
     ...MODES[key]
   }));
 }
 
-function getModeInfo(mode) {
+export function getModeInfo(mode) {
   return MODES[mode] || MODES.universal;
 }
 
-module.exports = {
-  getRealtimePrompt,
-  getAvailableModes,
-  getModeInfo,
-  MODES,
-  PROMPTS
-};
+export { MODES, PROMPTS };
