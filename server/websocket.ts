@@ -452,42 +452,61 @@ export function setupWebSocket(server: Server) {
     let gptHandler: GPTRealtimeHandler | null = null;
     let streamSid: string | null = null;
     let callSid: string | null = null;
+    let audioFrameCount = 0;
 
     ws.on("message", async (data: Buffer) => {
       try {
         const message: TwilioMediaMessage = JSON.parse(data.toString());
+        log(`Twilio event: ${message.event}`, "twilio");
 
         switch (message.event) {
+          case "connected":
+            log("Twilio Media Stream handshake complete", "twilio");
+            break;
+
           case "start":
             if (message.start) {
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
-              log(`Call started: ${callSid}`, "twilio");
+              log(`Call starting: ${callSid}, stream: ${streamSid}`, "twilio");
 
-              gptHandler = new GPTRealtimeHandler({
-                mode: currentMode,
-                onTranscript: (transcript) => {
-                  uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
-                },
-                onResponse: (response) => {
-                  uiBroadcast({ type: "ai_hint", callSid, text: response.text });
-                  uiBroadcast({ type: "response", callSid, ...response });
-                },
-                onAudio: () => {
-                  // Phone Mode: AI audio goes to UI only, not back to caller
-                },
-                onError: (error) => {
-                  uiBroadcast({ type: "error", callSid, error: error.message || error });
-                },
-              });
+              try {
+                gptHandler = new GPTRealtimeHandler({
+                  mode: currentMode,
+                  onTranscript: (transcript) => {
+                    log(`GST transcript: ${transcript.text}`, "twilio");
+                    uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
+                  },
+                  onResponse: (response) => {
+                    log(`AI hint: ${response.text}`, "twilio");
+                    uiBroadcast({ type: "ai_hint", callSid, text: response.text });
+                    uiBroadcast({ type: "response", callSid, ...response });
+                  },
+                  onAudio: () => {
+                    // Phone Mode: AI audio goes to UI only, not back to caller
+                  },
+                  onError: (error) => {
+                    log(`GPT error: ${error.message || error}`, "twilio");
+                    uiBroadcast({ type: "error", callSid, error: error.message || error });
+                  },
+                });
 
-              await gptHandler.connect();
-              uiBroadcast({ type: "call_started", callSid, streamSid });
+                await gptHandler.connect();
+                log(`GPT connected for call: ${callSid}`, "twilio");
+                uiBroadcast({ type: "call_started", callSid, streamSid });
+              } catch (err: any) {
+                log(`GPT connection failed: ${err.message}`, "twilio");
+                uiBroadcast({ type: "error", callSid, error: `GPT connection failed: ${err.message}` });
+              }
             }
             break;
 
           case "media":
             if (gptHandler && message.media?.payload) {
+              audioFrameCount++;
+              if (audioFrameCount === 1 || audioFrameCount % 100 === 0) {
+                log(`Audio frames received: ${audioFrameCount}`, "twilio");
+              }
               try {
                 const pcm16Audio = await convertMulawToPCM16(message.media.payload);
                 gptHandler.sendAudio(pcm16Audio);
@@ -498,7 +517,7 @@ export function setupWebSocket(server: Server) {
             break;
 
           case "stop":
-            log(`Call ended: ${callSid}`, "twilio");
+            log(`Call ended: ${callSid}, total audio frames: ${audioFrameCount}`, "twilio");
             if (gptHandler) gptHandler.disconnect();
             uiBroadcast({ type: "call_ended", callSid });
             break;
