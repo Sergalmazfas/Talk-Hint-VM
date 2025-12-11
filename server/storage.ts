@@ -29,12 +29,15 @@ export class MemStorage implements IStorage {
   async createCall(insertCall: InsertCall): Promise<Call> {
     const id = randomUUID();
     const call: Call = { 
-      ...insertCall, 
+      callSid: insertCall.callSid,
+      fromNumber: insertCall.fromNumber,
+      toNumber: insertCall.toNumber,
+      status: insertCall.status || "active",
       id,
       startedAt: new Date(),
-      endedAt: null,
-      transcript: null,
-      metadata: null
+      endedAt: insertCall.endedAt || null,
+      transcript: insertCall.transcript || null,
+      metadata: insertCall.metadata || null
     };
     this.calls.set(id, call);
     return call;
