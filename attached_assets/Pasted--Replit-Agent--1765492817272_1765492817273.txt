@@ -1,0 +1,101 @@
+Отлично. Ниже — идеальная, короткая, инженерная задача для Replit Agent, чтобы он сделал САМОЕ ГЛАВНОЕ:
+
+📞 ВХОДЯЩИЙ ЗВОНОК → GPT REALTIME → АНГЛИЙСКИЕ ПОДСКАЗКИ → UI
+
+Скопируй точно весь текст ниже и вставь в Replit Agent (Build → Agent chat).
+
+⸻
+
+✅ ЗАДАЧА ДЛЯ REPLIT AGENT
+
+Task:
+Integrate Twilio inbound call audio (Media Streams) with the GPT Realtime API and deliver English transcripts + English AI hints to the TalkHint UI in real time.
+
+⸻
+
+Requirements
+
+1. Twilio Media Stream WebSocket endpoint
+
+Implement server-side WebSocket endpoint:
+
+wss://<server>/media
+
+It must:
+	•	accept Twilio Media Stream audio (mulaw or opus)
+	•	decode audio to PCM 16k
+	•	forward audio frames to GPT Realtime Audio In channel
+
+⸻
+
+2. GPT Realtime API connection
+
+Create a single persistent GPT Realtime API session per call.
+
+The server must:
+	•	send incoming audio from Twilio to GPT
+	•	receive transcripts from GPT events
+	•	Only English transcription needed (GST speaker)
+	•	receive “assistant suggestions” (AI hints)
+
+Example GPT events to parse:
+
+response.output_text.delta
+response.output_audio.delta
+response.transcript.delta
+
+
+⸻
+
+3. Map GPT events → UI WebSocket
+
+Forward structured messages to the UI WebSocket:
+
+{ type: "gst_transcript", text: "..." }
+{ type: "ai_hint", text: "..." }
+{ type: "status", text: "connected" }
+
+UI already handles these message types.
+
+⸻
+
+4. Automatic call start behavior
+
+On first audio frame from Twilio:
+	•	start GPT session
+	•	link callbacks
+	•	UI should instantly switch to active mode (“Waiting for conversation…” → live)
+
+⸻
+
+5. No browser microphone
+
+REMOVE any assumption of local mic audio.
+HON comes later — for now GST only.
+
+Focus ONLY on:
+	•	Caller speech → GPT
+	•	GPT → English hints → UI
+
+⸻
+
+Expected Result
+
+When an inbound phone call arrives:
+	1.	Caller speaks
+	2.	Twilio sends audio via Media Stream
+	3.	Server streams audio into GPT Realtime
+	4.	GPT returns:
+	•	English transcription
+	•	English hints
+	5.	UI updates both GST block and AI Hints block in real time
+
+No buttons.
+No recording.
+Fully automatic.
+
+⸻
+
+🟢 Paste the task above into Replit Agent now.
+
+Готов продолжать, как только агент сделает этот шаг.

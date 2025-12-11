@@ -345,7 +345,7 @@ export function setupWebSocket(server: Server) {
   server.on("upgrade", (request, socket, head) => {
     const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
 
-    if (["/twilio-stream", "/honor-stream", "/ui"].includes(pathname)) {
+    if (["/twilio-stream", "/media", "/honor-stream", "/ui"].includes(pathname)) {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request, pathname);
       });
@@ -359,7 +359,7 @@ export function setupWebSocket(server: Server) {
       handleUIConnection(ws);
     } else if (pathname === "/honor-stream") {
       handleHonorStream(ws);
-    } else if (pathname === "/twilio-stream") {
+    } else if (pathname === "/twilio-stream" || pathname === "/media") {
       handleTwilioStream(ws);
     }
   });
@@ -469,19 +469,11 @@ export function setupWebSocket(server: Server) {
                   uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
                 },
                 onResponse: (response) => {
+                  uiBroadcast({ type: "ai_hint", callSid, text: response.text });
                   uiBroadcast({ type: "response", callSid, ...response });
                 },
-                onAudio: async (pcm16Audio) => {
-                  try {
-                    const mulawAudio = await convertPCM16ToMulaw(pcm16Audio);
-                    ws.send(JSON.stringify({
-                      event: "media",
-                      streamSid,
-                      media: { payload: mulawAudio },
-                    }));
-                  } catch (err: any) {
-                    log(`Audio conversion error: ${err.message}`, "twilio");
-                  }
+                onAudio: () => {
+                  // Phone Mode: AI audio goes to UI only, not back to caller
                 },
                 onError: (error) => {
                   uiBroadcast({ type: "error", callSid, error: error.message || error });
