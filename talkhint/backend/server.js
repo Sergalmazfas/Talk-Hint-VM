@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createTwilioStreamHandler } = require('./twilio-stream');
 const { createHonorStreamHandler } = require('./honor-stream');
@@ -58,6 +59,12 @@ server.on('upgrade', (request, socket, head) => {
 
 app.use(express.json());
 
+app.use('/app', express.static(path.join(__dirname, '../ui')));
+
+app.get('/', (req, res) => {
+  res.redirect('/app');
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -102,6 +109,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`         - /honor-stream (Browser Microphone)`);
   console.log(`         - /ui (Browser UI)`);
   console.log(`[server] SSE endpoint: /events`);
+  console.log(`[server] UI available at: /app`);
 });
 
 module.exports = {
