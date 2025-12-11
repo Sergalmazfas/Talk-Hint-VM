@@ -60,12 +60,10 @@ export async function registerRoutes(
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Connect>
-    <Stream url="${wsUrl}">
-      <Parameter name="mode" value="phone" />
-    </Stream>
-  </Connect>
-  <Say>Thank you for calling. Goodbye.</Say>
+  <Start>
+    <Stream url="${wsUrl}" track="both_tracks" />
+  </Start>
+  <Pause length="60"/>
 </Response>`;
 
     res.type("text/xml").send(twiml);
@@ -79,12 +77,10 @@ export async function registerRoutes(
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Connect>
-    <Stream url="${wsUrl}">
-      <Parameter name="mode" value="phone" />
-    </Stream>
-  </Connect>
-  <Say>Thank you for calling. Goodbye.</Say>
+  <Start>
+    <Stream url="${wsUrl}" track="both_tracks" />
+  </Start>
+  <Pause length="60"/>
 </Response>`;
 
     res.type("text/xml").send(twiml);
