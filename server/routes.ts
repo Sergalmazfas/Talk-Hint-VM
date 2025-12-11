@@ -52,6 +52,44 @@ export async function registerRoutes(
     });
   });
 
+  // Twilio inbound webhook - returns TwiML to start Media Stream
+  app.post("/twilio/inbound", (req, res) => {
+    const host = req.headers.host || req.hostname;
+    const protocol = host.includes("localhost") ? "ws" : "wss";
+    const wsUrl = `${protocol}://${host}/media`;
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${wsUrl}">
+      <Parameter name="mode" value="phone" />
+    </Stream>
+  </Connect>
+  <Say>Thank you for calling. Goodbye.</Say>
+</Response>`;
+
+    res.type("text/xml").send(twiml);
+  });
+
+  // Also support GET for testing
+  app.get("/twilio/inbound", (req, res) => {
+    const host = req.headers.host || req.hostname;
+    const protocol = host.includes("localhost") ? "ws" : "wss";
+    const wsUrl = `${protocol}://${host}/media`;
+    
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${wsUrl}">
+      <Parameter name="mode" value="phone" />
+    </Stream>
+  </Connect>
+  <Say>Thank you for calling. Goodbye.</Say>
+</Response>`;
+
+    res.type("text/xml").send(twiml);
+  });
+
   const clients: Set<any> = new Set();
 
   app.get("/api/events", (req, res) => {
