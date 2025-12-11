@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile, writeFile } from "fs/promises";
+import { rm, readFile, writeFile, cp } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -71,6 +71,11 @@ async function buildAll() {
 `;
   await writeFile("dist/index.cjs", cjsWrapper);
   console.log("Created ESM-compatible wrapper at dist/index.cjs");
+
+  // Copy TalkHint UI files to dist
+  console.log("Copying TalkHint UI files...");
+  await cp("talkhint/ui", "dist/talkhint/ui", { recursive: true });
+  console.log("TalkHint UI files copied to dist/talkhint/ui");
 }
 
 buildAll().catch((err) => {

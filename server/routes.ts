@@ -16,7 +16,12 @@ export async function registerRoutes(
 ): Promise<Server> {
   setupWebSocket(httpServer);
 
-  app.use("/app", express.static(path.join(__dirname, "../talkhint/ui")));
+  // In production, TalkHint UI is at dist/talkhint/ui (same level as bundled code)
+  // In development, it's at ../talkhint/ui relative to server/
+  const talkhintUiPath = process.env.NODE_ENV === "production" 
+    ? path.join(__dirname, "talkhint/ui")
+    : path.join(__dirname, "../talkhint/ui");
+  app.use("/app", express.static(talkhintUiPath));
 
   app.get("/api/calls", async (_req, res) => {
     try {
