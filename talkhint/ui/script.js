@@ -7,10 +7,12 @@ const UI = {
   uiStatus: document.getElementById('uiStatus'),
   uiStatusText: document.getElementById('uiStatusText'),
   micStatus: document.getElementById('micStatus'),
-  micStatusText: document.getElementById('micStatusText')
+  micStatusText: document.getElementById('micStatusText'),
+  modeSelect: document.getElementById('modeSelect')
 };
 
 let uiSocket = null;
+let currentMode = 'universal';
 let honorSocket = null;
 let mediaStream = null;
 let audioContext = null;
@@ -42,6 +44,8 @@ function connectUI() {
     UI.uiStatus.classList.add('connected');
     UI.uiStatusText.textContent = 'Connected';
     UI.startBtn.disabled = false;
+    
+    sendMode(currentMode);
   };
 
   uiSocket.onmessage = (event) => {
@@ -101,6 +105,20 @@ function handleUIMessage(data) {
     case 'error':
       log(`Error: ${data.error}`, 'error');
       break;
+
+    case 'mode_changed':
+      log(`Mode changed to: ${data.mode}`, 'success');
+      break;
+  }
+}
+
+function sendMode(mode) {
+  if (uiSocket && uiSocket.readyState === WebSocket.OPEN) {
+    uiSocket.send(JSON.stringify({
+      type: 'set_mode',
+      mode: mode
+    }));
+    log(`Mode set to: ${mode}`);
   }
 }
 
@@ -297,6 +315,11 @@ UI.startBtn.addEventListener('click', () => {
   } else {
     startRecording();
   }
+});
+
+UI.modeSelect.addEventListener('change', (e) => {
+  currentMode = e.target.value;
+  sendMode(currentMode);
 });
 
 connectUI();

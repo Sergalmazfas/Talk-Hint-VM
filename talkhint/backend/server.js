@@ -13,6 +13,17 @@ const wss = new WebSocketServer({ noServer: true });
 const wsHandlers = {};
 const uiClients = new Set();
 
+let currentMode = 'universal';
+
+function getCurrentMode() {
+  return currentMode;
+}
+
+function setCurrentMode(mode) {
+  currentMode = mode;
+  console.log(`[server] Mode changed to: ${mode}`);
+}
+
 function uiBroadcast(message) {
   const data = JSON.stringify(message);
   uiClients.forEach((client) => {
@@ -26,7 +37,31 @@ function uiHandler(ws, request) {
   console.log('[server] UI client connected');
   uiClients.add(ws);
 
-  ws.send(JSON.stringify({ type: 'connected', timestamp: Date.now() }));
+  ws.send(JSON.stringify({ 
+    type: 'connected', 
+    timestamp: Date.now(),
+    mode: currentMode
+  }));
+
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+      
+      if (message.type === 'set_mode') {
+        setCurrentMode(message.mode);
+        ws.send(JSON.stringify({
+          type: 'mode_changed',
+          mode: currentMode
+        }));
+        uiBroadcast({
+          type: 'mode_changed',
+          mode: currentMode
+        });
+      }
+    } catch (err) {
+      console.error('[server] UI message error:', err.message);
+    }
+  });
 
   ws.on('close', () => {
     console.log('[server] UI client disconnected');
@@ -39,8 +74,8 @@ function uiHandler(ws, request) {
   });
 }
 
-wsHandlers['/twilio-stream'] = createTwilioStreamHandler(uiBroadcast);
-wsHandlers['/honor-stream'] = createHonorStreamHandler(uiBroadcast);
+wsHandlers['/twilio-stream'] = createTwilioStreamHandler(uiBroadcast, getCurrentMode);
+wsHandlers['/honor-stream'] = createHonorStreamHandler(uiBroadcast, getCurrentMode);
 wsHandlers['/ui'] = uiHandler;
 
 server.on('upgrade', (request, socket, head) => {
@@ -118,6 +153,8 @@ module.exports = {
   wss,
   uiBroadcast,
   sseBroadcast,
+  getCurrentMode,
+  setCurrentMode,
   registerWebSocket: (path, handler) => {
     wsHandlers[path] = handler;
     console.log(`[server] WebSocket handler registered: ${path}`);

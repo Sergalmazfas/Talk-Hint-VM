@@ -3,7 +3,7 @@ const { GPTRealtimeHandler } = require('./gpt-handler');
 
 const activeSessions = new Map();
 
-function createTwilioStreamHandler(uiBroadcast) {
+function createTwilioStreamHandler(uiBroadcast, getCurrentMode) {
   return async function twilioStreamHandler(ws, request) {
     console.log('[twilio-stream] New connection');
     
@@ -27,7 +27,10 @@ function createTwilioStreamHandler(uiBroadcast) {
             console.log(`[twilio-stream] Call started: ${callSid}`);
             console.log(`[twilio-stream] Stream SID: ${streamSid}`);
             
+            const mode = getCurrentMode ? getCurrentMode() : 'universal';
+            
             gptHandler = new GPTRealtimeHandler({
+              mode: mode,
               onTranscript: (transcript) => {
                 uiBroadcast({
                   type: 'transcript',

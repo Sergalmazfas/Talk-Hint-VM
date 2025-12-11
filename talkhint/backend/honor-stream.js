@@ -2,7 +2,7 @@ const { GPTRealtimeHandler } = require('./gpt-handler');
 
 const activeSessions = new Map();
 
-function createHonorStreamHandler(uiBroadcast) {
+function createHonorStreamHandler(uiBroadcast, getCurrentMode) {
   return async function honorStreamHandler(ws, request) {
     console.log('[honor-stream] Browser mic connected');
     
@@ -18,7 +18,10 @@ function createHonorStreamHandler(uiBroadcast) {
             sessionId = message.sessionId || Date.now().toString(36);
             console.log(`[honor-stream] Session started: ${sessionId}`);
 
+            const mode = getCurrentMode ? getCurrentMode() : 'universal';
+            
             gptHandler = new GPTRealtimeHandler({
+              mode: mode,
               onTranscript: (transcript) => {
                 ws.send(JSON.stringify({
                   type: 'transcript',

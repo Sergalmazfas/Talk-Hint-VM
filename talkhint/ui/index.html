@@ -44,6 +44,29 @@
       color: #fff;
     }
     #startBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+    select {
+      padding: 12px 16px;
+      font-size: 1rem;
+      border: 1px solid #444;
+      border-radius: 8px;
+      background: #1a1a1a;
+      color: #fff;
+      cursor: pointer;
+      min-width: 180px;
+    }
+    select:focus {
+      outline: none;
+      border-color: #00d4ff;
+    }
+    .mode-label {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 5px;
+    }
+    .mode-selector {
+      display: flex;
+      flex-direction: column;
+    }
     .status-bar {
       display: flex;
       align-items: center;
@@ -133,6 +156,14 @@
 
     <div class="controls">
       <button id="startBtn" disabled>Start Recording</button>
+      <div class="mode-selector">
+        <span class="mode-label">Assistant Mode</span>
+        <select id="modeSelect">
+          <option value="universal">Universal</option>
+          <option value="massage">Massage Salon</option>
+          <option value="dispatcher">Dispatcher</option>
+        </select>
+      </div>
     </div>
 
     <div class="panels">
