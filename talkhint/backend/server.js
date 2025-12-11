@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const { createTwilioStreamHandler } = require('./twilio-stream');
+const { createHonorStreamHandler } = require('./honor-stream');
 
 const app = express();
 const server = http.createServer(app);
@@ -38,6 +39,7 @@ function uiHandler(ws, request) {
 }
 
 wsHandlers['/twilio-stream'] = createTwilioStreamHandler(uiBroadcast);
+wsHandlers['/honor-stream'] = createHonorStreamHandler(uiBroadcast);
 wsHandlers['/ui'] = uiHandler;
 
 server.on('upgrade', (request, socket, head) => {
@@ -97,6 +99,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] TalkHint running on port ${PORT}`);
   console.log(`[server] WebSocket endpoints:`);
   console.log(`         - /twilio-stream (Twilio Media Streams)`);
+  console.log(`         - /honor-stream (Browser Microphone)`);
   console.log(`         - /ui (Browser UI)`);
   console.log(`[server] SSE endpoint: /events`);
 });
