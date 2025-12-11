@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TalkHint</title>
+  <title>TalkHint - Phone Mode</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -21,29 +21,42 @@
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
+    .subtitle {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 20px;
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #666;
+    }
+    .status-dot.connected { background: #00ff88; }
+    .status-dot.active { background: #00ff88; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .mode-badge {
+      margin-left: auto;
+      padding: 4px 12px;
+      background: linear-gradient(135deg, #7b2dff, #00d4ff);
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
     .controls {
       display: flex;
       gap: 10px;
       margin-bottom: 20px;
     }
-    button {
-      padding: 12px 24px;
-      font-size: 1rem;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    #startBtn {
-      background: linear-gradient(135deg, #00d4ff, #0099cc);
-      color: #000;
-    }
-    #startBtn:hover { transform: scale(1.05); }
-    #startBtn.recording {
-      background: linear-gradient(135deg, #ff4444, #cc0000);
-      color: #fff;
-    }
-    #startBtn:disabled { opacity: 0.5; cursor: not-allowed; }
     select {
       padding: 12px 16px;
       font-size: 1rem;
@@ -67,24 +80,6 @@
       display: flex;
       flex-direction: column;
     }
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 15px;
-      background: #1a1a1a;
-      border-radius: 8px;
-      margin-bottom: 20px;
-    }
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #666;
-    }
-    .status-dot.connected { background: #00ff88; }
-    .status-dot.recording { background: #ff4444; animation: pulse 1s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .panel {
       background: #111;
@@ -99,7 +94,11 @@
       margin-bottom: 10px;
       text-transform: uppercase;
       letter-spacing: 1px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
+    .panel h2 .icon { font-size: 1rem; }
     .panel.hon { border-color: #00d4ff; }
     .panel.hon h2 { color: #00d4ff; }
     .panel.gst { border-color: #7b2dff; }
@@ -118,12 +117,26 @@
       background: rgba(255,255,255,0.05);
       border-radius: 6px;
     }
+    .content .empty {
+      color: #555;
+      font-style: italic;
+    }
     .hints-text {
       font-size: 1.5rem;
       font-weight: 300;
       animation: fadeIn 0.3s ease;
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .call-info {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: #888;
+    }
+    .call-info strong { color: #fff; }
     .debug {
       margin-top: 20px;
       padding: 15px;
@@ -144,21 +157,18 @@
 <body>
   <div class="container">
     <h1>TalkHint</h1>
+    <p class="subtitle">Phone Mode - Receiving audio from Twilio calls via GPT Realtime API</p>
     
     <div class="status-bar">
-      <div class="status-dot" id="uiStatus"></div>
-      <span id="uiStatusText">Connecting to server...</span>
-      <div style="margin-left: auto;">
-        <div class="status-dot" id="micStatus"></div>
-        <span id="micStatusText">Mic off</span>
-      </div>
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
+      <span class="mode-badge" id="modeBadge">PHONE</span>
     </div>
 
     <div class="controls">
-      <button id="startBtn" disabled>Start Recording</button>
       <div class="mode-selector">
         <span class="mode-label">Assistant Mode</span>
-        <select id="modeSelect">
+        <select id="modeSelect" data-testid="select-mode">
           <option value="universal">Universal</option>
           <option value="massage">Massage Salon</option>
           <option value="dispatcher">Dispatcher</option>
@@ -168,17 +178,21 @@
 
     <div class="panels">
       <div class="panel hon">
-        <h2>You (HON)</h2>
-        <div class="content" id="hon"></div>
+        <h2><span class="icon">📞</span> You (HON)</h2>
+        <div class="content" id="hon"><p class="empty">Waiting for call...</p></div>
       </div>
       <div class="panel gst">
-        <h2>Guest (GST)</h2>
-        <div class="content" id="gst"></div>
+        <h2><span class="icon">👤</span> Guest (GST)</h2>
+        <div class="content" id="gst"><p class="empty">Waiting for caller...</p></div>
       </div>
       <div class="panel hints">
-        <h2>AI Hints</h2>
+        <h2><span class="icon">💡</span> AI Hints</h2>
         <div class="hints-text" id="hints">Waiting for conversation...</div>
       </div>
+    </div>
+
+    <div class="call-info" id="callInfo">
+      <strong>Status:</strong> <span id="callStatus">No active call</span>
     </div>
 
     <div class="debug" id="debug"></div>

@@ -1,0 +1,76 @@
+Готово.
+Ниже — идеально сформулированная инженерная задача для Replit Agent, с чёткими требованиями, без двусмысленностей.
+Просто СКОПИРУЙ и ВСТАВЬ её в Replit Chat (вкладка Build → Agent).
+
+⸻
+
+✅ ЗАДАЧА ДЛЯ REPLIT AGENT (вставь полностью как есть)
+
+Task:
+Remove browser-based audio recording entirely and switch the TalkHint UI into full PHONE MODE, where all audio and transcripts come ONLY from Twilio Media Streams processed through the GPT Realtime API.
+
+⸻
+
+🔧 Detailed Requirements
+
+1. Remove Start Recording button & browser mic logic
+	•	Completely delete the Start Recording UI button.
+	•	Remove any browser getUserMedia, microphone streaming, or local audio capture code.
+	•	UI must NOT request microphone permissions anymore.
+
+2. Implement PHONE MODE
+
+UI should only receive data from the backend via WebSocket:
+	•	HON (host / user) transcript
+	•	GST (guest / caller) transcript
+	•	AI Hints (from GPT Realtime API)
+
+No audio should originate from the browser.
+
+3. Automatic UI connection
+
+On page load:
+	•	UI auto-connects to the backend WebSocket.
+	•	UI displays:
+	•	Connected
+	•	Mode: Phone or Universal
+
+4. Update backend → UI data flow
+
+Backend will stream structured events to the UI WebSocket:
+
+{ type: "hon_transcript", text: "..." }
+{ type: "gst_transcript", text: "..." }
+{ type: "ai_hint", text: "..." }
+{ type: "status", text: "connected" }
+
+Ensure UI correctly routes these messages to:
+	•	HON block
+	•	GST block
+	•	AI Hints block
+
+5. Prepare server to receive audio from Twilio
+
+(You don’t need to implement Twilio streaming now — just ensure UI expects only server-driven events)
+	•	Remove assumptions about browser audio stream.
+	•	UI strictly reads events coming from the backend.
+
+6. Keep existing visual layout
+	•	Blocks HON, GST, AI hints remain unchanged.
+	•	Only remove microphone-driven functionality.
+
+⸻
+
+🎯 Expected Results
+	•	No “Start Recording” button anywhere in UI.
+	•	No browser mic access requested.
+	•	UI shows HON/GST text only from server messages.
+	•	Full readiness for TELEPHONY mode with GPT Realtime API.
+	•	Automatic WebSocket connection on load.
+	•	Clean console (no mic warnings).
+
+⸻
+
+🔥 Paste this into Replit Agent — он выполнит всё автоматически.
+
+Когда закончишь — присылай скрин, посмотрим, что дальше оптимизировать.
