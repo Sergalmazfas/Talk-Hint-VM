@@ -2,11 +2,6 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { spawn } from "child_process";
 import { log } from "./index";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 interface TwilioMediaMessage {
   event: string;
