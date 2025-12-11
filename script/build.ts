@@ -51,7 +51,7 @@ async function buildAll() {
     platform: "node",
     bundle: true,
     format: "esm",
-    outfile: "dist/index.mjs",
+    outfile: "dist/index.js",
     define: {
       "process.env.NODE_ENV": '"production"',
     },
@@ -63,19 +63,22 @@ async function buildAll() {
     },
   });
 
-  // Create CJS wrapper for package.json start script compatibility
-  const cjsWrapper = `// ESM wrapper for deployment - loads the actual ESM build
-(async () => {
-  await import('./index.mjs');
-})();
-`;
-  await writeFile("dist/index.cjs", cjsWrapper);
-  console.log("Created ESM-compatible wrapper at dist/index.cjs");
-
   // Copy TalkHint UI files to dist
   console.log("Copying TalkHint UI files...");
   await cp("talkhint/ui", "dist/talkhint/ui", { recursive: true });
   console.log("TalkHint UI files copied to dist/talkhint/ui");
+
+  // Create CJS wrapper for package.json start script (which expects index.cjs)
+  const cjsWrapper = `// ESM loader - redirects to pure ESM build
+(async () => { await import('./index.js'); })();
+`;
+  await writeFile("dist/index.cjs", cjsWrapper);
+
+  console.log("\n✅ Build complete:");
+  console.log("   - dist/index.js (pure ESM server)");
+  console.log("   - dist/index.cjs (loader wrapper)");
+  console.log("   - dist/public/ (React client)");
+  console.log("   - dist/talkhint/ui/ (TalkHint UI)");
 }
 
 buildAll().catch((err) => {
