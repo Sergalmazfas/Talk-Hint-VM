@@ -1,37 +1,56 @@
-import { type User, type InsertUser } from "@shared/schema";
+import { type Call, type InsertCall } from "@shared/schema";
 import { randomUUID } from "crypto";
 
-// modify the interface with any CRUD methods
-// you might need
-
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getCall(id: string): Promise<Call | undefined>;
+  getCallByCallSid(callSid: string): Promise<Call | undefined>;
+  createCall(call: InsertCall): Promise<Call>;
+  updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined>;
+  getAllCalls(): Promise<Call[]>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private calls: Map<string, Call>;
 
   constructor() {
-    this.users = new Map();
+    this.calls = new Map();
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getCall(id: string): Promise<Call | undefined> {
+    return this.calls.get(id);
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
+  async getCallByCallSid(callSid: string): Promise<Call | undefined> {
+    return Array.from(this.calls.values()).find(
+      (call) => call.callSid === callSid,
     );
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
+  async createCall(insertCall: InsertCall): Promise<Call> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+    const call: Call = { 
+      ...insertCall, 
+      id,
+      startedAt: new Date(),
+      endedAt: null,
+      transcript: null,
+      metadata: null
+    };
+    this.calls.set(id, call);
+    return call;
+  }
+
+  async updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined> {
+    const call = this.calls.get(id);
+    if (!call) return undefined;
+    
+    const updatedCall = { ...call, ...updates };
+    this.calls.set(id, updatedCall);
+    return updatedCall;
+  }
+
+  async getAllCalls(): Promise<Call[]> {
+    return Array.from(this.calls.values());
   }
 }
 

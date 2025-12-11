@@ -1,16 +1,59 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { setupWebSocket } from "./websocket";
+import { z } from "zod";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  setupWebSocket(httpServer);
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  app.get("/api/calls", async (_req, res) => {
+    try {
+      const calls = await storage.getAllCalls();
+      res.json(calls);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch calls" });
+    }
+  });
+
+  app.get("/api/calls/:id", async (req, res) => {
+    try {
+      const call = await storage.getCall(req.params.id);
+      if (!call) {
+        return res.status(404).json({ message: "Call not found" });
+      }
+      res.json(call);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch call" });
+    }
+  });
+
+  app.get("/api/health", (_req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      websocket: "ready",
+    });
+  });
+
+  const clients: Set<any> = new Set();
+
+  app.get("/api/events", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    
+    clients.add(res);
+    
+    res.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
+
+    req.on("close", () => {
+      clients.delete(res);
+    });
+  });
 
   return httpServer;
 }
