@@ -1,9 +1,11 @@
 const WebSocket = require('ws');
 const { convertPCM16ToMulaw } = require('./audio-convert');
+const { getRealtimePrompt } = require('../shared/prompt-realtime');
 
 class GPTRealtimeHandler {
   constructor(options = {}) {
     this.apiKey = options.apiKey || process.env.OPENAI_API_KEY;
+    this.mode = options.mode || 'universal';
     this.ws = null;
     this.isConnected = false;
     this.sessionId = null;
@@ -74,14 +76,14 @@ class GPTRealtimeHandler {
   }
 
   getSystemPrompt() {
-    return `You are a real-time voice assistant for TalkHint. 
-Your role is to:
-1. Listen to conversations in real-time
-2. Provide helpful hints and suggestions
-3. Translate between languages when needed
-4. Be concise and helpful
+    return getRealtimePrompt(this.mode);
+  }
 
-Always respond naturally and conversationally.`;
+  setMode(mode) {
+    this.mode = mode;
+    if (this.isConnected) {
+      this.initSession();
+    }
   }
 
   send(message) {
