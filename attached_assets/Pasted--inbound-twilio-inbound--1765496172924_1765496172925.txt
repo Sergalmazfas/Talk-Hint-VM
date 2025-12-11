@@ -1,0 +1,97 @@
+Отлично, это правильный inbound-вебхук — и он уже работает.
+НО ⛔ проблема НЕ в /twilio/inbound.
+Этот эндпоинт у тебя работает идеально и Twilio его уже вызывает.
+
+⸻
+
+☝️ Где реальная ошибка
+
+Twilio приходит сюда:
+
+POST https://talk-hint-vm--sergalmazfas.replit.app/twilio/inbound
+
+И получает TwiML:
+
+<Stream url="wss://talk-hint-vm--sergalmazfas.replit.app/media" />
+
+После этого Twilio СРАЗУ пытается подключиться на:
+
+wss://talk-hint-vm--sergalmazfas.replit.app/media
+
+И вот здесь сервер возвращает 404, потому что у тебя:
+
+❌ Нет WebSocket-эндпоинта /media
+
+Поэтому:
+	•	Twilio не может открыть аудиострим
+	•	соединение рвётся
+	•	UI пишет Disconnected from server
+	•	разговор не начинает обрабатываться GPT
+
+⸻
+
+🔥 ОБЯЗАТЕЛЬНО должен существовать WebSocket /media
+
+Хотя inbound-вебхук правильный, но без этого второго сокета система не работает.
+
+Я сейчас переформулирую чётко:
+
+⸻
+
+✔ Что тебе нужно сделать СЕЙЧАС
+
+Создать в Replit backend WebSocket endpoint:
+
+wss://talk-hint-vm--sergalmazfas.replit.app/media
+
+Этот WebSocket будет:
+	•	принимать аудио от Twilio (8kHz μ-law)
+	•	отправлять поток в GPT Realtime API
+	•	возвращать транскрипт → в UI
+
+Сейчас его нет. Поэтому звонок падает.
+
+⸻
+
+📌 Даю готовую фразу, вставляешь в Replit Agent:
+
+🟣 ПРОМПТ ДЛЯ REPLIT-АГЕНТА (просто вставь):
+
+Add a WebSocket endpoint at path /media. 
+It must accept Twilio Media Streams connections:
+
+Path: wss://talk-hint-vm--sergalmazfas.replit.app/media
+
+Requirements:
+1. Handle WebSocket upgrade for /media.
+2. Log connection: "Twilio Media Stream connected".
+3. Receive binary audio frames from Twilio (μ-law 8kHz).
+4. Forward audio frames to GPT Realtime API.
+5. Send GPT transcripts and hints to the existing /ui WebSocket.
+6. Do NOT modify or break the existing /ui WebSocket logic.
+7. After implementation, restart the server.
+
+
+⸻
+
+🧪 После того как агент всё сделает:
+
+Проверка:
+	1.	Открой в браузере:
+
+https://talk-hint-vm--sergalmazfas.replit.app/media
+
+Должно быть: не 404.
+	2.	Сделай звонок → на логах появится:
+
+Twilio Media Stream connected
+
+	3.	UI должен показать:
+
+Status: Active call
+
+И начнут идти GST + AI Hints.
+
+⸻
+
+Хочешь, я напишу окончательный вариант WebSocket-сервера вручную (идеальный), чтобы агент точно не ошибся?

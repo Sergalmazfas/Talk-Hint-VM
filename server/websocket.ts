@@ -360,6 +360,7 @@ export function setupWebSocket(server: Server) {
     } else if (pathname === "/honor-stream") {
       handleHonorStream(ws);
     } else if (pathname === "/twilio-stream" || pathname === "/media") {
+      log(`Twilio Media Stream connected via ${pathname}`, "twilio");
       handleTwilioStream(ws);
     }
   });
