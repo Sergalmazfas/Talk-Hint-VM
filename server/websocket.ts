@@ -267,15 +267,29 @@ class GPTRealtimeHandler {
   }
 
   private handleMessage(message: any) {
+    // Log all OpenAI messages for debugging
+    if (message.type && !message.type.includes("audio")) {
+      log(`OpenAI event: ${message.type}`, "openai");
+    }
+    
     switch (message.type) {
       case "session.created":
         this.sessionId = message.session?.id;
         log(`Session created: ${this.sessionId}`, "openai");
         break;
+      case "session.updated":
+        log(`Session updated successfully`, "openai");
+        break;
+      case "input_audio_buffer.speech_started":
+        log(`Speech detected`, "openai");
+        break;
+      case "input_audio_buffer.speech_stopped":
+        log(`Speech ended`, "openai");
+        break;
       case "conversation.item.input_audio_transcription.completed":
         if (message.transcript) {
-          log(`User: ${message.transcript}`, "transcript");
-          this.onTranscript({ role: "user", text: message.transcript });
+          log(`Guest: ${message.transcript}`, "transcript");
+          this.onTranscript({ role: "guest", text: message.transcript });
         }
         break;
       case "response.audio_transcript.delta":
