@@ -6,12 +6,15 @@ const UI = {
   callBtn: document.getElementById('callBtn'),
   statusDot: document.getElementById('statusDot'),
   statusText: document.getElementById('statusText'),
+  goalIndicator: document.getElementById('goalIndicator'),
   chatContainer: document.getElementById('chatContainer'),
   emptyState: document.getElementById('emptyState'),
   textInput: document.getElementById('textInput'),
   sendBtn: document.getElementById('sendBtn'),
   micBtn: document.getElementById('micBtn')
 };
+
+let hasGoal = false;
 
 let socket = null;
 let reconnectTimeout = null;
@@ -31,9 +34,22 @@ function getWSUrl(path) {
   return protocol + '//' + window.location.host + path;
 }
 
+function setGoalActive(active) {
+  hasGoal = active;
+  if (active) {
+    UI.goalIndicator.classList.add('active');
+  } else {
+    UI.goalIndicator.classList.remove('active');
+  }
+}
+
 function addMessage(type, text, translation) {
   if (!text) return;
   UI.emptyState.style.display = 'none';
+  
+  if (type === 'you' && !hasGoal) {
+    setGoalActive(true);
+  }
   
   const now = Date.now();
   const shouldGroup = (type === lastMessageType) && 
@@ -89,6 +105,7 @@ function clearChat() {
   lastMessageType = null;
   lastMessageTime = 0;
   lastMessageEl = null;
+  setGoalActive(false);
 }
 
 async function initTwilioDevice() {
