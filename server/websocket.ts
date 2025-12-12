@@ -513,19 +513,20 @@ export function setupWebSocket(server: Server) {
         const transcript = data.channel?.alternatives?.[0]?.transcript;
         if (transcript && transcript.trim()) {
           const isFinal = data.is_final;
-          const speaker = track === "inbound" ? "Guest" : "Owner";
+          // inbound = Owner (browser/WebRTC), outbound = Guest (phone)
+          const speaker = track === "inbound" ? "Owner" : "Guest";
           
           if (isFinal) {
-            log(`[Deepgram] ${track} final: ${transcript}`, "deepgram");
+            log(`[Deepgram] ${speaker} final: ${transcript}`, "deepgram");
             // Broadcast to UI
             uiBroadcast({ 
-              type: track === "inbound" ? "guest_transcript" : "owner_transcript",
+              type: track === "inbound" ? "owner_transcript" : "guest_transcript",
               text: transcript,
               isFinal: true,
               callSid 
             });
           } else {
-            log(`[Deepgram] ${track} partial: ${transcript}`, "deepgram");
+            log(`[Deepgram] ${speaker} partial: ${transcript}`, "deepgram");
           }
         }
       });
