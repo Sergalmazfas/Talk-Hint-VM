@@ -252,12 +252,12 @@ class GPTRealtimeHandler {
         modalities: ["text", "audio"],
         instructions: getRealtimePrompt(this.mode),
         voice: "alloy",
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
+        input_audio_format: "g711_ulaw",
+        output_audio_format: "g711_ulaw",
         input_audio_transcription: { model: "whisper-1" },
         turn_detection: {
           type: "server_vad",
-          threshold: 0.5,
+          threshold: 0.3,
           prefix_padding_ms: 300,
           silence_duration_ms: 500,
         },
@@ -279,16 +279,14 @@ class GPTRealtimeHandler {
       return; // Not connected yet
     }
     
-    // Convert μ-law (Twilio) to PCM16 (OpenAI)
-    const pcm16Audio = mulawToPcm16(base64Audio);
-    
-    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: pcm16Audio }));
+    // Send μ-law audio directly to OpenAI (native g711_ulaw support)
+    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Audio }));
     this.audioChunkCount++;
     this.totalAudioSent++;
     
     // Log first audio and periodically
     if (this.totalAudioSent === 1) {
-      log(`First audio chunk sent to OpenAI (converted μ-law -> PCM16, ${pcm16Audio.length} bytes)`, "openai");
+      log(`First audio chunk sent to OpenAI (g711_ulaw, ${base64Audio.length} bytes)`, "openai");
     }
   }
   
