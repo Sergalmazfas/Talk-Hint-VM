@@ -18,9 +18,30 @@ let hasGoal = false;
 let currentFolder = null;
 
 const FOLDER_PROMPTS = {
-  realtor: 'You are a Realtor assistant. Your goal is to help the user navigate real estate conversations, handle pricing discussions, and close deals efficiently.',
-  dispatcher: 'You are a Dispatcher assistant. Your goal is to help the user communicate clearly with dispatchers, schedule pickups/deliveries, and handle logistics.',
-  handyman: 'You are a Handyman assistant. Your goal is to help the user discuss repairs, negotiate prices, and schedule service appointments.'
+  realtor: `You are a Realtor assistant.
+User does NOT speak English fluently.
+Always respond with ONE short, ready-to-say phrase.
+No explanations. No teaching. No options.
+Format: Just the phrase to say.
+Help with: property viewings, price negotiations, contracts, scheduling.`,
+  dispatcher: `You are a Dispatcher assistant.
+User does NOT speak English fluently.
+Always respond with ONE short, ready-to-say phrase.
+No explanations. No teaching. No options.
+Format: Just the phrase to say.
+Help with: scheduling pickups, confirming addresses, delivery times, load details.`,
+  handyman: `You are a Handyman assistant.
+User does NOT speak English fluently.
+Always respond with ONE short, ready-to-say phrase.
+No explanations. No teaching. No options.
+Format: Just the phrase to say.
+Help with: repair quotes, scheduling service, describing problems, confirming work.`,
+  doctor: `You are a Medical assistant.
+User does NOT speak English fluently.
+Always respond with ONE short, ready-to-say phrase.
+No explanations. No teaching. No options.
+Format: Just the phrase to say.
+Help with: test results, appointments, prescriptions, insurance questions.`
 };
 
 let socket = null;
@@ -113,6 +134,77 @@ function clearChat() {
   lastMessageTime = 0;
   lastMessageEl = null;
   setGoalActive(false);
+}
+
+function escapeHtml(text) {
+  var div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function addHint(english, russian) {
+  if (!english) return;
+  UI.emptyState.style.display = 'none';
+  
+  var safeEnglish = escapeHtml(english);
+  var safeRussian = russian ? escapeHtml(russian) : '';
+  
+  var hint = document.createElement('div');
+  hint.className = 'hint';
+  
+  var header = document.createElement('div');
+  header.className = 'hint-header';
+  header.textContent = '💡 Say this';
+  
+  var card = document.createElement('div');
+  card.className = 'hint-card';
+  
+  var phrase = document.createElement('div');
+  phrase.className = 'hint-phrase';
+  phrase.textContent = english;
+  card.appendChild(phrase);
+  
+  if (russian) {
+    var translation = document.createElement('div');
+    translation.className = 'hint-translation';
+    translation.textContent = russian;
+    card.appendChild(translation);
+  }
+  
+  var actions = document.createElement('div');
+  actions.className = 'hint-actions';
+  
+  var sayBtn = document.createElement('button');
+  sayBtn.className = 'hint-btn say';
+  sayBtn.setAttribute('data-testid', 'button-hint-say');
+  sayBtn.textContent = '▶️ Say';
+  sayBtn.addEventListener('click', function() {
+    log('Say: ' + english);
+  });
+  
+  var copyBtn = document.createElement('button');
+  copyBtn.className = 'hint-btn copy';
+  copyBtn.setAttribute('data-testid', 'button-hint-copy');
+  copyBtn.textContent = '📋 Copy';
+  copyBtn.addEventListener('click', function() {
+    navigator.clipboard.writeText(english).then(function() {
+      log('Copied to clipboard');
+    });
+  });
+  
+  actions.appendChild(sayBtn);
+  actions.appendChild(copyBtn);
+  card.appendChild(actions);
+  
+  hint.appendChild(header);
+  hint.appendChild(card);
+  UI.chatContainer.appendChild(hint);
+  
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+  
+  lastMessageType = 'hint';
+  lastMessageTime = Date.now();
+  lastMessageEl = null;
 }
 
 async function initTwilioDevice() {
@@ -214,8 +306,9 @@ function handleMessage(data) {
 
     case 'suggestion':
     case 'ai_hint':
-      if (data.en) {
-        addMessage('assistant', data.en, data.ru);
+    case 'hint':
+      if (data.en || data.english) {
+        addHint(data.en || data.english, data.ru || data.russian);
       }
       break;
 
