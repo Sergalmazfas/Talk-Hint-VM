@@ -239,8 +239,24 @@ class GPTRealtimeHandler {
     }
   }
 
+  private audioChunkCount = 0;
+  
   sendAudio(base64PCM: string) {
     this.send({ type: "input_audio_buffer.append", audio: base64PCM });
+    this.audioChunkCount++;
+    
+    // Commit audio buffer periodically (every ~50 chunks = ~1 second of audio at 20ms per frame)
+    if (this.audioChunkCount >= 50) {
+      this.send({ type: "input_audio_buffer.commit" });
+      this.audioChunkCount = 0;
+    }
+  }
+  
+  commitAudio() {
+    if (this.audioChunkCount > 0) {
+      this.send({ type: "input_audio_buffer.commit" });
+      this.audioChunkCount = 0;
+    }
   }
 
   private handleMessage(message: any) {
@@ -358,8 +374,9 @@ export function setupWebSocket(server: Server) {
                 uiBroadcast({ type: "hon_transcript", sessionId, ...transcript });
               },
               onResponse: (response) => {
-                ws.send(JSON.stringify({ type: "response", sessionId, ...response }));
-                uiBroadcast({ type: "hon_response", sessionId, ...response });
+                const { type: respType, ...rest } = response;
+                ws.send(JSON.stringify({ type: "response", sessionId, responseType: respType, ...rest }));
+                uiBroadcast({ type: "hon_response", sessionId, responseType: respType, ...rest });
               },
               onAudio: (audio) => {
                 ws.send(JSON.stringify({ type: "audio", audio }));
@@ -381,7 +398,10 @@ export function setupWebSocket(server: Server) {
 
           case "stop":
             log(`Honor session ended: ${sessionId}`, "honor");
-            if (gptHandler) gptHandler.disconnect();
+            if (gptHandler) {
+              gptHandler.commitAudio(); // Flush remaining audio
+              gptHandler.disconnect();
+            }
             ws.send(JSON.stringify({ type: "stopped", sessionId }));
             break;
         }
@@ -396,10 +416,13 @@ export function setupWebSocket(server: Server) {
   }
 
   function handleTwilioStream(ws: WebSocket) {
-    log("Twilio stream connected (disabled for Phase 1)", "twilio");
+    log("Twilio stream connected", "twilio");
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
+    let gptHandler: GPTRealtimeHandler | null = null;
+    let conversationHistory: { role: string; text: string }[] = [];
+    let lastHintTime = 0;
 
     ws.on("message", async (data: Buffer) => {
       try {
@@ -419,6 +442,42 @@ export function setupWebSocket(server: Server) {
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
               log(`Stream started: ${callSid}`, "twilio");
+              
+              // Connect to OpenAI Realtime API for transcription
+              gptHandler = new GPTRealtimeHandler({
+                mode: currentMode,
+                onTranscript: (transcript) => {
+                  conversationHistory.push(transcript);
+                  
+                  // Broadcast transcription to UI
+                  const msgType = transcript.role === "user" ? "guest_transcript" : "owner_transcript";
+                  uiBroadcast({ type: msgType, text: transcript.text, callSid });
+                  
+                  // Generate hints periodically (not too often)
+                  const now = Date.now();
+                  if (now - lastHintTime > 3000) {
+                    lastHintTime = now;
+                    generateHints(conversationHistory);
+                  }
+                },
+                onResponse: (response) => {
+                  // GPT assistant response (hints)
+                  if (response.text) {
+                    uiBroadcast({ type: "ai_hint", text: response.text, callSid });
+                  }
+                },
+                onAudio: () => {}, // No audio playback needed
+                onError: (error) => {
+                  log(`GPT error: ${error.message || error}`, "openai");
+                },
+              });
+              
+              try {
+                await gptHandler.connect();
+                log(`GPT connected for call: ${callSid}`, "openai");
+              } catch (err: any) {
+                log(`GPT connection failed: ${err.message}`, "openai");
+              }
             }
             break;
 
@@ -427,10 +486,20 @@ export function setupWebSocket(server: Server) {
             if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
               log(`Audio frames: ${audioFrameCount}`, "twilio");
             }
+            
+            // Send audio to OpenAI for transcription
+            if (gptHandler && message.media?.payload) {
+              gptHandler.sendAudio(message.media.payload);
+            }
             break;
 
           case "stop":
             log(`Stream ended: ${callSid}, frames: ${audioFrameCount}`, "twilio");
+            if (gptHandler) {
+              gptHandler.commitAudio(); // Flush remaining audio
+              gptHandler.disconnect();
+              gptHandler = null;
+            }
             break;
         }
       } catch (err: any) {
@@ -440,7 +509,106 @@ export function setupWebSocket(server: Server) {
 
     ws.on("close", () => {
       log(`Twilio WS closed, callSid: ${callSid}`, "twilio");
+      if (gptHandler) {
+        gptHandler.disconnect();
+        gptHandler = null;
+      }
     });
+  }
+  
+  // Filler phrases to use during GPT thinking time
+  const FILLER_PHRASES = [
+    { en: "Hmm, let me think...", ru: "Хмм, дайте подумать..." },
+    { en: "Oh, that's interesting...", ru: "О, это интересно..." },
+    { en: "I see, and so...", ru: "Понятно, и так..." },
+    { en: "Right, right...", ru: "Да, да..." },
+    { en: "Uh-huh, go on...", ru: "Угу, продолжайте..." },
+    { en: "Well, you know...", ru: "Ну, знаете..." },
+  ];
+  
+  let lastFillerTime = 0;
+  let fillerIndex = 0;
+  
+  function getNextFiller(): { en: string; ru: string } {
+    const filler = FILLER_PHRASES[fillerIndex % FILLER_PHRASES.length];
+    fillerIndex++;
+    return filler;
+  }
+  
+  // Send a filler phrase to keep conversation flowing
+  function sendFiller() {
+    const now = Date.now();
+    if (now - lastFillerTime < 5000) return; // Don't send fillers too often
+    
+    lastFillerTime = now;
+    const filler = getNextFiller();
+    uiBroadcast({ 
+      type: "filler", 
+      text: filler.en, 
+      translation: filler.ru 
+    });
+    log(`Filler: ${filler.en}`, "openai");
+  }
+  
+  // Generate AI hints based on conversation
+  async function generateHints(history: { role: string; text: string }[]) {
+    if (history.length < 1) return;
+    
+    const recentContext = history.slice(-5).map(h => `${h.role}: ${h.text}`).join("\n");
+    
+    // Start a timer for filler phrase
+    const fillerTimer = setTimeout(() => sendFiller(), 2000);
+    
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are a real-time assistant helping someone during a phone call. Based on the conversation, suggest 3 SHORT response options they could say next. Each suggestion should be:
+1. Natural and conversational
+2. Under 15 words
+3. Helpful for continuing the conversation
+
+Return ONLY a JSON object with this format:
+{"hints": [{"en": "English phrase", "ru": "Russian translation"}, {"en": "...", "ru": "..."}, {"en": "...", "ru": "..."}]}`
+            },
+            {
+              role: "user",
+              content: `Recent conversation:\n${recentContext}\n\nSuggest 3 response options:`
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 300,
+        }),
+      });
+      
+      clearTimeout(fillerTimer);
+      
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices[0]?.message?.content;
+        
+        try {
+          const parsed = JSON.parse(content);
+          if (parsed.hints) {
+            uiBroadcast({ type: "hints", hints: parsed.hints });
+            log(`Generated ${parsed.hints.length} hints`, "openai");
+          }
+        } catch {
+          log("Failed to parse hints JSON", "openai");
+        }
+      }
+    } catch (err: any) {
+      clearTimeout(fillerTimer);
+      log(`Hint generation error: ${err.message}`, "openai");
+    }
   }
 
   return wss;

@@ -139,22 +139,35 @@ export async function registerRoutes(
   app.post("/twilio/voice", (req, res) => {
     // The To parameter comes from device.connect({ params: { To: number } })
     const targetNumber = req.body.To || req.body.to || req.query.To || req.query.to;
+    const callSid = req.body.CallSid;
     
     console.log("[TwiML Voice] ===== BROWSER CALL =====");
-    console.log("[TwiML Voice] Full Body:", JSON.stringify(req.body));
+    console.log("[TwiML Voice] CallSid:", callSid);
     console.log("[TwiML Voice] To:", targetNumber);
     console.log("[TwiML Voice] From:", req.body.From);
+
+    // Get the host for WebSocket URL
+    const host = req.get("host") || "localhost:5000";
+    const wsProtocol = req.protocol === "https" ? "wss" : "wss";
+    const streamUrl = `${wsProtocol}://${host}/twilio-stream`;
 
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twimlResponse = new VoiceResponse();
 
     if (targetNumber && targetNumber.startsWith("+")) {
+      // Start media stream for transcription
+      const start = twimlResponse.start();
+      start.stream({
+        url: streamUrl,
+        track: "both_tracks"
+      });
+      
       const dial = twimlResponse.dial({ 
         callerId: TWILIO_PHONE_NUMBER,
         answerOnBridge: true 
       });
       dial.number(targetNumber);
-      console.log("[TwiML Voice] Dialing:", targetNumber);
+      console.log("[TwiML Voice] Dialing:", targetNumber, "with stream:", streamUrl);
     } else {
       twimlResponse.say("Please provide a valid phone number starting with plus.");
       console.log("[TwiML Voice] Invalid or missing target:", targetNumber);

@@ -154,6 +154,13 @@ function handleMessage(data) {
       }
       break;
 
+    case 'filler':
+      if (data.text) {
+        log(`Filler: ${data.text}`);
+        speakFiller(data.text);
+      }
+      break;
+
     case 'mode_changed':
       currentMode = data.mode;
       UI.modeSelect.value = currentMode;
@@ -201,6 +208,42 @@ function updateHints(newHints) {
     const hint = newHints[i] || hints[i];
     document.getElementById(`hint${i}en`).textContent = hint.en || hint.english || hints[i].en;
     document.getElementById(`hint${i}ru`).textContent = hint.ru || hint.russian || hints[i].ru;
+  }
+}
+
+async function speakFiller(text) {
+  if (isSpeaking) return;
+  
+  isSpeaking = true;
+  
+  try {
+    const response = await fetch('/api/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    
+    if (response.ok) {
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = () => {
+        isSpeaking = false;
+        URL.revokeObjectURL(audioUrl);
+      };
+      
+      audio.onerror = () => {
+        isSpeaking = false;
+      };
+      
+      await audio.play();
+    } else {
+      isSpeaking = false;
+    }
+  } catch (err) {
+    isSpeaking = false;
+    log(`Filler speak error: ${err.message}`, 'error');
   }
 }
 
