@@ -2,6 +2,38 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { log } from "./index";
 
+// μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
+const MULAW_DECODE_TABLE = new Int16Array(256);
+(function initMulawTable() {
+  for (let i = 0; i < 256; i++) {
+    const mulaw = ~i;
+    const sign = mulaw & 0x80;
+    const exponent = (mulaw >> 4) & 0x07;
+    const mantissa = mulaw & 0x0f;
+    let sample = ((mantissa << 3) + 0x84) << exponent;
+    sample -= 0x84;
+    MULAW_DECODE_TABLE[i] = sign ? -sample : sample;
+  }
+})();
+
+// Convert μ-law buffer to PCM16 and upsample 8kHz to 24kHz (3x)
+function mulawToPcm16(mulawBase64: string): string {
+  const mulawBytes = Buffer.from(mulawBase64, "base64");
+  // Upsample 8kHz to 24kHz (3x replication for simplicity)
+  const pcm16Buffer = Buffer.alloc(mulawBytes.length * 2 * 3);
+  
+  for (let i = 0; i < mulawBytes.length; i++) {
+    const sample = MULAW_DECODE_TABLE[mulawBytes[i]];
+    // Replicate each sample 3 times for 8kHz -> 24kHz
+    for (let j = 0; j < 3; j++) {
+      const offset = (i * 3 + j) * 2;
+      pcm16Buffer.writeInt16LE(sample, offset);
+    }
+  }
+  
+  return pcm16Buffer.toString("base64");
+}
+
 interface TwilioMediaMessage {
   event: string;
   sequenceNumber?: string;
@@ -220,14 +252,14 @@ class GPTRealtimeHandler {
         modalities: ["text", "audio"],
         instructions: getRealtimePrompt(this.mode),
         voice: "alloy",
-        input_audio_format: "g711_ulaw",
-        output_audio_format: "g711_ulaw",
-        input_audio_transcription: { model: "whisper-1" },
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        input_audio_transcription: { model: "gpt-4o-transcribe" },
         turn_detection: {
           type: "server_vad",
           threshold: 0.5,
           prefix_padding_ms: 300,
-          silence_duration_ms: 700,
+          silence_duration_ms: 500,
         },
       },
     });
@@ -247,14 +279,16 @@ class GPTRealtimeHandler {
       return; // Not connected yet
     }
     
-    // Send audio to OpenAI (Twilio sends g711_ulaw which OpenAI accepts)
-    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Audio }));
+    // Convert μ-law (Twilio) to PCM16 (OpenAI)
+    const pcm16Audio = mulawToPcm16(base64Audio);
+    
+    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: pcm16Audio }));
     this.audioChunkCount++;
     this.totalAudioSent++;
     
     // Log first audio and periodically
     if (this.totalAudioSent === 1) {
-      log(`First audio chunk sent to OpenAI (${base64Audio.length} bytes)`, "openai");
+      log(`First audio chunk sent to OpenAI (converted μ-law -> PCM16, ${pcm16Audio.length} bytes)`, "openai");
     }
   }
   
