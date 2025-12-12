@@ -56,6 +56,57 @@ export async function registerRoutes(
     });
   });
 
+  // ElevenLabs Text-to-Speech endpoint
+  app.post("/api/speak", async (req, res) => {
+    const { text } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: "Text is required" });
+    }
+
+    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+    
+    if (!ELEVENLABS_API_KEY) {
+      console.log("[TTS] ElevenLabs not configured, using fallback");
+      return res.status(503).json({ error: "TTS not configured" });
+    }
+
+    try {
+      const voiceId = "21m00Tcm4TlvDq8ikWAM"; // Rachel - default voice
+      
+      const response = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "xi-api-key": ELEVENLABS_API_KEY,
+          },
+          body: JSON.stringify({
+            text,
+            model_id: "eleven_monolingual_v1",
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.75,
+            },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`ElevenLabs API error: ${response.status}`);
+      }
+
+      const audioBuffer = await response.arrayBuffer();
+      res.set("Content-Type", "audio/mpeg");
+      res.send(Buffer.from(audioBuffer));
+      
+    } catch (error: any) {
+      console.error("[TTS] Error:", error.message);
+      res.status(500).json({ error: "TTS generation failed" });
+    }
+  });
+
   // Generate Twilio Access Token for browser-based calling
   app.get("/api/token", (req, res) => {
     if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
