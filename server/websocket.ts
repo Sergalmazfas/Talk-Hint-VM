@@ -396,27 +396,10 @@ export function setupWebSocket(server: Server) {
   }
 
   function handleTwilioStream(ws: WebSocket) {
-    log("Twilio stream connected", "twilio");
-    let gptHandler: GPTRealtimeHandler | null = null;
+    log("Twilio stream connected (disabled for Phase 1)", "twilio");
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
-    let audioSentCount = 0;
-
-    // Send audio back to Twilio (for bidirectional streaming)
-    const sendAudioToTwilio = (base64Audio: string) => {
-      if (ws.readyState === WebSocket.OPEN && streamSid) {
-        audioSentCount++;
-        if (audioSentCount === 1 || audioSentCount % 100 === 0) {
-          log(`Audio sent to Twilio: ${audioSentCount}`, "twilio");
-        }
-        ws.send(JSON.stringify({
-          event: "media",
-          streamSid,
-          media: { payload: base64Audio }
-        }));
-      }
-    };
 
     ws.on("message", async (data: Buffer) => {
       try {
@@ -428,63 +411,26 @@ export function setupWebSocket(server: Server) {
 
         switch (message.event) {
           case "connected":
-            log("Twilio Media Stream handshake complete", "twilio");
+            log("Twilio Media Stream handshake", "twilio");
             break;
 
           case "start":
             if (message.start) {
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
-              log(`Call starting: ${callSid}, stream: ${streamSid}`, "twilio");
-              log(`Tracks: ${JSON.stringify(message.start.tracks)}`, "twilio");
-
-              try {
-                gptHandler = new GPTRealtimeHandler({
-                  mode: currentMode,
-                  onTranscript: (transcript) => {
-                    log(`Transcript: ${transcript.text}`, "twilio");
-                    uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
-                  },
-                  onResponse: (response) => {
-                    log(`AI response: ${response.text}`, "twilio");
-                    uiBroadcast({ type: "ai_hint", callSid, text: response.text });
-                    uiBroadcast({ type: "response", callSid, ...response });
-                  },
-                  onAudio: (audioBase64) => {
-                    // Send OpenAI audio back to Twilio
-                    sendAudioToTwilio(audioBase64);
-                  },
-                  onError: (error) => {
-                    log(`GPT error: ${error.message || error}`, "twilio");
-                    uiBroadcast({ type: "error", callSid, error: error.message || error });
-                  },
-                });
-
-                await gptHandler.connect();
-                log(`GPT connected for call: ${callSid}`, "twilio");
-                uiBroadcast({ type: "call_started", callSid, streamSid });
-              } catch (err: any) {
-                log(`GPT connection failed: ${err.message}`, "twilio");
-                uiBroadcast({ type: "error", callSid, error: `GPT connection failed: ${err.message}` });
-              }
+              log(`Stream started: ${callSid}`, "twilio");
             }
             break;
 
           case "media":
-            if (gptHandler && message.media?.payload) {
-              audioFrameCount++;
-              if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
-                log(`Audio frames received: ${audioFrameCount}`, "twilio");
-              }
-              // Send mulaw audio directly to OpenAI - no conversion needed
-              gptHandler.sendAudio(message.media.payload);
+            audioFrameCount++;
+            if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
+              log(`Audio frames: ${audioFrameCount}`, "twilio");
             }
             break;
 
           case "stop":
-            log(`Call ended: ${callSid}, received: ${audioFrameCount}, sent: ${audioSentCount}`, "twilio");
-            if (gptHandler) gptHandler.disconnect();
-            uiBroadcast({ type: "call_ended", callSid });
+            log(`Stream ended: ${callSid}, frames: ${audioFrameCount}`, "twilio");
             break;
         }
       } catch (err: any) {
@@ -493,8 +439,7 @@ export function setupWebSocket(server: Server) {
     });
 
     ws.on("close", () => {
-      if (gptHandler) gptHandler.disconnect();
-      if (callSid) uiBroadcast({ type: "call_ended", callSid });
+      log(`Twilio WS closed, callSid: ${callSid}`, "twilio");
     });
   }
 
