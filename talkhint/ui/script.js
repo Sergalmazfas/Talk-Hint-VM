@@ -16,6 +16,12 @@ const UI = {
 
 let hasGoal = false;
 let currentFolder = null;
+let currentLanguage = localStorage.getItem('talkhint_language') || 'ru';
+
+const LANGUAGE_FLAGS = {
+  ru: '🇷🇺',
+  es: '🇪🇸'
+};
 
 const FOLDER_PROMPTS = {
   realtor: `You are a Realtor assistant.
@@ -88,16 +94,16 @@ function addMessage(type, text, translation) {
   if (shouldGroup) {
     const bubble = lastMessageEl.querySelector('.message-bubble');
     if (bubble) {
-      bubble.innerHTML += '<br>' + text;
+      bubble.textContent += '\n' + text;
     }
     if (translation) {
       let transEl = lastMessageEl.querySelector('.message-translation');
       if (transEl) {
-        transEl.innerHTML += '<br>' + translation;
+        transEl.textContent += '\n' + (LANGUAGE_FLAGS[currentLanguage] || '🇷🇺') + ' ' + translation;
       } else {
         const newTrans = document.createElement('div');
         newTrans.className = 'message-translation';
-        newTrans.innerHTML = translation;
+        newTrans.textContent = (LANGUAGE_FLAGS[currentLanguage] || '🇷🇺') + ' ' + translation;
         lastMessageEl.appendChild(newTrans);
       }
     }
@@ -108,14 +114,23 @@ function addMessage(type, text, translation) {
     
     let label = type === 'you' ? 'You' : type === 'guest' ? 'Guest' : 'Assistant';
     
-    let html = '<div class="message-label">' + label + '</div>';
-    html += '<div class="message-bubble">' + text + '</div>';
+    var labelDiv = document.createElement('div');
+    labelDiv.className = 'message-label';
+    labelDiv.textContent = label;
+    
+    var bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.textContent = text;
+    
+    msg.appendChild(labelDiv);
+    msg.appendChild(bubble);
     
     if (translation) {
-      html += '<div class="message-translation">' + translation + '</div>';
+      var transDiv = document.createElement('div');
+      transDiv.className = 'message-translation';
+      transDiv.textContent = (LANGUAGE_FLAGS[currentLanguage] || '🇷🇺') + ' ' + translation;
+      msg.appendChild(transDiv);
     }
-    
-    msg.innerHTML = html;
     UI.chatContainer.appendChild(msg);
     
     lastMessageType = type;
@@ -142,12 +157,9 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function addHint(english, russian) {
+function addHint(english, translationText) {
   if (!english) return;
   UI.emptyState.style.display = 'none';
-  
-  var safeEnglish = escapeHtml(english);
-  var safeRussian = russian ? escapeHtml(russian) : '';
   
   var hint = document.createElement('div');
   hint.className = 'hint';
@@ -164,11 +176,11 @@ function addHint(english, russian) {
   phrase.textContent = english;
   card.appendChild(phrase);
   
-  if (russian) {
-    var translation = document.createElement('div');
-    translation.className = 'hint-translation';
-    translation.textContent = russian;
-    card.appendChild(translation);
+  if (translationText) {
+    var transDiv = document.createElement('div');
+    transDiv.className = 'hint-translation';
+    transDiv.textContent = (LANGUAGE_FLAGS[currentLanguage] || '🇷🇺') + ' ' + translationText;
+    card.appendChild(transDiv);
   }
   
   var actions = document.createElement('div');
@@ -308,7 +320,7 @@ function handleMessage(data) {
     case 'ai_hint':
     case 'hint':
       if (data.en || data.english) {
-        addHint(data.en || data.english, data.ru || data.russian);
+        addHint(data.en || data.english, data.translation || data.ru || data.russian);
       }
       break;
 
@@ -474,6 +486,47 @@ document.querySelectorAll('.folder-item').forEach(function(item) {
     }
   });
 });
+
+function selectLanguage(langCode) {
+  if (currentLanguage === langCode) return;
+  
+  currentLanguage = langCode;
+  localStorage.setItem('talkhint_language', langCode);
+  log('Selected language: ' + langCode);
+  
+  document.querySelectorAll('.language-item').forEach(function(item) {
+    item.classList.remove('active');
+  });
+  
+  var selectedItem = document.querySelector('[data-lang="' + langCode + '"]');
+  if (selectedItem) {
+    selectedItem.classList.add('active');
+  }
+  
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      type: 'set_language',
+      language: langCode
+    }));
+  }
+}
+
+document.querySelectorAll('.language-item').forEach(function(item) {
+  item.addEventListener('click', function() {
+    var langCode = this.getAttribute('data-lang');
+    if (langCode) {
+      selectLanguage(langCode);
+    }
+  });
+});
+
+(function initLanguage() {
+  var savedLang = localStorage.getItem('talkhint_language') || 'ru';
+  var langItem = document.querySelector('[data-lang="' + savedLang + '"]');
+  if (langItem) {
+    langItem.classList.add('active');
+  }
+})();
 
 log('TalkHint Chat UI');
 connectWebSocket();

@@ -92,6 +92,31 @@
     }
     .new-folder-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
     
+    .sidebar-section {
+      padding: 12px 8px;
+      border-top: 1px solid #e5e5e5;
+    }
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #9ca3af;
+      padding: 4px 12px 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .language-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #374151;
+    }
+    .language-item:hover { background: #e5e7eb; }
+    .language-item.active { background: #dbeafe; color: #1d4ed8; }
+    
     .main-content {
       flex: 1;
       display: flex;
@@ -390,6 +415,17 @@
       <div class="folder-item" data-folder="handyman" data-testid="folder-handyman">
         <span class="folder-icon">📁</span>
         <span>Handyman</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-label">🌍 Language</div>
+      <div class="language-item" data-lang="ru" data-testid="lang-russian">
+        <span>🇷🇺</span>
+        <span>Russian</span>
+      </div>
+      <div class="language-item" data-lang="es" data-testid="lang-spanish">
+        <span>🇪🇸</span>
+        <span>Spanish</span>
       </div>
     </div>
     <div class="sidebar-footer">
