@@ -15,6 +15,13 @@ const UI = {
 };
 
 let hasGoal = false;
+let currentFolder = null;
+
+const FOLDER_PROMPTS = {
+  realtor: 'You are a Realtor assistant. Your goal is to help the user navigate real estate conversations, handle pricing discussions, and close deals efficiently.',
+  dispatcher: 'You are a Dispatcher assistant. Your goal is to help the user communicate clearly with dispatchers, schedule pickups/deliveries, and handle logistics.',
+  handyman: 'You are a Handyman assistant. Your goal is to help the user discuss repairs, negotiate prices, and schedule service appointments.'
+};
 
 let socket = null;
 let reconnectTimeout = null;
@@ -338,6 +345,41 @@ UI.toggleSidebarBtn.addEventListener('click', function() {
 
 UI.closeSidebarBtn.addEventListener('click', function() {
   UI.sidebar.classList.add('collapsed');
+});
+
+function selectFolder(folderId) {
+  if (currentFolder === folderId) return;
+  
+  currentFolder = folderId;
+  log('Selected folder: ' + folderId);
+  
+  document.querySelectorAll('.folder-item').forEach(function(item) {
+    item.classList.remove('active');
+  });
+  
+  var selectedItem = document.querySelector('[data-folder="' + folderId + '"]');
+  if (selectedItem) {
+    selectedItem.classList.add('active');
+  }
+  
+  clearChat();
+  
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      type: 'set_context',
+      folder: folderId,
+      systemPrompt: FOLDER_PROMPTS[folderId] || ''
+    }));
+  }
+}
+
+document.querySelectorAll('.folder-item').forEach(function(item) {
+  item.addEventListener('click', function() {
+    var folderId = this.getAttribute('data-folder');
+    if (folderId) {
+      selectFolder(folderId);
+    }
+  });
 });
 
 log('TalkHint Chat UI');
