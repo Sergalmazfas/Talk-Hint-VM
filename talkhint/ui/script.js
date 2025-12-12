@@ -1,12 +1,12 @@
 const UI = {
   phoneInput: document.getElementById('phoneInput'),
   callBtn: document.getElementById('callBtn'),
-  ownerTranscripts: document.getElementById('ownerTranscripts'),
-  ownerEmpty: document.getElementById('ownerEmpty'),
-  guestTranscripts: document.getElementById('guestTranscripts'),
-  guestEmpty: document.getElementById('guestEmpty'),
   statusDot: document.getElementById('statusDot'),
-  statusText: document.getElementById('statusText')
+  statusText: document.getElementById('statusText'),
+  chatContainer: document.getElementById('chatContainer'),
+  emptyState: document.getElementById('emptyState'),
+  textInput: document.getElementById('textInput'),
+  micBtn: document.getElementById('micBtn')
 };
 
 let socket = null;
@@ -14,13 +14,40 @@ let reconnectTimeout = null;
 let activeCall = null;
 let device = null;
 
-function log(message) {
-  console.log(`[TalkHint] ${message}`);
+function log(msg) {
+  console.log('[TalkHint] ' + msg);
 }
 
 function getWSUrl(path) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}${path}`;
+  return protocol + '//' + window.location.host + path;
+}
+
+function addMessage(type, text, translation) {
+  if (!text) return;
+  UI.emptyState.style.display = 'none';
+  
+  const msg = document.createElement('div');
+  msg.className = 'message ' + type;
+  
+  let label = type === 'you' ? 'You' : type === 'guest' ? 'Guest' : 'Assistant';
+  
+  let html = '<div class="message-label">' + label + '</div>';
+  html += '<div class="message-bubble">' + text + '</div>';
+  
+  if (translation) {
+    html += '<div class="message-translation">' + translation + '</div>';
+  }
+  
+  msg.innerHTML = html;
+  UI.chatContainer.appendChild(msg);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
+function clearChat() {
+  UI.chatContainer.innerHTML = '';
+  UI.emptyState.style.display = 'block';
+  UI.chatContainer.appendChild(UI.emptyState);
 }
 
 async function initTwilioDevice() {
@@ -36,33 +63,33 @@ async function initTwilioDevice() {
     const data = await response.json();
     
     if (data.error) {
-      log(`Token error: ${data.error}`);
+      log('Token error: ' + data.error);
       UI.statusText.textContent = 'Token error';
       return;
     }
 
-    log(`Token received for: ${data.identity}`);
+    log('Token received for: ' + data.identity);
     
     device = new TwilioDevice(data.token, { logLevel: 1 });
 
-    device.on('registered', () => {
+    device.on('registered', function() {
       log('Device registered');
       UI.statusDot.classList.add('connected');
       UI.statusText.textContent = 'Ready';
       UI.callBtn.disabled = false;
     });
 
-    device.on('error', (twilioError) => {
-      log(`Device error: ${twilioError.message}`);
-      UI.statusText.textContent = `Error: ${twilioError.message}`;
+    device.on('error', function(err) {
+      log('Device error: ' + err.message);
+      UI.statusText.textContent = 'Error';
     });
 
     await device.register();
     log('Device registered successfully');
 
   } catch (err) {
-    log(`Init error: ${err.message}`);
-    UI.statusText.textContent = 'Failed to initialize';
+    log('Init error: ' + err.message);
+    UI.statusText.textContent = 'Failed';
   }
 }
 
@@ -73,29 +100,29 @@ function connectWebSocket() {
   }
 
   const url = getWSUrl('/ui');
-  log(`Connecting WebSocket: ${url}`);
+  log('Connecting WebSocket: ' + url);
   
   socket = new WebSocket(url);
 
-  socket.onopen = () => {
+  socket.onopen = function() {
     log('WebSocket connected');
   };
 
-  socket.onmessage = (event) => {
+  socket.onmessage = function(event) {
     try {
       const data = JSON.parse(event.data);
       handleMessage(data);
     } catch (err) {
-      log(`Parse error: ${err.message}`);
+      log('Parse error: ' + err.message);
     }
   };
 
-  socket.onclose = () => {
+  socket.onclose = function() {
     log('WebSocket disconnected');
     reconnectTimeout = setTimeout(connectWebSocket, 3000);
   };
 
-  socket.onerror = () => {
+  socket.onerror = function() {
     log('WebSocket error');
   };
 }
@@ -106,79 +133,57 @@ function handleMessage(data) {
       log('Server confirmed connection');
       break;
 
-    case 'guest_transcript':
-      addGuestTranscript(data.text);
+    case 'owner_transcript':
+    case 'hon_transcript':
+      if (data.text) {
+        addMessage('you', data.text);
+      }
       break;
 
-    case 'owner_transcript':
-      addOwnerTranscript(data.text);
+    case 'guest_transcript':
+    case 'gst_transcript':
+      if (data.text) {
+        addMessage('guest', data.text, data.translation);
+      }
+      break;
+
+    case 'suggestion':
+    case 'ai_hint':
+      if (data.en) {
+        addMessage('assistant', data.en, data.ru);
+      }
       break;
 
     case 'error':
-      log(`Error: ${data.error}`);
+      log('Error: ' + data.error);
       break;
   }
-}
-
-function addOwnerTranscript(text) {
-  if (!text) return;
-  
-  UI.ownerEmpty.style.display = 'none';
-  
-  const item = document.createElement('div');
-  item.className = 'transcript-item';
-  item.innerHTML = `<div class="transcript-en">${text}</div>`;
-  UI.ownerTranscripts.appendChild(item);
-  UI.ownerTranscripts.scrollTop = UI.ownerTranscripts.scrollHeight;
-}
-
-function addGuestTranscript(text) {
-  if (!text) return;
-  
-  UI.guestEmpty.style.display = 'none';
-  
-  const item = document.createElement('div');
-  item.className = 'transcript-item';
-  item.innerHTML = `<div class="transcript-en">${text}</div>`;
-  UI.guestTranscripts.appendChild(item);
-  UI.guestTranscripts.scrollTop = UI.guestTranscripts.scrollHeight;
-}
-
-function clearTranscripts() {
-  UI.ownerTranscripts.innerHTML = '';
-  UI.ownerEmpty.style.display = 'block';
-  UI.ownerTranscripts.appendChild(UI.ownerEmpty);
-  
-  UI.guestTranscripts.innerHTML = '';
-  UI.guestEmpty.style.display = 'block';
-  UI.guestTranscripts.appendChild(UI.guestEmpty);
 }
 
 async function makeCall() {
   const phoneNumber = UI.phoneInput.value.trim();
   
   if (!phoneNumber) {
-    UI.statusText.textContent = 'Enter phone number';
+    UI.statusText.textContent = 'Enter number';
     return;
   }
 
   if (!device) {
-    UI.statusText.textContent = 'Device not ready';
+    UI.statusText.textContent = 'Not ready';
     return;
   }
 
-  log(`Calling: ${phoneNumber}`);
+  log('Calling: ' + phoneNumber);
   UI.statusDot.classList.add('calling');
   UI.statusText.textContent = 'Calling...';
   UI.callBtn.disabled = true;
   
-  clearTranscripts();
+  clearChat();
 
   try {
-    const params = { To: phoneNumber };
-    activeCall = await device.connect({ params });
+    activeCall = await device.connect({ params: { To: phoneNumber } });
     
-    activeCall.on('accept', () => {
+    activeCall.on('accept', function() {
       log('Call connected');
       UI.statusDot.classList.remove('calling');
       UI.statusDot.classList.add('active');
@@ -189,30 +194,28 @@ async function makeCall() {
       UI.callBtn.disabled = false;
     });
 
-    activeCall.on('disconnect', () => {
+    activeCall.on('disconnect', function() {
       log('Call disconnected');
       resetCallUI();
     });
 
-    activeCall.on('cancel', () => {
+    activeCall.on('cancel', function() {
       log('Call cancelled');
       resetCallUI();
     });
 
-    activeCall.on('reject', () => {
+    activeCall.on('reject', function() {
       log('Call rejected');
       resetCallUI();
     });
 
-    activeCall.on('error', (error) => {
-      log(`Call error: ${error.message}`);
-      UI.statusText.textContent = `Error: ${error.message}`;
+    activeCall.on('error', function(err) {
+      log('Call error: ' + err.message);
       resetCallUI();
     });
 
   } catch (err) {
-    log(`Call failed: ${err.message}`);
-    UI.statusText.textContent = `Failed: ${err.message}`;
+    log('Call failed: ' + err.message);
     resetCallUI();
   }
 }
@@ -231,11 +234,11 @@ function resetCallUI() {
 function endCall() {
   if (activeCall) {
     activeCall.disconnect();
-    log('Call ended by user');
+    log('Call ended');
   }
 }
 
-UI.callBtn.addEventListener('click', () => {
+UI.callBtn.addEventListener('click', function() {
   if (activeCall) {
     endCall();
   } else {
@@ -243,12 +246,26 @@ UI.callBtn.addEventListener('click', () => {
   }
 });
 
-UI.phoneInput.addEventListener('keypress', (e) => {
+UI.phoneInput.addEventListener('keypress', function(e) {
   if (e.key === 'Enter' && !activeCall) {
     makeCall();
   }
 });
 
-log('TalkHint UI Cleanup Mode');
+UI.textInput.addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') {
+    const text = UI.textInput.value.trim();
+    if (text) {
+      addMessage('you', text);
+      UI.textInput.value = '';
+    }
+  }
+});
+
+UI.micBtn.addEventListener('click', function() {
+  UI.micBtn.classList.toggle('active');
+});
+
+log('TalkHint Chat UI');
 connectWebSocket();
 initTwilioDevice();
