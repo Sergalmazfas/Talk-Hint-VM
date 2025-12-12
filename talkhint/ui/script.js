@@ -1,31 +1,18 @@
 const UI = {
   phoneInput: document.getElementById('phoneInput'),
   callBtn: document.getElementById('callBtn'),
-  goalInput: document.getElementById('goalInput'),
   ownerTranscripts: document.getElementById('ownerTranscripts'),
   ownerEmpty: document.getElementById('ownerEmpty'),
   guestTranscripts: document.getElementById('guestTranscripts'),
   guestEmpty: document.getElementById('guestEmpty'),
-  suggestionCard: document.getElementById('suggestionCard'),
-  suggestionEmpty: document.getElementById('suggestionEmpty'),
-  suggestionEn: document.getElementById('suggestionEn'),
-  suggestionRu: document.getElementById('suggestionRu'),
-  sayBtn: document.getElementById('sayBtn'),
-  editBtn: document.getElementById('editBtn'),
   statusDot: document.getElementById('statusDot'),
-  statusText: document.getElementById('statusText'),
-  editModal: document.getElementById('editModal'),
-  editTextarea: document.getElementById('editTextarea'),
-  editCancel: document.getElementById('editCancel'),
-  editSave: document.getElementById('editSave')
+  statusText: document.getElementById('statusText')
 };
 
 let socket = null;
 let reconnectTimeout = null;
 let activeCall = null;
 let device = null;
-let currentGoal = '';
-let currentSuggestion = { en: '', ru: '' };
 
 function log(message) {
   console.log(`[TalkHint] ${message}`);
@@ -92,7 +79,6 @@ function connectWebSocket() {
 
   socket.onopen = () => {
     log('WebSocket connected');
-    sendGoal();
   };
 
   socket.onmessage = (event) => {
@@ -121,26 +107,16 @@ function handleMessage(data) {
       break;
 
     case 'guest_transcript':
-      addGuestTranscript(data.text, data.translation, data.explanation);
+      addGuestTranscript(data.text);
       break;
 
     case 'owner_transcript':
       addOwnerTranscript(data.text);
       break;
 
-    case 'suggestion':
-      showSuggestion(data.en, data.ru);
-      break;
-
     case 'error':
       log(`Error: ${data.error}`);
       break;
-  }
-}
-
-function sendGoal() {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: 'update_goal', goal: currentGoal }));
   }
 }
 
@@ -156,35 +132,16 @@ function addOwnerTranscript(text) {
   UI.ownerTranscripts.scrollTop = UI.ownerTranscripts.scrollHeight;
 }
 
-function addGuestTranscript(text, translation, explanation) {
+function addGuestTranscript(text) {
   if (!text) return;
   
   UI.guestEmpty.style.display = 'none';
   
   const item = document.createElement('div');
   item.className = 'transcript-item';
-  
-  let html = `<div class="transcript-en">${text}</div>`;
-  if (translation) {
-    html += `<div class="transcript-ru">${translation}</div>`;
-  }
-  if (explanation) {
-    html += `<div class="transcript-explanation">${explanation}</div>`;
-  }
-  
-  item.innerHTML = html;
+  item.innerHTML = `<div class="transcript-en">${text}</div>`;
   UI.guestTranscripts.appendChild(item);
   UI.guestTranscripts.scrollTop = UI.guestTranscripts.scrollHeight;
-}
-
-function showSuggestion(en, ru) {
-  if (!en) return;
-  
-  currentSuggestion = { en, ru: ru || '' };
-  UI.suggestionEmpty.style.display = 'none';
-  UI.suggestionCard.style.display = 'block';
-  UI.suggestionEn.textContent = en;
-  UI.suggestionRu.textContent = ru || '';
 }
 
 function clearTranscripts() {
@@ -195,9 +152,6 @@ function clearTranscripts() {
   UI.guestTranscripts.innerHTML = '';
   UI.guestEmpty.style.display = 'block';
   UI.guestTranscripts.appendChild(UI.guestEmpty);
-  
-  UI.suggestionCard.style.display = 'none';
-  UI.suggestionEmpty.style.display = 'block';
 }
 
 async function makeCall() {
@@ -219,7 +173,6 @@ async function makeCall() {
   UI.callBtn.disabled = true;
   
   clearTranscripts();
-  sendGoal();
 
   try {
     const params = { To: phoneNumber };
@@ -282,29 +235,6 @@ function endCall() {
   }
 }
 
-function openEditModal() {
-  UI.editTextarea.value = currentSuggestion.en;
-  UI.editModal.classList.add('show');
-}
-
-function closeEditModal() {
-  UI.editModal.classList.remove('show');
-}
-
-function saveEdit() {
-  const newText = UI.editTextarea.value.trim();
-  if (newText) {
-    currentSuggestion.en = newText;
-    UI.suggestionEn.textContent = newText;
-    UI.suggestionRu.textContent = '';
-  }
-  closeEditModal();
-}
-
-function saySuggestion() {
-  log(`Say: ${currentSuggestion.en}`);
-}
-
 UI.callBtn.addEventListener('click', () => {
   if (activeCall) {
     endCall();
@@ -313,28 +243,12 @@ UI.callBtn.addEventListener('click', () => {
   }
 });
 
-UI.goalInput.addEventListener('input', (e) => {
-  currentGoal = e.target.value;
-});
-
-UI.goalInput.addEventListener('blur', () => {
-  sendGoal();
-});
-
 UI.phoneInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !activeCall) {
     makeCall();
   }
 });
 
-UI.sayBtn.addEventListener('click', saySuggestion);
-UI.editBtn.addEventListener('click', openEditModal);
-UI.editCancel.addEventListener('click', closeEditModal);
-UI.editSave.addEventListener('click', saveEdit);
-UI.editModal.addEventListener('click', (e) => {
-  if (e.target === UI.editModal) closeEditModal();
-});
-
-log('TalkHint Goal-Driven Mode');
+log('TalkHint UI Cleanup Mode');
 connectWebSocket();
 initTwilioDevice();

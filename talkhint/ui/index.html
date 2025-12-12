@@ -60,30 +60,6 @@
     .call-btn.end { background: #f44336; color: #fff; }
     .call-btn svg { width: 24px; height: 24px; }
     
-    .goal-section {
-      margin-bottom: 20px;
-    }
-    .goal-label {
-      font-size: 0.9rem;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #333;
-    }
-    .goal-input {
-      width: 100%;
-      min-height: 60px;
-      padding: 12px;
-      font-size: 0.95rem;
-      border: 1px solid #e0e0e0;
-      border-radius: 8px;
-      resize: vertical;
-      font-family: inherit;
-    }
-    .goal-input:focus {
-      outline: none;
-      border-color: #4CAF50;
-    }
-    
     .section {
       background: #f9f9f9;
       border-radius: 12px;
@@ -128,60 +104,6 @@
       color: #666;
       font-style: italic;
     }
-    .transcript-explanation {
-      font-size: 0.8rem;
-      color: #888;
-      margin-top: 6px;
-      padding-top: 6px;
-      border-top: 1px solid #eee;
-    }
-    
-    .suggestion-card {
-      background: #fff;
-      border: 2px solid #4CAF50;
-      border-radius: 12px;
-      padding: 20px;
-    }
-    .suggestion-en {
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #1a1a1a;
-      margin-bottom: 8px;
-    }
-    .suggestion-ru {
-      font-size: 0.9rem;
-      color: #666;
-      margin-bottom: 16px;
-    }
-    .suggestion-actions {
-      display: flex;
-      gap: 10px;
-    }
-    .action-btn {
-      flex: 1;
-      padding: 10px 16px;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 500;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-    .action-btn.say {
-      background: #4CAF50;
-      color: #fff;
-    }
-    .action-btn.say:hover { background: #43a047; }
-    .action-btn.edit {
-      background: #f5f5f5;
-      color: #333;
-    }
-    .action-btn.edit:hover { background: #e0e0e0; }
-    .action-btn svg { width: 18px; height: 18px; }
-    
     .empty-state {
       text-align: center;
       color: #999;
@@ -207,57 +129,6 @@
     .status-dot.connected { background: #4CAF50; }
     .status-dot.calling { background: #ff9800; }
     .status-dot.active { background: #4CAF50; }
-    
-    .edit-modal {
-      display: none;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.5);
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-    }
-    .edit-modal.show { display: flex; }
-    .edit-modal-content {
-      background: #fff;
-      border-radius: 12px;
-      padding: 20px;
-      width: 90%;
-      max-width: 400px;
-    }
-    .edit-modal-title {
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-    .edit-textarea {
-      width: 100%;
-      min-height: 80px;
-      padding: 12px;
-      font-size: 0.95rem;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      resize: vertical;
-      font-family: inherit;
-      margin-bottom: 12px;
-    }
-    .edit-modal-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: flex-end;
-    }
-    .modal-btn {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 6px;
-      font-size: 0.9rem;
-      cursor: pointer;
-    }
-    .modal-btn.cancel { background: #f5f5f5; color: #333; }
-    .modal-btn.save { background: #4CAF50; color: #fff; }
   </style>
 </head>
 <body>
@@ -271,11 +142,6 @@
           <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
         </svg>
       </button>
-    </div>
-    
-    <div class="goal-section">
-      <div class="goal-label">Call Goal</div>
-      <textarea class="goal-input" id="goalInput" placeholder="Example: Schedule an appointment for next Tuesday at 2pm" data-testid="input-goal"></textarea>
     </div>
     
     <div class="transcripts-row">
@@ -293,41 +159,9 @@
       </div>
     </div>
     
-    <div class="section">
-      <div class="section-title">Suggested Response</div>
-      <div id="suggestionContainer">
-        <div class="empty-state" id="suggestionEmpty">Suggestions will appear here</div>
-        <div class="suggestion-card" id="suggestionCard" style="display: none;">
-          <div class="suggestion-en" id="suggestionEn" data-testid="text-suggestion-en"></div>
-          <div class="suggestion-ru" id="suggestionRu" data-testid="text-suggestion-ru"></div>
-          <div class="suggestion-actions">
-            <button class="action-btn say" id="sayBtn" data-testid="button-say">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>
-              Say
-            </button>
-            <button class="action-btn edit" id="editBtn" data-testid="button-edit">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-              Edit
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-    
     <div class="status-bar">
       <div class="status-dot" id="statusDot"></div>
       <span id="statusText">Connecting...</span>
-    </div>
-  </div>
-  
-  <div class="edit-modal" id="editModal">
-    <div class="edit-modal-content">
-      <div class="edit-modal-title">Edit Response</div>
-      <textarea class="edit-textarea" id="editTextarea" data-testid="input-edit"></textarea>
-      <div class="edit-modal-actions">
-        <button class="modal-btn cancel" id="editCancel" data-testid="button-edit-cancel">Cancel</button>
-        <button class="modal-btn save" id="editSave" data-testid="button-edit-save">Use This</button>
-      </div>
     </div>
   </div>
 
