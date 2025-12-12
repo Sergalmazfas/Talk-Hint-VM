@@ -7,13 +7,16 @@ const UI = {
   statusText: document.getElementById('statusText'),
   modeBadge: document.getElementById('modeBadge'),
   modeSelect: document.getElementById('modeSelect'),
-  callStatus: document.getElementById('callStatus')
+  callStatus: document.getElementById('callStatus'),
+  phoneInput: document.getElementById('phoneInput'),
+  callBtn: document.getElementById('callBtn')
 };
 
 let socket = null;
 let currentMode = 'universal';
 let reconnectTimeout = null;
 let activeCallSid = null;
+let isCallActive = false;
 
 function log(message, type = 'info') {
   const line = document.createElement('div');
@@ -43,7 +46,8 @@ function connect() {
   socket.onopen = () => {
     log('Connected to server', 'success');
     UI.statusDot.classList.add('connected');
-    UI.statusText.textContent = 'Connected - Phone Mode';
+    UI.statusText.textContent = 'Connected - Ready';
+    UI.callBtn.disabled = false;
     
     sendMode(currentMode);
   };
@@ -59,8 +63,9 @@ function connect() {
 
   socket.onclose = () => {
     log('Disconnected from server', 'error');
-    UI.statusDot.classList.remove('connected', 'active');
+    UI.statusDot.classList.remove('connected', 'active', 'calling');
     UI.statusText.textContent = 'Disconnected';
+    UI.callBtn.disabled = true;
     
     reconnectTimeout = setTimeout(connect, 3000);
   };
@@ -112,19 +117,28 @@ function handleMessage(data) {
 
     case 'call_started':
       activeCallSid = data.callSid;
+      isCallActive = true;
       log(`Call started: ${data.callSid}`, 'success');
+      UI.statusDot.classList.remove('calling');
       UI.statusDot.classList.add('active');
       UI.statusText.textContent = 'Active Call';
       UI.callStatus.textContent = `Active call: ${data.callSid}`;
+      UI.callBtn.textContent = 'End Call';
+      UI.callBtn.classList.remove('start');
+      UI.callBtn.classList.add('end');
       clearTranscripts();
       break;
 
     case 'call_ended':
       log(`Call ended: ${data.callSid}`);
-      UI.statusDot.classList.remove('active');
-      UI.statusText.textContent = 'Connected - Phone Mode';
+      UI.statusDot.classList.remove('active', 'calling');
+      UI.statusText.textContent = 'Connected - Ready';
       UI.callStatus.textContent = 'Call ended';
+      UI.callBtn.textContent = 'Call';
+      UI.callBtn.classList.remove('end');
+      UI.callBtn.classList.add('start');
       activeCallSid = null;
+      isCallActive = false;
       break;
 
     case 'mode_changed':
@@ -135,6 +149,9 @@ function handleMessage(data) {
 
     case 'error':
       log(`Error: ${data.error}`, 'error');
+      UI.callStatus.textContent = `Error: ${data.error}`;
+      UI.statusDot.classList.remove('calling');
+      UI.callBtn.disabled = false;
       break;
 
     default:
@@ -174,9 +191,68 @@ function clearTranscripts() {
   UI.hints.textContent = 'Waiting for conversation...';
 }
 
+async function startCall() {
+  const phoneNumber = UI.phoneInput.value.trim();
+  
+  if (!phoneNumber) {
+    log('Please enter a phone number', 'error');
+    return;
+  }
+  
+  log(`Starting call to: ${phoneNumber}`);
+  UI.statusDot.classList.add('calling');
+  UI.statusText.textContent = 'Calling...';
+  UI.callStatus.textContent = `Calling ${phoneNumber}...`;
+  UI.callBtn.disabled = true;
+  
+  try {
+    const response = await fetch('/start-call', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ target: phoneNumber }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      log(`Call initiated: ${data.callSid}`, 'success');
+      activeCallSid = data.callSid;
+      UI.callBtn.disabled = false;
+    } else {
+      log(`Call failed: ${data.error}`, 'error');
+      UI.statusDot.classList.remove('calling');
+      UI.statusText.textContent = 'Connected - Ready';
+      UI.callStatus.textContent = `Failed: ${data.error}`;
+      UI.callBtn.disabled = false;
+    }
+  } catch (err) {
+    log(`Call error: ${err.message}`, 'error');
+    UI.statusDot.classList.remove('calling');
+    UI.statusText.textContent = 'Connected - Ready';
+    UI.callStatus.textContent = `Error: ${err.message}`;
+    UI.callBtn.disabled = false;
+  }
+}
+
+UI.callBtn.addEventListener('click', () => {
+  if (isCallActive) {
+    log('Call end not implemented yet');
+  } else {
+    startCall();
+  }
+});
+
 UI.modeSelect.addEventListener('change', (e) => {
   currentMode = e.target.value;
   sendMode(currentMode);
+});
+
+UI.phoneInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter' && !isCallActive) {
+    startCall();
+  }
 });
 
 log('TalkHint Phone Mode initialized');

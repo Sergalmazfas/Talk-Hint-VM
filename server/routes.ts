@@ -7,6 +7,10 @@ import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
 
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -52,19 +56,39 @@ export async function registerRoutes(
     });
   });
 
-  // Twilio inbound webhook - returns TwiML to start Media Stream
+  // Twilio inbound webhook - returns TwiML to start Media Stream + Dial
   app.post("/twilio/inbound", (req, res) => {
     const host = req.headers.host || req.hostname;
     const protocol = host.includes("localhost") ? "ws" : "wss";
     const wsUrl = `${protocol}://${host}/media`;
     
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+    // Get target number from query params or body
+    const targetNumber = req.query.target || req.body?.target;
+    
+    let twiml: string;
+    
+    if (targetNumber) {
+      // Outbound call: start stream + dial to target
+      twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
     <Stream url="${wsUrl}" track="both_tracks" />
   </Start>
+  <Dial callerId="${TWILIO_PHONE_NUMBER}">
+    <Number>${targetNumber}</Number>
+  </Dial>
+</Response>`;
+    } else {
+      // Inbound call: start stream + pause to keep call open
+      twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Start>
+    <Stream url="${wsUrl}" track="both_tracks" />
+  </Start>
+  <Say>Welcome to TalkHint. Connecting you now.</Say>
   <Pause length="60"/>
 </Response>`;
+    }
 
     res.type("text/xml").send(twiml);
   });
@@ -84,6 +108,64 @@ export async function registerRoutes(
 </Response>`;
 
     res.type("text/xml").send(twiml);
+  });
+
+  // Start outbound call via Twilio REST API
+  app.post("/start-call", async (req, res) => {
+    try {
+      const { target } = req.body;
+      
+      if (!target) {
+        return res.status(400).json({ error: "Target phone number is required" });
+      }
+      
+      if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+        return res.status(500).json({ error: "Twilio credentials not configured" });
+      }
+      
+      const host = req.headers.host || req.hostname;
+      const webhookUrl = `https://${host}/twilio/inbound?target=${encodeURIComponent(target)}`;
+      
+      console.log(`Starting call to ${target} via webhook ${webhookUrl}`);
+      
+      // Make Twilio API call - dial the TARGET number, not Twilio number
+      const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+      
+      const twilioResponse = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            To: target, // Dial the TARGET number entered by user
+            From: TWILIO_PHONE_NUMBER!, // Caller ID shown to recipient
+            Url: webhookUrl,
+          }),
+        }
+      );
+      
+      if (!twilioResponse.ok) {
+        const errorText = await twilioResponse.text();
+        console.error('Twilio API error:', errorText);
+        return res.status(twilioResponse.status).json({ error: 'Failed to initiate call', details: errorText });
+      }
+      
+      const callData = await twilioResponse.json();
+      console.log(`Call initiated: ${callData.sid}`);
+      
+      res.json({ 
+        success: true, 
+        callSid: callData.sid,
+        status: callData.status,
+        target 
+      });
+    } catch (error: any) {
+      console.error('Start call error:', error);
+      res.status(500).json({ error: error.message || 'Failed to start call' });
+    }
   });
 
   const clients: Set<any> = new Set();
