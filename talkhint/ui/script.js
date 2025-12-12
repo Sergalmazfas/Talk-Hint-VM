@@ -13,6 +13,10 @@ let socket = null;
 let reconnectTimeout = null;
 let activeCall = null;
 let device = null;
+let lastMessageType = null;
+let lastMessageTime = 0;
+let lastMessageEl = null;
+const GROUP_WINDOW_MS = 2000;
 
 function log(msg) {
   console.log('[TalkHint] ' + msg);
@@ -27,20 +31,50 @@ function addMessage(type, text, translation) {
   if (!text) return;
   UI.emptyState.style.display = 'none';
   
-  const msg = document.createElement('div');
-  msg.className = 'message ' + type;
+  const now = Date.now();
+  const shouldGroup = (type === lastMessageType) && 
+                      (now - lastMessageTime < GROUP_WINDOW_MS) && 
+                      lastMessageEl && 
+                      (type === 'you' || type === 'guest');
   
-  let label = type === 'you' ? 'You' : type === 'guest' ? 'Guest' : 'Assistant';
-  
-  let html = '<div class="message-label">' + label + '</div>';
-  html += '<div class="message-bubble">' + text + '</div>';
-  
-  if (translation) {
-    html += '<div class="message-translation">' + translation + '</div>';
+  if (shouldGroup) {
+    const bubble = lastMessageEl.querySelector('.message-bubble');
+    if (bubble) {
+      bubble.innerHTML += '<br>' + text;
+    }
+    if (translation) {
+      let transEl = lastMessageEl.querySelector('.message-translation');
+      if (transEl) {
+        transEl.innerHTML += '<br>' + translation;
+      } else {
+        const newTrans = document.createElement('div');
+        newTrans.className = 'message-translation';
+        newTrans.innerHTML = translation;
+        lastMessageEl.appendChild(newTrans);
+      }
+    }
+    lastMessageTime = now;
+  } else {
+    const msg = document.createElement('div');
+    msg.className = 'message ' + type;
+    
+    let label = type === 'you' ? 'You' : type === 'guest' ? 'Guest' : 'Assistant';
+    
+    let html = '<div class="message-label">' + label + '</div>';
+    html += '<div class="message-bubble">' + text + '</div>';
+    
+    if (translation) {
+      html += '<div class="message-translation">' + translation + '</div>';
+    }
+    
+    msg.innerHTML = html;
+    UI.chatContainer.appendChild(msg);
+    
+    lastMessageType = type;
+    lastMessageTime = now;
+    lastMessageEl = msg;
   }
   
-  msg.innerHTML = html;
-  UI.chatContainer.appendChild(msg);
   UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
 }
 
@@ -48,6 +82,9 @@ function clearChat() {
   UI.chatContainer.innerHTML = '';
   UI.emptyState.style.display = 'block';
   UI.chatContainer.appendChild(UI.emptyState);
+  lastMessageType = null;
+  lastMessageTime = 0;
+  lastMessageEl = null;
 }
 
 async function initTwilioDevice() {
