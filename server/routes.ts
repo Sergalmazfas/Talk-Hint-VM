@@ -75,8 +75,8 @@ export async function registerRoutes(
 
     const token = new AccessToken(
       TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_API_KEY_SID || TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_API_KEY_SECRET || TWILIO_AUTH_TOKEN,
+      process.env.TWILIO_API_KEY || TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_SECRET || TWILIO_AUTH_TOKEN,
       { identity }
     );
 
