@@ -1,12 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
-import { spawn } from "child_process";
 import { log } from "./index";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 interface TwilioMediaMessage {
   event: string;
@@ -155,60 +149,7 @@ function uiBroadcast(message: object) {
   });
 }
 
-class PersistentAudioConverter {
-  private ffmpeg: ReturnType<typeof spawn> | null = null;
-  private outputCallback: ((data: string) => void) | null = null;
-  private pendingData: Buffer[] = [];
-  private isReady = false;
-
-  start(onOutput: (pcm16Base64: string) => void) {
-    this.outputCallback = onOutput;
-    this.ffmpeg = spawn("ffmpeg", [
-      "-f", "mulaw", "-ar", "8000", "-ac", "1", "-i", "pipe:0",
-      "-f", "s16le", "-ar", "16000", "-ac", "1", "pipe:1",
-    ], { stdio: ["pipe", "pipe", "pipe"] });
-
-    this.ffmpeg.stdout?.on("data", (chunk: Buffer) => {
-      if (this.outputCallback) {
-        this.outputCallback(chunk.toString("base64"));
-      }
-    });
-
-    this.ffmpeg.on("error", (err) => {
-      log(`FFmpeg error: ${err.message}`, "audio");
-    });
-
-    this.ffmpeg.on("close", (code) => {
-      if (code !== 0 && code !== null) {
-        log(`FFmpeg closed with code ${code}`, "audio");
-      }
-    });
-
-    this.isReady = true;
-  }
-
-  write(base64Payload: string) {
-    if (!this.ffmpeg || !this.isReady) return;
-    try {
-      const buffer = Buffer.from(base64Payload, "base64");
-      this.ffmpeg.stdin?.write(buffer);
-    } catch (err: any) {
-      log(`Audio write error: ${err.message}`, "audio");
-    }
-  }
-
-  stop() {
-    if (this.ffmpeg) {
-      try {
-        this.ffmpeg.stdin?.end();
-        this.ffmpeg.kill();
-      } catch (err) {}
-      this.ffmpeg = null;
-    }
-    this.isReady = false;
-    this.outputCallback = null;
-  }
-}
+// No audio conversion needed - OpenAI accepts mulaw (pcmu) directly from Twilio
 
 class GPTRealtimeHandler {
   private apiKey: string;
@@ -279,8 +220,8 @@ class GPTRealtimeHandler {
         modalities: ["text", "audio"],
         instructions: getRealtimePrompt(this.mode),
         voice: "alloy",
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
+        input_audio_format: "g711_ulaw",
+        output_audio_format: "g711_ulaw",
         input_audio_transcription: { model: "whisper-1" },
         turn_detection: {
           type: "server_vad",
@@ -457,7 +398,6 @@ export function setupWebSocket(server: Server) {
   function handleTwilioStream(ws: WebSocket) {
     log("Twilio stream connected", "twilio");
     let gptHandler: GPTRealtimeHandler | null = null;
-    let audioConverter: PersistentAudioConverter | null = null;
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
@@ -485,7 +425,7 @@ export function setupWebSocket(server: Server) {
                 gptHandler = new GPTRealtimeHandler({
                   mode: currentMode,
                   onTranscript: (transcript) => {
-                    log(`GST transcript: ${transcript.text}`, "twilio");
+                    log(`Transcript: ${transcript.text}`, "twilio");
                     uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
                   },
                   onResponse: (response) => {
@@ -502,15 +442,6 @@ export function setupWebSocket(server: Server) {
 
                 await gptHandler.connect();
                 log(`GPT connected for call: ${callSid}`, "twilio");
-
-                audioConverter = new PersistentAudioConverter();
-                audioConverter.start((pcm16Base64) => {
-                  if (gptHandler) {
-                    gptHandler.sendAudio(pcm16Base64);
-                  }
-                });
-                log("Audio converter started", "twilio");
-
                 uiBroadcast({ type: "call_started", callSid, streamSid });
               } catch (err: any) {
                 log(`GPT connection failed: ${err.message}`, "twilio");
@@ -520,18 +451,18 @@ export function setupWebSocket(server: Server) {
             break;
 
           case "media":
-            if (audioConverter && message.media?.payload) {
+            if (gptHandler && message.media?.payload) {
               audioFrameCount++;
               if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
                 log(`Audio frames received: ${audioFrameCount}`, "twilio");
               }
-              audioConverter.write(message.media.payload);
+              // Send mulaw audio directly to OpenAI - no conversion needed
+              gptHandler.sendAudio(message.media.payload);
             }
             break;
 
           case "stop":
             log(`Call ended: ${callSid}, total audio frames: ${audioFrameCount}`, "twilio");
-            if (audioConverter) audioConverter.stop();
             if (gptHandler) gptHandler.disconnect();
             uiBroadcast({ type: "call_ended", callSid });
             break;
@@ -542,7 +473,6 @@ export function setupWebSocket(server: Server) {
     });
 
     ws.on("close", () => {
-      if (audioConverter) audioConverter.stop();
       if (gptHandler) gptHandler.disconnect();
       if (callSid) uiBroadcast({ type: "call_ended", callSid });
     });
