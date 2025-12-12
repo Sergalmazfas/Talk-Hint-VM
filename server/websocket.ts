@@ -480,11 +480,8 @@ export function setupWebSocket(server: Server) {
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
-    let gptHandler: GPTRealtimeHandler | null = null;
-    let conversationHistory: { role: string; text: string }[] = [];
-    let lastHintTime = 0;
 
-    ws.on("message", async (data: Buffer) => {
+    ws.on("message", (data: Buffer) => {
       try {
         const message: TwilioMediaMessage = JSON.parse(data.toString());
         
@@ -502,64 +499,22 @@ export function setupWebSocket(server: Server) {
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
               log(`Stream started: ${callSid}`, "twilio");
-              
-              // Connect to OpenAI Realtime API for transcription
-              gptHandler = new GPTRealtimeHandler({
-                mode: currentMode,
-                onTranscript: (transcript) => {
-                  conversationHistory.push(transcript);
-                  
-                  // Broadcast transcription to UI
-                  const msgType = transcript.role === "user" ? "guest_transcript" : "owner_transcript";
-                  uiBroadcast({ type: msgType, text: transcript.text, callSid });
-                  
-                  // Generate hints periodically (not too often)
-                  const now = Date.now();
-                  if (now - lastHintTime > 3000) {
-                    lastHintTime = now;
-                    generateHints(conversationHistory);
-                  }
-                },
-                onResponse: (response) => {
-                  // GPT assistant response (hints)
-                  if (response.text) {
-                    uiBroadcast({ type: "ai_hint", text: response.text, callSid });
-                  }
-                },
-                onAudio: () => {}, // No audio playback needed
-                onError: (error) => {
-                  log(`GPT error: ${error.message || error}`, "openai");
-                },
-              });
-              
-              try {
-                await gptHandler.connect();
-                log(`GPT connected for call: ${callSid}`, "openai");
-              } catch (err: any) {
-                log(`GPT connection failed: ${err.message}`, "openai");
-              }
+              log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
             }
             break;
 
           case "media":
             audioFrameCount++;
-            if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
-              log(`Audio frames: ${audioFrameCount}`, "twilio");
-            }
-            
-            // Send audio to OpenAI for transcription
-            if (gptHandler && message.media?.payload) {
-              gptHandler.sendAudio(message.media.payload);
+            if (message.media?.payload) {
+              // Log every chunk for debugging
+              if (audioFrameCount <= 5 || audioFrameCount % 100 === 0) {
+                log(`AUDIO CHUNK #${audioFrameCount}: ${message.media.payload.length} bytes, track: ${message.media.track}`, "twilio");
+              }
             }
             break;
 
           case "stop":
-            log(`Stream ended: ${callSid}, frames: ${audioFrameCount}`, "twilio");
-            if (gptHandler) {
-              gptHandler.commitAudio(); // Flush remaining audio
-              gptHandler.disconnect();
-              gptHandler = null;
-            }
+            log(`Stream ended: ${callSid}, total frames: ${audioFrameCount}`, "twilio");
             break;
         }
       } catch (err: any) {
@@ -569,10 +524,6 @@ export function setupWebSocket(server: Server) {
 
     ws.on("close", () => {
       log(`Twilio WS closed, callSid: ${callSid}`, "twilio");
-      if (gptHandler) {
-        gptHandler.disconnect();
-        gptHandler = null;
-      }
     });
   }
   
