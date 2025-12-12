@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { log } from "./index";
+import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -480,6 +481,65 @@ export function setupWebSocket(server: Server) {
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
+    
+    // Deepgram connections for each track
+    let deepgramInbound: any = null;
+    let deepgramOutbound: any = null;
+    
+    // Create Deepgram client
+    const deepgramClient = createClient(process.env.DEEPGRAM_API_KEY || "");
+    
+    // Setup Deepgram live transcription for a track
+    function setupDeepgram(track: string) {
+      log(`[Deepgram] Setting up for track: ${track}`, "deepgram");
+      
+      const connection = deepgramClient.listen.live({
+        model: "nova-2",
+        language: "en",
+        smart_format: true,
+        encoding: "mulaw",
+        sample_rate: 8000,
+        channels: 1,
+        interim_results: true,
+        utterance_end_ms: 1000,
+        vad_events: true,
+      });
+      
+      connection.on(LiveTranscriptionEvents.Open, () => {
+        log(`[Deepgram] ${track} connection opened`, "deepgram");
+      });
+      
+      connection.on(LiveTranscriptionEvents.Transcript, (data: any) => {
+        const transcript = data.channel?.alternatives?.[0]?.transcript;
+        if (transcript && transcript.trim()) {
+          const isFinal = data.is_final;
+          const speaker = track === "inbound" ? "Guest" : "Owner";
+          
+          if (isFinal) {
+            log(`[Deepgram] ${track} final: ${transcript}`, "deepgram");
+            // Broadcast to UI
+            uiBroadcast({ 
+              type: track === "inbound" ? "guest_transcript" : "owner_transcript",
+              text: transcript,
+              isFinal: true,
+              callSid 
+            });
+          } else {
+            log(`[Deepgram] ${track} partial: ${transcript}`, "deepgram");
+          }
+        }
+      });
+      
+      connection.on(LiveTranscriptionEvents.Error, (err: any) => {
+        log(`[Deepgram] ${track} error: ${err.message || err}`, "deepgram");
+      });
+      
+      connection.on(LiveTranscriptionEvents.Close, () => {
+        log(`[Deepgram] ${track} connection closed`, "deepgram");
+      });
+      
+      return connection;
+    }
 
     ws.on("message", (data: Buffer) => {
       try {
@@ -500,21 +560,44 @@ export function setupWebSocket(server: Server) {
               callSid = message.start.callSid;
               log(`Stream started: ${callSid}`, "twilio");
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
+              
+              // Initialize Deepgram for both tracks
+              deepgramInbound = setupDeepgram("inbound");
+              deepgramOutbound = setupDeepgram("outbound");
             }
             break;
 
           case "media":
             audioFrameCount++;
             if (message.media?.payload) {
-              // Log every chunk for debugging
-              if (audioFrameCount <= 5 || audioFrameCount % 100 === 0) {
-                log(`AUDIO CHUNK #${audioFrameCount}: ${message.media.payload.length} bytes, track: ${message.media.track}`, "twilio");
+              const track = message.media.track;
+              const audioData = Buffer.from(message.media.payload, "base64");
+              
+              // Send audio to appropriate Deepgram connection
+              if (track === "inbound" && deepgramInbound) {
+                deepgramInbound.send(audioData);
+              } else if (track === "outbound" && deepgramOutbound) {
+                deepgramOutbound.send(audioData);
+              }
+              
+              // Log periodically
+              if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
+                log(`Audio frames: ${audioFrameCount}`, "twilio");
               }
             }
             break;
 
           case "stop":
             log(`Stream ended: ${callSid}, total frames: ${audioFrameCount}`, "twilio");
+            // Close Deepgram connections
+            if (deepgramInbound) {
+              deepgramInbound.finish();
+              deepgramInbound = null;
+            }
+            if (deepgramOutbound) {
+              deepgramOutbound.finish();
+              deepgramOutbound = null;
+            }
             break;
         }
       } catch (err: any) {
@@ -524,6 +607,15 @@ export function setupWebSocket(server: Server) {
 
     ws.on("close", () => {
       log(`Twilio WS closed, callSid: ${callSid}`, "twilio");
+      // Cleanup Deepgram connections
+      if (deepgramInbound) {
+        deepgramInbound.finish();
+        deepgramInbound = null;
+      }
+      if (deepgramOutbound) {
+        deepgramOutbound.finish();
+        deepgramOutbound = null;
+      }
     });
   }
   
