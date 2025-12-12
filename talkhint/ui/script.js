@@ -1,4 +1,7 @@
 const UI = {
+  sidebar: document.getElementById('sidebar'),
+  toggleSidebarBtn: document.getElementById('toggleSidebarBtn'),
+  closeSidebarBtn: document.getElementById('closeSidebarBtn'),
   phoneInput: document.getElementById('phoneInput'),
   callBtn: document.getElementById('callBtn'),
   statusDot: document.getElementById('statusDot'),
@@ -6,6 +9,7 @@ const UI = {
   chatContainer: document.getElementById('chatContainer'),
   emptyState: document.getElementById('emptyState'),
   textInput: document.getElementById('textInput'),
+  sendBtn: document.getElementById('sendBtn'),
   micBtn: document.getElementById('micBtn')
 };
 
@@ -301,6 +305,22 @@ UI.textInput.addEventListener('keypress', function(e) {
 
 UI.micBtn.addEventListener('click', function() {
   UI.micBtn.classList.toggle('active');
+});
+
+UI.sendBtn.addEventListener('click', function() {
+  const text = UI.textInput.value.trim();
+  if (text) {
+    addMessage('you', text);
+    UI.textInput.value = '';
+  }
+});
+
+UI.toggleSidebarBtn.addEventListener('click', function() {
+  UI.sidebar.classList.toggle('collapsed');
+});
+
+UI.closeSidebarBtn.addEventListener('click', function() {
+  UI.sidebar.classList.add('collapsed');
 });
 
 log('TalkHint Chat UI');
