@@ -240,22 +240,29 @@ class GPTRealtimeHandler {
   }
 
   private audioChunkCount = 0;
+  private totalAudioSent = 0;
   
-  sendAudio(base64PCM: string) {
-    this.send({ type: "input_audio_buffer.append", audio: base64PCM });
-    this.audioChunkCount++;
+  sendAudio(base64Audio: string) {
+    if (!this.isConnected || !this.ws) {
+      return; // Not connected yet
+    }
     
-    // Commit audio buffer periodically (every ~50 chunks = ~1 second of audio at 20ms per frame)
-    if (this.audioChunkCount >= 50) {
-      this.send({ type: "input_audio_buffer.commit" });
-      this.audioChunkCount = 0;
+    // Send audio to OpenAI (Twilio sends g711_ulaw which OpenAI accepts)
+    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio: base64Audio }));
+    this.audioChunkCount++;
+    this.totalAudioSent++;
+    
+    // Log first audio and periodically
+    if (this.totalAudioSent === 1) {
+      log(`First audio chunk sent to OpenAI (${base64Audio.length} bytes)`, "openai");
     }
   }
   
   commitAudio() {
-    if (this.audioChunkCount > 0) {
-      this.send({ type: "input_audio_buffer.commit" });
-      this.audioChunkCount = 0;
+    // With server_vad, OpenAI automatically detects speech end
+    // Manual commit not needed
+    if (this.totalAudioSent > 0) {
+      log(`Total audio chunks sent: ${this.totalAudioSent}`, "openai");
     }
   }
 
