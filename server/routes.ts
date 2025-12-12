@@ -22,11 +22,9 @@ export async function registerRoutes(
 ): Promise<Server> {
   setupWebSocket(httpServer);
 
-  // In production, TalkHint UI is at dist/talkhint/ui (same level as bundled code)
-  // In development, it's at ../talkhint/ui relative to server/
-  const talkhintUiPath = process.env.NODE_ENV === "production" 
-    ? path.join(__dirname, "talkhint/ui")
-    : path.join(__dirname, "../talkhint/ui");
+  // TalkHint UI - serve from dist/talkhint/ui (where bundled SDK is)
+  const talkhintUiPath = path.join(__dirname, "../dist/talkhint/ui");
+  console.log("[TalkHint] Serving UI from:", talkhintUiPath);
   app.use("/app", express.static(talkhintUiPath));
 
   app.get("/api/calls", async (_req, res) => {
@@ -88,17 +86,18 @@ export async function registerRoutes(
 
   // TwiML webhook for browser-initiated calls
   app.post("/twilio/voice", (req, res) => {
-    const targetNumber = req.body.To || req.query.To;
+    // The To parameter comes from device.connect({ params: { To: number } })
+    const targetNumber = req.body.To || req.body.to || req.query.To || req.query.to;
     
     console.log("[TwiML Voice] ===== BROWSER CALL =====");
+    console.log("[TwiML Voice] Full Body:", JSON.stringify(req.body));
     console.log("[TwiML Voice] To:", targetNumber);
     console.log("[TwiML Voice] From:", req.body.From);
-    console.log("[TwiML Voice] Body:", JSON.stringify(req.body));
 
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twimlResponse = new VoiceResponse();
 
-    if (targetNumber) {
+    if (targetNumber && targetNumber.startsWith("+")) {
       const dial = twimlResponse.dial({ 
         callerId: TWILIO_PHONE_NUMBER,
         answerOnBridge: true 
@@ -106,8 +105,8 @@ export async function registerRoutes(
       dial.number(targetNumber);
       console.log("[TwiML Voice] Dialing:", targetNumber);
     } else {
-      twimlResponse.say("No destination number provided.");
-      console.log("[TwiML Voice] No target number");
+      twimlResponse.say("Please provide a valid phone number starting with plus.");
+      console.log("[TwiML Voice] Invalid or missing target:", targetNumber);
     }
 
     res.type("text/xml").send(twimlResponse.toString());

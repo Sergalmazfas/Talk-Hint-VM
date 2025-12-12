@@ -1,0 +1,50 @@
+Voice JavaScript SDK: Twilio in the browser
+
+
+The Twilio Voice JavaScript SDK allows you to make and receive voice calls with a web browser. This means that you can open inbound and outbound audio connections to Twilio for building softphones, walkie-talkies, conference calls, click-to-talk systems, and more, all from the web.
+
+Installation
+
+
+Follow these steps to install the Voice JavaScript SDK:
+
+Install the SDK using npm. This command adds the SDK as a dependency to your project:
+
+Copy code block
+npm install @twilio/voice-sdk
+Import the SDK to your JavaScript or TypeScript file:
+
+Copy code block
+import { Device } from '@twilio/voice-sdk';
+How the Voice JavaScript SDK works
+
+
+After you configure a device, the SDK establishes a connection to Twilio. Your microphone sends audio to Twilio, and Twilio returns audio that plays through your speakers. In the SDK, Twilio.Device represents the virtual device that manages these connections.
+
+Web app connects to Twilio, Twilio sends webhook to backend, backend responds with TwiML, Twilio initiates call.
+Expand image
+When you initiate a call using Twilio.Device, you don't dial another phone directly. Instead, you connect to Twilio and instruct Twilio to fetch TwiML from your server to handle the call. Twilio processes the resulting TwiML in the same way that it processes voice traffic from a physical phone.
+
+TwiML app
+
+
+Twilio relies on a TwiML app
+ in your account to determine how to interact with your server. When your application uses Twilio.Device to begin a call, Twilio sends an HTTP request to the application's VoiceUrl. You identify the application through the Access Token that you pass to the client. Twilio then executes the TwiML returned by the VoiceUrl to control the call.
+
+Supported browsers
+
+
+The Voice JavaScript SDK supports the following browsers. Twilio tests the current (N) and the two previous (N-2) major versions.
+
+Chrome	Firefox	Safari	Edge
+Android	✓	✓		
+iOS	✓	✓	✓	
+Linux	✓	✓		
+macOS	✓	✓	✓	
+Windows	✓	✓		✓
+ChromeOS	✓			
+(information)
+Info
+Mobile browsers lack the ability to receive or maintain call connectivity whilst in the background and they do not allow GSM call interruption handling. These lead to poor user experience. To create the best user experience, Twilio recommends understanding these limitations when creating mobile Voice Applications. Twilio also recommends evaluating the iOS and Android SDKs for creating mobile Voice Applications.
+
+Electron support

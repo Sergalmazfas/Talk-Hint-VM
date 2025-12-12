@@ -33,7 +33,7 @@ function getWSUrl(path) {
 }
 
 async function initTwilioDevice() {
-  if (typeof Twilio === 'undefined') {
+  if (typeof TwilioDevice === 'undefined') {
     log('Waiting for Twilio SDK...');
     setTimeout(initTwilioDevice, 500);
     return;
@@ -52,9 +52,8 @@ async function initTwilioDevice() {
 
     log(`Token received for: ${data.identity}`, 'success');
     
-    device = new Twilio.Device(data.token, {
-      logLevel: 1,
-      codecPreferences: [Twilio.Device.Codec.Opus, Twilio.Device.Codec.PCMU],
+    device = new TwilioDevice(data.token, {
+      logLevel: 1
     });
 
     device.on('registered', () => {
