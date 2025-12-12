@@ -15,7 +15,7 @@ const UI = {
 let socket = null;
 let currentMode = 'universal';
 let reconnectTimeout = null;
-let activeConnection = null;
+let activeCall = null;
 let device = null;
 
 function log(message, type = 'info') {
@@ -32,8 +32,13 @@ function getWSUrl(path) {
   return `${protocol}//${window.location.host}${path}`;
 }
 
-// Initialize Twilio Device
 async function initTwilioDevice() {
+  if (typeof Twilio === 'undefined') {
+    log('Waiting for Twilio SDK...');
+    setTimeout(initTwilioDevice, 500);
+    return;
+  }
+
   try {
     log('Getting Twilio token...');
     const response = await fetch('/api/token');
@@ -41,57 +46,35 @@ async function initTwilioDevice() {
     
     if (data.error) {
       log(`Token error: ${data.error}`, 'error');
-      UI.callStatus.textContent = 'Token error - check console';
+      UI.callStatus.textContent = 'Token error';
       return;
     }
 
     log(`Token received for: ${data.identity}`, 'success');
     
-    // Initialize Twilio Device
     device = new Twilio.Device(data.token, {
-      codecPreferences: ['opus', 'pcmu'],
-      enableRingingState: true,
+      logLevel: 1,
+      codecPreferences: [Twilio.Device.Codec.Opus, Twilio.Device.Codec.PCMU],
     });
 
-    device.on('ready', () => {
-      log('Twilio Device ready', 'success');
+    device.on('registered', () => {
+      log('Device registered', 'success');
       UI.statusDot.classList.add('connected');
       UI.statusText.textContent = 'Ready to call';
       UI.callBtn.disabled = false;
     });
 
-    device.on('error', (error) => {
-      log(`Device error: ${error.message}`, 'error');
-      UI.callStatus.textContent = `Error: ${error.message}`;
+    device.on('error', (twilioError) => {
+      log(`Device error: ${twilioError.message}`, 'error');
+      UI.callStatus.textContent = `Error: ${twilioError.message}`;
     });
 
-    device.on('connect', (conn) => {
-      log('Call connected', 'success');
-      activeConnection = conn;
-      UI.statusDot.classList.remove('calling');
-      UI.statusDot.classList.add('active');
-      UI.statusText.textContent = 'In Call';
-      UI.callStatus.textContent = 'Connected';
-      UI.callBtn.textContent = 'End Call';
-      UI.callBtn.classList.remove('start');
-      UI.callBtn.classList.add('end');
+    device.on('incoming', (call) => {
+      log(`Incoming call from: ${call.parameters.From}`);
     });
 
-    device.on('disconnect', () => {
-      log('Call disconnected');
-      activeConnection = null;
-      UI.statusDot.classList.remove('active', 'calling');
-      UI.statusDot.classList.add('connected');
-      UI.statusText.textContent = 'Ready to call';
-      UI.callStatus.textContent = 'Call ended';
-      UI.callBtn.textContent = 'Call';
-      UI.callBtn.classList.remove('end');
-      UI.callBtn.classList.add('start');
-    });
-
-    device.on('incoming', (conn) => {
-      log(`Incoming call from: ${conn.parameters.From}`);
-    });
+    await device.register();
+    log('Device registered successfully', 'success');
 
   } catch (err) {
     log(`Init error: ${err.message}`, 'error');
@@ -129,7 +112,7 @@ function connectWebSocket() {
     reconnectTimeout = setTimeout(connectWebSocket, 3000);
   };
 
-  socket.onerror = (err) => {
+  socket.onerror = () => {
     log('WebSocket error', 'error');
   };
 }
@@ -189,7 +172,7 @@ function addTranscript(panel, text) {
   container.scrollTop = container.scrollHeight;
 }
 
-function makeCall() {
+async function makeCall() {
   const phoneNumber = UI.phoneInput.value.trim();
   
   if (!phoneNumber) {
@@ -210,46 +193,70 @@ function makeCall() {
   UI.callStatus.textContent = `Calling ${phoneNumber}...`;
   UI.callBtn.disabled = true;
 
-  // Make the call via Twilio Device
-  const params = { To: phoneNumber };
-  activeConnection = device.connect(params);
-  
-  activeConnection.on('accept', () => {
-    log('Call accepted', 'success');
-    UI.callBtn.disabled = false;
-  });
-  
-  activeConnection.on('reject', () => {
-    log('Call rejected');
-    UI.statusDot.classList.remove('calling');
-    UI.statusText.textContent = 'Ready to call';
-    UI.callStatus.textContent = 'Call rejected';
-    UI.callBtn.disabled = false;
-  });
+  try {
+    const params = { To: phoneNumber };
+    activeCall = await device.connect({ params });
+    
+    activeCall.on('accept', () => {
+      log('Call connected', 'success');
+      UI.statusDot.classList.remove('calling');
+      UI.statusDot.classList.add('active');
+      UI.statusText.textContent = 'In Call';
+      UI.callStatus.textContent = 'Connected';
+      UI.callBtn.textContent = 'End Call';
+      UI.callBtn.classList.remove('start');
+      UI.callBtn.classList.add('end');
+      UI.callBtn.disabled = false;
+    });
 
-  activeConnection.on('cancel', () => {
-    log('Call cancelled');
-    UI.statusDot.classList.remove('calling');
-    UI.callBtn.disabled = false;
-  });
+    activeCall.on('disconnect', () => {
+      log('Call disconnected');
+      resetCallUI();
+    });
 
-  activeConnection.on('error', (error) => {
-    log(`Call error: ${error.message}`, 'error');
-    UI.statusDot.classList.remove('calling');
-    UI.callStatus.textContent = `Error: ${error.message}`;
-    UI.callBtn.disabled = false;
-  });
+    activeCall.on('cancel', () => {
+      log('Call cancelled');
+      resetCallUI();
+    });
+
+    activeCall.on('reject', () => {
+      log('Call rejected');
+      resetCallUI();
+    });
+
+    activeCall.on('error', (error) => {
+      log(`Call error: ${error.message}`, 'error');
+      UI.callStatus.textContent = `Error: ${error.message}`;
+      resetCallUI();
+    });
+
+  } catch (err) {
+    log(`Call failed: ${err.message}`, 'error');
+    UI.callStatus.textContent = `Failed: ${err.message}`;
+    resetCallUI();
+  }
+}
+
+function resetCallUI() {
+  activeCall = null;
+  UI.statusDot.classList.remove('active', 'calling');
+  UI.statusDot.classList.add('connected');
+  UI.statusText.textContent = 'Ready to call';
+  UI.callBtn.textContent = 'Call';
+  UI.callBtn.classList.remove('end');
+  UI.callBtn.classList.add('start');
+  UI.callBtn.disabled = false;
 }
 
 function endCall() {
-  if (activeConnection) {
-    activeConnection.disconnect();
+  if (activeCall) {
+    activeCall.disconnect();
     log('Call ended by user');
   }
 }
 
 UI.callBtn.addEventListener('click', () => {
-  if (activeConnection) {
+  if (activeCall) {
     endCall();
   } else {
     makeCall();
@@ -262,12 +269,11 @@ UI.modeSelect.addEventListener('change', (e) => {
 });
 
 UI.phoneInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && !activeConnection) {
+  if (e.key === 'Enter' && !activeCall) {
     makeCall();
   }
 });
 
-// Initialize
 log('TalkHint WebRTC Mode');
 connectWebSocket();
 initTwilioDevice();
