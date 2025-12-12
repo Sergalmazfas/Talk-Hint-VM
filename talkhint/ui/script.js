@@ -8,8 +8,7 @@ const UI = {
   modeBadge: document.getElementById('modeBadge'),
   modeSelect: document.getElementById('modeSelect'),
   callStatus: document.getElementById('callStatus'),
-  yourPhone: document.getElementById('yourPhone'),
-  targetPhone: document.getElementById('targetPhone'),
+  phoneInput: document.getElementById('phoneInput'),
   callBtn: document.getElementById('callBtn')
 };
 
@@ -196,19 +195,18 @@ function clearTranscripts() {
 }
 
 async function startCall() {
-  const yourPhone = UI.yourPhone.value.trim();
-  const targetPhone = UI.targetPhone.value.trim();
+  const phoneNumber = UI.phoneInput.value.trim();
   
-  if (!yourPhone || !targetPhone) {
-    log('Please enter both phone numbers', 'error');
-    UI.callStatus.textContent = 'Enter both phone numbers';
+  if (!phoneNumber) {
+    log('Please enter a phone number', 'error');
+    UI.callStatus.textContent = 'Enter a phone number';
     return;
   }
   
-  log(`Starting call: Your phone ${yourPhone} → Target ${targetPhone}`);
+  log(`Calling: ${phoneNumber}`);
   UI.statusDot.classList.add('calling');
   UI.statusText.textContent = 'Calling...';
-  UI.callStatus.textContent = `Calling you at ${yourPhone}...`;
+  UI.callStatus.textContent = `Calling ${phoneNumber}...`;
   UI.callBtn.disabled = true;
   
   try {
@@ -217,7 +215,7 @@ async function startCall() {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: yourPhone, target: targetPhone }),
+      body: JSON.stringify({ target: phoneNumber }),
     });
     
     const data = await response.json();
@@ -225,7 +223,7 @@ async function startCall() {
     if (data.success) {
       log(`Call initiated: ${data.callSid}`, 'success');
       activeCallSid = data.callSid;
-      UI.callStatus.textContent = `Ringing your phone... then connecting to ${targetPhone}`;
+      UI.callStatus.textContent = `Ringing ${phoneNumber}...`;
       UI.callBtn.disabled = false;
     } else {
       log(`Call failed: ${data.error}`, 'error');
@@ -256,7 +254,7 @@ UI.modeSelect.addEventListener('change', (e) => {
   sendMode(currentMode);
 });
 
-UI.targetPhone.addEventListener('keypress', (e) => {
+UI.phoneInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isCallActive) {
     startCall();
   }

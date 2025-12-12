@@ -100,10 +100,10 @@ export async function registerRoutes(
   });
 
   // Start outbound call via Twilio REST API
-  // First leg: call initiator (HON), then TwiML dials TARGET
+  // Direct call to target with inline TwiML
   app.post("/start-call", async (req, res) => {
     try {
-      const { target, from } = req.body;
+      const { target } = req.body;
       
       if (!target) {
         return res.status(400).json({ error: "Target phone number is required" });
@@ -113,23 +113,20 @@ export async function registerRoutes(
         return res.status(500).json({ error: "Twilio credentials not configured" });
       }
       
-      // The "from" field is HON's phone number - who will receive the first call
-      // If not provided, we'll call the target directly (one-way test)
-      const honNumber = from || target;
+      console.log(`[start-call] ===== DIRECT OUTBOUND CALL =====`);
+      console.log(`[start-call] Target: ${target}`);
+      console.log(`[start-call] From: ${TWILIO_PHONE_NUMBER}`);
       
-      const host = req.headers.host || req.hostname;
-      // Webhook URL includes target number - TwiML will dial this
-      const webhookUrl = `https://${host}/twilio/outbound?target=${encodeURIComponent(target)}`;
-      
-      console.log(`[start-call] ===== INITIATING OUTBOUND CALL =====`);
-      console.log(`[start-call] HON (first leg): ${honNumber}`);
-      console.log(`[start-call] TARGET (second leg via Dial): ${target}`);
-      console.log(`[start-call] Twilio From: ${TWILIO_PHONE_NUMBER}`);
-      console.log(`[start-call] Webhook URL: ${webhookUrl}`);
+      // Simple TwiML - just say a message
+      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>Hello! This is a test call from TalkHint.</Say>
+  <Pause length="2"/>
+  <Say>The connection is working. Goodbye!</Say>
+</Response>`;
       
       const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
       
-      // Call HON first - when they answer, TwiML dials TARGET
       const twilioResponse = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`,
         {
@@ -139,9 +136,9 @@ export async function registerRoutes(
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({
-            To: honNumber, // Call HON first
+            To: target,
             From: TWILIO_PHONE_NUMBER!,
-            Url: webhookUrl, // When HON answers, this TwiML dials TARGET
+            Twiml: twiml,
           }),
         }
       );
@@ -159,8 +156,7 @@ export async function registerRoutes(
         success: true, 
         callSid: callData.sid,
         status: callData.status,
-        target,
-        from: honNumber
+        target
       });
     } catch (error: any) {
       console.error('[start-call] Error:', error);
