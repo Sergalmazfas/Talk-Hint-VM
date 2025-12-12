@@ -64,6 +64,75 @@ const MODES: Record<string, { name: string; description: string }> = {
   dispatcher: { name: "Dispatcher Assistant", description: "Helps dispatchers handle calls efficiently" },
 };
 
+// Translate guest speech and generate suggestion
+async function translateAndSuggest(text: string, goal: string): Promise<{
+  translation: string;
+  explanation?: string;
+  suggestion?: { en: string; ru: string };
+}> {
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You help a Russian speaker during an English phone call.
+
+TASK: Given what the other person (Guest) just said, provide:
+1. Russian translation of their speech
+2. (Optional) Brief explanation if the phrase has cultural context or is unclear
+3. A suggested response the user should say, aligned with their goal
+
+GOAL: ${goal || "Have a successful phone conversation"}
+
+Return JSON only:
+{
+  "translation": "Russian translation",
+  "explanation": "optional explanation or null",
+  "suggestion": { "en": "English response", "ru": "Russian translation of response" }
+}`
+          },
+          {
+            role: "user",
+            content: `Guest said: "${text}"`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 300,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`GPT API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    
+    // Parse JSON response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        translation: parsed.translation || "",
+        explanation: parsed.explanation || undefined,
+        suggestion: parsed.suggestion || undefined,
+      };
+    }
+    
+    return { translation: "" };
+  } catch (err: any) {
+    log(`Translation error: ${err.message}`, "openai");
+    return { translation: "" };
+  }
+}
+
 const BASE_RULES = `
 CRITICAL RULES:
 1. You are helping HON (the Host/Owner) during a live conversation
@@ -390,11 +459,13 @@ export function setupWebSocket(server: Server) {
     }
   });
 
+  let currentGoal = "";
+  
   function handleUIConnection(ws: WebSocket) {
     log("UI client connected", "server");
     uiClients.add(ws);
 
-    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), mode: currentMode }));
+    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), goal: currentGoal }));
 
     ws.on("message", (data: Buffer) => {
       try {
@@ -403,7 +474,9 @@ export function setupWebSocket(server: Server) {
           currentMode = message.mode;
           log(`Mode changed to: ${currentMode}`, "server");
           ws.send(JSON.stringify({ type: "mode_changed", mode: currentMode }));
-          uiBroadcast({ type: "mode_changed", mode: currentMode });
+        } else if (message.type === "update_goal") {
+          currentGoal = message.goal || "";
+          log(`Goal updated: ${currentGoal.substring(0, 50)}...`, "server");
         }
       } catch (err) {}
     });
@@ -509,7 +582,7 @@ export function setupWebSocket(server: Server) {
         log(`[Deepgram] ${track} connection opened`, "deepgram");
       });
       
-      connection.on(LiveTranscriptionEvents.Transcript, (data: any) => {
+      connection.on(LiveTranscriptionEvents.Transcript, async (data: any) => {
         const transcript = data.channel?.alternatives?.[0]?.transcript;
         if (transcript && transcript.trim()) {
           const isFinal = data.is_final;
@@ -518,13 +591,36 @@ export function setupWebSocket(server: Server) {
           
           if (isFinal) {
             log(`[Deepgram] ${speaker} final: ${transcript}`, "deepgram");
-            // Broadcast to UI
-            uiBroadcast({ 
-              type: track === "inbound" ? "owner_transcript" : "guest_transcript",
-              text: transcript,
-              isFinal: true,
-              callSid 
-            });
+            
+            if (track === "outbound") {
+              // Guest transcript - translate and generate suggestion
+              const translated = await translateAndSuggest(transcript, currentGoal);
+              uiBroadcast({ 
+                type: "guest_transcript",
+                text: transcript,
+                translation: translated.translation,
+                explanation: translated.explanation,
+                isFinal: true,
+                callSid 
+              });
+              
+              if (translated.suggestion) {
+                uiBroadcast({
+                  type: "suggestion",
+                  en: translated.suggestion.en,
+                  ru: translated.suggestion.ru,
+                  callSid
+                });
+              }
+            } else {
+              // Owner transcript
+              uiBroadcast({ 
+                type: "owner_transcript",
+                text: transcript,
+                isFinal: true,
+                callSid 
+              });
+            }
           } else {
             log(`[Deepgram] ${speaker} partial: ${transcript}`, "deepgram");
           }

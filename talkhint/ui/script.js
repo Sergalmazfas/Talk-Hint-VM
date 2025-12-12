@@ -1,34 +1,31 @@
 const UI = {
-  ownerMessages: document.getElementById('ownerMessages'),
-  guestMessages: document.getElementById('guestMessages'),
-  hintsGrid: document.getElementById('hintsGrid'),
-  debug: document.getElementById('debug'),
+  phoneInput: document.getElementById('phoneInput'),
+  callBtn: document.getElementById('callBtn'),
+  goalInput: document.getElementById('goalInput'),
+  guestTranscripts: document.getElementById('guestTranscripts'),
+  guestEmpty: document.getElementById('guestEmpty'),
+  suggestionCard: document.getElementById('suggestionCard'),
+  suggestionEmpty: document.getElementById('suggestionEmpty'),
+  suggestionEn: document.getElementById('suggestionEn'),
+  suggestionRu: document.getElementById('suggestionRu'),
+  sayBtn: document.getElementById('sayBtn'),
+  editBtn: document.getElementById('editBtn'),
   statusDot: document.getElementById('statusDot'),
   statusText: document.getElementById('statusText'),
-  modeSelect: document.getElementById('modeSelect'),
-  phoneInput: document.getElementById('phoneInput'),
-  callBtn: document.getElementById('callBtn')
+  editModal: document.getElementById('editModal'),
+  editTextarea: document.getElementById('editTextarea'),
+  editCancel: document.getElementById('editCancel'),
+  editSave: document.getElementById('editSave')
 };
 
-const hints = [
-  { en: 'Could you explain that in more detail?', ru: 'Не могли бы вы объяснить это более подробно?' },
-  { en: 'I understand your concern. Let me check that for you.', ru: 'Я понимаю вашу озабоченность. Позвольте мне проверить это для вас.' },
-  { en: 'Thank you for your patience. I\'ll resolve this issue shortly.', ru: 'Спасибо за ваше терпение. Я скоро решу эту проблему.' }
-];
-
 let socket = null;
-let currentMode = 'universal';
 let reconnectTimeout = null;
 let activeCall = null;
 let device = null;
-let isSpeaking = false;
+let currentGoal = '';
+let currentSuggestion = { en: '', ru: '' };
 
-function log(message, type = 'info') {
-  const line = document.createElement('div');
-  line.className = `debug-line ${type}`;
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-  UI.debug.appendChild(line);
-  UI.debug.scrollTop = UI.debug.scrollHeight;
+function log(message) {
   console.log(`[TalkHint] ${message}`);
 }
 
@@ -50,38 +47,32 @@ async function initTwilioDevice() {
     const data = await response.json();
     
     if (data.error) {
-      log(`Token error: ${data.error}`, 'error');
+      log(`Token error: ${data.error}`);
       UI.statusText.textContent = 'Token error';
       return;
     }
 
-    log(`Token received for: ${data.identity}`, 'success');
+    log(`Token received for: ${data.identity}`);
     
-    device = new TwilioDevice(data.token, {
-      logLevel: 1
-    });
+    device = new TwilioDevice(data.token, { logLevel: 1 });
 
     device.on('registered', () => {
-      log('Device registered', 'success');
+      log('Device registered');
       UI.statusDot.classList.add('connected');
-      UI.statusText.textContent = 'Ready to call';
+      UI.statusText.textContent = 'Ready';
       UI.callBtn.disabled = false;
     });
 
     device.on('error', (twilioError) => {
-      log(`Device error: ${twilioError.message}`, 'error');
+      log(`Device error: ${twilioError.message}`);
       UI.statusText.textContent = `Error: ${twilioError.message}`;
     });
 
-    device.on('incoming', (call) => {
-      log(`Incoming call from: ${call.parameters.From}`);
-    });
-
     await device.register();
-    log('Device registered successfully', 'success');
+    log('Device registered successfully');
 
   } catch (err) {
-    log(`Init error: ${err.message}`, 'error');
+    log(`Init error: ${err.message}`);
     UI.statusText.textContent = 'Failed to initialize';
   }
 }
@@ -98,8 +89,8 @@ function connectWebSocket() {
   socket = new WebSocket(url);
 
   socket.onopen = () => {
-    log('WebSocket connected', 'success');
-    sendMode(currentMode);
+    log('WebSocket connected');
+    sendGoal();
   };
 
   socket.onmessage = (event) => {
@@ -107,211 +98,98 @@ function connectWebSocket() {
       const data = JSON.parse(event.data);
       handleMessage(data);
     } catch (err) {
-      log(`Parse error: ${err.message}`, 'error');
+      log(`Parse error: ${err.message}`);
     }
   };
 
   socket.onclose = () => {
-    log('WebSocket disconnected', 'error');
+    log('WebSocket disconnected');
     reconnectTimeout = setTimeout(connectWebSocket, 3000);
   };
 
   socket.onerror = () => {
-    log('WebSocket error', 'error');
+    log('WebSocket error');
   };
 }
 
 function handleMessage(data) {
   switch (data.type) {
     case 'connected':
-      log('Server confirmed connection', 'success');
-      if (data.mode) {
-        currentMode = data.mode;
-        UI.modeSelect.value = currentMode;
-      }
-      break;
-
-    case 'owner_transcript':
-    case 'hon_transcript':
-      addMessage('owner', data.text, data.streaming);
+      log('Server confirmed connection');
       break;
 
     case 'guest_transcript':
-    case 'gst_transcript':
-      addMessage('guest', data.text, data.streaming);
+      addGuestTranscript(data.text, data.translation, data.explanation);
       break;
 
-    case 'hints':
-      if (data.hints && Array.isArray(data.hints)) {
-        updateHints(data.hints);
-      }
+    case 'owner_transcript':
       break;
 
-    case 'ai_hint':
-    case 'response':
-      if (data.hints) {
-        updateHints(data.hints);
-      }
-      break;
-
-    case 'filler':
-      if (data.text) {
-        log(`Filler: ${data.text}`);
-        speakFiller(data.text);
-      }
-      break;
-
-    case 'mode_changed':
-      currentMode = data.mode;
-      UI.modeSelect.value = currentMode;
-      log(`Mode: ${data.mode}`, 'success');
+    case 'suggestion':
+      showSuggestion(data.en, data.ru);
       break;
 
     case 'error':
-      log(`Error: ${data.error}`, 'error');
+      log(`Error: ${data.error}`);
       break;
   }
 }
 
-function sendMode(mode) {
+function sendGoal() {
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: 'set_mode', mode }));
+    socket.send(JSON.stringify({ type: 'update_goal', goal: currentGoal }));
   }
 }
 
-function addMessage(panel, text, isStreaming = false) {
+function addGuestTranscript(text, translation, explanation) {
   if (!text) return;
-  const container = panel === 'owner' ? UI.ownerMessages : UI.guestMessages;
   
-  if (isStreaming) {
-    let streamingEl = container.querySelector('.streaming');
-    if (!streamingEl) {
-      streamingEl = document.createElement('p');
-      streamingEl.className = 'streaming';
-      container.appendChild(streamingEl);
-    }
-    streamingEl.textContent = text;
-  } else {
-    const streamingEl = container.querySelector('.streaming');
-    if (streamingEl) {
-      streamingEl.classList.remove('streaming');
-    }
-    const p = document.createElement('p');
-    p.textContent = text;
-    container.appendChild(p);
+  UI.guestEmpty.style.display = 'none';
+  
+  const item = document.createElement('div');
+  item.className = 'transcript-item';
+  
+  let html = `<div class="transcript-en">${text}</div>`;
+  if (translation) {
+    html += `<div class="transcript-ru">${translation}</div>`;
   }
-  container.scrollTop = container.scrollHeight;
+  if (explanation) {
+    html += `<div class="transcript-explanation">${explanation}</div>`;
+  }
+  
+  item.innerHTML = html;
+  UI.guestTranscripts.appendChild(item);
+  UI.guestTranscripts.scrollTop = UI.guestTranscripts.scrollHeight;
 }
 
-function updateHints(newHints) {
-  for (let i = 0; i < 3; i++) {
-    const hint = newHints[i] || hints[i];
-    document.getElementById(`hint${i}en`).textContent = hint.en || hint.english || hints[i].en;
-    document.getElementById(`hint${i}ru`).textContent = hint.ru || hint.russian || hints[i].ru;
-  }
+function showSuggestion(en, ru) {
+  if (!en) return;
+  
+  currentSuggestion = { en, ru: ru || '' };
+  UI.suggestionEmpty.style.display = 'none';
+  UI.suggestionCard.style.display = 'block';
+  UI.suggestionEn.textContent = en;
+  UI.suggestionRu.textContent = ru || '';
 }
 
-async function speakFiller(text) {
-  if (isSpeaking) return;
+function clearTranscripts() {
+  UI.guestTranscripts.innerHTML = '';
+  UI.guestEmpty.style.display = 'block';
+  UI.guestTranscripts.appendChild(UI.guestEmpty);
   
-  isSpeaking = true;
-  
-  try {
-    const response = await fetch('/api/speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
-    });
-    
-    if (response.ok) {
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      audio.onended = () => {
-        isSpeaking = false;
-        URL.revokeObjectURL(audioUrl);
-      };
-      
-      audio.onerror = () => {
-        isSpeaking = false;
-      };
-      
-      await audio.play();
-    } else {
-      isSpeaking = false;
-    }
-  } catch (err) {
-    isSpeaking = false;
-    log(`Filler speak error: ${err.message}`, 'error');
-  }
-}
-
-async function speakHint(index) {
-  if (isSpeaking) return;
-  
-  const hintText = document.getElementById(`hint${index}en`).textContent;
-  const btn = document.querySelectorAll('.mic-btn')[index];
-  
-  isSpeaking = true;
-  btn.classList.add('speaking');
-  
-  try {
-    const response = await fetch('/api/speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: hintText })
-    });
-    
-    if (response.ok) {
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      audio.onended = () => {
-        isSpeaking = false;
-        btn.classList.remove('speaking');
-        URL.revokeObjectURL(audioUrl);
-      };
-      
-      audio.onerror = () => {
-        isSpeaking = false;
-        btn.classList.remove('speaking');
-        log('Audio playback error', 'error');
-      };
-      
-      await audio.play();
-    } else {
-      throw new Error('TTS request failed');
-    }
-  } catch (err) {
-    log(`Speak error: ${err.message}`, 'error');
-    isSpeaking = false;
-    btn.classList.remove('speaking');
-    
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(hintText);
-      utterance.lang = 'en-US';
-      utterance.onend = () => {
-        isSpeaking = false;
-        btn.classList.remove('speaking');
-      };
-      speechSynthesis.speak(utterance);
-    }
-  }
+  UI.suggestionCard.style.display = 'none';
+  UI.suggestionEmpty.style.display = 'block';
 }
 
 async function makeCall() {
   const phoneNumber = UI.phoneInput.value.trim();
   
   if (!phoneNumber) {
-    log('Enter a phone number', 'error');
-    UI.statusText.textContent = 'Enter a phone number';
+    UI.statusText.textContent = 'Enter phone number';
     return;
   }
 
   if (!device) {
-    log('Device not ready', 'error');
     UI.statusText.textContent = 'Device not ready';
     return;
   }
@@ -320,13 +198,16 @@ async function makeCall() {
   UI.statusDot.classList.add('calling');
   UI.statusText.textContent = 'Calling...';
   UI.callBtn.disabled = true;
+  
+  clearTranscripts();
+  sendGoal();
 
   try {
     const params = { To: phoneNumber };
     activeCall = await device.connect({ params });
     
     activeCall.on('accept', () => {
-      log('Call connected', 'success');
+      log('Call connected');
       UI.statusDot.classList.remove('calling');
       UI.statusDot.classList.add('active');
       UI.statusText.textContent = 'In Call';
@@ -352,13 +233,13 @@ async function makeCall() {
     });
 
     activeCall.on('error', (error) => {
-      log(`Call error: ${error.message}`, 'error');
+      log(`Call error: ${error.message}`);
       UI.statusText.textContent = `Error: ${error.message}`;
       resetCallUI();
     });
 
   } catch (err) {
-    log(`Call failed: ${err.message}`, 'error');
+    log(`Call failed: ${err.message}`);
     UI.statusText.textContent = `Failed: ${err.message}`;
     resetCallUI();
   }
@@ -368,7 +249,7 @@ function resetCallUI() {
   activeCall = null;
   UI.statusDot.classList.remove('active', 'calling');
   UI.statusDot.classList.add('connected');
-  UI.statusText.textContent = 'Ready to call';
+  UI.statusText.textContent = 'Ready';
   UI.callBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/></svg>';
   UI.callBtn.classList.remove('end');
   UI.callBtn.classList.add('start');
@@ -382,6 +263,29 @@ function endCall() {
   }
 }
 
+function openEditModal() {
+  UI.editTextarea.value = currentSuggestion.en;
+  UI.editModal.classList.add('show');
+}
+
+function closeEditModal() {
+  UI.editModal.classList.remove('show');
+}
+
+function saveEdit() {
+  const newText = UI.editTextarea.value.trim();
+  if (newText) {
+    currentSuggestion.en = newText;
+    UI.suggestionEn.textContent = newText;
+    UI.suggestionRu.textContent = '';
+  }
+  closeEditModal();
+}
+
+function saySuggestion() {
+  log(`Say: ${currentSuggestion.en}`);
+}
+
 UI.callBtn.addEventListener('click', () => {
   if (activeCall) {
     endCall();
@@ -390,9 +294,12 @@ UI.callBtn.addEventListener('click', () => {
   }
 });
 
-UI.modeSelect.addEventListener('change', (e) => {
-  currentMode = e.target.value;
-  sendMode(currentMode);
+UI.goalInput.addEventListener('input', (e) => {
+  currentGoal = e.target.value;
+});
+
+UI.goalInput.addEventListener('blur', () => {
+  sendGoal();
 });
 
 UI.phoneInput.addEventListener('keypress', (e) => {
@@ -401,8 +308,14 @@ UI.phoneInput.addEventListener('keypress', (e) => {
   }
 });
 
-window.speakHint = speakHint;
+UI.sayBtn.addEventListener('click', saySuggestion);
+UI.editBtn.addEventListener('click', openEditModal);
+UI.editCancel.addEventListener('click', closeEditModal);
+UI.editSave.addEventListener('click', saveEdit);
+UI.editModal.addEventListener('click', (e) => {
+  if (e.target === UI.editModal) closeEditModal();
+});
 
-log('TalkHint WebRTC Mode');
+log('TalkHint Goal-Driven Mode');
 connectWebSocket();
 initTwilioDevice();
