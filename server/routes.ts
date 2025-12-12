@@ -116,7 +116,7 @@ export async function registerRoutes(
   });
 
   // Start outbound call via Twilio REST API
-  // Calls Twilio number first, TwiML then dials target (single visible call to target)
+  // Calls TARGET directly, webhook returns TwiML with Stream (no Dial needed - already connected)
   app.post("/start-call", async (req, res) => {
     try {
       const { target } = req.body;
@@ -130,15 +130,17 @@ export async function registerRoutes(
       }
       
       const host = req.headers.host || req.hostname;
-      // Pass target in webhook URL - TwiML will dial this number
-      const webhookUrl = `https://${host}/twilio/inbound?target=${encodeURIComponent(target)}`;
+      // Webhook URL - when target answers, this TwiML starts the stream
+      const webhookUrl = `https://${host}/twilio/inbound`;
       
-      console.log(`[start-call] Initiating call to target: ${target}`);
+      console.log(`[start-call] ===== INITIATING OUTBOUND CALL =====`);
+      console.log(`[start-call] Target: ${target}`);
+      console.log(`[start-call] From: ${TWILIO_PHONE_NUMBER}`);
       console.log(`[start-call] Webhook: ${webhookUrl}`);
       
       const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
       
-      // Call our Twilio number first - it will execute TwiML which dials target
+      // Call TARGET directly - TwiML will start stream when they answer
       const twilioResponse = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`,
         {
@@ -148,9 +150,9 @@ export async function registerRoutes(
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({
-            To: TWILIO_PHONE_NUMBER!, // Call Twilio number first
+            To: target, // Call target directly
             From: TWILIO_PHONE_NUMBER!,
-            Url: webhookUrl, // TwiML will dial target
+            Url: webhookUrl,
           }),
         }
       );
@@ -162,7 +164,8 @@ export async function registerRoutes(
       }
       
       const callData = await twilioResponse.json();
-      console.log(`[start-call] Call initiated: ${callData.sid}`);
+      console.log(`[start-call] Call initiated successfully: ${callData.sid}`);
+      console.log(`[start-call] Status: ${callData.status}`);
       
       res.json({ 
         success: true, 
