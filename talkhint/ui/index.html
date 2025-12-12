@@ -1,22 +1,23 @@
+<!-- ACTIVE_UI_FILE - Source file, copied to dist/talkhint/ui during build -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TalkHint - Call Assistant</title>
+  <title>TalkHint - Phone Call Transcription</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #fff;
+      background: #f0f2f5;
       color: #333;
       min-height: 100vh;
       padding: 20px;
     }
-    .container { max-width: 600px; margin: 0 auto; }
+    .container { max-width: 1000px; margin: 0 auto; }
     
     h1 { 
-      font-size: 1.5rem; 
+      font-size: 1.8rem; 
       font-weight: 600;
       text-align: center;
       margin-bottom: 20px;
@@ -28,16 +29,17 @@
       justify-content: center;
       align-items: center;
       gap: 10px;
-      margin-bottom: 20px;
+      margin-bottom: 10px;
     }
     
     .phone-input {
-      width: 220px;
+      width: 300px;
       padding: 12px 16px;
       font-size: 1rem;
       border: 1px solid #ddd;
       border-radius: 8px;
       background: #fff;
+      color: #333;
     }
     .phone-input:focus {
       outline: none;
@@ -53,62 +55,73 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: all 0.2s;
     }
-    .call-btn.start { background: #4CAF50; color: #fff; }
-    .call-btn.start:hover { background: #43a047; }
+    .call-btn.start {
+      background: #4CAF50;
+      color: #fff;
+    }
+    .call-btn.start:hover { transform: scale(1.1); background: #43a047; }
     .call-btn.start:disabled { opacity: 0.5; cursor: not-allowed; }
-    .call-btn.end { background: #f44336; color: #fff; }
+    .call-btn.end {
+      background: #f44336;
+      color: #fff;
+    }
+    .call-btn.end:hover { transform: scale(1.1); }
     .call-btn svg { width: 24px; height: 24px; }
     
-    .section {
-      background: #f9f9f9;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-    .transcripts-row {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .transcript-col {
-      flex: 1;
-      margin-bottom: 0;
-    }
-    .section-title {
+    .helper-text {
+      text-align: center;
       font-size: 0.85rem;
-      font-weight: 600;
-      color: #666;
-      margin-bottom: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      color: #888;
+      margin-bottom: 20px;
     }
     
-    .transcript-list {
+    .main-panel {
+      background: #e8eaed;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .messages-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    
+    .message-panel {
+      background: #f5f5f5;
+      border-radius: 12px;
+      padding: 15px;
+      min-height: 150px;
+    }
+    
+    .message-panel h3 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    
+    .message-content {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: #555;
       max-height: 200px;
       overflow-y: auto;
     }
-    .transcript-item {
-      padding: 8px 12px;
+    
+    .message-content p {
+      margin-bottom: 6px;
+      padding: 6px 10px;
       background: #fff;
       border-radius: 6px;
-      margin-bottom: 6px;
     }
-    .transcript-en {
-      font-size: 0.95rem;
-      color: #333;
-      margin-bottom: 4px;
-    }
-    .transcript-ru {
-      font-size: 0.85rem;
-      color: #666;
+    
+    .message-content .streaming {
+      color: #4CAF50;
       font-style: italic;
-    }
-    .empty-state {
-      text-align: center;
-      color: #999;
-      font-size: 0.9rem;
-      padding: 20px;
     }
     
     .status-bar {
@@ -120,6 +133,7 @@
       font-size: 0.85rem;
       color: #666;
     }
+    
     .status-dot {
       width: 8px;
       height: 8px;
@@ -127,16 +141,21 @@
       background: #ccc;
     }
     .status-dot.connected { background: #4CAF50; }
-    .status-dot.calling { background: #ff9800; }
-    .status-dot.active { background: #4CAF50; }
+    .status-dot.calling { background: #ff9800; animation: pulse 1s infinite; }
+    .status-dot.active { background: #4CAF50; animation: pulse 1.5s infinite; }
+    
+    @keyframes pulse { 
+      0%, 100% { opacity: 1; transform: scale(1); } 
+      50% { opacity: 0.8; transform: scale(1.05); } 
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>TalkHint</h1>
+    <h1>TalkHint – Phone Call Transcription</h1>
     
     <div class="call-section">
-      <input type="tel" class="phone-input" id="phoneInput" placeholder="+1 234 567 8900" data-testid="input-phone">
+      <input type="tel" class="phone-input" id="phoneInput" placeholder="Enter phone number" data-testid="input-phone">
       <button class="call-btn start" id="callBtn" data-testid="button-call">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
@@ -144,17 +163,17 @@
       </button>
     </div>
     
-    <div class="transcripts-row">
-      <div class="section transcript-col">
-        <div class="section-title">You (Owner)</div>
-        <div class="transcript-list" id="ownerTranscripts">
-          <div class="empty-state" id="ownerEmpty">Your speech...</div>
+    <p class="helper-text">Enter phone number and click to call</p>
+    
+    <div class="main-panel">
+      <div class="messages-grid">
+        <div class="message-panel">
+          <h3>Owner Messages</h3>
+          <div class="message-content" id="ownerMessages"></div>
         </div>
-      </div>
-      <div class="section transcript-col">
-        <div class="section-title">Guest</div>
-        <div class="transcript-list" id="guestTranscripts">
-          <div class="empty-state" id="guestEmpty">Guest speech...</div>
+        <div class="message-panel">
+          <h3>Guest Messages</h3>
+          <div class="message-content" id="guestMessages"></div>
         </div>
       </div>
     </div>
