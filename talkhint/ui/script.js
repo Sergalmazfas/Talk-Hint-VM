@@ -2,6 +2,8 @@ const UI = {
   phoneInput: document.getElementById('phoneInput'),
   callBtn: document.getElementById('callBtn'),
   goalInput: document.getElementById('goalInput'),
+  ownerTranscripts: document.getElementById('ownerTranscripts'),
+  ownerEmpty: document.getElementById('ownerEmpty'),
   guestTranscripts: document.getElementById('guestTranscripts'),
   guestEmpty: document.getElementById('guestEmpty'),
   suggestionCard: document.getElementById('suggestionCard'),
@@ -123,6 +125,7 @@ function handleMessage(data) {
       break;
 
     case 'owner_transcript':
+      addOwnerTranscript(data.text);
       break;
 
     case 'suggestion':
@@ -139,6 +142,18 @@ function sendGoal() {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'update_goal', goal: currentGoal }));
   }
+}
+
+function addOwnerTranscript(text) {
+  if (!text) return;
+  
+  UI.ownerEmpty.style.display = 'none';
+  
+  const item = document.createElement('div');
+  item.className = 'transcript-item';
+  item.innerHTML = `<div class="transcript-en">${text}</div>`;
+  UI.ownerTranscripts.appendChild(item);
+  UI.ownerTranscripts.scrollTop = UI.ownerTranscripts.scrollHeight;
 }
 
 function addGuestTranscript(text, translation, explanation) {
@@ -173,6 +188,10 @@ function showSuggestion(en, ru) {
 }
 
 function clearTranscripts() {
+  UI.ownerTranscripts.innerHTML = '';
+  UI.ownerEmpty.style.display = 'block';
+  UI.ownerTranscripts.appendChild(UI.ownerEmpty);
+  
   UI.guestTranscripts.innerHTML = '';
   UI.guestEmpty.style.display = 'block';
   UI.guestTranscripts.appendChild(UI.guestEmpty);

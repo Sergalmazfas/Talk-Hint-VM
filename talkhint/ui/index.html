@@ -90,6 +90,15 @@
       padding: 16px;
       margin-bottom: 16px;
     }
+    .transcripts-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .transcript-col {
+      flex: 1;
+      margin-bottom: 0;
+    }
     .section-title {
       font-size: 0.85rem;
       font-weight: 600;
@@ -269,10 +278,18 @@
       <textarea class="goal-input" id="goalInput" placeholder="Example: Schedule an appointment for next Tuesday at 2pm" data-testid="input-goal"></textarea>
     </div>
     
-    <div class="section">
-      <div class="section-title">Guest Says</div>
-      <div class="transcript-list" id="guestTranscripts">
-        <div class="empty-state" id="guestEmpty">Waiting for call...</div>
+    <div class="transcripts-row">
+      <div class="section transcript-col">
+        <div class="section-title">You (Owner)</div>
+        <div class="transcript-list" id="ownerTranscripts">
+          <div class="empty-state" id="ownerEmpty">Your speech...</div>
+        </div>
+      </div>
+      <div class="section transcript-col">
+        <div class="section-title">Guest</div>
+        <div class="transcript-list" id="guestTranscripts">
+          <div class="empty-state" id="guestEmpty">Guest speech...</div>
+        </div>
       </div>
     </div>
     
