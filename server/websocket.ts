@@ -267,9 +267,13 @@ class GPTRealtimeHandler {
   }
 
   private handleMessage(message: any) {
-    // Log all OpenAI messages for debugging
-    if (message.type && !message.type.includes("audio")) {
-      log(`OpenAI event: ${message.type}`, "openai");
+    // Log all OpenAI messages for debugging (including content for transcript events)
+    if (message.type) {
+      if (message.type.includes("transcript")) {
+        log(`OpenAI event: ${message.type} - ${JSON.stringify(message).slice(0, 200)}`, "openai");
+      } else if (!message.type.includes("audio.delta")) {
+        log(`OpenAI event: ${message.type}`, "openai");
+      }
     }
     
     switch (message.type) {
