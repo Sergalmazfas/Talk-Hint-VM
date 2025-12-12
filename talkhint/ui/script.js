@@ -275,6 +275,12 @@ function connectWebSocket() {
 
   socket.onopen = function() {
     log('WebSocket connected');
+    var savedLang = localStorage.getItem('talkhint_language') || 'ru';
+    socket.send(JSON.stringify({
+      type: 'set_language',
+      language: savedLang
+    }));
+    log('Sent initial language: ' + savedLang);
   };
 
   socket.onmessage = function(event) {

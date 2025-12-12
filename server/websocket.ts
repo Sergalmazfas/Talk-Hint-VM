@@ -64,12 +64,19 @@ const MODES: Record<string, { name: string; description: string }> = {
   dispatcher: { name: "Dispatcher Assistant", description: "Helps dispatchers handle calls efficiently" },
 };
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  ru: "Russian",
+  es: "Spanish"
+};
+
 // Translate guest speech and generate suggestion
-async function translateAndSuggest(text: string, goal: string): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru"): Promise<{
   translation: string;
   explanation?: string;
-  suggestion?: { en: string; ru: string };
+  suggestion?: { en: string; translation: string };
 }> {
+  const langName = LANGUAGE_NAMES[language] || "Russian";
+  
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -82,20 +89,20 @@ async function translateAndSuggest(text: string, goal: string): Promise<{
         messages: [
           {
             role: "system",
-            content: `You help a Russian speaker during an English phone call.
+            content: `You help a ${langName} speaker during an English phone call.
 
 TASK: Given what the other person (Guest) just said, provide:
-1. Russian translation of their speech
-2. (Optional) Brief explanation if the phrase has cultural context or is unclear
-3. A suggested response the user should say, aligned with their goal
+1. ${langName} translation of their speech
+2. A suggested SHORT response (under 15 words) the user should say, aligned with their goal
 
 GOAL: ${goal || "Have a successful phone conversation"}
 
+CRITICAL: Suggestions must be SHORT ready-to-say phrases. NO explanations, NO teaching, NO options.
+
 Return JSON only:
 {
-  "translation": "Russian translation",
-  "explanation": "optional explanation or null",
-  "suggestion": { "en": "English response", "ru": "Russian translation of response" }
+  "translation": "${langName} translation of what Guest said",
+  "suggestion": { "en": "Short English response to say", "translation": "${langName} translation of response" }
 }`
           },
           {
@@ -240,6 +247,7 @@ function getRealtimePrompt(mode: string = "universal"): string {
 }
 
 let currentMode = "universal";
+let currentLanguage = "ru"; // Default to Russian, can be "ru" or "es"
 const uiClients = new Set<WebSocket>();
 
 function uiBroadcast(message: object) {
@@ -477,6 +485,13 @@ export function setupWebSocket(server: Server) {
         } else if (message.type === "update_goal") {
           currentGoal = message.goal || "";
           log(`Goal updated: ${currentGoal.substring(0, 50)}...`, "server");
+        } else if (message.type === "set_language") {
+          const lang = message.language;
+          if (lang === "ru" || lang === "es") {
+            currentLanguage = lang;
+            log(`Language changed to: ${currentLanguage}`, "server");
+            ws.send(JSON.stringify({ type: "language_changed", language: currentLanguage }));
+          }
         }
       } catch (err) {}
     });
@@ -594,12 +609,11 @@ export function setupWebSocket(server: Server) {
             
             if (track === "outbound") {
               // Guest transcript - translate and generate suggestion
-              const translated = await translateAndSuggest(transcript, currentGoal);
+              const translated = await translateAndSuggest(transcript, currentGoal, currentLanguage);
               uiBroadcast({ 
                 type: "guest_transcript",
                 text: transcript,
                 translation: translated.translation,
-                explanation: translated.explanation,
                 isFinal: true,
                 callSid 
               });
@@ -608,7 +622,7 @@ export function setupWebSocket(server: Server) {
                 uiBroadcast({
                   type: "suggestion",
                   en: translated.suggestion.en,
-                  ru: translated.suggestion.ru,
+                  translation: translated.suggestion.translation,
                   callSid
                 });
               }
