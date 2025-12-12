@@ -55,7 +55,14 @@ Three operational modes for different use cases:
 
 ### APIs and Services
 - **OpenAI Realtime API** - GPT-4 model for real-time speech transcription and AI hints (requires OPENAI_API_KEY)
-- **Twilio Media Streams** - Phone call audio streaming (requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER)
+- **Twilio Voice SDK** - Browser-to-PSTN WebRTC calling (requires TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_PHONE_NUMBER, TWILIO_TWIML_APP_SID)
+
+### WebRTC Browser Calling (Working!)
+- Uses @twilio/voice-sdk 2.17.0 bundled with esbuild for browser
+- TalkHint UI at /app/ - direct browser-to-phone calling
+- Token endpoint: GET /api/token - generates Access Token with Voice Grant
+- TwiML webhook: POST /twilio/voice - handles outbound dial
+- TwiML App SID: AP10d04a2c23c851da6c300263849c993f
 
 ### Database
 - PostgreSQL via Drizzle ORM (DATABASE_URL environment variable required)
