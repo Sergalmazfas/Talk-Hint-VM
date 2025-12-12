@@ -6,10 +6,12 @@ import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
+import twilio from "twilio";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+const TWILIO_TWIML_APP_SID = process.env.TWILIO_TWIML_APP_SID;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +56,61 @@ export async function registerRoutes(
       timestamp: new Date().toISOString(),
       websocket: "ready",
     });
+  });
+
+  // Generate Twilio Access Token for browser-based calling
+  app.get("/api/token", (req, res) => {
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+      return res.status(500).json({ error: "Twilio credentials not configured" });
+    }
+
+    const identity = "browser-user";
+    const AccessToken = twilio.jwt.AccessToken;
+    const VoiceGrant = AccessToken.VoiceGrant;
+
+    const voiceGrant = new VoiceGrant({
+      outgoingApplicationSid: TWILIO_TWIML_APP_SID,
+      incomingAllow: false,
+    });
+
+    const token = new AccessToken(
+      TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_KEY_SID || TWILIO_ACCOUNT_SID,
+      process.env.TWILIO_API_KEY_SECRET || TWILIO_AUTH_TOKEN,
+      { identity }
+    );
+
+    token.addGrant(voiceGrant);
+
+    console.log("[Token] Generated access token for:", identity);
+    res.json({ token: token.toJwt(), identity });
+  });
+
+  // TwiML webhook for browser-initiated calls
+  app.post("/twilio/voice", (req, res) => {
+    const targetNumber = req.body.To || req.query.To;
+    
+    console.log("[TwiML Voice] ===== BROWSER CALL =====");
+    console.log("[TwiML Voice] To:", targetNumber);
+    console.log("[TwiML Voice] From:", req.body.From);
+    console.log("[TwiML Voice] Body:", JSON.stringify(req.body));
+
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const twimlResponse = new VoiceResponse();
+
+    if (targetNumber) {
+      const dial = twimlResponse.dial({ 
+        callerId: TWILIO_PHONE_NUMBER,
+        answerOnBridge: true 
+      });
+      dial.number(targetNumber);
+      console.log("[TwiML Voice] Dialing:", targetNumber);
+    } else {
+      twimlResponse.say("No destination number provided.");
+      console.log("[TwiML Voice] No target number");
+    }
+
+    res.type("text/xml").send(twimlResponse.toString());
   });
 
   // Twilio outbound webhook - returns TwiML for basic voice call

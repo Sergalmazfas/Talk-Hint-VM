@@ -15,8 +15,8 @@ const UI = {
 let socket = null;
 let currentMode = 'universal';
 let reconnectTimeout = null;
-let activeCallSid = null;
-let isCallActive = false;
+let activeConnection = null;
+let device = null;
 
 function log(message, type = 'info') {
   const line = document.createElement('div');
@@ -32,23 +32,86 @@ function getWSUrl(path) {
   return `${protocol}//${window.location.host}${path}`;
 }
 
-function connect() {
+// Initialize Twilio Device
+async function initTwilioDevice() {
+  try {
+    log('Getting Twilio token...');
+    const response = await fetch('/api/token');
+    const data = await response.json();
+    
+    if (data.error) {
+      log(`Token error: ${data.error}`, 'error');
+      UI.callStatus.textContent = 'Token error - check console';
+      return;
+    }
+
+    log(`Token received for: ${data.identity}`, 'success');
+    
+    // Initialize Twilio Device
+    device = new Twilio.Device(data.token, {
+      codecPreferences: ['opus', 'pcmu'],
+      enableRingingState: true,
+    });
+
+    device.on('ready', () => {
+      log('Twilio Device ready', 'success');
+      UI.statusDot.classList.add('connected');
+      UI.statusText.textContent = 'Ready to call';
+      UI.callBtn.disabled = false;
+    });
+
+    device.on('error', (error) => {
+      log(`Device error: ${error.message}`, 'error');
+      UI.callStatus.textContent = `Error: ${error.message}`;
+    });
+
+    device.on('connect', (conn) => {
+      log('Call connected', 'success');
+      activeConnection = conn;
+      UI.statusDot.classList.remove('calling');
+      UI.statusDot.classList.add('active');
+      UI.statusText.textContent = 'In Call';
+      UI.callStatus.textContent = 'Connected';
+      UI.callBtn.textContent = 'End Call';
+      UI.callBtn.classList.remove('start');
+      UI.callBtn.classList.add('end');
+    });
+
+    device.on('disconnect', () => {
+      log('Call disconnected');
+      activeConnection = null;
+      UI.statusDot.classList.remove('active', 'calling');
+      UI.statusDot.classList.add('connected');
+      UI.statusText.textContent = 'Ready to call';
+      UI.callStatus.textContent = 'Call ended';
+      UI.callBtn.textContent = 'Call';
+      UI.callBtn.classList.remove('end');
+      UI.callBtn.classList.add('start');
+    });
+
+    device.on('incoming', (conn) => {
+      log(`Incoming call from: ${conn.parameters.From}`);
+    });
+
+  } catch (err) {
+    log(`Init error: ${err.message}`, 'error');
+    UI.callStatus.textContent = 'Failed to initialize';
+  }
+}
+
+function connectWebSocket() {
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
   }
 
   const url = getWSUrl('/ui');
-  log(`Connecting to server: ${url}`);
+  log(`Connecting WebSocket: ${url}`);
   
   socket = new WebSocket(url);
 
   socket.onopen = () => {
-    log('Connected to server', 'success');
-    UI.statusDot.classList.add('connected');
-    UI.statusText.textContent = 'Connected - Ready';
-    UI.callBtn.disabled = false;
-    
+    log('WebSocket connected', 'success');
     sendMode(currentMode);
   };
 
@@ -62,16 +125,12 @@ function connect() {
   };
 
   socket.onclose = () => {
-    log('Disconnected from server', 'error');
-    UI.statusDot.classList.remove('connected', 'active', 'calling');
-    UI.statusText.textContent = 'Disconnected';
-    UI.callBtn.disabled = true;
-    
-    reconnectTimeout = setTimeout(connect, 3000);
+    log('WebSocket disconnected', 'error');
+    reconnectTimeout = setTimeout(connectWebSocket, 3000);
   };
 
   socket.onerror = (err) => {
-    log('Connection error', 'error');
+    log('WebSocket error', 'error');
   };
 }
 
@@ -85,11 +144,6 @@ function handleMessage(data) {
       }
       break;
 
-    case 'status':
-      log(`Status: ${data.text}`, 'success');
-      UI.callStatus.textContent = data.text;
-      break;
-
     case 'hon_transcript':
       addTranscript('hon', data.text);
       break;
@@ -98,89 +152,36 @@ function handleMessage(data) {
       addTranscript('gst', data.text);
       break;
 
-    case 'transcript':
-      if (data.role === 'user') {
-        addTranscript('hon', data.text);
-      } else if (data.role === 'assistant') {
-        addTranscript('gst', data.text);
-      }
-      break;
-
     case 'ai_hint':
     case 'response':
-    case 'hon_response':
       if (data.text) {
         UI.hints.textContent = data.text;
-        UI.hints.classList.remove('empty');
       }
-      break;
-
-    case 'call_started':
-      activeCallSid = data.callSid;
-      isCallActive = true;
-      log(`Call started: ${data.callSid}`, 'success');
-      UI.statusDot.classList.remove('calling');
-      UI.statusDot.classList.add('active');
-      UI.statusText.textContent = 'Active Call - Streaming';
-      UI.callStatus.textContent = `Active call: ${data.callSid}`;
-      UI.callBtn.textContent = 'End Call';
-      UI.callBtn.classList.remove('start');
-      UI.callBtn.classList.add('end');
-      // Show streaming status in panels
-      UI.hon.innerHTML = '<p class="streaming">Streaming... Listening for your voice</p>';
-      UI.gst.innerHTML = '<p class="streaming">Streaming... Listening for caller</p>';
-      UI.hints.textContent = 'Waiting for conversation...';
-      break;
-
-    case 'call_ended':
-      log(`Call ended: ${data.callSid}`);
-      UI.statusDot.classList.remove('active', 'calling');
-      UI.statusText.textContent = 'Connected - Ready';
-      UI.callStatus.textContent = 'Call ended';
-      UI.callBtn.textContent = 'Call';
-      UI.callBtn.classList.remove('end');
-      UI.callBtn.classList.add('start');
-      activeCallSid = null;
-      isCallActive = false;
       break;
 
     case 'mode_changed':
       currentMode = data.mode;
       UI.modeSelect.value = currentMode;
-      log(`Mode changed to: ${data.mode}`, 'success');
+      log(`Mode: ${data.mode}`, 'success');
       break;
 
     case 'error':
       log(`Error: ${data.error}`, 'error');
-      UI.callStatus.textContent = `Error: ${data.error}`;
-      UI.statusDot.classList.remove('calling');
-      UI.callBtn.disabled = false;
       break;
-
-    default:
-      log(`Event: ${data.type}`);
   }
 }
 
 function sendMode(mode) {
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({
-      type: 'set_mode',
-      mode: mode
-    }));
-    log(`Mode set to: ${mode}`);
+    socket.send(JSON.stringify({ type: 'set_mode', mode }));
   }
 }
 
 function addTranscript(panel, text) {
   if (!text) return;
-  
   const container = panel === 'hon' ? UI.hon : UI.gst;
-  
   const emptyMsg = container.querySelector('.empty');
-  if (emptyMsg) {
-    emptyMsg.remove();
-  }
+  if (emptyMsg) emptyMsg.remove();
   
   const p = document.createElement('p');
   p.textContent = text;
@@ -188,64 +189,70 @@ function addTranscript(panel, text) {
   container.scrollTop = container.scrollHeight;
 }
 
-function clearTranscripts() {
-  UI.hon.innerHTML = '<p class="empty">Listening...</p>';
-  UI.gst.innerHTML = '<p class="empty">Listening...</p>';
-  UI.hints.textContent = 'Waiting for conversation...';
-}
-
-async function startCall() {
+function makeCall() {
   const phoneNumber = UI.phoneInput.value.trim();
   
   if (!phoneNumber) {
-    log('Please enter a phone number', 'error');
+    log('Enter a phone number', 'error');
     UI.callStatus.textContent = 'Enter a phone number';
     return;
   }
-  
+
+  if (!device) {
+    log('Device not ready', 'error');
+    UI.callStatus.textContent = 'Device not ready';
+    return;
+  }
+
   log(`Calling: ${phoneNumber}`);
   UI.statusDot.classList.add('calling');
   UI.statusText.textContent = 'Calling...';
   UI.callStatus.textContent = `Calling ${phoneNumber}...`;
   UI.callBtn.disabled = true;
+
+  // Make the call via Twilio Device
+  const params = { To: phoneNumber };
+  activeConnection = device.connect(params);
   
-  try {
-    const response = await fetch('/start-call', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ target: phoneNumber }),
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      log(`Call initiated: ${data.callSid}`, 'success');
-      activeCallSid = data.callSid;
-      UI.callStatus.textContent = `Ringing ${phoneNumber}...`;
-      UI.callBtn.disabled = false;
-    } else {
-      log(`Call failed: ${data.error}`, 'error');
-      UI.statusDot.classList.remove('calling');
-      UI.statusText.textContent = 'Connected - Ready';
-      UI.callStatus.textContent = `Failed: ${data.error}`;
-      UI.callBtn.disabled = false;
-    }
-  } catch (err) {
-    log(`Call error: ${err.message}`, 'error');
-    UI.statusDot.classList.remove('calling');
-    UI.statusText.textContent = 'Connected - Ready';
-    UI.callStatus.textContent = `Error: ${err.message}`;
+  activeConnection.on('accept', () => {
+    log('Call accepted', 'success');
     UI.callBtn.disabled = false;
+  });
+  
+  activeConnection.on('reject', () => {
+    log('Call rejected');
+    UI.statusDot.classList.remove('calling');
+    UI.statusText.textContent = 'Ready to call';
+    UI.callStatus.textContent = 'Call rejected';
+    UI.callBtn.disabled = false;
+  });
+
+  activeConnection.on('cancel', () => {
+    log('Call cancelled');
+    UI.statusDot.classList.remove('calling');
+    UI.callBtn.disabled = false;
+  });
+
+  activeConnection.on('error', (error) => {
+    log(`Call error: ${error.message}`, 'error');
+    UI.statusDot.classList.remove('calling');
+    UI.callStatus.textContent = `Error: ${error.message}`;
+    UI.callBtn.disabled = false;
+  });
+}
+
+function endCall() {
+  if (activeConnection) {
+    activeConnection.disconnect();
+    log('Call ended by user');
   }
 }
 
 UI.callBtn.addEventListener('click', () => {
-  if (isCallActive) {
-    log('Call end not implemented yet');
+  if (activeConnection) {
+    endCall();
   } else {
-    startCall();
+    makeCall();
   }
 });
 
@@ -255,10 +262,12 @@ UI.modeSelect.addEventListener('change', (e) => {
 });
 
 UI.phoneInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && !isCallActive) {
-    startCall();
+  if (e.key === 'Enter' && !activeConnection) {
+    makeCall();
   }
 });
 
-log('TalkHint Phone Mode initialized');
-connect();
+// Initialize
+log('TalkHint WebRTC Mode');
+connectWebSocket();
+initTwilioDevice();
