@@ -93,11 +93,6 @@
       color: #fff;
     }
     .call-btn.end:hover { transform: scale(1.05); }
-    .call-help {
-      font-size: 0.8rem;
-      color: #666;
-      margin-top: 5px;
-    }
     .controls {
       display: flex;
       gap: 10px;
@@ -217,11 +212,9 @@
     </div>
 
     <div class="call-controls">
-      <input type="tel" class="phone-input" id="honInput" placeholder="Your phone (+1...)" data-testid="input-hon">
-      <input type="tel" class="phone-input" id="targetInput" placeholder="Target phone (+1...)" data-testid="input-target">
+      <input type="tel" class="phone-input" id="phoneInput" placeholder="Enter phone number (+1...)" data-testid="input-phone">
       <button class="call-btn start" id="callBtn" data-testid="button-call">Call</button>
     </div>
-    <p class="call-help">Enter YOUR phone first, then the target. We'll call you and connect to target.</p>
 
     <div class="controls">
       <div class="mode-selector">
