@@ -401,6 +401,22 @@ export function setupWebSocket(server: Server) {
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
+    let audioSentCount = 0;
+
+    // Send audio back to Twilio (for bidirectional streaming)
+    const sendAudioToTwilio = (base64Audio: string) => {
+      if (ws.readyState === WebSocket.OPEN && streamSid) {
+        audioSentCount++;
+        if (audioSentCount === 1 || audioSentCount % 100 === 0) {
+          log(`Audio sent to Twilio: ${audioSentCount}`, "twilio");
+        }
+        ws.send(JSON.stringify({
+          event: "media",
+          streamSid,
+          media: { payload: base64Audio }
+        }));
+      }
+    };
 
     ws.on("message", async (data: Buffer) => {
       try {
@@ -420,6 +436,7 @@ export function setupWebSocket(server: Server) {
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
               log(`Call starting: ${callSid}, stream: ${streamSid}`, "twilio");
+              log(`Tracks: ${JSON.stringify(message.start.tracks)}`, "twilio");
 
               try {
                 gptHandler = new GPTRealtimeHandler({
@@ -429,11 +446,14 @@ export function setupWebSocket(server: Server) {
                     uiBroadcast({ type: "gst_transcript", callSid, ...transcript });
                   },
                   onResponse: (response) => {
-                    log(`AI hint: ${response.text}`, "twilio");
+                    log(`AI response: ${response.text}`, "twilio");
                     uiBroadcast({ type: "ai_hint", callSid, text: response.text });
                     uiBroadcast({ type: "response", callSid, ...response });
                   },
-                  onAudio: () => {},
+                  onAudio: (audioBase64) => {
+                    // Send OpenAI audio back to Twilio
+                    sendAudioToTwilio(audioBase64);
+                  },
                   onError: (error) => {
                     log(`GPT error: ${error.message || error}`, "twilio");
                     uiBroadcast({ type: "error", callSid, error: error.message || error });
@@ -462,7 +482,7 @@ export function setupWebSocket(server: Server) {
             break;
 
           case "stop":
-            log(`Call ended: ${callSid}, total audio frames: ${audioFrameCount}`, "twilio");
+            log(`Call ended: ${callSid}, received: ${audioFrameCount}, sent: ${audioSentCount}`, "twilio");
             if (gptHandler) gptHandler.disconnect();
             uiBroadcast({ type: "call_ended", callSid });
             break;

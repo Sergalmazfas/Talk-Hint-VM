@@ -56,45 +56,27 @@ export async function registerRoutes(
     });
   });
 
-  // Twilio webhook - returns TwiML for outbound calls
-  // Starts media stream and dials target number
+  // Twilio webhook - returns TwiML for calls
+  // Uses <Connect><Stream> for bidirectional audio with OpenAI
   app.post("/twilio/inbound", (req, res) => {
     const host = req.headers.host || req.hostname;
     const wsUrl = `wss://${host}/twilio-stream`;
     
-    // Get target number from query params (passed from /start-call)
-    const targetNumber = req.query.target as string | undefined;
-    
-    console.log("[TwiML] Generating TwiML");
+    console.log("[TwiML] ===== GENERATING TwiML =====");
     console.log("[TwiML] Stream URL:", wsUrl);
-    console.log("[TwiML] Target:", targetNumber || "none");
+    console.log("[TwiML] Request body:", JSON.stringify(req.body));
     
-    let twiml: string;
-    
-    if (targetNumber) {
-      // Outbound call: start stream and dial target
-      twiml = `<?xml version="1.0" encoding="UTF-8"?>
+    // Use <Connect><Stream> for bidirectional audio
+    // This allows OpenAI to both receive audio AND send audio back
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Start>
-    <Stream url="${wsUrl}" track="both_tracks" />
-  </Start>
-  <Dial callerId="${TWILIO_PHONE_NUMBER}">
-    <Number>${targetNumber}</Number>
-  </Dial>
+  <Say>Please wait while we connect you to the AI assistant.</Say>
+  <Connect>
+    <Stream url="${wsUrl}" />
+  </Connect>
 </Response>`;
-    } else {
-      // Inbound call: just stream and keep open
-      twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Start>
-    <Stream url="${wsUrl}" track="both_tracks" />
-  </Start>
-  <Say>Connected to TalkHint.</Say>
-  <Pause length="3600"/>
-</Response>`;
-    }
 
-    console.log("[TwiML] Sending TwiML");
+    console.log("[TwiML] Sending bidirectional TwiML");
     res.type("text/xml").send(twiml);
   });
 
