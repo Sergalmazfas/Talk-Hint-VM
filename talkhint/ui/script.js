@@ -8,7 +8,8 @@ const UI = {
   modeBadge: document.getElementById('modeBadge'),
   modeSelect: document.getElementById('modeSelect'),
   callStatus: document.getElementById('callStatus'),
-  phoneInput: document.getElementById('phoneInput'),
+  honInput: document.getElementById('honInput'),
+  targetInput: document.getElementById('targetInput'),
   callBtn: document.getElementById('callBtn')
 };
 
@@ -121,12 +122,15 @@ function handleMessage(data) {
       log(`Call started: ${data.callSid}`, 'success');
       UI.statusDot.classList.remove('calling');
       UI.statusDot.classList.add('active');
-      UI.statusText.textContent = 'Active Call';
+      UI.statusText.textContent = 'Active Call - Streaming';
       UI.callStatus.textContent = `Active call: ${data.callSid}`;
       UI.callBtn.textContent = 'End Call';
       UI.callBtn.classList.remove('start');
       UI.callBtn.classList.add('end');
-      clearTranscripts();
+      // Show streaming status in panels
+      UI.hon.innerHTML = '<p class="streaming">Streaming... Listening for your voice</p>';
+      UI.gst.innerHTML = '<p class="streaming">Streaming... Listening for caller</p>';
+      UI.hints.textContent = 'Waiting for conversation...';
       break;
 
     case 'call_ended':
@@ -192,17 +196,19 @@ function clearTranscripts() {
 }
 
 async function startCall() {
-  const phoneNumber = UI.phoneInput.value.trim();
+  const honPhone = UI.honInput.value.trim();
+  const targetPhone = UI.targetInput.value.trim();
   
-  if (!phoneNumber) {
-    log('Please enter a phone number', 'error');
+  if (!honPhone || !targetPhone) {
+    log('Please enter both phone numbers', 'error');
+    UI.callStatus.textContent = 'Enter both phone numbers';
     return;
   }
   
-  log(`Starting call to: ${phoneNumber}`);
+  log(`Starting bridge call: ${honPhone} -> ${targetPhone}`);
   UI.statusDot.classList.add('calling');
-  UI.statusText.textContent = 'Calling...';
-  UI.callStatus.textContent = `Calling ${phoneNumber}...`;
+  UI.statusText.textContent = 'Calling your phone...';
+  UI.callStatus.textContent = `Calling ${honPhone}...`;
   UI.callBtn.disabled = true;
   
   try {
@@ -211,7 +217,11 @@ async function startCall() {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ target: phoneNumber }),
+      body: JSON.stringify({ 
+        target: targetPhone,
+        hon: honPhone,
+        mode: 'bridge'
+      }),
     });
     
     const data = await response.json();
@@ -219,6 +229,7 @@ async function startCall() {
     if (data.success) {
       log(`Call initiated: ${data.callSid}`, 'success');
       activeCallSid = data.callSid;
+      UI.callStatus.textContent = `Calling you first, then ${targetPhone}...`;
       UI.callBtn.disabled = false;
     } else {
       log(`Call failed: ${data.error}`, 'error');
@@ -249,7 +260,7 @@ UI.modeSelect.addEventListener('change', (e) => {
   sendMode(currentMode);
 });
 
-UI.phoneInput.addEventListener('keypress', (e) => {
+UI.targetInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter' && !isCallActive) {
     startCall();
   }

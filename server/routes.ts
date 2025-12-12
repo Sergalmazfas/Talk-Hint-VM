@@ -56,64 +56,72 @@ export async function registerRoutes(
     });
   });
 
-  // Twilio inbound webhook - returns TwiML to start Media Stream + Dial
+  // Twilio webhook - returns TwiML to start Media Stream and optionally dial target
   app.post("/twilio/inbound", (req, res) => {
     const host = req.headers.host || req.hostname;
-    const protocol = host.includes("localhost") ? "ws" : "wss";
-    const wsUrl = `${protocol}://${host}/media`;
+    const wsUrl = `wss://${host}/twilio-stream`;
     
-    // Get target number from query params or body
-    const targetNumber = req.query.target || req.body?.target;
+    // Get target number from query params (passed from /start-call)
+    const targetNumber = req.query.target as string | undefined;
+    
+    console.log("[TwiML] Generating TwiML, stream URL:", wsUrl);
+    console.log("[TwiML] Target number:", targetNumber || "none (direct call)");
     
     let twiml: string;
     
     if (targetNumber) {
-      // Outbound call: start stream + dial to target
+      // This is a bridge call: HON's phone answered, now dial TARGET
+      // Audio from both parties streams to TalkHint
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
     <Stream url="${wsUrl}" track="both_tracks" />
   </Start>
+  <Say>Connecting your call.</Say>
   <Dial callerId="${TWILIO_PHONE_NUMBER}">
     <Number>${targetNumber}</Number>
   </Dial>
 </Response>`;
     } else {
-      // Inbound call: start stream + pause to keep call open
+      // Direct outbound call to target - just stream and keep open
       twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
     <Stream url="${wsUrl}" track="both_tracks" />
   </Start>
-  <Say>Welcome to TalkHint. Connecting you now.</Say>
-  <Pause length="60"/>
+  <Say>Connected to TalkHint. Your call is being monitored.</Say>
+  <Pause length="300"/>
 </Response>`;
     }
 
+    console.log("[TwiML] Sending TwiML");
     res.type("text/xml").send(twiml);
   });
 
   // Also support GET for testing
   app.get("/twilio/inbound", (req, res) => {
     const host = req.headers.host || req.hostname;
-    const protocol = host.includes("localhost") ? "ws" : "wss";
-    const wsUrl = `${protocol}://${host}/media`;
+    const wsUrl = `wss://${host}/twilio-stream`;
     
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Start>
     <Stream url="${wsUrl}" track="both_tracks" />
   </Start>
-  <Pause length="60"/>
+  <Say>TalkHint streaming active.</Say>
+  <Pause length="300"/>
 </Response>`;
 
     res.type("text/xml").send(twiml);
   });
 
   // Start outbound call via Twilio REST API
+  // Two modes:
+  // 1. Direct: Calls TARGET directly, streams audio (one-party call for testing)
+  // 2. Bridge: Calls HON first, then dials TARGET when HON answers (two-party call)
   app.post("/start-call", async (req, res) => {
     try {
-      const { target } = req.body;
+      const { target, hon, mode = 'direct' } = req.body;
       
       if (!target) {
         return res.status(400).json({ error: "Target phone number is required" });
@@ -124,12 +132,25 @@ export async function registerRoutes(
       }
       
       const host = req.headers.host || req.hostname;
-      const webhookUrl = `https://${host}/twilio/inbound?target=${encodeURIComponent(target)}`;
-      
-      console.log(`Starting call to ${target} via webhook ${webhookUrl}`);
-      
-      // Make Twilio API call - dial the TARGET number, not Twilio number
       const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+      
+      let toNumber: string;
+      let webhookUrl: string;
+      
+      if (mode === 'bridge' && hon) {
+        // Bridge mode: Call HON first, TwiML will dial TARGET
+        toNumber = hon;
+        webhookUrl = `https://${host}/twilio/inbound?target=${encodeURIComponent(target)}`;
+        console.log(`[start-call] Bridge mode: calling HON ${hon}, will connect to TARGET ${target}`);
+      } else {
+        // Direct mode: Call TARGET directly, just stream audio
+        toNumber = target;
+        webhookUrl = `https://${host}/twilio/inbound`;
+        console.log(`[start-call] Direct mode: calling TARGET ${target}`);
+      }
+      
+      console.log(`[start-call] To: ${toNumber}, From: ${TWILIO_PHONE_NUMBER}`);
+      console.log(`[start-call] Webhook: ${webhookUrl}`);
       
       const twilioResponse = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`,
@@ -140,8 +161,8 @@ export async function registerRoutes(
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({
-            To: target, // Dial the TARGET number entered by user
-            From: TWILIO_PHONE_NUMBER!, // Caller ID shown to recipient
+            To: toNumber,
+            From: TWILIO_PHONE_NUMBER!,
             Url: webhookUrl,
           }),
         }
@@ -149,21 +170,22 @@ export async function registerRoutes(
       
       if (!twilioResponse.ok) {
         const errorText = await twilioResponse.text();
-        console.error('Twilio API error:', errorText);
+        console.error('[start-call] Twilio API error:', errorText);
         return res.status(twilioResponse.status).json({ error: 'Failed to initiate call', details: errorText });
       }
       
       const callData = await twilioResponse.json();
-      console.log(`Call initiated: ${callData.sid}`);
+      console.log(`[start-call] Call initiated: ${callData.sid}`);
       
       res.json({ 
         success: true, 
         callSid: callData.sid,
         status: callData.status,
-        target 
+        target,
+        mode 
       });
     } catch (error: any) {
-      console.error('Start call error:', error);
+      console.error('[start-call] Error:', error);
       res.status(500).json({ error: error.message || 'Failed to start call' });
     }
   });
