@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupWebSocket } from "./websocket";
+import { setupWebSocket, TALKHINT_GLOBAL_PROMPT, PREP_PROMPT, LANGUAGE_NAMES } from "./websocket";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -298,6 +298,73 @@ export async function registerRoutes(
     req.on("close", () => {
       clients.delete(res);
     });
+  });
+
+  // PREP MODE Chat endpoint - for rehearsal before calls
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const { message, language = "ru", isLiveCall = false, goal = "" } = req.body;
+      
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+      
+      const langName = LANGUAGE_NAMES[language] || "Russian";
+      
+      // Use PREP_PROMPT when no live call, otherwise use GLOBAL prompt
+      const systemPrompt = isLiveCall 
+        ? `${TALKHINT_GLOBAL_PROMPT}
+
+USER'S GOAL: ${goal || "Have a successful phone conversation"}
+USER'S NATIVE LANGUAGE: ${langName}
+
+The user is in a LIVE call. Give them immediate, ready-to-say phrases.`
+        : `${PREP_PROMPT}
+
+${TALKHINT_GLOBAL_PROMPT}
+
+USER'S GOAL: ${goal || "Unknown - ask what they want to accomplish"}
+USER'S NATIVE LANGUAGE: ${langName}`;
+
+      console.log("[Chat] Mode:", isLiveCall ? "LIVE" : "PREP", "Language:", language);
+      
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: message }
+          ],
+          temperature: 0.7,
+          max_tokens: 500,
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[Chat] OpenAI error:", errorText);
+        return res.status(500).json({ error: "AI service error" });
+      }
+      
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content || "";
+      
+      console.log("[Chat] Response:", reply.substring(0, 100) + "...");
+      
+      res.json({ 
+        reply,
+        mode: isLiveCall ? "live" : "prep"
+      });
+      
+    } catch (error: any) {
+      console.error("[Chat] Error:", error.message);
+      res.status(500).json({ error: "Failed to process chat" });
+    }
   });
 
   return httpServer;
