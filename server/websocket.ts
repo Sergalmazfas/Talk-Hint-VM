@@ -69,6 +69,33 @@ const LANGUAGE_NAMES: Record<string, string> = {
   es: "Spanish"
 };
 
+// TalkHint Global System Prompt - the core behavior
+const TALKHINT_GLOBAL_PROMPT = `You are TalkHint — a real-time call coach and conversation assistant.
+
+Your role:
+- The user does NOT speak English fluently.
+- The user needs EXACT phrases to say during live conversations.
+- You do NOT teach.
+- You do NOT explain grammar.
+- You do NOT give long answers.
+
+Your job:
+- Give SHORT, READY-TO-SAY phrases.
+- The user will READ them out loud.
+- Always guide the conversation toward the USER'S GOAL.
+
+Rules:
+1. Be concise. Short sentences only.
+2. Always suggest what the user should SAY next.
+3. Do NOT explain why.
+4. Do NOT ask unnecessary questions.
+5. Assume the user is in a REAL conversation right now.
+6. Respond immediately with usable phrases.
+
+You are NOT a chatbot.
+You are a live call assistant.
+Speed and clarity are critical.`;
+
 // Translate guest speech and generate suggestion
 async function translateAndSuggest(text: string, goal: string, language: string = "ru"): Promise<{
   translation: string;
@@ -76,6 +103,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
   suggestion?: { en: string; translation: string };
 }> {
   const langName = LANGUAGE_NAMES[language] || "Russian";
+  const langCode = language === "es" ? "ES" : "RU";
   
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -89,20 +117,19 @@ async function translateAndSuggest(text: string, goal: string, language: string 
         messages: [
           {
             role: "system",
-            content: `You help a ${langName} speaker during an English phone call.
+            content: `${TALKHINT_GLOBAL_PROMPT}
 
-TASK: Given what the other person (Guest) just said, provide:
-1. ${langName} translation of their speech
-2. A suggested SHORT response (under 15 words) the user should say, aligned with their goal
+USER'S GOAL: ${goal || "Have a successful phone conversation"}
+USER'S NATIVE LANGUAGE: ${langName} (${langCode})
 
-GOAL: ${goal || "Have a successful phone conversation"}
-
-CRITICAL: Suggestions must be SHORT ready-to-say phrases. NO explanations, NO teaching, NO options.
+TASK: The other person (Guest) just spoke. You must:
+1. Translate what Guest said into ${langName}
+2. Give a SHORT phrase the user should SAY next
 
 Return JSON only:
 {
-  "translation": "${langName} translation of what Guest said",
-  "suggestion": { "en": "Short English response to say", "translation": "${langName} translation of response" }
+  "translation": "${langName} translation of Guest's words",
+  "suggestion": { "en": "Short English phrase to say", "translation": "${langName} translation" }
 }`
           },
           {
@@ -110,8 +137,8 @@ Return JSON only:
             content: `Guest said: "${text}"`
           }
         ],
-        temperature: 0.7,
-        max_tokens: 300,
+        temperature: 0.5,
+        max_tokens: 200,
       }),
     });
 
@@ -324,11 +351,14 @@ class GPTRealtimeHandler {
   }
 
   private initSession() {
+    // Combine global TalkHint prompt with mode-specific prompt
+    const fullInstructions = `${TALKHINT_GLOBAL_PROMPT}\n\n${getRealtimePrompt(this.mode)}`;
+    
     this.send({
       type: "session.update",
       session: {
         modalities: ["text", "audio"],
-        instructions: getRealtimePrompt(this.mode),
+        instructions: fullInstructions,
         voice: "alloy",
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw",
@@ -769,6 +799,7 @@ export function setupWebSocket(server: Server) {
     if (history.length < 1) return;
     
     const recentContext = history.slice(-5).map(h => `${h.role}: ${h.text}`).join("\n");
+    const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
     
     // Start a timer for filler phrase
     const fillerTimer = setTimeout(() => sendFiller(), 2000);
@@ -785,21 +816,22 @@ export function setupWebSocket(server: Server) {
           messages: [
             {
               role: "system",
-              content: `You are a real-time assistant helping someone during a phone call. Based on the conversation, suggest 3 SHORT response options they could say next. Each suggestion should be:
-1. Natural and conversational
-2. Under 15 words
-3. Helpful for continuing the conversation
+              content: `${TALKHINT_GLOBAL_PROMPT}
 
-Return ONLY a JSON object with this format:
-{"hints": [{"en": "English phrase", "ru": "Russian translation"}, {"en": "...", "ru": "..."}, {"en": "...", "ru": "..."}]}`
+Based on the conversation, give 1-2 SHORT phrases the user should SAY next.
+Each phrase must be under 15 words.
+Include ${langName} translation.
+
+Return JSON only:
+{"hints": [{"en": "English phrase to say", "translation": "${langName} translation"}]}`
             },
             {
               role: "user",
-              content: `Recent conversation:\n${recentContext}\n\nSuggest 3 response options:`
+              content: `Recent conversation:\n${recentContext}\n\nWhat should user say next?`
             }
           ],
-          temperature: 0.7,
-          max_tokens: 300,
+          temperature: 0.5,
+          max_tokens: 200,
         }),
       });
       
