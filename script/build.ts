@@ -63,10 +63,11 @@ async function buildAll() {
     },
   });
 
-  // Copy TalkHint UI files to dist
+  // Copy TalkHint UI files to dist (both locations for compatibility)
   console.log("Copying TalkHint UI files...");
   await cp("talkhint/ui", "dist/talkhint/ui", { recursive: true });
-  console.log("TalkHint UI files copied to dist/talkhint/ui");
+  await cp("talkhint/ui", "dist/public/app", { recursive: true });
+  console.log("TalkHint UI files copied to dist/talkhint/ui and dist/public/app");
 
   // Create CJS wrapper for package.json start script (which expects index.cjs)
   const cjsWrapper = `// ESM loader - redirects to pure ESM build
