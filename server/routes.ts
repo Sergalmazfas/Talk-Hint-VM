@@ -23,7 +23,10 @@ export async function registerRoutes(
   setupWebSocket(httpServer);
 
   // TalkHint UI - serve from dist/talkhint/ui (where bundled SDK is)
-  const talkhintUiPath = path.join(__dirname, "../dist/talkhint/ui");
+  // In production, use cwd-relative path; in dev, use __dirname-relative
+  const talkhintUiPath = process.env.NODE_ENV === "production"
+    ? path.join(process.cwd(), "dist/talkhint/ui")
+    : path.join(__dirname, "../dist/talkhint/ui");
   console.log("[TalkHint] Serving UI from:", talkhintUiPath);
   app.use("/app", express.static(talkhintUiPath));
 
