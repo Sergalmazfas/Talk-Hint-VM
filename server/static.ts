@@ -17,7 +17,12 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  // but NOT for API routes or Twilio webhooks
+  app.use("*", (req, res, next) => {
+    const path = req.originalUrl;
+    if (path.startsWith("/api/") || path.startsWith("/twilio/")) {
+      return next();
+    }
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
