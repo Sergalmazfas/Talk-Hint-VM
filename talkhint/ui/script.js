@@ -10,13 +10,14 @@ const UI = {
   chatContainer: document.getElementById('chatContainer'),
   emptyState: document.getElementById('emptyState'),
   textInput: document.getElementById('textInput'),
-  sendBtn: document.getElementById('sendBtn'),
-  micBtn: document.getElementById('micBtn')
+  sendBtn: document.getElementById('sendBtn')
 };
 
 let hasGoal = false;
 let currentFolder = null;
 let currentLanguage = localStorage.getItem('talkhint_language') || 'ru';
+let callGoal = '';
+let isInCall = false;
 
 const LANGUAGE_FLAGS = {
   ru: '🇷🇺',
@@ -438,9 +439,6 @@ UI.textInput.addEventListener('keypress', function(e) {
   }
 });
 
-UI.micBtn.addEventListener('click', function() {
-  UI.micBtn.classList.toggle('active');
-});
 
 UI.sendBtn.addEventListener('click', function() {
   const text = UI.textInput.value.trim();
