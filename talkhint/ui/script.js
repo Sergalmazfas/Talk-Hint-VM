@@ -17,6 +17,8 @@ const UI = {
 let hasGoal = false;
 let currentFolder = null;
 let currentLanguage = localStorage.getItem('talkhint_language') || 'ru';
+let conversationContext = []; // Store conversation history for assistant chat
+let currentGoal = ''; // Store call goal
 
 const LANGUAGE_FLAGS = {
   ru: '🇷🇺',
@@ -149,6 +151,8 @@ function clearChat() {
   lastMessageTime = 0;
   lastMessageEl = null;
   setGoalActive(false);
+  // Clear conversation context for new call
+  conversationContext = [];
 }
 
 function escapeHtml(text) {
@@ -312,6 +316,9 @@ function handleMessage(data) {
     case 'hon_transcript':
       if (data.text) {
         addMessage('you', data.text);
+        // Add to conversation context for assistant chat
+        conversationContext.push({ role: 'honor', text: data.text });
+        if (conversationContext.length > 20) conversationContext.shift();
       }
       break;
 
@@ -319,6 +326,9 @@ function handleMessage(data) {
     case 'gst_transcript':
       if (data.text) {
         addMessage('guest', data.text, data.translation);
+        // Add to conversation context for assistant chat
+        conversationContext.push({ role: 'guest', text: data.text });
+        if (conversationContext.length > 20) conversationContext.shift();
       }
       break;
 
@@ -428,12 +438,99 @@ UI.phoneInput.addEventListener('keypress', function(e) {
   }
 });
 
+// Send message to Assistant Chat API
+async function sendToAssistant(text) {
+  if (!text) return;
+  
+  // Show user's message immediately
+  addAssistantChatMessage('user', text);
+  UI.textInput.value = '';
+  UI.sendBtn.disabled = true;
+  
+  // Add Honor's chat message to context so AI knows what was asked
+  conversationContext.push({ role: 'honor_chat', text: text });
+  if (conversationContext.length > 20) conversationContext.shift();
+  
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        language: currentLanguage,
+        isLiveCall: !!activeCall,
+        goal: currentGoal,
+        conversationContext: conversationContext
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Chat API error');
+    }
+    
+    const data = await response.json();
+    if (data.reply) {
+      addAssistantChatMessage('assistant', data.reply);
+    }
+  } catch (err) {
+    log('Assistant error: ' + err.message);
+    addAssistantChatMessage('assistant', '⚠️ Error connecting to assistant');
+  } finally {
+    UI.sendBtn.disabled = false;
+  }
+}
+
+// Add assistant chat message (different from call transcript)
+function addAssistantChatMessage(role, text) {
+  if (!text) return;
+  UI.emptyState.style.display = 'none';
+  
+  const msg = document.createElement('div');
+  msg.className = 'message ' + (role === 'user' ? 'you' : 'assistant');
+  
+  const labelDiv = document.createElement('div');
+  labelDiv.className = 'message-label';
+  labelDiv.textContent = role === 'user' ? '💬 You' : '🤖 Assistant';
+  
+  const bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+  if (role === 'assistant') {
+    bubble.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    bubble.style.color = '#fff';
+  }
+  bubble.textContent = text;
+  
+  msg.appendChild(labelDiv);
+  msg.appendChild(bubble);
+  
+  // Add copy button for assistant messages
+  if (role === 'assistant') {
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'hint-btn copy';
+    copyBtn.style.marginTop = '8px';
+    copyBtn.textContent = '📋 Copy';
+    copyBtn.onclick = function() {
+      navigator.clipboard.writeText(text);
+      copyBtn.textContent = '✓ Copied';
+      setTimeout(() => copyBtn.textContent = '📋 Copy', 1500);
+    };
+    msg.appendChild(copyBtn);
+  }
+  
+  UI.chatContainer.appendChild(msg);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+  
+  lastMessageType = role === 'user' ? 'you' : 'assistant';
+  lastMessageTime = Date.now();
+  lastMessageEl = msg;
+}
+
 UI.textInput.addEventListener('keypress', function(e) {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
     const text = UI.textInput.value.trim();
     if (text) {
-      addMessage('you', text);
-      UI.textInput.value = '';
+      sendToAssistant(text);
     }
   }
 });
@@ -445,8 +542,7 @@ UI.micBtn.addEventListener('click', function() {
 UI.sendBtn.addEventListener('click', function() {
   const text = UI.textInput.value.trim();
   if (text) {
-    addMessage('you', text);
-    UI.textInput.value = '';
+    sendToAssistant(text);
   }
 });
 

@@ -12,6 +12,16 @@ Key features working in this version:
 - Multilingual speech recognition (RU/ES/EN)
 - Voice waveform animation
 - PREP mode for call rehearsal
+- **NEW: Assistant Chat** - text-based chat with AI during live calls
+
+## Recent Changes
+
+**December 28, 2025 - Assistant Chat Feature**
+- Added ASSISTANT_CHAT_PROMPT in server/websocket.ts - AI acts as prompter/sufleur for Honor
+- Updated /api/chat endpoint to support live call mode with conversation context
+- UI integration: sendToAssistant() function with context tracking
+- Honor can write in any language (RU/ES/EN), assistant provides ready-to-say English phrases
+- Conversation context (last 20 messages) passed to AI for relevant suggestions
 
 To restore this version, use Replit's checkpoint/rollback feature.
 

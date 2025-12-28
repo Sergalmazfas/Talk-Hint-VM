@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupWebSocket, TALKHINT_GLOBAL_PROMPT, PREP_PROMPT, LANGUAGE_NAMES } from "./websocket";
+import { setupWebSocket, TALKHINT_GLOBAL_PROMPT, PREP_PROMPT, ASSISTANT_CHAT_PROMPT, LANGUAGE_NAMES } from "./websocket";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -303,33 +303,62 @@ export async function registerRoutes(
     });
   });
 
-  // PREP MODE Chat endpoint - for rehearsal before calls
+  // Chat endpoint - supports both PREP mode and LIVE call assistant chat
   app.post("/api/chat", async (req, res) => {
     try {
-      const { message, language = "ru", isLiveCall = false, goal = "" } = req.body;
+      const { 
+        message, 
+        language = "ru", 
+        isLiveCall = false, 
+        goal = "",
+        conversationContext = [] // Array of { role: 'guest'|'honor', text: string }
+      } = req.body;
       
       if (!message) {
         return res.status(400).json({ error: "Message is required" });
       }
       
       const langName = LANGUAGE_NAMES[language] || "Russian";
+      const langFlag = language === "es" ? "🇪🇸" : "🇷🇺";
       
-      // Use PREP_PROMPT when no live call, otherwise use GLOBAL prompt
-      const systemPrompt = isLiveCall 
-        ? `${TALKHINT_GLOBAL_PROMPT}
+      let systemPrompt: string;
+      
+      if (isLiveCall) {
+        // LIVE CALL MODE - Assistant Chat as a prompter/sufleur
+        let contextSummary = "";
+        if (conversationContext && conversationContext.length > 0) {
+          contextSummary = "\n\nКОНТЕКСТ ТЕКУЩЕГО РАЗГОВОРА:\n";
+          conversationContext.slice(-10).forEach((item: { role: string; text: string }) => {
+            let speaker = "Unknown";
+            if (item.role === "guest") speaker = "Guest (собеседник по телефону)";
+            else if (item.role === "honor") speaker = "Honor (произнёс вслух)";
+            else if (item.role === "honor_chat") speaker = "Honor (написал в чат)";
+            contextSummary += `${speaker}: "${item.text}"\n`;
+          });
+        }
+        
+        systemPrompt = `${ASSISTANT_CHAT_PROMPT}
 
-USER'S GOAL: ${goal || "Have a successful phone conversation"}
-USER'S NATIVE LANGUAGE: ${langName}
+ЦЕЛЬ ЗВОНКА: ${goal || "Успешно провести телефонный разговор"}
+ЯЗЫК HONOR: ${langName} (${langFlag})
+ЯЗЫК GUEST: English (📞)
+${contextSummary}
 
-The user is in a LIVE call. Give them immediate, ready-to-say phrases.`
-        : `${PREP_PROMPT}
+ВАЖНО: Honor сейчас В ЖИВОМ ЗВОНКЕ. Давай немедленные, готовые к произнесению фразы.`;
+      } else {
+        // PREP MODE - for rehearsal before calls
+        systemPrompt = `${PREP_PROMPT}
 
 ${TALKHINT_GLOBAL_PROMPT}
 
 USER'S GOAL: ${goal || "Unknown - ask what they want to accomplish"}
 USER'S NATIVE LANGUAGE: ${langName}`;
+      }
 
-      console.log("[Chat] Mode:", isLiveCall ? "LIVE" : "PREP", "Language:", language);
+      console.log("[Chat] Mode:", isLiveCall ? "LIVE ASSISTANT" : "PREP", "Language:", language);
+      if (conversationContext?.length > 0) {
+        console.log("[Chat] Context items:", conversationContext.length);
+      }
       
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -343,8 +372,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
             { role: "system", content: systemPrompt },
             { role: "user", content: message }
           ],
-          temperature: 0.7,
-          max_tokens: 500,
+          temperature: 0.6,
+          max_tokens: 400,
         }),
       });
       
