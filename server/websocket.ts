@@ -323,6 +323,8 @@ const uiClients = new Set<WebSocket>();
 
 function uiBroadcast(message: object) {
   const data = JSON.stringify(message);
+  const openClients = Array.from(uiClients).filter(c => c.readyState === WebSocket.OPEN).length;
+  log(`[uiBroadcast] Sending to ${openClients} clients: ${(message as any).type}`, "server");
   uiClients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(data);
