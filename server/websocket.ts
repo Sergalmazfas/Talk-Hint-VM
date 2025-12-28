@@ -545,6 +545,51 @@ export function setupWebSocket(server: Server) {
 
   let currentGoal = "";
   
+  async function handleAIQuestion(ws: WebSocket, question: string, goal: string) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      ws.send(JSON.stringify({ type: "ai_response", text: "API ключ не настроен", error: true }));
+      return;
+    }
+
+    try {
+      const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
+      const systemPrompt = `${TALKHINT_GLOBAL_PROMPT}
+
+The user's goal for this call: ${goal || "Not specified"}
+The user's native language: ${langName}
+
+The user is asking you a question during an active phone call.
+Respond with a SHORT, helpful answer.
+If they need a phrase to say, give them the English phrase AND its translation to ${langName}.`;
+
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: question }
+          ],
+          max_tokens: 200
+        })
+      });
+
+      const data = await response.json() as any;
+      const text = data.choices?.[0]?.message?.content || "Не удалось получить ответ";
+      
+      ws.send(JSON.stringify({ type: "ai_response", text }));
+      log(`AI response sent: ${text.substring(0, 50)}...`, "server");
+    } catch (err: any) {
+      log(`AI question error: ${err.message}`, "server");
+      ws.send(JSON.stringify({ type: "ai_response", text: "Ошибка при обработке вопроса", error: true }));
+    }
+  }
+  
   function handleUIConnection(ws: WebSocket) {
     log("UI client connected", "server");
     uiClients.add(ws);
@@ -558,9 +603,10 @@ export function setupWebSocket(server: Server) {
           currentMode = message.mode;
           log(`Mode changed to: ${currentMode}`, "server");
           ws.send(JSON.stringify({ type: "mode_changed", mode: currentMode }));
-        } else if (message.type === "update_goal") {
+        } else if (message.type === "update_goal" || message.type === "set_goal") {
           currentGoal = message.goal || "";
-          log(`Goal updated: ${currentGoal.substring(0, 50)}...`, "server");
+          log(`Goal set: ${currentGoal.substring(0, 50)}...`, "server");
+          ws.send(JSON.stringify({ type: "goal_set", goal: currentGoal }));
         } else if (message.type === "set_language") {
           const lang = message.language;
           if (lang === "ru" || lang === "es") {
@@ -568,6 +614,11 @@ export function setupWebSocket(server: Server) {
             log(`Language changed to: ${currentLanguage}`, "server");
             ws.send(JSON.stringify({ type: "language_changed", language: currentLanguage }));
           }
+        } else if (message.type === "ask_ai") {
+          const question = message.question || "";
+          const goal = message.goal || currentGoal;
+          log(`AI question: ${question.substring(0, 50)}...`, "server");
+          handleAIQuestion(ws, question, goal);
         }
       } catch (err) {}
     });
