@@ -14,10 +14,14 @@ export function serveStatic(app: Express) {
     );
   }
 
+  const talkHintPath = path.resolve(__dirname, "talkhint/ui");
+  if (fs.existsSync(talkHintPath)) {
+    console.log("[TalkHint] Serving UI from:", talkHintPath);
+    app.use("/app", express.static(talkHintPath));
+  }
+
   app.use(express.static(distPath));
 
-  // fall through to index.html if the file doesn't exist
-  // but NOT for API routes, Twilio webhooks, or TalkHint app
   app.use("*", (req, res, next) => {
     const reqPath = req.originalUrl;
     if (reqPath.startsWith("/api/") || reqPath.startsWith("/twilio/") || reqPath.startsWith("/app/") || reqPath === "/app") {
