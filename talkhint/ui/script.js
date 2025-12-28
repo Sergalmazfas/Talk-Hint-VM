@@ -365,6 +365,10 @@ async function makeCall() {
   UI.callBtn.disabled = true;
   
   clearChat();
+  
+  if (callGoal) {
+    setGoalActive(true);
+  }
 
   try {
     activeCall = await device.connect({ params: { To: phoneNumber } });
