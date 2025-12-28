@@ -166,7 +166,7 @@ READY TO CALL.`;
 export { TALKHINT_GLOBAL_PROMPT, PREP_PROMPT, LANGUAGE_NAMES };
 
 // Translate guest speech and generate suggestion
-async function translateAndSuggest(text: string, goal: string, language: string = "ru"): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -175,6 +175,10 @@ async function translateAndSuggest(text: string, goal: string, language: string 
   const langCode = language === "es" ? "ES" : "RU";
   
   try {
+    const contextSection = conversationContext 
+      ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n` 
+      : "";
+    
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -190,20 +194,23 @@ async function translateAndSuggest(text: string, goal: string, language: string 
 
 USER'S GOAL: ${goal || "Have a successful phone conversation"}
 USER'S NATIVE LANGUAGE: ${langName} (${langCode})
-
-TASK: The other person (Guest) just spoke. You must:
+${contextSection}
+TASK: The other person (Guest) just spoke. Based on the FULL conversation context above:
 1. Translate what Guest said into ${langName}
-2. Give a SHORT phrase the user should SAY next
+2. Give a CONTEXTUAL phrase the user should SAY next (must make sense given the conversation flow)
+
+IMPORTANT: Your suggestion must be a LOGICAL RESPONSE to what Guest said, considering the FULL conversation history.
+Do NOT suggest random phrases. Be CONTEXTUAL.
 
 Return JSON only:
 {
   "translation": "${langName} translation of Guest's words",
-  "suggestion": { "en": "Short English phrase to say", "translation": "${langName} translation" }
+  "suggestion": { "en": "Short contextual English phrase to say", "translation": "${langName} translation" }
 }`
           },
           {
             role: "user",
-            content: `Guest said: "${text}"`
+            content: `Guest just said: "${text}"\n\nWhat should Honor say next?`
           }
         ],
         temperature: 0.5,
@@ -722,6 +729,9 @@ If they need a phrase to say, give them the English phrase AND its translation t
     let callSid: string | null = null;
     let audioFrameCount = 0;
     
+    // Conversation history for context
+    const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
+    
     // Deepgram connections for each track
     let deepgramInbound: any = null;
     let deepgramOutbound: any = null;
@@ -759,9 +769,22 @@ If they need a phrase to say, give them the English phrase AND its translation t
           if (isFinal) {
             log(`[Deepgram] ${speaker} final: ${transcript}`, "deepgram");
             
+            // Add to conversation log
+            conversationLog.push({
+              speaker: track === "outbound" ? "Guest" : "Honor",
+              text: transcript,
+              timestamp: Date.now()
+            });
+            
+            // Keep only last 10 messages
+            if (conversationLog.length > 10) {
+              conversationLog.shift();
+            }
+            
             if (track === "outbound") {
-              // Guest transcript - translate and generate suggestion
-              const translated = await translateAndSuggest(transcript, currentGoal, currentLanguage);
+              // Guest transcript - translate and generate suggestion with context
+              const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
+              const translated = await translateAndSuggest(transcript, currentGoal, currentLanguage, contextHistory);
               uiBroadcast({ 
                 type: "guest_transcript",
                 text: transcript,
