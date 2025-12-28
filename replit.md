@@ -1,5 +1,20 @@
 # TalkHint - Real-time Voice Assistant
 
+## Golden Version (Stable Release)
+
+**Commit:** `ee0ed3ac6617b015a106677402f0fa93ca81237e`  
+**Date:** December 20, 2025  
+**Status:** Production-ready, fully working on published site
+
+Key features working in this version:
+- Browser-to-phone calling via Twilio Voice SDK
+- Real-time transcription and AI hints
+- Multilingual speech recognition (RU/ES/EN)
+- Voice waveform animation
+- PREP mode for call rehearsal
+
+To restore this version, use Replit's checkpoint/rollback feature.
+
 ## Overview
 
 TalkHint is a real-time voice assistant application that helps users during phone calls by providing live transcription, translation hints, and AI-powered suggestions. The system processes audio streams from both Twilio phone calls and browser microphones, transcribes speech using OpenAI's Realtime API, and delivers contextual hints to the host (HON) during conversations with guests (GST).
