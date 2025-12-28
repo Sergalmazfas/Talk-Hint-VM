@@ -1,24 +1,18 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const calls = pgTable("calls", {
+export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  callSid: text("call_sid").notNull().unique(),
-  fromNumber: text("from_number").notNull(),
-  toNumber: text("to_number").notNull(),
-  status: text("status").notNull().default("active"),
-  startedAt: timestamp("started_at").notNull().defaultNow(),
-  endedAt: timestamp("ended_at"),
-  transcript: text("transcript"),
-  metadata: jsonb("metadata"),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
 });
 
-export const insertCallSchema = createInsertSchema(calls).omit({
-  id: true,
-  startedAt: true,
+export const insertUserSchema = createInsertSchema(users).pick({
+  username: true,
+  password: true,
 });
 
-export type InsertCall = z.infer<typeof insertCallSchema>;
-export type Call = typeof calls.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;

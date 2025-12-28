@@ -33,17 +33,9 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
-// Log ALL incoming requests for debugging
 app.use((req, res, next) => {
   const start = Date.now();
-  const reqPath = req.path;
-  
-  // Log every request immediately for debugging Twilio webhooks
-  if (reqPath.includes("twilio") || reqPath.includes("media")) {
-    log(`>>> INCOMING: ${req.method} ${reqPath} from ${req.ip}`, "request");
-    log(`>>> Headers: ${JSON.stringify(req.headers)}`, "request");
-  }
-  
+  const path = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
   const originalResJson = res.json;
@@ -54,12 +46,12 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const duration = Date.now() - start;
-    // Log all non-static requests
-    if (reqPath.startsWith("/api") || reqPath.includes("twilio") || reqPath.includes("media")) {
-      let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
+
       log(logLine);
     }
   });

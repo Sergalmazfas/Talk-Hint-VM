@@ -1,1 +1,0 @@
-// TalkHint Frontend UI
