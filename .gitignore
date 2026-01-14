@@ -1,0 +1,17 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+
+# Attached assets with secrets
+attached_assets/
+
+# Environment and secrets
+.env
+.env.*
+*.log
+
+# Seed config with real Twilio data (use seed-config.template.json as reference)
+seed-config.json

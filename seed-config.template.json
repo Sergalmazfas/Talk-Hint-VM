@@ -1,0 +1,23 @@
+{
+  "_readme": "Copy this file to seed-config.json and fill in your Twilio data. seed-config.json is gitignored.",
+  "numbers": [
+    {
+      "id": "uuid-1",
+      "twilioNumber": "+1XXXXXXXXXX",
+      "twilioSid": "PNXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "country": "US",
+      "subaccountSid": "ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      "subaccountName": "TH-NUM-1",
+      "tokenEnvVar": "TH_NUM_1_TOKEN"
+    }
+  ],
+  "defaultUser": {
+    "id": "your-user-id",
+    "email": "your@email.com",
+    "language": "ru",
+    "plan": "free",
+    "assignedNumber": "+1XXXXXXXXXX",
+    "phoneNumberId": "uuid-for-phone",
+    "phoneNumberName": "My Number"
+  }
+}

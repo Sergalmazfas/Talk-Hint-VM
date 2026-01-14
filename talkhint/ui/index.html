@@ -1,0 +1,852 @@
+<!-- MAIN UI ENTRY: TalkHint stable layout -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TalkHint">
+  <link rel="manifest" href="/app/manifest.json">
+  <link rel="apple-touch-icon" href="/app/icon-192.png">
+  <title>TalkHint</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #fff;
+      color: #333;
+      height: 100vh;
+      display: flex;
+    }
+    
+    .sidebar {
+      width: 260px;
+      background: #f9fafb;
+      border-right: 1px solid #e5e5e5;
+      display: flex;
+      flex-direction: column;
+      transition: width 0.2s, transform 0.2s;
+    }
+    .sidebar.collapsed {
+      width: 0;
+      overflow: hidden;
+      border-right: none;
+    }
+    
+    .sidebar-header {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    
+    .menu-btn {
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+    .menu-btn:hover { background: #e5e7eb; }
+    .menu-btn svg { width: 20px; height: 20px; fill: #6b7280; }
+    
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 8px;
+    }
+    
+    .numbers-section {
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .numbers-list {
+      min-height: 40px;
+    }
+    .number-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #374151;
+    }
+    .number-item:hover { background: #e5e7eb; }
+    .number-item.active { background: #dbeafe; color: #1d4ed8; }
+    .number-icon { font-size: 1rem; }
+    .number-info { flex: 1; overflow: hidden; }
+    .number-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .number-value { font-size: 0.75rem; color: #6b7280; }
+    .number-type-badge {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    .number-type-badge.personal { background: #dbeafe; color: #1d4ed8; }
+    .number-type-badge.work { background: #fef3c7; color: #d97706; }
+    
+    .folders-section {
+      margin-bottom: 12px;
+    }
+    .folders-list {
+      min-height: 40px;
+    }
+    .folders-empty {
+      padding: 20px 12px;
+      text-align: center;
+      color: #9ca3af;
+      font-size: 0.85rem;
+    }
+    
+    .folder-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #374151;
+      position: relative;
+    }
+    .folder-item:hover { background: #e5e7eb; }
+    .folder-item.active { background: #dbeafe; color: #1d4ed8; }
+    .folder-icon { font-size: 1rem; }
+    .folder-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .folder-actions {
+      display: none;
+      gap: 4px;
+    }
+    .folder-item:hover .folder-actions { display: flex; }
+    .folder-action-btn {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .folder-action-btn:hover { background: #d1d5db; }
+    
+    .sidebar-footer {
+      padding: 12px;
+      border-top: 1px solid #e5e5e5;
+    }
+    
+    .new-folder-btn {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px dashed #d1d5db;
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: #6b7280;
+    }
+    .new-folder-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+    
+    .sidebar-section {
+      padding: 12px 8px;
+      border-top: 1px solid #e5e5e5;
+    }
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #9ca3af;
+      padding: 4px 12px 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .language-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #374151;
+    }
+    .language-item:hover { background: #e5e7eb; }
+    .language-item.active { background: #dbeafe; color: #1d4ed8; }
+    
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    
+    .header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e5e5;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .toggle-sidebar-btn {
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+    .toggle-sidebar-btn:hover { background: #f3f4f6; }
+    .toggle-sidebar-btn svg { width: 20px; height: 20px; fill: #6b7280; }
+    
+    .header-center {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    
+    .phone-input {
+      width: 180px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .phone-input:focus {
+      outline: none;
+      border-color: #10a37f;
+    }
+    
+    .call-btn {
+      width: 40px;
+      height: 40px;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .call-btn.start { background: #10a37f; color: #fff; }
+    .call-btn.start:hover { background: #0d8a6a; }
+    .call-btn.end { background: #ef4444; color: #fff; }
+    .call-btn svg { width: 18px; height: 18px; }
+    
+    .status {
+      font-size: 0.8rem;
+      color: #888;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ccc;
+    }
+    .status-dot.connected { background: #10a37f; }
+    .status-dot.calling { background: #f59e0b; }
+    .status-dot.active { background: #10a37f; }
+    
+    .goal-indicator {
+      font-size: 1.1rem;
+      opacity: 0.3;
+      transition: opacity 0.2s;
+    }
+    .goal-indicator.active {
+      opacity: 1;
+    }
+    
+    .chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+    
+    .message {
+      margin-bottom: 16px;
+      max-width: 80%;
+    }
+    .message.you, .message.honor {
+      margin-left: auto;
+    }
+    .message.guest {
+      margin-right: auto;
+    }
+    
+    .message-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .message.you .message-label, .message.honor .message-label { color: #10a37f; text-align: right; }
+    .message.guest .message-label { color: #6b7280; }
+    .message.ai .message-label { color: #8b5cf6; }
+    
+    .message-bubble {
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .message.you .message-bubble, .message.honor .message-bubble {
+      background: #10a37f;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .message.guest .message-bubble {
+      background: #f3f4f6;
+      color: #333;
+      border-bottom-left-radius: 4px;
+    }
+    .message.ai {
+      margin-right: auto;
+    }
+    .message.ai .message-bubble {
+      background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+      border: 1px solid #ddd6fe;
+      color: #1f2937;
+      border-bottom-left-radius: 4px;
+    }
+    
+    .message-sentiment {
+      font-size: 1rem;
+      cursor: help;
+    }
+    .message.sentiment-positive .message-bubble {
+      border-left: 3px solid #22c55e;
+    }
+    .message.sentiment-negative .message-bubble {
+      border-left: 3px solid #ef4444;
+    }
+    .message.sentiment-neutral .message-bubble {
+      border-left: 3px solid #9ca3af;
+    }
+    .message.you.sentiment-positive .message-bubble,
+    .message.honor.sentiment-positive .message-bubble {
+      border-right: 3px solid #22c55e;
+      border-left: none;
+    }
+    .message.you.sentiment-negative .message-bubble,
+    .message.honor.sentiment-negative .message-bubble {
+      border-right: 3px solid #ef4444;
+      border-left: none;
+    }
+    .message.you.sentiment-neutral .message-bubble,
+    .message.honor.sentiment-neutral .message-bubble {
+      border-right: 3px solid #9ca3af;
+      border-left: none;
+    }
+    
+    .hint {
+      margin-bottom: 16px;
+      max-width: 90%;
+      margin-right: auto;
+    }
+    .hint-header {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #8b5cf6;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hint-card {
+      background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+      border: 1px solid #ddd6fe;
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .hint-phrase {
+      font-size: 1.05rem;
+      line-height: 1.5;
+      color: #1f2937;
+      margin-bottom: 8px;
+    }
+    .hint-translation {
+      font-size: 0.9rem;
+      color: #6b7280;
+      font-style: italic;
+      padding-top: 8px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .hint-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .hint-btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hint-btn.say {
+      background: #8b5cf6;
+      color: #fff;
+    }
+    .hint-btn.say:hover { background: #7c3aed; }
+    .hint-btn.copy {
+      background: #e5e7eb;
+      color: #374151;
+    }
+    .hint-btn.copy:hover { background: #d1d5db; }
+    
+    .input-bar {
+      padding: 16px 20px;
+      border-top: 1px solid #e5e5e5;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #fff;
+    }
+    
+    .text-input {
+      flex: 1;
+      padding: 12px 16px;
+      font-size: 0.95rem;
+      border: 1px solid #ddd;
+      border-radius: 24px;
+      background: #f9fafb;
+      resize: none;
+      font-family: inherit;
+    }
+    .text-input:focus {
+      outline: none;
+      border-color: #10a37f;
+      background: #fff;
+    }
+    
+    .send-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 50%;
+      background: #10a37f;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .send-btn:hover { background: #0d8a6a; }
+    .send-btn svg { width: 20px; height: 20px; fill: #fff; }
+    
+    
+    .empty-state {
+      text-align: center;
+      color: #9ca3af;
+      padding: 60px 20px;
+    }
+    .empty-state h2 {
+      font-size: 1.2rem;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+    .empty-state p {
+      font-size: 0.9rem;
+    }
+    
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: #fff;
+      border-radius: 16px;
+      width: 90%;
+      max-width: 500px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid #e5e5e5;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 8px;
+      font-size: 1.2rem;
+      color: #6b7280;
+    }
+    .modal-close:hover { background: #f3f4f6; }
+    .modal-body {
+      padding: 24px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: #374151;
+    }
+    .form-input {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: #8b5cf6;
+    }
+    .form-textarea {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      min-height: 150px;
+      resize: vertical;
+      font-family: inherit;
+    }
+    .form-textarea:focus {
+      outline: none;
+      border-color: #8b5cf6;
+    }
+    .form-hint {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      margin-top: 6px;
+    }
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid #e5e5e5;
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+    }
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    .btn-secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+    .btn-secondary:hover { background: #e5e7eb; }
+    .btn-primary {
+      background: #8b5cf6;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #7c3aed; }
+    .btn-danger {
+      background: #ef4444;
+      color: #fff;
+    }
+    .btn-danger:hover { background: #dc2626; }
+    
+    .subscription-section {
+      padding: 12px;
+    }
+    .subscription-info {
+      padding: 8px 12px;
+    }
+    .plan-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .plan-badge.free { background: #fef3c7; color: #d97706; }
+    .plan-badge.personal { background: #dbeafe; color: #1d4ed8; }
+    .plan-badge.pro { background: #dcfce7; color: #16a34a; }
+    .subscription-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+    
+    @media (max-width: 768px) {
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        z-index: 100;
+        transform: translateX(0);
+      }
+      .sidebar.collapsed {
+        transform: translateX(-100%);
+        width: 260px;
+      }
+    }
+    
+    /* Incoming call notification styles */
+    .incoming-call-notification {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #1e3a5f, #2d5a87);
+      border-radius: 16px;
+      padding: 20px 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      z-index: 10000;
+      animation: slideDown 0.3s ease-out, pulse 2s ease-in-out infinite;
+      min-width: 320px;
+    }
+    
+    @keyframes slideDown {
+      from { transform: translateX(-50%) translateY(-100%); opacity: 0; }
+      to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+    
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); }
+      50% { box-shadow: 0 8px 48px rgba(34, 197, 94, 0.4); }
+    }
+    
+    .incoming-call-content {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    
+    .incoming-call-icon {
+      font-size: 2rem;
+      animation: ring 0.5s ease-in-out infinite alternate;
+    }
+    
+    @keyframes ring {
+      from { transform: rotate(-15deg); }
+      to { transform: rotate(15deg); }
+    }
+    
+    .incoming-call-text { flex: 1; }
+    .incoming-call-label {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .incoming-call-from {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #fff;
+      margin-top: 4px;
+    }
+    .incoming-call-buttons {
+      display: flex;
+      gap: 12px;
+    }
+    .accept-call-btn {
+      flex: 1;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #22c55e;
+      color: #fff;
+      transition: all 0.2s;
+    }
+    .accept-call-btn:hover { background: #16a34a; transform: scale(1.02); }
+    .reject-call-btn {
+      flex: 1;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #ef4444;
+      color: #fff;
+      transition: all 0.2s;
+    }
+    .reject-call-btn:hover { background: #dc2626; transform: scale(1.02); }
+    .status-dot.ringing { background: #f59e0b !important; animation: blink 0.5s ease-in-out infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  </style>
+</head>
+<body>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span style="font-weight: 600; font-size: 1rem;">TalkHint</span>
+      <button class="menu-btn" id="closeSidebarBtn" data-testid="button-close-sidebar">
+        <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+      </button>
+    </div>
+    <div class="sidebar-content">
+      <div class="numbers-section">
+        <div class="section-label">📱 My Numbers</div>
+        <div class="numbers-list" id="numbersList">
+          <div class="folders-empty">No numbers yet</div>
+        </div>
+      </div>
+      <div class="folders-section">
+        <div class="section-label">📁 My Prompts</div>
+        <div class="folders-list" id="foldersList">
+          <div class="folders-empty" id="foldersEmpty">No prompts yet</div>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-label">🌍 Language</div>
+      <div class="language-item" data-lang="ru" data-testid="lang-russian">
+        <span>🇷🇺</span>
+        <span>Russian</span>
+      </div>
+      <div class="language-item" data-lang="es" data-testid="lang-spanish">
+        <span>🇪🇸</span>
+        <span>Spanish</span>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-label">📞 Forwarding Number</div>
+      <div style="padding: 8px 12px;">
+        <input type="tel" id="forwardingPhoneInput" class="phone-input" placeholder="+1 954 218 7485" data-testid="input-forwarding-phone" style="width: 100%; font-size: 0.85rem; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
+        <button id="saveForwardingBtn" class="btn btn-primary btn-small" data-testid="button-save-forwarding" style="margin-top: 6px; width: 100%; font-size: 0.8rem; padding: 6px;">Save</button>
+        <div id="forwardingStatus" style="font-size: 0.75rem; color: #6b7280; margin-top: 4px; text-align: center;"></div>
+      </div>
+    </div>
+    <div class="sidebar-section subscription-section" id="subscriptionSection">
+      <div class="section-label">💳 Subscription</div>
+      <div class="subscription-info" id="subscriptionInfo">
+        <div class="plan-badge free" id="planBadge">Free Trial</div>
+        <div class="subscription-actions">
+          <button class="btn btn-primary btn-small" id="upgradeBtn" data-testid="button-upgrade">Upgrade</button>
+          <button class="btn btn-secondary btn-small" id="manageBtn" data-testid="button-manage" style="display: none;">Manage</button>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button class="new-folder-btn" id="enableNotificationsBtn" data-testid="button-enable-notifications" style="background: #6366f1; color: white;">
+        <span>🔔</span>
+        <span>Enable Notifications</span>
+      </button>
+      <button class="new-folder-btn" id="newFolderBtn" data-testid="button-new-folder">
+        <span>➕</span>
+        <span>New prompt</span>
+      </button>
+    </div>
+  </aside>
+  
+  <main class="main-content">
+    <div class="header">
+      <button class="toggle-sidebar-btn" id="toggleSidebarBtn" data-testid="button-toggle-sidebar">
+        <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+      </button>
+      <div class="header-center">
+        <input type="tel" class="phone-input" id="phoneInput" placeholder="+1 234 567 8900" data-testid="input-phone">
+        <button class="call-btn start" id="callBtn" data-testid="button-call">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
+          </svg>
+        </button>
+        <div class="status">
+          <div class="status-dot" id="statusDot"></div>
+          <span id="statusText">Connecting...</span>
+        </div>
+        <span class="goal-indicator" id="goalIndicator" data-testid="indicator-goal">🎯</span>
+      </div>
+    </div>
+    
+    <div class="chat-container" id="chatContainer">
+      <div class="empty-state" id="emptyState">
+        <h2>TalkHint</h2>
+        <p>Напишите цель звонка внизу, затем позвоните</p>
+      </div>
+    </div>
+    
+    <div class="input-bar">
+      <input type="text" class="text-input" id="textInput" placeholder="Напишите цель звонка..." data-testid="input-text">
+      <button class="send-btn" id="sendBtn" data-testid="button-send">
+        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  </main>
+
+  <div class="modal-overlay" id="folderModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modalTitle">New Prompt</span>
+        <button class="modal-close" id="modalClose" data-testid="button-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-input" id="folderName" placeholder="e.g., Realtor, Dispatcher..." data-testid="input-folder-name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">AI Prompt</label>
+          <textarea class="form-textarea" id="folderPrompt" placeholder="Describe what you do and how AI should help you during calls..." data-testid="input-folder-prompt"></textarea>
+          <div class="form-hint">Example: I'm a massage therapist. We offer: Classic massage ($80/hr), Sports massage ($120/90min). Help clients schedule appointments.</div>
+        </div>
+      </div>
+      <div class="modal-footer" id="modalFooter">
+        <button class="btn btn-secondary" id="modalCancel" data-testid="button-modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modalSave" data-testid="button-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="twilio-sdk-bundle.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

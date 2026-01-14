@@ -1,0 +1,55 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+deploymentTarget = "autoscale"
+build = ["npm", "run", "build"]
+run = ["node", "./dist/index.cjs"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[env]
+PORT = "5000"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[agent]
+mockupState = "FULLSTACK"
+integrations = ["stripe:2.0.0", "javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+VAPID_PUBLIC_KEY = "BKG5nJon2zwG1nRd0TnryWcRDNa5htAQsHlJPoa_U9c20g0KTvGB87IOon1iMc5l7lNnxT30wXMsx60VQgzecKs"
+VAPID_SUBJECT = "mailto:support@talkhint.me"
+
+[userenv.development]
+DISABLE_TWILIO_SIGNATURE_CHECK = "true"
+
+[userenv.production]
+DISABLE_TWILIO_SIGNATURE_CHECK = "true"
