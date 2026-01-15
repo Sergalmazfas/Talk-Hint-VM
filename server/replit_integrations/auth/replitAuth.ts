@@ -34,15 +34,13 @@ export function getSession() {
   
   // Check if this is a dev/internal database URL that won't work in production
   // helium, lithium, etc. are internal Replit hosts that don't exist outside dev
-  const pgHost = process.env.PGHOST || "";
+  // NOTE: Only check databaseUrl, NOT PGHOST - PGHOST always points to dev database
   const isDevDatabase = 
     databaseUrl?.includes("helium") || 
     databaseUrl?.includes("lithium") ||
-    pgHost.includes("helium") ||
-    pgHost.includes("lithium") ||
     false;
   
-  console.log("[Auth] Database check - isProduction:", isProduction, "isDevDatabase:", isDevDatabase, "PGHOST:", pgHost);
+  console.log("[Auth] Database check - isProduction:", isProduction, "isDevDatabase:", isDevDatabase, "databaseUrl host:", databaseUrl?.split("@")[1]?.split("/")[0] || "none");
   
   let store: session.Store | undefined;
   
