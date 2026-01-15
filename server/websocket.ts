@@ -678,6 +678,9 @@ If they need a phrase to say, give them the English phrase AND its translation t
             const isOwnerTrack = !isGuestTrack;
             const speaker = isOwnerTrack ? "Owner" : "Guest";
             
+            // Debug: log track mapping decision
+            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speaker}`, "deepgram");
+            
             if (isFinal) {
               log(`[Deepgram] ${speaker} final: ${transcript}`, "deepgram");
               
