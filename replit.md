@@ -101,6 +101,25 @@ One TwiML App serves all phone numbers with intelligent routing:
 - **Diagnostic endpoint**: `/api/build` - Returns deployment info (host, env, dbConnected, replId) for debugging domain/session issues
 - **Session persistence**: Uses PostgreSQL session store in production to support autoscale
 
+### Connection Stability
+**Twilio Call Timeout:**
+- Default: 90 seconds (`TALKHINT_CALL_TIMEOUT` env var)
+- Prevents early disconnect during silence/pauses
+- Applied to all Dial verbs and Number elements
+
+**Deepgram WebSocket:**
+- Keepalive ping every 10 seconds
+- Auto-reconnect with exponential backoff (2s, 4s, 8s, max 3 attempts)
+- VAD events enabled for better speech detection
+- Audio buffering for early frames (up to 500 frames) before Deepgram ready
+
+**Process Stability:**
+- SIGTERM/SIGINT handlers for graceful shutdown with logging
+- Uncaught exception and unhandled rejection logging
+- **For production voice calls**: Use **Reserved VM Deployment** (not Autoscale)
+  - Autoscale can restart/scale-down during calls, causing disconnections
+  - Reserved VM provides consistent uptime for WebSocket connections
+
 ### Audio Processing
 - **FFmpeg** (system dependency) - Audio format conversion between μ-law and PCM16
 

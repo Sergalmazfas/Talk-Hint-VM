@@ -306,4 +306,46 @@ app.use((req, res, next) => {
       log(`serving on port ${port}`);
     },
   );
+
+  // Graceful shutdown handlers - log when process is being terminated
+  // This helps debug unexpected restarts (Replit autoscale, VM restarts, etc.)
+  const gracefulShutdown = (signal: string) => {
+    console.log(`\n[Server] Received ${signal} at ${new Date().toISOString()}`);
+    console.log("[Server] Starting graceful shutdown...");
+    
+    // Close HTTP server (stop accepting new connections)
+    httpServer.close((err) => {
+      if (err) {
+        console.error("[Server] Error closing HTTP server:", err.message);
+      } else {
+        console.log("[Server] HTTP server closed successfully");
+      }
+      
+      // Exit after cleanup
+      console.log("[Server] Exiting process...");
+      process.exit(err ? 1 : 0);
+    });
+    
+    // Force exit after 10 seconds if graceful shutdown fails
+    setTimeout(() => {
+      console.error("[Server] Forced exit after 10s timeout");
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  
+  // Log uncaught errors that might cause restarts
+  process.on("uncaughtException", (err) => {
+    console.error("[Server] UNCAUGHT EXCEPTION at", new Date().toISOString());
+    console.error("[Server] Error:", err.message);
+    console.error("[Server] Stack:", err.stack);
+    process.exit(1);
+  });
+  
+  process.on("unhandledRejection", (reason, promise) => {
+    console.error("[Server] UNHANDLED REJECTION at", new Date().toISOString());
+    console.error("[Server] Reason:", reason);
+  });
 })();
