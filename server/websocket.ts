@@ -890,29 +890,57 @@ If they need a phrase to say, give them the English phrase AND its translation t
             log("Twilio Media Stream handshake", "twilio");
             // Pre-initialize Deepgram immediately on connected to capture early audio
             log("[DG] Pre-initializing on connected event", "deepgram");
+            
+            let inboundReady = false;
+            let outboundReady = false;
+            
+            const checkBothReady = () => {
+              if (inboundReady && outboundReady && !deepgramReady) {
+                deepgramReady = true;
+                log("[DG] Both connections ready, flushing buffer", "deepgram");
+                
+                // Flush any buffered audio
+                if (audioBuffer.length > 0) {
+                  const bufferedMs = Math.round(audioBuffer.length * 20);
+                  log(`[AUDIO] flush buffered ${bufferedMs}ms (${audioBuffer.length} frames)`, "twilio");
+                  for (const frame of audioBuffer) {
+                    if (frame.track === "inbound" && deepgramInbound) {
+                      deepgramInbound.send(frame.data);
+                    } else if (frame.track === "outbound" && deepgramOutbound) {
+                      deepgramOutbound.send(frame.data);
+                    }
+                  }
+                  audioBuffer.length = 0;
+                }
+              }
+            };
+            
             const setupInboundEarly = () => {
-              deepgramInbound = setupDeepgram("inbound", setupInboundEarly);
+              const dg = setupDeepgram("inbound", setupInboundEarly);
+              deepgramInbound = dg;
+              // Wait for actual WebSocket open
+              if (dg.dgWs) {
+                dg.dgWs.on("open", () => {
+                  inboundReady = true;
+                  log("[DG] inbound WebSocket opened", "deepgram");
+                  checkBothReady();
+                });
+              }
             };
             const setupOutboundEarly = () => {
-              deepgramOutbound = setupDeepgram("outbound", setupOutboundEarly);
+              const dg = setupDeepgram("outbound", setupOutboundEarly);
+              deepgramOutbound = dg;
+              // Wait for actual WebSocket open
+              if (dg.dgWs) {
+                dg.dgWs.on("open", () => {
+                  outboundReady = true;
+                  log("[DG] outbound WebSocket opened", "deepgram");
+                  checkBothReady();
+                });
+              }
             };
             setupInboundEarly();
             setupOutboundEarly();
-            deepgramReady = true;
-            
-            // Flush any buffered audio
-            if (audioBuffer.length > 0) {
-              const bufferedMs = Math.round(audioBuffer.length * 20); // ~20ms per frame at 8kHz
-              log(`[AUDIO] flush buffered ${bufferedMs}ms (${audioBuffer.length} frames)`, "twilio");
-              for (const frame of audioBuffer) {
-                if (frame.track === "inbound" && deepgramInbound) {
-                  deepgramInbound.send(frame.data);
-                } else if (frame.track === "outbound" && deepgramOutbound) {
-                  deepgramOutbound.send(frame.data);
-                }
-              }
-              audioBuffer.length = 0;
-            }
             break;
 
           case "start":
