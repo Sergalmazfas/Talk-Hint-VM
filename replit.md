@@ -117,3 +117,26 @@ One TwiML App serves all phone numbers with intelligent routing:
   - Не сохраняется в историю/контекст GPT
   - WebSocket событие `fast_phrase` с target: HON
   - UI показывает временно (fade-out через 5 сек)
+
+### Goal State Engine
+State-machine для отслеживания цели разговора и прогресса:
+- **shared/goalTypes.ts** - Типы GoalType, GoalStatus, GoalState, SlotMap
+- **server/slotExtractors.ts** - Regex для извлечения 7 слотов: date, time, phone, name, location, price, service
+- **server/goalEngine.ts** - GoalEngine класс с методами:
+  - `updateOnUtterance({speaker, text, ts})` - обновление состояния
+  - `detectGoalType(text, prevGoal)` - определение цели с confidence
+  - `extractSlots(text)` - извлечение слотов из текста
+  - `computeMissingSlots(goalType, slots)` - расчёт недостающих слотов
+  - `checkAchieved(goalType, slots, text)` - проверка достижения цели
+- **Goal Types:** booking, pricing, support, info, negotiation, other
+- **Achieved Rules:**
+  - `booking` - date + time ИЛИ фраза "confirmed/booked/see you"
+  - `pricing` - найден price
+  - `support` - фраза "fixed/works now/done"
+- **WebSocket события:**
+  - `goal_state_update` - после каждого финального utterance
+  - `goal_achieved` - один раз при достижении цели
+- **Интеграция с FastLayer:**
+  - Анти-повтор steer: lastSteerSlot + lastSteerAt с cooldown 5 сек
+  - GoalEngine получает fastMeta и не предлагает тот же слот повторно
+- **UI панель:** Goal Progress с goalType, missingSlots, status, nextBestAction

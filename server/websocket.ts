@@ -4,6 +4,8 @@ import { log } from "./index";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
+import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
+import type { GoalState, SlotMap } from "../shared/goalTypes";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -566,6 +568,7 @@ If they need a phrase to say, give them the English phrase AND its translation t
     let callSid: string | null = null;
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
+    let goalEngine: GoalEngine | null = null; // Goal State Engine per call
     
     // Conversation history for context
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
@@ -573,6 +576,12 @@ If they need a phrase to say, give them the English phrase AND its translation t
     // Fast Layer for quick responses while GPT is thinking
     const fastLayer = new FastLayerManager((phrase: FastPhraseResult, waitTimeMs: number) => {
       log(`[FastLayer] Emitting fast_phrase after ${waitTimeMs}ms: "${phrase.text}" (${phrase.category})`, "fast");
+      
+      // Notify GoalEngine about fast phrase to prevent steer repetition
+      if (goalEngine) {
+        goalEngine.onFastPhraseSent(phrase.category, phrase.slot !== "none" ? phrase.slot : undefined);
+      }
+      
       uiBroadcast({
         type: "fast_phrase",
         text: phrase.text,
@@ -655,6 +664,49 @@ If they need a phrase to say, give them the English phrase AND its translation t
               }
               
               if (isGuestTrack) {
+                // Update GoalEngine with GST utterance
+                let goalUpdate = null;
+                if (goalEngine) {
+                  goalUpdate = goalEngine.updateOnUtterance({
+                    speaker: "GST",
+                    text: transcript,
+                    ts: Date.now()
+                  });
+                  
+                  // Update FastLayer with current goal and missing slot
+                  const state = goalUpdate.state;
+                  const missingSlot = state.missingSlots[0] || "none";
+                  fastLayer.setGoal(state.goalType, missingSlot);
+                  
+                  // Broadcast goal state update
+                  uiBroadcast({
+                    type: "goal_state_update",
+                    target: "HON",
+                    callId: state.callId,
+                    goalType: state.goalType,
+                    currentGoal: state.currentGoal,
+                    confidence: state.confidence,
+                    status: state.status,
+                    slots: state.slots,
+                    missingSlots: state.missingSlots,
+                    nextBestAction: state.nextBestAction
+                  });
+                  
+                  // Broadcast goal achieved if reached
+                  if (goalUpdate.goalAchieved) {
+                    uiBroadcast({
+                      type: "goal_achieved",
+                      target: "HON",
+                      callId: state.callId,
+                      goalType: state.goalType,
+                      summary: state.currentGoal,
+                      achievedReason: state.achievedReason
+                    });
+                  }
+                  
+                  log(`[GoalEngine] GST update: goal=${state.goalType}, status=${state.status}, missing=${state.missingSlots.join(",")}`, "goal");
+                }
+                
                 // Trigger fast layer timer - GPT request starts now
                 fastLayer.setLanguage(currentLanguage);
                 fastLayer.onGstUtteranceEnd();
@@ -682,6 +734,45 @@ If they need a phrase to say, give them the English phrase AND its translation t
                   });
                 }
               } else {
+                // Update GoalEngine with HON utterance
+                if (goalEngine) {
+                  const goalUpdate = goalEngine.updateOnUtterance({
+                    speaker: "HON",
+                    text: transcript,
+                    ts: Date.now()
+                  });
+                  
+                  const state = goalUpdate.state;
+                  
+                  // Broadcast goal state update
+                  uiBroadcast({
+                    type: "goal_state_update",
+                    target: "HON",
+                    callId: state.callId,
+                    goalType: state.goalType,
+                    currentGoal: state.currentGoal,
+                    confidence: state.confidence,
+                    status: state.status,
+                    slots: state.slots,
+                    missingSlots: state.missingSlots,
+                    nextBestAction: state.nextBestAction
+                  });
+                  
+                  // Broadcast goal achieved if reached
+                  if (goalUpdate.goalAchieved) {
+                    uiBroadcast({
+                      type: "goal_achieved",
+                      target: "HON",
+                      callId: state.callId,
+                      goalType: state.goalType,
+                      summary: state.currentGoal,
+                      achievedReason: state.achievedReason
+                    });
+                  }
+                  
+                  log(`[GoalEngine] HON update: goal=${state.goalType}, status=${state.status}, slots=${JSON.stringify(goalUpdate.newSlots)}`, "goal");
+                }
+                
                 uiBroadcast({ 
                   type: "owner_transcript",
                   text: transcript,
@@ -746,6 +837,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
               log(`Stream started: ${callSid}, callType: ${callType || 'browser'}, isPstnForwarding: ${isPstnForwarding}`, "twilio");
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               
+              // Initialize Goal State Engine for this call
+              goalEngine = getOrCreateEngine(callSid);
+              log(`[GoalEngine] Initialized for call: ${callSid}`, "goal");
+              
               // Initialize Deepgram for both tracks
               deepgramInbound = setupDeepgram("inbound");
               deepgramOutbound = setupDeepgram("outbound");
@@ -783,6 +878,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
               deepgramOutbound.finish();
               deepgramOutbound = null;
             }
+            // Cleanup GoalEngine
+            if (callSid) {
+              removeEngine(callSid);
+            }
             break;
         }
       } catch (err: any) {
@@ -800,6 +899,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
       if (deepgramOutbound) {
         deepgramOutbound.finish();
         deepgramOutbound = null;
+      }
+      // Cleanup GoalEngine
+      if (callSid) {
+        removeEngine(callSid);
       }
     });
   }
