@@ -936,7 +936,17 @@ async function initTwilioDevice() {
 
     log('Token received for: ' + data.identity);
     
-    device = new TwilioDevice(data.token, { logLevel: 1 });
+    device = new TwilioDevice(data.token, { 
+      logLevel: 1,
+      codecPreferences: ['opus', 'pcmu'],
+      edge: 'ashburn',
+      enableImprovedSignalingErrorPrecision: true,
+      sounds: {
+        incoming: false,
+        outgoing: false,
+        disconnect: false
+      }
+    });
 
     device.on('registered', function() {
       log('Device registered');
@@ -1167,6 +1177,9 @@ async function makeCall() {
       if (callGoal) {
         addMessage('ai', 'Звонок начался. Ваша цель: ' + callGoal);
       }
+      
+      // Start quality monitoring for debugging audio issues
+      startQualityMonitoring(activeCall);
     });
 
     activeCall.on('disconnect', function() {
@@ -1210,7 +1223,74 @@ function resetCallUI() {
   UI.callBtn.disabled = false;
 }
 
+var qualityMonitorInterval = null;
+
+function startQualityMonitoring(call) {
+  if (qualityMonitorInterval) {
+    clearInterval(qualityMonitorInterval);
+  }
+  
+  log('[Quality] Starting quality monitoring...');
+  
+  // Monitor call quality every 5 seconds
+  qualityMonitorInterval = setInterval(async function() {
+    try {
+      if (!call || call.status() !== 'open') {
+        log('[Quality] Call not active, stopping monitor');
+        clearInterval(qualityMonitorInterval);
+        qualityMonitorInterval = null;
+        return;
+      }
+      
+      // Get RTC stats if available
+      var stats = await call.getStats();
+      if (stats && stats.length > 0) {
+        var report = stats[0];
+        if (report) {
+          var mos = report.mos ? report.mos.toFixed(2) : 'N/A';
+          var jitter = report.jitter ? Math.round(report.jitter) : 'N/A';
+          var rtt = report.rtt ? Math.round(report.rtt) : 'N/A';
+          var packetsLost = report.packetsLost || 0;
+          var packetsSent = report.packetsSent || 0;
+          var packetsReceived = report.packetsReceived || 0;
+          var lossRate = packetsSent > 0 ? ((packetsLost / packetsSent) * 100).toFixed(2) : '0';
+          
+          log('[Quality] MOS=' + mos + ' jitter=' + jitter + 'ms RTT=' + rtt + 'ms loss=' + lossRate + '% (lost:' + packetsLost + ')');
+          
+          // Alert if quality is degrading
+          if (report.mos && report.mos < 3.0) {
+            log('[Quality] WARNING: Poor call quality detected (MOS < 3.0)');
+          }
+          if (packetsLost > 10) {
+            log('[Quality] WARNING: Packet loss detected (' + packetsLost + ' packets)');
+          }
+        }
+      }
+    } catch (err) {
+      log('[Quality] Stats error: ' + err.message);
+    }
+  }, 5000);
+  
+  // Also listen for quality warnings from Twilio
+  call.on('warning', function(name) {
+    log('[Quality] WARNING event: ' + name);
+  });
+  
+  call.on('warning-cleared', function(name) {
+    log('[Quality] Warning cleared: ' + name);
+  });
+}
+
+function stopQualityMonitoring() {
+  if (qualityMonitorInterval) {
+    clearInterval(qualityMonitorInterval);
+    qualityMonitorInterval = null;
+    log('[Quality] Monitoring stopped');
+  }
+}
+
 function endCall() {
+  stopQualityMonitoring();
   if (activeCall) {
     activeCall.disconnect();
     log('Call ended');
