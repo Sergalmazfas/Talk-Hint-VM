@@ -367,7 +367,13 @@
     .hint {
       margin-bottom: 16px;
       max-width: 90%;
-      margin-right: auto;
+      margin-left: auto;  /* Align right like owner messages */
+      margin-right: 0;
+    }
+    .hint.hon-suggestion {
+      /* Visual indicator that this is for HON (owner) */
+      border-right: 3px solid #8b5cf6;
+      padding-right: 8px;
     }
     .hint-header {
       font-size: 0.75rem;
@@ -427,7 +433,8 @@
     .fast-phrase {
       margin-bottom: 12px;
       max-width: 80%;
-      margin-right: auto;
+      margin-left: auto;  /* Align right like owner messages */
+      margin-right: 0;
       animation: fadeIn 0.3s ease-in;
     }
     .fast-phrase.fade-out {

@@ -814,12 +814,17 @@ function addHint(english, translationText) {
   if (!english) return;
   UI.emptyState.style.display = 'none';
   
+  // Reset message tracking to break grouping with guest messages
+  lastMessageType = null;
+  lastMessageEl = null;
+  
   var hint = document.createElement('div');
-  hint.className = 'hint';
+  hint.className = 'hint hon-suggestion';  // Mark as HON suggestion
+  hint.setAttribute('data-target', 'HON');  // Explicit target attribute
   
   var header = document.createElement('div');
   header.className = 'hint-header';
-  header.textContent = '💡 Say this';
+  header.textContent = '🎙️ Say this';  // Use mic emoji to indicate it's for owner
   
   var card = document.createElement('div');
   card.className = 'hint-card';

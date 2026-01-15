@@ -754,8 +754,13 @@ If they need a phrase to say, give them the English phrase AND its translation t
                 });
                 
                 if (translated.suggestion) {
+                  log(`[Suggestion] Sending to HON, basedOn=GST, callSid=${callSid}`, "websocket");
                   uiBroadcast({
                     type: "suggestion",
+                    target: "HON",  // Suggestions ALWAYS go to owner
+                    eventType: "suggestion",
+                    source: "gpt",
+                    basedOnSpeaker: "GST",  // Based on guest's speech
                     en: translated.suggestion.en,
                     translation: translated.suggestion.translation,
                     callSid
