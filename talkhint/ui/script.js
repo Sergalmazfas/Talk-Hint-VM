@@ -629,6 +629,89 @@ function updateLastSentiment(speaker, sentiment) {
   }
 }
 
+// Track interim message elements per speaker type
+var interimMessages = {};
+
+// Update last interim message (replace text, don't accumulate)
+function updateLastInterim(type, text) {
+  if (!text) return;
+  UI.emptyState.style.display = 'none';
+  
+  if ((type === 'you' || type === 'honor') && !hasGoal) {
+    setGoalActive(true);
+  }
+  
+  // Check if we have an active interim message for this type
+  if (interimMessages[type]) {
+    var bubble = interimMessages[type].querySelector('.message-bubble');
+    if (bubble) {
+      bubble.textContent = text; // Replace, don't append
+    }
+  } else {
+    // Create new interim message
+    var msg = document.createElement('div');
+    msg.className = 'message ' + type + ' interim';
+    
+    var label = (type === 'you' || type === 'honor') ? '🎙️ You' : '👤 Guest';
+    var labelDiv = document.createElement('div');
+    labelDiv.className = 'message-label';
+    labelDiv.textContent = label;
+    
+    var bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.textContent = text;
+    bubble.style.opacity = '0.7'; // Interim style
+    
+    msg.appendChild(labelDiv);
+    msg.appendChild(bubble);
+    UI.chatContainer.appendChild(msg);
+    
+    interimMessages[type] = msg;
+  }
+  
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
+// Finalize message (convert interim to final or add new final)
+function finalizeMessage(type, text, translation, sentiment) {
+  if (!text) return;
+  
+  // If we have an interim message, finalize it
+  if (interimMessages[type]) {
+    var msg = interimMessages[type];
+    var bubble = msg.querySelector('.message-bubble');
+    if (bubble) {
+      bubble.textContent = text;
+      bubble.style.opacity = '1'; // Full opacity for final
+    }
+    msg.classList.remove('interim');
+    
+    if (translation) {
+      var transDiv = document.createElement('div');
+      transDiv.className = 'message-translation';
+      transDiv.textContent = (LANGUAGE_FLAGS[currentLanguage] || '🇷🇺') + ' ' + translation;
+      msg.appendChild(transDiv);
+    }
+    
+    if (sentiment) {
+      msg.classList.add(getSentimentClass(sentiment));
+    }
+    
+    // Update tracking
+    lastMessageType = type;
+    lastMessageTime = Date.now();
+    lastMessageEl = msg;
+    
+    // Clear interim reference
+    delete interimMessages[type];
+  } else {
+    // No interim exists, create fresh final message
+    addMessage(type, text, translation, sentiment);
+  }
+  
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
 function addMessage(type, text, translation, sentiment) {
   if (!text) return;
   UI.emptyState.style.display = 'none';
@@ -972,7 +1055,12 @@ function handleMessage(data) {
     case 'owner_transcript':
     case 'hon_transcript':
       if (data.text) {
-        addMessage('you', data.text, null, data.sentiment);
+        // For interim results, update last message instead of adding new
+        if (data.isFinal === false) {
+          updateLastInterim('you', data.text);
+        } else {
+          finalizeMessage('you', data.text);
+        }
       }
       break;
 
@@ -983,7 +1071,12 @@ function handleMessage(data) {
     case 'guest_transcript':
     case 'gst_transcript':
       if (data.text) {
-        addMessage('guest', data.text, data.translation, data.sentiment);
+        // For interim results, update last message instead of adding new
+        if (data.isFinal === false) {
+          updateLastInterim('guest', data.text);
+        } else {
+          finalizeMessage('guest', data.text, data.translation, data.sentiment);
+        }
       }
       break;
 
