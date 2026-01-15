@@ -572,6 +572,15 @@ If they need a phrase to say, give them the English phrase AND its translation t
     let deepgramReady = false; // Flag to track if Deepgram is ready
     const audioBuffer: { track: string; data: Buffer }[] = []; // Buffer for early audio
     
+    // Twilio WS keepalive ping every 15 seconds to prevent proxy/edge idle disconnect
+    const twilioKeepaliveInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        // Twilio expects JSON messages, send a heartbeat
+        ws.ping();
+        log(`[Twilio] keepalive ping sent`, "twilio");
+      }
+    }, 15000);
+    
     // Conversation history for context
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
     
@@ -981,8 +990,19 @@ If they need a phrase to say, give them the English phrase AND its translation t
       }
     });
 
-    ws.on("close", () => {
-      log(`Twilio WS closed, callSid: ${callSid}`, "twilio");
+    // Log pong responses from Twilio
+    ws.on("pong", () => {
+      log(`[Twilio] pong received`, "twilio");
+    });
+    
+    ws.on("close", (code: number, reason: Buffer) => {
+      const reasonStr = reason.toString() || "no reason";
+      const duration = ((Date.now() - new Date(startTime).getTime()) / 1000).toFixed(1);
+      log(`[Twilio] WS closed code=${code} reason="${reasonStr}" duration=${duration}s callSid=${callSid}`, "twilio");
+      
+      // Clear keepalive interval
+      clearInterval(twilioKeepaliveInterval);
+      
       // Cleanup Deepgram connections
       if (deepgramInbound) {
         deepgramInbound.finish();
@@ -996,6 +1016,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
       if (callSid) {
         removeEngine(callSid);
       }
+    });
+    
+    ws.on("error", (err) => {
+      log(`[Twilio] WS error: ${err.message}`, "twilio");
     });
   }
   
