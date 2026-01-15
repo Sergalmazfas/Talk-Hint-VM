@@ -134,6 +134,11 @@ async function initStripe() {
     console.log("[Stripe] Schema ready");
 
     const stripeSync = await getStripeSync();
+    
+    if (!stripeSync) {
+      console.log("[Stripe] Stripe not configured - skipping webhook and sync");
+      return;
+    }
 
     const replitDomains = process.env.REPLIT_DOMAINS;
     if (replitDomains) {
