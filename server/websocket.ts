@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { log } from "./index";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt } from "@shared/prompts";
+import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -569,6 +570,22 @@ If they need a phrase to say, give them the English phrase AND its translation t
     // Conversation history for context
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
     
+    // Fast Layer for quick responses while GPT is thinking
+    const fastLayer = new FastLayerManager((phrase: FastPhraseResult, waitTimeMs: number) => {
+      log(`[FastLayer] Emitting fast_phrase after ${waitTimeMs}ms: "${phrase.text}" (${phrase.category})`, "fast");
+      uiBroadcast({
+        type: "fast_phrase",
+        text: phrase.text,
+        translation: phrase.translation,
+        category: phrase.category,
+        target: "HON",
+        timestamp: Date.now(),
+        waitTimeMs,
+        goalType: phrase.goalType,
+        slot: phrase.slot
+      });
+    });
+    
     // Deepgram connections for each track
     let deepgramInbound: any = null;
     let deepgramOutbound: any = null;
@@ -638,8 +655,15 @@ If they need a phrase to say, give them the English phrase AND its translation t
               }
               
               if (isGuestTrack) {
+                // Trigger fast layer timer - GPT request starts now
+                fastLayer.setLanguage(currentLanguage);
+                fastLayer.onGstUtteranceEnd();
+                
                 const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
                 const translated = await translateAndSuggest(transcript, currentGoal, currentLanguage, contextHistory);
+                
+                // GPT response received - stop fast layer timer
+                fastLayer.onGptResponseReceived();
                 
                 uiBroadcast({ 
                   type: "guest_transcript",

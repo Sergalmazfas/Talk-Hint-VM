@@ -423,6 +423,50 @@
     }
     .hint-btn.copy:hover { background: #d1d5db; }
     
+    /* Fast Phrase - quick responses while GPT is thinking */
+    .fast-phrase {
+      margin-bottom: 12px;
+      max-width: 80%;
+      margin-right: auto;
+      animation: fadeIn 0.3s ease-in;
+    }
+    .fast-phrase.fade-out {
+      opacity: 0;
+      transition: opacity 0.5s ease-out;
+    }
+    .fast-phrase-header {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #f59e0b;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .fast-phrase-card {
+      background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+      border: 1px solid #fcd34d;
+      border-radius: 10px;
+      padding: 10px 14px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    .fast-phrase-text {
+      font-size: 0.95rem;
+      line-height: 1.4;
+      color: #1f2937;
+      font-weight: 500;
+    }
+    .fast-phrase-translation {
+      font-size: 0.8rem;
+      color: #78716c;
+      font-style: italic;
+      margin-top: 4px;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
     .input-bar {
       padding: 16px 20px;
       border-top: 1px solid #e5e5e5;

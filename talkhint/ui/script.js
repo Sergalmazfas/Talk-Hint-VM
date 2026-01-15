@@ -789,6 +789,50 @@ function addHint(english, translationText) {
   lastMessageEl = null;
 }
 
+function addFastPhrase(text, translation, category) {
+  if (!text) return;
+  UI.emptyState.style.display = 'none';
+  
+  var fastPhrase = document.createElement('div');
+  fastPhrase.className = 'fast-phrase';
+  
+  var categoryLabel = category === 'steer' ? '⚡ Quick tip' : '⏳ One sec';
+  
+  var header = document.createElement('div');
+  header.className = 'fast-phrase-header';
+  header.textContent = categoryLabel;
+  
+  var card = document.createElement('div');
+  card.className = 'fast-phrase-card';
+  
+  var phrase = document.createElement('div');
+  phrase.className = 'fast-phrase-text';
+  phrase.textContent = text;
+  card.appendChild(phrase);
+  
+  if (translation) {
+    var transDiv = document.createElement('div');
+    transDiv.className = 'fast-phrase-translation';
+    transDiv.textContent = (LANGUAGE_FLAGS[currentLanguage] || '🇷🇺') + ' ' + translation;
+    card.appendChild(transDiv);
+  }
+  
+  fastPhrase.appendChild(header);
+  fastPhrase.appendChild(card);
+  UI.chatContainer.appendChild(fastPhrase);
+  
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+  
+  setTimeout(function() {
+    fastPhrase.classList.add('fade-out');
+    setTimeout(function() {
+      if (fastPhrase.parentNode) {
+        fastPhrase.parentNode.removeChild(fastPhrase);
+      }
+    }, 500);
+  }, 5000);
+}
+
 async function initTwilioDevice() {
   if (typeof TwilioDevice === 'undefined') {
     log('Waiting for Twilio SDK...');
@@ -948,6 +992,12 @@ function handleMessage(data) {
     case 'hint':
       if (data.en || data.english) {
         addHint(data.en || data.english, data.translation || data.ru || data.russian);
+      }
+      break;
+
+    case 'fast_phrase':
+      if (data.text) {
+        addFastPhrase(data.text, data.translation, data.category);
       }
       break;
 
