@@ -103,3 +103,17 @@ One TwiML App serves all phone numbers with intelligent routing:
 
 ### Audio Processing
 - **FFmpeg** (system dependency) - Audio format conversion between μ-law and PCM16
+
+### Fast Conversation Layer
+Быстрый слой коротких фраз для заполнения пауз пока GPT думает:
+- **server/fastLayer.ts** - FastLayerManager с таймером 450ms и cooldown 1200ms
+- **server/fastPhrases.json** - База фраз с категориями:
+  - `hold/ack` - короткие подтверждения ("Got it", "Okay")
+  - `steer` - ведущие вопросы ("What time works for you?")
+  - `clarify` - уточнения при шуме/обрыве
+- **Принципы:**
+  - Не LLM, а детерминированная логика (rules + база)
+  - 1 fast-фраза на 1 реплику GST
+  - Не сохраняется в историю/контекст GPT
+  - WebSocket событие `fast_phrase` с target: HON
+  - UI показывает временно (fade-out через 5 сек)
