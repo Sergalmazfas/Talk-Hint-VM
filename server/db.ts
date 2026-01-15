@@ -11,14 +11,13 @@ const dbUrl = (isProduction && process.env.PROD_DATABASE_URL)
   : (process.env.DATABASE_URL || "");
 export const isDevDatabase = dbUrl.includes("helium") || dbUrl.includes("lithium");
 
-// CRITICAL: Reject internal Replit hosts (helium/lithium) in production
-// These hosts only resolve inside the workspace, not in autoscale/deployment
+// Note: Reserved VM has access to internal DATABASE_URL (helium/lithium)
+// Only Autoscale requires external database (Neon)
+// We warn but don't block - Reserved VM deployment should work fine
 if (isProduction && isDevDatabase) {
-  console.error("[Database] FATAL: PROD_DATABASE_URL contains internal host (helium/lithium)");
-  console.error("[Database] Internal hosts don't resolve in autoscale/production!");
-  console.error("[Database] Please set PROD_DATABASE_URL to an external database (e.g., Neon)");
-  console.error("[Database] Example: postgresql://user:pass@ep-xxx.neon.tech/db?sslmode=require");
-  // Don't throw - let it fail gracefully so user sees the error in logs
+  console.log("[Database] Using internal host (helium) in production");
+  console.log("[Database] This works for Reserved VM but NOT for Autoscale");
+  console.log("[Database] For Autoscale: set PROD_DATABASE_URL to external DB (e.g., Neon)");
 }
 
 // SQL to create all tables if they don't exist

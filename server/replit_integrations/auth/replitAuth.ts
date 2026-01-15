@@ -63,8 +63,22 @@ export function getSession() {
   
   if (!store) {
     if (isProduction && isDevDatabase) {
-      console.log("[Auth] Production detected but dev DATABASE_URL - using in-memory session store");
-      console.log("[Auth] WARNING: Sessions won't persist across autoscale. Set production DATABASE_URL!");
+      // Reserved VM has access to internal helium database, so we can use PG session store
+      // Only Autoscale needs external database for sessions
+      console.log("[Auth] Production with internal DB - attempting PG session store for Reserved VM");
+      try {
+        store = new PgSession({
+          conString: databaseUrl,
+          tableName: "user_sessions",
+          createTableIfMissing: true,
+          ttl: sessionTtl / 1000,
+          pruneSessionInterval: 60 * 15,
+        });
+        console.log("[Auth] Using PostgreSQL session store (Reserved VM compatible)");
+      } catch (err) {
+        console.log("[Auth] PG session store failed, using in-memory:", err);
+        console.log("[Auth] WARNING: Sessions won't persist. This is expected for Autoscale.");
+      }
     } else {
       console.log("[Auth] Using in-memory session store (development or fallback)");
     }
