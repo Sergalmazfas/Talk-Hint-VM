@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupWebSocket, TALKHINT_GLOBAL_PROMPT, PREP_PROMPT, LANGUAGE_NAMES } from "./websocket";
+import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES } from "./websocket";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -973,7 +973,7 @@ export async function registerRoutes(
       
       // Use PREP_PROMPT when no live call, otherwise use GLOBAL prompt
       const systemPrompt = isLiveCall 
-        ? `${TALKHINT_GLOBAL_PROMPT}
+        ? `${TALKHINT_GOLDEN_PROMPT}
 
 USER'S GOAL: ${goal || "Have a successful phone conversation"}
 USER'S NATIVE LANGUAGE: ${langName}
@@ -981,7 +981,7 @@ USER'S NATIVE LANGUAGE: ${langName}
 The user is in a LIVE call. Give them immediate, ready-to-say phrases.`
         : `${PREP_PROMPT}
 
-${TALKHINT_GLOBAL_PROMPT}
+${TALKHINT_GOLDEN_PROMPT}
 
 USER'S GOAL: ${goal || "Unknown - ask what they want to accomplish"}
 USER'S NATIVE LANGUAGE: ${langName}`;
