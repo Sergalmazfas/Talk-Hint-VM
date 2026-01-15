@@ -569,6 +569,8 @@ If they need a phrase to say, give them the English phrase AND its translation t
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     let goalEngine: GoalEngine | null = null; // Goal State Engine per call
+    let deepgramReady = false; // Flag to track if Deepgram is ready
+    const audioBuffer: { track: string; data: Buffer }[] = []; // Buffer for early audio
     
     // Conversation history for context
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
@@ -605,12 +607,18 @@ If they need a phrase to say, give them the English phrase AND its translation t
     const deepgramClient = createClient(dgApiKey);
     
     // Setup Deepgram live transcription for a track using raw WebSocket
-    function setupDeepgram(track: string) {
+    // With keepalive and reconnect support
+    function setupDeepgram(track: string, onReconnect?: () => void) {
       log(`[Deepgram] Setting up for track: ${track}`, "deepgram");
       
       // Use raw WebSocket for more control
-      const dgUrl = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&encoding=mulaw&sample_rate=8000&channels=1&interim_results=true&punctuate=true";
+      const dgUrl = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&encoding=mulaw&sample_rate=8000&channels=1&interim_results=true&punctuate=true&vad_events=true";
       log(`[Deepgram] Connecting to: ${dgUrl}`, "deepgram");
+      
+      let keepaliveInterval: NodeJS.Timeout | null = null;
+      let reconnectAttempts = 0;
+      const maxReconnectAttempts = 3;
+      let isClosedIntentionally = false;
       
       const dgWs = new WebSocket(dgUrl, {
         headers: {
@@ -637,6 +645,14 @@ If they need a phrase to say, give them the English phrase AND its translation t
       
       dgWs.on("open", () => {
         log(`[Deepgram] ${track} connection opened`, "deepgram");
+        reconnectAttempts = 0;
+        
+        // Start keepalive ping every 10 seconds
+        keepaliveInterval = setInterval(() => {
+          if (dgWs.readyState === WebSocket.OPEN) {
+            dgWs.send(JSON.stringify({ type: "KeepAlive" }));
+          }
+        }, 10000);
       });
       
       dgWs.on("message", async (data: any) => {
@@ -799,17 +815,41 @@ If they need a phrase to say, give them the English phrase AND its translation t
       
       dgWs.on("close", () => {
         log(`[Deepgram] ${track} connection closed`, "deepgram");
+        
+        // Clear keepalive interval
+        if (keepaliveInterval) {
+          clearInterval(keepaliveInterval);
+          keepaliveInterval = null;
+        }
+        
+        // Auto-reconnect if not intentionally closed
+        if (!isClosedIntentionally && reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          log(`[Deepgram] ${track} reconnecting (attempt ${reconnectAttempts}/${maxReconnectAttempts})...`, "deepgram");
+          setTimeout(() => {
+            if (onReconnect) onReconnect();
+          }, Math.pow(2, reconnectAttempts) * 1000); // Exponential backoff: 2s, 4s, 8s
+        }
       });
       
-      return { dgWs, send: (data: Buffer) => {
-        if (dgWs.readyState === WebSocket.OPEN) {
-          dgWs.send(data);
+      return { 
+        dgWs, 
+        send: (data: Buffer) => {
+          if (dgWs.readyState === WebSocket.OPEN) {
+            dgWs.send(data);
+          }
+        }, 
+        finish: () => {
+          isClosedIntentionally = true;
+          if (keepaliveInterval) {
+            clearInterval(keepaliveInterval);
+            keepaliveInterval = null;
+          }
+          if (dgWs.readyState === WebSocket.OPEN) {
+            dgWs.close();
+          }
         }
-      }, finish: () => {
-        if (dgWs.readyState === WebSocket.OPEN) {
-          dgWs.close();
-        }
-      }};
+      };
     }
 
     ws.on("message", (data: Buffer) => {
@@ -823,6 +863,30 @@ If they need a phrase to say, give them the English phrase AND its translation t
         switch (message.event) {
           case "connected":
             log("Twilio Media Stream handshake", "twilio");
+            // Pre-initialize Deepgram immediately on connected to capture early audio
+            log("[Deepgram] Pre-initializing on connected event", "deepgram");
+            const setupInboundEarly = () => {
+              deepgramInbound = setupDeepgram("inbound", setupInboundEarly);
+            };
+            const setupOutboundEarly = () => {
+              deepgramOutbound = setupDeepgram("outbound", setupOutboundEarly);
+            };
+            setupInboundEarly();
+            setupOutboundEarly();
+            deepgramReady = true;
+            
+            // Flush any buffered audio
+            if (audioBuffer.length > 0) {
+              log(`[Deepgram] Flushing ${audioBuffer.length} buffered audio frames`, "deepgram");
+              for (const frame of audioBuffer) {
+                if (frame.track === "inbound" && deepgramInbound) {
+                  deepgramInbound.send(frame.data);
+                } else if (frame.track === "outbound" && deepgramOutbound) {
+                  deepgramOutbound.send(frame.data);
+                }
+              }
+              audioBuffer.length = 0;
+            }
             break;
 
           case "start":
@@ -837,13 +901,17 @@ If they need a phrase to say, give them the English phrase AND its translation t
               log(`Stream started: ${callSid}, callType: ${callType || 'browser'}, isPstnForwarding: ${isPstnForwarding}`, "twilio");
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               
+              // Log track roles for debugging
+              const honTrack = isPstnForwarding ? "outbound" : "inbound";
+              const gstTrack = isPstnForwarding ? "inbound" : "outbound";
+              log(`[Track Mapping] HON=${honTrack}, GST=${gstTrack}`, "twilio");
+              
               // Initialize Goal State Engine for this call
               goalEngine = getOrCreateEngine(callSid);
               log(`[GoalEngine] Initialized for call: ${callSid}`, "goal");
               
-              // Initialize Deepgram for both tracks
-              deepgramInbound = setupDeepgram("inbound");
-              deepgramOutbound = setupDeepgram("outbound");
+              // Note: Deepgram already initialized on "connected" event for early capture
+              log(`[Deepgram] Deepgram ready: ${deepgramReady}, inbound: ${!!deepgramInbound}, outbound: ${!!deepgramOutbound}`, "deepgram");
             }
             break;
 
@@ -853,15 +921,33 @@ If they need a phrase to say, give them the English phrase AND its translation t
               const track = message.media.track;
               const audioData = Buffer.from(message.media.payload, "base64");
               
-              // Send audio to appropriate Deepgram connection
-              if (track === "inbound" && deepgramInbound) {
-                deepgramInbound.send(audioData);
-              } else if (track === "outbound" && deepgramOutbound) {
-                deepgramOutbound.send(audioData);
+              // Track audio frames per track for debugging
+              if (audioFrameCount === 1) {
+                log(`[Audio] First frame received on track: ${track}`, "twilio");
               }
               
-              // Log periodically
-              if (audioFrameCount === 1 || audioFrameCount % 500 === 0) {
+              // Buffer audio if Deepgram not ready yet (should be rare)
+              if (!deepgramReady) {
+                if (audioBuffer.length < 500) { // Limit buffer size
+                  audioBuffer.push({ track, data: audioData });
+                }
+                if (audioFrameCount === 1) {
+                  log(`[Audio] Buffering early audio, Deepgram not ready yet`, "twilio");
+                }
+              } else {
+                // Send audio to appropriate Deepgram connection
+                if (track === "inbound" && deepgramInbound) {
+                  deepgramInbound.send(audioData);
+                } else if (track === "outbound" && deepgramOutbound) {
+                  deepgramOutbound.send(audioData);
+                }
+              }
+              
+              // Log periodically with track info
+              if (audioFrameCount === 50) {
+                log(`[Audio] 50 frames received, stream is active`, "twilio");
+              }
+              if (audioFrameCount % 500 === 0) {
                 log(`Audio frames: ${audioFrameCount}`, "twilio");
               }
             }
