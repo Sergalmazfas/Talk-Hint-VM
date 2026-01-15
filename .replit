@@ -53,3 +53,4 @@ DISABLE_TWILIO_SIGNATURE_CHECK = "true"
 
 [userenv.production]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"
+RUN_SEED = "true"
