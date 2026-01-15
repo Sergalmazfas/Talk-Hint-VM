@@ -671,7 +671,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
           if (transcript && transcript.trim()) {
             const isFinal = response.is_final;
             
-            const isGuestTrack = isPstnForwarding ? (track === "inbound") : (track === "outbound");
+            // Track mapping:
+            // Browser outbound call (isPstnForwarding=false): outbound=HON (browser mic), inbound=GST (remote)
+            // PSTN forwarding (isPstnForwarding=true): inbound=HON (mobile owner), outbound=GST (original caller)
+            const isGuestTrack = isPstnForwarding ? (track === "outbound") : (track === "inbound");
             const isOwnerTrack = !isGuestTrack;
             const speaker = isOwnerTrack ? "Owner" : "Guest";
             
@@ -917,8 +920,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               
               // Log track roles for debugging
-              const honTrack = isPstnForwarding ? "outbound" : "inbound";
-              const gstTrack = isPstnForwarding ? "inbound" : "outbound";
+              // Browser: outbound=HON, inbound=GST
+              // PSTN forwarding: inbound=HON, outbound=GST
+              const honTrack = isPstnForwarding ? "inbound" : "outbound";
+              const gstTrack = isPstnForwarding ? "outbound" : "inbound";
               log(`[Track Mapping] HON=${honTrack}, GST=${gstTrack}`, "twilio");
               
               // Initialize Goal State Engine for this call
