@@ -966,17 +966,22 @@ function handleMessage(data) {
 async function makeCall() {
   const phoneNumber = UI.phoneInput.value.trim();
   
+  log('[makeCall] Starting... phoneNumber=' + phoneNumber);
+  
   if (!phoneNumber) {
+    log('[makeCall] ERROR: No phone number entered');
     UI.statusText.textContent = 'Enter number';
     return;
   }
 
   if (!device) {
+    log('[makeCall] ERROR: Twilio device not initialized');
     UI.statusText.textContent = 'Not ready';
     return;
   }
 
-  log('Calling: ' + phoneNumber);
+  log('[makeCall] Device state: ' + device.state);
+  log('[makeCall] Calling: ' + phoneNumber);
   UI.statusDot.classList.add('calling');
   UI.statusText.textContent = 'Calling...';
   UI.callBtn.disabled = true;
@@ -992,7 +997,11 @@ async function makeCall() {
     var selectedNum = userNumbers.find(function(n) { return n.id === currentNumber; });
     var fromNumber = selectedNum ? selectedNum.twilioNumber : null;
     
-    log('Using callerId: ' + (fromNumber || 'default'));
+    log('[makeCall] Selected number ID: ' + currentNumber);
+    log('[makeCall] User numbers available: ' + userNumbers.length);
+    log('[makeCall] Using callerId: ' + (fromNumber || 'default'));
+    
+    log('[makeCall] Calling device.connect()...');
     activeCall = await device.connect({ 
       params: { 
         To: phoneNumber,
