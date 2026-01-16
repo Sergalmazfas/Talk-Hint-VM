@@ -671,11 +671,13 @@ If they need a phrase to say, give them the English phrase AND its translation t
           if (transcript && transcript.trim()) {
             const isFinal = response.is_final;
             
-            // Track mapping:
-            // Browser outbound call (isPstnForwarding=false): outbound=HON (browser mic), inbound=GST (remote)
+            // Track mapping (CORRECTED):
+            // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
+            // Browser outbound call (isPstnForwarding=false): inbound=HON (browser mic), outbound=GST (remote PSTN)
             // PSTN forwarding (isPstnForwarding=true): inbound=HON (mobile owner), outbound=GST (original caller)
-            const isGuestTrack = isPstnForwarding ? (track === "outbound") : (track === "inbound");
-            const isOwnerTrack = !isGuestTrack;
+            // Both modes have SAME mapping: inbound=HON, outbound=GST
+            const isGuestTrack = (track === "outbound");
+            const isOwnerTrack = (track === "inbound");
             const speaker = isOwnerTrack ? "Owner" : "Guest";
             
             // Debug: log track mapping decision
@@ -956,11 +958,8 @@ If they need a phrase to say, give them the English phrase AND its translation t
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               
               // Log track roles for debugging
-              // Browser: outbound=HON, inbound=GST
-              // PSTN forwarding: inbound=HON, outbound=GST
-              const honTrack = isPstnForwarding ? "inbound" : "outbound";
-              const gstTrack = isPstnForwarding ? "outbound" : "inbound";
-              log(`[Track Mapping] HON=${honTrack}, GST=${gstTrack}`, "twilio");
+              // BOTH modes: inbound=HON (owner), outbound=GST (guest)
+              log(`[Track Mapping] HON=inbound, GST=outbound (same for all modes)`, "twilio");
               
               // Initialize Goal State Engine for this call
               goalEngine = getOrCreateEngine(callSid);
