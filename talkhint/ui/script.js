@@ -802,6 +802,29 @@ function clearChat() {
   lastMessageTime = 0;
   lastMessageEl = null;
   setGoalActive(false);
+  hideGoalBadge();
+}
+
+// Goal badge in header
+function showGoalBadge(goalText) {
+  var existing = document.getElementById('goalBadge');
+  if (existing) existing.remove();
+  
+  var badge = document.createElement('div');
+  badge.id = 'goalBadge';
+  badge.className = 'goal-badge';
+  badge.innerHTML = '🎯 <span class="goal-text">' + escapeHtml(goalText) + '</span>';
+  
+  // Insert after status section
+  var statusSection = document.querySelector('.status-section');
+  if (statusSection && statusSection.parentNode) {
+    statusSection.parentNode.insertBefore(badge, statusSection.nextSibling);
+  }
+}
+
+function hideGoalBadge() {
+  var badge = document.getElementById('goalBadge');
+  if (badge) badge.remove();
 }
 
 function escapeHtml(text) {
@@ -1118,7 +1141,36 @@ function handleMessage(data) {
     case 'error':
       log('Error: ' + data.error);
       break;
+
+    case 'goal_state_update':
+      // Auto-detect goal from conversation
+      if (data.goalType && data.goalType !== 'other') {
+        var goalLabel = getGoalLabel(data.goalType);
+        showGoalBadge(goalLabel);
+        if (!callGoal) {
+          callGoal = goalLabel;
+          setGoalActive(true);
+        }
+      }
+      break;
+
+    case 'goal_achieved':
+      if (data.goalType) {
+        addMessage('ai', '✅ Цель достигнута: ' + getGoalLabel(data.goalType));
+      }
+      break;
   }
+}
+
+function getGoalLabel(goalType) {
+  var labels = {
+    'booking': 'Запись/Бронирование',
+    'pricing': 'Узнать цены',
+    'support': 'Техподдержка',
+    'info': 'Информация',
+    'negotiation': 'Переговоры'
+  };
+  return labels[goalType] || goalType;
 }
 
 async function makeCall() {
@@ -1180,7 +1232,12 @@ async function makeCall() {
       UI.callBtn.disabled = false;
       
       if (callGoal) {
-        addMessage('ai', 'Звонок начался. Ваша цель: ' + callGoal);
+        addMessage('ai', '🎯 Цель: ' + callGoal);
+        showGoalBadge(callGoal);
+      } else {
+        // Safe Start: no goal set, AI will help discover it
+        addMessage('ai', '👋 Звонок начался! Я слушаю и буду подсказывать.');
+        addHint('What brings you to call today?', 'Что привело вас сегодня?');
       }
       
       // Start quality monitoring for debugging audio issues
@@ -1218,6 +1275,8 @@ async function makeCall() {
 function resetCallUI() {
   activeCall = null;
   isInCall = false;
+  callGoal = '';  // Reset goal for next call
+  
   UI.statusDot.classList.remove('active', 'calling');
   UI.statusDot.classList.add('connected');
   UI.statusText.textContent = 'Ready';
@@ -1226,6 +1285,16 @@ function resetCallUI() {
   UI.callBtn.classList.remove('end');
   UI.callBtn.classList.add('start');
   UI.callBtn.disabled = false;
+  
+  // Hide goal badge and reset goal state
+  hideGoalBadge();
+  setGoalActive(false);
+  
+  // Stop quality monitoring
+  if (qualityMonitorInterval) {
+    clearInterval(qualityMonitorInterval);
+    qualityMonitorInterval = null;
+  }
 }
 
 var qualityMonitorInterval = null;
