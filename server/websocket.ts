@@ -191,6 +191,37 @@ let currentMode = "universal";
 let currentLanguage = "ru"; // Default to Russian, can be "ru" or "es"
 const uiClients = new Set<WebSocket>();
 
+// Filter JSON from text - never show raw JSON to users
+function filterJsonFromText(text: string): string {
+  if (!text) return text;
+  
+  // Remove JSON blocks like {...} or [{...}]
+  let filtered = text.replace(/\{[\s\S]*?\}/g, '').replace(/\[[\s\S]*?\]/g, '');
+  
+  // Clean up leftover formatting
+  filtered = filtered.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+  filtered = filtered.trim();
+  
+  // If nothing left after filtering, extract useful fields from original
+  if (!filtered && text.includes('{')) {
+    try {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        // Extract common fields
+        const parts: string[] = [];
+        if (parsed.suggestion) parts.push(parsed.suggestion);
+        if (parsed.en || parsed.english) parts.push(parsed.en || parsed.english);
+        if (parsed.translation || parsed.ru) parts.push(parsed.translation || parsed.ru);
+        if (parsed.text) parts.push(parsed.text);
+        filtered = parts.join('\n\n') || "Готово";
+      }
+    } catch {}
+  }
+  
+  return filtered || text;
+}
+
 function uiBroadcast(message: object) {
   const data = JSON.stringify(message);
   const openClients = Array.from(uiClients).filter(c => c.readyState === WebSocket.OPEN).length;
@@ -424,14 +455,23 @@ export function setupWebSocket(server: Server) {
 
     try {
       const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
+      const goalLockInstructions = goal ? `
+GOAL LOCK-IN MODE: The user has set a clear goal: "${goal}"
+- ONLY provide phrases and help that move toward this goal
+- IGNORE small-talk or off-topic requests from the caller
+- Keep steering toward: confirming time, place, details for the goal
+- If user asks for a phrase, give ONE clear phrase that advances the goal` : '';
+      
       const systemPrompt = `${TALKHINT_GOLDEN_PROMPT}
 
 The user's goal for this call: ${goal || "Not specified"}
 The user's native language: ${langName}
+${goalLockInstructions}
 
 The user is asking you a question during an active phone call.
 Respond with a SHORT, helpful answer.
-If they need a phrase to say, give them the English phrase AND its translation to ${langName}.`;
+If they need a phrase to say, give them the English phrase AND its translation to ${langName}.
+NEVER output JSON - only plain text with the phrase and translation.`;
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -450,7 +490,10 @@ If they need a phrase to say, give them the English phrase AND its translation t
       });
 
       const data = await response.json() as any;
-      const text = data.choices?.[0]?.message?.content || "Не удалось получить ответ";
+      let text = data.choices?.[0]?.message?.content || "Не удалось получить ответ";
+      
+      // Filter out JSON from response - never show raw JSON to user
+      text = filterJsonFromText(text);
       
       ws.send(JSON.stringify({ type: "ai_response", text }));
       log(`AI response sent: ${text.substring(0, 50)}...`, "server");

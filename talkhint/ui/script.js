@@ -712,8 +712,42 @@ function finalizeMessage(type, text, translation, sentiment) {
   UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
 }
 
+function filterJsonFromText(text) {
+  if (!text) return text;
+  
+  // Remove JSON blocks like {...} or [{...}]
+  var filtered = text.replace(/\{[\s\S]*?\}/g, '').replace(/\[[\s\S]*?\]/g, '');
+  
+  // Clean up leftover formatting
+  filtered = filtered.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+  filtered = filtered.trim();
+  
+  // If nothing left after filtering, try to extract useful fields
+  if (!filtered && text.indexOf('{') !== -1) {
+    try {
+      var jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        var parsed = JSON.parse(jsonMatch[0]);
+        var parts = [];
+        if (parsed.suggestion) parts.push(parsed.suggestion);
+        if (parsed.en || parsed.english) parts.push(parsed.en || parsed.english);
+        if (parsed.translation || parsed.ru) parts.push(parsed.translation || parsed.ru);
+        if (parsed.text) parts.push(parsed.text);
+        filtered = parts.join('\n\n') || text;
+      }
+    } catch (e) {}
+  }
+  
+  return filtered || text;
+}
+
 function addMessage(type, text, translation, sentiment) {
   if (!text) return;
+  
+  // Filter out JSON from text - never show raw JSON to users
+  text = filterJsonFromText(text);
+  if (translation) translation = filterJsonFromText(translation);
+  
   UI.emptyState.style.display = 'none';
   
   if ((type === 'you' || type === 'honor') && !hasGoal) {
@@ -1084,6 +1118,37 @@ function connectWebSocket() {
   };
 }
 
+// STT garbage filter - ignore low-quality/incomplete phrases
+function isGarbageSTT(text, confidence) {
+  if (!text) return true;
+  
+  var trimmed = text.trim();
+  
+  // Too short - likely garbage
+  var words = trimmed.split(/\s+/).filter(function(w) { return w.length > 0; });
+  if (words.length < 3) return true;
+  
+  // Low confidence
+  if (confidence !== undefined && confidence < 0.65) return true;
+  
+  // Common garbage patterns
+  var garbagePatterns = [
+    /^(so|the|and|but|or|um|uh|like)\s*$/i,
+    /^(does it|so the|stairs|I'm stay|I stay)\.?$/i,
+    /^\w{1,3}\.?$/  // Single short word
+  ];
+  
+  for (var i = 0; i < garbagePatterns.length; i++) {
+    if (garbagePatterns[i].test(trimmed)) return true;
+  }
+  
+  return false;
+}
+
+// Safe Start fallback tracking
+var safeStartRepliesWithoutGoal = 0;
+var safeStartFallbackShown = false;
+
 function handleMessage(data) {
   switch (data.type) {
     case 'connected':
@@ -1093,6 +1158,12 @@ function handleMessage(data) {
     case 'owner_transcript':
     case 'hon_transcript':
       if (data.text) {
+        // STT garbage filter for HON
+        if (data.isFinal && isGarbageSTT(data.text, data.confidence)) {
+          log('Filtered garbage HON STT: ' + data.text);
+          break;
+        }
+        
         // For interim results, update last message instead of adding new
         if (data.isFinal === false) {
           updateLastInterim('you', data.text);
@@ -1114,6 +1185,18 @@ function handleMessage(data) {
           updateLastInterim('guest', data.text);
         } else {
           finalizeMessage('guest', data.text, data.translation, data.sentiment);
+          
+          // Safe Start fallback: if no goal after 3 GST replies, show steer hint
+          if (!callGoal && isInCall && data.isFinal) {
+            safeStartRepliesWithoutGoal++;
+            if (safeStartRepliesWithoutGoal >= 3 && !safeStartFallbackShown) {
+              safeStartFallbackShown = true;
+              addHint(
+                'Just to check — are you calling to meet, ask a question, or schedule something?',
+                'Уточню — вы звоните чтобы встретиться, задать вопрос или что-то запланировать?'
+              );
+            }
+          }
         }
       }
       break;
@@ -1277,6 +1360,10 @@ function resetCallUI() {
   isInCall = false;
   callGoal = '';  // Reset goal for next call
   
+  // Reset Safe Start fallback tracking
+  safeStartRepliesWithoutGoal = 0;
+  safeStartFallbackShown = false;
+  
   UI.statusDot.classList.remove('active', 'calling');
   UI.statusDot.classList.add('connected');
   UI.statusText.textContent = 'Ready';
@@ -1385,6 +1472,26 @@ UI.phoneInput.addEventListener('keypress', function(e) {
   }
 });
 
+function getNextStepHint(goal) {
+  var goalLower = (goal || '').toLowerCase();
+  
+  // Detect goal type and suggest next step
+  if (goalLower.includes('встреч') || goalLower.includes('meet') || goalLower.includes('appointment')) {
+    return { en: 'What time works for you tomorrow?', ru: 'Во сколько вам удобно завтра?' };
+  }
+  if (goalLower.includes('запис') || goalLower.includes('book') || goalLower.includes('schedule')) {
+    return { en: 'Do you have any availability this week?', ru: 'Есть ли у вас свободное время на этой неделе?' };
+  }
+  if (goalLower.includes('цен') || goalLower.includes('price') || goalLower.includes('cost') || goalLower.includes('стоим')) {
+    return { en: 'Could you tell me the price for...?', ru: 'Можете сказать цену на...?' };
+  }
+  if (goalLower.includes('узнать') || goalLower.includes('info') || goalLower.includes('question')) {
+    return { en: 'I have a quick question about...', ru: 'У меня быстрый вопрос про...' };
+  }
+  
+  return { en: 'How can I help you today?', ru: 'Чем могу помочь сегодня?' };
+}
+
 function sendTextToAI() {
   const text = UI.textInput.value.trim();
   if (!text) return;
@@ -1392,6 +1499,7 @@ function sendTextToAI() {
   if (!isInCall) {
     callGoal = text;
     setGoalActive(true);
+    showGoalBadge(text);
     addMessage('honor', text);
     
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -1401,7 +1509,11 @@ function sendTextToAI() {
       }));
     }
     
-    addMessage('ai', 'Цель установлена. Теперь позвоните, и я помогу вам достичь её.');
+    addMessage('ai', '🎯 Цель установлена! Теперь позвоните.');
+    
+    // Show next_step hint immediately
+    var nextStep = getNextStepHint(text);
+    addHint(nextStep.en, nextStep.ru);
   } else {
     addMessage('honor', text);
     
