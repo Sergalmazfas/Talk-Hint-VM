@@ -1325,8 +1325,20 @@ async function makeCall() {
           var localTracks = localStream.getAudioTracks();
           localTracks.forEach(function(track, i) {
             log('[Audio] Local track ' + i + ': enabled=' + track.enabled + ' muted=' + track.muted + ' label=' + track.label);
+            // Ensure track is enabled
+            if (!track.enabled) {
+              track.enabled = true;
+              log('[Audio] Enabled local track ' + i);
+            }
           });
         }
+        
+        // Check if call is muted and unmute
+        if (activeCall.isMuted && activeCall.isMuted()) {
+          log('[Audio] Call was muted, unmuting...');
+          activeCall.mute(false);
+        }
+        log('[Audio] Call muted status: ' + (activeCall.isMuted ? activeCall.isMuted() : 'unknown'));
       } catch (e) {
         log('[Audio] Stream check error: ' + e.message);
       }
