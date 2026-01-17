@@ -1314,6 +1314,23 @@ async function makeCall() {
       UI.callBtn.classList.add('end');
       UI.callBtn.disabled = false;
       
+      // Log audio track info for debugging
+      try {
+        var localStream = activeCall.getLocalStream && activeCall.getLocalStream();
+        var remoteStream = activeCall.getRemoteStream && activeCall.getRemoteStream();
+        log('[Audio] Local stream: ' + (localStream ? 'OK (' + localStream.getAudioTracks().length + ' tracks)' : 'NONE'));
+        log('[Audio] Remote stream: ' + (remoteStream ? 'OK (' + remoteStream.getAudioTracks().length + ' tracks)' : 'NONE'));
+        
+        if (localStream) {
+          var localTracks = localStream.getAudioTracks();
+          localTracks.forEach(function(track, i) {
+            log('[Audio] Local track ' + i + ': enabled=' + track.enabled + ' muted=' + track.muted + ' label=' + track.label);
+          });
+        }
+      } catch (e) {
+        log('[Audio] Stream check error: ' + e.message);
+      }
+      
       if (callGoal) {
         addMessage('ai', '🎯 Цель: ' + callGoal);
         showGoalBadge(callGoal);
