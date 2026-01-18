@@ -1010,11 +1010,27 @@ async function initTwilioDevice() {
       }
     });
 
-    device.on('registered', function() {
+    device.on('registered', async function() {
       log('Device registered');
       UI.statusDot.classList.add('connected');
       UI.statusText.textContent = 'Ready';
       UI.callBtn.disabled = false;
+      
+      // Setup audio devices
+      try {
+        await device.audio.setInputDevice('default');
+        log('[Audio] Input device set to default');
+        
+        // List available input devices
+        var inputDevices = await navigator.mediaDevices.enumerateDevices();
+        var mics = inputDevices.filter(function(d) { return d.kind === 'audioinput'; });
+        log('[Audio] Available microphones: ' + mics.length);
+        mics.forEach(function(mic, i) {
+          log('[Audio] Mic ' + i + ': ' + (mic.label || 'Unnamed') + ' (' + mic.deviceId.substring(0,8) + ')');
+        });
+      } catch (e) {
+        log('[Audio] Device setup error: ' + e.message);
+      }
     });
 
     device.on('error', function(err) {
