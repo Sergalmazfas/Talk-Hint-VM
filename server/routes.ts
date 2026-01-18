@@ -27,6 +27,9 @@ const DISABLE_TWILIO_SIGNATURE_CHECK = process.env.DISABLE_TWILIO_SIGNATURE_CHEC
 
 // Call timeout in seconds - prevents early disconnect during silence/pauses
 const CALL_TIMEOUT = parseInt(process.env.TALKHINT_CALL_TIMEOUT || "90", 10);
+// Maximum call duration in seconds - safety limit to prevent runaway charges
+// Default: 10 minutes (600 seconds) - can be overridden with env var
+const CALL_TIME_LIMIT = parseInt(process.env.TALKHINT_CALL_TIME_LIMIT || "600", 10);
 
 // Log Twilio config at startup for debugging
 console.log("[Twilio Config] Startup diagnostics:");
@@ -38,6 +41,7 @@ console.log("  TWIML_APP_SID:", TWILIO_TWIML_APP_SID ? TWILIO_TWIML_APP_SID.subs
 console.log("  CALLER_ID:", TWILIO_PHONE_NUMBER || "NOT SET");
 console.log("  Signature check:", DISABLE_TWILIO_SIGNATURE_CHECK ? "DISABLED" : "ENABLED");
 console.log("  CALL_TIMEOUT:", CALL_TIMEOUT + "s");
+console.log("  CALL_TIME_LIMIT:", CALL_TIME_LIMIT + "s (max duration)");
 
 // Line token mapping: TH_NUM_X_TOKEN → lineId → phone number
 // Maps environment variable tokens to line numbers (1-7)
@@ -553,7 +557,8 @@ export async function registerRoutes(
           const dial = twimlResponse.dial({
             callerId: pendingCall.fromNumber || "",
             answerOnBridge: true,
-            timeout: CALL_TIMEOUT
+            timeout: CALL_TIMEOUT,
+            timeLimit: CALL_TIME_LIMIT
           });
           dial.number(forwardingPhone);
         }
@@ -827,7 +832,8 @@ export async function registerRoutes(
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
         answerOnBridge: true,
-        timeout: CALL_TIMEOUT
+        timeout: CALL_TIMEOUT,
+        timeLimit: CALL_TIME_LIMIT
       });
       dial.number(toNumber);
       console.log("[TwiML Voice] Dialing:", toNumber, "with stream:", streamUrl);
@@ -860,7 +866,7 @@ export async function registerRoutes(
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say>Connecting your call.</Say>
-  <Dial answerOnBridge="true" callerId="${TWILIO_PHONE_NUMBER}" timeout="${CALL_TIMEOUT}">
+  <Dial answerOnBridge="true" callerId="${TWILIO_PHONE_NUMBER}" timeout="${CALL_TIMEOUT}" timeLimit="${CALL_TIME_LIMIT}">
     <Number timeout="${CALL_TIMEOUT}">${targetNumber}</Number>
   </Dial>
 </Response>`;
@@ -876,7 +882,7 @@ export async function registerRoutes(
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say>Test call.</Say>
-  <Dial answerOnBridge="true" timeout="${CALL_TIMEOUT}">
+  <Dial answerOnBridge="true" timeout="${CALL_TIMEOUT}" timeLimit="${CALL_TIME_LIMIT}">
     <Number timeout="${CALL_TIMEOUT}">${targetNumber}</Number>
   </Dial>
 </Response>`;
