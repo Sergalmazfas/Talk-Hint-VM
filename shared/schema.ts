@@ -9,7 +9,7 @@ export const users = pgTable("users", {
   password: text("password"),
   language: text("language").notNull().default("ru"),
   forwardingPhone: text("forwarding_phone"),
-  callMode: text("call_mode").notNull().default("forwarding"),
+  callMode: text("call_mode").notNull().default("live"),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   plan: text("plan").default("free"),

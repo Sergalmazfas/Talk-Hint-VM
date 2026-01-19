@@ -37,6 +37,9 @@ let userPrompts = [];
 let userNumbers = [];
 let currentNumber = null;
 let editingPromptId = null;
+let callMode = localStorage.getItem('talkhint_call_mode') || 'live';
+let trainingSessionId = null;
+let isTrainingActive = false;
 
 const LANGUAGE_FLAGS = {
   ru: '🇷🇺',
@@ -1504,6 +1507,17 @@ function endCall() {
 }
 
 UI.callBtn.addEventListener('click', function() {
+  // Training mode: toggle training session
+  if (callMode === 'training') {
+    if (isTrainingActive) {
+      stopTrainingSession();
+    } else {
+      startTrainingSession();
+    }
+    return;
+  }
+  
+  // Live mode: normal Twilio call
   if (activeCall) {
     endCall();
   } else {
@@ -1541,7 +1555,14 @@ function sendTextToAI() {
   const text = UI.textInput.value.trim();
   if (!text) return;
   
-  if (!isInCall) {
+  // Training mode: send to training API
+  if (callMode === 'training' && isTrainingActive) {
+    sendTrainingTurn(text);
+    UI.textInput.value = '';
+    return;
+  }
+  
+  if (!isInCall && !isTrainingActive) {
     callGoal = text;
     setGoalActive(true);
     showGoalBadge(text);
@@ -1554,7 +1575,11 @@ function sendTextToAI() {
       }));
     }
     
-    addMessage('ai', '🎯 Цель установлена! Теперь позвоните.');
+    if (callMode === 'training') {
+      addMessage('ai', '🎯 Goal set! Click the phone button to start training.');
+    } else {
+      addMessage('ai', '🎯 Цель установлена! Теперь позвоните.');
+    }
     
     // Show next_step hint immediately
     var nextStep = getNextStepHint(text);
@@ -1632,6 +1657,251 @@ document.querySelectorAll('.language-item').forEach(function(item) {
     langItem.classList.add('active');
   }
 })();
+
+// Call Mode Toggle (Live / Training)
+function setCallMode(mode) {
+  if (callMode === mode) return;
+  
+  callMode = mode;
+  localStorage.setItem('talkhint_call_mode', mode);
+  log('Call mode set to: ' + mode);
+  
+  // Update UI toggle
+  document.querySelectorAll('.mode-option').forEach(function(item) {
+    item.classList.remove('active');
+  });
+  var selectedMode = document.querySelector('[data-mode="' + mode + '"]');
+  if (selectedMode) {
+    selectedMode.classList.add('active');
+  }
+  
+  // Toggle training mode class on body
+  if (mode === 'training') {
+    document.body.classList.add('training-mode');
+    UI.phoneInput.placeholder = 'Not needed in Training';
+    UI.statusText.textContent = 'Training Ready';
+  } else {
+    document.body.classList.remove('training-mode');
+    UI.phoneInput.placeholder = '+1 234 567 8900';
+    if (device && device.state === 'registered') {
+      UI.statusText.textContent = 'Ready';
+    }
+  }
+  
+  // Save to server
+  saveCallModeToServer(mode);
+}
+
+async function saveCallModeToServer(mode) {
+  try {
+    var token = getAuthToken();
+    if (!token) return;
+    
+    await fetch('/api/user/call-mode', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({ callMode: mode })
+    });
+  } catch (err) {
+    log('Error saving call mode: ' + err.message);
+  }
+}
+
+document.querySelectorAll('.mode-option').forEach(function(item) {
+  item.addEventListener('click', function() {
+    var mode = this.getAttribute('data-mode');
+    if (mode) {
+      setCallMode(mode);
+    }
+  });
+});
+
+(function initCallMode() {
+  var savedMode = localStorage.getItem('talkhint_call_mode') || 'live';
+  callMode = savedMode;
+  var modeItem = document.querySelector('[data-mode="' + savedMode + '"]');
+  if (modeItem) {
+    document.querySelectorAll('.mode-option').forEach(function(item) {
+      item.classList.remove('active');
+    });
+    modeItem.classList.add('active');
+  }
+  if (savedMode === 'training') {
+    document.body.classList.add('training-mode');
+    UI.phoneInput.placeholder = 'Not needed in Training';
+  }
+})();
+
+// Training Mode Functions
+async function startTrainingSession() {
+  if (!callGoal) {
+    addSystemMessage('Please set a call goal first (type in the text box below)');
+    return;
+  }
+  
+  log('Starting training session with goal: ' + callGoal);
+  isTrainingActive = true;
+  
+  try {
+    var token = getAuthToken();
+    var res = await fetch('/training/start', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        goal: callGoal,
+        language: 'en',
+        hintLanguage: currentLanguage
+      })
+    });
+    
+    var data = await res.json();
+    if (data.sessionId) {
+      trainingSessionId = data.sessionId;
+      log('Training session started: ' + trainingSessionId);
+      
+      // Update UI
+      UI.callBtn.classList.add('on-call');
+      UI.statusText.textContent = 'Training Active';
+      UI.statusDot.classList.add('on-call');
+      
+      // Show initial message
+      addSystemMessage('Training session started! Type what you would say to the caller.');
+      
+      // If there's an initial GST message, show it
+      if (data.gst) {
+        addMessage('GST', data.gst.text);
+      }
+    } else {
+      log('Failed to start training: ' + (data.error || 'Unknown error'));
+      isTrainingActive = false;
+    }
+  } catch (err) {
+    log('Error starting training: ' + err.message);
+    isTrainingActive = false;
+  }
+}
+
+async function sendTrainingTurn(honText) {
+  if (!trainingSessionId || !isTrainingActive) {
+    log('No active training session');
+    return;
+  }
+  
+  log('Sending training turn: ' + honText);
+  
+  // Add HON message to chat
+  addMessage('HON', honText);
+  
+  try {
+    var token = getAuthToken();
+    var res = await fetch('/training/turn', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        sessionId: trainingSessionId,
+        hon_text: honText
+      })
+    });
+    
+    var data = await res.json();
+    
+    if (data.error) {
+      log('Training turn error: ' + data.error);
+      addSystemMessage('Error: ' + data.error);
+      return;
+    }
+    
+    // Add GST response
+    if (data.gst && data.gst.text) {
+      addMessage('GST', data.gst.text);
+    }
+    
+    // Add HINT as system message
+    if (data.hint) {
+      var hintText = '';
+      if (data.hint.suggestion) {
+        hintText += data.hint.suggestion;
+      }
+      if (data.hint.translation) {
+        hintText += '\n' + LANGUAGE_FLAGS[currentLanguage] + ' ' + data.hint.translation;
+      }
+      if (hintText) {
+        addHintMessage(hintText, data.hint.goal_state);
+      }
+    }
+  } catch (err) {
+    log('Error in training turn: ' + err.message);
+    addSystemMessage('Error: ' + err.message);
+  }
+}
+
+async function stopTrainingSession() {
+  log('Stopping training session');
+  
+  // Reset session on server
+  if (trainingSessionId) {
+    try {
+      var token = getAuthToken();
+      await fetch('/training/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ sessionId: trainingSessionId })
+      });
+    } catch (err) {
+      log('Error resetting training session: ' + err.message);
+    }
+  }
+  
+  isTrainingActive = false;
+  trainingSessionId = null;
+  
+  // Update UI
+  UI.callBtn.classList.remove('on-call');
+  UI.statusText.textContent = 'Training Ready';
+  UI.statusDot.classList.remove('on-call');
+  
+  addSystemMessage('Training session ended.');
+}
+
+function addHintMessage(text, goalState) {
+  var msgEl = document.createElement('div');
+  msgEl.className = 'message hint';
+  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong> ' + text.replace(/\n/g, '<br>') + '</div>';
+  
+  if (goalState && goalState.next_step) {
+    var goalEl = document.createElement('div');
+    goalEl.className = 'goal-hint';
+    goalEl.style.cssText = 'font-size: 0.8rem; color: #6b7280; margin-top: 4px;';
+    goalEl.textContent = 'Next: ' + goalState.next_step;
+    msgEl.querySelector('.message-content').appendChild(goalEl);
+  }
+  
+  UI.emptyState.style.display = 'none';
+  UI.chatContainer.appendChild(msgEl);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
+function addSystemMessage(text) {
+  var msgEl = document.createElement('div');
+  msgEl.className = 'message system';
+  msgEl.innerHTML = '<div class="message-content" style="color: #6b7280; font-style: italic;">' + text + '</div>';
+  
+  UI.emptyState.style.display = 'none';
+  UI.chatContainer.appendChild(msgEl);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
 
 let currentPlan = 'free';
 let stripeProducts = [];

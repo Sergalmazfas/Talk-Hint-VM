@@ -189,6 +189,45 @@
     .language-item:hover { background: #e5e7eb; }
     .language-item.active { background: #dbeafe; color: #1d4ed8; }
     
+    .call-mode-toggle {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mode-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      color: #374151;
+    }
+    .mode-option:hover { background: #e5e7eb; }
+    .mode-option.active { background: #dbeafe; color: #1d4ed8; }
+    .mode-option[data-mode="training"].active { background: #fef3c7; color: #d97706; }
+    
+    .training-badge {
+      display: none;
+      background: #fef3c7;
+      color: #d97706;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+    .training-mode .training-badge { display: inline-block; }
+    .training-mode .phone-input#phoneInput { 
+      opacity: 0.5; 
+      pointer-events: none; 
+    }
+    .training-mode #statusText::after {
+      content: " (Training)";
+      color: #d97706;
+    }
+    
     .main-content {
       flex: 1;
       display: flex;
@@ -812,6 +851,19 @@
         <div class="section-label">📁 My Prompts</div>
         <div class="folders-list" id="foldersList">
           <div class="folders-empty" id="foldersEmpty">No prompts yet</div>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-label">📞 Call Mode</div>
+      <div class="call-mode-toggle" id="callModeToggle">
+        <div class="mode-option active" data-mode="live" data-testid="mode-live">
+          <span>📱</span>
+          <span>Live call</span>
+        </div>
+        <div class="mode-option" data-mode="training" data-testid="mode-training">
+          <span>🎓</span>
+          <span>Training call</span>
         </div>
       </div>
     </div>

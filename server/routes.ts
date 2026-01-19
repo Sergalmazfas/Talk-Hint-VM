@@ -13,6 +13,7 @@ import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
+import { startTrainingSession, processTrainingTurn, resetTrainingSession } from "./training";
 import { pendingCalls, users, phoneNumbers } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
@@ -1475,6 +1476,102 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const templates = await storage.getPromptTemplates();
       res.json({ templates });
     } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Training Mode API - with Zod validation
+  const trainingStartSchema = z.object({
+    goal: z.string().min(1, "Goal is required"),
+    language: z.string().optional().default("en"),
+    hintLanguage: z.enum(["ru", "es"]).optional().default("ru")
+  });
+
+  const trainingTurnSchema = z.object({
+    sessionId: z.string().uuid("Invalid session ID"),
+    hon_text: z.string().min(1, "hon_text is required"),
+    goal_override: z.string().optional()
+  });
+
+  const trainingResetSchema = z.object({
+    sessionId: z.string().uuid("Invalid session ID")
+  });
+
+  const callModeSchema = z.object({
+    callMode: z.enum(["live", "training", "forwarding"])
+  });
+
+  app.post("/training/start", authMiddleware, async (req, res) => {
+    try {
+      const parsed = trainingStartSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+      
+      const { goal, language, hintLanguage } = parsed.data;
+      const result = await startTrainingSession(goal, language, hintLanguage);
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Training] Start error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/training/turn", authMiddleware, async (req, res) => {
+    try {
+      const parsed = trainingTurnSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+      
+      const { sessionId, hon_text, goal_override } = parsed.data;
+      const result = await processTrainingTurn(sessionId, hon_text, goal_override);
+      
+      if (result.error && result.error === "Session not found") {
+        return res.status(404).json({ error: result.error });
+      }
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Training] Turn error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/training/reset", authMiddleware, async (req, res) => {
+    try {
+      const parsed = trainingResetSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.errors[0].message });
+      }
+      
+      const { sessionId } = parsed.data;
+      const success = resetTrainingSession(sessionId);
+      res.json({ success });
+    } catch (error: any) {
+      console.error("[Training] Reset error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // User call mode setting
+  app.post("/api/user/call-mode", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const parsed = callModeSchema.safeParse(req.body);
+      
+      if (!parsed.success) {
+        return res.status(400).json({ error: "callMode must be 'live', 'training', or 'forwarding'" });
+      }
+      
+      await db.update(users)
+        .set({ callMode: parsed.data.callMode })
+        .where(eq(users.id, user.id));
+      
+      res.json({ success: true, callMode: parsed.data.callMode });
+    } catch (error: any) {
+      console.error("[User] Call mode update error:", error);
       res.status(500).json({ error: error.message });
     }
   });
