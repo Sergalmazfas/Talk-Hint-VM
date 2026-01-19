@@ -14,20 +14,81 @@ interface TrainingSession {
 
 const trainingSessions: Map<string, TrainingSession> = new Map();
 
-const TRAINING_SYSTEM_PROMPT = `You are simulating a phone conversation for training purposes. You play the role of GST (Guest) - the person being called (receptionist, doctor's office, business, etc.). The user (HON - Honor) is practicing making phone calls.
+// GST prompt - ONLY for the conversation partner, NO hints
+const GST_SYSTEM_PROMPT = `You are the conversation partner (GST) in a TalkHint training call.
 
-SCENARIO: The user is calling to achieve their stated goal. Play a realistic, slightly challenging but helpful GST character.
+This is a roleplay phone conversation. The user is practicing a real-life call.
+You are NOT an assistant, NOT a coach, NOT a teacher, and NOT ChatGPT.
+You are a real person on the phone (doctor, receptionist, support agent, etc.).
 
-IMPORTANT RULES:
-1. Respond ONLY in valid JSON format, no extra text
-2. Keep GST responses realistic and natural (1-2 sentences in English)
-3. The suggestion should help HON achieve their goal (3-7 words, English)
-4. Translation is the suggestion in the user's hint language
-5. Update goal_state based on conversation progress
+You DO NOT know that the user receives hints.
+You DO NOT see the goal, slots, or internal state.
+You DO NOT explain, teach, or help the user learn.
+
+────────────────────────
+ROLE AND BEHAVIOR
+────────────────────────
+• Speak naturally, like a real person on a phone call
+• Use short replies only: 1–2 sentences maximum
+• No explanations, no instructions, no lists
+• No "as an AI", no system language
+• No politeness filler unless natural
+• If unsure, say less, not more
+
+────────────────────────
+CONVERSATION LOGIC
+────────────────────────
+• Respond only to the user's last message
+• Ask only ONE simple question at a time if information is missing
+• If a date is given → ask for time
+• If a time is given → confirm or offer an alternative
+• If something is unavailable → say it briefly and offer another option
+• Keep the initiative with the user; do not decide for them
+
+────────────────────────
+GOAL HANDLING
+────────────────────────
+• Do not complete the goal on your own
+• Do not summarize the conversation
+• Do not push the user
+• Let the conversation progress naturally
+
+────────────────────────
+STRICTLY FORBIDDEN
+────────────────────────
+• Teaching or correcting the user
+• Suggesting what the user should say
+• Explaining the process
+• Mentioning goals, hints, training, AI, or the system
+• Speaking more than 2 sentences
+• Breaking character
+
+────────────────────────
+OUTPUT FORMAT (CRITICAL)
+────────────────────────
+Return ONLY valid JSON. No extra text. No markdown.
+
+Format:
+{
+  "gst_text": "Your short reply as the conversation partner."
+}
+
+FINAL RULE:
+If you are unsure, respond with the shortest natural reply possible.`;
+
+// Hint prompt - SEPARATE system for generating suggestions
+const HINT_SYSTEM_PROMPT = `You are TalkHint, an AI assistant that helps users during phone calls.
+You analyze the conversation and provide helpful suggestions.
+
+Your job:
+1. Suggest what the user (HON) should say next to achieve their goal
+2. Translate the suggestion into the user's native language
+3. Track conversation progress (slots filled, goal achieved)
+
+You DO NOT speak in the conversation. You only provide hints.
 
 OUTPUT FORMAT (strict JSON):
 {
-  "gst_text": "GST's response in English",
   "suggestion_for_hon": "Short suggestion in English (3-7 words)",
   "translation": "Suggestion translated to hint language",
   "goal_state": {
@@ -44,15 +105,7 @@ OUTPUT FORMAT (strict JSON):
     },
     "achieved": false
   }
-}
-
-GST CHARACTER GUIDELINES:
-- Be helpful but realistic (ask for details, suggest alternatives)
-- Sometimes be slightly busy or need to check things
-- Use natural phone conversation phrases
-- If appointment/booking: ask for preferred date/time, then confirm
-- If pricing: give ranges or ask what service they need
-- If support: ask clarifying questions, then provide help`;
+}`;
 
 export async function startTrainingSession(
   goal: string,
@@ -98,10 +151,10 @@ async function generateInitialGstGreeting(session: TrainingSession): Promise<str
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: TRAINING_SYSTEM_PROMPT },
+          { role: "system", content: GST_SYSTEM_PROMPT },
           { 
             role: "user", 
-            content: `The user (HON) is about to call to: "${session.goal}". Generate ONLY a brief phone greeting from GST (the person answering). Just the greeting text, no JSON.`
+            content: `Generate ONLY a brief phone greeting. Just the greeting text, no JSON. Example: "Hello, Dr. Smith's office, how may I help you?"`
           }
         ],
         temperature: 0.7,
@@ -162,7 +215,8 @@ export async function processTrainingTurn(
       `${h.role.toUpperCase()}: ${h.text}`
     ).join("\n");
     
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // STEP 1: Get GST response (separate call, no goal knowledge)
+    const gstResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -171,70 +225,121 @@ export async function processTrainingTurn(
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: TRAINING_SYSTEM_PROMPT },
+          { role: "system", content: GST_SYSTEM_PROMPT },
+          { 
+            role: "user", 
+            content: `CONVERSATION:\n${historyForPrompt}\n\nRespond as GST. Return ONLY valid JSON.`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 150
+      })
+    });
+    
+    const gstData = await gstResponse.json();
+    const gstContent = gstData.choices?.[0]?.message?.content?.trim();
+    
+    let gstText = "I understand. How can I help you?";
+    if (gstContent) {
+      try {
+        const jsonMatch = gstContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const gstParsed = JSON.parse(jsonMatch[0]);
+          gstText = gstParsed.gst_text || gstText;
+        }
+      } catch {
+        // If not JSON, use raw text (fallback)
+        gstText = gstContent.replace(/^["']|["']$/g, '').slice(0, 200);
+      }
+    }
+    
+    session.history.push({ role: "gst", text: gstText });
+    console.log(`[Training] GST: "${gstText}"`);
+    
+    // STEP 2: Get hint (separate call, knows the goal)
+    const hintResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: HINT_SYSTEM_PROMPT },
           { 
             role: "user", 
             content: `GOAL: "${session.goal}"
 HINT LANGUAGE: ${session.hintLanguage === "ru" ? "Russian" : session.hintLanguage === "es" ? "Spanish" : "Russian"}
 
-CONVERSATION SO FAR:
+CONVERSATION:
 ${historyForPrompt}
+GST: ${gstText}
 
-Generate the next GST response and a helpful hint for HON. Return ONLY valid JSON.`
+What should HON say next? Return ONLY valid JSON.`
           }
         ],
         temperature: 0.7,
-        max_tokens: 500
+        max_tokens: 300
       })
     });
     
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content?.trim();
+    const hintData = await hintResponse.json();
+    const hintContent = hintData.choices?.[0]?.message?.content?.trim();
     
-    if (!content) {
-      return { error: "No response from AI" };
-    }
-    
-    let parsed;
-    try {
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
-      } else {
-        parsed = JSON.parse(content);
+    let hint = {
+      suggestion: "",
+      translation: "",
+      goal_state: {
+        current_goal: session.goal,
+        next_step: "",
+        slots: session.slots as Record<string, string | null>,
+        achieved: false
       }
-    } catch (parseErr) {
-      console.error(`[Training] Failed to parse JSON: ${content}`);
-      return { 
-        error: "Failed to parse AI response",
-        gst: { speaker: "GST", text: content.slice(0, 200) }
-      };
-    }
+    };
     
-    const gstText = parsed.gst_text || "I understand. How can I help you further?";
-    session.history.push({ role: "gst", text: gstText });
-    
-    if (parsed.goal_state?.slots) {
-      for (const [key, value] of Object.entries(parsed.goal_state.slots)) {
-        if (value && value !== "null") {
-          session.slots[key] = value as string;
+    if (hintContent) {
+      try {
+        const jsonMatch = hintContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const hintParsed = JSON.parse(jsonMatch[0]);
+          hint.suggestion = hintParsed.suggestion_for_hon || "";
+          hint.translation = hintParsed.translation || "";
+          if (hintParsed.goal_state) {
+            hint.goal_state = {
+              current_goal: hintParsed.goal_state.current_goal || session.goal,
+              next_step: hintParsed.goal_state.next_step || "",
+              slots: { ...session.slots, ...(hintParsed.goal_state.slots || {}) },
+              achieved: hintParsed.goal_state.achieved || false
+            };
+            // Update session slots
+            if (hintParsed.goal_state.slots) {
+              for (const [key, value] of Object.entries(hintParsed.goal_state.slots)) {
+                if (value && value !== "null") {
+                  session.slots[key] = value as string;
+                }
+              }
+            }
+          }
         }
+      } catch (err) {
+        console.error(`[Training] Failed to parse hint JSON: ${hintContent}`);
       }
     }
     
-    console.log(`[Training] Turn processed - GST: "${gstText.slice(0, 50)}..."`);
+    console.log(`[Training] Hint: "${hint.suggestion}"`);
     
     return {
       hon: { speaker: "HON", text: honText },
       gst: { speaker: "GST", text: gstText },
       hint: {
-        suggestion: parsed.suggestion_for_hon || "",
-        translation: parsed.translation || "",
+        suggestion: hint.suggestion,
+        translation: hint.translation,
         goal_state: {
-          current_goal: parsed.goal_state?.current_goal || session.goal,
-          next_step: parsed.goal_state?.next_step || "",
-          slots: { ...session.slots, ...(parsed.goal_state?.slots || {}) },
-          achieved: parsed.goal_state?.achieved || false
+          current_goal: hint.goal_state.current_goal,
+          next_step: hint.goal_state.next_step,
+          slots: hint.goal_state.slots,
+          achieved: hint.goal_state.achieved
         }
       }
     };

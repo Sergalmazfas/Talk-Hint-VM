@@ -159,3 +159,29 @@ State-machine для отслеживания цели разговора и п�
   - Анти-повтор steer: lastSteerSlot + lastSteerAt с cooldown 5 сек
   - GoalEngine получает fastMeta и не предлагает тот же слот повторно
 - **UI панель:** Goal Progress с goalType, missingSlots, status, nextBestAction
+
+### Training Mode
+Режим тренировки телефонных разговоров без Twilio:
+- **server/training.ts** - TrainingSession manager с отдельными промтами
+- **Архитектура двух промтов:**
+  - `GST_SYSTEM_PROMPT` - симуляция собеседника (ресепшн, врач, etc.)
+    - НЕ знает о цели пользователя
+    - НЕ учит, НЕ объясняет, НЕ подсказывает
+    - Короткие реплики 1-2 предложения
+    - Возвращает только `{ "gst_text": "..." }`
+  - `HINT_SYSTEM_PROMPT` - TalkHint подсказчик (отдельный вызов)
+    - Знает цель пользователя
+    - Генерирует suggestion + translation + goal_state
+- **API endpoints:**
+  - `POST /training/start` - создание сессии, initial greeting от GST
+  - `POST /training/turn` - обработка реплики HON → GST ответ + Hint
+  - `POST /training/reset` - очистка сессии
+- **UI интеграция:**
+  - Settings toggle: Live call / Training call
+  - `callMode` сохраняется в localStorage + сервер
+  - Кнопка Call в training mode НЕ вызывает Twilio
+  - 3 типа сообщений в ленте: HON, GST, HINT (отдельный блок)
+- **Session management:**
+  - In-memory Map с UUID сессиями
+  - Auto-cleanup каждые 5 мин (expiry 30 мин)
+  - UI вызывает /training/reset при stop
