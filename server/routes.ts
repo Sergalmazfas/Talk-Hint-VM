@@ -1637,22 +1637,6 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
-  // TEMPORARY: Fix phone number type (will remove after use)
-  app.get("/api/admin/fix-phone-type", async (req, res) => {
-    try {
-      const result = await db.update(phoneNumbers)
-        .set({ type: "personal" })
-        .where(eq(phoneNumbers.twilioNumber, "+19543200848"))
-        .returning();
-      
-      console.log("[Admin] Fixed phone type:", result);
-      res.json({ success: true, message: "Phone number type changed to personal", updated: result.length });
-    } catch (error: any) {
-      console.error("[Admin] Fix phone type error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
   // User call mode setting
   app.post("/api/user/call-mode", authMiddleware, async (req, res) => {
     try {
