@@ -183,6 +183,11 @@ State-machine для отслеживания цели разговора и п�
   - `/training/stt` endpoint → Deepgram prerecorded API → текст
   - Transcribed text отправляется в `/training/turn`
   - Microphone видна только в training mode когда сессия активна
+- **Goal-First Logic:**
+  - При старте сессии: Goal → Initial Hint (КАК НАЧАТЬ разговор)
+  - НЕ GST greeting первым, а подсказка ЧТО СКАЗАТЬ
+  - Поток: Goal → initialHint → User говорит → GST отвечает → nextHint
+  - `generateInitialHint()` создаёт opening phrase на основе цели
 - **API endpoints:**
   - `POST /training/start` - создание сессии, initial greeting от GST
     - Params: `goal`, `conversationLanguage` (default: "en"), `hintLanguage` (default: "ru")

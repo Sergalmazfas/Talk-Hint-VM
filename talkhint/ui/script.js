@@ -1775,12 +1775,15 @@ async function startTrainingSession() {
       UI.statusText.textContent = 'Training Active';
       UI.statusDot.classList.add('on-call');
       
-      // Show initial message
-      addSystemMessage('Training session started! Type what you would say to the caller.');
-      
-      // If there's an initial GST message, show it
-      if (data.gst) {
-        addMessage('GST', data.gst.text);
+      // Show initial hint based on goal - what should user say FIRST
+      if (data.initialHint) {
+        addSystemMessage('Say this to start the call:');
+        addHint(data.initialHint.suggestion, data.initialHint.translation);
+        if (data.initialHint.context) {
+          addSystemMessage(data.initialHint.context);
+        }
+      } else {
+        addSystemMessage('Training session started! Say your opening phrase.');
       }
       
       // Show microphone button for voice input

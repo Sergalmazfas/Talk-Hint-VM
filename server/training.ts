@@ -148,7 +148,14 @@ export async function startTrainingSession(
   goal: string,
   conversationLanguage: string = "en", // GST always speaks this (default: English)
   hintLanguage: string = "ru" // User's native language for translations
-): Promise<{ sessionId: string; gst?: { text: string } }> {
+): Promise<{ 
+  sessionId: string; 
+  initialHint?: { 
+    suggestion: string; 
+    translation: string;
+    context: string;
+  } 
+}> {
   const sessionId = crypto.randomUUID();
   
   const session: TrainingSession = {
@@ -164,12 +171,89 @@ export async function startTrainingSession(
   trainingSessions.set(sessionId, session);
   console.log(`[Training] Session started: ${sessionId}, goal: "${goal}"`);
   
-  const initialGst = await generateInitialGstGreeting(session);
+  // Generate INITIAL HINT based on goal - what should the user say FIRST
+  const initialHint = await generateInitialHint(session);
   
   return { 
     sessionId,
-    gst: initialGst ? { text: initialGst } : undefined
+    initialHint
   };
+}
+
+// Generate the FIRST hint based on the goal - what should user say to START the conversation
+async function generateInitialHint(session: TrainingSession): Promise<{
+  suggestion: string;
+  translation: string;
+  context: string;
+} | undefined> {
+  if (!OPENAI_API_KEY) {
+    return undefined;
+  }
+  
+  try {
+    const hintLangName = getHintLanguageName(session.hintLanguage);
+    
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { 
+            role: "system", 
+            content: `You help users practice phone calls in English.
+Given the user's goal, generate:
+1. An opening phrase in English that the user should say FIRST when the call starts
+2. A translation to ${hintLangName}
+3. A brief context explanation
+
+Return ONLY valid JSON:
+{
+  "suggestion": "The opening phrase in English",
+  "translation": "Translation to ${hintLangName}",
+  "context": "Brief explanation of why to say this"
+}`
+          },
+          { 
+            role: "user", 
+            content: `User's goal: "${session.goal}"
+
+Generate an appropriate opening phrase for this phone call. The user is MAKING the call, not receiving it.`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 200
+      })
+    });
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content?.trim();
+    
+    if (content) {
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          console.log(`[Training] Initial hint: "${parsed.suggestion}"`);
+          return {
+            suggestion: parsed.suggestion || "",
+            translation: parsed.translation || "",
+            context: parsed.context || ""
+          };
+        }
+      } catch {
+        console.error("[Training] Failed to parse initial hint JSON");
+      }
+    }
+    
+    return undefined;
+  } catch (err: any) {
+    console.error(`[Training] Error generating initial hint: ${err.message}`);
+    return undefined;
+  }
 }
 
 async function generateInitialGstGreeting(session: TrainingSession): Promise<string | null> {
