@@ -5,8 +5,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 interface TrainingSession {
   id: string;
   goal: string;
-  language: string;
-  hintLanguage: string;
+  conversationLanguage: string; // GST speaks this language (always "en")
+  hintLanguage: string; // User's native language for translations (ru/es)
   history: Array<{ role: "hon" | "gst"; text: string }>;
   slots: Record<string, string>;
   createdAt: Date;
@@ -15,7 +15,8 @@ interface TrainingSession {
 const trainingSessions: Map<string, TrainingSession> = new Map();
 
 // GST prompt - ONLY for the conversation partner, NO hints
-const GST_SYSTEM_PROMPT = `You are the conversation partner (GST) in a TalkHint training call.
+// {CONVERSATION_LANGUAGE} will be replaced with the actual language
+const GST_SYSTEM_PROMPT_TEMPLATE = `You are the conversation partner (GST) in a TalkHint training call.
 
 This is a roleplay phone conversation. The user is practicing a real-life call.
 You are NOT an assistant, NOT a coach, NOT a teacher, and NOT ChatGPT.
@@ -24,6 +25,14 @@ You are a real person on the phone (doctor, receptionist, support agent, etc.).
 You DO NOT know that the user receives hints.
 You DO NOT see the goal, slots, or internal state.
 You DO NOT explain, teach, or help the user learn.
+
+────────────────────────
+LANGUAGE (CRITICAL)
+────────────────────────
+• You MUST speak ONLY in {CONVERSATION_LANGUAGE}
+• Even if the user writes in another language, you ALWAYS reply in {CONVERSATION_LANGUAGE}
+• No translations, no mixing languages
+• This simulates a real phone call in {CONVERSATION_LANGUAGE}
 
 ────────────────────────
 ROLE AND BEHAVIOR
@@ -56,6 +65,7 @@ GOAL HANDLING
 ────────────────────────
 STRICTLY FORBIDDEN
 ────────────────────────
+• Speaking any language other than {CONVERSATION_LANGUAGE}
 • Teaching or correcting the user
 • Suggesting what the user should say
 • Explaining the process
@@ -70,30 +80,47 @@ Return ONLY valid JSON. No extra text. No markdown.
 
 Format:
 {
-  "gst_text": "Your short reply as the conversation partner."
+  "gst_text": "Your short reply in {CONVERSATION_LANGUAGE}."
 }
 
 FINAL RULE:
-If you are unsure, respond with the shortest natural reply possible.`;
+If you are unsure, respond with the shortest natural reply possible in {CONVERSATION_LANGUAGE}.`;
+
+function getGstSystemPrompt(conversationLanguage: string): string {
+  // Currently only English is supported for GST conversation
+  // Force English regardless of input to ensure consistency
+  const langName = "English";
+  return GST_SYSTEM_PROMPT_TEMPLATE.replace(/\{CONVERSATION_LANGUAGE\}/g, langName);
+}
+
+function getConversationLanguageName(lang: string): string {
+  return "English"; // Always English for now
+}
 
 // Hint prompt - SEPARATE system for generating suggestions
-const HINT_SYSTEM_PROMPT = `You are TalkHint, an AI assistant that helps users during phone calls.
+// {HINT_LANGUAGE} will be replaced with the user's native language
+const HINT_SYSTEM_PROMPT_TEMPLATE = `You are TalkHint, an AI assistant that helps users during phone calls.
 You analyze the conversation and provide helpful suggestions.
 
 Your job:
 1. Suggest what the user (HON) should say next to achieve their goal
-2. Translate the suggestion into the user's native language
+2. Translate the suggestion into the user's native language ({HINT_LANGUAGE})
 3. Track conversation progress (slots filled, goal achieved)
 
 You DO NOT speak in the conversation. You only provide hints.
 
+LANGUAGE RULES:
+• "suggestion_for_hon" → ALWAYS in English (the conversation language)
+• "translation" → ALWAYS in {HINT_LANGUAGE} (user's native language)
+• Never mix languages in a single field
+
 OUTPUT FORMAT (strict JSON):
 {
   "suggestion_for_hon": "Short suggestion in English (3-7 words)",
-  "translation": "Suggestion translated to hint language",
+  "translation": "Same suggestion translated to {HINT_LANGUAGE}",
   "goal_state": {
     "current_goal": "user's main goal",
-    "next_step": "what HON should do/say next",
+    "next_step": "what HON should do/say next (in English)",
     "slots": {
       "date": "extracted or null",
       "time": "extracted or null",
@@ -107,17 +134,27 @@ OUTPUT FORMAT (strict JSON):
   }
 }`;
 
+function getHintSystemPrompt(hintLanguage: string): string {
+  const langName = getHintLanguageName(hintLanguage);
+  return HINT_SYSTEM_PROMPT_TEMPLATE.replace(/\{HINT_LANGUAGE\}/g, langName);
+}
+
+function getHintLanguageName(lang: string): string {
+  if (lang === "es") return "Spanish";
+  return "Russian"; // Default to Russian
+}
+
 export async function startTrainingSession(
   goal: string,
-  language: string,
-  hintLanguage: string
+  conversationLanguage: string = "en", // GST always speaks this (default: English)
+  hintLanguage: string = "ru" // User's native language for translations
 ): Promise<{ sessionId: string; gst?: { text: string } }> {
   const sessionId = crypto.randomUUID();
   
   const session: TrainingSession = {
     id: sessionId,
     goal,
-    language,
+    conversationLanguage,
     hintLanguage,
     history: [],
     slots: {},
@@ -151,10 +188,10 @@ async function generateInitialGstGreeting(session: TrainingSession): Promise<str
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: GST_SYSTEM_PROMPT },
+          { role: "system", content: getGstSystemPrompt(session.conversationLanguage) },
           { 
             role: "user", 
-            content: `Generate ONLY a brief phone greeting. Just the greeting text, no JSON. Example: "Hello, Dr. Smith's office, how may I help you?"`
+            content: `Generate ONLY a brief phone greeting in English. Just the greeting text, no JSON. Example: "Hello, Dr. Smith's office, how may I help you?"`
           }
         ],
         temperature: 0.7,
@@ -225,10 +262,10 @@ export async function processTrainingTurn(
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: GST_SYSTEM_PROMPT },
+          { role: "system", content: getGstSystemPrompt(session.conversationLanguage) },
           { 
             role: "user", 
-            content: `CONVERSATION:\n${historyForPrompt}\n\nRespond as GST. Return ONLY valid JSON.`
+            content: `CONVERSATION:\n${historyForPrompt}\n\nRespond as GST in English only. Return ONLY valid JSON.`
           }
         ],
         temperature: 0.7,
@@ -266,17 +303,16 @@ export async function processTrainingTurn(
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: HINT_SYSTEM_PROMPT },
+          { role: "system", content: getHintSystemPrompt(session.hintLanguage) },
           { 
             role: "user", 
             content: `GOAL: "${session.goal}"
-HINT LANGUAGE: ${session.hintLanguage === "ru" ? "Russian" : session.hintLanguage === "es" ? "Spanish" : "Russian"}
 
 CONVERSATION:
 ${historyForPrompt}
 GST: ${gstText}
 
-What should HON say next? Return ONLY valid JSON.`
+What should HON say next in English? Translate the suggestion to ${getHintLanguageName(session.hintLanguage)}. Return ONLY valid JSON.`
           }
         ],
         temperature: 0.7,

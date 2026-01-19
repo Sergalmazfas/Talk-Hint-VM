@@ -1755,8 +1755,8 @@ async function startTrainingSession() {
       },
       body: JSON.stringify({
         goal: callGoal,
-        language: 'en',
-        hintLanguage: currentLanguage
+        conversationLanguage: 'en', // GST always speaks English
+        hintLanguage: currentLanguage // User's native language for translations
       })
     });
     

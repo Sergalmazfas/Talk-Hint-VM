@@ -1483,8 +1483,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   // Training Mode API - with Zod validation
   const trainingStartSchema = z.object({
     goal: z.string().min(1, "Goal is required"),
-    language: z.string().optional().default("en"),
-    hintLanguage: z.enum(["ru", "es"]).optional().default("ru")
+    conversationLanguage: z.string().optional().default("en"), // GST speaks this (always EN for now)
+    hintLanguage: z.enum(["ru", "es"]).optional().default("ru") // User's native language for translations
   });
 
   const trainingTurnSchema = z.object({
@@ -1508,8 +1508,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         return res.status(400).json({ error: parsed.error.errors[0].message });
       }
       
-      const { goal, language, hintLanguage } = parsed.data;
-      const result = await startTrainingSession(goal, language, hintLanguage);
+      const { goal, conversationLanguage, hintLanguage } = parsed.data;
+      const result = await startTrainingSession(goal, conversationLanguage, hintLanguage);
       
       res.json(result);
     } catch (error: any) {

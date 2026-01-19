@@ -164,16 +164,22 @@ State-machine для отслеживания цели разговора и п�
 Режим тренировки телефонных разговоров без Twilio:
 - **server/training.ts** - TrainingSession manager с отдельными промтами
 - **Архитектура двух промтов:**
-  - `GST_SYSTEM_PROMPT` - симуляция собеседника (ресепшн, врач, etc.)
+  - `GST_SYSTEM_PROMPT_TEMPLATE` - симуляция собеседника (ресепшн, врач, etc.)
     - НЕ знает о цели пользователя
     - НЕ учит, НЕ объясняет, НЕ подсказывает
     - Короткие реплики 1-2 предложения
     - Возвращает только `{ "gst_text": "..." }`
-  - `HINT_SYSTEM_PROMPT` - TalkHint подсказчик (отдельный вызов)
+    - **ВСЕГДА говорит на English** (conversationLanguage)
+  - `HINT_SYSTEM_PROMPT_TEMPLATE` - TalkHint подсказчик (отдельный вызов)
     - Знает цель пользователя
-    - Генерирует suggestion + translation + goal_state
+    - Генерирует suggestion (English) + translation (hintLanguage) + goal_state
+- **Language Logic (Step 1):**
+  - `conversationLanguage` = "en" → GST всегда говорит на английском
+  - `hintLanguage` = "ru" или "es" → перевод подсказки на родной язык
+  - Даже если HON пишет на русском, GST отвечает на английском
 - **API endpoints:**
   - `POST /training/start` - создание сессии, initial greeting от GST
+    - Params: `goal`, `conversationLanguage` (default: "en"), `hintLanguage` (default: "ru")
   - `POST /training/turn` - обработка реплики HON → GST ответ + Hint
   - `POST /training/reset` - очистка сессии
 - **UI интеграция:**
