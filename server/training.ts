@@ -200,7 +200,23 @@ async function generateInitialGstGreeting(session: TrainingSession): Promise<str
     });
     
     const data = await response.json();
-    const greeting = data.choices?.[0]?.message?.content?.trim() || "Hello, how can I help you?";
+    let greeting = data.choices?.[0]?.message?.content?.trim() || "Hello, how can I help you?";
+    
+    // Parse JSON if returned (sometimes GPT returns JSON even when asked not to)
+    if (greeting.includes('{') && greeting.includes('}')) {
+      try {
+        const jsonMatch = greeting.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          greeting = parsed.gst_text || parsed.text || parsed.greeting || greeting;
+        }
+      } catch {
+        // Not valid JSON, use as-is
+      }
+    }
+    
+    // Remove quotes if wrapped
+    greeting = greeting.replace(/^["']|["']$/g, '');
     
     session.history.push({ role: "gst", text: greeting });
     console.log(`[Training] Initial GST greeting: "${greeting}"`);

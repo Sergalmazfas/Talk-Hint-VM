@@ -180,6 +180,7 @@ app.post(
 
 app.use(
   express.json({
+    limit: '10mb', // Increased for audio data in training STT
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
