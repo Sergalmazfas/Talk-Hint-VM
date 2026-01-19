@@ -106,6 +106,7 @@ Your job:
 1. Suggest what the user (HON) should say next to achieve their goal
 2. Translate the suggestion into the user's native language ({HINT_LANGUAGE})
 3. Track conversation progress (slots filled, goal achieved)
+4. Detect if the conversation intent has changed and suggest a new goal if needed
 
 You DO NOT speak in the conversation. You only provide hints.
 
@@ -113,6 +114,12 @@ LANGUAGE RULES:
 • "suggestion_for_hon" → ALWAYS in English (the conversation language)
 • "translation" → ALWAYS in {HINT_LANGUAGE} (user's native language)
 • Never mix languages in a single field
+
+GOAL CHANGE DETECTION:
+If you detect the conversation has shifted to a different intent/goal:
+• Set "suggested_goal" to the new goal (in English)
+• Set "goal_change_reason" to explain why (in English)
+• Only suggest if clearly different from current goal
 
 OUTPUT FORMAT (strict JSON):
 {
@@ -131,7 +138,9 @@ OUTPUT FORMAT (strict JSON):
       "service": "extracted or null"
     },
     "achieved": false
-  }
+  },
+  "suggested_goal": null,
+  "goal_change_reason": null
 }`;
 
 function getHintSystemPrompt(hintLanguage: string): string {
@@ -330,6 +339,10 @@ export async function processTrainingTurn(
       achieved: boolean;
     };
   };
+  suggested_goal?: {
+    goal: string;
+    reason: string;
+  };
 }> {
   const session = trainingSessions.get(sessionId);
   
@@ -434,6 +447,8 @@ What should HON say next in English? Translate the suggestion to ${getHintLangua
       }
     };
     
+    let suggestedGoal: { goal: string; reason: string } | undefined = undefined;
+    
     if (hintContent) {
       try {
         const jsonMatch = hintContent.match(/\{[\s\S]*\}/);
@@ -457,6 +472,15 @@ What should HON say next in English? Translate the suggestion to ${getHintLangua
               }
             }
           }
+          
+          // Check for suggested goal change
+          if (hintParsed.suggested_goal && hintParsed.goal_change_reason) {
+            suggestedGoal = {
+              goal: hintParsed.suggested_goal,
+              reason: hintParsed.goal_change_reason
+            };
+            console.log(`[Training] Suggested new goal: "${suggestedGoal.goal}" - ${suggestedGoal.reason}`);
+          }
         }
       } catch (err) {
         console.error(`[Training] Failed to parse hint JSON: ${hintContent}`);
@@ -465,7 +489,7 @@ What should HON say next in English? Translate the suggestion to ${getHintLangua
     
     console.log(`[Training] Hint: "${hint.suggestion}"`);
     
-    return {
+    const result: any = {
       hon: { speaker: "HON", text: honText },
       gst: { speaker: "GST", text: gstText },
       hint: {
@@ -479,6 +503,12 @@ What should HON say next in English? Translate the suggestion to ${getHintLangua
         }
       }
     };
+    
+    if (suggestedGoal) {
+      result.suggested_goal = suggestedGoal;
+    }
+    
+    return result;
   } catch (err: any) {
     console.error(`[Training] Error in turn: ${err.message}`);
     return { error: err.message };

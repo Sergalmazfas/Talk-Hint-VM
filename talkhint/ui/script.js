@@ -1680,10 +1680,12 @@ function setCallMode(mode) {
   if (mode === 'training') {
     document.body.classList.add('training-mode');
     UI.phoneInput.placeholder = 'Not needed in Training';
+    UI.textInput.placeholder = 'Write your goal...';
     UI.statusText.textContent = 'Training Ready';
   } else {
     document.body.classList.remove('training-mode');
     UI.phoneInput.placeholder = '+1 234 567 8900';
+    UI.textInput.placeholder = 'Напишите цель звонка...';
     if (device && device.state === 'registered') {
       UI.statusText.textContent = 'Ready';
     }
@@ -1737,6 +1739,7 @@ document.querySelectorAll('.mode-option').forEach(function(item) {
   if (savedMode === 'training') {
     document.body.classList.add('training-mode');
     UI.phoneInput.placeholder = 'Not needed in Training';
+    UI.textInput.placeholder = 'Write your goal...';
   }
 })();
 
@@ -1774,6 +1777,9 @@ async function startTrainingSession() {
       UI.callBtn.classList.add('on-call');
       UI.statusText.textContent = 'Training Active';
       UI.statusDot.classList.add('on-call');
+      
+      // Switch input field to Chat/Message mode
+      UI.textInput.placeholder = 'Type your reply or use mic...';
       
       // Show initial hint based on goal - what should user say FIRST
       if (data.initialHint) {
@@ -1850,6 +1856,11 @@ async function sendTrainingTurn(honText) {
         addHintMessage(hintText, data.hint.goal_state);
       }
     }
+    
+    // Show suggested goal change if AI detected intent shift
+    if (data.suggested_goal) {
+      showGoalSuggestion(data.suggested_goal.goal, data.suggested_goal.reason);
+    }
   } catch (err) {
     log('Error in training turn: ' + err.message);
     addSystemMessage('Error: ' + err.message);
@@ -1884,11 +1895,90 @@ async function stopTrainingSession() {
   UI.statusText.textContent = 'Training Ready';
   UI.statusDot.classList.remove('on-call');
   
+  // Reset input field to Goal mode
+  UI.textInput.placeholder = 'Write your goal...';
+  
+  // Reset goal
+  callGoal = '';
+  setGoalActive(false);
+  
   // Hide microphone button
   log('[Training] Calling updateMicButtonVisibility after session stop');
   updateMicButtonVisibility();
   
-  addSystemMessage('Training session ended.');
+  addSystemMessage('Training ended. Set a new goal to start again.');
+}
+
+// Show suggested goal change banner with Apply/Ignore buttons
+function showGoalSuggestion(newGoal, reason) {
+  log('[Training] Showing goal suggestion: ' + newGoal);
+  
+  // Remove any existing suggestion banner
+  var existing = document.querySelector('.goal-suggestion-banner');
+  if (existing) existing.remove();
+  
+  var banner = document.createElement('div');
+  banner.className = 'goal-suggestion-banner';
+  banner.style.cssText = 'background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 12px; padding: 12px 16px; margin: 8px 0; animation: slideIn 0.3s ease;';
+  
+  banner.innerHTML = 
+    '<div style="font-size: 0.85rem; color: #92400e; margin-bottom: 8px;">' +
+    '<strong>💡 Suggested goal change:</strong> ' + reason +
+    '</div>' +
+    '<div style="font-size: 0.95rem; font-weight: 500; color: #78350f; margin-bottom: 12px;">' +
+    '"' + newGoal + '"' +
+    '</div>' +
+    '<div style="display: flex; gap: 8px;">' +
+    '<button class="apply-goal-btn" style="background: #059669; color: white; border: none; border-radius: 8px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer;">✓ Apply</button>' +
+    '<button class="ignore-goal-btn" style="background: #9ca3af; color: white; border: none; border-radius: 8px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer;">✕ Ignore</button>' +
+    '</div>';
+  
+  // Add to chat
+  UI.chatContainer.appendChild(banner);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+  
+  // Button handlers
+  banner.querySelector('.apply-goal-btn').addEventListener('click', function() {
+    applyNewGoal(newGoal);
+    banner.remove();
+  });
+  
+  banner.querySelector('.ignore-goal-btn').addEventListener('click', function() {
+    log('[Training] Goal suggestion ignored');
+    addSystemMessage('Goal kept as: "' + callGoal + '"');
+    banner.remove();
+  });
+}
+
+// Apply new goal to the session
+async function applyNewGoal(newGoal) {
+  log('[Training] Applying new goal: ' + newGoal);
+  
+  callGoal = newGoal;
+  showGoalBadge(newGoal);
+  
+  // Update goal on server
+  if (trainingSessionId) {
+    try {
+      var token = getAuthToken();
+      await fetch('/training/turn', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({
+          sessionId: trainingSessionId,
+          hon_text: '',
+          goal_override: newGoal
+        })
+      });
+    } catch (err) {
+      log('[Training] Error updating goal: ' + err.message);
+    }
+  }
+  
+  addSystemMessage('Goal updated to: "' + newGoal + '"');
 }
 
 function addHintMessage(text, goalState) {
@@ -2539,8 +2629,10 @@ async function sendAudioForTranscription(base64Audio, mimeType) {
     
     log('[Mic] Transcribed: ' + text);
     
-    // Send transcribed text as training turn
-    await sendTrainingTurn(text);
+    // Put transcribed text in input field for user to review/edit before sending
+    UI.textInput.value = text;
+    UI.textInput.focus();
+    addSystemMessage('Tap Send to confirm, or edit the text first');
     
   } catch (err) {
     log('[Mic] Transcription error: ' + err.message);
