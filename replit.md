@@ -4,12 +4,19 @@
 
 TalkHint is an AI-powered real-time voice assistant for phone calls. It provides live transcription, translation hints, and GPT-powered suggestions during phone conversations. The application uses Twilio for phone call handling, Deepgram for speech-to-text, and OpenAI's Realtime API for AI-powered assistance.
 
-**TalkHint v2** adds subscription-based plans with Stripe, multiple phone numbers per user (Personal + Work) with different AI prompts/contexts for each number.
+**TalkHint v2** adds subscription-based plans with Stripe and a simplified Basic plan.
 
-### Subscription Plans
-- **Personal Plan** - $9/month: 1 personal phone number, 100 minutes/month
-- **Pro Plan** - $19/month: 2 phone numbers (personal + work), unlimited minutes
-- **Additional Work Number** - $10/month add-on
+### Subscription Plans (Current)
+- **Basic Plan** - $15/month: 1 personal phone number, live calls, training calls, learning/flashcards, notifications
+
+### FROZEN Features (Not Deleted, Just Hidden)
+- WORK phone numbers (type='work')
+- WORK folders and custom prompts
+- Multiple numbers per user
+- Editable prompts per number
+- Pro/Personal multi-tier plans
+
+These features remain in the database but are hidden in the UI and not used in call flows. The backend always uses TALKHINT_GOLDEN_PROMPT (base prompt).
 
 The system has two main interfaces:
 1. A React landing page that redirects to the main app
