@@ -177,11 +177,18 @@ State-machine для отслеживания цели разговора и п�
   - `conversationLanguage` = "en" → GST всегда говорит на английском
   - `hintLanguage` = "ru" или "es" → перевод подсказки на родной язык
   - Даже если HON пишет на русском, GST отвечает на английском
+- **Voice Input (Step 2):**
+  - Push-to-talk кнопка микрофона (зажми и говори)
+  - Browser MediaRecorder API → audio/webm
+  - `/training/stt` endpoint → Deepgram prerecorded API → текст
+  - Transcribed text отправляется в `/training/turn`
+  - Microphone видна только в training mode когда сессия активна
 - **API endpoints:**
   - `POST /training/start` - создание сессии, initial greeting от GST
     - Params: `goal`, `conversationLanguage` (default: "en"), `hintLanguage` (default: "ru")
   - `POST /training/turn` - обработка реплики HON → GST ответ + Hint
   - `POST /training/reset` - очистка сессии
+  - `POST /training/stt` - Deepgram STT для голосового ввода (audio base64 → text)
 - **UI интеграция:**
   - Settings toggle: Live call / Training call
   - `callMode` сохраняется в localStorage + сервер

@@ -11,6 +11,7 @@ const UI = {
   emptyState: document.getElementById('emptyState'),
   textInput: document.getElementById('textInput'),
   sendBtn: document.getElementById('sendBtn'),
+  micBtn: document.getElementById('micBtn'),
   numbersList: document.getElementById('numbersList'),
   foldersList: document.getElementById('foldersList'),
   foldersEmpty: document.getElementById('foldersEmpty'),
@@ -1688,6 +1689,11 @@ function setCallMode(mode) {
     }
   }
   
+  // Update microphone button visibility
+  if (typeof updateMicButtonVisibility === 'function') {
+    updateMicButtonVisibility();
+  }
+  
   // Save to server
   saveCallModeToServer(mode);
 }
@@ -1776,6 +1782,11 @@ async function startTrainingSession() {
       // If there's an initial GST message, show it
       if (data.gst) {
         addMessage('GST', data.gst.text);
+      }
+      
+      // Show microphone button for voice input
+      if (typeof updateMicButtonVisibility === 'function') {
+        updateMicButtonVisibility();
       }
     } else {
       log('Failed to start training: ' + (data.error || 'Unknown error'));
@@ -1871,6 +1882,11 @@ async function stopTrainingSession() {
   UI.callBtn.classList.remove('on-call');
   UI.statusText.textContent = 'Training Ready';
   UI.statusDot.classList.remove('on-call');
+  
+  // Hide microphone button
+  if (typeof updateMicButtonVisibility === 'function') {
+    updateMicButtonVisibility();
+  }
   
   addSystemMessage('Training session ended.');
 }
@@ -2331,3 +2347,200 @@ registerServiceWorker().then(function(registration) {
     checkExistingSubscription();
   }
 });
+
+// ============================================================
+// PUSH-TO-TALK MICROPHONE FOR TRAINING MODE
+// ============================================================
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+function initMicButton() {
+  if (!UI.micBtn) {
+    log('[Mic] Mic button not found');
+    return;
+  }
+  
+  // Show/hide mic button based on training mode
+  updateMicButtonVisibility();
+  
+  // Push-to-talk: mousedown to start, mouseup to stop
+  UI.micBtn.addEventListener('mousedown', startRecording);
+  UI.micBtn.addEventListener('mouseup', stopRecording);
+  UI.micBtn.addEventListener('mouseleave', stopRecording);
+  
+  // Touch events for mobile
+  UI.micBtn.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    startRecording();
+  });
+  UI.micBtn.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    stopRecording();
+  });
+  
+  log('[Mic] Push-to-talk initialized');
+}
+
+function updateMicButtonVisibility() {
+  if (!UI.micBtn) return;
+  
+  // Show mic button only in training mode when session is active
+  if (callMode === 'training' && isTrainingActive) {
+    UI.micBtn.style.display = 'flex';
+  } else {
+    UI.micBtn.style.display = 'none';
+  }
+}
+
+async function startRecording() {
+  if (isRecording || !isTrainingActive) return;
+  
+  try {
+    log('[Mic] Requesting microphone access...');
+    const stream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      } 
+    });
+    
+    // Determine best supported mime type
+    let mimeType = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/mp4';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = ''; // Let browser choose
+        }
+      }
+    }
+    
+    log('[Mic] Using mime type: ' + (mimeType || 'default'));
+    
+    const options = mimeType ? { mimeType } : {};
+    mediaRecorder = new MediaRecorder(stream, options);
+    audioChunks = [];
+    
+    mediaRecorder.ondataavailable = function(event) {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    };
+    
+    mediaRecorder.onstop = async function() {
+      log('[Mic] Recording stopped, processing...');
+      UI.micBtn.classList.remove('recording');
+      UI.micBtn.classList.add('processing');
+      
+      // Stop all tracks
+      stream.getTracks().forEach(track => track.stop());
+      
+      if (audioChunks.length === 0) {
+        log('[Mic] No audio data recorded');
+        UI.micBtn.classList.remove('processing');
+        return;
+      }
+      
+      const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
+      log('[Mic] Audio blob size: ' + audioBlob.size + ' bytes');
+      
+      // Convert to base64 and send to STT
+      const base64Audio = await blobToBase64(audioBlob);
+      await sendAudioForTranscription(base64Audio, mimeType || 'audio/webm');
+      
+      UI.micBtn.classList.remove('processing');
+    };
+    
+    mediaRecorder.start();
+    isRecording = true;
+    UI.micBtn.classList.add('recording');
+    log('[Mic] Recording started');
+    
+  } catch (err) {
+    log('[Mic] Error accessing microphone: ' + err.message);
+    alert('Could not access microphone. Please grant permission.');
+  }
+}
+
+function stopRecording() {
+  if (!isRecording || !mediaRecorder) return;
+  
+  isRecording = false;
+  if (mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    log('[Mic] Stopping recording...');
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise(function(resolve, reject) {
+    const reader = new FileReader();
+    reader.onloadend = function() {
+      // Remove the data URL prefix to get just base64
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function sendAudioForTranscription(base64Audio, mimeType) {
+  try {
+    log('[Mic] Sending audio for transcription...');
+    
+    const token = getAuthToken();
+    const response = await fetch('/training/stt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        audio: base64Audio,
+        mimeType: mimeType
+      })
+    });
+    
+    if (!response.ok) {
+      let errorMsg = 'Transcription failed';
+      try {
+        const error = await response.json();
+        errorMsg = error.error || errorMsg;
+      } catch (e) {
+        // Response was not JSON
+        errorMsg = 'Server error: ' + response.status;
+      }
+      throw new Error(errorMsg);
+    }
+    
+    let result;
+    try {
+      result = await response.json();
+    } catch (e) {
+      throw new Error('Invalid response from server');
+    }
+    const text = result.text;
+    
+    if (!text || text.trim() === '') {
+      log('[Mic] No speech detected');
+      addSystemMessage('(No speech detected - try again)');
+      return;
+    }
+    
+    log('[Mic] Transcribed: ' + text);
+    
+    // Send transcribed text as training turn
+    await sendTrainingTurn(text);
+    
+  } catch (err) {
+    log('[Mic] Transcription error: ' + err.message);
+    addSystemMessage('Voice input error: ' + err.message);
+  }
+}
+
+// Initialize mic button on load
+initMicButton();

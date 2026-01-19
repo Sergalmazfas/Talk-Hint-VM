@@ -1555,6 +1555,54 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // STT endpoint for training mode - accepts audio and returns transcribed text
+  app.post("/training/stt", authMiddleware, async (req, res) => {
+    try {
+      const { audio, mimeType } = req.body;
+      
+      if (!audio) {
+        return res.status(400).json({ error: "No audio data provided" });
+      }
+      
+      const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+      if (!DEEPGRAM_API_KEY) {
+        return res.status(500).json({ error: "Deepgram API key not configured" });
+      }
+      
+      // Decode base64 audio
+      const audioBuffer = Buffer.from(audio, "base64");
+      
+      // Determine content type
+      const contentType = mimeType || "audio/webm";
+      
+      // Call Deepgram prerecorded API
+      const response = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true", {
+        method: "POST",
+        headers: {
+          "Authorization": `Token ${DEEPGRAM_API_KEY}`,
+          "Content-Type": contentType
+        },
+        body: audioBuffer
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[STT] Deepgram error:", response.status, errorText);
+        return res.status(500).json({ error: "Transcription failed" });
+      }
+      
+      const result = await response.json();
+      const transcript = result.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+      
+      console.log("[STT] Transcribed:", transcript.substring(0, 50) + (transcript.length > 50 ? "..." : ""));
+      
+      res.json({ text: transcript });
+    } catch (error: any) {
+      console.error("[STT] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // User call mode setting
   app.post("/api/user/call-mode", authMiddleware, async (req, res) => {
     try {
