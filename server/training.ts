@@ -542,3 +542,61 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+
+// ElevenLabs TTS
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+
+// Voice IDs - can be customized
+const VOICE_GST = "EXAVITQu4vr4xnSDxMaL"; // "Sarah" - neutral female voice for Guest
+const VOICE_HINT = "21m00Tcm4TlvDq8ikWAM"; // "Rachel" - clear coach voice for Hints
+
+export async function generateTTS(
+  text: string,
+  voiceType: "gst" | "hint" = "gst"
+): Promise<Buffer | null> {
+  if (!ELEVENLABS_API_KEY) {
+    console.error("[TTS] No ELEVENLABS_API_KEY configured");
+    return null;
+  }
+  
+  const voiceId = voiceType === "hint" ? VOICE_HINT : VOICE_GST;
+  
+  try {
+    console.log(`[TTS] Generating audio for: "${text.substring(0, 50)}..." (voice: ${voiceType})`);
+    
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "xi-api-key": ELEVENLABS_API_KEY
+        },
+        body: JSON.stringify({
+          text: text,
+          model_id: "eleven_turbo_v2_5",
+          voice_settings: {
+            stability: voiceType === "hint" ? 0.75 : 0.5,
+            similarity_boost: 0.75,
+            style: 0.0,
+            use_speaker_boost: true
+          }
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[TTS] ElevenLabs error: ${response.status} - ${errorText}`);
+      return null;
+    }
+    
+    const audioBuffer = Buffer.from(await response.arrayBuffer());
+    console.log(`[TTS] Generated ${audioBuffer.length} bytes of audio`);
+    
+    return audioBuffer;
+  } catch (err: any) {
+    console.error(`[TTS] Error: ${err.message}`);
+    return null;
+  }
+}

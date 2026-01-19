@@ -13,7 +13,7 @@ import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
-import { startTrainingSession, processTrainingTurn, resetTrainingSession } from "./training";
+import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
 import { pendingCalls, users, phoneNumbers } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
@@ -1599,6 +1599,38 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       res.json({ text: transcript });
     } catch (error: any) {
       console.error("[STT] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // TTS endpoint for training mode - generates audio from text via ElevenLabs
+  app.post("/training/tts", authMiddleware, async (req, res) => {
+    try {
+      const { text, voiceType } = req.body;
+      
+      if (!text || typeof text !== "string") {
+        return res.status(400).json({ error: "No text provided" });
+      }
+      
+      if (text.length > 500) {
+        return res.status(400).json({ error: "Text too long (max 500 chars)" });
+      }
+      
+      const voice = voiceType === "hint" ? "hint" : "gst";
+      const audioBuffer = await generateTTS(text, voice as "gst" | "hint");
+      
+      if (!audioBuffer) {
+        return res.status(500).json({ error: "TTS generation failed" });
+      }
+      
+      // Return audio as base64
+      const audioBase64 = audioBuffer.toString("base64");
+      res.json({ 
+        audio: audioBase64,
+        mimeType: "audio/mpeg"
+      });
+    } catch (error: any) {
+      console.error("[TTS] Error:", error);
       res.status(500).json({ error: error.message });
     }
   });

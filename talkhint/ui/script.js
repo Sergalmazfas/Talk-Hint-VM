@@ -42,6 +42,10 @@ let callMode = localStorage.getItem('talkhint_call_mode') || 'live';
 let trainingSessionId = null;
 let isTrainingActive = false;
 
+// TTS settings for Training Mode
+let ttsAutoplayGST = localStorage.getItem('talkhint_tts_autoplay') !== 'false'; // default ON
+let currentAudio = null; // Currently playing audio
+
 const LANGUAGE_FLAGS = {
   ru: '🇷🇺',
   es: '🇪🇸'
@@ -1838,9 +1842,9 @@ async function sendTrainingTurn(honText) {
       return;
     }
     
-    // Add GST response
+    // Add GST response with TTS
     if (data.gst && data.gst.text) {
-      addMessage('GST', data.gst.text);
+      addGstMessageWithTTS(data.gst.text);
     }
     
     // Add HINT as system message
@@ -1981,10 +1985,54 @@ async function applyNewGoal(newGoal) {
   addSystemMessage('Goal updated to: "' + newGoal + '"');
 }
 
+// Add GST message with Listen button and optional autoplay
+function addGstMessageWithTTS(text) {
+  var msgEl = document.createElement('div');
+  msgEl.className = 'message gst';
+  
+  msgEl.innerHTML = 
+    '<div class="message-label">ASSISTANT</div>' +
+    '<div class="message-bubble">' + text + '</div>' +
+    '<div style="margin-top: 8px; display: flex; gap: 6px;">' +
+    '<button class="gst-listen-btn" style="background: #6366f1; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">🔊 Listen</button>' +
+    '<button class="gst-save-btn" style="background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">⭐ Save</button>' +
+    '</div>';
+  
+  var listenBtn = msgEl.querySelector('.gst-listen-btn');
+  
+  // Listen button for GST (English only)
+  listenBtn.addEventListener('click', function() {
+    playTTS(text, 'gst', this);
+  });
+  
+  // Save button placeholder
+  msgEl.querySelector('.gst-save-btn').addEventListener('click', function() {
+    addSystemMessage('⭐ Card saved! (Coming soon: flashcard deck)');
+  });
+  
+  UI.emptyState.style.display = 'none';
+  UI.chatContainer.appendChild(msgEl);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+  
+  // Autoplay if enabled
+  if (ttsAutoplayGST && callMode === 'training' && isTrainingActive) {
+    log('[TTS] Autoplay GST message');
+    playTTS(text, 'gst', listenBtn);
+  }
+}
+
 function addHintMessage(text, goalState) {
   var msgEl = document.createElement('div');
   msgEl.className = 'message hint';
-  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong> ' + text.replace(/\n/g, '<br>') + '</div>';
+  
+  // Extract English part only (before newline with flag)
+  var englishText = text.split('\n')[0].trim();
+  
+  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong> ' + text.replace(/\n/g, '<br>') + 
+    '<div style="margin-top: 8px;">' +
+    '<button class="listen-btn" style="background: #6366f1; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; margin-right: 6px;">🔊 Listen</button>' +
+    '<button class="save-btn" style="background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">⭐ Save</button>' +
+    '</div></div>';
   
   if (goalState && goalState.next_step) {
     var goalEl = document.createElement('div');
@@ -1993,6 +2041,16 @@ function addHintMessage(text, goalState) {
     goalEl.textContent = 'Next: ' + goalState.next_step;
     msgEl.querySelector('.message-content').appendChild(goalEl);
   }
+  
+  // Listen button for HINT (English only)
+  msgEl.querySelector('.listen-btn').addEventListener('click', function() {
+    playTTS(englishText, 'hint', this);
+  });
+  
+  // Save button placeholder
+  msgEl.querySelector('.save-btn').addEventListener('click', function() {
+    addSystemMessage('⭐ Card saved! (Coming soon: flashcard deck)');
+  });
   
   UI.emptyState.style.display = 'none';
   UI.chatContainer.appendChild(msgEl);
@@ -2007,6 +2065,95 @@ function addSystemMessage(text) {
   UI.emptyState.style.display = 'none';
   UI.chatContainer.appendChild(msgEl);
   UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
+// TTS playback function - calls /training/tts and plays audio
+async function playTTS(text, voiceType, buttonEl) {
+  if (!text || text.trim() === '') return;
+  
+  log('[TTS] Playing: "' + text.substring(0, 30) + '..."');
+  
+  // Stop any currently playing audio
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  
+  // Update button state
+  var originalText = buttonEl ? buttonEl.textContent : '';
+  if (buttonEl) {
+    buttonEl.textContent = '⏳ Loading...';
+    buttonEl.disabled = true;
+  }
+  
+  try {
+    var token = getAuthToken();
+    var res = await fetch('/training/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        text: text,
+        voiceType: voiceType || 'gst'
+      })
+    });
+    
+    if (!res.ok) {
+      var errorData = await res.json();
+      throw new Error(errorData.error || 'TTS failed');
+    }
+    
+    var data = await res.json();
+    
+    // Create audio from base64
+    var audioBlob = base64ToBlob(data.audio, data.mimeType || 'audio/mpeg');
+    var audioUrl = URL.createObjectURL(audioBlob);
+    
+    currentAudio = new Audio(audioUrl);
+    
+    // Update button during playback
+    if (buttonEl) {
+      buttonEl.textContent = '🔊 Playing...';
+    }
+    
+    currentAudio.onended = function() {
+      if (buttonEl) {
+        buttonEl.textContent = originalText;
+        buttonEl.disabled = false;
+      }
+      currentAudio = null;
+    };
+    
+    currentAudio.onerror = function() {
+      if (buttonEl) {
+        buttonEl.textContent = originalText;
+        buttonEl.disabled = false;
+      }
+      log('[TTS] Audio playback error');
+    };
+    
+    await currentAudio.play();
+    
+  } catch (err) {
+    log('[TTS] Error: ' + err.message);
+    if (buttonEl) {
+      buttonEl.textContent = originalText;
+      buttonEl.disabled = false;
+    }
+  }
+}
+
+// Helper: convert base64 to Blob
+function base64ToBlob(base64, mimeType) {
+  var byteString = atob(base64);
+  var ab = new ArrayBuffer(byteString.length);
+  var ia = new Uint8Array(ab);
+  for (var i = 0; i < byteString.length; i++) {
+    ia[i] = byteString.charCodeAt(i);
+  }
+  return new Blob([ab], { type: mimeType });
 }
 
 let currentPlan = 'free';
