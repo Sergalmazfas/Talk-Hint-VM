@@ -298,7 +298,9 @@ class GPTRealtimeHandler {
   }
 
   private initSession() {
-    // Combine global TalkHint prompt with mode-specific prompt
+    // FROZEN: Always use base prompt (TALKHINT_GOLDEN_PROMPT)
+    // Custom prompts (activePromptId from phone_numbers) are NOT used for Basic plan
+    // This is intentional - all users get the same base AI assistant behavior
     const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${getRealtimePrompt(this.mode)}`;
     
     this.send({

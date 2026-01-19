@@ -298,12 +298,17 @@ function renderNumbers(numbers) {
   if (!UI.numbersList) return;
   UI.numbersList.innerHTML = '';
   
-  if (numbers.length === 0) {
+  // FROZEN: Filter out WORK numbers - only show personal for Basic plan
+  var personalNumbers = numbers.filter(function(num) {
+    return num.type !== 'work';
+  });
+  
+  if (personalNumbers.length === 0) {
     UI.numbersList.innerHTML = '<div class="folders-empty">No numbers yet</div>';
     return;
   }
 
-  numbers.forEach(function(num) {
+  personalNumbers.forEach(function(num) {
     var item = document.createElement('div');
     item.className = 'number-item';
     item.setAttribute('data-number-id', num.id);
@@ -311,9 +316,8 @@ function renderNumbers(numbers) {
       item.classList.add('active');
     }
     
-    var icon = num.type === 'work' ? '💼' : '📱';
-    var badgeClass = num.type === 'work' ? 'work' : 'personal';
-    var badgeText = num.type === 'work' ? 'Work' : 'Personal';
+    // FROZEN: Always use personal icon, no WORK badge needed
+    var icon = '📱';
     
     var iconSpan = document.createElement('span');
     iconSpan.className = 'number-icon';
@@ -324,7 +328,7 @@ function renderNumbers(numbers) {
     
     var nameDiv = document.createElement('div');
     nameDiv.className = 'number-name';
-    nameDiv.textContent = num.name;
+    nameDiv.textContent = num.name || 'My Number';
     
     var valueDiv = document.createElement('div');
     valueDiv.className = 'number-value';
@@ -333,13 +337,10 @@ function renderNumbers(numbers) {
     infoDiv.appendChild(nameDiv);
     infoDiv.appendChild(valueDiv);
     
-    var badge = document.createElement('span');
-    badge.className = 'number-type-badge ' + badgeClass;
-    badge.textContent = badgeText;
+    // FROZEN: No badge - all numbers are personal now
     
     item.appendChild(iconSpan);
     item.appendChild(infoDiv);
-    item.appendChild(badge);
     
     item.addEventListener('click', function() {
       selectNumber(num.id, num.twilioNumber);
@@ -2184,14 +2185,18 @@ async function loadSubscription() {
 function updatePlanBadge(plan, hasStripeCustomer) {
   if (!UI.planBadge) return;
   
-  UI.planBadge.className = 'plan-badge ' + plan;
+  // SIMPLIFIED: Only Free Trial and Basic $15 plans
+  var displayPlan = (plan === 'free') ? 'free' : 'basic';
+  UI.planBadge.className = 'plan-badge ' + displayPlan;
   
   var planNames = {
     'free': 'Free Trial',
-    'personal': 'Personal $9/mo',
-    'pro': 'Pro $19/mo'
+    'basic': 'Basic $15/mo',
+    // FROZEN: Old plans kept for backwards compatibility
+    'personal': 'Basic $15/mo',
+    'pro': 'Basic $15/mo'
   };
-  UI.planBadge.textContent = planNames[plan] || 'Free Trial';
+  UI.planBadge.textContent = planNames[plan] || planNames[displayPlan];
   
   if (plan === 'free') {
     UI.upgradeBtn.style.display = 'block';
@@ -2277,33 +2282,87 @@ async function openBillingPortal() {
   }
 }
 
-function showUpgradeModal() {
+// SIMPLIFIED: Show upgrade modal with just Basic $15 plan
+var upgradeModalLoading = false;
+
+async function showUpgradeModal() {
+  // Prevent multiple loads
+  if (upgradeModalLoading) return;
+  
+  // If no products loaded, try loading with timeout
   if (stripeProducts.length === 0) {
-    alert('Loading plans...');
-    loadStripeProducts().then(showUpgradeModal);
-    return;
+    upgradeModalLoading = true;
+    
+    // Show loading modal
+    var loadingModal = document.createElement('div');
+    loadingModal.className = 'modal-overlay active';
+    loadingModal.id = 'upgradeModal';
+    loadingModal.innerHTML = '<div class="modal"><div class="modal-header"><span class="modal-title">Loading...</span><button class="modal-close" onclick="closeUpgradeModal()">&times;</button></div><div class="modal-body" style="text-align: center; padding: 40px;">Loading plans...</div></div>';
+    document.body.appendChild(loadingModal);
+    
+    try {
+      // Load with timeout (5 seconds)
+      var timeout = new Promise(function(_, reject) {
+        setTimeout(function() { reject(new Error('timeout')); }, 5000);
+      });
+      await Promise.race([loadStripeProducts(), timeout]);
+    } catch (err) {
+      log('Failed to load Stripe products: ' + err.message);
+    }
+    
+    upgradeModalLoading = false;
+    closeUpgradeModal();
+    
+    // Show result
+    if (stripeProducts.length === 0) {
+      // Show error modal
+      var errorModal = document.createElement('div');
+      errorModal.className = 'modal-overlay active';
+      errorModal.id = 'upgradeModal';
+      errorModal.innerHTML = '<div class="modal"><div class="modal-header"><span class="modal-title">Subscription</span><button class="modal-close" onclick="closeUpgradeModal()">&times;</button></div><div class="modal-body" style="text-align: center; padding: 20px;"><p style="color: #ef4444; margin-bottom: 16px;">Unable to load subscription plans.</p><p style="color: #666;">Please try again later or contact support.</p><button class="btn btn-secondary" onclick="closeUpgradeModal()" style="margin-top: 16px;">Close</button></div></div>';
+      document.body.appendChild(errorModal);
+      return;
+    }
   }
   
   var modal = document.createElement('div');
   modal.className = 'modal-overlay active';
   modal.id = 'upgradeModal';
   
-  var content = '<div class="modal"><div class="modal-header"><span class="modal-title">Choose Your Plan</span><button class="modal-close" onclick="closeUpgradeModal()">&times;</button></div><div class="modal-body">';
+  // SIMPLIFIED: Show only one Basic plan (first available product)
+  var content = '<div class="modal"><div class="modal-header"><span class="modal-title">Upgrade to Basic</span><button class="modal-close" onclick="closeUpgradeModal()">&times;</button></div><div class="modal-body">';
   
-  stripeProducts.forEach(function(product) {
+  // Find first product with valid price (Basic plan)
+  var basicProduct = null;
+  var basicPrice = null;
+  for (var i = 0; i < stripeProducts.length; i++) {
+    var product = stripeProducts[i];
     var price = product.prices && product.prices[0];
-    if (!price) return;
+    if (price) {
+      basicProduct = product;
+      basicPrice = price;
+      break;
+    }
+  }
+  
+  if (basicProduct && basicPrice) {
+    var amount = (basicPrice.unit_amount / 100).toFixed(0);
     
-    var amount = (price.unit_amount / 100).toFixed(0);
-    var planType = product.metadata && product.metadata.plan_type || 'personal';
-    
-    content += '<div class="plan-card" style="border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; margin-bottom: 12px;">';
-    content += '<h3 style="margin: 0 0 8px 0;">' + escapeHtml(product.name) + '</h3>';
-    content += '<p style="color: #666; margin: 0 0 12px 0;">' + escapeHtml(product.description || '') + '</p>';
-    content += '<div style="font-size: 1.5rem; font-weight: 600; margin-bottom: 12px;">$' + amount + '<span style="font-size: 0.9rem; color: #666;">/month</span></div>';
-    content += '<button class="btn btn-primary" onclick="openCheckout(\'' + price.id + '\')" style="width: 100%;">Subscribe</button>';
+    content += '<div class="plan-card" style="border: 2px solid #6366f1; border-radius: 12px; padding: 20px; text-align: center;">';
+    content += '<h3 style="margin: 0 0 8px 0; color: #6366f1;">Basic Plan</h3>';
+    content += '<div style="font-size: 2rem; font-weight: 700; margin: 16px 0;">$' + amount + '<span style="font-size: 1rem; color: #666; font-weight: 400;">/month</span></div>';
+    content += '<ul style="text-align: left; margin: 16px 0; padding-left: 20px; color: #374151;">';
+    content += '<li style="margin-bottom: 8px;">📱 1 Personal phone number</li>';
+    content += '<li style="margin-bottom: 8px;">📞 Live calls with AI assistance</li>';
+    content += '<li style="margin-bottom: 8px;">🎓 Training calls</li>';
+    content += '<li style="margin-bottom: 8px;">📚 Learning & flashcards</li>';
+    content += '<li style="margin-bottom: 8px;">🔔 Notifications</li>';
+    content += '</ul>';
+    content += '<button class="btn btn-primary" onclick="openCheckout(\'' + basicPrice.id + '\')" style="width: 100%; padding: 12px; font-size: 1rem;">Subscribe Now</button>';
     content += '</div>';
-  });
+  } else {
+    content += '<p style="color: #ef4444; text-align: center;">No plans available. Please try again later.</p>';
+  }
   
   content += '</div></div>';
   modal.innerHTML = content;

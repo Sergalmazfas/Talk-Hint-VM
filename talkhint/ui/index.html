@@ -882,7 +882,8 @@
           <div class="folders-empty">No numbers yet</div>
         </div>
       </div>
-      <div class="folders-section">
+      <!-- FROZEN: WORK prompts section - hidden for Basic plan -->
+      <div class="folders-section" id="foldersSection" style="display: none;">
         <div class="section-label">📁 My Prompts</div>
         <div class="folders-list" id="foldersList">
           <div class="folders-empty" id="foldersEmpty">No prompts yet</div>
@@ -936,7 +937,8 @@
         <span>🔔</span>
         <span>Enable Notifications</span>
       </button>
-      <button class="new-folder-btn" id="newFolderBtn" data-testid="button-new-folder">
+      <!-- FROZEN: New prompt button - hidden for Basic plan -->
+      <button class="new-folder-btn" id="newFolderBtn" data-testid="button-new-folder" style="display: none;">
         <span>➕</span>
         <span>New prompt</span>
       </button>

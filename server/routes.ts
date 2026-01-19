@@ -983,7 +983,9 @@ export async function registerRoutes(
       
       const langName = LANGUAGE_NAMES[language] || "Russian";
       
-      // Use PREP_PROMPT when no live call, otherwise use GLOBAL prompt
+      // FROZEN: Always use base prompt (TALKHINT_GOLDEN_PROMPT)
+      // Custom prompts (activePromptId from phone_numbers) are NOT used for Basic plan
+      // This is intentional - all users get the same base AI assistant behavior
       const systemPrompt = isLiveCall 
         ? `${TALKHINT_GOLDEN_PROMPT}
 
