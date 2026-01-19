@@ -1690,9 +1690,8 @@ function setCallMode(mode) {
   }
   
   // Update microphone button visibility
-  if (typeof updateMicButtonVisibility === 'function') {
-    updateMicButtonVisibility();
-  }
+  log('[Mode] Calling updateMicButtonVisibility after mode change to: ' + mode);
+  updateMicButtonVisibility();
   
   // Save to server
   saveCallModeToServer(mode);
@@ -1785,9 +1784,8 @@ async function startTrainingSession() {
       }
       
       // Show microphone button for voice input
-      if (typeof updateMicButtonVisibility === 'function') {
-        updateMicButtonVisibility();
-      }
+      log('[Training] Calling updateMicButtonVisibility after session start');
+      updateMicButtonVisibility();
     } else {
       log('Failed to start training: ' + (data.error || 'Unknown error'));
       isTrainingActive = false;
@@ -1884,9 +1882,8 @@ async function stopTrainingSession() {
   UI.statusDot.classList.remove('on-call');
   
   // Hide microphone button
-  if (typeof updateMicButtonVisibility === 'function') {
-    updateMicButtonVisibility();
-  }
+  log('[Training] Calling updateMicButtonVisibility after session stop');
+  updateMicButtonVisibility();
   
   addSystemMessage('Training session ended.');
 }
@@ -2383,13 +2380,19 @@ function initMicButton() {
 }
 
 function updateMicButtonVisibility() {
-  if (!UI.micBtn) return;
+  log('[Mic] updateMicButtonVisibility called: callMode=' + callMode + ', isTrainingActive=' + isTrainingActive);
+  if (!UI.micBtn) {
+    log('[Mic] micBtn element not found!');
+    return;
+  }
   
   // Show mic button only in training mode when session is active
   if (callMode === 'training' && isTrainingActive) {
     UI.micBtn.style.display = 'flex';
+    log('[Mic] Showing mic button');
   } else {
     UI.micBtn.style.display = 'none';
+    log('[Mic] Hiding mic button');
   }
 }
 
