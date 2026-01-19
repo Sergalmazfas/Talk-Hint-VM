@@ -189,11 +189,18 @@ State-machine для отслеживания цели разговора и п�
   - Поток: Goal → initialHint → User говорит → GST отвечает → nextHint
   - `generateInitialHint()` создаёт opening phrase на основе цели
 - **API endpoints:**
-  - `POST /training/start` - создание сессии, initial greeting от GST
+  - `POST /training/start` - создание сессии, возвращает initialHint (не GST greeting)
     - Params: `goal`, `conversationLanguage` (default: "en"), `hintLanguage` (default: "ru")
-  - `POST /training/turn` - обработка реплики HON → GST ответ + Hint
+  - `POST /training/turn` - обработка реплики HON → GST ответ + Hint + suggested_goal
   - `POST /training/reset` - очистка сессии
   - `POST /training/stt` - Deepgram STT для голосового ввода (audio base64 → text)
+- **Input Field Modes:**
+  - Goal Setup (до старта): placeholder "Write your goal..."
+  - Chat/Message (после старта): placeholder "Type your reply or use mic..."
+- **Goal Suggestion UI:**
+  - AI детектирует смену intent → suggested_goal + reason
+  - UI показывает баннер с Apply/Ignore кнопками
+  - Goal меняется только после Apply
 - **UI интеграция:**
   - Settings toggle: Live call / Training call
   - `callMode` сохраняется в localStorage + сервер
