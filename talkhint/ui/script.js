@@ -1858,9 +1858,9 @@ async function sendTrainingTurn(honText) {
       return;
     }
     
-    // Add GST response with TTS
+    // Add GST response with TTS and translation
     if (data.gst && data.gst.text) {
-      addGstMessageWithTTS(data.gst.text);
+      addGstMessageWithTTS(data.gst.text, data.gst.translation);
     }
     
     // Add HINT as system message
@@ -2001,14 +2001,21 @@ async function applyNewGoal(newGoal) {
   addSystemMessage('Goal updated to: "' + newGoal + '"');
 }
 
-// Add GST message with Listen button and optional autoplay
-function addGstMessageWithTTS(text) {
+// Add GST message with Listen button, translation, and optional autoplay
+function addGstMessageWithTTS(text, translation) {
   var msgEl = document.createElement('div');
   msgEl.className = 'message gst';
+  
+  var translationHtml = '';
+  if (translation) {
+    var flag = LANGUAGE_FLAGS[currentLanguage] || '🇷🇺';
+    translationHtml = '<div class="message-translation" style="font-size: 0.9rem; color: #6b7280; margin-top: 4px;">' + flag + ' ' + translation + '</div>';
+  }
   
   msgEl.innerHTML = 
     '<div class="message-label">👤 Guest</div>' +
     '<div class="message-bubble">' + text + '</div>' +
+    translationHtml +
     '<div style="margin-top: 8px; display: flex; gap: 6px;">' +
     '<button class="gst-listen-btn" style="background: #6366f1; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">🔊 Listen</button>' +
     '<button class="gst-save-btn" style="background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">⭐ Save</button>' +

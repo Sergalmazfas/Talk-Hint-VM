@@ -445,6 +445,33 @@ export async function processTrainingTurn(
     session.history.push({ role: "gst", text: gstText });
     console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
     
+    // Translate GST text to user's hint language
+    let gstTranslation = "";
+    try {
+      const langName = getHintLanguageName(session.hintLanguage);
+      const translateResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: `Translate to ${langName}. Return ONLY the translation, no explanations.` },
+            { role: "user", content: gstText }
+          ],
+          temperature: 0.3,
+          max_tokens: 100
+        })
+      });
+      const translateData = await translateResponse.json();
+      gstTranslation = translateData.choices?.[0]?.message?.content?.trim() || "";
+      console.log(`[Training] GST translation: "${gstTranslation}"`);
+    } catch (err) {
+      console.error(`[Training] GST translation error: ${err}`);
+    }
+    
     const hintMs = Date.now() - hintStartTime;
     const hintData = await hintResponse.json();
     const hintContent = hintData.choices?.[0]?.message?.content?.trim();
@@ -480,7 +507,7 @@ export async function processTrainingTurn(
     
     const result: any = {
       hon: { speaker: "HON", text: honText },
-      gst: { speaker: "GST", text: gstText },
+      gst: { speaker: "GST", text: gstText, translation: gstTranslation },
       hint: {
         suggestion: hint.suggestion,
         translation: hint.translation,
