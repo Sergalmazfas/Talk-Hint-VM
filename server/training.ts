@@ -2,6 +2,15 @@ import crypto from "crypto";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+// FAST PROMPTS - ultra-short for speed
+const GST_FAST_PROMPT = `You are a phone call partner. Reply naturally in English only.
+Rules: 1-2 sentences max. No teaching. No explaining. Just respond as a real person would.
+Return JSON: {"gst_text": "your reply"}`;
+
+const HINT_FAST_PROMPT = `You help with phone calls. Given the goal and conversation, suggest what to say next.
+Return JSON only:
+{"suggestion": "3-7 words in English", "translation": "same in {LANG}", "achieved": false}`;
+
 interface TrainingSession {
   id: string;
   goal: string;
@@ -343,7 +352,13 @@ export async function processTrainingTurn(
     goal: string;
     reason: string;
   };
+  timing?: {
+    total_ms: number;
+    gst_ms: number;
+    hint_ms: number;
+  };
 }> {
+  const startTime = Date.now();
   const session = trainingSessions.get(sessionId);
   
   if (!session) {
@@ -361,31 +376,54 @@ export async function processTrainingTurn(
   }
   
   try {
-    const historyForPrompt = session.history.map(h => 
+    // OPTIMIZATION: Trim context to last 3 exchanges (6 messages)
+    const recentHistory = session.history.slice(-6);
+    const historyForPrompt = recentHistory.map(h => 
       `${h.role.toUpperCase()}: ${h.text}`
     ).join("\n");
     
-    // STEP 1: Get GST response (separate call, no goal knowledge)
-    const gstResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: getGstSystemPrompt(session.conversationLanguage) },
-          { 
-            role: "user", 
-            content: `CONVERSATION:\n${historyForPrompt}\n\nRespond as GST in English only. Return ONLY valid JSON.`
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 150
-      })
-    });
+    // OPTIMIZATION: Run GST and Hint in PARALLEL
+    const gstStartTime = Date.now();
+    const hintStartTime = Date.now();
     
+    const [gstResponse, hintResponse] = await Promise.all([
+      // GST call (doesn't know goal)
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: GST_FAST_PROMPT },
+            { role: "user", content: historyForPrompt }
+          ],
+          temperature: 0.6,
+          max_tokens: 80
+        })
+      }),
+      // Hint call (knows goal) - runs in parallel
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: HINT_FAST_PROMPT.replace("{LANG}", getHintLanguageName(session.hintLanguage)) },
+            { role: "user", content: `Goal: ${session.goal}\n\n${historyForPrompt}` }
+          ],
+          temperature: 0.6,
+          max_tokens: 120
+        })
+      })
+    ]);
+    
+    const gstMs = Date.now() - gstStartTime;
     const gstData = await gstResponse.json();
     const gstContent = gstData.choices?.[0]?.message?.content?.trim();
     
@@ -395,44 +433,19 @@ export async function processTrainingTurn(
         const jsonMatch = gstContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const gstParsed = JSON.parse(jsonMatch[0]);
-          gstText = gstParsed.gst_text || gstText;
+          gstText = gstParsed.gst_text || gstParsed.text || gstText;
+        } else {
+          gstText = gstContent.replace(/^["']|["']$/g, '').slice(0, 150);
         }
       } catch {
-        // If not JSON, use raw text (fallback)
-        gstText = gstContent.replace(/^["']|["']$/g, '').slice(0, 200);
+        gstText = gstContent.replace(/^["']|["']$/g, '').slice(0, 150);
       }
     }
     
     session.history.push({ role: "gst", text: gstText });
-    console.log(`[Training] GST: "${gstText}"`);
+    console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
     
-    // STEP 2: Get hint (separate call, knows the goal)
-    const hintResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: getHintSystemPrompt(session.hintLanguage) },
-          { 
-            role: "user", 
-            content: `GOAL: "${session.goal}"
-
-CONVERSATION:
-${historyForPrompt}
-GST: ${gstText}
-
-What should HON say next in English? Translate the suggestion to ${getHintLanguageName(session.hintLanguage)}. Return ONLY valid JSON.`
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 300
-      })
-    });
-    
+    const hintMs = Date.now() - hintStartTime;
     const hintData = await hintResponse.json();
     const hintContent = hintData.choices?.[0]?.message?.content?.trim();
     
@@ -447,47 +460,23 @@ What should HON say next in English? Translate the suggestion to ${getHintLangua
       }
     };
     
-    let suggestedGoal: { goal: string; reason: string } | undefined = undefined;
-    
     if (hintContent) {
       try {
         const jsonMatch = hintContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const hintParsed = JSON.parse(jsonMatch[0]);
-          hint.suggestion = hintParsed.suggestion_for_hon || "";
+          // Support both old and new format
+          hint.suggestion = hintParsed.suggestion || hintParsed.suggestion_for_hon || "";
           hint.translation = hintParsed.translation || "";
-          if (hintParsed.goal_state) {
-            hint.goal_state = {
-              current_goal: hintParsed.goal_state.current_goal || session.goal,
-              next_step: hintParsed.goal_state.next_step || "",
-              slots: { ...session.slots, ...(hintParsed.goal_state.slots || {}) },
-              achieved: hintParsed.goal_state.achieved || false
-            };
-            // Update session slots
-            if (hintParsed.goal_state.slots) {
-              for (const [key, value] of Object.entries(hintParsed.goal_state.slots)) {
-                if (value && value !== "null") {
-                  session.slots[key] = value as string;
-                }
-              }
-            }
-          }
-          
-          // Check for suggested goal change
-          if (hintParsed.suggested_goal && hintParsed.goal_change_reason) {
-            suggestedGoal = {
-              goal: hintParsed.suggested_goal,
-              reason: hintParsed.goal_change_reason
-            };
-            console.log(`[Training] Suggested new goal: "${suggestedGoal.goal}" - ${suggestedGoal.reason}`);
-          }
+          hint.goal_state.achieved = hintParsed.achieved || false;
         }
       } catch (err) {
         console.error(`[Training] Failed to parse hint JSON: ${hintContent}`);
       }
     }
     
-    console.log(`[Training] Hint: "${hint.suggestion}"`);
+    const totalMs = Date.now() - startTime;
+    console.log(`[Training] Hint (${hintMs}ms): "${hint.suggestion}" | Total: ${totalMs}ms`);
     
     const result: any = {
       hon: { speaker: "HON", text: honText },
@@ -496,17 +485,18 @@ What should HON say next in English? Translate the suggestion to ${getHintLangua
         suggestion: hint.suggestion,
         translation: hint.translation,
         goal_state: {
-          current_goal: hint.goal_state.current_goal,
-          next_step: hint.goal_state.next_step,
-          slots: hint.goal_state.slots,
+          current_goal: session.goal,
+          next_step: hint.suggestion,
+          slots: session.slots,
           achieved: hint.goal_state.achieved
         }
+      },
+      timing: {
+        total_ms: totalMs,
+        gst_ms: gstMs,
+        hint_ms: hintMs
       }
     };
-    
-    if (suggestedGoal) {
-      result.suggested_goal = suggestedGoal;
-    }
     
     return result;
   } catch (err: any) {
