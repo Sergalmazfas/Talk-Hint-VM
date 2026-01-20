@@ -43,6 +43,21 @@ export class WebhookHandlers {
     const stripe = await getUncachableStripeClient();
     
     switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const customerId = session.customer as string;
+        const userId = session.metadata?.userId;
+        
+        console.log('[Webhook] Checkout completed - customerId:', customerId, 'userId:', userId);
+        
+        if (userId && customerId) {
+          // Link Stripe customer to user
+          await storage.updateUser(userId, { stripeCustomerId: customerId });
+          console.log('[Webhook] Linked customer', customerId, 'to user', userId);
+        }
+        break;
+      }
+      
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
         const subscription = event.data.object;

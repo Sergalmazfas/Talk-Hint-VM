@@ -1233,6 +1233,74 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Fix subscription - find Stripe customer by email and sync to user
+  app.all("/api/stripe/fix-subscription", async (req, res) => {
+    try {
+      const email = req.query.email as string;
+      if (!email) {
+        return res.status(400).json({ error: "Email required as query param" });
+      }
+      
+      const { getUncachableStripeClient } = await import("./stripeClient");
+      const stripe = await getUncachableStripeClient();
+      
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe not configured" });
+      }
+      
+      // Find user in DB
+      const user = await storage.getUserByEmail(email);
+      if (!user) {
+        return res.status(404).json({ error: "User not found in database" });
+      }
+      
+      // Search for customer in Stripe by email
+      const customers = await stripe.customers.list({ email, limit: 1 });
+      if (customers.data.length === 0) {
+        return res.status(404).json({ error: "No Stripe customer found for this email" });
+      }
+      
+      const customer = customers.data[0];
+      console.log("[Fix] Found Stripe customer:", customer.id);
+      
+      // Get active subscriptions
+      const subscriptions = await stripe.subscriptions.list({ 
+        customer: customer.id, 
+        status: 'active',
+        limit: 1 
+      });
+      
+      let plan = 'free';
+      let subscriptionId = null;
+      
+      if (subscriptions.data.length > 0) {
+        plan = 'basic';
+        subscriptionId = subscriptions.data[0].id;
+        console.log("[Fix] Found active subscription:", subscriptionId);
+      }
+      
+      // Update user
+      await storage.updateUser(user.id, {
+        stripeCustomerId: customer.id,
+        stripeSubscriptionId: subscriptionId,
+        plan: plan
+      });
+      
+      console.log("[Fix] Updated user", user.id, "- plan:", plan, "customerId:", customer.id);
+      
+      res.json({
+        status: "fixed",
+        userId: user.id,
+        stripeCustomerId: customer.id,
+        stripeSubscriptionId: subscriptionId,
+        plan: plan
+      });
+    } catch (error: any) {
+      console.error("[Fix] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/checkout", authMiddleware, async (req, res) => {
     try {
       const { priceId } = req.body;
