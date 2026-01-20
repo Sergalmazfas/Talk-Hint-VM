@@ -2209,11 +2209,13 @@ function updatePlanBadge(plan, hasStripeCustomer) {
 
 async function loadStripeProducts() {
   try {
-    const res = await fetch('/api/stripe/config');
+    const res = await fetch('/api/products');
     if (res.ok) {
       const data = await res.json();
       stripeProducts = data.products || [];
       log('Loaded ' + stripeProducts.length + ' Stripe products');
+    } else {
+      log('Failed to load products: ' + res.status);
     }
   } catch (err) {
     log('Error loading products: ' + err.message);

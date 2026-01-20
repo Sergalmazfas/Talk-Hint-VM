@@ -490,6 +490,54 @@ export class DatabaseStorage implements IStorage {
         ORDER BY pr.unit_amount
       `
     );
+    
+    // Fallback to direct Stripe API if sync cache is empty
+    if (result.rows.length === 0) {
+      console.log("[Storage] Stripe cache empty, fetching from API...");
+      try {
+        const { getUncachableStripeClient } = await import("./stripeClient");
+        const stripe = await getUncachableStripeClient();
+        if (!stripe) return [];
+        
+        const products = await stripe.products.list({ active, limit: 20 });
+        const rows: any[] = [];
+        
+        for (const p of products.data) {
+          const prices = await stripe.prices.list({ product: p.id, active: true, limit: 10 });
+          if (prices.data.length === 0) {
+            rows.push({
+              product_id: p.id,
+              product_name: p.name,
+              product_description: p.description,
+              product_metadata: p.metadata,
+              price_id: null,
+              unit_amount: null,
+              currency: null,
+              recurring: null
+            });
+          } else {
+            for (const pr of prices.data) {
+              rows.push({
+                product_id: p.id,
+                product_name: p.name,
+                product_description: p.description,
+                product_metadata: p.metadata,
+                price_id: pr.id,
+                unit_amount: pr.unit_amount,
+                currency: pr.currency,
+                recurring: pr.recurring
+              });
+            }
+          }
+        }
+        console.log("[Storage] Fetched", rows.length, "products from Stripe API");
+        return rows;
+      } catch (err) {
+        console.error("[Storage] Stripe API fallback error:", err);
+        return [];
+      }
+    }
+    
     return result.rows;
   }
   
