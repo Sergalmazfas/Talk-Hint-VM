@@ -1172,6 +1172,67 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Bootstrap Stripe products - creates TalkHint Basic if it doesn't exist
+  app.post("/api/stripe/bootstrap", async (req, res) => {
+    try {
+      const { getStripeClient } = await import("./stripeClient");
+      const stripe = getStripeClient();
+      
+      if (!stripe) {
+        return res.status(500).json({ error: "Stripe not configured" });
+      }
+      
+      // Check existing products
+      const existingProducts = await stripe.products.list({ active: true, limit: 100 });
+      console.log("[Bootstrap] Found", existingProducts.data.length, "existing products");
+      
+      const basicProduct = existingProducts.data.find(p => 
+        p.name === "TalkHint Basic" || p.metadata?.plan_type === "basic"
+      );
+      
+      if (basicProduct) {
+        // Check if has price
+        const prices = await stripe.prices.list({ product: basicProduct.id, active: true });
+        console.log("[Bootstrap] TalkHint Basic exists with", prices.data.length, "prices");
+        return res.json({ 
+          status: "exists", 
+          product: basicProduct,
+          prices: prices.data 
+        });
+      }
+      
+      // Create TalkHint Basic product
+      console.log("[Bootstrap] Creating TalkHint Basic product...");
+      const product = await stripe.products.create({
+        name: "TalkHint Basic",
+        description: "AI-powered voice assistant for phone calls",
+        metadata: {
+          plan_type: "basic",
+          features: "1 personal phone number, live calls, training calls, learning/flashcards, notifications"
+        }
+      });
+      
+      // Create $15/month price
+      const price = await stripe.prices.create({
+        product: product.id,
+        unit_amount: 1500,
+        currency: "usd",
+        recurring: { interval: "month" }
+      });
+      
+      console.log("[Bootstrap] Created product:", product.id, "with price:", price.id);
+      
+      res.json({ 
+        status: "created", 
+        product,
+        price 
+      });
+    } catch (error: any) {
+      console.error("[Bootstrap] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/checkout", authMiddleware, async (req, res) => {
     try {
       const { priceId } = req.body;
