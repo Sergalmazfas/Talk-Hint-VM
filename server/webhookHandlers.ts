@@ -1,10 +1,12 @@
 import { getStripeSync, getUncachableStripeClient } from './stripeClient';
 import { storage } from './storage';
 
-// Map product IDs to plan names
+// SIMPLIFIED: All subscriptions = Basic plan
+// Product map kept for backwards compatibility but all map to 'basic'
 const PRODUCT_PLAN_MAP: Record<string, string> = {
-  'prod_Tgad5uBrVNcJVS': 'personal', // Personal Plan - $9/month
-  'prod_TgadUzTlkj4eT9': 'pro',      // Pro Plan - $19/month
+  'prod_Tgad5uBrVNcJVS': 'basic',   // Old Personal Plan
+  'prod_TgadUzTlkj4eT9': 'basic',   // Old Pro Plan
+  'prod_Tp6Udj1pR1DWmW': 'basic',   // TalkHint Basic $15/month
 };
 
 export class WebhookHandlers {
@@ -23,6 +25,10 @@ export class WebhookHandlers {
     
     // Parse event to handle plan updates
     const stripe = await getUncachableStripeClient();
+    if (!stripe) {
+      console.error('[Webhook] Stripe client not available');
+      return;
+    }
     const endpointSecret = await sync.getWebhookSecret();
     
     try {
@@ -52,31 +58,28 @@ export class WebhookHandlers {
           return;
         }
         
-        // Determine plan from product
+        // SIMPLIFIED: Only active subscription (not trialing) = Basic plan
         let newPlan = 'free';
-        if (status === 'active' || status === 'trialing') {
-          const priceId = subscription.items?.data?.[0]?.price?.id;
-          const price = await stripe.prices.retrieve(priceId);
-          const productId = price.product as string;
-          
-          // Use product map or check metadata
-          if (PRODUCT_PLAN_MAP[productId]) {
-            newPlan = PRODUCT_PLAN_MAP[productId];
-          } else {
-            const product = await stripe.products.retrieve(productId);
-            if (product.metadata?.tier === 'personal') {
-              newPlan = 'personal';
-            } else if (product.metadata?.tier === 'pro') {
-              newPlan = 'pro';
-            }
-          }
+        let shouldAssignNumber = false;
+        
+        if (status === 'active') {
+          newPlan = 'basic';
+          shouldAssignNumber = true;  // Only assign number after actual payment
+        } else if (status === 'trialing') {
+          newPlan = 'basic';  // Allow training, but no number yet
+          shouldAssignNumber = false;
         }
         
-        console.log('[Webhook] Updating user', user.id, 'plan to:', newPlan);
+        console.log('[Webhook] Updating user', user.id, 'plan to:', newPlan, 'assignNumber:', shouldAssignNumber);
         await storage.updateUser(user.id, { 
           plan: newPlan,
           stripeSubscriptionId: subscription.id 
         });
+        
+        // Task 4: Create phone number ONLY after successful payment (not during trial)
+        if (shouldAssignNumber) {
+          await this.ensureUserHasPhoneNumber(user.id);
+        }
         break;
       }
       
@@ -94,6 +97,35 @@ export class WebhookHandlers {
         });
         break;
       }
+    }
+  }
+  
+  // Task 4: Assign phone number after successful subscription
+  static async ensureUserHasPhoneNumber(userId: string): Promise<void> {
+    try {
+      // Check if user already has a number
+      const existingNumbers = await storage.getUserPhoneNumbers(userId);
+      if (existingNumbers.length > 0) {
+        console.log('[Webhook] User', userId, 'already has phone number');
+        return;
+      }
+      
+      // Find an available number from the pool
+      const availableNumbers = await storage.getAvailableNumbers();
+      if (availableNumbers.length === 0) {
+        console.error('[Webhook] No available phone numbers in pool!');
+        return;
+      }
+      
+      // Assign the first available number
+      const number = availableNumbers[0];
+      const user = await storage.getUser(userId);
+      const userName = user?.email?.split('@')[0] || 'My Number';
+      
+      await storage.assignNumber(number.id, userId, userName, 'personal');
+      console.log('[Webhook] Assigned phone number', number.twilioNumber, 'to user', userId);
+    } catch (error: any) {
+      console.error('[Webhook] Error assigning phone number:', error.message);
     }
   }
 }

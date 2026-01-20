@@ -1726,13 +1726,20 @@ document.querySelectorAll('.mode-option').forEach(function(item) {
   item.addEventListener('click', function() {
     var mode = this.getAttribute('data-mode');
     if (mode) {
+      // PAYWALL: Live call requires subscription
+      if (mode === 'live' && !hasActiveSubscription()) {
+        showUpgradeModal();
+        return;
+      }
       setCallMode(mode);
     }
   });
 });
 
+// Initial call mode - will be re-evaluated after subscription loads
 (function initCallMode() {
-  var savedMode = localStorage.getItem('talkhint_call_mode') || 'live';
+  // Default to training for new users (will be checked after subscription loads)
+  var savedMode = localStorage.getItem('talkhint_call_mode') || 'training';
   callMode = savedMode;
   var modeItem = document.querySelector('[data-mode="' + savedMode + '"]');
   if (modeItem) {
@@ -1747,6 +1754,14 @@ document.querySelectorAll('.mode-option').forEach(function(item) {
     UI.textInput.placeholder = 'Write your goal...';
   }
 })();
+
+// Force training mode if no subscription (called after subscription loads)
+function enforceCallModeBySubscription() {
+  if (!hasActiveSubscription() && callMode === 'live') {
+    log('[Mode] No subscription, forcing training mode');
+    setCallMode('training');
+  }
+}
 
 // Training Mode Functions
 async function startTrainingSession() {
@@ -2176,34 +2191,51 @@ async function loadSubscription() {
       currentPlan = data.plan || 'free';
       updatePlanBadge(currentPlan, !!data.stripeCustomerId);
       log('Loaded subscription: ' + currentPlan);
+      
+      // Enforce call mode based on subscription
+      enforceCallModeBySubscription();
     }
   } catch (err) {
     log('Error loading subscription: ' + err.message);
   }
 }
 
+function hasActiveSubscription() {
+  return currentPlan && currentPlan !== 'free' && currentPlan !== 'none';
+}
+
 function updatePlanBadge(plan, hasStripeCustomer) {
   if (!UI.planBadge) return;
   
-  // SIMPLIFIED: Only Free Trial and Basic $15 plans
-  var displayPlan = (plan === 'free') ? 'free' : 'basic';
-  UI.planBadge.className = 'plan-badge ' + displayPlan;
+  // SIMPLIFIED: No trial - only Basic $15/mo or no subscription
+  var hasSub = hasActiveSubscription();
   
-  var planNames = {
-    'free': 'Free Trial',
-    'basic': 'Basic $15/mo',
-    // FROZEN: Old plans kept for backwards compatibility
-    'personal': 'Basic $15/mo',
-    'pro': 'Basic $15/mo'
-  };
-  UI.planBadge.textContent = planNames[plan] || planNames[displayPlan];
-  
-  if (plan === 'free') {
-    UI.upgradeBtn.style.display = 'block';
-    UI.manageBtn.style.display = 'none';
-  } else {
+  if (hasSub) {
+    UI.planBadge.style.display = 'block';
+    UI.planBadge.className = 'plan-badge basic';
+    UI.planBadge.textContent = 'Basic $15/mo';
     UI.upgradeBtn.style.display = 'none';
     UI.manageBtn.style.display = hasStripeCustomer ? 'block' : 'none';
+  } else {
+    // No subscription - hide badge, show upgrade button
+    UI.planBadge.style.display = 'none';
+    UI.upgradeBtn.style.display = 'block';
+    UI.manageBtn.style.display = 'none';
+  }
+  
+  // Update section visibility based on subscription
+  updateSectionVisibility(hasSub);
+}
+
+function updateSectionVisibility(hasSub) {
+  var numbersSection = document.getElementById('numbersSection');
+  var forwardingSection = document.getElementById('forwardingSection');
+  
+  if (numbersSection) {
+    numbersSection.style.display = hasSub ? 'block' : 'none';
+  }
+  if (forwardingSection) {
+    forwardingSection.style.display = hasSub ? 'block' : 'none';
   }
 }
 

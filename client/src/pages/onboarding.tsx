@@ -83,30 +83,30 @@ export default function Onboarding() {
     );
   }
 
-  const personalPlan = products.find((p) => p.metadata?.tier === "personal");
-  const proPlan = products.find((p) => p.metadata?.tier === "pro");
+  // SIMPLIFIED: Only one Basic plan
+  const basicPlan = products[0]; // First product is Basic $15/mo
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4">
       <div className="max-w-4xl mx-auto pt-12">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4 text-white">Choose Your Plan</h1>
-          <p className="text-gray-400 text-lg">Select a plan to get your personal phone number with AI assistance</p>
+          <h1 className="text-4xl font-bold mb-4 text-white">Subscribe to TalkHint</h1>
+          <p className="text-gray-400 text-lg">Get your personal phone number with AI-powered call assistance</p>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {personalPlan && (
-            <Card className="bg-gray-800/50 border-gray-700 relative overflow-hidden" data-testid="card-personal-plan">
+        <div className="max-w-md mx-auto">
+          {basicPlan ? (
+            <Card className="bg-gray-800/50 border-cyan-500 border-2 relative overflow-hidden" data-testid="card-basic-plan">
               <CardHeader>
                 <CardTitle className="text-white flex items-center justify-between">
-                  Personal
+                  Basic
                   <span className="text-3xl font-bold text-cyan-400">
-                    ${(personalPlan.prices[0]?.unit_amount || 0) / 100}
+                    ${(basicPlan.prices[0]?.unit_amount || 1500) / 100}
                     <span className="text-sm text-gray-400">/mo</span>
                   </span>
                 </CardTitle>
                 <CardDescription className="text-gray-400">
-                  {personalPlan.description}
+                  {basicPlan.description || "AI-powered voice assistant for phone calls"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -117,73 +117,29 @@ export default function Onboarding() {
                   </li>
                   <li className="flex items-center gap-2">
                     <Check className="w-5 h-5 text-cyan-400" />
-                    100 minutes/month
+                    Live calls with AI assistance
                   </li>
                   <li className="flex items-center gap-2">
                     <Check className="w-5 h-5 text-cyan-400" />
-                    Real-time transcription
+                    Training calls
                   </li>
                   <li className="flex items-center gap-2">
                     <Check className="w-5 h-5 text-cyan-400" />
-                    AI translation hints
+                    Real-time translations
                   </li>
                 </ul>
                 <Button
-                  onClick={() => handleCheckout(personalPlan.prices[0]?.id)}
+                  onClick={() => handleCheckout(basicPlan.prices[0]?.id)}
                   disabled={!!checkoutLoading}
-                  className="w-full bg-cyan-600 hover:bg-cyan-700"
-                  data-testid="button-checkout-personal"
+                  className="w-full bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-600 hover:to-purple-700"
+                  data-testid="button-checkout-basic"
                 >
-                  {checkoutLoading === personalPlan.prices[0]?.id ? "Loading..." : "Get Started"}
+                  {checkoutLoading === basicPlan.prices[0]?.id ? "Loading..." : "Subscribe Now"}
                 </Button>
               </CardContent>
             </Card>
-          )}
-
-          {proPlan && (
-            <Card className="bg-gray-800/50 border-purple-500 border-2 relative overflow-hidden" data-testid="card-pro-plan">
-              <Badge className="absolute top-4 right-4 bg-purple-600">Popular</Badge>
-              <CardHeader>
-                <CardTitle className="text-white flex items-center justify-between">
-                  Pro
-                  <span className="text-3xl font-bold text-purple-400">
-                    ${(proPlan.prices[0]?.unit_amount || 0) / 100}
-                    <span className="text-sm text-gray-400">/mo</span>
-                  </span>
-                </CardTitle>
-                <CardDescription className="text-gray-400">
-                  {proPlan.description}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <ul className="space-y-3 text-gray-300">
-                  <li className="flex items-center gap-2">
-                    <Check className="w-5 h-5 text-purple-400" />
-                    2 phone numbers (personal + work)
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="w-5 h-5 text-purple-400" />
-                    Unlimited minutes
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="w-5 h-5 text-purple-400" />
-                    Custom AI prompts per number
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Check className="w-5 h-5 text-purple-400" />
-                    Priority support
-                  </li>
-                </ul>
-                <Button
-                  onClick={() => handleCheckout(proPlan.prices[0]?.id)}
-                  disabled={!!checkoutLoading}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
-                  data-testid="button-checkout-pro"
-                >
-                  {checkoutLoading === proPlan.prices[0]?.id ? "Loading..." : "Get Pro"}
-                </Button>
-              </CardContent>
-            </Card>
+          ) : (
+            <div className="text-center text-gray-400">Loading plans...</div>
           )}
         </div>
 
@@ -194,7 +150,7 @@ export default function Onboarding() {
             className="text-gray-400 hover:text-white"
             data-testid="button-skip"
           >
-            Skip for now (free trial)
+            Skip for now
           </Button>
         </div>
       </div>

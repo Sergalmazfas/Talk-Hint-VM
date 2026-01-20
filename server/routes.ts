@@ -1384,11 +1384,14 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const existingNumbers = await storage.getUserPhoneNumbers(req.user!.id);
       const user = await storage.getUser(req.user!.id);
       
-      if (user?.plan === "free" && existingNumbers.length >= 1) {
-        return res.status(400).json({ error: "Free trial allows only 1 number. Please subscribe." });
+      // SIMPLIFIED: Only subscribers can have phone numbers
+      const hasSubscription = user?.plan && user.plan !== "free" && user.plan !== "none";
+      if (!hasSubscription) {
+        return res.status(400).json({ error: "Please subscribe to get a phone number." });
       }
-      if (user?.plan === "personal" && existingNumbers.length >= 1) {
-        return res.status(400).json({ error: "Personal plan allows only 1 number. Upgrade to Pro for more." });
+      // Basic plan: 1 number only
+      if (existingNumbers.length >= 1) {
+        return res.status(400).json({ error: "Basic plan allows only 1 number." });
       }
       
       const phoneNumber = await storage.assignNumber(numberId, req.user!.id, name, type || "personal");

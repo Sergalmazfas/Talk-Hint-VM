@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { Phone, Settings, LogOut, Plus, Briefcase, Sparkles, Clock, Crown, Check } from "lucide-react";
+import { Phone, LogOut, Crown, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface PhoneNumber {
@@ -22,7 +22,6 @@ export default function Dashboard() {
   const [numbers, setNumbers] = useState<PhoneNumber[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSubscribeDialog, setShowSubscribeDialog] = useState(false);
-  const [trialMinutesUsed, setTrialMinutesUsed] = useState(0);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -31,7 +30,6 @@ export default function Dashboard() {
     }
     if (token) {
       fetchData();
-      checkTrialUsage();
     }
   }, [isLoading, user, token]);
 
@@ -52,15 +50,7 @@ export default function Dashboard() {
     }
   }
 
-  function checkTrialUsage() {
-    const storedMinutes = localStorage.getItem('talkhint_trial_minutes');
-    const minutes = storedMinutes ? parseFloat(storedMinutes) : 0;
-    setTrialMinutesUsed(minutes);
-    
-    if (minutes >= 5 && user?.plan === "free") {
-      setShowSubscribeDialog(true);
-    }
-  }
+  const hasSubscription = user?.plan && user.plan !== "free" && user.plan !== "none";
 
   async function handleLogout() {
     await logout();
@@ -80,8 +70,6 @@ export default function Dashboard() {
     );
   }
 
-  const remainingTrialMinutes = Math.max(0, 5 - trialMinutesUsed);
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       <header className="border-b border-gray-700 bg-gray-900/50 backdrop-blur">
@@ -90,15 +78,20 @@ export default function Dashboard() {
             TalkHint
           </h1>
           <div className="flex items-center gap-4">
-            {user?.plan === "free" && (
-              <Badge variant="outline" className="text-yellow-400 border-yellow-600 flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                {remainingTrialMinutes.toFixed(1)} min left
+            {hasSubscription ? (
+              <Badge variant="outline" className="text-green-400 border-green-600">
+                Basic $15/mo
               </Badge>
+            ) : (
+              <Button
+                size="sm"
+                onClick={() => setLocation("/pricing")}
+                className="bg-gradient-to-r from-cyan-500 to-purple-600"
+                data-testid="button-subscribe"
+              >
+                Subscribe
+              </Button>
             )}
-            <Badge variant="outline" className="text-gray-300 border-gray-600">
-              {user?.plan === "free" ? "Free Trial" : user?.plan}
-            </Badge>
             <span className="text-gray-400 text-sm hidden sm:inline">{user?.email}</span>
             <Button
               variant="ghost"
@@ -120,37 +113,39 @@ export default function Dashboard() {
               <Phone className="w-5 h-5 text-cyan-400" />
               My Number
             </h2>
-            {numbers.length > 0 && user?.plan === "pro" && (
-              <Button
-                size="sm"
-                onClick={() => setLocation("/select-number")}
-                className="bg-cyan-600 hover:bg-cyan-700"
-                data-testid="button-add-number"
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Add Number
-              </Button>
-            )}
+{/* FROZEN: Add Number button hidden - Basic plan has 1 number only */}
           </div>
 
           {numbers.length === 0 ? (
-            <Card className="bg-gray-800/50 border-gray-700 border-dashed" data-testid="card-no-numbers">
-              <CardContent className="py-12 text-center">
-                <Phone className="w-16 h-16 mx-auto mb-4 text-gray-600" />
-                <h3 className="text-white text-lg font-medium mb-2">Get Your Phone Number</h3>
-                <p className="text-gray-400 mb-6 max-w-sm mx-auto">
-                  Choose a US phone number and start making calls with AI-powered assistance
-                </p>
-                <Button
-                  size="lg"
-                  onClick={() => setLocation("/select-number")}
-                  className="bg-gradient-to-r from-cyan-500 to-purple-600"
-                  data-testid="button-get-number"
-                >
-                  Get Your Number
-                </Button>
-              </CardContent>
-            </Card>
+            hasSubscription ? (
+              <Card className="bg-gray-800/50 border-gray-700 border-dashed" data-testid="card-no-numbers">
+                <CardContent className="py-12 text-center">
+                  <Phone className="w-16 h-16 mx-auto mb-4 text-gray-600" />
+                  <h3 className="text-white text-lg font-medium mb-2">Setting Up Your Number</h3>
+                  <p className="text-gray-400 mb-6 max-w-sm mx-auto">
+                    Your phone number is being assigned. Please refresh in a moment.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="bg-gradient-to-br from-purple-900/30 to-cyan-900/30 border-purple-500/50" data-testid="card-subscribe-cta">
+                <CardContent className="py-12 text-center">
+                  <Crown className="w-16 h-16 mx-auto mb-4 text-purple-400" />
+                  <h3 className="text-white text-lg font-medium mb-2">Subscribe to Get Your Number</h3>
+                  <p className="text-gray-400 mb-6 max-w-sm mx-auto">
+                    Get a personal US phone number with AI-powered call assistance
+                  </p>
+                  <Button
+                    size="lg"
+                    onClick={() => setLocation("/pricing")}
+                    className="bg-gradient-to-r from-cyan-500 to-purple-600"
+                    data-testid="button-subscribe-cta"
+                  >
+                    Subscribe Now - $15/mo
+                  </Button>
+                </CardContent>
+              </Card>
+            )
           ) : (
             <div className="space-y-4">
               {numbers.map((number) => (
@@ -192,20 +187,20 @@ export default function Dashboard() {
             <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-r from-cyan-500 to-purple-600 flex items-center justify-center mb-4">
               <Crown className="w-8 h-8 text-white" />
             </div>
-            <DialogTitle className="text-xl text-center">Your Trial Has Ended</DialogTitle>
+            <DialogTitle className="text-xl text-center">Subscribe to TalkHint</DialogTitle>
             <DialogDescription className="text-gray-400 text-center">
-              You've used your 5 free minutes. Subscribe to continue using TalkHint!
+              Get your personal phone number and start making calls with AI assistance
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-3 my-4">
             <div className="flex items-center gap-3 text-gray-300">
               <Check className="w-5 h-5 text-green-500" />
-              <span>Unlimited call minutes</span>
+              <span>Personal US phone number</span>
             </div>
             <div className="flex items-center gap-3 text-gray-300">
               <Check className="w-5 h-5 text-green-500" />
-              <span>AI-powered assistance</span>
+              <span>AI-powered call assistance</span>
             </div>
             <div className="flex items-center gap-3 text-gray-300">
               <Check className="w-5 h-5 text-green-500" />
