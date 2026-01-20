@@ -473,25 +473,32 @@ export class DatabaseStorage implements IStorage {
   }
   
   async listProductsWithPrices(active = true): Promise<any[]> {
-    const result = await db.execute(
-      sql`
-        SELECT 
-          p.id as product_id,
-          p.name as product_name,
-          p.description as product_description,
-          p.metadata as product_metadata,
-          pr.id as price_id,
-          pr.unit_amount,
-          pr.currency,
-          pr.recurring
-        FROM stripe.products p
-        LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
-        WHERE p.active = ${active}
-        ORDER BY pr.unit_amount
-      `
-    );
+    let result: any = { rows: [] };
     
-    // Fallback to direct Stripe API if sync cache is empty
+    // Try database cache first
+    try {
+      result = await db.execute(
+        sql`
+          SELECT 
+            p.id as product_id,
+            p.name as product_name,
+            p.description as product_description,
+            p.metadata as product_metadata,
+            pr.id as price_id,
+            pr.unit_amount,
+            pr.currency,
+            pr.recurring
+          FROM stripe.products p
+          LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
+          WHERE p.active = ${active}
+          ORDER BY pr.unit_amount
+        `
+      );
+    } catch (dbErr) {
+      console.log("[Storage] Stripe cache query failed, falling back to API:", (dbErr as Error).message);
+    }
+    
+    // Fallback to direct Stripe API if sync cache is empty or failed
     if (result.rows.length === 0) {
       console.log("[Storage] Stripe cache empty, fetching from API...");
       try {
