@@ -137,7 +137,7 @@ export default function Dashboard() {
                   </p>
                   <Button
                     size="lg"
-                    onClick={() => setLocation("/pricing")}
+                    onClick={() => setLocation("/onboarding")}
                     className="bg-gradient-to-r from-cyan-500 to-purple-600"
                     data-testid="button-subscribe-cta"
                   >
