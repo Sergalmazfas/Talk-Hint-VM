@@ -497,9 +497,14 @@ export class DatabaseStorage implements IStorage {
       try {
         const { getUncachableStripeClient } = await import("./stripeClient");
         const stripe = await getUncachableStripeClient();
-        if (!stripe) return [];
+        if (!stripe) {
+          console.log("[Storage] No Stripe client available for fallback");
+          return [];
+        }
         
+        console.log("[Storage] Stripe client obtained, fetching products...");
         const products = await stripe.products.list({ active, limit: 20 });
+        console.log("[Storage] Got", products.data.length, "products from Stripe");
         const rows: any[] = [];
         
         for (const p of products.data) {
