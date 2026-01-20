@@ -1175,8 +1175,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   // Bootstrap Stripe products - creates TalkHint Basic if it doesn't exist
   app.all("/api/stripe/bootstrap", async (req, res) => {
     try {
-      const { getStripeClient } = await import("./stripeClient");
-      const stripe = getStripeClient();
+      const { getUncachableStripeClient } = await import("./stripeClient");
+      const stripe = await getUncachableStripeClient();
       
       if (!stripe) {
         return res.status(500).json({ error: "Stripe not configured" });
