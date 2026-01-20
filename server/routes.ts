@@ -1173,7 +1173,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   });
 
   // Bootstrap Stripe products - creates TalkHint Basic if it doesn't exist
-  app.post("/api/stripe/bootstrap", async (req, res) => {
+  app.all("/api/stripe/bootstrap", async (req, res) => {
     try {
       const { getStripeClient } = await import("./stripeClient");
       const stripe = getStripeClient();
