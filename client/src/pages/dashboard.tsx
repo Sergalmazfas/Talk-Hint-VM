@@ -180,38 +180,7 @@ export default function Dashboard() {
                 </Card>
               ))}
 
-              {numbers.length > 0 && !numbers.some(n => n.type === "work") && (user?.plan === "personal" || user?.plan === "free") && (
-                <Card className="bg-gradient-to-br from-purple-900/30 to-pink-900/30 border-purple-500/50" data-testid="card-upsell-work">
-                  <CardContent className="py-6">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                        <Briefcase className="w-6 h-6 text-purple-400" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-white font-semibold">Add Work Number</h3>
-                          <Badge className="bg-purple-600 text-xs">
-                            <Sparkles className="w-3 h-3 mr-1" />
-                            +$10/mo
-                          </Badge>
-                        </div>
-                        <p className="text-gray-400 text-sm mb-3">
-                          Get a dedicated work number for your business calls
-                        </p>
-                        <Button
-                          size="sm"
-                          onClick={() => setLocation("/select-number?type=work")}
-                          className="bg-purple-600 hover:bg-purple-700"
-                          data-testid="button-add-work-number"
-                        >
-                          <Plus className="w-4 h-4 mr-1" />
-                          Add Work Number
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+{/* FROZEN: Work Number upsell hidden for Basic plan simplification */}
             </div>
           )}
         </section>
@@ -249,7 +218,7 @@ export default function Dashboard() {
               className="w-full bg-gradient-to-r from-cyan-500 to-purple-600"
               onClick={() => setLocation("/pricing")}
             >
-              Subscribe Now - $9/mo
+              Subscribe Now - $15/mo
             </Button>
             <Button 
               variant="ghost" 
