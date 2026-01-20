@@ -905,13 +905,22 @@
     </div>
     <div class="sidebar-section">
       <div class="section-label">🌍 Language</div>
-      <div class="language-item" data-lang="ru" data-testid="lang-russian">
-        <span>🇷🇺</span>
-        <span>Russian</span>
+      <div class="language-selector" id="languageSelector" data-testid="button-language-selector" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #f3f4f6; border-radius: 8px; cursor: pointer; transition: background 0.2s;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span id="currentLangFlag">🇷🇺</span>
+          <span id="currentLangName">Russian</span>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="#6b7280"><path d="M7 10l5 5 5-5z"/></svg>
       </div>
-      <div class="language-item" data-lang="es" data-testid="lang-spanish">
-        <span>🇪🇸</span>
-        <span>Spanish</span>
+      <div class="language-dropdown" id="languageDropdown" style="display: none; margin-top: 4px; background: white; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden;">
+        <div class="language-item" data-lang="ru" data-testid="lang-russian">
+          <span>🇷🇺</span>
+          <span>Russian</span>
+        </div>
+        <div class="language-item" data-lang="es" data-testid="lang-spanish">
+          <span>🇪🇸</span>
+          <span>Spanish</span>
+        </div>
       </div>
     </div>
     <div class="sidebar-section" id="forwardingSection" style="display: none;">

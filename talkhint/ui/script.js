@@ -1623,12 +1623,36 @@ UI.closeSidebarBtn.addEventListener('click', function() {
   UI.sidebar.classList.add('collapsed');
 });
 
+var LANGUAGE_DISPLAY = {
+  ru: { flag: '🇷🇺', name: 'Russian' },
+  es: { flag: '🇪🇸', name: 'Spanish' }
+};
+
+function updateLanguageSelector(langCode) {
+  var display = LANGUAGE_DISPLAY[langCode] || LANGUAGE_DISPLAY['ru'];
+  var flagEl = document.getElementById('currentLangFlag');
+  var nameEl = document.getElementById('currentLangName');
+  if (flagEl) flagEl.textContent = display.flag;
+  if (nameEl) nameEl.textContent = display.name;
+}
+
+function toggleLanguageDropdown() {
+  var dropdown = document.getElementById('languageDropdown');
+  if (dropdown) {
+    dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
 function selectLanguage(langCode) {
-  if (currentLanguage === langCode) return;
-  
   currentLanguage = langCode;
   localStorage.setItem('talkhint_language', langCode);
   log('Selected language: ' + langCode);
+  
+  updateLanguageSelector(langCode);
+  
+  // Close dropdown
+  var dropdown = document.getElementById('languageDropdown');
+  if (dropdown) dropdown.style.display = 'none';
   
   document.querySelectorAll('.language-item').forEach(function(item) {
     item.classList.remove('active');
@@ -1647,8 +1671,19 @@ function selectLanguage(langCode) {
   }
 }
 
+// Language selector toggle
+var langSelector = document.getElementById('languageSelector');
+if (langSelector) {
+  langSelector.addEventListener('click', function(e) {
+    e.stopPropagation();
+    toggleLanguageDropdown();
+  });
+}
+
+// Language item selection
 document.querySelectorAll('.language-item').forEach(function(item) {
-  item.addEventListener('click', function() {
+  item.addEventListener('click', function(e) {
+    e.stopPropagation();
     var langCode = this.getAttribute('data-lang');
     if (langCode) {
       selectLanguage(langCode);
@@ -1656,8 +1691,18 @@ document.querySelectorAll('.language-item').forEach(function(item) {
   });
 });
 
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  var dropdown = document.getElementById('languageDropdown');
+  var selector = document.getElementById('languageSelector');
+  if (dropdown && selector && !selector.contains(e.target) && !dropdown.contains(e.target)) {
+    dropdown.style.display = 'none';
+  }
+});
+
 (function initLanguage() {
   var savedLang = localStorage.getItem('talkhint_language') || 'ru';
+  updateLanguageSelector(savedLang);
   var langItem = document.querySelector('[data-lang="' + savedLang + '"]');
   if (langItem) {
     langItem.classList.add('active');
