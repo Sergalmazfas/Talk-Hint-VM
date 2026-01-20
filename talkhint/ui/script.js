@@ -798,8 +798,8 @@ function addMessage(type, text, translation, sentiment) {
     msg.className = 'message ' + type + (sentiment ? ' ' + getSentimentClass(sentiment) : '');
     
     let label = 'Assistant';
-    if (type === 'you' || type === 'honor') label = '🎙️ You';
-    else if (type === 'guest') label = '👤 Guest';
+    if (type === 'you' || type === 'honor' || type === 'HON') label = '🎙️ You';
+    else if (type === 'guest' || type === 'GST') label = '👤 Guest';
     else if (type === 'ai') label = '💡 AI';
     
     var labelDiv = document.createElement('div');
@@ -2007,7 +2007,7 @@ function addGstMessageWithTTS(text) {
   msgEl.className = 'message gst';
   
   msgEl.innerHTML = 
-    '<div class="message-label">ASSISTANT</div>' +
+    '<div class="message-label">👤 Guest</div>' +
     '<div class="message-bubble">' + text + '</div>' +
     '<div style="margin-top: 8px; display: flex; gap: 6px;">' +
     '<button class="gst-listen-btn" style="background: #6366f1; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">🔊 Listen</button>' +
