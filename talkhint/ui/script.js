@@ -116,7 +116,7 @@ async function refreshTwilioToken(reason) {
   log('[Auth] Refreshing token... reason=' + reason);
   
   try {
-    const response = await fetch('/api/token');
+    const response = await fetch('/api/token', { credentials: 'include' });
     
     if (response.status === 401 || response.status === 403) {
       log('[Auth] Unauthorized - session expired');
@@ -1134,7 +1134,7 @@ async function initTwilioDevice() {
 
   try {
     log('Getting Twilio token...');
-    const response = await fetch('/api/token');
+    const response = await fetch('/api/token', { credentials: 'include' });
     
     if (response.status === 401 || response.status === 403) {
       log('[Auth] Unauthorized on init - session expired');
