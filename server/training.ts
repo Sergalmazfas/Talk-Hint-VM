@@ -26,6 +26,158 @@ Slot flows (move forward only):
 Return JSON only:
 {"suggestion": "3-7 words English or null", "translation": "same in {LANG} or null", "achieved": false}`;
 
+// Dialog state tracking - prevents HINT repetition
+interface DialogState {
+  asked_price: boolean;
+  price_known: boolean;
+  price_value: string | null;
+  asked_types: boolean;
+  types_known: boolean;
+  asked_availability: boolean;
+  availability_known: boolean;
+  asked_time: boolean;
+  time_known: boolean;
+}
+
+function createInitialState(): DialogState {
+  return {
+    asked_price: false,
+    price_known: false,
+    price_value: null,
+    asked_types: false,
+    types_known: false,
+    asked_availability: false,
+    availability_known: false,
+    asked_time: false,
+    time_known: false
+  };
+}
+
+// Intent detection - improved keyword matching for reliability
+function detectIntent(text: string, speaker: "hon" | "gst"): string[] {
+  const lower = text.toLowerCase();
+  const intents: string[] = [];
+  
+  // Price intents - broader detection
+  const priceKeywords = /price|cost|how much|сколько|цена|charge|fee|rate/;
+  const priceAnswer = /\$\d+|\d+\s*(dollars?|usd|cents?|bucks?|each|per)|it'?s\s+\d+|costs?\s+\d+|(\d+)\s*(for|a|per)/;
+  const numericPrice = /\b\d{1,5}\b/; // Simple numbers like "50", "fifteen"
+  
+  if (speaker === "hon" && (priceKeywords.test(lower) || /\?.*(?:cost|price|much)/.test(lower))) {
+    intents.push("ask_price");
+  }
+  if (speaker === "gst" && (priceAnswer.test(lower) || (priceKeywords.test(lower) && numericPrice.test(lower)))) {
+    intents.push("answer_price");
+  }
+  
+  // Types/options intents - broader detection
+  const typesKeywords = /types?|options?|variants?|kinds?|models?|versions?|какие|варианты|choices?|different/;
+  const typesAnswer = /we have|there are|offer|come in|available in|include|such as|like the/;
+  
+  if (speaker === "hon" && typesKeywords.test(lower)) {
+    intents.push("ask_types");
+  }
+  if (speaker === "gst" && (typesAnswer.test(lower) || /\band\b.*\band\b/.test(lower))) {
+    // GST listing things (X and Y and Z)
+    intents.push("answer_types");
+  }
+  
+  // Availability intents - broader detection
+  const availKeywords = /available|in stock|when|schedule|appointment|slots?|opening|book|reserve/;
+  const availAnswer = /available|open|free|can (do|schedule|book)|have (a |an )?slot|next available/;
+  
+  if (speaker === "hon" && availKeywords.test(lower)) {
+    intents.push("ask_availability");
+  }
+  if (speaker === "gst" && availAnswer.test(lower)) {
+    intents.push("answer_availability");
+  }
+  
+  // Time intents - broader detection
+  const timeKeywords = /what time|when|at \d|time.*\?|schedule/;
+  const timeAnswer = /\d+:\d+|\d+\s*(am|pm|a\.m\.|p\.m\.)|o'clock|morning|afternoon|evening|tomorrow|today|monday|tuesday|wednesday|thursday|friday/;
+  
+  if (speaker === "hon" && timeKeywords.test(lower)) {
+    intents.push("ask_time");
+  }
+  if (speaker === "gst" && timeAnswer.test(lower)) {
+    intents.push("answer_time");
+  }
+  
+  return intents;
+}
+
+// Update state based on message
+function updateDialogState(state: DialogState, text: string, speaker: "hon" | "gst"): DialogState {
+  const intents = detectIntent(text, speaker);
+  const newState = { ...state };
+  
+  for (const intent of intents) {
+    switch (intent) {
+      case "ask_price": newState.asked_price = true; break;
+      case "answer_price": 
+        newState.price_known = true;
+        const priceMatch = text.match(/\$(\d+(?:\.\d+)?)/);
+        if (priceMatch) newState.price_value = priceMatch[1];
+        break;
+      case "ask_types": newState.asked_types = true; break;
+      case "answer_types": newState.types_known = true; break;
+      case "ask_availability": newState.asked_availability = true; break;
+      case "answer_availability": newState.availability_known = true; break;
+      case "ask_time": newState.asked_time = true; break;
+      case "answer_time": newState.time_known = true; break;
+    }
+  }
+  
+  return newState;
+}
+
+// Generate state context for HINT prompt - includes both asked AND known
+function getStateContext(state: DialogState): string {
+  const known: string[] = [];
+  const forbidden: string[] = [];
+  
+  // Price - forbid if answered OR already asked (waiting for answer)
+  if (state.price_known) {
+    known.push(`price=${state.price_value || "known"}`);
+    forbidden.push("ask_price");
+  } else if (state.asked_price) {
+    forbidden.push("ask_price (already asked, waiting for answer)");
+  }
+  
+  // Types - forbid if answered OR already asked
+  if (state.types_known) {
+    known.push("types=known");
+    forbidden.push("ask_types");
+  } else if (state.asked_types) {
+    forbidden.push("ask_types (already asked)");
+  }
+  
+  // Availability - forbid if answered OR already asked
+  if (state.availability_known) {
+    known.push("availability=known");
+    forbidden.push("ask_availability");
+  } else if (state.asked_availability) {
+    forbidden.push("ask_availability (already asked)");
+  }
+  
+  // Time - forbid if answered OR already asked
+  if (state.time_known) {
+    known.push("time=known");
+    forbidden.push("ask_time");
+  } else if (state.asked_time) {
+    forbidden.push("ask_time (already asked)");
+  }
+  
+  if (forbidden.length === 0) return "";
+  
+  const parts: string[] = [];
+  if (known.length > 0) parts.push(`KNOWN: ${known.join(", ")}`);
+  parts.push(`FORBIDDEN (do NOT suggest these): ${forbidden.join(", ")}`);
+  
+  return `\n${parts.join("\n")}`;
+}
+
 interface TrainingSession {
   id: string;
   goal: string;
@@ -33,6 +185,7 @@ interface TrainingSession {
   hintLanguage: string; // User's native language for translations (ru/es)
   history: Array<{ role: "hon" | "gst"; text: string }>;
   slots: Record<string, string>;
+  dialogState: DialogState; // NEW: track what's been asked/answered
   createdAt: Date;
 }
 
@@ -198,6 +351,7 @@ export async function startTrainingSession(
     hintLanguage,
     history: [],
     slots: {},
+    dialogState: createInitialState(),
     createdAt: new Date()
   };
   
@@ -386,6 +540,9 @@ export async function processTrainingTurn(
   
   session.history.push({ role: "hon", text: honText });
   
+  // Update dialog state based on HON message
+  session.dialogState = updateDialogState(session.dialogState, honText, "hon");
+  
   if (!OPENAI_API_KEY) {
     return { error: "OpenAI API key not configured" };
   }
@@ -396,6 +553,9 @@ export async function processTrainingTurn(
     const historyForPrompt = recentHistory.map(h => 
       `${h.role.toUpperCase()}: ${h.text}`
     ).join("\n");
+    
+    // Get state context for HINT (prevents repetition)
+    const stateContext = getStateContext(session.dialogState);
     
     // OPTIMIZATION: Run GST and Hint in PARALLEL
     const gstStartTime = Date.now();
@@ -419,7 +579,7 @@ export async function processTrainingTurn(
           max_tokens: 80
         })
       }),
-      // Hint call (knows goal) - runs in parallel
+      // Hint call (knows goal + state context) - runs in parallel
       fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -430,7 +590,7 @@ export async function processTrainingTurn(
           model: "gpt-4o-mini",
           messages: [
             { role: "system", content: HINT_FAST_PROMPT.replace("{LANG}", getHintLanguageName(session.hintLanguage)) },
-            { role: "user", content: `Goal: ${session.goal}\n\n${historyForPrompt}` }
+            { role: "user", content: `Goal: ${session.goal}${stateContext}\n\n${historyForPrompt}` }
           ],
           temperature: 0.6,
           max_tokens: 120
@@ -458,6 +618,10 @@ export async function processTrainingTurn(
     }
     
     session.history.push({ role: "gst", text: gstText });
+    
+    // Update dialog state based on GST response
+    session.dialogState = updateDialogState(session.dialogState, gstText, "gst");
+    
     console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
     
     // OPTIMIZATION: Run translation AND hint parsing in PARALLEL
