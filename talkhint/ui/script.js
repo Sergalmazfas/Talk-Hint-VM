@@ -2096,13 +2096,18 @@ function addHintMessage(text, goalState) {
   // Extract English part only (before newline with flag)
   var englishText = text.split('\n')[0].trim();
   
-  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong> ' + text.replace(/\n/g, '<br>') + 
+  // Check if goal is achieved
+  var isAchieved = goalState && goalState.achieved;
+  var achievedBadge = isAchieved ? '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; margin-left: 8px;">✓ Goal Achieved</span>' : '';
+  
+  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong>' + achievedBadge + ' ' + text.replace(/\n/g, '<br>') + 
     '<div style="margin-top: 8px;">' +
     '<button class="listen-btn" style="background: #6366f1; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; margin-right: 6px;">🔊 Listen</button>' +
     '<button class="save-btn" style="background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">⭐ Save</button>' +
+    (isAchieved ? '<button class="new-goal-btn" style="background: #10b981; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; margin-left: 6px;">🎯 New Goal</button>' : '') +
     '</div></div>';
   
-  if (goalState && goalState.next_step) {
+  if (goalState && goalState.next_step && !isAchieved) {
     var goalEl = document.createElement('div');
     goalEl.className = 'goal-hint';
     goalEl.style.cssText = 'font-size: 0.8rem; color: #6b7280; margin-top: 4px;';
@@ -2119,6 +2124,15 @@ function addHintMessage(text, goalState) {
   msgEl.querySelector('.save-btn').addEventListener('click', function() {
     addSystemMessage('⭐ Card saved! (Coming soon: flashcard deck)');
   });
+  
+  // New Goal button - reset session and start fresh
+  var newGoalBtn = msgEl.querySelector('.new-goal-btn');
+  if (newGoalBtn) {
+    newGoalBtn.addEventListener('click', function() {
+      stopTrainingSession();
+      addSystemMessage('🎯 Ready for a new goal! Type your goal and tap Start.');
+    });
+  }
   
   UI.emptyState.style.display = 'none';
   UI.chatContainer.appendChild(msgEl);

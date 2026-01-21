@@ -3,8 +3,17 @@ import crypto from "crypto";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // FAST PROMPTS - ultra-short for speed
-const GST_FAST_PROMPT = `You are a phone call partner. Reply naturally in English only.
-Rules: 1-2 sentences max. No teaching. No explaining. Just respond as a real person would.
+const GST_FAST_PROMPT = `You are a phone call partner (receptionist/agent). Reply naturally in English only.
+
+RULES:
+- 1-2 sentences max. No teaching.
+- If you can answer directly → give the answer
+- If you need to check → say what you're checking + give ETA ("Let me check, one moment")
+- If you cannot answer → explain limitation + ask for required data OR give next step
+
+NEVER just say "I'll get back to you" without a concrete next action.
+If conversation is going in circles, provide a final answer or explain what's needed to proceed.
+
 Return JSON: {"gst_text": "your reply"}`;
 
 // TalkHint copilot prompt - helps HON achieve their goal
@@ -15,20 +24,23 @@ const HINT_FAST_PROMPT = `You are TalkHint — real-time copilot for phone calls
 DECISION LOGIC:
 1. If GST asks for information (name, DOB, phone, address) → suggest YOUR answer
 2. If GST asks for confirmation → suggest "Yes" or clarify
-3. If GST says they'll check/wait → suggest "Ok, I'll wait" or similar acknowledgment
-4. If GST provides information → suggest follow-up question or acknowledgment
-5. If conversation is stuck → suggest next logical step toward goal
+3. If GST says they'll check/wait → suggest "Ok, I'll wait" or acknowledgment
+4. If GST provides final answer → acknowledge and set achieved=true
+5. If FORCE RESOLUTION flag present → you MUST provide closure:
+   - Either a final answer/confirmation → achieved=true
+   - Or "I'll call my insurance directly" → achieved=true (blocked path)
 
 EXAMPLES:
 - GST: "May I have your name?" → "My name is [Name]"
 - GST: "Let me check that for you" → "Ok, thank you"
-- GST: "Your results are ready" → "Great, what are the results?"
-- GST: "Is there anything else?" → "No, that's all. Thank you!"
+- GST: "Your plan covers this fully" → "Great, thank you!" (achieved=true)
+- GST: "I can't verify that" + FORCE RESOLUTION → "I'll call insurance directly" (achieved=true)
 
 RULES:
-1. ALWAYS provide a suggestion - never return null unless goal is achieved
+1. ALWAYS provide a suggestion - never return null
 2. SHORT: 3-7 words, immediately speakable
-3. NO confirmation questions like "Can you confirm...?"
+3. When topic repeats 2+ times, force a conclusion
+4. Set achieved=true when goal is resolved OR you suggest ending the call
 
 Return JSON only:
 {"suggestion": "3-7 words English", "translation": "same in {LANG}", "achieved": false}`;
@@ -47,6 +59,11 @@ interface DialogState {
   // Track what GST is currently asking for
   lastGuestRequest: string | null;
   answeredSlots: string[];
+  // Goal completion tracking
+  goalStatus: "active" | "finished";
+  finishReason: "achieved" | "blocked" | null;
+  // Intent repeat tracking (anti-loop)
+  intentCounts: Record<string, number>;
 }
 
 function createInitialState(): DialogState {
@@ -61,8 +78,34 @@ function createInitialState(): DialogState {
     asked_time: false,
     time_known: false,
     lastGuestRequest: null,
-    answeredSlots: []
+    answeredSlots: [],
+    goalStatus: "active",
+    finishReason: null,
+    intentCounts: {}
   };
+}
+
+// Detect conversation intent for anti-loop tracking
+function detectConversationIntent(text: string): string | null {
+  const lower = text.toLowerCase();
+  
+  // Insurance-related intents
+  if (/coverage|covered|cover|in.?network|out.?of.?network/.test(lower)) return "insurance_coverage";
+  if (/eligibility|eligible|qualify/.test(lower)) return "eligibility";
+  if (/copay|co-?pay|deductible|out.?of.?pocket/.test(lower)) return "cost_details";
+  if (/pre.?auth|prior.?auth|authorization/.test(lower)) return "prior_auth";
+  
+  // Medical-related intents
+  if (/prescription|refill|medication|rx/.test(lower)) return "prescription";
+  if (/appointment|schedule|book|available/.test(lower)) return "appointment";
+  if (/test.?result|lab.?result|results/.test(lower)) return "test_results";
+  
+  // General intents
+  if (/price|cost|how much|fee|charge/.test(lower)) return "pricing";
+  if (/wait|hold|moment|check|look.?up|let me/.test(lower)) return "waiting";
+  if (/call.?back|get.?back|contact.?you/.test(lower)) return "callback";
+  
+  return null;
 }
 
 // Detect what GST is asking for (identification, confirmation, etc.)
@@ -166,7 +209,17 @@ function detectIntent(text: string, speaker: "hon" | "gst"): string[] {
 // Update state based on message
 function updateDialogState(state: DialogState, text: string, speaker: "hon" | "gst"): DialogState {
   const intents = detectIntent(text, speaker);
-  const newState = { ...state, answeredSlots: [...state.answeredSlots] };
+  const newState = { 
+    ...state, 
+    answeredSlots: [...state.answeredSlots],
+    intentCounts: { ...state.intentCounts }
+  };
+  
+  // Track conversation intent for anti-loop (both speakers)
+  const convIntent = detectConversationIntent(text);
+  if (convIntent) {
+    newState.intentCounts[convIntent] = (newState.intentCounts[convIntent] || 0) + 1;
+  }
   
   // Track what GST is currently asking for
   if (speaker === "gst") {
@@ -207,6 +260,20 @@ function updateDialogState(state: DialogState, text: string, speaker: "hon" | "g
 // Generate state context for HINT prompt - includes current request, answered slots, and forbidden intents
 function getStateContext(state: DialogState): string {
   const parts: string[] = [];
+  
+  // ANTI-LOOP: Check for repeated intents (force resolution)
+  const repeatedIntents = Object.entries(state.intentCounts)
+    .filter(([_, count]) => count >= 2)
+    .map(([intent, count]) => `${intent}(${count}x)`);
+  
+  if (repeatedIntents.length > 0) {
+    parts.push(`⚠️ FORCE RESOLUTION: These topics repeated 2+ times: ${repeatedIntents.join(", ")}. You MUST provide a FINAL answer or mark as BLOCKED. No more "I'll check" or "let me look into it".`);
+  }
+  
+  // Goal status
+  if (state.goalStatus === "finished") {
+    parts.push(`GOAL STATUS: ${state.finishReason?.toUpperCase() || "FINISHED"}`);
+  }
   
   // MOST IMPORTANT: What GST is currently asking for
   if (state.lastGuestRequest) {
@@ -769,7 +836,14 @@ export async function processTrainingTurn(
     }
     
     const totalMs = Date.now() - startTime;
-    console.log(`[Training] Hint (${hintMs}ms): "${hint.suggestion}" | Total: ${totalMs}ms`);
+    console.log(`[Training] Hint (${hintMs}ms): "${hint.suggestion}" | achieved=${hint.goal_state.achieved} | Total: ${totalMs}ms`);
+    
+    // Update session goalStatus if achieved
+    if (hint.goal_state.achieved) {
+      session.dialogState.goalStatus = "finished";
+      session.dialogState.finishReason = "achieved";
+      console.log(`[Training] Goal ACHIEVED for session ${sessionId}`);
+    }
     
     const result: any = {
       hon: { speaker: "HON", text: honText },
@@ -781,7 +855,9 @@ export async function processTrainingTurn(
           current_goal: session.goal,
           next_step: hint.suggestion,
           slots: session.slots,
-          achieved: hint.goal_state.achieved
+          achieved: hint.goal_state.achieved,
+          status: session.dialogState.goalStatus,
+          finishReason: session.dialogState.finishReason
         }
       },
       timing: {
