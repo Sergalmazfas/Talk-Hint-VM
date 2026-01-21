@@ -76,18 +76,25 @@ export async function deleteSession(token: string): Promise<void> {
 }
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const path = req.path;
+  const hasSessionCookie = !!req.headers.cookie?.includes("connect.sid");
+  const hasAuthHeader = !!req.headers.authorization;
+  
+  // Diagnostic log for auth debugging
+  console.log(`[AuthMW] ${req.method} ${path} | cookie=${hasSessionCookie} bearer=${hasAuthHeader} req.user=${!!req.user}`);
+  
   // First check if user is already set by Replit Auth (passport session)
   if (req.user) {
     const passportUser = req.user as any;
     // Passport stores user with claims.sub as user ID
     const userId = passportUser.id || passportUser.claims?.sub;
     
-    console.log("[Auth] Passport user found, userId:", userId, "type:", typeof userId);
+    console.log("[AuthMW] Passport user found, userId:", userId);
     
     if (userId) {
       const user = await storage.getUser(String(userId));
-      console.log("[Auth] User lookup result:", user ? `found ${user.email}` : "NOT FOUND");
       if (user) {
+        console.log(`[AuthMW] OK via session: ${user.email}`);
         req.user = {
           id: user.id,
           email: user.email,
@@ -95,14 +102,20 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
           plan: user.plan,
         };
         return next();
+      } else {
+        console.log(`[AuthMW] REJECT: user ${userId} not found in DB`);
       }
     }
+  } else if (hasSessionCookie) {
+    // Cookie present but req.user not set - session might be invalid/expired
+    console.log(`[AuthMW] WARN: cookie present but req.user not set (session invalid or expired)`);
   }
   
   // Fall back to Bearer token auth
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.log(`[AuthMW] REJECT: no bearer token, no valid session`);
     return res.status(401).json({ error: "Unauthorized" });
   }
   
