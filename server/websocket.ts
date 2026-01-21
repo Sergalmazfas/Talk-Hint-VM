@@ -618,7 +618,15 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
+    
+    // === ROLE MANAGEMENT: Locked once at call start, never changes ===
+    let roleLocked = false; // Once true, roles cannot change
     let isOutboundCall = false; // Track call direction for proper speaker mapping
+    let callType: string = "unknown"; // Store for diagnostics
+    // Role mapping (set once, immutable):
+    // OUTBOUND: inbound=GST (remote), outbound=HON (browser user)
+    // INBOUND: inbound=HON (browser user), outbound=GST (remote)
+    
     // CALL_MODE = "browser_only" - PSTN forwarding is completely disabled
     // All incoming calls go to browser client only
     let goalEngine: GoalEngine | null = null; // Goal State Engine per call
@@ -921,8 +929,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
             const speakerCode = isGuestTrack ? "GST" : "HON";
             
-            // Debug: log track mapping decision
-            log(`[TrackDebug] callMode=browser_only isOutbound=${isOutboundCall} track=${track} isGuest=${isGuestTrack} isOwner=${isOwnerTrack} speaker=${speakerLabel}/${speakerCode} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
+            // Diagnostic log for TURN (only on final transcripts to reduce noise)
+            if (isFinal) {
+              log(`TURN callSid=${callSid || "?"} speaker=${speakerCode} track=${track} roleLocked=${roleLocked} callType=${callType} gptTriggered=${speakerCode === "GST"}`, "twilio");
+            }
             
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
@@ -1058,25 +1068,28 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
               
-              // CALL_MODE = browser_only (PSTN forwarding disabled)
-              const callType = message.start.customParameters?.callType || "browser";
-              isOutboundCall = (callType === "outbound");
-              
-              log(`CALL_START callSid=${callSid} callMode=browser_only forwarding=false callType=${callType} isOutbound=${isOutboundCall}`, "twilio");
-              log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
-              
-              // Track mapping depends on call direction:
-              // OUTBOUND (browser calling external): inbound=GST (remote), outbound=HON (user)
-              // INBOUND (external calling browser): inbound=HON (user), outbound=GST (remote)
-              if (isOutboundCall) {
-                log(`[Track Mapping] OUTBOUND: inbound=GST (remote party), outbound=HON (browser user)`, "twilio");
+              // === LOCK ROLES: Set once at call start, never change ===
+              if (!roleLocked) {
+                callType = message.start.customParameters?.callType || "browser";
+                isOutboundCall = (callType === "outbound");
+                roleLocked = true; // LOCK - roles cannot change after this
+                
+                // Diagnostic log with locked role information
+                log(`CALL_START callSid=${callSid} callMode=browser_only callType=${callType}`, "twilio");
+                log(`ROLE_LOCKED=true isOutbound=${isOutboundCall}`, "twilio");
+                log(`HON=${isOutboundCall ? "outbound_track" : "inbound_track"} (browser user)`, "twilio");
+                log(`GST=${isOutboundCall ? "inbound_track" : "outbound_track"} (remote party)`, "twilio");
+                log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               } else {
-                log(`[Track Mapping] INBOUND: inbound=HON (browser user), outbound=GST (remote party)`, "twilio");
+                // Roles already locked - ignore any attempt to re-set
+                log(`[WARN] ROLE_LOCK: Ignoring duplicate start event, roles already locked for ${callSid}`, "twilio");
               }
               
               // Initialize Goal State Engine for this call
-              goalEngine = getOrCreateEngine(callSid);
-              log(`[GoalEngine] Initialized for call: ${callSid}`, "goal");
+              if (!goalEngine && callSid) {
+                goalEngine = getOrCreateEngine(callSid);
+                log(`[GoalEngine] Initialized for call: ${callSid}`, "goal");
+              }
               
               // Note: Deepgram already initialized on "connected" event for early capture
               log(`[Deepgram] Deepgram ready: ${deepgramReady}, inbound: ${!!deepgramInbound}, outbound: ${!!deepgramOutbound}`, "deepgram");
