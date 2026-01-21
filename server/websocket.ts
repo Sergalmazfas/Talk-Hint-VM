@@ -144,7 +144,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
             role: "system",
             content: `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
-This is a LIVE call. Do not wait or stay passive. Always help the user move toward the call goal.
+This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 
 ${LIVE_ANTI_LOOP_RULES}
 
@@ -1173,7 +1173,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
 USER'S CALL GOAL: ${currentGoal || "Have a successful conversation"}
 
-This is a LIVE call. Do not wait or stay passive. Always help the user move toward the call goal.
+This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 
 Based on the conversation, give 1-2 SHORT phrases the user should SAY next.
 Each phrase must move toward the GOAL above.
