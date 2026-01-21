@@ -1918,7 +1918,7 @@ async function sendTrainingTurn(honText) {
         hintText += '\n' + LANGUAGE_FLAGS[currentLanguage] + ' ' + data.hint.translation;
       }
       if (hintText) {
-        addHintMessage(hintText, data.hint.goal_state);
+        addHintMessage(hintText, data.hint.goal_state, data.hint.responseType);
       }
     }
     
@@ -2089,7 +2089,7 @@ function addGstMessageWithTTS(text, translation) {
   }
 }
 
-function addHintMessage(text, goalState) {
+function addHintMessage(text, goalState, responseType) {
   var msgEl = document.createElement('div');
   msgEl.className = 'message hint';
   
@@ -2100,7 +2100,16 @@ function addHintMessage(text, goalState) {
   var isAchieved = goalState && goalState.achieved;
   var achievedBadge = isAchieved ? '<span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; margin-left: 8px;">✓ Goal Achieved</span>' : '';
   
-  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong>' + achievedBadge + ' ' + text.replace(/\n/g, '<br>') + 
+  // TASK 6: Response type badge (HOLD/STEER/CLOSE)
+  var typeBadgeColors = {
+    'HOLD': { bg: '#fbbf24', text: '#78350f' },  // Yellow
+    'STEER': { bg: '#3b82f6', text: 'white' },   // Blue
+    'CLOSE': { bg: '#10b981', text: 'white' }    // Green
+  };
+  var typeColor = typeBadgeColors[responseType] || typeBadgeColors['STEER'];
+  var typeBadge = responseType ? '<span style="background: ' + typeColor.bg + '; color: ' + typeColor.text + '; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; margin-left: 6px; font-weight: 600;">' + responseType + '</span>' : '';
+  
+  msgEl.innerHTML = '<div class="message-content"><strong>HINT:</strong>' + typeBadge + achievedBadge + ' ' + text.replace(/\n/g, '<br>') + 
     '<div style="margin-top: 8px;">' +
     '<button class="listen-btn" style="background: #6366f1; color: white; border: none; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; margin-right: 6px;">🔊 Listen</button>' +
     '<button class="save-btn" style="background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">⭐ Save</button>' +

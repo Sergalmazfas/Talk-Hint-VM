@@ -75,6 +75,15 @@ Never spam multiple questions. One clear steering question per Guest turn.
 8. SPEED SAFE
 Keep responses short. No long explanations. Natural spoken language only.
 
+9. NO UNFINISHED PHRASES
+You are NOT allowed to end a turn with:
+"I'll check" / "Let me see" / "I need to verify"
+unless you immediately follow with an assertion or a steering question.
+If you are unsure what to say:
+Default to a clarifying or narrowing question that moves the decision forward.
+Never repeat the same steering question twice in a row.
+If repeated context occurs, reframe the question.
+
 Return JSON only:
 {"suggestion": "short speakable reply", "translation": "same in {LANG}", "achieved": false}`;
 
@@ -97,6 +106,12 @@ interface DialogState {
   finishReason: "achieved" | "blocked" | null;
   // Intent repeat tracking (anti-loop)
   intentCounts: Record<string, number>;
+  // Anti-loop: passive response counter (Task 1)
+  passiveResponseCount: number;
+  // Anti-loop: last steering question to avoid repeats (Task 2)
+  lastSteeringQuestion: string | null;
+  // Goal progress: turns since meaningful progress (Task 4)
+  turnsSinceProgress: number;
 }
 
 function createInitialState(): DialogState {
@@ -114,8 +129,44 @@ function createInitialState(): DialogState {
     answeredSlots: [],
     goalStatus: "active",
     finishReason: null,
-    intentCounts: {}
+    intentCounts: {},
+    passiveResponseCount: 0,
+    lastSteeringQuestion: null,
+    turnsSinceProgress: 0
   };
+}
+
+// Detect if a response is passive (Task 1: Anti-loop)
+function isPassiveResponse(text: string): boolean {
+  const lower = text.toLowerCase();
+  const passivePhrases = [
+    /ok,?\s*(i'll|let me)\s*wait/,
+    /no problem,?\s*take your time/,
+    /sure,?\s*let me know/,
+    /i('ll| will) wait/,
+    /take your time/,
+    /no rush/,
+    /whenever you('re| are) ready/,
+    /i('ll| will) hold/,
+    /ok,?\s*thank you/,  // Just acknowledgment without steering
+  ];
+  return passivePhrases.some(p => p.test(lower));
+}
+
+// Detect if response contains steering (Task 2: Mandatory Steering)
+function containsSteering(text: string): boolean {
+  const lower = text.toLowerCase();
+  // Check for question marks or steering patterns
+  if (text.includes('?')) return true;
+  // Assertive steering patterns without questions
+  const steeringPatterns = [
+    /let('s| us)/,  // "Let's..."
+    /i('ll| will) (call|email|send|book|schedule)/,
+    /would you (prefer|like)/,
+    /most (clients|people) (choose|prefer)/,
+    /usually|typically/,  // Making assertions
+  ];
+  return steeringPatterns.some(p => p.test(lower));
 }
 
 // Detect conversation intent for anti-loop tracking
@@ -293,6 +344,21 @@ function updateDialogState(state: DialogState, text: string, speaker: "hon" | "g
 // Generate state context for HINT prompt - includes current request, answered slots, and forbidden intents
 function getStateContext(state: DialogState): string {
   const parts: string[] = [];
+  
+  // TASK 1: Anti-loop - passive response warning
+  if (state.passiveResponseCount >= 1) {
+    parts.push(`⚠️ PASSIVE BLOCK: You already said a passive phrase (wait/hold). You MUST now STEER or ASSERT. NO MORE: "I'll wait" / "take your time" / "let me know"`);
+  }
+  
+  // TASK 4: Goal progress enforcement (3 turns limit)
+  if (state.turnsSinceProgress >= 3) {
+    parts.push(`⚠️ STALL ALERT: No progress for ${state.turnsSinceProgress} turns. You MUST: (1) Summarize what's known, (2) Propose next step, OR (3) Close the call.`);
+  }
+  
+  // TASK 2: Last steering question (avoid repeats)
+  if (state.lastSteeringQuestion) {
+    parts.push(`LAST QUESTION: "${state.lastSteeringQuestion}" - DO NOT repeat this. Reframe or ask something new.`);
+  }
   
   // ANTI-LOOP: Check for repeated intents (force resolution)
   const repeatedIntents = Object.entries(state.intentCounts)
@@ -871,6 +937,61 @@ export async function processTrainingTurn(
     const totalMs = Date.now() - startTime;
     console.log(`[Training] Hint (${hintMs}ms): "${hint.suggestion}" | achieved=${hint.goal_state.achieved} | Total: ${totalMs}ms`);
     
+    // TASK 1 & 2: Check if hint has steering content
+    const hasSteering = hint.suggestion && containsSteering(hint.suggestion);
+    const isPassive = hint.suggestion && isPassiveResponse(hint.suggestion);
+    
+    // TASK 1: Track passive responses - only reset when we get steering
+    if (isPassive) {
+      session.dialogState.passiveResponseCount++;
+      console.log(`[Training] Passive response detected (count: ${session.dialogState.passiveResponseCount})`);
+    } else if (hasSteering) {
+      // Only reset when we actually have steering content
+      session.dialogState.passiveResponseCount = 0;
+    }
+    // If neither passive nor steering, keep counter as-is
+    
+    // TASK 2: Track last steering question (avoid repeats)
+    if (hasSteering) {
+      const question = hint.suggestion.match(/[^.!?]*\?/)?.[0] || hint.suggestion;
+      session.dialogState.lastSteeringQuestion = question;
+    }
+    
+    // TASK 2: Mandatory steering enforcement - add fallback question if no steering
+    if (hint.suggestion && !hasSteering && !isPassive && !hint.goal_state.achieved) {
+      // Append a steering question based on goal context
+      const fallbackQuestions = [
+        "What works best for you?",
+        "Would you prefer to schedule now?",
+        "Can we confirm the details?",
+        "What's your preference?"
+      ];
+      const fallback = fallbackQuestions[Math.floor(Math.random() * fallbackQuestions.length)];
+      hint.suggestion = hint.suggestion + " " + fallback;
+      console.log(`[Training] Added fallback steering: "${fallback}"`);
+    }
+    
+    // TASK 6: Determine response type for UI
+    let responseType: "HOLD" | "STEER" | "CLOSE" = "STEER";
+    if (hint.goal_state.achieved) {
+      responseType = "CLOSE";
+    } else if (isPassive) {
+      responseType = "HOLD";
+    } else if (hasSteering || hint.suggestion?.includes("?")) {
+      responseType = "STEER";
+    }
+    
+    // TASK 4: Track turns since progress (delta-based)
+    const prevSlotCount = session.dialogState.answeredSlots.length;
+    const prevPriceKnown = session.dialogState.price_known;
+    // Progress = new slot answered OR goal achieved this turn
+    const hasNewProgress = hint.goal_state.achieved;
+    if (hasNewProgress) {
+      session.dialogState.turnsSinceProgress = 0;
+    } else {
+      session.dialogState.turnsSinceProgress++;
+    }
+    
     // Update session goalStatus if achieved
     if (hint.goal_state.achieved) {
       session.dialogState.goalStatus = "finished";
@@ -884,6 +1005,7 @@ export async function processTrainingTurn(
       hint: {
         suggestion: hint.suggestion,
         translation: hint.translation,
+        responseType: responseType, // TASK 6: UI label
         goal_state: {
           current_goal: session.goal,
           next_step: hint.suggestion,
