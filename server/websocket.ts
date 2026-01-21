@@ -893,18 +893,34 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const isFinal = response.is_final;
             const speechFinal = response.speech_final === true;
             
-            // Track mapping (CORRECTED):
+            // Track mapping (CORRECTED for both modes):
             // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
-            // Browser outbound call (isPstnForwarding=false): inbound=HON (browser mic), outbound=GST (remote PSTN)
-            // PSTN forwarding (isPstnForwarding=true): inbound=HON (mobile owner), outbound=GST (original caller)
-            // Both modes have SAME mapping: inbound=HON, outbound=GST
-            const isGuestTrack = (track === "outbound");
-            const isOwnerTrack = (track === "inbound");
+            // 
+            // Browser outbound call (isPstnForwarding=false):
+            //   inbound = HON (browser mic going into Twilio)
+            //   outbound = GST (remote PSTN party audio coming out of Twilio)
+            // 
+            // PSTN forwarding (isPstnForwarding=true) - INVERTED ROLES:
+            //   inbound = GST (original caller audio going into Twilio)
+            //   outbound = HON (mobile owner audio coming out of Twilio)
+            let isGuestTrack: boolean;
+            let isOwnerTrack: boolean;
+            
+            if (isPstnForwarding) {
+              // PSTN forwarding: roles are INVERTED
+              isGuestTrack = (track === "inbound");  // Original caller = GST
+              isOwnerTrack = (track === "outbound"); // Mobile owner = HON
+            } else {
+              // Browser call: normal mapping
+              isGuestTrack = (track === "outbound"); // Remote PSTN = GST
+              isOwnerTrack = (track === "inbound");  // Browser mic = HON
+            }
+            
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
             const speakerCode = isGuestTrack ? "GST" : "HON";
             
             // Debug: log track mapping decision
-            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
+            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, isOwner=${isOwnerTrack}, speaker=${speakerLabel}/${speakerCode} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
             
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
@@ -1048,8 +1064,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               
               // Log track roles for debugging
-              // BOTH modes: inbound=HON (owner), outbound=GST (guest)
-              log(`[Track Mapping] HON=inbound, GST=outbound (same for all modes)`, "twilio");
+              if (isPstnForwarding) {
+                log(`[Track Mapping] PSTN Forwarding: GST=inbound (caller), HON=outbound (mobile owner)`, "twilio");
+              } else {
+                log(`[Track Mapping] Browser Call: HON=inbound (browser), GST=outbound (remote PSTN)`, "twilio");
+              }
               
               // Initialize Goal State Engine for this call
               goalEngine = getOrCreateEngine(callSid);
