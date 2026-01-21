@@ -63,6 +63,123 @@ let lastMessageTime = 0;
 let lastMessageEl = null;
 const GROUP_WINDOW_MS = 2000;
 
+// Token management state
+let currentIdentity = null;
+let tokenExpiresAt = null;
+let isRefreshingToken = false;
+const TOKEN_REFRESH_BUFFER_MS = 60000; // Refresh 1 minute before expiry
+
+// Parse JWT to get expiry time
+function parseJwtExpiry(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1]));
+    return payload.exp ? payload.exp * 1000 : null; // Convert to ms
+  } catch (e) {
+    return null;
+  }
+}
+
+// Check if token needs refresh
+function isTokenExpiringSoon() {
+  if (!tokenExpiresAt) return true;
+  return Date.now() > (tokenExpiresAt - TOKEN_REFRESH_BUFFER_MS);
+}
+
+// Show session expired UI
+function showSessionExpiredUI() {
+  log('[Auth] Session expired - showing reload message');
+  UI.statusDot.classList.remove('connected', 'calling', 'active');
+  UI.statusDot.classList.add('error');
+  UI.statusText.textContent = 'Session expired. Reload app.';
+  UI.callBtn.disabled = true;
+  
+  // Show a prominent message
+  const expiredBanner = document.createElement('div');
+  expiredBanner.id = 'sessionExpiredBanner';
+  expiredBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:white;padding:12px;text-align:center;z-index:9999;font-weight:bold;';
+  expiredBanner.innerHTML = 'Session expired. <a href="javascript:location.reload()" style="color:white;text-decoration:underline;">Reload app</a>';
+  if (!document.getElementById('sessionExpiredBanner')) {
+    document.body.appendChild(expiredBanner);
+  }
+}
+
+// Refresh Twilio token
+async function refreshTwilioToken(reason) {
+  if (isRefreshingToken) {
+    log('[Auth] Token refresh already in progress');
+    return false;
+  }
+  
+  isRefreshingToken = true;
+  log('[Auth] Refreshing token... reason=' + reason);
+  
+  try {
+    const response = await fetch('/api/token');
+    
+    if (response.status === 401 || response.status === 403) {
+      log('[Auth] Unauthorized - session expired');
+      showSessionExpiredUI();
+      isRefreshingToken = false;
+      return false;
+    }
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      log('[Auth] Token refresh error: ' + data.error);
+      if (data.error.toLowerCase().includes('unauthorized') || data.error.toLowerCase().includes('session')) {
+        showSessionExpiredUI();
+      }
+      isRefreshingToken = false;
+      return false;
+    }
+    
+    // Validate identity matches
+    if (currentIdentity && data.identity !== currentIdentity) {
+      log('[Auth] Identity mismatch! Expected=' + currentIdentity + ' Got=' + data.identity);
+      showSessionExpiredUI();
+      isRefreshingToken = false;
+      return false;
+    }
+    
+    currentIdentity = data.identity;
+    tokenExpiresAt = parseJwtExpiry(data.token);
+    log('[Auth] Token refreshed for: ' + data.identity + ' expires: ' + (tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : 'unknown'));
+    
+    // Update device token
+    if (device) {
+      device.updateToken(data.token);
+      log('[Auth] Device token updated');
+    }
+    
+    isRefreshingToken = false;
+    return true;
+  } catch (err) {
+    log('[Auth] Token refresh failed: ' + err.message);
+    isRefreshingToken = false;
+    return false;
+  }
+}
+
+// Handle visibility change (app resume)
+document.addEventListener('visibilitychange', async function() {
+  if (document.visibilityState === 'visible') {
+    log('[Auth] App resumed - checking token');
+    if (isTokenExpiringSoon()) {
+      await refreshTwilioToken('resume');
+    }
+  }
+});
+
+// Periodic token refresh check
+setInterval(async function() {
+  if (device && isTokenExpiringSoon() && !isOnCall) {
+    await refreshTwilioToken('periodic');
+  }
+}, 30000); // Check every 30 seconds
+
 // Incoming call notification functions - for Twilio Device incoming calls
 function showIncomingCallNotification(fromNumber, call) {
   incomingCall = call;
@@ -91,8 +208,17 @@ function showIncomingCallNotification(fromNumber, call) {
   document.body.appendChild(notification);
   
   // Add button handlers for Twilio Device calls
-  document.getElementById('acceptCallBtn').onclick = function() {
+  document.getElementById('acceptCallBtn').onclick = async function() {
     log('Accepting Twilio Device call...');
+    // Refresh token before accepting to ensure valid auth
+    if (isTokenExpiringSoon()) {
+      log('[Auth] Token expiring - refreshing before accept');
+      const refreshed = await refreshTwilioToken('incoming_call');
+      if (!refreshed) {
+        log('[Auth] Token refresh failed - cannot accept call');
+        return;
+      }
+    }
     call.accept();
   };
   
@@ -150,6 +276,18 @@ function showPushIncomingCall(fromNumber, callSid) {
 // Accept call via API (for push-based calls)
 async function acceptPushCall(callSid) {
   log('Accepting push call: ' + callSid);
+  
+  // Refresh token before accepting to ensure valid auth
+  if (isTokenExpiringSoon()) {
+    log('[Auth] Token expiring - refreshing before accept');
+    const refreshed = await refreshTwilioToken('incoming_push_call');
+    if (!refreshed) {
+      log('[Auth] Token refresh failed - cannot accept call');
+      hideIncomingCallNotification();
+      return;
+    }
+  }
+  
   try {
     var response = await fetch('/api/call/accept', {
       method: 'POST',
@@ -997,15 +1135,29 @@ async function initTwilioDevice() {
   try {
     log('Getting Twilio token...');
     const response = await fetch('/api/token');
+    
+    if (response.status === 401 || response.status === 403) {
+      log('[Auth] Unauthorized on init - session expired');
+      showSessionExpiredUI();
+      return;
+    }
+    
     const data = await response.json();
     
     if (data.error) {
       log('Token error: ' + data.error);
-      UI.statusText.textContent = 'Token error';
+      if (data.error.toLowerCase().includes('unauthorized') || data.error.toLowerCase().includes('session')) {
+        showSessionExpiredUI();
+      } else {
+        UI.statusText.textContent = 'Token error';
+      }
       return;
     }
 
-    log('Token received for: ' + data.identity);
+    // Store token identity and expiry
+    currentIdentity = data.identity;
+    tokenExpiresAt = parseJwtExpiry(data.token);
+    log('Token received for: ' + data.identity + ' expires: ' + (tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : 'unknown'));
     
     device = new TwilioDevice(data.token, { 
       logLevel: 1,
