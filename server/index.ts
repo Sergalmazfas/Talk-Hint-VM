@@ -189,6 +189,14 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    console.warn(`[Server] JSON Parse Error on ${req.method} ${req.path} - client may have disconnected`);
+    return res.status(400).json({ error: "Invalid JSON" });
+  }
+  next(err);
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
