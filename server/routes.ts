@@ -805,28 +805,35 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         console.error("[TwiML Voice] Push notification failed:", err.message);
       });
       
-      // Send SMS notification to user's phone (NOT forwarding - just notification)
-      // PSTN forwarding is DISABLED - all calls go to browser only
+      // Whisper notification call - short outbound call to notify user (NOT SMS, NOT forwarding)
+      // PSTN forwarding is DISABLED - customer call goes to browser only
       (async () => {
         try {
           const [user] = await db.select().from(users).where(eq(users.id, ownerUserId));
-          const smsTo = user?.forwardingPhone || null;
+          const notificationPhone = user?.forwardingPhone || null;
           
-          if (smsTo && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+          if (notificationPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
             const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
             const protocol = req.get("x-forwarded-proto") || "https";
-            const appUrl = `${protocol}://${host}/app`;
-            await twilioClient.messages.create({
-              body: `📞 Incoming call from ${fromNumber}. Answer in app: ${appUrl}`,
+            const statusCallbackUrl = `${protocol}://${host}/api/twilio/whisper-status`;
+            
+            // Create outbound whisper call - plays TTS message then auto-hangs up
+            const whisperCall = await twilioClient.calls.create({
+              to: notificationPhone,
               from: toNumber,
-              to: smsTo
+              twiml: '<Response><Say voice="alice" language="en-US">Incoming call in TalkHint. Open the app.</Say><Hangup/></Response>',
+              timeout: 15,
+              statusCallback: statusCallbackUrl,
+              statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+              statusCallbackMethod: 'POST'
             });
-            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=DISABLED smsTo=${smsTo} smsStatus=sent`);
+            
+            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} notificationPhone=${notificationPhone} whisperAttempted=true whisperCallSid=${whisperCall.sid} forwarding=DISABLED mode=browser_only`);
           } else {
-            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=DISABLED smsTo=none smsStatus=skipped`);
+            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} notificationPhone=none whisperAttempted=false forwarding=DISABLED mode=browser_only`);
           }
-        } catch (smsErr: any) {
-          console.error(`[TwiML Voice] INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=DISABLED smsStatus=failed error=${smsErr.message}`);
+        } catch (whisperErr: any) {
+          console.error(`[TwiML Voice] INCOMING_CALL callSid=${callSid} whisperAttempted=true whisperStatus=failed error=${whisperErr.message} forwarding=DISABLED mode=browser_only`);
         }
       })();
       
@@ -937,6 +944,18 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
     console.log(`[Twilio Status] Full body:`, JSON.stringify(req.body));
     
     // Just acknowledge - we can add more logic here later if needed
+    res.status(200).send("OK");
+  });
+
+  // Whisper notification call status callback - logs whisper call events
+  app.post("/api/twilio/whisper-status", (req, res) => {
+    const whisperCallSid = req.body.CallSid;
+    const status = req.body.CallStatus;
+    const duration = req.body.CallDuration || 0;
+    const timestamp = new Date().toISOString();
+    
+    console.log(`[WHISPER_STATUS] whisperCallSid=${whisperCallSid} status=${status} duration=${duration}s @ ${timestamp}`);
+    
     res.status(200).send("OK");
   });
 
