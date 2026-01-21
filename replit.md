@@ -130,6 +130,26 @@ One TwiML App serves all phone numbers with intelligent routing:
 ### Audio Processing
 - **FFmpeg** (system dependency) - Audio format conversion between μ-law and PCM16
 
+### Utterance Gate (LIVE mode)
+Модуль для предотвращения прерывания собеседника - ждёт полную реплику перед вызовом GPT:
+- **server/utteranceGate.ts** - UtteranceGate класс с буфером и debounce
+- **Константы:**
+  - `END_SILENCE_MS = 900` - тишина после которой считаем реплику законченной
+  - `MIN_CHARS = 10` - минимум символов для генерации (блокирует "yes", "ok")
+  - `MAX_BUFFER_CHARS = 400` - лимит буфера
+- **Триггеры генерации:**
+  - `speech_final` / `UtteranceEnd` от Deepgram (primary)
+  - Silence timeout 900ms (fallback)
+- **Логика:**
+  - `ingestTranscript()` - накапливает текст в буфер
+  - `flush()` - вызывает onGenerate callback когда реплика готова
+  - Anti-duplicate через utteranceId
+- **Логирование:**
+  - `[utteranceGate] speaker=GST event=final_chunk bufLen=45`
+  - `[utteranceGate] speaker=GST event=utterance_end -> flush`
+  - `[utteranceGate] speaker=GST silence_timeout -> generate=true`
+  - `[utteranceGate] generate=false reason=min_chars`
+
 ### Fast Conversation Layer
 Быстрый слой коротких фраз для заполнения пауз пока GPT думает:
 - **server/fastLayer.ts** - FastLayerManager с таймером 450ms и cooldown 1200ms

@@ -874,9 +874,24 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       dgWs.on("message", async (data: any) => {
         try {
           const response = JSON.parse(data.toString());
+          
+          // Handle VAD events (SpeechStarted, UtteranceEnd)
+          if (response.type === "SpeechStarted") {
+            log(`[DG] ${track}: SpeechStarted`, "deepgram");
+            return;
+          }
+          if (response.type === "UtteranceEnd") {
+            log(`[DG] ${track}: UtteranceEnd -> forcing flush`, "deepgram");
+            const isGuestTrack = (track === "outbound");
+            const speakerCode = isGuestTrack ? "GST" : "HON";
+            utteranceGate.forceFlush(callSid || "unknown", speakerCode as "GST" | "HON");
+            return;
+          }
+          
           const transcript = response.channel?.alternatives?.[0]?.transcript;
           if (transcript && transcript.trim()) {
             const isFinal = response.is_final;
+            const speechFinal = response.speech_final === true;
             
             // Track mapping (CORRECTED):
             // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
@@ -889,10 +904,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const speakerCode = isGuestTrack ? "GST" : "HON";
             
             // Debug: log track mapping decision
-            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel}`, "deepgram");
+            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
             
             // Use utteranceGate to wait for complete utterance before GPT
-            utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal);
+            utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
             
             // Broadcast partial/final transcripts immediately for UI display
             if (isGuestTrack) {

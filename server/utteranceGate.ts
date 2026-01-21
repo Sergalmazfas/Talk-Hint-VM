@@ -1,31 +1,35 @@
 type Speaker = "GST" | "HON";
 
 interface UtteranceState {
-  lastPartialText: string;
-  lastFinalText: string;
-  utteranceId: number;
-  speechActive: boolean;
+  bufferText: string;
+  lastPartialTs: number;
+  lastFinalTs: number;
   debounceTimer?: NodeJS.Timeout;
+  utteranceId: number;
   lastGeneratedUtteranceId: number;
-  pendingText: string;
-  lastTranscriptAt: number;
+  speechActive: boolean;
 }
 
-interface ShouldGenerateParams {
+interface IngestParams {
   speaker: Speaker;
   text: string;
   isFinal: boolean;
+  speechFinal?: boolean;
+  utteranceEnd?: boolean;
+  ts?: number;
 }
 
-interface ShouldGenerateResult {
+interface IngestResult {
   shouldGenerate: boolean;
-  reason: "final_accumulated" | "debounce_timeout" | "duplicate" | "too_short" | "pending";
+  reason: string;
   text: string;
   utteranceId: number;
 }
 
-const DEBOUNCE_MS = 750;
-const MIN_CHARS = 8;
+const END_SILENCE_MS = 900;
+const CHUNK_SILENCE_MS = 350;
+const MIN_CHARS = 10;
+const MAX_BUFFER_CHARS = 400;
 
 export class UtteranceGate {
   private states: Map<string, UtteranceState> = new Map();
@@ -39,122 +43,189 @@ export class UtteranceGate {
     const key = `${callId}:${speaker}`;
     if (!this.states.has(key)) {
       this.states.set(key, {
-        lastPartialText: "",
-        lastFinalText: "",
+        bufferText: "",
+        lastPartialTs: 0,
+        lastFinalTs: 0,
         utteranceId: 0,
-        speechActive: false,
         lastGeneratedUtteranceId: -1,
-        pendingText: "",
-        lastTranscriptAt: 0
+        speechActive: false
       });
     }
     return this.states.get(key)!;
+  }
+  
+  ingestTranscript(
+    callId: string,
+    params: IngestParams
+  ): IngestResult {
+    const { speaker, text, isFinal, speechFinal, utteranceEnd, ts } = params;
+    const state = this.getState(callId, speaker);
+    const now = ts || Date.now();
+    
+    if (!text || text.trim().length === 0) {
+      return {
+        shouldGenerate: false,
+        reason: "empty_text",
+        text: state.bufferText,
+        utteranceId: state.utteranceId
+      };
+    }
+    
+    if (state.debounceTimer) {
+      clearTimeout(state.debounceTimer);
+      state.debounceTimer = undefined;
+    }
+    
+    state.speechActive = true;
+    
+    if (isFinal) {
+      state.lastFinalTs = now;
+      
+      if (state.bufferText.length > 0) {
+        const lastWords = state.bufferText.split(" ").slice(-3).join(" ");
+        if (!text.includes(lastWords)) {
+          state.bufferText = state.bufferText + " " + text.trim();
+        } else {
+          state.bufferText = text.trim();
+        }
+      } else {
+        state.bufferText = text.trim();
+      }
+      
+      if (state.bufferText.length > MAX_BUFFER_CHARS) {
+        state.bufferText = state.bufferText.slice(-MAX_BUFFER_CHARS);
+      }
+      
+      console.log(`[utteranceGate] speaker=${speaker} event=final_chunk is_final=true bufLen=${state.bufferText.length}`);
+      
+      if (speechFinal || utteranceEnd) {
+        console.log(`[utteranceGate] speaker=${speaker} event=utterance_end speechFinal=${speechFinal} -> flush immediately`);
+        return this.flush(callId, speaker, "utterance_end");
+      }
+      
+      state.debounceTimer = setTimeout(() => {
+        const result = this.flush(callId, speaker, "silence_timeout");
+        if (result.shouldGenerate) {
+          console.log(`[utteranceGate] speaker=${speaker} silence_timeout -> generate=true`);
+        }
+      }, END_SILENCE_MS);
+      
+      return {
+        shouldGenerate: false,
+        reason: "waiting_silence",
+        text: state.bufferText,
+        utteranceId: state.utteranceId
+      };
+      
+    } else {
+      state.lastPartialTs = now;
+      
+      console.log(`[utteranceGate] speaker=${speaker} event=partial len=${text.length}`);
+      
+      state.debounceTimer = setTimeout(() => {
+        if (state.bufferText.length >= MIN_CHARS) {
+          const result = this.flush(callId, speaker, "partial_silence_timeout");
+          if (result.shouldGenerate) {
+            console.log(`[utteranceGate] speaker=${speaker} partial_silence_timeout -> generate=true`);
+          }
+        }
+      }, END_SILENCE_MS);
+      
+      return {
+        shouldGenerate: false,
+        reason: "partial_waiting",
+        text: state.bufferText,
+        utteranceId: state.utteranceId
+      };
+    }
   }
   
   processTranscript(
     callId: string,
     speaker: Speaker,
     text: string,
-    isFinal: boolean
-  ): ShouldGenerateResult {
+    isFinal: boolean,
+    speechFinal?: boolean,
+    utteranceEnd?: boolean
+  ): IngestResult {
+    return this.ingestTranscript(callId, {
+      speaker,
+      text,
+      isFinal,
+      speechFinal,
+      utteranceEnd
+    });
+  }
+  
+  private flush(callId: string, speaker: Speaker, trigger: string): IngestResult {
     const state = this.getState(callId, speaker);
-    const now = Date.now();
     
-    state.lastTranscriptAt = now;
-    
-    // Clear existing debounce timer on ANY transcript (partial or final)
     if (state.debounceTimer) {
       clearTimeout(state.debounceTimer);
       state.debounceTimer = undefined;
     }
     
-    if (isFinal) {
-      // Accumulate final text
-      if (state.pendingText && !state.pendingText.endsWith(text)) {
-        state.pendingText = state.pendingText + " " + text;
-      } else {
-        state.pendingText = text;
-      }
-      
-      state.lastFinalText = text;
-      state.speechActive = true;
-      
-      // Start debounce timer - will flush after 750ms of silence
-      state.debounceTimer = setTimeout(() => {
-        this.flushUtterance(callId, speaker, "debounce_after_final");
-      }, DEBOUNCE_MS);
-      
-      console.log(`[utteranceGate] speaker=${speaker} event=final len=${text.length} generate=false reason=waiting_debounce`);
-      
-      return {
-        shouldGenerate: false,
-        reason: "pending",
-        text: state.pendingText,
-        utteranceId: state.utteranceId
-      };
-    } else {
-      // Partial transcript - update pending text and start/reset debounce
-      state.lastPartialText = text;
-      state.pendingText = text; // Use partial as pending if no final yet
-      state.speechActive = true;
-      
-      // Start debounce timer even on partials (fallback if final never comes)
-      state.debounceTimer = setTimeout(() => {
-        this.flushUtterance(callId, speaker, "debounce_after_partial");
-      }, DEBOUNCE_MS);
-      
-      console.log(`[utteranceGate] speaker=${speaker} event=partial len=${text.length} generate=false reason=waiting`);
-      
-      return {
-        shouldGenerate: false,
-        reason: "pending",
-        text: text,
-        utteranceId: state.utteranceId
-      };
-    }
-  }
-  
-  private flushUtterance(callId: string, speaker: Speaker, trigger: string): void {
-    const state = this.getState(callId, speaker);
+    const finalText = state.bufferText.trim();
     
-    if (!state.pendingText || state.pendingText.trim().length === 0) {
-      console.log(`[utteranceGate] speaker=${speaker} event=${trigger} len=0 generate=false reason=empty`);
-      return;
-    }
-    
-    if (state.pendingText.length < MIN_CHARS) {
-      console.log(`[utteranceGate] speaker=${speaker} event=${trigger} len=${state.pendingText.length} generate=false reason=too_short`);
-      state.pendingText = "";
+    if (!finalText || finalText.length === 0) {
+      console.log(`[utteranceGate] speaker=${speaker} event=${trigger} generate=false reason=empty`);
       state.speechActive = false;
-      return;
+      return {
+        shouldGenerate: false,
+        reason: "empty",
+        text: "",
+        utteranceId: state.utteranceId
+      };
+    }
+    
+    if (finalText.length < MIN_CHARS) {
+      console.log(`[utteranceGate] speaker=${speaker} event=${trigger} len=${finalText.length} generate=false reason=min_chars`);
+      state.bufferText = "";
+      state.speechActive = false;
+      return {
+        shouldGenerate: false,
+        reason: "min_chars",
+        text: finalText,
+        utteranceId: state.utteranceId
+      };
     }
     
     state.utteranceId++;
     
     if (state.utteranceId === state.lastGeneratedUtteranceId) {
-      console.log(`[utteranceGate] speaker=${speaker} event=${trigger} utteranceId=${state.utteranceId} generate=false reason=duplicate`);
-      return;
+      console.log(`[utteranceGate] speaker=${speaker} event=${trigger} dedupe=true utteranceId=${state.utteranceId}`);
+      return {
+        shouldGenerate: false,
+        reason: "duplicate",
+        text: finalText,
+        utteranceId: state.utteranceId
+      };
     }
     
-    const finalText = state.pendingText.trim();
     state.lastGeneratedUtteranceId = state.utteranceId;
     
     console.log(`[utteranceGate] speaker=${speaker} event=${trigger} utteranceId=${state.utteranceId} len=${finalText.length} generate=true`);
     
-    state.pendingText = "";
+    state.bufferText = "";
     state.speechActive = false;
-    state.lastPartialText = "";
     
     this.onGenerate(speaker, finalText, state.utteranceId);
+    
+    return {
+      shouldGenerate: true,
+      reason: trigger,
+      text: finalText,
+      utteranceId: state.utteranceId
+    };
   }
   
-  forceFlush(callId: string, speaker: Speaker): void {
+  forceFlush(callId: string, speaker: Speaker): IngestResult {
+    return this.flush(callId, speaker, "force_flush");
+  }
+  
+  isSpeechActive(callId: string, speaker: Speaker): boolean {
     const state = this.getState(callId, speaker);
-    if (state.debounceTimer) {
-      clearTimeout(state.debounceTimer);
-      state.debounceTimer = undefined;
-    }
-    this.flushUtterance(callId, speaker, "force_flush");
+    return state.speechActive;
   }
   
   cleanup(callId: string): void {
@@ -169,5 +240,6 @@ export class UtteranceGate {
       }
     });
     keysToDelete.forEach(key => this.states.delete(key));
+    console.log(`[utteranceGate] cleanup callId=${callId} cleared=${keysToDelete.length} states`);
   }
 }
