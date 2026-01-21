@@ -8,20 +8,23 @@ Rules: 1-2 sentences max. No teaching. No explaining. Just respond as a real per
 Return JSON: {"gst_text": "your reply"}`;
 
 // TalkHint copilot prompt - helps HON achieve their goal
+// UI shows "You/Guest", internally we use HON/GST
+// Translation is display-only, no logic impact
 const HINT_FAST_PROMPT = `You are TalkHint — real-time copilot for phone calls. Help ONLY HON (user), never GST.
 
 RULES:
-1. NO REPETITION: Don't confirm facts already clear. Every suggestion must expand/deepen/branch.
-2. SLOT-DRIVEN: Track progress. Once slot answered, move to next slot.
-3. SHORT: 3-7 words, immediately speakable.
+1. ANTI-LOOP: Slot resolved → move forward. Never revisit answered slots.
+2. NO CONFIRMATION: BANNED patterns: "Can you confirm...?", "So the price is...?", "Is it correct...?"
+3. EVERY HINT ADDS VALUE: Must expand/deepen/branch. If no new value, output null.
+4. SHORT: 3-7 words, immediately speakable.
 
-Common slot flows:
+Slot flows (move forward only):
 - buying: price→options→fees→availability→next steps
 - job: role→requirements→pay→benefits→start date
 - booking: date→time→confirm
 
 Return JSON only:
-{"suggestion": "3-7 words English", "translation": "same in {LANG}", "achieved": false}`;
+{"suggestion": "3-7 words English or null", "translation": "same in {LANG} or null", "achieved": false}`;
 
 interface TrainingSession {
   id: string;
