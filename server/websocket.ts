@@ -1169,7 +1169,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               role: "system",
               content: `${TALKHINT_GOLDEN_PROMPT}
 
+USER'S CALL GOAL: ${currentGoal || "Have a successful conversation"}
+
 Based on the conversation, give 1-2 SHORT phrases the user should SAY next.
+Each phrase must move toward the GOAL above.
 Each phrase must be under 15 words.
 Include ${langName} translation.
 
@@ -1178,7 +1181,7 @@ Return JSON only:
             },
             {
               role: "user",
-              content: `Recent conversation:\n${recentContext}\n\nWhat should user say next?`
+              content: `Goal: ${currentGoal || "Have a successful conversation"}\n\nRecent conversation:\n${recentContext}\n\nWhat should user say next to achieve their goal?`
             }
           ],
           temperature: 0.5,
