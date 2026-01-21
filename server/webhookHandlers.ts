@@ -21,21 +21,17 @@ export class WebhookHandlers {
     }
 
     const sync = await getStripeSync();
-    await sync.processWebhook(payload, signature);
-    
-    // Parse event to handle plan updates
-    const stripe = await getUncachableStripeClient();
-    if (!stripe) {
-      console.error('[Webhook] Stripe client not available');
+    if (!sync) {
+      console.error('[Webhook] Stripe sync not available');
       return;
     }
-    const endpointSecret = await sync.getWebhookSecret();
     
-    try {
-      const event = stripe.webhooks.constructEvent(payload, signature, endpointSecret);
+    // Process webhook via Replit sync (handles signature verification internally)
+    const event = await sync.processWebhook(payload, signature);
+    
+    // Handle subscription events
+    if (event) {
       await this.handleSubscriptionEvents(event);
-    } catch (err: any) {
-      console.error('[Webhook] Error parsing event:', err.message);
     }
   }
   
