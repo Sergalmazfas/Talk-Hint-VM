@@ -108,6 +108,15 @@ One TwiML App serves all phone numbers with intelligent routing:
 - **Diagnostic endpoint**: `/api/build` - Returns deployment info (host, env, dbConnected, replId) for debugging domain/session issues
 - **Session persistence**: Uses PostgreSQL session store in production to support autoscale
 
+### Call Mode (BROWSER_ONLY)
+**PSTN forwarding is completely disabled.** All calls work via browser/WebRTC only.
+- `CALL_MODE = "browser_only"` - hardcoded, no PSTN forwarding
+- Incoming calls: Caller → Twilio → Browser client (via `<Dial><Client>`)
+- SMS notifications: Sent to `forwardingPhone` (user settings) about incoming calls
+- **No phone ringing** - user answers in browser only
+- Roles: `HON = inbound (user/browser)`, `GST = outbound (caller)`
+- Logs show: `callMode=browser_only forwarding=false`
+
 ### Connection Stability
 **Twilio Call Timeout:**
 - Default: 90 seconds (`TALKHINT_CALL_TIMEOUT` env var)
