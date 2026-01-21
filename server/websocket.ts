@@ -618,8 +618,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
+    let isOutboundCall = false; // Track call direction for proper speaker mapping
     // CALL_MODE = "browser_only" - PSTN forwarding is completely disabled
-    // All incoming calls go to browser client only, SMS notifications are sent
+    // All incoming calls go to browser client only
     let goalEngine: GoalEngine | null = null; // Goal State Engine per call
     let deepgramReady = false; // Flag to track if Deepgram is ready
     const audioBuffer: { track: string; data: Buffer }[] = []; // Buffer for early audio
@@ -894,20 +895,34 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const isFinal = response.is_final;
             const speechFinal = response.speech_final === true;
             
-            // Track mapping (BROWSER_ONLY mode - no PSTN forwarding):
+            // Track mapping depends on call direction:
             // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
-            // 
-            // All calls are browser-based:
-            //   inbound = HON (browser mic / user audio going into Twilio)
-            //   outbound = GST (remote PSTN party audio coming out of Twilio)
-            const isGuestTrack = (track === "outbound"); // Remote PSTN = GST
-            const isOwnerTrack = (track === "inbound");  // Browser/User = HON
+            //
+            // OUTBOUND call (browser user calls external number):
+            //   inbound = GST (remote party's voice coming into Twilio)
+            //   outbound = HON (browser user's voice going out of Twilio)
+            //
+            // INBOUND call (external number calls browser user):
+            //   inbound = HON (browser user's voice going into Twilio)
+            //   outbound = GST (remote party's voice coming out of Twilio)
+            let isGuestTrack: boolean;
+            let isOwnerTrack: boolean;
+            
+            if (isOutboundCall) {
+              // OUTBOUND: user initiated call from browser
+              isGuestTrack = (track === "inbound");  // Remote party's voice
+              isOwnerTrack = (track === "outbound"); // Browser user's voice
+            } else {
+              // INBOUND: external caller calling browser user
+              isGuestTrack = (track === "outbound"); // Remote party's voice
+              isOwnerTrack = (track === "inbound");  // Browser user's voice
+            }
             
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
             const speakerCode = isGuestTrack ? "GST" : "HON";
             
             // Debug: log track mapping decision
-            log(`[TrackDebug] callMode=browser_only track=${track} isGuest=${isGuestTrack} isOwner=${isOwnerTrack} speaker=${speakerLabel}/${speakerCode} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
+            log(`[TrackDebug] callMode=browser_only isOutbound=${isOutboundCall} track=${track} isGuest=${isGuestTrack} isOwner=${isOwnerTrack} speaker=${speakerLabel}/${speakerCode} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
             
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
@@ -1045,10 +1060,19 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               
               // CALL_MODE = browser_only (PSTN forwarding disabled)
               const callType = message.start.customParameters?.callType || "browser";
+              isOutboundCall = (callType === "outbound");
               
-              log(`INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=false callType=${callType}`, "twilio");
+              log(`CALL_START callSid=${callSid} callMode=browser_only forwarding=false callType=${callType} isOutbound=${isOutboundCall}`, "twilio");
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
-              log(`[Track Mapping] BROWSER_ONLY: HON=inbound (user), GST=outbound (caller)`, "twilio");
+              
+              // Track mapping depends on call direction:
+              // OUTBOUND (browser calling external): inbound=GST (remote), outbound=HON (user)
+              // INBOUND (external calling browser): inbound=HON (user), outbound=GST (remote)
+              if (isOutboundCall) {
+                log(`[Track Mapping] OUTBOUND: inbound=GST (remote party), outbound=HON (browser user)`, "twilio");
+              } else {
+                log(`[Track Mapping] INBOUND: inbound=HON (browser user), outbound=GST (remote party)`, "twilio");
+              }
               
               // Initialize Goal State Engine for this call
               goalEngine = getOrCreateEngine(callSid);

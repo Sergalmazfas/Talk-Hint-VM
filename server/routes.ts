@@ -914,7 +914,7 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
       start.stream({
         url: streamUrl,
         track: "both_tracks"
-      });
+      }).parameter({ name: "callType", value: "outbound" });
       
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
