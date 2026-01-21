@@ -1025,20 +1025,28 @@ async function initTwilioDevice() {
       UI.statusText.textContent = 'Ready';
       UI.callBtn.disabled = false;
       
-      // Setup audio devices
+      // Setup audio devices (skip on iOS Safari as it doesn't support setInputDevice)
       try {
-        await device.audio.setInputDevice('default');
-        log('[Audio] Input device set to default');
+        var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+        var isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
         
-        // List available input devices
+        // List available input devices first
         var inputDevices = await navigator.mediaDevices.enumerateDevices();
         var mics = inputDevices.filter(function(d) { return d.kind === 'audioinput'; });
-        log('[Audio] Available microphones: ' + mics.length);
+        log('[Audio] Available microphones: ' + mics.length + ' (iOS=' + isIOS + ', Safari=' + isSafari + ')');
         mics.forEach(function(mic, i) {
           log('[Audio] Mic ' + i + ': ' + (mic.label || 'Unnamed') + ' (' + mic.deviceId.substring(0,8) + ')');
         });
+        
+        // iOS Safari doesn't support setInputDevice - skip it
+        if (!isIOS && device.audio && device.audio.setInputDevice) {
+          await device.audio.setInputDevice('default');
+          log('[Audio] Input device set to default');
+        } else {
+          log('[Audio] Skipping setInputDevice (iOS/Safari uses system default)');
+        }
       } catch (e) {
-        log('[Audio] Device setup error: ' + e.message);
+        log('[Audio] Device setup warning: ' + e.message + ' (non-fatal on iOS)');
       }
     });
 
