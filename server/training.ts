@@ -12,16 +12,20 @@ Return JSON: {"gst_text": "your reply"}`;
 // Translation is display-only, no logic impact
 const HINT_FAST_PROMPT = `You are TalkHint — real-time copilot for phone calls. Help ONLY HON (user), never GST.
 
-RULES:
-1. ANTI-LOOP: Slot resolved → move forward. Never revisit answered slots.
-2. NO CONFIRMATION: BANNED patterns: "Can you confirm...?", "So the price is...?", "Is it correct...?"
-3. EVERY HINT ADDS VALUE: Must expand/deepen/branch. If no new value, output null.
-4. SHORT: 3-7 words, immediately speakable.
+CRITICAL RULE: RESPOND TO GST'S LAST MESSAGE FIRST!
+- If GST asks for name → suggest YOUR name
+- If GST asks for DOB → suggest YOUR date of birth  
+- If GST asks for phone → suggest YOUR phone number
+- If GST asks for address → suggest YOUR address
+- If GST asks for confirmation → suggest "yes" or clarification
 
-Slot flows (move forward only):
-- buying: price→options→fees→availability→next steps
-- job: role→requirements→pay→benefits→start date
-- booking: date→time→confirm
+NEVER skip the current step. NEVER suggest asking about something else when GST expects an answer.
+
+RULES:
+1. RESPOND FIRST: Always answer what GST just asked before suggesting next steps.
+2. ANTI-LOOP: Never revisit already answered slots.
+3. NO CONFIRMATION QUESTIONS: BANNED: "Can you confirm...?", "So the price is...?"
+4. SHORT: 3-7 words, immediately speakable.
 
 Return JSON only:
 {"suggestion": "3-7 words English or null", "translation": "same in {LANG} or null", "achieved": false}`;
@@ -37,6 +41,9 @@ interface DialogState {
   availability_known: boolean;
   asked_time: boolean;
   time_known: boolean;
+  // Track what GST is currently asking for
+  lastGuestRequest: string | null;
+  answeredSlots: string[];
 }
 
 function createInitialState(): DialogState {
@@ -49,8 +56,54 @@ function createInitialState(): DialogState {
     asked_availability: false,
     availability_known: false,
     asked_time: false,
-    time_known: false
+    time_known: false,
+    lastGuestRequest: null,
+    answeredSlots: []
   };
+}
+
+// Detect what GST is asking for (identification, confirmation, etc.)
+function detectGuestRequest(text: string): string | null {
+  const lower = text.toLowerCase();
+  
+  // Identity requests
+  if (/your name|what('s| is) your name|may i (have|get) your name|name please/.test(lower)) {
+    return "name";
+  }
+  if (/date of birth|birth date|dob|when were you born|birthday/.test(lower)) {
+    return "dob";
+  }
+  if (/phone number|contact number|can i (have|get) your (phone|number)|number to reach/.test(lower)) {
+    return "phone";
+  }
+  if (/address|where (do you|are you) live|mailing address|street address/.test(lower)) {
+    return "address";
+  }
+  if (/email|e-mail|email address/.test(lower)) {
+    return "email";
+  }
+  
+  // Confirmation requests
+  if (/is that correct|can you confirm|do i have that right|is this right/.test(lower)) {
+    return "confirmation";
+  }
+  
+  // Prescription/medical specific
+  if (/prescription|medication|refill|rx number|doctor('s)? name/.test(lower)) {
+    return "prescription_info";
+  }
+  
+  // Insurance
+  if (/insurance|policy number|member id|group number/.test(lower)) {
+    return "insurance";
+  }
+  
+  // Payment
+  if (/payment|credit card|card number|billing/.test(lower)) {
+    return "payment";
+  }
+  
+  return null;
 }
 
 // Intent detection - improved keyword matching for reliability
@@ -110,7 +163,23 @@ function detectIntent(text: string, speaker: "hon" | "gst"): string[] {
 // Update state based on message
 function updateDialogState(state: DialogState, text: string, speaker: "hon" | "gst"): DialogState {
   const intents = detectIntent(text, speaker);
-  const newState = { ...state };
+  const newState = { ...state, answeredSlots: [...state.answeredSlots] };
+  
+  // Track what GST is currently asking for
+  if (speaker === "gst") {
+    const guestRequest = detectGuestRequest(text);
+    if (guestRequest) {
+      newState.lastGuestRequest = guestRequest;
+    }
+  }
+  
+  // If HON responds and there was a pending request, mark it as answered
+  if (speaker === "hon" && state.lastGuestRequest) {
+    if (!newState.answeredSlots.includes(state.lastGuestRequest)) {
+      newState.answeredSlots.push(state.lastGuestRequest);
+    }
+    newState.lastGuestRequest = null; // Clear after answered
+  }
   
   for (const intent of intents) {
     switch (intent) {
@@ -132,8 +201,20 @@ function updateDialogState(state: DialogState, text: string, speaker: "hon" | "g
   return newState;
 }
 
-// Generate state context for HINT prompt - includes both asked AND known
+// Generate state context for HINT prompt - includes current request, answered slots, and forbidden intents
 function getStateContext(state: DialogState): string {
+  const parts: string[] = [];
+  
+  // MOST IMPORTANT: What GST is currently asking for
+  if (state.lastGuestRequest) {
+    parts.push(`CURRENT GST REQUEST: ${state.lastGuestRequest} - YOU MUST SUGGEST AN ANSWER TO THIS!`);
+  }
+  
+  // Already answered slots (don't ask about these again)
+  if (state.answeredSlots.length > 0) {
+    parts.push(`ALREADY ANSWERED: ${state.answeredSlots.join(", ")}`);
+  }
+  
   const known: string[] = [];
   const forbidden: string[] = [];
   
@@ -169,11 +250,10 @@ function getStateContext(state: DialogState): string {
     forbidden.push("ask_time (already asked)");
   }
   
-  if (forbidden.length === 0) return "";
-  
-  const parts: string[] = [];
   if (known.length > 0) parts.push(`KNOWN: ${known.join(", ")}`);
-  parts.push(`FORBIDDEN (do NOT suggest these): ${forbidden.join(", ")}`);
+  if (forbidden.length > 0) parts.push(`FORBIDDEN: ${forbidden.join(", ")}`);
+  
+  if (parts.length === 0) return "";
   
   return `\n${parts.join("\n")}`;
 }
@@ -554,49 +634,25 @@ export async function processTrainingTurn(
       `${h.role.toUpperCase()}: ${h.text}`
     ).join("\n");
     
-    // Get state context for HINT (prevents repetition)
-    const stateContext = getStateContext(session.dialogState);
-    
-    // OPTIMIZATION: Run GST and Hint in PARALLEL
+    // STEP 1: Call GST first (we need to know what they ask before generating HINT)
     const gstStartTime = Date.now();
-    const hintStartTime = Date.now();
     
-    const [gstResponse, hintResponse] = await Promise.all([
-      // GST call (doesn't know goal)
-      fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: GST_FAST_PROMPT },
-            { role: "user", content: historyForPrompt }
-          ],
-          temperature: 0.6,
-          max_tokens: 80
-        })
-      }),
-      // Hint call (knows goal + state context) - runs in parallel
-      fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: HINT_FAST_PROMPT.replace("{LANG}", getHintLanguageName(session.hintLanguage)) },
-            { role: "user", content: `Goal: ${session.goal}${stateContext}\n\n${historyForPrompt}` }
-          ],
-          temperature: 0.6,
-          max_tokens: 120
-        })
+    const gstResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: GST_FAST_PROMPT },
+          { role: "user", content: historyForPrompt }
+        ],
+        temperature: 0.6,
+        max_tokens: 80
       })
-    ]);
+    });
     
     const gstMs = Date.now() - gstStartTime;
     const gstData = await gstResponse.json();
@@ -619,14 +675,23 @@ export async function processTrainingTurn(
     
     session.history.push({ role: "gst", text: gstText });
     
-    // Update dialog state based on GST response
+    // STEP 2: Update dialog state based on GST response (BEFORE calling HINT)
     session.dialogState = updateDialogState(session.dialogState, gstText, "gst");
     
     console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
+    console.log(`[Training] State: lastGuestRequest=${session.dialogState.lastGuestRequest}, answered=${session.dialogState.answeredSlots.join(",")}`);
     
-    // OPTIMIZATION: Run translation AND hint parsing in PARALLEL
+    // Get state context for HINT (now includes what GST just asked)
+    const stateContext = getStateContext(session.dialogState);
+    
+    // Add GST's latest message to history for HINT
+    const historyWithGst = historyForPrompt + `\nGST: ${gstText}`;
+    
+    // STEP 3: Run translation AND hint in PARALLEL (hint now knows what GST asked)
     const langName = getHintLanguageName(session.hintLanguage);
-    const [translateResult, hintData] = await Promise.all([
+    const hintStartTime = Date.now();
+    
+    const [translateResult, hintResponse] = await Promise.all([
       // Translation call
       fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -644,9 +709,26 @@ export async function processTrainingTurn(
           max_tokens: 80
         })
       }).then(r => r.json()).catch(() => null),
-      // Parse hint response (already received)
-      hintResponse.json()
+      // Hint call (now has GST's message in context)
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: HINT_FAST_PROMPT.replace("{LANG}", getHintLanguageName(session.hintLanguage)) },
+            { role: "user", content: `Goal: ${session.goal}${stateContext}\n\n${historyWithGst}` }
+          ],
+          temperature: 0.6,
+          max_tokens: 120
+        })
+      })
     ]);
+    
+    const hintData = await hintResponse.json();
     
     let gstTranslation = "";
     if (translateResult?.choices?.[0]?.message?.content) {
