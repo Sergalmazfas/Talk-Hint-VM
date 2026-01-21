@@ -805,25 +805,28 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         console.error("[TwiML Voice] Push notification failed:", err.message);
       });
       
-      // Send SMS notification to user's forwarding phone (async, don't wait)
+      // Send SMS notification to user's phone (NOT forwarding - just notification)
+      // PSTN forwarding is DISABLED - all calls go to browser only
       (async () => {
         try {
           const [user] = await db.select().from(users).where(eq(users.id, ownerUserId));
-          if (user?.forwardingPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+          const smsTo = user?.forwardingPhone || null;
+          
+          if (smsTo && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
             const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
             const protocol = req.get("x-forwarded-proto") || "https";
             const appUrl = `${protocol}://${host}/app`;
             await twilioClient.messages.create({
               body: `📞 Incoming call from ${fromNumber}. Answer in app: ${appUrl}`,
-              from: toNumber, // Use the Twilio number that received the call
-              to: user.forwardingPhone
+              from: toNumber,
+              to: smsTo
             });
-            console.log(`[TwiML Voice] SMS sent to ${user.forwardingPhone}`);
+            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=DISABLED smsTo=${smsTo} smsStatus=sent`);
           } else {
-            console.log("[TwiML Voice] No forwarding phone for SMS notification");
+            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=DISABLED smsTo=none smsStatus=skipped`);
           }
         } catch (smsErr: any) {
-          console.error("[TwiML Voice] SMS notification failed:", smsErr.message);
+          console.error(`[TwiML Voice] INCOMING_CALL callSid=${callSid} callMode=browser_only forwarding=DISABLED smsStatus=failed error=${smsErr.message}`);
         }
       })();
       
