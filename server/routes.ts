@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES } from "./websocket";
+import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -411,6 +412,69 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[TTS] Error:", error.message);
       res.status(500).json({ error: "TTS generation failed" });
+    }
+  });
+
+  // Generate initial hint based on goal (LIVE mode)
+  app.post("/api/generate-initial-hint", async (req, res) => {
+    const { goal, language } = req.body;
+    
+    if (!goal) {
+      return res.status(400).json({ error: "Goal is required" });
+    }
+    
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) {
+      return res.status(503).json({ error: "AI not configured" });
+    }
+    
+    const langName = LANGUAGE_NAMES[language] || "Russian";
+    
+    try {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You are TalkHint. Generate the FIRST phrase user should say when they call to achieve their goal.
+
+${LIVE_ANTI_LOOP_RULES}
+
+Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} translation"}`
+            },
+            {
+              role: "user",
+              content: `Goal: ${goal}\n\nWhat should user say FIRST when they call?`
+            }
+          ],
+          temperature: 0.5,
+          max_tokens: 100
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return res.json({ en: parsed.en, translation: parsed.translation });
+      }
+      
+      return res.json({ en: "Hello, I am calling about...", translation: "Здравствуйте, я звоню по поводу..." });
+    } catch (error: any) {
+      console.error("[InitialHint] Error:", error.message);
+      return res.json({ en: "Hello, I am calling about...", translation: "Здравствуйте, я звоню по поводу..." });
     }
   });
 
