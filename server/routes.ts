@@ -526,43 +526,33 @@ export async function registerRoutes(
       console.log(`[Hold] Call ${callSid} status: ${pendingCall.status}, expired: ${isExpired}`);
       
       if (pendingCall.status === "accepted") {
-        // User accepted - forward call to user's phone number from settings
-        // Use userId from pendingCall record (more reliable than query param)
+        // User accepted - connect caller to user's browser client
         const callUserId = pendingCall.userId || userId;
-        console.log(`[Hold] ${callSid} ACCEPTED - route=PSTN, looking up forwarding for user ${callUserId}`);
+        const clientIdentity = `user-${callUserId}`;
+        console.log(`[Hold] ${callSid} ACCEPTED - route=BROWSER, connecting to client:${clientIdentity}`);
         
-        // Get user's forwarding phone from database
-        const [user] = await db.select().from(users).where(eq(users.id, callUserId));
-        const forwardingPhone = user?.forwardingPhone;
+        const host = req.get("host") || "talkhint.app";
+        const streamUrl = `wss://${host}/twilio-stream`;
         
-        if (!forwardingPhone) {
-          console.log(`[Hold] ${callSid} ERROR - user ${callUserId} has no forwarding phone`);
-          twimlResponse.say({ voice: "alice" }, "No forwarding number configured. Please set your forwarding number in settings.");
-          twimlResponse.hangup();
-        } else {
-          const host = req.get("host") || "talkhint.app";
-          const streamUrl = `wss://${host}/twilio-stream`;
-          console.log(`[Hold] ${callSid} DIALING ${forwardingPhone} | streamUrl: ${streamUrl}`);
-          
-          // Start media stream for transcription with PSTN forwarding flag
-          // This tells WebSocket to INVERT roles: inbound=Guest, outbound=Honor
-          const start = twimlResponse.start();
-          start.stream({
-            url: streamUrl,
-            track: "both_tracks"
-          }).parameter({ name: "callType", value: "pstn_forwarding" });
-          
-          twimlResponse.say({ voice: "alice" }, "Connecting you now.");
-          
-          // Forward the call to user's configured phone number
-          const dial = twimlResponse.dial({
-            callerId: pendingCall.fromNumber || "",
-            answerOnBridge: true,
-            timeout: CALL_TIMEOUT,
-            timeLimit: CALL_TIME_LIMIT
-          });
-          dial.number(forwardingPhone);
-        }
+        // Start media stream for transcription
+        const start = twimlResponse.start();
+        start.stream({
+          url: streamUrl,
+          track: "both_tracks"
+        }).parameter({ name: "callType", value: "incoming_answered" });
+        
+        twimlResponse.say({ voice: "alice" }, "Connecting you now.");
+        
+        // Dial user's browser client (not PSTN forwarding)
+        const dial = twimlResponse.dial({
+          callerId: pendingCall.fromNumber || "",
+          answerOnBridge: true,
+          timeout: CALL_TIMEOUT,
+          timeLimit: CALL_TIME_LIMIT
+        });
+        dial.client(clientIdentity);
+        
+        console.log(`[Hold] ${callSid} DIALING browser client: ${clientIdentity} | streamUrl: ${streamUrl}`);
         
       } else if (pendingCall.status === "rejected" || isExpired) {
         // User rejected or timeout
@@ -751,6 +741,28 @@ export async function registerRoutes(
         console.error("[TwiML Voice] Push notification failed:", err.message);
       });
       
+      // Send SMS notification to user's forwarding phone (async, don't wait)
+      (async () => {
+        try {
+          const [user] = await db.select().from(users).where(eq(users.id, ownerUserId));
+          if (user?.forwardingPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+            const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+            const protocol = req.get("x-forwarded-proto") || "https";
+            const appUrl = `${protocol}://${host}/app`;
+            await twilioClient.messages.create({
+              body: `📞 Incoming call from ${fromNumber}. Answer in app: ${appUrl}`,
+              from: toNumber, // Use the Twilio number that received the call
+              to: user.forwardingPhone
+            });
+            console.log(`[TwiML Voice] SMS sent to ${user.forwardingPhone}`);
+          } else {
+            console.log("[TwiML Voice] No forwarding phone for SMS notification");
+          }
+        } catch (smsErr: any) {
+          console.error("[TwiML Voice] SMS notification failed:", smsErr.message);
+        }
+      })();
+      
       // Return HOLD TwiML - caller hears message while we wait for accept (no annoying sounds)
       const protocol = req.get("x-forwarded-proto") || "https";
       const holdUrl = `${protocol}://${host}/api/twilio/hold?callSid=${callSid}&userId=${ownerUserId}`;
@@ -846,6 +858,19 @@ export async function registerRoutes(
     const twimlXml = twimlResponse.toString();
     console.log("[TwiML Voice] Generated TwiML:", twimlXml);
     res.type("text/xml").send(twimlXml);
+  });
+
+  // Twilio status callback endpoint - receives call status updates
+  app.post("/twilio/status", validateTwilioSignature, (req, res) => {
+    const callSid = req.body.CallSid;
+    const callStatus = req.body.CallStatus;
+    const timestamp = new Date().toISOString();
+    
+    console.log(`[Twilio Status] ${callSid} @ ${timestamp} - Status: ${callStatus}`);
+    console.log(`[Twilio Status] Full body:`, JSON.stringify(req.body));
+    
+    // Just acknowledge - we can add more logic here later if needed
+    res.status(200).send("OK");
   });
 
   // Twilio outbound webhook - returns TwiML for basic voice call
