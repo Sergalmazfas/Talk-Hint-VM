@@ -5,6 +5,7 @@ import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
+import { UtteranceGate } from "./utteranceGate";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -634,6 +635,162 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Conversation history for context
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
     
+    // Utterance Gate - wait for end of speech before generating hints
+    const utteranceGate = new UtteranceGate(async (speaker, text, utteranceId) => {
+      if (speaker === "GST") {
+        await handleGuestUtteranceComplete(text, utteranceId);
+      } else {
+        handleOwnerUtteranceComplete(text, utteranceId);
+      }
+    });
+    
+    // Handler for complete GST utterance (after debounce)
+    async function handleGuestUtteranceComplete(text: string, utteranceId: number) {
+      log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
+      
+      // Add to conversation log
+      conversationLog.push({
+        speaker: "Guest",
+        text: text,
+        timestamp: Date.now()
+      });
+      if (conversationLog.length > 10) conversationLog.shift();
+      
+      // Update GoalEngine
+      if (goalEngine) {
+        const goalUpdate = goalEngine.updateOnUtterance({
+          speaker: "GST",
+          text: text,
+          ts: Date.now()
+        });
+        
+        const state = goalUpdate.state;
+        const missingSlot = state.missingSlots[0] || "none";
+        fastLayer.setGoal(state.goalType, missingSlot);
+        
+        uiBroadcast({
+          type: "goal_state_update",
+          target: "HON",
+          callId: state.callId,
+          goalType: state.goalType,
+          currentGoal: state.currentGoal,
+          confidence: state.confidence,
+          status: state.status,
+          slots: state.slots,
+          missingSlots: state.missingSlots,
+          nextBestAction: state.nextBestAction
+        });
+        
+        if (goalUpdate.goalAchieved) {
+          uiBroadcast({
+            type: "goal_achieved",
+            target: "HON",
+            callId: state.callId,
+            goalType: state.goalType,
+            summary: state.currentGoal,
+            achievedReason: state.achievedReason
+          });
+        }
+        
+        log(`[GoalEngine] GST update: goal=${state.goalType}, status=${state.status}, missing=${state.missingSlots.join(",")}`, "goal");
+      }
+      
+      // Trigger fast layer timer - GPT request starts now
+      fastLayer.setLanguage(currentLanguage);
+      fastLayer.onGstUtteranceEnd();
+      
+      const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
+      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);
+      
+      // GPT response received - stop fast layer timer
+      fastLayer.onGptResponseReceived();
+      
+      // Broadcast translation
+      uiBroadcast({ 
+        type: "guest_transcript",
+        text: text,
+        translation: translated.translation,
+        isFinal: true,
+        isComplete: true,
+        utteranceId,
+        callSid
+      });
+      
+      if (translated.suggestion) {
+        log(`[Suggestion] Sending to HON, basedOn=GST, utteranceId=${utteranceId}`, "websocket");
+        uiBroadcast({
+          type: "suggestion",
+          target: "HON",
+          eventType: "suggestion",
+          source: "gpt",
+          basedOnSpeaker: "GST",
+          en: translated.suggestion.en,
+          translation: translated.suggestion.translation,
+          utteranceId,
+          callSid
+        });
+      }
+    }
+    
+    // Handler for complete HON utterance (after debounce)
+    function handleOwnerUtteranceComplete(text: string, utteranceId: number) {
+      log(`[UtteranceComplete] HON utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
+      
+      // Add to conversation log
+      conversationLog.push({
+        speaker: "Honor",
+        text: text,
+        timestamp: Date.now()
+      });
+      if (conversationLog.length > 10) conversationLog.shift();
+      
+      // Update GoalEngine
+      if (goalEngine) {
+        const goalUpdate = goalEngine.updateOnUtterance({
+          speaker: "HON",
+          text: text,
+          ts: Date.now()
+        });
+        
+        const state = goalUpdate.state;
+        
+        uiBroadcast({
+          type: "goal_state_update",
+          target: "HON",
+          callId: state.callId,
+          goalType: state.goalType,
+          currentGoal: state.currentGoal,
+          confidence: state.confidence,
+          status: state.status,
+          slots: state.slots,
+          missingSlots: state.missingSlots,
+          nextBestAction: state.nextBestAction
+        });
+        
+        if (goalUpdate.goalAchieved) {
+          uiBroadcast({
+            type: "goal_achieved",
+            target: "HON",
+            callId: state.callId,
+            goalType: state.goalType,
+            summary: state.currentGoal,
+            achievedReason: state.achievedReason
+          });
+        }
+        
+        log(`[GoalEngine] HON update: goal=${state.goalType}, status=${state.status}, slots=${JSON.stringify(goalUpdate.newSlots)}`, "goal");
+      }
+      
+      uiBroadcast({ 
+        type: "owner_transcript",
+        text: text,
+        isFinal: true,
+        isComplete: true,
+        utteranceId,
+        callSid
+      });
+    }
+    
     // Fast Layer for quick responses while GPT is thinking
     const fastLayer = new FastLayerManager((phrase: FastPhraseResult, waitTimeMs: number) => {
       log(`[FastLayer] Emitting fast_phrase after ${waitTimeMs}ms: "${phrase.text}" (${phrase.category})`, "fast");
@@ -728,152 +885,20 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // Both modes have SAME mapping: inbound=HON, outbound=GST
             const isGuestTrack = (track === "outbound");
             const isOwnerTrack = (track === "inbound");
-            const speaker = isOwnerTrack ? "Owner" : "Guest";
+            const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
+            const speakerCode = isGuestTrack ? "GST" : "HON";
             
             // Debug: log track mapping decision
-            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speaker}`, "deepgram");
+            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel}`, "deepgram");
             
-            if (isFinal) {
-              log(`[Deepgram] ${speaker} final: ${transcript}`, "deepgram");
-              
-              conversationLog.push({
-                speaker: isGuestTrack ? "Guest" : "Honor",
-                text: transcript,
-                timestamp: Date.now()
-              });
-              
-              if (conversationLog.length > 10) {
-                conversationLog.shift();
-              }
-              
-              if (isGuestTrack) {
-                // Update GoalEngine with GST utterance
-                let goalUpdate = null;
-                if (goalEngine) {
-                  goalUpdate = goalEngine.updateOnUtterance({
-                    speaker: "GST",
-                    text: transcript,
-                    ts: Date.now()
-                  });
-                  
-                  // Update FastLayer with current goal and missing slot
-                  const state = goalUpdate.state;
-                  const missingSlot = state.missingSlots[0] || "none";
-                  fastLayer.setGoal(state.goalType, missingSlot);
-                  
-                  // Broadcast goal state update
-                  uiBroadcast({
-                    type: "goal_state_update",
-                    target: "HON",
-                    callId: state.callId,
-                    goalType: state.goalType,
-                    currentGoal: state.currentGoal,
-                    confidence: state.confidence,
-                    status: state.status,
-                    slots: state.slots,
-                    missingSlots: state.missingSlots,
-                    nextBestAction: state.nextBestAction
-                  });
-                  
-                  // Broadcast goal achieved if reached
-                  if (goalUpdate.goalAchieved) {
-                    uiBroadcast({
-                      type: "goal_achieved",
-                      target: "HON",
-                      callId: state.callId,
-                      goalType: state.goalType,
-                      summary: state.currentGoal,
-                      achievedReason: state.achievedReason
-                    });
-                  }
-                  
-                  log(`[GoalEngine] GST update: goal=${state.goalType}, status=${state.status}, missing=${state.missingSlots.join(",")}`, "goal");
-                }
-                
-                // Trigger fast layer timer - GPT request starts now
-                fastLayer.setLanguage(currentLanguage);
-                fastLayer.onGstUtteranceEnd();
-                
-                const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
-                const translated = await translateAndSuggest(transcript, currentGoal, currentLanguage, contextHistory);
-                
-                // GPT response received - stop fast layer timer
-                fastLayer.onGptResponseReceived();
-                
-                uiBroadcast({ 
-                  type: "guest_transcript",
-                  text: transcript,
-                  translation: translated.translation,
-                  isFinal: true,
-                  callSid
-                });
-                
-                if (translated.suggestion) {
-                  log(`[Suggestion] Sending to HON, basedOn=GST, callSid=${callSid}`, "websocket");
-                  uiBroadcast({
-                    type: "suggestion",
-                    target: "HON",  // Suggestions ALWAYS go to owner
-                    eventType: "suggestion",
-                    source: "gpt",
-                    basedOnSpeaker: "GST",  // Based on guest's speech
-                    en: translated.suggestion.en,
-                    translation: translated.suggestion.translation,
-                    callSid
-                  });
-                }
-              } else {
-                // Update GoalEngine with HON utterance
-                if (goalEngine) {
-                  const goalUpdate = goalEngine.updateOnUtterance({
-                    speaker: "HON",
-                    text: transcript,
-                    ts: Date.now()
-                  });
-                  
-                  const state = goalUpdate.state;
-                  
-                  // Broadcast goal state update
-                  uiBroadcast({
-                    type: "goal_state_update",
-                    target: "HON",
-                    callId: state.callId,
-                    goalType: state.goalType,
-                    currentGoal: state.currentGoal,
-                    confidence: state.confidence,
-                    status: state.status,
-                    slots: state.slots,
-                    missingSlots: state.missingSlots,
-                    nextBestAction: state.nextBestAction
-                  });
-                  
-                  // Broadcast goal achieved if reached
-                  if (goalUpdate.goalAchieved) {
-                    uiBroadcast({
-                      type: "goal_achieved",
-                      target: "HON",
-                      callId: state.callId,
-                      goalType: state.goalType,
-                      summary: state.currentGoal,
-                      achievedReason: state.achievedReason
-                    });
-                  }
-                  
-                  log(`[GoalEngine] HON update: goal=${state.goalType}, status=${state.status}, slots=${JSON.stringify(goalUpdate.newSlots)}`, "goal");
-                }
-                
-                uiBroadcast({ 
-                  type: "owner_transcript",
-                  text: transcript,
-                  isFinal: true,
-                  callSid
-                });
-              }
+            // Use utteranceGate to wait for complete utterance before GPT
+            utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal);
+            
+            // Broadcast partial/final transcripts immediately for UI display
+            if (isGuestTrack) {
+              uiBroadcast({ type: "guest_transcript", text: transcript, isFinal, callSid });
             } else {
-              if (isGuestTrack) {
-                uiBroadcast({ type: "guest_transcript", text: transcript, isFinal: false, callSid });
-              } else {
-                uiBroadcast({ type: "owner_transcript", text: transcript, isFinal: false, callSid });
-              }
+              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal, callSid });
             }
           }
         } catch (err: any) {
@@ -1105,6 +1130,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Cleanup GoalEngine
       if (callSid) {
         removeEngine(callSid);
+        utteranceGate.cleanup(callSid);
       }
     });
     
