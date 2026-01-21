@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { log } from "./index";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, ANTI_LOOP_RULES } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
@@ -144,7 +144,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
             role: "system",
             content: `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
-${ANTI_LOOP_RULES}
+${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 1) Translate to ${langName}. 2) Suggest short reply (under 15 words) that moves toward the goal.
 Return JSON: {"translation":"...", "suggestion":{"en":"...", "translation":"..."}}`
