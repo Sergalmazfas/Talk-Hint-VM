@@ -1120,25 +1120,40 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                 // - PSTN caller sends audio TO Twilio → shows as "inbound" track  
                 // - Browser SDK receives/sends → outgoing audio appears as... actually same pattern
                 //
-                // CRITICAL: After testing, for BOTH directions:
-                // - "inbound" track = audio from the call initiator (browser for outbound, PSTN for inbound)
-                // - "outbound" track = audio from the call recipient
+                // CORRECT: Track naming is from the PARENT LEG's perspective:
+                // - "inbound" = audio the parent leg RECEIVES (hears)
+                // - "outbound" = audio the parent leg SENDS (says)
                 //
-                // For our use case:
-                // - OUTBOUND: browser initiates → inbound=HON, outbound=GST
-                // - INBOUND: PSTN initiates → inbound=GST, outbound=HON
+                // Result (verified):
+                // - OUTBOUND: browser=parent → inbound=GST(heard), outbound=HON(said)
+                // - INBOUND: PSTN=parent → inbound=HON(heard), outbound=GST(said)
                 
                 let youTrack: "inbound" | "outbound";
                 let guestTrack: "inbound" | "outbound";
                 
+                // === CORRECT TRACK SEMANTICS ===
+                // Stream is attached to the PARENT leg (the call initiator)
+                // "inbound" = audio this leg RECEIVES (what it hears)
+                // "outbound" = audio this leg SENDS (what it says)
+                //
+                // OUTBOUND call (browser user dials PSTN):
+                //   Parent leg = browser user
+                //   inbound = what browser HEARS = PSTN voice = GST
+                //   outbound = what browser SAYS = browser mic = HON
+                //
+                // INBOUND call (PSTN dials browser user):
+                //   Parent leg = PSTN caller
+                //   inbound = what PSTN HEARS = browser voice = HON
+                //   outbound = what PSTN SAYS = PSTN voice = GST
+                
                 if (callType === "outbound") {
-                  // OUTBOUND: browser user initiated call
-                  youTrack = "inbound";   // Browser mic audio goes INTO Twilio
-                  guestTrack = "outbound"; // PSTN/remote audio comes OUT OF Twilio
+                  // OUTBOUND: browser user is parent leg
+                  youTrack = "outbound";  // Browser mic = what browser SAYS
+                  guestTrack = "inbound"; // PSTN voice = what browser HEARS
                 } else {
-                  // INBOUND/incoming_answered: PSTN caller initiated call
-                  youTrack = "outbound";  // Browser user's audio (responding to call)
-                  guestTrack = "inbound"; // PSTN caller's audio goes INTO Twilio
+                  // INBOUND/incoming_answered: PSTN caller is parent leg
+                  youTrack = "inbound";   // Browser voice = what PSTN HEARS  
+                  guestTrack = "outbound"; // PSTN voice = what PSTN SAYS
                 }
                 
                 pinYouByTrack(callKey, youTrack);
