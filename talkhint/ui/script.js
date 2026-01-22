@@ -31,7 +31,7 @@ const UI = {
 
 let hasGoal = false;
 let currentFolder = null;
-let currentLanguage = localStorage.getItem('talkhint_language') || 'ru';
+let currentLanguage = localStorage.getItem('talkhint_language') || 'en'; // Default to EN, not RU
 let callGoal = '';
 let isInCall = false;
 let userPrompts = [];
@@ -1299,7 +1299,7 @@ function connectWebSocket() {
 
   socket.onopen = function() {
     log('WebSocket connected');
-    var savedLang = localStorage.getItem('talkhint_language') || 'ru';
+    var savedLang = localStorage.getItem('talkhint_language') || 'en'; // Default to EN
     socket.send(JSON.stringify({
       type: 'set_language',
       language: savedLang
@@ -1931,7 +1931,7 @@ document.addEventListener('click', function(e) {
 });
 
 (function initLanguage() {
-  var savedLang = localStorage.getItem('talkhint_language') || 'ru';
+  var savedLang = localStorage.getItem('talkhint_language') || 'en'; // Default to EN
   updateLanguageSelector(savedLang);
   var langItem = document.querySelector('[data-lang="' + savedLang + '"]');
   if (langItem) {

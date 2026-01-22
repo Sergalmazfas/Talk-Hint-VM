@@ -428,7 +428,7 @@ export async function registerRoutes(
       return res.status(503).json({ error: "AI not configured" });
     }
     
-    const langName = LANGUAGE_NAMES[language] || "Russian";
+    const langName = LANGUAGE_NAMES[language] || "English"; // Default to EN
     
     try {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -1104,7 +1104,7 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         return res.status(400).json({ error: "Message is required" });
       }
       
-      const langName = LANGUAGE_NAMES[language] || "Russian";
+      const langName = LANGUAGE_NAMES[language] || "English"; // Default to EN
       
       // FROZEN: Always use base prompt (TALKHINT_GOLDEN_PROMPT)
       // Custom prompts (activePromptId from phone_numbers) are NOT used for Basic plan
