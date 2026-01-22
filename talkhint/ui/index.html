@@ -263,6 +263,7 @@
       align-items: center;
       justify-content: center;
       gap: 12px;
+      position: relative;
     }
     
     .phone-input {
@@ -313,17 +314,16 @@
     
     .dtmf-keypad {
       position: absolute;
-      top: 100%;
+      top: calc(100% + 10px);
       left: 50%;
       transform: translateX(-50%);
       background: #fff;
+      z-index: 1000;
       border: 1px solid #e5e5e5;
       border-radius: 12px;
       padding: 12px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       display: none;
-      z-index: 100;
-      margin-top: 8px;
     }
     .dtmf-keypad.visible { display: block; }
     
