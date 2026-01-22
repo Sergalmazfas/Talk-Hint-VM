@@ -144,14 +144,8 @@ async function initStripe() {
     if (replitDomains) {
       console.log("[Stripe] Setting up managed webhook...");
       const webhookBaseUrl = `https://${replitDomains.split(",")[0]}`;
-      try {
-        await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-        console.log("[Stripe] Webhook configured");
-      } catch (webhookErr: any) {
-        // Don't crash on webhook setup errors - the webhook may already exist in Stripe Dashboard
-        console.log("[Stripe] Managed webhook setup skipped:", webhookErr?.message || webhookErr);
-        console.log("[Stripe] Webhook events will still be received if configured in Stripe Dashboard");
-      }
+      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
+      console.log("[Stripe] Webhook configured");
     } else {
       console.log("[Stripe] REPLIT_DOMAINS not set, skipping webhook setup (local dev)");
     }

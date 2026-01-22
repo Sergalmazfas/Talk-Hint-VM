@@ -428,7 +428,7 @@ export async function registerRoutes(
       return res.status(503).json({ error: "AI not configured" });
     }
     
-    const langName = LANGUAGE_NAMES[language] || "English"; // Default to EN
+    const langName = LANGUAGE_NAMES[language] || "Russian";
     
     try {
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -600,12 +600,10 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         
         // Start media stream for transcription
         const start = twimlResponse.start();
-        const stream = start.stream({
+        start.stream({
           url: streamUrl,
           track: "both_tracks"
-        });
-        stream.parameter({ name: "callType", value: "incoming_answered" });
-        stream.parameter({ name: "ownerUserId", value: callUserId });
+        }).parameter({ name: "callType", value: "incoming_answered" });
         
         twimlResponse.say({ voice: "alice" }, "Connecting you now.");
         
@@ -807,35 +805,25 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         console.error("[TwiML Voice] Push notification failed:", err.message);
       });
       
-      // Whisper notification call - short outbound call to notify user (NOT SMS, NOT forwarding)
-      // PSTN forwarding is DISABLED - customer call goes to browser only
+      // Send SMS notification to user's forwarding phone (async, don't wait)
       (async () => {
         try {
           const [user] = await db.select().from(users).where(eq(users.id, ownerUserId));
-          const notificationPhone = user?.forwardingPhone || null;
-          
-          if (notificationPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+          if (user?.forwardingPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
             const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
             const protocol = req.get("x-forwarded-proto") || "https";
-            const statusCallbackUrl = `${protocol}://${host}/api/twilio/whisper-status`;
-            
-            // Create outbound whisper call - plays TTS message then auto-hangs up
-            const whisperCall = await twilioClient.calls.create({
-              to: notificationPhone,
-              from: toNumber,
-              twiml: '<Response><Say voice="alice" language="en-US">Incoming call in TalkHint. Open the app.</Say><Hangup/></Response>',
-              timeout: 15,
-              statusCallback: statusCallbackUrl,
-              statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-              statusCallbackMethod: 'POST'
+            const appUrl = `${protocol}://${host}/app`;
+            await twilioClient.messages.create({
+              body: `📞 Incoming call from ${fromNumber}. Answer in app: ${appUrl}`,
+              from: toNumber, // Use the Twilio number that received the call
+              to: user.forwardingPhone
             });
-            
-            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} notificationPhone=${notificationPhone} whisperAttempted=true whisperCallSid=${whisperCall.sid} forwarding=DISABLED mode=browser_only`);
+            console.log(`[TwiML Voice] SMS sent to ${user.forwardingPhone}`);
           } else {
-            console.log(`[TwiML Voice] INCOMING_CALL callSid=${callSid} notificationPhone=none whisperAttempted=false forwarding=DISABLED mode=browser_only`);
+            console.log("[TwiML Voice] No forwarding phone for SMS notification");
           }
-        } catch (whisperErr: any) {
-          console.error(`[TwiML Voice] INCOMING_CALL callSid=${callSid} whisperAttempted=true whisperStatus=failed error=${whisperErr.message} forwarding=DISABLED mode=browser_only`);
+        } catch (smsErr: any) {
+          console.error("[TwiML Voice] SMS notification failed:", smsErr.message);
         }
       })();
       
@@ -909,24 +897,14 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         console.log(`[TwiML Voice] No client identity, using default callerId`);
       }
       
-      // Extract userId from client identity for CallContext
-      let outboundUserId = "";
-      if (fromNumber && fromNumber.startsWith("client:user-")) {
-        outboundUserId = fromNumber.replace("client:user-", "");
-      } else if (fromNumber && fromNumber.startsWith("client:line_")) {
-        outboundUserId = fromNumber.replace("client:line_", "");
-      }
-      
-      console.log(`[TwiML Voice] OUTBOUND CALL to ${toNumber} from ${userCallerId} ownerUserId=${outboundUserId}`);
+      console.log(`[TwiML Voice] OUTBOUND CALL to ${toNumber} from ${userCallerId}`);
       
       // Start media stream for transcription
       const start = twimlResponse.start();
-      const stream = start.stream({
+      start.stream({
         url: streamUrl,
         track: "both_tracks"
       });
-      stream.parameter({ name: "callType", value: "outbound" });
-      stream.parameter({ name: "ownerUserId", value: outboundUserId });
       
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
@@ -956,18 +934,6 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
     console.log(`[Twilio Status] Full body:`, JSON.stringify(req.body));
     
     // Just acknowledge - we can add more logic here later if needed
-    res.status(200).send("OK");
-  });
-
-  // Whisper notification call status callback - logs whisper call events
-  app.post("/api/twilio/whisper-status", (req, res) => {
-    const whisperCallSid = req.body.CallSid;
-    const status = req.body.CallStatus;
-    const duration = req.body.CallDuration || 0;
-    const timestamp = new Date().toISOString();
-    
-    console.log(`[WHISPER_STATUS] whisperCallSid=${whisperCallSid} status=${status} duration=${duration}s @ ${timestamp}`);
-    
     res.status(200).send("OK");
   });
 
@@ -1104,7 +1070,7 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         return res.status(400).json({ error: "Message is required" });
       }
       
-      const langName = LANGUAGE_NAMES[language] || "English"; // Default to EN
+      const langName = LANGUAGE_NAMES[language] || "Russian";
       
       // FROZEN: Always use base prompt (TALKHINT_GOLDEN_PROMPT)
       // Custom prompts (activePromptId from phone_numbers) are NOT used for Basic plan

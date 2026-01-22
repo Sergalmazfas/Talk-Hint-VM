@@ -7,17 +7,6 @@ import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
-import { 
-  createCallContext, 
-  getCallContext, 
-  setCallContextOwner, 
-  setCallContextCallSid,
-  setCallContextStatus,
-  pinYouByTrack,
-  getSpeakerFromContext,
-  removeCallContext 
-} from "./callContext";
-import { appendTranscript, clearTranscriptCache } from "./transcriptGate";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -127,13 +116,13 @@ Score: 1.0 = very strong emotion, 0.0 = neutral. Be concise.`
 }
 
 // Translate guest speech and generate suggestion
-async function translateAndSuggest(text: string, goal: string, language: string = "en", conversationContext: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
   sentiment?: { sentiment: 'positive' | 'neutral' | 'negative'; score: number };
 }> {
-  const langName = LANGUAGE_NAMES[language] || "English"; // Default to EN
+  const langName = LANGUAGE_NAMES[language] || "Russian";
   const langCode = language === "es" ? "ES" : "RU";
   
   // Don't wait for sentiment - return it separately via callback
@@ -205,7 +194,7 @@ function getRealtimePrompt(mode: string = "universal"): string {
 }
 
 let currentMode = "universal";
-let currentLanguage = "en"; // Default to English, can be "en", "ru" or "es"
+let currentLanguage = "ru"; // Default to Russian, can be "ru" or "es"
 const uiClients = new Set<WebSocket>();
 
 // Filter JSON from text - never show raw JSON to users
@@ -473,7 +462,7 @@ export function setupWebSocket(server: Server) {
     }
 
     try {
-      const langName = LANGUAGE_NAMES[currentLanguage] || "English"; // Default to EN
+      const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
       const goalLockInstructions = goal ? `
 GOAL LOCK-IN MODE: The user has set a clear goal: "${goal}"
 - ONLY provide phrases and help that move toward this goal
@@ -535,25 +524,6 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           currentMode = message.mode;
           log(`Mode changed to: ${currentMode}`, "server");
           ws.send(JSON.stringify({ type: "mode_changed", mode: currentMode }));
-        } else if (message.type === "pin_call") {
-          // Handshake: UI sends ownerUserId and callKey to pin roles
-          const { callKey: reqCallKey, ownerUserId: reqOwnerId } = message;
-          if (reqCallKey && reqOwnerId) {
-            const ctx = getCallContext(reqCallKey);
-            if (ctx) {
-              setCallContextOwner(reqCallKey, reqOwnerId);
-              log(`[CallContext] UI handshake: pinned owner=${reqOwnerId} for callKey=${reqCallKey}`, "server");
-              ws.send(JSON.stringify({ type: "call_pinned", callKey: reqCallKey, ownerUserId: reqOwnerId }));
-            } else {
-              // Create CallContext if not yet created (call not started via Twilio yet)
-              createCallContext(reqCallKey);
-              setCallContextOwner(reqCallKey, reqOwnerId);
-              log(`[CallContext] UI handshake: created and pinned owner=${reqOwnerId} for callKey=${reqCallKey}`, "server");
-              ws.send(JSON.stringify({ type: "call_pinned", callKey: reqCallKey, ownerUserId: reqOwnerId }));
-            }
-          } else {
-            log(`[CallContext] UI handshake failed: missing callKey or ownerUserId`, "server");
-          }
         } else if (message.type === "update_goal" || message.type === "set_goal") {
           currentGoal = message.goal || "";
           log(`Goal set: ${currentGoal.substring(0, 50)}...`, "server");
@@ -648,16 +618,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let audioFrameCount = 0;
-    
-    // === CALL CONTEXT: Deterministic role mapping via CallContext ===
-    // Role pinning is done via customParameters (ownerUserId) from TwiML
-    // YOU = ownerUserId's audio track, GUEST = remote party's audio track
-    let callKey: string | null = null; // Unique key for CallContext lookup
-    let ownerUserId: string | null = null; // Owner of this call (from TwiML params)
-    let callType: string = "unknown"; // Store for diagnostics
-    
-    // CALL_MODE = "browser_only" - PSTN forwarding is completely disabled
-    // All incoming calls go to browser client only
+    let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     let goalEngine: GoalEngine | null = null; // Goal State Engine per call
     let deepgramReady = false; // Flag to track if Deepgram is ready
     const audioBuffer: { track: string; data: Buffer }[] = []; // Buffer for early audio
@@ -684,36 +645,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     });
     
     // Handler for complete GST utterance (after debounce)
-    // Hints ARE generated for GUEST speech to help owner respond
-    // GUARD: This handler ONLY processes remote party audio - never owner mic
     async function handleGuestUtteranceComplete(text: string, utteranceId: number) {
-      // === DEFENSIVE GUARD: Verify this is the guest handler ===
-      // This handler should ONLY be called for GST speaker
-      // If called incorrectly, log error and reject
-      const ctx = callKey ? getCallContext(callKey) : undefined;
-      if (!ctx) {
-        log(`[HANDLER_GUARD] REJECT GST handler - no CallContext | callKey=${callKey} utteranceId=${utteranceId}`, "twilio");
-        return;
-      }
+      log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
-      // === CENTRALIZED TRANSCRIPT WRITE via appendTranscript ===
-      const transcriptResult = appendTranscript({
-        callKey: callKey || "",
-        callSid: callSid || "",
-        callType: callType as "inbound" | "outbound",
-        role: "GST",
-        source: "twilio_stream",
-        utteranceId,
-        text,
-        timestamp: Date.now()
-      });
-      
-      if (!transcriptResult.accepted) {
-        log(`[TRANSCRIPT_REJECTED] GST utterance dropped | reason=${transcriptResult.reason} utteranceId=${utteranceId}`, "twilio");
-        return;
-      }
-      
-      // Add to in-memory conversation log (for GPT context)
+      // Add to conversation log
       conversationLog.push({
         speaker: "Guest",
         text: text,
@@ -798,36 +733,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     }
     
     // Handler for complete HON utterance (after debounce)
-    // NOTE: NO hints generated for owner's speech - hints only for GUEST
-    // GUARD: This handler ONLY processes owner mic audio - never remote party
     function handleOwnerUtteranceComplete(text: string, utteranceId: number) {
-      // === DEFENSIVE GUARD: Verify this is the owner handler ===
-      // This handler should ONLY be called for HON speaker
-      // If called incorrectly, log error and reject
-      const ctx = callKey ? getCallContext(callKey) : undefined;
-      if (!ctx) {
-        log(`[HANDLER_GUARD] REJECT HON handler - no CallContext | callKey=${callKey} utteranceId=${utteranceId}`, "twilio");
-        return;
-      }
+      log(`[UtteranceComplete] HON utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
-      // === CENTRALIZED TRANSCRIPT WRITE via appendTranscript ===
-      const transcriptResult = appendTranscript({
-        callKey: callKey || "",
-        callSid: callSid || "",
-        callType: callType as "inbound" | "outbound",
-        role: "HON",
-        source: "owner_mic",
-        utteranceId,
-        text,
-        timestamp: Date.now()
-      });
-      
-      if (!transcriptResult.accepted) {
-        log(`[TRANSCRIPT_REJECTED] HON utterance dropped | reason=${transcriptResult.reason} utteranceId=${utteranceId}`, "twilio");
-        return;
-      }
-      
-      // Add to in-memory conversation log (for GPT context)
+      // Add to conversation log
       conversationLog.push({
         speaker: "Honor",
         text: text,
@@ -973,13 +882,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           }
           if (response.type === "UtteranceEnd") {
             log(`[DG] ${track}: UtteranceEnd -> forcing flush`, "deepgram");
-            // Use CallContext for deterministic speaker role
-            const speaker = callKey ? getSpeakerFromContext(callKey, track as "inbound" | "outbound") : null;
-            if (!speaker) {
-              log(`[HintGate] UtteranceEnd SKIP - no CallContext or speaker for callKey=${callKey}`, "deepgram");
-              return;
-            }
-            utteranceGate.forceFlush(callSid || "unknown", speaker);
+            const isGuestTrack = (track === "outbound");
+            const speakerCode = isGuestTrack ? "GST" : "HON";
+            utteranceGate.forceFlush(callSid || "unknown", speakerCode as "GST" | "HON");
             return;
           }
           
@@ -988,55 +893,28 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const isFinal = response.is_final;
             const speechFinal = response.speech_final === true;
             
-            // === USE CALL CONTEXT for deterministic role mapping ===
-            // No inference based on track/direction - CallContext is single source of truth
-            const speaker = callKey ? getSpeakerFromContext(callKey, track as "inbound" | "outbound") : null;
-            
-            // === HARD SOURCE VALIDATION ===
-            if (!speaker) {
-              // No CallContext or role not pinned - DROP transcript (don't process or broadcast)
-              log(`[SOURCE_GUARD] REJECT - no speaker mapping | callKey=${callKey} track=${track} callType=${callType} text_len=${transcript.length}`, "twilio");
-              return; // Hard reject - don't process unattributed audio
-            }
-            
-            // === CALLCONTEXT DETAILS FOR LOGGING ===
-            const ctx = callKey ? getCallContext(callKey) : undefined;
-            const youStreamSid = ctx?.youStreamSid || "unknown";  // "inbound" or "outbound"
-            const guestStreamSid = ctx?.guestStreamSid || "unknown";
-            
-            // === STRICT CALLTYPE/TRACK VALIDATION ===
-            // Verify that CallContext track mapping matches expected for callType
-            const expectedYouTrack = callType === "outbound" ? "outbound" : "inbound";
-            if (youStreamSid !== "unknown" && youStreamSid !== expectedYouTrack) {
-              log(`[SOURCE_GUARD] REJECT - callType/youTrack mismatch | callType=${callType} expected_you=${expectedYouTrack} actual_you=${youStreamSid} track=${track} speaker=${speaker}`, "twilio");
-              return; // Hard reject - CallContext was set incorrectly
-            }
-            
-            const isOwnerTrack = (speaker === "HON");
-            const isGuestTrack = (speaker === "GST");
+            // Track mapping (CORRECTED):
+            // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
+            // Browser outbound call (isPstnForwarding=false): inbound=HON (browser mic), outbound=GST (remote PSTN)
+            // PSTN forwarding (isPstnForwarding=true): inbound=HON (mobile owner), outbound=GST (original caller)
+            // Both modes have SAME mapping: inbound=HON, outbound=GST
+            const isGuestTrack = (track === "outbound");
+            const isOwnerTrack = (track === "inbound");
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
+            const speakerCode = isGuestTrack ? "GST" : "HON";
             
-            // === STRUCTURED LOGGING with full context ===
-            log(`[TURN] callKey=${callKey || "?"} callSid=${callSid || "?"} callType=${callType} track=${track} speaker=${speaker} youTrack=${youStreamSid} isFinal=${isFinal} text_len=${transcript.length} text="${transcript.substring(0, 40)}..."`, "twilio");
+            // Debug: log track mapping decision
+            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
             
             // Use utteranceGate to wait for complete utterance before GPT
-            utteranceGate.processTranscript(callSid || "unknown", speaker, transcript, isFinal, speechFinal, false);
+            utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
             
-            // === CANONICAL TRANSCRIPT EVENT ===
-            // Single schema for all transcript events, UI must use ONLY this
-            const turnId = `${callSid}-${Date.now()}`;
-            uiBroadcast({ 
-              type: "canonical_transcript", 
-              turnId,
-              callSid: callSid || "",
-              callType,
-              role: speaker,  // "HON" or "GST"
-              speakerLabel: isGuestTrack ? "GUEST" : "YOU",
-              source: isGuestTrack ? "twilio_stream" : "owner_mic",
-              text: transcript,
-              isFinal,
-              producer: "server"
-            });
+            // Broadcast partial/final transcripts immediately for UI display
+            if (isGuestTrack) {
+              uiBroadcast({ type: "guest_transcript", text: transcript, isFinal, callSid });
+            } else {
+              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal, callSid });
+            }
           }
         } catch (err: any) {
           log(`[Deepgram] Parse error: ${err.message}`, "deepgram");
@@ -1162,85 +1040,20 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
               
-              // === CALL CONTEXT: Deterministic role pinning ===
-              if (!callKey && callSid) {
-                callKey = callSid; // Use callSid as unique key
-                callType = message.start.customParameters?.callType || "browser";
-                ownerUserId = message.start.customParameters?.ownerUserId || "";
-                
-                // Create CallContext and set owner
-                createCallContext(callKey);
-                setCallContextCallSid(callKey, callSid);
-                if (ownerUserId) {
-                  setCallContextOwner(callKey, ownerUserId);
-                }
-                setCallContextStatus(callKey, "connected");
-                
-                // === TRACK SEMANTICS (from Twilio documentation) ===
-                // Twilio Media Streams track naming:
-                // - "inbound" = audio flowing INTO Twilio (from the caller/originator)
-                // - "outbound" = audio flowing OUT OF Twilio (to the caller/originator)
-                //
-                // For OUTBOUND calls (browser user calls PSTN):
-                // - Browser SDK sends audio TO Twilio → shows as "inbound" track
-                // - PSTN party audio comes FROM Twilio → shows as "outbound" track
-                // - Therefore: inbound=HON (browser user), outbound=GST (PSTN)
-                //
-                // For INBOUND/incoming_answered calls (PSTN calls browser user):
-                // - PSTN caller sends audio TO Twilio → shows as "inbound" track  
-                // - Browser SDK receives/sends → outgoing audio appears as... actually same pattern
-                //
-                // CORRECT: Track naming is from the PARENT LEG's perspective:
-                // - "inbound" = audio the parent leg RECEIVES (hears)
-                // - "outbound" = audio the parent leg SENDS (says)
-                //
-                // Result (verified):
-                // - OUTBOUND: browser=parent → inbound=GST(heard), outbound=HON(said)
-                // - INBOUND: PSTN=parent → inbound=HON(heard), outbound=GST(said)
-                
-                let youTrack: "inbound" | "outbound";
-                let guestTrack: "inbound" | "outbound";
-                
-                // === CORRECT TRACK SEMANTICS ===
-                // Stream is attached to the PARENT leg (the call initiator)
-                // "inbound" = audio this leg RECEIVES (what it hears)
-                // "outbound" = audio this leg SENDS (what it says)
-                //
-                // OUTBOUND call (browser user dials PSTN):
-                //   Parent leg = browser user
-                //   inbound = what browser HEARS = PSTN voice = GST
-                //   outbound = what browser SAYS = browser mic = HON
-                //
-                // INBOUND call (PSTN dials browser user):
-                //   Parent leg = PSTN caller
-                //   inbound = what PSTN HEARS = browser voice = HON
-                //   outbound = what PSTN SAYS = PSTN voice = GST
-                
-                if (callType === "outbound") {
-                  // OUTBOUND: browser user is parent leg
-                  youTrack = "outbound";  // Browser mic = what browser SAYS
-                  guestTrack = "inbound"; // PSTN voice = what browser HEARS
-                } else {
-                  // INBOUND/incoming_answered: PSTN caller is parent leg
-                  youTrack = "inbound";   // Browser voice = what PSTN HEARS  
-                  guestTrack = "outbound"; // PSTN voice = what PSTN SAYS
-                }
-                
-                pinYouByTrack(callKey, youTrack);
-                
-                // Diagnostic logs
-                log(`[CallContext] CALL_START callKey=${callKey} callSid=${callSid} callType=${callType} ownerUserId=${ownerUserId || "unknown"}`, "twilio");
-                log(`[CallContext] YOU=${youTrack}_track GUEST=${guestTrack}_track (based on callType=${callType})`, "twilio");
-                log(`[CallContext] Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
-              } else {
-                log(`[WARN] CallContext already exists for callKey=${callKey}, ignoring duplicate start`, "twilio");
-              }
+              // Check for PSTN forwarding mode (roles inverted)
+              const callType = message.start.customParameters?.callType;
+              isPstnForwarding = callType === "pstn_forwarding";
+              
+              log(`Stream started: ${callSid}, callType: ${callType || 'browser'}, isPstnForwarding: ${isPstnForwarding}`, "twilio");
+              log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
+              
+              // Log track roles for debugging
+              // BOTH modes: inbound=HON (owner), outbound=GST (guest)
+              log(`[Track Mapping] HON=inbound, GST=outbound (same for all modes)`, "twilio");
               
               // Initialize Goal State Engine for this call
-              if (!goalEngine && callSid) {
-                goalEngine = getOrCreateEngine(callSid);
-                log(`[GoalEngine] Initialized for call: ${callSid}`, "goal");
-              }
+              goalEngine = getOrCreateEngine(callSid);
+              log(`[GoalEngine] Initialized for call: ${callSid}`, "goal");
               
               // Note: Deepgram already initialized on "connected" event for early capture
               log(`[Deepgram] Deepgram ready: ${deepgramReady}, inbound: ${!!deepgramInbound}, outbound: ${!!deepgramOutbound}`, "deepgram");
@@ -1299,12 +1112,6 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // Cleanup GoalEngine
             if (callSid) {
               removeEngine(callSid);
-              clearTranscriptCache(callSid);
-            }
-            // Cleanup CallContext
-            if (callKey) {
-              setCallContextStatus(callKey, "ended");
-              removeCallContext(callKey);
             }
             break;
         }
@@ -1386,7 +1193,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     if (history.length < 1) return;
     
     const recentContext = history.slice(-5).map(h => `${h.role}: ${h.text}`).join("\n");
-    const langName = LANGUAGE_NAMES[currentLanguage] || "English"; // Default to EN
+    const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
     
     // Start a timer for filler phrase
     const fillerTimer = setTimeout(() => sendFiller(), 2000);

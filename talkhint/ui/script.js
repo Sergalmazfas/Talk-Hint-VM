@@ -31,7 +31,7 @@ const UI = {
 
 let hasGoal = false;
 let currentFolder = null;
-let currentLanguage = localStorage.getItem('talkhint_language') || 'en'; // Default to EN, not RU
+let currentLanguage = localStorage.getItem('talkhint_language') || 'ru';
 let callGoal = '';
 let isInCall = false;
 let userPrompts = [];
@@ -45,7 +45,6 @@ let isTrainingActive = false;
 // TTS settings for Training Mode
 let ttsAutoplayGST = localStorage.getItem('talkhint_tts_autoplay') !== 'false'; // default ON
 let currentAudio = null; // Currently playing audio
-let isTTSPlaying = false; // Flag to suppress owner transcript echo during TTS
 
 const LANGUAGE_FLAGS = {
   ru: '🇷🇺',
@@ -63,131 +62,6 @@ let lastMessageType = null;
 let lastMessageTime = 0;
 let lastMessageEl = null;
 const GROUP_WINDOW_MS = 2000;
-
-// Token management state
-let currentIdentity = null;
-let tokenExpiresAt = null;
-let isRefreshingToken = false;
-const TOKEN_REFRESH_BUFFER_MS = 60000; // Refresh 1 minute before expiry
-
-// Parse JWT to get expiry time
-function parseJwtExpiry(token) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(atob(parts[1]));
-    return payload.exp ? payload.exp * 1000 : null; // Convert to ms
-  } catch (e) {
-    return null;
-  }
-}
-
-// Check if token needs refresh
-function isTokenExpiringSoon() {
-  if (!tokenExpiresAt) return true;
-  return Date.now() > (tokenExpiresAt - TOKEN_REFRESH_BUFFER_MS);
-}
-
-// Show session expired UI
-function showSessionExpiredUI() {
-  log('[Auth] Session expired - showing reload message');
-  UI.statusDot.classList.remove('connected', 'calling', 'active');
-  UI.statusDot.classList.add('error');
-  UI.statusText.textContent = 'Session expired. Reload app.';
-  UI.callBtn.disabled = true;
-  
-  // Show a prominent message
-  const expiredBanner = document.createElement('div');
-  expiredBanner.id = 'sessionExpiredBanner';
-  expiredBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ef4444;color:white;padding:12px;text-align:center;z-index:9999;font-weight:bold;';
-  expiredBanner.innerHTML = 'Session expired. <a href="javascript:location.reload()" style="color:white;text-decoration:underline;">Reload app</a>';
-  if (!document.getElementById('sessionExpiredBanner')) {
-    document.body.appendChild(expiredBanner);
-  }
-}
-
-// Refresh Twilio token
-async function refreshTwilioToken(reason) {
-  if (isRefreshingToken) {
-    log('[Auth] Token refresh already in progress');
-    return false;
-  }
-  
-  isRefreshingToken = true;
-  log('[Auth] Refreshing token... reason=' + reason);
-  
-  try {
-    const authToken = getAuthToken();
-    const headers = {};
-    if (authToken) {
-      headers['Authorization'] = 'Bearer ' + authToken;
-    }
-    const response = await fetch('/api/token', { 
-      credentials: 'include',
-      headers: headers
-    });
-    
-    if (response.status === 401 || response.status === 403) {
-      log('[Auth] Unauthorized - session expired');
-      showSessionExpiredUI();
-      isRefreshingToken = false;
-      return false;
-    }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      log('[Auth] Token refresh error: ' + data.error);
-      if (data.error.toLowerCase().includes('unauthorized') || data.error.toLowerCase().includes('session')) {
-        showSessionExpiredUI();
-      }
-      isRefreshingToken = false;
-      return false;
-    }
-    
-    // Validate identity matches
-    if (currentIdentity && data.identity !== currentIdentity) {
-      log('[Auth] Identity mismatch! Expected=' + currentIdentity + ' Got=' + data.identity);
-      showSessionExpiredUI();
-      isRefreshingToken = false;
-      return false;
-    }
-    
-    currentIdentity = data.identity;
-    tokenExpiresAt = parseJwtExpiry(data.token);
-    log('[Auth] Token refreshed for: ' + data.identity + ' expires: ' + (tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : 'unknown'));
-    
-    // Update device token
-    if (device) {
-      device.updateToken(data.token);
-      log('[Auth] Device token updated');
-    }
-    
-    isRefreshingToken = false;
-    return true;
-  } catch (err) {
-    log('[Auth] Token refresh failed: ' + err.message);
-    isRefreshingToken = false;
-    return false;
-  }
-}
-
-// Handle visibility change (app resume)
-document.addEventListener('visibilitychange', async function() {
-  if (document.visibilityState === 'visible') {
-    log('[Auth] App resumed - checking token');
-    if (isTokenExpiringSoon()) {
-      await refreshTwilioToken('resume');
-    }
-  }
-});
-
-// Periodic token refresh check
-setInterval(async function() {
-  if (device && isTokenExpiringSoon() && !isOnCall) {
-    await refreshTwilioToken('periodic');
-  }
-}, 30000); // Check every 30 seconds
 
 // Incoming call notification functions - for Twilio Device incoming calls
 function showIncomingCallNotification(fromNumber, call) {
@@ -217,17 +91,8 @@ function showIncomingCallNotification(fromNumber, call) {
   document.body.appendChild(notification);
   
   // Add button handlers for Twilio Device calls
-  document.getElementById('acceptCallBtn').onclick = async function() {
+  document.getElementById('acceptCallBtn').onclick = function() {
     log('Accepting Twilio Device call...');
-    // Refresh token before accepting to ensure valid auth
-    if (isTokenExpiringSoon()) {
-      log('[Auth] Token expiring - refreshing before accept');
-      const refreshed = await refreshTwilioToken('incoming_call');
-      if (!refreshed) {
-        log('[Auth] Token refresh failed - cannot accept call');
-        return;
-      }
-    }
     call.accept();
   };
   
@@ -285,18 +150,6 @@ function showPushIncomingCall(fromNumber, callSid) {
 // Accept call via API (for push-based calls)
 async function acceptPushCall(callSid) {
   log('Accepting push call: ' + callSid);
-  
-  // Refresh token before accepting to ensure valid auth
-  if (isTokenExpiringSoon()) {
-    log('[Auth] Token expiring - refreshing before accept');
-    const refreshed = await refreshTwilioToken('incoming_push_call');
-    if (!refreshed) {
-      log('[Auth] Token refresh failed - cannot accept call');
-      hideIncomingCallNotification();
-      return;
-    }
-  }
-  
   try {
     var response = await fetch('/api/call/accept', {
       method: 'POST',
@@ -911,18 +764,14 @@ function addMessage(type, text, translation, sentiment) {
   }
   
   const now = Date.now();
-  // Only group actual speech transcripts, never goals or user questions
-  const isTranscriptType = (type === 'you' || type === 'honor' || type === 'guest');
   const shouldGroup = (type === lastMessageType) && 
                       (now - lastMessageTime < GROUP_WINDOW_MS) && 
                       lastMessageEl && 
-                      isTranscriptType;
+                      (type === 'you' || type === 'honor' || type === 'guest');
   
   if (shouldGroup) {
     const bubble = lastMessageEl.querySelector('.message-bubble');
     if (bubble) {
-      // NOTE: Deduplication now handled server-side via appendTranscript()
-      // UI renders exactly what backend sends
       bubble.textContent += '\n' + text;
     }
     if (translation) {
@@ -952,8 +801,6 @@ function addMessage(type, text, translation, sentiment) {
     if (type === 'you' || type === 'honor' || type === 'HON') label = '🎙️ You';
     else if (type === 'guest' || type === 'GST') label = '👤 Guest';
     else if (type === 'ai') label = '💡 AI';
-    else if (type === 'goal') label = '🎯 Goal';
-    else if (type === 'user_question') label = '❓ You asked';
     
     var labelDiv = document.createElement('div');
     labelDiv.className = 'message-label';
@@ -1149,38 +996,16 @@ async function initTwilioDevice() {
 
   try {
     log('Getting Twilio token...');
-    const authToken = getAuthToken();
-    const headers = {};
-    if (authToken) {
-      headers['Authorization'] = 'Bearer ' + authToken;
-    }
-    const response = await fetch('/api/token', { 
-      credentials: 'include',
-      headers: headers
-    });
-    
-    if (response.status === 401 || response.status === 403) {
-      log('[Auth] Unauthorized on init - session expired');
-      showSessionExpiredUI();
-      return;
-    }
-    
+    const response = await fetch('/api/token');
     const data = await response.json();
     
     if (data.error) {
       log('Token error: ' + data.error);
-      if (data.error.toLowerCase().includes('unauthorized') || data.error.toLowerCase().includes('session')) {
-        showSessionExpiredUI();
-      } else {
-        UI.statusText.textContent = 'Token error';
-      }
+      UI.statusText.textContent = 'Token error';
       return;
     }
 
-    // Store token identity and expiry
-    currentIdentity = data.identity;
-    tokenExpiresAt = parseJwtExpiry(data.token);
-    log('Token received for: ' + data.identity + ' expires: ' + (tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : 'unknown'));
+    log('Token received for: ' + data.identity);
     
     device = new TwilioDevice(data.token, { 
       logLevel: 1,
@@ -1200,28 +1025,20 @@ async function initTwilioDevice() {
       UI.statusText.textContent = 'Ready';
       UI.callBtn.disabled = false;
       
-      // Setup audio devices (skip on iOS Safari as it doesn't support setInputDevice)
+      // Setup audio devices
       try {
-        var isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-        var isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+        await device.audio.setInputDevice('default');
+        log('[Audio] Input device set to default');
         
-        // List available input devices first
+        // List available input devices
         var inputDevices = await navigator.mediaDevices.enumerateDevices();
         var mics = inputDevices.filter(function(d) { return d.kind === 'audioinput'; });
-        log('[Audio] Available microphones: ' + mics.length + ' (iOS=' + isIOS + ', Safari=' + isSafari + ')');
+        log('[Audio] Available microphones: ' + mics.length);
         mics.forEach(function(mic, i) {
           log('[Audio] Mic ' + i + ': ' + (mic.label || 'Unnamed') + ' (' + mic.deviceId.substring(0,8) + ')');
         });
-        
-        // iOS Safari doesn't support setInputDevice - skip it
-        if (!isIOS && device.audio && device.audio.setInputDevice) {
-          await device.audio.setInputDevice('default');
-          log('[Audio] Input device set to default');
-        } else {
-          log('[Audio] Skipping setInputDevice (iOS/Safari uses system default)');
-        }
       } catch (e) {
-        log('[Audio] Device setup warning: ' + e.message + ' (non-fatal on iOS)');
+        log('[Audio] Device setup error: ' + e.message);
       }
     });
 
@@ -1299,7 +1116,7 @@ function connectWebSocket() {
 
   socket.onopen = function() {
     log('WebSocket connected');
-    var savedLang = localStorage.getItem('talkhint_language') || 'en'; // Default to EN
+    var savedLang = localStorage.getItem('talkhint_language') || 'ru';
     socket.send(JSON.stringify({
       type: 'set_language',
       language: savedLang
@@ -1363,36 +1180,39 @@ function handleMessage(data) {
       log('Server confirmed connection');
       break;
 
-    // === CANONICAL TRANSCRIPT - PRIMARY HANDLER ===
-    // This is the ONLY source of truth for transcripts
-    case 'canonical_transcript':
-      if (data.text && data.producer === 'server') {
-        var msgType = data.speakerLabel === 'YOU' ? 'you' : 'guest';
-        
-        // Trace logging for debugging
-        log('[TRACE] canonical_transcript | turnId=' + data.turnId + ' role=' + data.role + 
-            ' speaker=' + data.speakerLabel + ' source=' + data.source + 
-            ' callType=' + data.callType + ' producer=' + data.producer);
-        
-        // TTS echo suppression for owner only
-        if (data.speakerLabel === 'YOU' && isTTSPlaying) {
-          log('[Echo] Suppressed YOU transcript during TTS: ' + data.text.substring(0, 30));
-          break;
-        }
-        
-        // STT garbage filter
+    case 'owner_transcript':
+    case 'hon_transcript':
+      if (data.text) {
+        // STT garbage filter for HON
         if (data.isFinal && isGarbageSTT(data.text, data.confidence)) {
-          log('Filtered garbage STT: ' + data.text);
+          log('Filtered garbage HON STT: ' + data.text);
           break;
         }
         
+        // For interim results, update last message instead of adding new
         if (data.isFinal === false) {
-          updateLastInterim(msgType, data.text);
+          updateLastInterim('you', data.text);
         } else {
-          finalizeMessage(msgType, data.text, data.translation, data.sentiment);
+          finalizeMessage('you', data.text);
+        }
+      }
+      break;
+
+    case 'sentiment_update':
+      updateLastSentiment(data.speaker, data.sentiment);
+      break;
+
+    case 'guest_transcript':
+    case 'gst_transcript':
+      if (data.text) {
+        // For interim results, update last message instead of adding new
+        if (data.isFinal === false) {
+          updateLastInterim('guest', data.text);
+        } else {
+          finalizeMessage('guest', data.text, data.translation, data.sentiment);
           
-          // Safe Start fallback for GUEST
-          if (data.speakerLabel === 'GUEST' && !callGoal && isInCall) {
+          // Safe Start fallback: if no goal after 3 GST replies, show steer hint
+          if (!callGoal && isInCall && data.isFinal) {
             safeStartRepliesWithoutGoal++;
             if (safeStartRepliesWithoutGoal >= 3 && !safeStartFallbackShown) {
               safeStartFallbackShown = true;
@@ -1404,34 +1224,6 @@ function handleMessage(data) {
           }
         }
       }
-      break;
-
-    // === TRAINING MODE HANDLER ===
-    // hon_transcript is used for training mode (GPTRealtimeHandler)
-    // This is still needed for training mode where user speaks to AI trainer
-    case 'hon_transcript':
-      if (data.text && callMode === 'training') {
-        // Training mode: hon_transcript represents user's speech to AI trainer
-        if (data.isFinal === false) {
-          updateLastInterim('you', data.text);
-        } else {
-          finalizeMessage('you', data.text);
-        }
-      }
-      break;
-    
-    // === LEGACY OWNER TRANSCRIPT - DISABLED ===
-    case 'owner_transcript':
-      log('[LEGACY] Ignoring owner_transcript - use canonical_transcript for LIVE mode');
-      break;
-
-    case 'sentiment_update':
-      updateLastSentiment(data.speaker, data.sentiment);
-      break;
-
-    case 'guest_transcript':
-    case 'gst_transcript':
-      log('[LEGACY] Ignoring legacy guest_transcript - use canonical_transcript');
       break;
 
     case 'suggestion':
@@ -1818,8 +1610,7 @@ function sendTextToAI() {
     callGoal = text;
     setGoalActive(true);
     showGoalBadge(text);
-    // Goal is NOT a transcript - use 'goal' type, not 'honor'
-    addMessage('goal', text);
+    addMessage('honor', text);
     
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({
@@ -1839,8 +1630,7 @@ function sendTextToAI() {
       });
     }
   } else {
-    // User question during call - use 'user_question' type, not transcript
-    addMessage('user_question', text);
+    addMessage('honor', text);
     
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({
@@ -1950,7 +1740,7 @@ document.addEventListener('click', function(e) {
 });
 
 (function initLanguage() {
-  var savedLang = localStorage.getItem('talkhint_language') || 'en'; // Default to EN
+  var savedLang = localStorage.getItem('talkhint_language') || 'ru';
   updateLanguageSelector(savedLang);
   var langItem = document.querySelector('[data-lang="' + savedLang + '"]');
   if (langItem) {
@@ -2417,7 +2207,6 @@ async function playTTS(text, voiceType, buttonEl) {
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
-    isTTSPlaying = false;
   }
   
   // Update button state
@@ -2465,8 +2254,6 @@ async function playTTS(text, voiceType, buttonEl) {
         buttonEl.disabled = false;
       }
       currentAudio = null;
-      isTTSPlaying = false;
-      log('[TTS] Playback ended, echo suppression OFF');
     };
     
     currentAudio.onerror = function() {
@@ -2474,12 +2261,9 @@ async function playTTS(text, voiceType, buttonEl) {
         buttonEl.textContent = originalText;
         buttonEl.disabled = false;
       }
-      isTTSPlaying = false;
       log('[TTS] Audio playback error');
     };
     
-    isTTSPlaying = true;
-    log('[TTS] Playback started, echo suppression ON');
     await currentAudio.play();
     
   } catch (err) {
