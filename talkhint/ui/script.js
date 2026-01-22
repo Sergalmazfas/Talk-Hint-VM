@@ -26,7 +26,9 @@ const UI = {
   folderPrompt: document.getElementById('folderPrompt'),
   planBadge: document.getElementById('planBadge'),
   upgradeBtn: document.getElementById('upgradeBtn'),
-  manageBtn: document.getElementById('manageBtn')
+  manageBtn: document.getElementById('manageBtn'),
+  dtmfToggleBtn: document.getElementById('dtmfToggleBtn'),
+  dtmfKeypad: document.getElementById('dtmfKeypad')
 };
 
 let hasGoal = false;
@@ -1072,6 +1074,7 @@ async function initTwilioDevice() {
         UI.callBtn.classList.add('on-call');
         UI.callBtn.textContent = 'End Call';
         hideIncomingCallNotification();
+        showDtmfKeypad();
       });
       
       call.on('disconnect', function() {
@@ -1083,6 +1086,7 @@ async function initTwilioDevice() {
         UI.callBtn.classList.remove('on-call');
         UI.callBtn.textContent = 'Start Call';
         hideIncomingCallNotification();
+        hideDtmfKeypad();
       });
       
       call.on('cancel', function() {
@@ -1379,10 +1383,14 @@ async function makeCall() {
       
       // Start quality monitoring for debugging audio issues
       startQualityMonitoring(activeCall);
+      
+      // Show DTMF keypad for IVR navigation
+      showDtmfKeypad();
     });
 
     activeCall.on('disconnect', function() {
       log('Call disconnected');
+      hideDtmfKeypad();
       resetCallUI();
     });
 
@@ -1413,6 +1421,7 @@ function resetCallUI() {
   activeCall = null;
   isInCall = false;
   callGoal = '';  // Reset goal for next call
+  hideDtmfKeypad();  // Hide DTMF keypad
   
   // Reset Safe Start fallback tracking
   safeStartRepliesWithoutGoal = 0;
@@ -1510,7 +1519,79 @@ function endCall() {
     activeCall.disconnect();
     log('Call ended');
   }
+  hideDtmfKeypad();
 }
+
+function sendDtmf(digit) {
+  if (!activeCall) {
+    log('[DTMF] No active call');
+    return false;
+  }
+  
+  try {
+    activeCall.sendDigits(digit);
+    log('[DTMF] Sent: ' + digit);
+    
+    addMessage('system', 'Pressed: ' + digit, { isDtmf: true });
+    
+    return true;
+  } catch (err) {
+    log('[DTMF] Error: ' + err.message);
+    return false;
+  }
+}
+
+function showDtmfKeypad() {
+  if (UI.dtmfToggleBtn) {
+    UI.dtmfToggleBtn.classList.add('visible');
+  }
+}
+
+function hideDtmfKeypad() {
+  if (UI.dtmfToggleBtn) {
+    UI.dtmfToggleBtn.classList.remove('visible', 'active');
+  }
+  if (UI.dtmfKeypad) {
+    UI.dtmfKeypad.classList.remove('visible');
+  }
+}
+
+function toggleDtmfKeypad() {
+  if (UI.dtmfKeypad && UI.dtmfToggleBtn) {
+    var isVisible = UI.dtmfKeypad.classList.contains('visible');
+    if (isVisible) {
+      UI.dtmfKeypad.classList.remove('visible');
+      UI.dtmfToggleBtn.classList.remove('active');
+    } else {
+      UI.dtmfKeypad.classList.add('visible');
+      UI.dtmfToggleBtn.classList.add('active');
+    }
+  }
+}
+
+if (UI.dtmfToggleBtn) {
+  UI.dtmfToggleBtn.addEventListener('click', toggleDtmfKeypad);
+}
+
+if (UI.dtmfKeypad) {
+  UI.dtmfKeypad.querySelectorAll('.dtmf-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var digit = this.getAttribute('data-digit');
+      if (digit) {
+        sendDtmf(digit);
+      }
+    });
+  });
+}
+
+document.addEventListener('click', function(e) {
+  if (UI.dtmfKeypad && UI.dtmfKeypad.classList.contains('visible')) {
+    if (!UI.dtmfKeypad.contains(e.target) && !UI.dtmfToggleBtn.contains(e.target)) {
+      UI.dtmfKeypad.classList.remove('visible');
+      UI.dtmfToggleBtn.classList.remove('active');
+    }
+  }
+});
 
 UI.callBtn.addEventListener('click', function() {
   // Training mode: toggle training session

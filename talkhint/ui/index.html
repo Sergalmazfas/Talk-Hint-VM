@@ -293,6 +293,66 @@
     .call-btn.end { background: #ef4444; color: #fff; }
     .call-btn svg { width: 18px; height: 18px; }
     
+    .dtmf-toggle-btn {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #e5e5e5;
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      color: #6b7280;
+      margin-left: 8px;
+    }
+    .dtmf-toggle-btn:hover { background: #f3f4f6; }
+    .dtmf-toggle-btn.active { background: #dbeafe; border-color: #3b82f6; color: #3b82f6; }
+    .dtmf-toggle-btn.visible { display: flex; }
+    
+    .dtmf-keypad {
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fff;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      display: none;
+      z-index: 100;
+      margin-top: 8px;
+    }
+    .dtmf-keypad.visible { display: block; }
+    
+    .dtmf-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    
+    .dtmf-btn {
+      width: 48px;
+      height: 48px;
+      border: 1px solid #e5e5e5;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+      font-size: 20px;
+      font-weight: 500;
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.1s;
+    }
+    .dtmf-btn:hover { background: #f3f4f6; }
+    .dtmf-btn:active { background: #dbeafe; transform: scale(0.95); }
+    .dtmf-btn .dtmf-sub { font-size: 8px; color: #9ca3af; letter-spacing: 1px; }
+    
     .status {
       font-size: 0.8rem;
       color: #888;
@@ -966,6 +1026,25 @@
             <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z"/>
           </svg>
         </button>
+        <button class="dtmf-toggle-btn" id="dtmfToggleBtn" data-testid="button-dtmf-toggle" title="Keypad (DTMF)">
+          #
+        </button>
+        <div class="dtmf-keypad" id="dtmfKeypad">
+          <div class="dtmf-grid">
+            <button class="dtmf-btn" data-digit="1" data-testid="dtmf-1">1</button>
+            <button class="dtmf-btn" data-digit="2" data-testid="dtmf-2">2<span class="dtmf-sub">ABC</span></button>
+            <button class="dtmf-btn" data-digit="3" data-testid="dtmf-3">3<span class="dtmf-sub">DEF</span></button>
+            <button class="dtmf-btn" data-digit="4" data-testid="dtmf-4">4<span class="dtmf-sub">GHI</span></button>
+            <button class="dtmf-btn" data-digit="5" data-testid="dtmf-5">5<span class="dtmf-sub">JKL</span></button>
+            <button class="dtmf-btn" data-digit="6" data-testid="dtmf-6">6<span class="dtmf-sub">MNO</span></button>
+            <button class="dtmf-btn" data-digit="7" data-testid="dtmf-7">7<span class="dtmf-sub">PQRS</span></button>
+            <button class="dtmf-btn" data-digit="8" data-testid="dtmf-8">8<span class="dtmf-sub">TUV</span></button>
+            <button class="dtmf-btn" data-digit="9" data-testid="dtmf-9">9<span class="dtmf-sub">WXYZ</span></button>
+            <button class="dtmf-btn" data-digit="*" data-testid="dtmf-star">*</button>
+            <button class="dtmf-btn" data-digit="0" data-testid="dtmf-0">0</button>
+            <button class="dtmf-btn" data-digit="#" data-testid="dtmf-hash">#</button>
+          </div>
+        </div>
         <div class="status">
           <div class="status-dot" id="statusDot"></div>
           <span id="statusText">Connecting...</span>
