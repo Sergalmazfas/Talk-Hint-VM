@@ -1,239 +1,46 @@
 # TalkHint v2 - Real-time Voice Assistant
 
 ## Overview
-
-TalkHint is an AI-powered real-time voice assistant for phone calls. It provides live transcription, translation hints, and GPT-powered suggestions during phone conversations. The application uses Twilio for phone call handling, Deepgram for speech-to-text, and OpenAI's Realtime API for AI-powered assistance.
-
-**TalkHint v2** adds subscription-based plans with Stripe and a simplified Basic plan.
-
-### Subscription Plans (Current)
-- **Basic Plan** - $15/month: 1 personal phone number, live calls, training calls, learning/flashcards, notifications
-
-### FROZEN Features (Not Deleted, Just Hidden)
-- WORK phone numbers (type='work')
-- WORK folders and custom prompts
-- Multiple numbers per user
-- Editable prompts per number
-- Pro/Personal multi-tier plans
-
-These features remain in the database but are hidden in the UI and not used in call flows. The backend always uses TALKHINT_GOLDEN_PROMPT (base prompt).
-
-The system has two main interfaces:
-1. A React landing page that redirects to the main app
-2. A standalone TalkHint UI served from `/app` with voice calling capabilities
+TalkHint is an AI-powered real-time voice assistant designed for phone calls. It offers live transcription, translation hints, and GPT-powered suggestions during conversations. The system integrates Twilio for call handling, Deepgram for speech-to-text, and OpenAI's Realtime API for AI assistance. TalkHint v2 introduces subscription-based plans with Stripe, focusing on a simplified Basic plan. The project aims to provide an advanced conversational AI experience, enhancing communication efficiency and effectiveness for users during phone interactions.
 
 ## User Preferences
-
 Preferred communication style: Simple, everyday language.
 Key phrase: "не запрещаем, предупреждаем" - warn users when changing prompts on work numbers, don't block.
 
 ## System Architecture
 
-### Frontend Architecture
-- **React + TypeScript** with Vite for the main client application
-- **Standalone HTML/JS UI** at `talkhint/ui/` served at `/app` route for the voice assistant interface
-- **shadcn/ui** component library with Radix UI primitives
-- **TailwindCSS** for styling with custom theme variables
-- **React Query** for server state management
-- **Wouter** for client-side routing
+### Frontend
+The main client application is built with React and TypeScript using Vite, providing a modern and responsive user interface. A separate, standalone HTML/JS UI is served at `/app` for the core voice assistant interface. Design is based on `shadcn/ui` with Radix UI primitives and styled using TailwindCSS. React Query manages server state, and Wouter handles client-side routing.
 
-### Backend Architecture
-- **Express.js** server with TypeScript
-- **WebSocket connections** for real-time audio streaming:
-  - Twilio media streams for phone call audio
-  - Browser microphone audio ("Honor stream")
-  - UI client connections for broadcasting transcripts
-- **Audio Processing Pipeline**:
-  - μ-law to PCM16 conversion for Twilio audio
-  - 8kHz to 24kHz upsampling for OpenAI compatibility
-  - FFmpeg-based audio conversion utilities
+### Backend
+The backend runs on Express.js with TypeScript, facilitating real-time audio streaming via WebSockets. It handles Twilio media streams, browser microphone audio ("Honor stream"), and broadcasts transcripts to UI clients. An audio processing pipeline converts μ-law to PCM16 and upsamples to 24kHz for OpenAI compatibility, utilizing FFmpeg for conversions.
 
 ### Data Storage
-- **PostgreSQL** database with Drizzle ORM
-- **Schema** includes calls table with: id, callSid, fromNumber, toNumber, status, timestamps, transcript, and metadata
-- **In-memory storage** class available as fallback (MemStorage)
+PostgreSQL serves as the primary database, managed with Drizzle ORM. The schema includes a `calls` table for tracking call details, transcripts, and metadata. In production, `connect-pg-simple` is used for session storage in PostgreSQL.
 
 ### Real-time Communication
-- Multiple WebSocket endpoints:
-  - `/twilio-stream` - Receives Twilio media streams
-  - `/honor-stream` - Receives browser microphone audio
-  - `/ui` - UI client connections for receiving transcripts/responses
-- Mode system (universal, massage, dispatcher) for context-specific prompts
+Multiple WebSocket endpoints (`/twilio-stream`, `/honor-stream`, `/ui`) manage real-time audio and data flow. A mode system (universal, massage, dispatcher) applies context-specific prompts. The system employs an Utterance Gate to prevent interruptions by waiting for complete speaker utterances before GPT processing, and Hint Throttling to limit suggestion frequency. A Fast Conversation Layer provides immediate, short phrases to fill pauses while GPT processes, using a predefined `fastPhrases.json` database.
 
-### Build System
-- **Vite** for frontend bundling
-- **esbuild** for server bundling with selective dependency bundling
-- Custom build script that bundles allowlisted dependencies for faster cold starts
+### AI and Conversation Flow
+The system incorporates a Goal State Engine, a state machine that tracks conversation objectives (e.g., booking, pricing). It uses regex-based slot extractors for key information (date, time, phone, etc.) and determines when a goal is achieved. In "Training Mode," the system simulates phone calls using two distinct prompts: one for the simulated conversational partner (GST_SYSTEM_PROMPT_TEMPLATE) and another for the TalkHint assistant (HINT_SYSTEM_PROMPT_TEMPLATE), supporting voice input via Deepgram STT and goal-first guidance.
+
+### Build and Deployment
+Vite is used for frontend bundling, while esbuild handles server bundling with selective dependency inclusion for optimized cold starts. Graceful shutdowns are managed with SIGTERM/SIGINT handlers. For production voice calls, Reserved VM Deployment is recommended to ensure consistent uptime for WebSocket connections, avoiding issues with autoscaling.
 
 ## External Dependencies
 
 ### Voice & Telephony
-- **Twilio Voice SDK** (`@twilio/voice-sdk`) - Browser-based phone calling
-- **Twilio Node SDK** (`twilio`) - Server-side call management
-- Required env vars: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `TWILIO_TWIML_APP_SID`
-- Line tokens: `TH_NUM_1_TOKEN` through `TH_NUM_7_TOKEN` for contractor authentication
-
-### Twilio Architecture (Canonical)
-One TwiML App serves all phone numbers with intelligent routing:
-
-**Authentication Endpoints:**
-- `POST /auth/by-token` - Authenticate with TH_NUM_X_TOKEN → returns session + lineId + twilioNumber
-- `GET /twilio/access-token` - Get Twilio JWT (requires Bearer session token)
-- `GET /api/token` - Get Twilio JWT for logged-in users (uses user identity)
-
-**Webhook Endpoint:**
-- `POST /twilio/voice` - Unified TwiML webhook for all numbers
-  - Signature validation via TWILIO_AUTH_TOKEN (disable with `DISABLE_TWILIO_SIGNATURE_CHECK=true`)
-  - Incoming calls: Lookup by `To` in phoneNumbers or available_numbers
-  - Outbound calls: Support for `client:line_X` and `client:user-{userId}` identities
-  - Automatic Caller ID selection based on identity
-
-**Line Mapping:**
-- Lines 1-7 map to available_numbers with subaccountName format: `TH-NUM-001` to `TH-NUM-007`
-- Each line has a corresponding TH_NUM_X_TOKEN for authentication
+- **Twilio Voice SDK**: For browser-based calling.
+- **Twilio Node SDK**: For server-side call management.
+- **Twilio**: Used for telephony services, including call routing and webhooks.
 
 ### AI Services
-- **OpenAI Realtime API** - GPT-4o realtime for voice-to-voice AI assistance
-- **Deepgram SDK** (`@deepgram/sdk`) - Live transcription
-- Required env vars: `OPENAI_API_KEY`
+- **OpenAI Realtime API**: Provides real-time GPT-4o assistance for voice-to-voice interactions.
+- **Deepgram SDK**: Used for live speech-to-text transcription.
 
 ### Database
-- **PostgreSQL** via `DATABASE_URL` environment variable
-- **Drizzle ORM** with drizzle-kit for migrations
-- **Session Storage**: In development uses in-memory, in production uses PostgreSQL via `connect-pg-simple` (table: `user_sessions`)
+- **PostgreSQL**: Primary database.
+- **Drizzle ORM**: Used for database interactions and migrations.
 
-### Production Deployment Notes
-- **Seed runs only in development** - Never runs automatically in production to avoid deployment failures
-- **To seed production**: Set `RUN_SEED=true` environment variable
-- **Diagnostic endpoint**: `/api/build` - Returns deployment info (host, env, dbConnected, replId) for debugging domain/session issues
-- **Session persistence**: Uses PostgreSQL session store in production to support autoscale
-
-### Connection Stability
-**Twilio Call Timeout:**
-- Default: 90 seconds (`TALKHINT_CALL_TIMEOUT` env var)
-- Prevents early disconnect during silence/pauses
-- Applied to all Dial verbs and Number elements
-
-**Deepgram WebSocket:**
-- Keepalive ping every 10 seconds
-- Auto-reconnect with exponential backoff (2s, 4s, 8s, max 3 attempts)
-- VAD events enabled for better speech detection
-- Audio buffering for early frames (up to 500 frames) before Deepgram ready
-
-**Process Stability:**
-- SIGTERM/SIGINT handlers for graceful shutdown with logging
-- Uncaught exception and unhandled rejection logging
-- **For production voice calls**: Use **Reserved VM Deployment** (not Autoscale)
-  - Autoscale can restart/scale-down during calls, causing disconnections
-  - Reserved VM provides consistent uptime for WebSocket connections
-
-### Audio Processing
-- **FFmpeg** (system dependency) - Audio format conversion between μ-law and PCM16
-
-### Utterance Gate (LIVE mode)
-Модуль для предотвращения прерывания собеседника - ждёт полную реплику перед вызовом GPT:
-- **server/utteranceGate.ts** - UtteranceGate класс с буфером и debounce
-- **Константы:**
-  - `END_SILENCE_MS = 900` - тишина после которой считаем реплику законченной
-  - `MIN_CHARS = 10` - минимум символов для генерации (блокирует "yes", "ok")
-  - `MAX_BUFFER_CHARS = 400` - лимит буфера
-- **Триггеры генерации:**
-  - `speech_final` / `UtteranceEnd` от Deepgram (primary)
-  - Silence timeout 900ms (fallback)
-- **Логика:**
-  - `ingestTranscript()` - накапливает текст в буфер
-  - `flush()` - вызывает onGenerate callback когда реплика готова
-  - Anti-duplicate через utteranceId
-- **Логирование:**
-  - `[utteranceGate] speaker=GST event=final_chunk bufLen=45`
-  - `[utteranceGate] speaker=GST event=utterance_end -> flush`
-  - `[utteranceGate] speaker=GST silence_timeout -> generate=true`
-  - `[utteranceGate] generate=false reason=min_chars`
-
-### Fast Conversation Layer
-Быстрый слой коротких фраз для заполнения пауз пока GPT думает:
-- **server/fastLayer.ts** - FastLayerManager с таймером 450ms и cooldown 1200ms
-- **server/fastPhrases.json** - База фраз с категориями:
-  - `hold/ack` - короткие подтверждения ("Got it", "Okay")
-  - `steer` - ведущие вопросы ("What time works for you?")
-  - `clarify` - уточнения при шуме/обрыве
-- **Принципы:**
-  - Не LLM, а детерминированная логика (rules + база)
-  - 1 fast-фраза на 1 реплику GST
-  - Не сохраняется в историю/контекст GPT
-  - WebSocket событие `fast_phrase` с target: HON
-  - UI показывает временно (fade-out через 5 сек)
-
-### Goal State Engine
-State-machine для отслеживания цели разговора и прогресса:
-- **shared/goalTypes.ts** - Типы GoalType, GoalStatus, GoalState, SlotMap
-- **server/slotExtractors.ts** - Regex для извлечения 7 слотов: date, time, phone, name, location, price, service
-- **server/goalEngine.ts** - GoalEngine класс с методами:
-  - `updateOnUtterance({speaker, text, ts})` - обновление состояния
-  - `detectGoalType(text, prevGoal)` - определение цели с confidence
-  - `extractSlots(text)` - извлечение слотов из текста
-  - `computeMissingSlots(goalType, slots)` - расчёт недостающих слотов
-  - `checkAchieved(goalType, slots, text)` - проверка достижения цели
-- **Goal Types:** booking, pricing, support, info, negotiation, other
-- **Achieved Rules:**
-  - `booking` - date + time ИЛИ фраза "confirmed/booked/see you"
-  - `pricing` - найден price
-  - `support` - фраза "fixed/works now/done"
-- **WebSocket события:**
-  - `goal_state_update` - после каждого финального utterance
-  - `goal_achieved` - один раз при достижении цели
-- **Интеграция с FastLayer:**
-  - Анти-повтор steer: lastSteerSlot + lastSteerAt с cooldown 5 сек
-  - GoalEngine получает fastMeta и не предлагает тот же слот повторно
-- **UI панель:** Goal Progress с goalType, missingSlots, status, nextBestAction
-
-### Training Mode
-Режим тренировки телефонных разговоров без Twilio:
-- **server/training.ts** - TrainingSession manager с отдельными промтами
-- **Архитектура двух промтов:**
-  - `GST_SYSTEM_PROMPT_TEMPLATE` - симуляция собеседника (ресепшн, врач, etc.)
-    - НЕ знает о цели пользователя
-    - НЕ учит, НЕ объясняет, НЕ подсказывает
-    - Короткие реплики 1-2 предложения
-    - Возвращает только `{ "gst_text": "..." }`
-    - **ВСЕГДА говорит на English** (conversationLanguage)
-  - `HINT_SYSTEM_PROMPT_TEMPLATE` - TalkHint подсказчик (отдельный вызов)
-    - Знает цель пользователя
-    - Генерирует suggestion (English) + translation (hintLanguage) + goal_state
-- **Language Logic (Step 1):**
-  - `conversationLanguage` = "en" → GST всегда говорит на английском
-  - `hintLanguage` = "ru" или "es" → перевод подсказки на родной язык
-  - Даже если HON пишет на русском, GST отвечает на английском
-- **Voice Input (Step 2):**
-  - Push-to-talk кнопка микрофона (зажми и говори)
-  - Browser MediaRecorder API → audio/webm
-  - `/training/stt` endpoint → Deepgram prerecorded API → текст
-  - Transcribed text отправляется в `/training/turn`
-  - Microphone видна только в training mode когда сессия активна
-- **Goal-First Logic:**
-  - При старте сессии: Goal → Initial Hint (КАК НАЧАТЬ разговор)
-  - НЕ GST greeting первым, а подсказка ЧТО СКАЗАТЬ
-  - Поток: Goal → initialHint → User говорит → GST отвечает → nextHint
-  - `generateInitialHint()` создаёт opening phrase на основе цели
-- **API endpoints:**
-  - `POST /training/start` - создание сессии, возвращает initialHint (не GST greeting)
-    - Params: `goal`, `conversationLanguage` (default: "en"), `hintLanguage` (default: "ru")
-  - `POST /training/turn` - обработка реплики HON → GST ответ + Hint + suggested_goal
-  - `POST /training/reset` - очистка сессии
-  - `POST /training/stt` - Deepgram STT для голосового ввода (audio base64 → text)
-- **Input Field Modes:**
-  - Goal Setup (до старта): placeholder "Write your goal..."
-  - Chat/Message (после старта): placeholder "Type your reply or use mic..."
-- **Goal Suggestion UI:**
-  - AI детектирует смену intent → suggested_goal + reason
-  - UI показывает баннер с Apply/Ignore кнопками
-  - Goal меняется только после Apply
-- **UI интеграция:**
-  - Settings toggle: Live call / Training call
-  - `callMode` сохраняется в localStorage + сервер
-  - Кнопка Call в training mode НЕ вызывает Twilio
-  - 3 типа сообщений в ленте: HON, GST, HINT (отдельный блок)
-- **Session management:**
-  - In-memory Map с UUID сессиями
-  - Auto-cleanup каждые 5 мин (expiry 30 мин)
-  - UI вызывает /training/reset при stop
+### Utilities
+- **FFmpeg**: System dependency for audio format conversions.
