@@ -7,6 +7,16 @@ import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
+import { 
+  createCallContext, 
+  getCallContext, 
+  setCallContextOwner, 
+  setCallContextCallSid,
+  setCallContextStatus,
+  pinYouByTrack,
+  getSpeakerFromContext,
+  removeCallContext 
+} from "./callContext";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -524,6 +534,25 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           currentMode = message.mode;
           log(`Mode changed to: ${currentMode}`, "server");
           ws.send(JSON.stringify({ type: "mode_changed", mode: currentMode }));
+        } else if (message.type === "pin_call") {
+          // Handshake: UI sends ownerUserId and callKey to pin roles
+          const { callKey: reqCallKey, ownerUserId: reqOwnerId } = message;
+          if (reqCallKey && reqOwnerId) {
+            const ctx = getCallContext(reqCallKey);
+            if (ctx) {
+              setCallContextOwner(reqCallKey, reqOwnerId);
+              log(`[CallContext] UI handshake: pinned owner=${reqOwnerId} for callKey=${reqCallKey}`, "server");
+              ws.send(JSON.stringify({ type: "call_pinned", callKey: reqCallKey, ownerUserId: reqOwnerId }));
+            } else {
+              // Create CallContext if not yet created (call not started via Twilio yet)
+              createCallContext(reqCallKey);
+              setCallContextOwner(reqCallKey, reqOwnerId);
+              log(`[CallContext] UI handshake: created and pinned owner=${reqOwnerId} for callKey=${reqCallKey}`, "server");
+              ws.send(JSON.stringify({ type: "call_pinned", callKey: reqCallKey, ownerUserId: reqOwnerId }));
+            }
+          } else {
+            log(`[CallContext] UI handshake failed: missing callKey or ownerUserId`, "server");
+          }
         } else if (message.type === "update_goal" || message.type === "set_goal") {
           currentGoal = message.goal || "";
           log(`Goal set: ${currentGoal.substring(0, 50)}...`, "server");
@@ -619,13 +648,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let callSid: string | null = null;
     let audioFrameCount = 0;
     
-    // === ROLE MANAGEMENT: Locked once at call start, never changes ===
-    let roleLocked = false; // Once true, roles cannot change
-    let isOutboundCall = false; // Track call direction for proper speaker mapping
+    // === CALL CONTEXT: Deterministic role mapping via CallContext ===
+    // Role pinning is done via customParameters (ownerUserId) from TwiML
+    // YOU = ownerUserId's audio track, GUEST = remote party's audio track
+    let callKey: string | null = null; // Unique key for CallContext lookup
+    let ownerUserId: string | null = null; // Owner of this call (from TwiML params)
     let callType: string = "unknown"; // Store for diagnostics
-    // Role mapping (set once, immutable):
-    // OUTBOUND: inbound=GST (remote), outbound=HON (browser user)
-    // INBOUND: inbound=HON (browser user), outbound=GST (remote)
     
     // CALL_MODE = "browser_only" - PSTN forwarding is completely disabled
     // All incoming calls go to browser client only
@@ -655,8 +683,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     });
     
     // Handler for complete GST utterance (after debounce)
+    // Hints ARE generated for GUEST speech to help owner respond
     async function handleGuestUtteranceComplete(text: string, utteranceId: number) {
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
+      log(`[HintGate] speaker=GST generate=true reason="generate hint for owner to respond"`, "websocket");
       
       // Add to conversation log
       conversationLog.push({
@@ -743,8 +773,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     }
     
     // Handler for complete HON utterance (after debounce)
+    // NOTE: NO hints generated for owner's speech - hints only for GUEST
     function handleOwnerUtteranceComplete(text: string, utteranceId: number) {
       log(`[UtteranceComplete] HON utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
+      log(`[HintGate] speaker=HON generate=false reason="hints only for GUEST"`, "websocket");
       
       // Add to conversation log
       conversationLog.push({
@@ -892,16 +924,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           }
           if (response.type === "UtteranceEnd") {
             log(`[DG] ${track}: UtteranceEnd -> forcing flush`, "deepgram");
-            // Must use same track logic as transcripts (depends on call direction)
-            let isGuestTrack: boolean;
-            if (isOutboundCall) {
-              // OUTBOUND: inbound=browser mic (HON), outbound=remote party (GST)
-              isGuestTrack = (track === "outbound");  // Remote party
-            } else {
-              isGuestTrack = (track === "outbound"); // Remote party
+            // Use CallContext for deterministic speaker role
+            const speaker = callKey ? getSpeakerFromContext(callKey, track as "inbound" | "outbound") : null;
+            if (!speaker) {
+              log(`[HintGate] UtteranceEnd SKIP - no CallContext or speaker for callKey=${callKey}`, "deepgram");
+              return;
             }
-            const speakerCode = isGuestTrack ? "GST" : "HON";
-            utteranceGate.forceFlush(callSid || "unknown", speakerCode as "GST" | "HON");
+            utteranceGate.forceFlush(callSid || "unknown", speaker);
             return;
           }
           
@@ -910,38 +939,27 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const isFinal = response.is_final;
             const speechFinal = response.speech_final === true;
             
-            // Track mapping depends on call direction:
-            // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
-            //
-            // OUTBOUND call (browser user calls external number):
-            //   inbound = GST (remote party's voice coming into Twilio)
-            //   outbound = HON (browser user's voice going out of Twilio)
-            //
-            // INBOUND call (external number calls browser user):
-            //   inbound = HON (browser user's voice going into Twilio)
-            //   outbound = GST (remote party's voice coming out of Twilio)
-            let isGuestTrack: boolean;
-            let isOwnerTrack: boolean;
+            // === USE CALL CONTEXT for deterministic role mapping ===
+            // No inference based on track/direction - CallContext is single source of truth
+            const speaker = callKey ? getSpeakerFromContext(callKey, track as "inbound" | "outbound") : null;
             
-            if (isOutboundCall) {
-              // OUTBOUND: user initiated call from browser
-              // Track semantics: inbound=browser mic (HON), outbound=remote party (GST)
-              isGuestTrack = (track === "outbound");  // Remote party's voice (voicemail, PSTN)
-              isOwnerTrack = (track === "inbound"); // Browser user's voice
-            } else {
-              // INBOUND: external caller calling browser user
-              isGuestTrack = (track === "outbound"); // Remote party's voice
-              isOwnerTrack = (track === "inbound");  // Browser user's voice
+            if (!speaker) {
+              // No CallContext or role not pinned - log warning and skip hint generation
+              log(`[HintGate] SKIP - no speaker mapping for callKey=${callKey} track=${track}`, "twilio");
+              // Still broadcast transcript for UI but without hints
+              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal, callSid });
+              return;
             }
             
+            const isOwnerTrack = (speaker === "HON");
+            const isGuestTrack = (speaker === "GST");
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
-            const speakerCode = isGuestTrack ? "GST" : "HON";
             
-            // Diagnostic log for TURN (on ALL transcripts for debugging)
-            log(`TURN callSid=${callSid || "?"} speaker=${speakerCode} track=${track} isOutboundCall=${isOutboundCall} isFinal=${isFinal} text="${transcript.substring(0, 30)}..."`, "twilio");
+            // Diagnostic log for TURN
+            log(`TURN callKey=${callKey || "?"} callSid=${callSid || "?"} speaker=${speaker} track=${track} isFinal=${isFinal} text="${transcript.substring(0, 30)}..."`, "twilio");
             
             // Use utteranceGate to wait for complete utterance before GPT
-            utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
+            utteranceGate.processTranscript(callSid || "unknown", speaker, transcript, isFinal, speechFinal, false);
             
             // Broadcast partial/final transcripts immediately for UI display
             if (isGuestTrack) {
@@ -1074,21 +1092,63 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
               
-              // === LOCK ROLES: Set once at call start, never change ===
-              if (!roleLocked) {
+              // === CALL CONTEXT: Deterministic role pinning ===
+              if (!callKey && callSid) {
+                callKey = callSid; // Use callSid as unique key
                 callType = message.start.customParameters?.callType || "browser";
-                isOutboundCall = (callType === "outbound");
-                roleLocked = true; // LOCK - roles cannot change after this
+                ownerUserId = message.start.customParameters?.ownerUserId || "";
                 
-                // Diagnostic log with locked role information
-                log(`CALL_START callSid=${callSid} callMode=browser_only callType=${callType}`, "twilio");
-                log(`ROLE_LOCKED=true isOutbound=${isOutboundCall}`, "twilio");
-                log(`HON=${isOutboundCall ? "outbound_track" : "inbound_track"} (browser user)`, "twilio");
-                log(`GST=${isOutboundCall ? "inbound_track" : "outbound_track"} (remote party)`, "twilio");
-                log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
+                // Create CallContext and set owner
+                createCallContext(callKey);
+                setCallContextCallSid(callKey, callSid);
+                if (ownerUserId) {
+                  setCallContextOwner(callKey, ownerUserId);
+                }
+                setCallContextStatus(callKey, "connected");
+                
+                // === TRACK SEMANTICS (from Twilio documentation) ===
+                // Twilio Media Streams track naming:
+                // - "inbound" = audio flowing INTO Twilio (from the caller/originator)
+                // - "outbound" = audio flowing OUT OF Twilio (to the caller/originator)
+                //
+                // For OUTBOUND calls (browser user calls PSTN):
+                // - Browser SDK sends audio TO Twilio → shows as "inbound" track
+                // - PSTN party audio comes FROM Twilio → shows as "outbound" track
+                // - Therefore: inbound=HON (browser user), outbound=GST (PSTN)
+                //
+                // For INBOUND/incoming_answered calls (PSTN calls browser user):
+                // - PSTN caller sends audio TO Twilio → shows as "inbound" track  
+                // - Browser SDK receives/sends → outgoing audio appears as... actually same pattern
+                //
+                // CRITICAL: After testing, for BOTH directions:
+                // - "inbound" track = audio from the call initiator (browser for outbound, PSTN for inbound)
+                // - "outbound" track = audio from the call recipient
+                //
+                // For our use case:
+                // - OUTBOUND: browser initiates → inbound=HON, outbound=GST
+                // - INBOUND: PSTN initiates → inbound=GST, outbound=HON
+                
+                let youTrack: "inbound" | "outbound";
+                let guestTrack: "inbound" | "outbound";
+                
+                if (callType === "outbound") {
+                  // OUTBOUND: browser user initiated call
+                  youTrack = "inbound";   // Browser mic audio goes INTO Twilio
+                  guestTrack = "outbound"; // PSTN/remote audio comes OUT OF Twilio
+                } else {
+                  // INBOUND/incoming_answered: PSTN caller initiated call
+                  youTrack = "outbound";  // Browser user's audio (responding to call)
+                  guestTrack = "inbound"; // PSTN caller's audio goes INTO Twilio
+                }
+                
+                pinYouByTrack(callKey, youTrack);
+                
+                // Diagnostic logs
+                log(`[CallContext] CALL_START callKey=${callKey} callSid=${callSid} callType=${callType} ownerUserId=${ownerUserId || "unknown"}`, "twilio");
+                log(`[CallContext] YOU=${youTrack}_track GUEST=${guestTrack}_track (based on callType=${callType})`, "twilio");
+                log(`[CallContext] Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               } else {
-                // Roles already locked - ignore any attempt to re-set
-                log(`[WARN] ROLE_LOCK: Ignoring duplicate start event, roles already locked for ${callSid}`, "twilio");
+                log(`[WARN] CallContext already exists for callKey=${callKey}, ignoring duplicate start`, "twilio");
               }
               
               // Initialize Goal State Engine for this call
@@ -1154,6 +1214,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // Cleanup GoalEngine
             if (callSid) {
               removeEngine(callSid);
+            }
+            // Cleanup CallContext
+            if (callKey) {
+              setCallContextStatus(callKey, "ended");
+              removeCallContext(callKey);
             }
             break;
         }

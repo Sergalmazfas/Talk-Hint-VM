@@ -600,10 +600,12 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         
         // Start media stream for transcription
         const start = twimlResponse.start();
-        start.stream({
+        const stream = start.stream({
           url: streamUrl,
           track: "both_tracks"
-        }).parameter({ name: "callType", value: "incoming_answered" });
+        });
+        stream.parameter({ name: "callType", value: "incoming_answered" });
+        stream.parameter({ name: "ownerUserId", value: callUserId });
         
         twimlResponse.say({ voice: "alice" }, "Connecting you now.");
         
@@ -907,14 +909,24 @@ Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} tra
         console.log(`[TwiML Voice] No client identity, using default callerId`);
       }
       
-      console.log(`[TwiML Voice] OUTBOUND CALL to ${toNumber} from ${userCallerId}`);
+      // Extract userId from client identity for CallContext
+      let outboundUserId = "";
+      if (fromNumber && fromNumber.startsWith("client:user-")) {
+        outboundUserId = fromNumber.replace("client:user-", "");
+      } else if (fromNumber && fromNumber.startsWith("client:line_")) {
+        outboundUserId = fromNumber.replace("client:line_", "");
+      }
+      
+      console.log(`[TwiML Voice] OUTBOUND CALL to ${toNumber} from ${userCallerId} ownerUserId=${outboundUserId}`);
       
       // Start media stream for transcription
       const start = twimlResponse.start();
-      start.stream({
+      const stream = start.stream({
         url: streamUrl,
         track: "both_tracks"
-      }).parameter({ name: "callType", value: "outbound" });
+      });
+      stream.parameter({ name: "callType", value: "outbound" });
+      stream.parameter({ name: "ownerUserId", value: outboundUserId });
       
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
