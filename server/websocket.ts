@@ -17,6 +17,7 @@ import {
   getSpeakerFromContext,
   removeCallContext 
 } from "./callContext";
+import { appendTranscript, clearTranscriptCache } from "./transcriptGate";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -695,12 +696,24 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         return;
       }
       
-      // === STRUCTURED LOGGING ===
-      log(`[UTTERANCE] callKey=${callKey} callSid=${callSid || "?"} callType=${callType} role=GST source=twilio_stream gstTrack=${ctx.guestStreamSid} text_len=${text.length} utteranceId=${utteranceId}`, "twilio");
-      log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
-      log(`[HintGate] speaker=GST generate=true reason="generate hint for owner to respond"`, "websocket");
+      // === CENTRALIZED TRANSCRIPT WRITE via appendTranscript ===
+      const transcriptResult = appendTranscript({
+        callKey: callKey || "",
+        callSid: callSid || "",
+        callType: callType as "inbound" | "outbound",
+        role: "GST",
+        source: "twilio_stream",
+        utteranceId,
+        text,
+        timestamp: Date.now()
+      });
       
-      // Add to conversation log
+      if (!transcriptResult.accepted) {
+        log(`[TRANSCRIPT_REJECTED] GST utterance dropped | reason=${transcriptResult.reason} utteranceId=${utteranceId}`, "twilio");
+        return;
+      }
+      
+      // Add to in-memory conversation log (for GPT context)
       conversationLog.push({
         speaker: "Guest",
         text: text,
@@ -797,12 +810,24 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         return;
       }
       
-      // === STRUCTURED LOGGING ===
-      log(`[UTTERANCE] callKey=${callKey} callSid=${callSid || "?"} callType=${callType} role=HON source=owner_mic youTrack=${ctx.youStreamSid} text_len=${text.length} utteranceId=${utteranceId}`, "twilio");
-      log(`[UtteranceComplete] HON utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
-      log(`[HintGate] speaker=HON generate=false reason="hints only for GUEST"`, "websocket");
+      // === CENTRALIZED TRANSCRIPT WRITE via appendTranscript ===
+      const transcriptResult = appendTranscript({
+        callKey: callKey || "",
+        callSid: callSid || "",
+        callType: callType as "inbound" | "outbound",
+        role: "HON",
+        source: "owner_mic",
+        utteranceId,
+        text,
+        timestamp: Date.now()
+      });
       
-      // Add to conversation log
+      if (!transcriptResult.accepted) {
+        log(`[TRANSCRIPT_REJECTED] HON utterance dropped | reason=${transcriptResult.reason} utteranceId=${utteranceId}`, "twilio");
+        return;
+      }
+      
+      // Add to in-memory conversation log (for GPT context)
       conversationLog.push({
         speaker: "Honor",
         text: text,
@@ -1265,6 +1290,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // Cleanup GoalEngine
             if (callSid) {
               removeEngine(callSid);
+              clearTranscriptCache(callSid);
             }
             // Cleanup CallContext
             if (callKey) {
