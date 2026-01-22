@@ -1406,12 +1406,23 @@ function handleMessage(data) {
       }
       break;
 
-    // === LEGACY HANDLERS - DISABLED ===
-    // These are kept for backwards compatibility but should NOT be used
-    // All transcripts must come through canonical_transcript
-    case 'owner_transcript':
+    // === TRAINING MODE HANDLER ===
+    // hon_transcript is used for training mode (GPTRealtimeHandler)
+    // This is still needed for training mode where user speaks to AI trainer
     case 'hon_transcript':
-      log('[LEGACY] Ignoring legacy owner_transcript - use canonical_transcript');
+      if (data.text && callMode === 'training') {
+        // Training mode: hon_transcript represents user's speech to AI trainer
+        if (data.isFinal === false) {
+          updateLastInterim('you', data.text);
+        } else {
+          finalizeMessage('you', data.text);
+        }
+      }
+      break;
+    
+    // === LEGACY OWNER TRANSCRIPT - DISABLED ===
+    case 'owner_transcript':
+      log('[LEGACY] Ignoring owner_transcript - use canonical_transcript for LIVE mode');
       break;
 
     case 'sentiment_update':

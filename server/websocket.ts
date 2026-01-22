@@ -127,13 +127,13 @@ Score: 1.0 = very strong emotion, 0.0 = neutral. Be concise.`
 }
 
 // Translate guest speech and generate suggestion
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "en", conversationContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
   sentiment?: { sentiment: 'positive' | 'neutral' | 'negative'; score: number };
 }> {
-  const langName = LANGUAGE_NAMES[language] || "Russian";
+  const langName = LANGUAGE_NAMES[language] || "English"; // Default to EN
   const langCode = language === "es" ? "ES" : "RU";
   
   // Don't wait for sentiment - return it separately via callback
@@ -205,7 +205,7 @@ function getRealtimePrompt(mode: string = "universal"): string {
 }
 
 let currentMode = "universal";
-let currentLanguage = "ru"; // Default to Russian, can be "ru" or "es"
+let currentLanguage = "en"; // Default to English, can be "en", "ru" or "es"
 const uiClients = new Set<WebSocket>();
 
 // Filter JSON from text - never show raw JSON to users
@@ -473,7 +473,7 @@ export function setupWebSocket(server: Server) {
     }
 
     try {
-      const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
+      const langName = LANGUAGE_NAMES[currentLanguage] || "English"; // Default to EN
       const goalLockInstructions = goal ? `
 GOAL LOCK-IN MODE: The user has set a clear goal: "${goal}"
 - ONLY provide phrases and help that move toward this goal
@@ -1386,7 +1386,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     if (history.length < 1) return;
     
     const recentContext = history.slice(-5).map(h => `${h.role}: ${h.text}`).join("\n");
-    const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
+    const langName = LANGUAGE_NAMES[currentLanguage] || "English"; // Default to EN
     
     // Start a timer for filler phrase
     const fillerTimer = setTimeout(() => sendFiller(), 2000);
