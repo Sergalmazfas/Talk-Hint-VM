@@ -895,7 +895,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // Must use same track logic as transcripts (depends on call direction)
             let isGuestTrack: boolean;
             if (isOutboundCall) {
-              isGuestTrack = (track === "inbound");  // Remote party
+              // OUTBOUND: inbound=browser mic (HON), outbound=remote party (GST)
+              isGuestTrack = (track === "outbound");  // Remote party
             } else {
               isGuestTrack = (track === "outbound"); // Remote party
             }
@@ -924,8 +925,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             
             if (isOutboundCall) {
               // OUTBOUND: user initiated call from browser
-              isGuestTrack = (track === "inbound");  // Remote party's voice
-              isOwnerTrack = (track === "outbound"); // Browser user's voice
+              // Track semantics: inbound=browser mic (HON), outbound=remote party (GST)
+              isGuestTrack = (track === "outbound");  // Remote party's voice (voicemail, PSTN)
+              isOwnerTrack = (track === "inbound"); // Browser user's voice
             } else {
               // INBOUND: external caller calling browser user
               isGuestTrack = (track === "outbound"); // Remote party's voice
