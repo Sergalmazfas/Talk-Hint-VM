@@ -921,13 +921,8 @@ function addMessage(type, text, translation, sentiment) {
   if (shouldGroup) {
     const bubble = lastMessageEl.querySelector('.message-bubble');
     if (bubble) {
-      // Dedupe: don't add if exact same text is already the last line
-      const existingLines = bubble.textContent.split('\n');
-      const lastLine = existingLines[existingLines.length - 1];
-      if (lastLine && lastLine.trim() === text.trim()) {
-        log('[Dedupe] Skipping duplicate text: ' + text.substring(0, 30));
-        return; // Skip duplicate
-      }
+      // NOTE: Deduplication now handled server-side via appendTranscript()
+      // UI renders exactly what backend sends
       bubble.textContent += '\n' + text;
     }
     if (translation) {
