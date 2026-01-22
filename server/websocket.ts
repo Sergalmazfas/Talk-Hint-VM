@@ -892,7 +892,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           }
           if (response.type === "UtteranceEnd") {
             log(`[DG] ${track}: UtteranceEnd -> forcing flush`, "deepgram");
-            const isGuestTrack = (track === "outbound");
+            // Must use same track logic as transcripts (depends on call direction)
+            let isGuestTrack: boolean;
+            if (isOutboundCall) {
+              isGuestTrack = (track === "inbound");  // Remote party
+            } else {
+              isGuestTrack = (track === "outbound"); // Remote party
+            }
             const speakerCode = isGuestTrack ? "GST" : "HON";
             utteranceGate.forceFlush(callSid || "unknown", speakerCode as "GST" | "HON");
             return;
