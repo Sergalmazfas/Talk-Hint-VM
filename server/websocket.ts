@@ -149,8 +149,12 @@ This is a LIVE call. Help the user move toward the call goal. Correctness over s
 
 ${LIVE_ANTI_LOOP_RULES}
 
-Guest just spoke. 1) Translate to ${langName}. 2) Suggest short reply (under 15 words) that moves toward the goal.
-Return JSON: {"translation":"...", "suggestion":{"en":"...", "translation":"..."}}`
+Guest just spoke. 
+1) Translate guest's words to ${langName}. 
+2) Suggest what user should say next - a short reply IN ENGLISH (under 15 words) that moves toward the goal.
+3) Translate that suggestion to ${langName}.
+
+Return JSON: {"translation":"guest's words in ${langName}", "suggestion":{"en":"reply in ENGLISH", "translation":"same reply in ${langName}"}}`
           },
           {
             role: "user",
