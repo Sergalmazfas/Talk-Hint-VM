@@ -44,3 +44,20 @@ Vite is used for frontend bundling, while esbuild handles server bundling with s
 
 ### Utilities
 - **FFmpeg**: System dependency for audio format conversions.
+
+## Hint Control Systems
+
+### Hint Throttling (LIVE mode)
+Prevents spam of suggestions - 1 hint = 1 GST utterance:
+- **Constants:** `HINT_COOLDOWN_MS = 1500`, `END_SILENCE_MS = 1000`
+- **Variables:** `lastHintTs`, `lastHintUtteranceId`, `goalAchievedFlag`
+- **Blocks:** cooldown, duplicate utterance, goal achieved
+- **Logging:** `[BLOCKED] reason=cooldown/hint_shown/goal_achieved`
+
+### Anti-Loop Guards (LIVE mode)
+Prevents cycling on same emotions/suggestions:
+- **Reaction-only filter:** Blocks short emotional phrases ("That's good", "Amazing") from triggering suggestions. Translation still shown.
+- **Repeat intent guard:** Blocks consecutive enthusiasm suggestions (enthusiasm → enthusiasm loop).
+- **Duplicate suggestion filter:** Blocks suggestions with >80% Jaccard similarity.
+- **Prompt rules:** "After agreement → next step" - forces GPT to ask concrete questions instead of looping on excitement.
+- **Logging:** `[BLOCKED] reason=reaction_only/repeat_intent/duplicate_suggestion`

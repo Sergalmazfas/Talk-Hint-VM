@@ -633,6 +633,83 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let goalAchievedFlag = false;          // HARD STOP when goal is achieved
     const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
     
+    // Anti-loop guards - prevents cycling on same emotions/suggestions
+    let lastSuggestionIntent = "";         // Last intent type (enthusiasm/ask_date/etc)
+    let lastSuggestionText = "";           // Last suggestion text for duplicate check
+    
+    // Reaction-only phrases to filter (short emotional reactions with no info)
+    const REACTION_ONLY_PATTERNS = [
+      /^(that'?s?\s+)?(good|great|amazing|awesome|perfect|wonderful|fantastic|excellent|nice|cool|fine)\.?$/i,
+      /^(oh\s+)?(my\s+)?(god|gosh|wow|man|boy)\.?$/i,
+      /^(ok(ay)?|right|sure|alright|got\s+it|i\s+see|uh[\s-]?huh)\.?$/i,
+      /^(yeah|yep|yup|nope|nah)\.?$/i,
+      /^hmm+\.?$/i,
+      /^(let'?s?\s+go|let'?s?\s+do\s+(it|this|that))\.?$/i
+    ];
+    
+    // Keywords that indicate meaningful content (don't block)
+    const MEANINGFUL_KEYWORDS = /\b(yes|no|when|where|what|how|price|cost|time|date|day|week|month|hour|minute|dollar|euro|available|book|schedule|appointment|cancel|change|confirm|sure|alright|definitely|absolutely|of course|please|thank|sounds good|deal|agreed|perfect|let me|i need|i want|i would|i will|can i|could you)\b/i;
+    
+    // Intent patterns for repeat detection
+    const INTENT_PATTERNS: { pattern: RegExp; intent: string }[] = [
+      { pattern: /can'?t wait|excited|amazing|wonderful|great|let'?s go|sounds good/i, intent: "enthusiasm" },
+      { pattern: /when|what (day|date|time)/i, intent: "ask_date" },
+      { pattern: /what time|which hour/i, intent: "ask_time" },
+      { pattern: /how long|duration/i, intent: "ask_duration" },
+      { pattern: /where|location|address/i, intent: "ask_location" },
+      { pattern: /price|cost|budget|how much/i, intent: "ask_price" },
+      { pattern: /confirm|all set|done|complete/i, intent: "closing" }
+    ];
+    
+    function detectIntent(text: string): string {
+      for (const { pattern, intent } of INTENT_PATTERNS) {
+        if (pattern.test(text)) return intent;
+      }
+      return "general";
+    }
+    
+    function isReactionOnly(text: string): boolean {
+      const trimmed = text.trim();
+      const wordCount = trimmed.split(/\s+/).length;
+      
+      // If has meaningful keywords, not reaction-only
+      if (MEANINGFUL_KEYWORDS.test(trimmed)) return false;
+      
+      // If more than 5 words, likely has content
+      if (wordCount > 5) return false;
+      
+      // Check against reaction patterns
+      for (const pattern of REACTION_ONLY_PATTERNS) {
+        if (pattern.test(trimmed)) return true;
+      }
+      
+      // Short phrase without info (< 4 words, no keywords)
+      if (wordCount <= 3 && !MEANINGFUL_KEYWORDS.test(trimmed)) {
+        return true;
+      }
+      
+      return false;
+    }
+    
+    function normalizeText(text: string): string {
+      return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    }
+    
+    function textSimilarity(a: string, b: string): number {
+      const na = normalizeText(a);
+      const nb = normalizeText(b);
+      if (na === nb) return 1;
+      if (!na || !nb) return 0;
+      
+      const wordsA = na.split(' ');
+      const wordsB = nb.split(' ');
+      const setB = new Set(wordsB);
+      const intersection = wordsA.filter(w => setB.has(w)).length;
+      const allWords = new Set(wordsA.concat(wordsB));
+      const union = allWords.size;
+      return intersection / union; // Jaccard similarity
+    }
+    
     // Twilio WS keepalive ping every 15 seconds to prevent proxy/edge idle disconnect
     const twilioKeepaliveInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -711,6 +788,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         log(`[GoalEngine] GST update: goal=${state.goalType}, status=${state.status}, missing=${state.missingSlots.join(",")}`, "goal");
       }
       
+      // ===== ANTI-LOOP GUARD: Reaction-only filter =====
+      // For reaction-only phrases: still get translation, but skip suggestion
+      const reactionOnly = isReactionOnly(text);
+      if (reactionOnly && !goalJustAchieved) {
+        log(`[REACTION_ONLY] text="${text.substring(0, 30)}" - will translate but skip suggestion`, "websocket");
+      }
+      
       // ALWAYS get translation for guest transcript
       fastLayer.setLanguage(currentLanguage);
       fastLayer.onGstUtteranceEnd();
@@ -773,12 +857,40 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       // ===== END THROTTLING CHECKS =====
       
+      // Check: reaction-only filter (skip suggestion, but translation was shown above)
+      if (reactionOnly && !goalJustAchieved) {
+        log(`[BLOCKED] reason=reaction_only text="${text.substring(0, 30)}" - suggestion skipped`, "websocket");
+        return;
+      }
+      
       if (translated.suggestion) {
+        const suggestionText = translated.suggestion.en;
+        
+        // ===== ANTI-LOOP GUARD: Repeat intent check =====
+        const currentIntent = detectIntent(suggestionText);
+        if (currentIntent === lastSuggestionIntent && currentIntent === "enthusiasm") {
+          log(`[BLOCKED] reason=repeat_intent intent=${currentIntent} - skipping enthusiasm loop`, "websocket");
+          // Don't show repeated enthusiasm, but record that we tried
+          lastSuggestionIntent = currentIntent;
+          return;
+        }
+        
+        // ===== ANTI-LOOP GUARD: Duplicate suggestion check =====
+        if (lastSuggestionText) {
+          const similarity = textSimilarity(suggestionText, lastSuggestionText);
+          if (similarity > 0.8) {
+            log(`[BLOCKED] reason=duplicate_suggestion similarity=${(similarity * 100).toFixed(0)}% - too similar to last`, "websocket");
+            return;
+          }
+        }
+        
         // Record hint shown for throttling
         lastHintTs = Date.now();
         lastHintUtteranceId = utteranceId;
+        lastSuggestionIntent = currentIntent;
+        lastSuggestionText = suggestionText;
         
-        log(`[Suggestion] Sending to HON, basedOn=GST, utteranceId=${utteranceId}`, "websocket");
+        log(`[Suggestion] Sending to HON, basedOn=GST, utteranceId=${utteranceId}, intent=${currentIntent}`, "websocket");
         uiBroadcast({
           type: "suggestion",
           target: "HON",
@@ -1209,11 +1321,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         utteranceGate.cleanup(callSid);
       }
       
-      // Reset hint throttling for next call
+      // Reset hint throttling and anti-loop guards for next call
       lastHintTs = 0;
       lastHintUtteranceId = -1;
       goalAchievedFlag = false;
-      log(`[Cleanup] Hint throttling reset`, "websocket");
+      lastSuggestionIntent = "";
+      lastSuggestionText = "";
+      log(`[Cleanup] Hint throttling and anti-loop guards reset`, "websocket");
     });
     
     ws.on("error", (err) => {
