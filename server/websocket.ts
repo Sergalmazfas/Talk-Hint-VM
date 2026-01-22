@@ -935,10 +935,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
             const speakerCode = isGuestTrack ? "GST" : "HON";
             
-            // Diagnostic log for TURN (only on final transcripts to reduce noise)
-            if (isFinal) {
-              log(`TURN callSid=${callSid || "?"} speaker=${speakerCode} track=${track} roleLocked=${roleLocked} callType=${callType} gptTriggered=${speakerCode === "GST"}`, "twilio");
-            }
+            // Diagnostic log for TURN (on ALL transcripts for debugging)
+            log(`TURN callSid=${callSid || "?"} speaker=${speakerCode} track=${track} isOutboundCall=${isOutboundCall} isFinal=${isFinal} text="${transcript.substring(0, 30)}..."`, "twilio");
             
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
