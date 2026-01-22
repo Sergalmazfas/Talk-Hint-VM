@@ -1363,45 +1363,36 @@ function handleMessage(data) {
       log('Server confirmed connection');
       break;
 
-    case 'owner_transcript':
-    case 'hon_transcript':
-      if (data.text) {
-        // TTS echo suppression: ignore owner transcripts while TTS is playing
-        if (isTTSPlaying) {
-          log('[Echo] Suppressed owner transcript during TTS: ' + data.text.substring(0, 30));
+    // === CANONICAL TRANSCRIPT - PRIMARY HANDLER ===
+    // This is the ONLY source of truth for transcripts
+    case 'canonical_transcript':
+      if (data.text && data.producer === 'server') {
+        var msgType = data.speakerLabel === 'YOU' ? 'you' : 'guest';
+        
+        // Trace logging for debugging
+        log('[TRACE] canonical_transcript | turnId=' + data.turnId + ' role=' + data.role + 
+            ' speaker=' + data.speakerLabel + ' source=' + data.source + 
+            ' callType=' + data.callType + ' producer=' + data.producer);
+        
+        // TTS echo suppression for owner only
+        if (data.speakerLabel === 'YOU' && isTTSPlaying) {
+          log('[Echo] Suppressed YOU transcript during TTS: ' + data.text.substring(0, 30));
           break;
         }
         
-        // STT garbage filter for HON
+        // STT garbage filter
         if (data.isFinal && isGarbageSTT(data.text, data.confidence)) {
-          log('Filtered garbage HON STT: ' + data.text);
+          log('Filtered garbage STT: ' + data.text);
           break;
         }
         
-        // For interim results, update last message instead of adding new
         if (data.isFinal === false) {
-          updateLastInterim('you', data.text);
+          updateLastInterim(msgType, data.text);
         } else {
-          finalizeMessage('you', data.text);
-        }
-      }
-      break;
-
-    case 'sentiment_update':
-      updateLastSentiment(data.speaker, data.sentiment);
-      break;
-
-    case 'guest_transcript':
-    case 'gst_transcript':
-      if (data.text) {
-        // For interim results, update last message instead of adding new
-        if (data.isFinal === false) {
-          updateLastInterim('guest', data.text);
-        } else {
-          finalizeMessage('guest', data.text, data.translation, data.sentiment);
+          finalizeMessage(msgType, data.text, data.translation, data.sentiment);
           
-          // Safe Start fallback: if no goal after 3 GST replies, show steer hint
-          if (!callGoal && isInCall && data.isFinal) {
+          // Safe Start fallback for GUEST
+          if (data.speakerLabel === 'GUEST' && !callGoal && isInCall) {
             safeStartRepliesWithoutGoal++;
             if (safeStartRepliesWithoutGoal >= 3 && !safeStartFallbackShown) {
               safeStartFallbackShown = true;
@@ -1413,6 +1404,23 @@ function handleMessage(data) {
           }
         }
       }
+      break;
+
+    // === LEGACY HANDLERS - DISABLED ===
+    // These are kept for backwards compatibility but should NOT be used
+    // All transcripts must come through canonical_transcript
+    case 'owner_transcript':
+    case 'hon_transcript':
+      log('[LEGACY] Ignoring legacy owner_transcript - use canonical_transcript');
+      break;
+
+    case 'sentiment_update':
+      updateLastSentiment(data.speaker, data.sentiment);
+      break;
+
+    case 'guest_transcript':
+    case 'gst_transcript':
+      log('[LEGACY] Ignoring legacy guest_transcript - use canonical_transcript');
       break;
 
     case 'suggestion':

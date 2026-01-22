@@ -1022,12 +1022,21 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speaker, transcript, isFinal, speechFinal, false);
             
-            // Broadcast partial/final transcripts immediately for UI display
-            if (isGuestTrack) {
-              uiBroadcast({ type: "guest_transcript", text: transcript, isFinal, callSid });
-            } else {
-              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal, callSid });
-            }
+            // === CANONICAL TRANSCRIPT EVENT ===
+            // Single schema for all transcript events, UI must use ONLY this
+            const turnId = `${callSid}-${Date.now()}`;
+            uiBroadcast({ 
+              type: "canonical_transcript", 
+              turnId,
+              callSid: callSid || "",
+              callType,
+              role: speaker,  // "HON" or "GST"
+              speakerLabel: isGuestTrack ? "GUEST" : "YOU",
+              source: isGuestTrack ? "twilio_stream" : "owner_mic",
+              text: transcript,
+              isFinal,
+              producer: "server"
+            });
           }
         } catch (err: any) {
           log(`[Deepgram] Parse error: ${err.message}`, "deepgram");
