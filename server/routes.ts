@@ -444,9 +444,11 @@ export async function registerRoutes(
               role: "system",
               content: `You are TalkHint. Generate the FIRST phrase user should say when they call to achieve their goal.
 
+IMPORTANT: The phrase MUST be in ENGLISH because user is calling an English-speaking person.
+
 ${LIVE_ANTI_LOOP_RULES}
 
-Return JSON: {"en": "English phrase 5-10 words", "translation": "${langName} translation"}`
+Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase translated to ${langName}"}`
             },
             {
               role: "user",
