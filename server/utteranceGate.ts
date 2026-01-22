@@ -28,7 +28,7 @@ interface IngestResult {
   utteranceId: number;
 }
 
-const END_SILENCE_MS = 900;
+const END_SILENCE_MS = 1000;  // 800-1200ms optimal for detecting end of speech
 const MIN_CHARS = 10;
 const MAX_BUFFER_CHARS = 400;
 

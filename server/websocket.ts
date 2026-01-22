@@ -627,6 +627,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let deepgramReady = false; // Flag to track if Deepgram is ready
     const audioBuffer: { track: string; data: Buffer }[] = []; // Buffer for early audio
     
+    // Hint throttling - prevents spam of suggestions
+    let lastHintTs = 0;                    // Timestamp of last hint shown
+    let lastHintUtteranceId = -1;          // Utterance ID of last hint
+    let goalAchievedFlag = false;          // HARD STOP when goal is achieved
+    const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
+    
     // Twilio WS keepalive ping every 15 seconds to prevent proxy/edge idle disconnect
     const twilioKeepaliveInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -652,20 +658,23 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     async function handleGuestUtteranceComplete(text: string, utteranceId: number) {
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
-      // Add to conversation log
+      const now = Date.now();
+      
+      // ALWAYS add to conversation log (even if hints are blocked)
       conversationLog.push({
         speaker: "Guest",
         text: text,
-        timestamp: Date.now()
+        timestamp: now
       });
       if (conversationLog.length > 10) conversationLog.shift();
       
-      // Update GoalEngine
+      // ALWAYS update GoalEngine (even if hints are blocked)
+      let goalJustAchieved = false;
       if (goalEngine) {
         const goalUpdate = goalEngine.updateOnUtterance({
           speaker: "GST",
           text: text,
-          ts: Date.now()
+          ts: now
         });
         
         const state = goalUpdate.state;
@@ -686,6 +695,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         
         if (goalUpdate.goalAchieved) {
+          goalAchievedFlag = true;
+          goalJustAchieved = true;
+          log(`[GoalAchieved] HARD STOP activated - no more hints after this`, "goal");
           uiBroadcast({
             type: "goal_achieved",
             target: "HON",
@@ -699,17 +711,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         log(`[GoalEngine] GST update: goal=${state.goalType}, status=${state.status}, missing=${state.missingSlots.join(",")}`, "goal");
       }
       
-      // Trigger fast layer timer - GPT request starts now
+      // ALWAYS get translation for guest transcript
       fastLayer.setLanguage(currentLanguage);
       fastLayer.onGstUtteranceEnd();
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
       const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);
       
-      // GPT response received - stop fast layer timer
       fastLayer.onGptResponseReceived();
       
-      // Broadcast translation
+      // ALWAYS broadcast translation (even if suggestion is blocked)
       uiBroadcast({ 
         type: "guest_transcript",
         text: text,
@@ -720,7 +731,53 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         callSid
       });
       
+      // ===== HINT THROTTLING CHECKS (only for suggestions, not transcripts) =====
+      
+      // If goal just achieved on this utterance - send closing phrase, skip regular hint
+      if (goalJustAchieved) {
+        uiBroadcast({
+          type: "suggestion",
+          target: "HON",
+          eventType: "closing",
+          source: "system",
+          basedOnSpeaker: "GST",
+          en: "All set! Thanks for the call.",
+          translation: currentLanguage === "ru" ? "Готово! Спасибо за звонок." : "¡Todo listo! Gracias por la llamada.",
+          utteranceId,
+          callSid
+        });
+        lastHintTs = Date.now();
+        lastHintUtteranceId = utteranceId;
+        log(`[Suggestion] Closing phrase sent, goal achieved`, "websocket");
+        return;
+      }
+      
+      // Check 1: HARD STOP if goal was achieved earlier
+      if (goalAchievedFlag) {
+        log(`[BLOCKED] reason=goal_achieved utteranceId=${utteranceId} - no hint`, "websocket");
+        return;
+      }
+      
+      // Check 2: 1 hint = 1 utterance (same utterance already got a hint)
+      if (utteranceId === lastHintUtteranceId) {
+        log(`[BLOCKED] reason=hint_shown utteranceId=${utteranceId} - already hinted`, "websocket");
+        return;
+      }
+      
+      // Check 3: Cooldown after previous hint
+      const timeSinceLastHint = now - lastHintTs;
+      if (lastHintTs > 0 && timeSinceLastHint < HINT_COOLDOWN_MS) {
+        log(`[BLOCKED] reason=cooldown utteranceId=${utteranceId} elapsed=${timeSinceLastHint}ms`, "websocket");
+        return;
+      }
+      
+      // ===== END THROTTLING CHECKS =====
+      
       if (translated.suggestion) {
+        // Record hint shown for throttling
+        lastHintTs = Date.now();
+        lastHintUtteranceId = utteranceId;
+        
         log(`[Suggestion] Sending to HON, basedOn=GST, utteranceId=${utteranceId}`, "websocket");
         uiBroadcast({
           type: "suggestion",
@@ -1151,6 +1208,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         removeEngine(callSid);
         utteranceGate.cleanup(callSid);
       }
+      
+      // Reset hint throttling for next call
+      lastHintTs = 0;
+      lastHintUtteranceId = -1;
+      goalAchievedFlag = false;
+      log(`[Cleanup] Hint throttling reset`, "websocket");
     });
     
     ws.on("error", (err) => {
