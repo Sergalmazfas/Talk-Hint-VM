@@ -684,7 +684,19 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     
     // Handler for complete GST utterance (after debounce)
     // Hints ARE generated for GUEST speech to help owner respond
+    // GUARD: This handler ONLY processes remote party audio - never owner mic
     async function handleGuestUtteranceComplete(text: string, utteranceId: number) {
+      // === DEFENSIVE GUARD: Verify this is the guest handler ===
+      // This handler should ONLY be called for GST speaker
+      // If called incorrectly, log error and reject
+      const ctx = callKey ? getCallContext(callKey) : undefined;
+      if (!ctx) {
+        log(`[HANDLER_GUARD] REJECT GST handler - no CallContext | callKey=${callKey} utteranceId=${utteranceId}`, "twilio");
+        return;
+      }
+      
+      // === STRUCTURED LOGGING ===
+      log(`[UTTERANCE] callKey=${callKey} callSid=${callSid || "?"} callType=${callType} role=GST source=twilio_stream gstTrack=${ctx.guestStreamSid} text_len=${text.length} utteranceId=${utteranceId}`, "twilio");
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       log(`[HintGate] speaker=GST generate=true reason="generate hint for owner to respond"`, "websocket");
       
@@ -774,7 +786,19 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     
     // Handler for complete HON utterance (after debounce)
     // NOTE: NO hints generated for owner's speech - hints only for GUEST
+    // GUARD: This handler ONLY processes owner mic audio - never remote party
     function handleOwnerUtteranceComplete(text: string, utteranceId: number) {
+      // === DEFENSIVE GUARD: Verify this is the owner handler ===
+      // This handler should ONLY be called for HON speaker
+      // If called incorrectly, log error and reject
+      const ctx = callKey ? getCallContext(callKey) : undefined;
+      if (!ctx) {
+        log(`[HANDLER_GUARD] REJECT HON handler - no CallContext | callKey=${callKey} utteranceId=${utteranceId}`, "twilio");
+        return;
+      }
+      
+      // === STRUCTURED LOGGING ===
+      log(`[UTTERANCE] callKey=${callKey} callSid=${callSid || "?"} callType=${callType} role=HON source=owner_mic youTrack=${ctx.youStreamSid} text_len=${text.length} utteranceId=${utteranceId}`, "twilio");
       log(`[UtteranceComplete] HON utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       log(`[HintGate] speaker=HON generate=false reason="hints only for GUEST"`, "websocket");
       
@@ -943,20 +967,32 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             // No inference based on track/direction - CallContext is single source of truth
             const speaker = callKey ? getSpeakerFromContext(callKey, track as "inbound" | "outbound") : null;
             
+            // === HARD SOURCE VALIDATION ===
             if (!speaker) {
-              // No CallContext or role not pinned - log warning and skip hint generation
-              log(`[HintGate] SKIP - no speaker mapping for callKey=${callKey} track=${track}`, "twilio");
-              // Still broadcast transcript for UI but without hints
-              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal, callSid });
-              return;
+              // No CallContext or role not pinned - DROP transcript (don't process or broadcast)
+              log(`[SOURCE_GUARD] REJECT - no speaker mapping | callKey=${callKey} track=${track} callType=${callType} text_len=${transcript.length}`, "twilio");
+              return; // Hard reject - don't process unattributed audio
+            }
+            
+            // === CALLCONTEXT DETAILS FOR LOGGING ===
+            const ctx = callKey ? getCallContext(callKey) : undefined;
+            const youStreamSid = ctx?.youStreamSid || "unknown";  // "inbound" or "outbound"
+            const guestStreamSid = ctx?.guestStreamSid || "unknown";
+            
+            // === STRICT CALLTYPE/TRACK VALIDATION ===
+            // Verify that CallContext track mapping matches expected for callType
+            const expectedYouTrack = callType === "outbound" ? "outbound" : "inbound";
+            if (youStreamSid !== "unknown" && youStreamSid !== expectedYouTrack) {
+              log(`[SOURCE_GUARD] REJECT - callType/youTrack mismatch | callType=${callType} expected_you=${expectedYouTrack} actual_you=${youStreamSid} track=${track} speaker=${speaker}`, "twilio");
+              return; // Hard reject - CallContext was set incorrectly
             }
             
             const isOwnerTrack = (speaker === "HON");
             const isGuestTrack = (speaker === "GST");
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
             
-            // Diagnostic log for TURN
-            log(`TURN callKey=${callKey || "?"} callSid=${callSid || "?"} speaker=${speaker} track=${track} isFinal=${isFinal} text="${transcript.substring(0, 30)}..."`, "twilio");
+            // === STRUCTURED LOGGING with full context ===
+            log(`[TURN] callKey=${callKey || "?"} callSid=${callSid || "?"} callType=${callType} track=${track} speaker=${speaker} youTrack=${youStreamSid} isFinal=${isFinal} text_len=${transcript.length} text="${transcript.substring(0, 40)}..."`, "twilio");
             
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speaker, transcript, isFinal, speechFinal, false);

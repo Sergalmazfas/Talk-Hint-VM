@@ -45,6 +45,7 @@ let isTrainingActive = false;
 // TTS settings for Training Mode
 let ttsAutoplayGST = localStorage.getItem('talkhint_tts_autoplay') !== 'false'; // default ON
 let currentAudio = null; // Currently playing audio
+let isTTSPlaying = false; // Flag to suppress owner transcript echo during TTS
 
 const LANGUAGE_FLAGS = {
   ru: '🇷🇺',
@@ -910,14 +911,23 @@ function addMessage(type, text, translation, sentiment) {
   }
   
   const now = Date.now();
+  // Only group actual speech transcripts, never goals or user questions
+  const isTranscriptType = (type === 'you' || type === 'honor' || type === 'guest');
   const shouldGroup = (type === lastMessageType) && 
                       (now - lastMessageTime < GROUP_WINDOW_MS) && 
                       lastMessageEl && 
-                      (type === 'you' || type === 'honor' || type === 'guest');
+                      isTranscriptType;
   
   if (shouldGroup) {
     const bubble = lastMessageEl.querySelector('.message-bubble');
     if (bubble) {
+      // Dedupe: don't add if exact same text is already the last line
+      const existingLines = bubble.textContent.split('\n');
+      const lastLine = existingLines[existingLines.length - 1];
+      if (lastLine && lastLine.trim() === text.trim()) {
+        log('[Dedupe] Skipping duplicate text: ' + text.substring(0, 30));
+        return; // Skip duplicate
+      }
       bubble.textContent += '\n' + text;
     }
     if (translation) {
@@ -947,6 +957,8 @@ function addMessage(type, text, translation, sentiment) {
     if (type === 'you' || type === 'honor' || type === 'HON') label = '🎙️ You';
     else if (type === 'guest' || type === 'GST') label = '👤 Guest';
     else if (type === 'ai') label = '💡 AI';
+    else if (type === 'goal') label = '🎯 Goal';
+    else if (type === 'user_question') label = '❓ You asked';
     
     var labelDiv = document.createElement('div');
     labelDiv.className = 'message-label';
@@ -1359,6 +1371,12 @@ function handleMessage(data) {
     case 'owner_transcript':
     case 'hon_transcript':
       if (data.text) {
+        // TTS echo suppression: ignore owner transcripts while TTS is playing
+        if (isTTSPlaying) {
+          log('[Echo] Suppressed owner transcript during TTS: ' + data.text.substring(0, 30));
+          break;
+        }
+        
         // STT garbage filter for HON
         if (data.isFinal && isGarbageSTT(data.text, data.confidence)) {
           log('Filtered garbage HON STT: ' + data.text);
@@ -1786,7 +1804,8 @@ function sendTextToAI() {
     callGoal = text;
     setGoalActive(true);
     showGoalBadge(text);
-    addMessage('honor', text);
+    // Goal is NOT a transcript - use 'goal' type, not 'honor'
+    addMessage('goal', text);
     
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({
@@ -1806,7 +1825,8 @@ function sendTextToAI() {
       });
     }
   } else {
-    addMessage('honor', text);
+    // User question during call - use 'user_question' type, not transcript
+    addMessage('user_question', text);
     
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({
@@ -2383,6 +2403,7 @@ async function playTTS(text, voiceType, buttonEl) {
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
+    isTTSPlaying = false;
   }
   
   // Update button state
@@ -2430,6 +2451,8 @@ async function playTTS(text, voiceType, buttonEl) {
         buttonEl.disabled = false;
       }
       currentAudio = null;
+      isTTSPlaying = false;
+      log('[TTS] Playback ended, echo suppression OFF');
     };
     
     currentAudio.onerror = function() {
@@ -2437,9 +2460,12 @@ async function playTTS(text, voiceType, buttonEl) {
         buttonEl.textContent = originalText;
         buttonEl.disabled = false;
       }
+      isTTSPlaying = false;
       log('[TTS] Audio playback error');
     };
     
+    isTTSPlaying = true;
+    log('[TTS] Playback started, echo suppression ON');
     await currentAudio.play();
     
   } catch (err) {
