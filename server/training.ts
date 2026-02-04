@@ -112,6 +112,9 @@ interface DialogState {
   lastSteeringQuestion: string | null;
   // Goal progress: turns since meaningful progress (Task 4)
   turnsSinceProgress: number;
+  // Wait State: when GST says "let me check", block STEER until real answer
+  waitingForInfo: boolean;
+  waitAckShown: boolean;
 }
 
 function createInitialState(): DialogState {
@@ -132,9 +135,15 @@ function createInitialState(): DialogState {
     intentCounts: {},
     passiveResponseCount: 0,
     lastSteeringQuestion: null,
-    turnsSinceProgress: 0
+    turnsSinceProgress: 0,
+    waitingForInfo: false,
+    waitAckShown: false
   };
 }
+
+// Wait State patterns (when GST says "let me check", block STEER)
+const WAIT_PATTERNS = /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up)\b/i;
+const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it costs|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|available|not available|yes we|no we|unfortunately|actually|the (experience|qualifications?|requirements?)( is| are)?|you need|you should|typically|usually|around \d|about \d)\b/i;
 
 // Detect if a response is passive (Task 1: Anti-loop)
 function isPassiveResponse(text: string): boolean {
@@ -310,6 +319,19 @@ function updateDialogState(state: DialogState, text: string, speaker: "hon" | "g
     const guestRequest = detectGuestRequest(text);
     if (guestRequest) {
       newState.lastGuestRequest = guestRequest;
+    }
+    
+    // Wait State detection: GST says "let me check" / "one moment"
+    if (WAIT_PATTERNS.test(text)) {
+      newState.waitingForInfo = true;
+      console.log(`[Training] WAIT_STATE entered: GST says "${text.substring(0, 40)}"`);
+    }
+    
+    // Exit Wait State: GST gives actual answer
+    if (newState.waitingForInfo && EXIT_WAIT_PATTERNS.test(text)) {
+      newState.waitingForInfo = false;
+      newState.waitAckShown = false;
+      console.log(`[Training] WAIT_STATE exited: GST answered "${text.substring(0, 40)}"`);
     }
   }
   
@@ -848,7 +870,7 @@ export async function processTrainingTurn(
     session.dialogState = updateDialogState(session.dialogState, gstText, "gst");
     
     console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
-    console.log(`[Training] State: lastGuestRequest=${session.dialogState.lastGuestRequest}, answered=${session.dialogState.answeredSlots.join(",")}`);
+    console.log(`[Training] State: lastGuestRequest=${session.dialogState.lastGuestRequest}, answered=${session.dialogState.answeredSlots.join(",")}, waitingForInfo=${session.dialogState.waitingForInfo}`);
     
     // Get state context for HINT (now includes what GST just asked)
     const stateContext = getStateContext(session.dialogState);
@@ -856,10 +878,82 @@ export async function processTrainingTurn(
     // Add GST's latest message to history for HINT
     const historyWithGst = historyForPrompt + `\nGST: ${gstText}`;
     
-    // STEP 3: Run translation AND hint in PARALLEL (hint now knows what GST asked)
     const langName = getHintLanguageName(session.hintLanguage);
     const hintStartTime = Date.now();
     
+    // ===== WAIT STATE: Show ACK, then block STEER =====
+    if (session.dialogState.waitingForInfo) {
+      // Get translation only
+      const translateResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: `Translate to ${langName}. Return ONLY the translation.` },
+            { role: "user", content: gstText }
+          ],
+          temperature: 0.3,
+          max_tokens: 80
+        })
+      });
+      const translateData = await translateResponse.json();
+      let gstTranslation = translateData.choices?.[0]?.message?.content?.trim() || "";
+      
+      const totalMs = Date.now() - startTime;
+      
+      if (!session.dialogState.waitAckShown) {
+        // Show 1 ACK response
+        session.dialogState.waitAckShown = true;
+        const ackPhrases: Record<string, { en: string; translation: string }> = {
+          ru: { en: "Sure, I'll wait.", translation: "Конечно, подожду." },
+          es: { en: "Sure, I'll wait.", translation: "Claro, esperaré." }
+        };
+        const ack = ackPhrases[session.hintLanguage] || ackPhrases.ru;
+        
+        console.log(`[Training] WAIT_STATE: ACK shown - "${ack.en}"`);
+        
+        return {
+          hon: { speaker: "hon", text: honText },
+          gst: { speaker: "gst", text: `${gstText}\n\n${session.hintLanguage === "es" ? "🇪🇸" : "🇷🇺"} ${gstTranslation}` },
+          hint: {
+            suggestion: ack.en,
+            translation: ack.translation,
+            goal_state: {
+              current_goal: session.goal,
+              next_step: "Waiting for information...",
+              slots: session.slots as Record<string, string | null>,
+              achieved: false
+            }
+          },
+          timing: { total_ms: totalMs, gst_ms: gstMs, hint_ms: Date.now() - hintStartTime }
+        };
+      } else {
+        // ACK already shown, block further STEER
+        console.log(`[Training] WAIT_STATE: Blocked - GST is checking, waiting for answer`);
+        
+        return {
+          hon: { speaker: "hon", text: honText },
+          gst: { speaker: "gst", text: `${gstText}\n\n${session.hintLanguage === "es" ? "🇪🇸" : "🇷🇺"} ${gstTranslation}` },
+          hint: {
+            suggestion: "",
+            translation: "",
+            goal_state: {
+              current_goal: session.goal,
+              next_step: "Waiting for information...",
+              slots: session.slots as Record<string, string | null>,
+              achieved: false
+            }
+          },
+          timing: { total_ms: totalMs, gst_ms: gstMs, hint_ms: 0 }
+        };
+      }
+    }
+    
+    // STEP 3: Run translation AND hint in PARALLEL (hint now knows what GST asked)
     const [translateResult, hintResponse] = await Promise.all([
       // Translation call
       fetch("https://api.openai.com/v1/chat/completions", {
