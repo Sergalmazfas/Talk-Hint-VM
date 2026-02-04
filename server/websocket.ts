@@ -158,7 +158,11 @@ Return JSON: {"translation":"guest's words in ${langName}", "suggestion":{"en":"
           },
           {
             role: "user",
-            content: `Guest said: "${text}"`
+            content: `USER'S GOAL: ${goal || "Have a successful conversation"}
+
+Guest said: "${text}"
+
+Remember: Your suggestion must ADVANCE the goal above. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`
           }
         ],
         temperature: 0.4,
@@ -637,6 +641,17 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastSuggestionIntent = "";         // Last intent type (enthusiasm/ask_date/etc)
     let lastSuggestionText = "";           // Last suggestion text for duplicate check
     
+    // Wait State - when GST says "let me check", block STEER until new content
+    let waitingForInfo = false;            // True when GST is checking/looking
+    let waitAckShown = false;              // True after showing 1 ACK ("Sure, I'll wait")
+    let waitingSlot: string | null = null; // Which slot we're waiting for
+    
+    // Patterns that trigger Wait State
+    const WAIT_PATTERNS = /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up)\b/i;
+    
+    // Patterns that EXIT Wait State (GST has real answer)
+    const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|available|not available|yes we|no we|unfortunately|actually)\b/i;
+    
     // Reaction-only phrases to filter (short emotional reactions with no info)
     const REACTION_ONLY_PATTERNS = [
       /^(that'?s?\s+)?(good|great|amazing|awesome|perfect|wonderful|fantastic|excellent|nice|cool|fine)\.?$/i,
@@ -788,6 +803,21 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         log(`[GoalEngine] GST update: goal=${state.goalType}, status=${state.status}, missing=${state.missingSlots.join(",")}`, "goal");
       }
       
+      // ===== WAIT STATE DETECTION =====
+      // Check if GST says "let me check" / "one moment" → enter wait state
+      if (WAIT_PATTERNS.test(text)) {
+        waitingForInfo = true;
+        log(`[WAIT_STATE] Entered - GST says "${text.substring(0, 40)}"`, "websocket");
+      }
+      
+      // Check if GST gives actual answer → exit wait state
+      if (waitingForInfo && EXIT_WAIT_PATTERNS.test(text)) {
+        waitingForInfo = false;
+        waitAckShown = false; // Reset ACK for next wait
+        waitingSlot = null;
+        log(`[WAIT_STATE] Exited - GST answered "${text.substring(0, 40)}"`, "websocket");
+      }
+      
       // ===== ANTI-LOOP GUARD: Reaction-only filter =====
       // For reaction-only phrases: still get translation, but skip suggestion
       const reactionOnly = isReactionOnly(text);
@@ -861,6 +891,39 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (reactionOnly && !goalJustAchieved) {
         log(`[BLOCKED] reason=reaction_only text="${text.substring(0, 30)}" - suggestion skipped`, "websocket");
         return;
+      }
+      
+      // ===== WAIT STATE: Show 1 ACK, then block STEER =====
+      if (waitingForInfo && !goalJustAchieved) {
+        if (!waitAckShown) {
+          // Show 1 ACK response
+          waitAckShown = true;
+          const ackPhrases = {
+            ru: { en: "Sure, I'll wait.", translation: "Конечно, подожду." },
+            es: { en: "Sure, I'll wait.", translation: "Claro, esperaré." }
+          };
+          const ack = ackPhrases[currentLanguage as "ru" | "es"] || ackPhrases.ru;
+          
+          uiBroadcast({
+            type: "suggestion",
+            target: "HON",
+            eventType: "ack",
+            source: "wait_state",
+            basedOnSpeaker: "GST",
+            en: ack.en,
+            translation: ack.translation,
+            utteranceId,
+            callSid
+          });
+          lastHintTs = Date.now();
+          lastHintUtteranceId = utteranceId;
+          log(`[WAIT_STATE] ACK shown - "Sure, I'll wait." - now blocking STEER`, "websocket");
+          return;
+        } else {
+          // ACK already shown, block all further STEER until exit
+          log(`[BLOCKED] reason=wait_state - GST is checking, waiting for answer`, "websocket");
+          return;
+        }
       }
       
       if (translated.suggestion) {
@@ -1321,13 +1384,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         utteranceGate.cleanup(callSid);
       }
       
-      // Reset hint throttling and anti-loop guards for next call
+      // Reset hint throttling, anti-loop guards, and wait state for next call
       lastHintTs = 0;
       lastHintUtteranceId = -1;
       goalAchievedFlag = false;
       lastSuggestionIntent = "";
       lastSuggestionText = "";
-      log(`[Cleanup] Hint throttling and anti-loop guards reset`, "websocket");
+      waitingForInfo = false;
+      waitAckShown = false;
+      waitingSlot = null;
+      log(`[Cleanup] Hint throttling, anti-loop guards, wait state reset`, "websocket");
     });
     
     ws.on("error", (err) => {

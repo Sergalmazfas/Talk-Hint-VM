@@ -61,3 +61,16 @@ Prevents cycling on same emotions/suggestions:
 - **Duplicate suggestion filter:** Blocks suggestions with >80% Jaccard similarity.
 - **Prompt rules:** "After agreement → next step" - forces GPT to ask concrete questions instead of looping on excitement.
 - **Logging:** `[BLOCKED] reason=reaction_only/repeat_intent/duplicate_suggestion`
+
+### Wait State (LIVE mode)
+Prevents spam when GST says "let me check":
+- **Trigger patterns:** "let me check", "one moment", "hold on", "just a second", "looking into", etc.
+- **Exit patterns:** "found it", "here's", "the answer", "it's", "costs", "we have", etc.
+- **Behavior:** When triggered, shows 1 ACK ("Sure, I'll wait"), then blocks all STEER suggestions until exit pattern detected.
+- **Variables:** `waitingForInfo`, `waitAckShown`, `waitingSlot`
+- **Logging:** `[WAIT_STATE] Entered/Exited`, `[BLOCKED] reason=wait_state`
+
+### Goal Persistence
+- Goal is passed in EVERY GPT request (system + user message)
+- Goal is in both `translateAndSuggest()` and hint generation
+- User message includes explicit reminder: "Your suggestion must ADVANCE the goal"
