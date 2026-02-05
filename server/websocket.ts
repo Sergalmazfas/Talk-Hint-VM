@@ -650,7 +650,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     const WAIT_PATTERNS = /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up)\b/i;
     
     // Patterns that EXIT Wait State (GST has real answer)
-    const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|available|not available|yes we|no we|unfortunately|actually)\b/i;
+    const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it costs|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|you can|available|not available|yes we|no we|unfortunately|actually|the (experience|qualifications?|requirements?|position)( is| are)?|you need|you should|typically|usually|around \d|about \d|currently open|is open|is closed|apply (directly|online|now|here|at)|thank you for (your|the) patience|so the|what we|looking for|requires?|need (to|a)|must have|should have)\b/i;
     
     // Reaction-only phrases to filter (short emotional reactions with no info)
     const REACTION_ONLY_PATTERNS = [
