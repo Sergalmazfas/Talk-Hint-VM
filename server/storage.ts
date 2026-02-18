@@ -20,7 +20,6 @@ export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
-  getUserByStripeCustomerId(customerId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
   
@@ -55,12 +54,6 @@ export interface IStorage {
   updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined>;
   getUserCalls(userId: string): Promise<Call[]>;
   getAllCalls(): Promise<Call[]>;
-  
-  // Stripe
-  getProduct(productId: string): Promise<any>;
-  getSubscription(subscriptionId: string): Promise<any>;
-  listProducts(active?: boolean): Promise<any[]>;
-  listProductsWithPrices(active?: boolean): Promise<any[]>;
   
   // Sessions
   createSession(id: string, userId: string, expiresAt: Date): Promise<Session>;
@@ -97,16 +90,6 @@ export class DatabaseStorage implements IStorage {
     }
   }
   
-  async getUserByStripeCustomerId(customerId: string): Promise<User | undefined> {
-    try {
-      const [user] = await db.select().from(users).where(eq(users.stripeCustomerId, customerId));
-      return user;
-    } catch (error) {
-      console.error("[Storage] getUserByStripeCustomerId error:", error);
-      return undefined;
-    }
-  }
-  
   async createUser(user: InsertUser): Promise<User> {
     if (!isDatabaseAvailable()) {
       const newUser: User = {
@@ -118,6 +101,8 @@ export class DatabaseStorage implements IStorage {
         authProvider: (user as any).authProvider || "email",
         stripeCustomerId: null,
         stripeSubscriptionId: null,
+        forwardingPhone: null,
+        callMode: "live",
         twilioSubaccountSid: null,
         twilioSubaccountToken: null,
         createdAt: new Date(),
@@ -141,6 +126,8 @@ export class DatabaseStorage implements IStorage {
         authProvider: (user as any).authProvider || "email",
         stripeCustomerId: null,
         stripeSubscriptionId: null,
+        forwardingPhone: null,
+        callMode: "live",
         twilioSubaccountSid: null,
         twilioSubaccountToken: null,
         createdAt: new Date(),
@@ -448,109 +435,6 @@ export class DatabaseStorage implements IStorage {
   
   async getAllCalls(): Promise<Call[]> {
     return db.select().from(calls);
-  }
-  
-  // Stripe queries from stripe schema
-  async getProduct(productId: string): Promise<any> {
-    const result = await db.execute(
-      sql`SELECT * FROM stripe.products WHERE id = ${productId}`
-    );
-    return result.rows[0] || null;
-  }
-  
-  async getSubscription(subscriptionId: string): Promise<any> {
-    const result = await db.execute(
-      sql`SELECT * FROM stripe.subscriptions WHERE id = ${subscriptionId}`
-    );
-    return result.rows[0] || null;
-  }
-  
-  async listProducts(active = true): Promise<any[]> {
-    const result = await db.execute(
-      sql`SELECT * FROM stripe.products WHERE active = ${active}`
-    );
-    return result.rows;
-  }
-  
-  async listProductsWithPrices(active = true): Promise<any[]> {
-    let result: any = { rows: [] };
-    
-    // Try database cache first
-    try {
-      result = await db.execute(
-        sql`
-          SELECT 
-            p.id as product_id,
-            p.name as product_name,
-            p.description as product_description,
-            p.metadata as product_metadata,
-            pr.id as price_id,
-            pr.unit_amount,
-            pr.currency,
-            pr.recurring
-          FROM stripe.products p
-          LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
-          WHERE p.active = ${active}
-          ORDER BY pr.unit_amount
-        `
-      );
-    } catch (dbErr) {
-      console.log("[Storage] Stripe cache query failed, falling back to API:", (dbErr as Error).message);
-    }
-    
-    // Fallback to direct Stripe API if sync cache is empty or failed
-    if (result.rows.length === 0) {
-      console.log("[Storage] Stripe cache empty, fetching from API...");
-      try {
-        const { getUncachableStripeClient } = await import("./stripeClient");
-        const stripe = await getUncachableStripeClient();
-        if (!stripe) {
-          console.log("[Storage] No Stripe client available for fallback");
-          return [];
-        }
-        
-        console.log("[Storage] Stripe client obtained, fetching products...");
-        const products = await stripe.products.list({ active, limit: 20 });
-        console.log("[Storage] Got", products.data.length, "products from Stripe");
-        const rows: any[] = [];
-        
-        for (const p of products.data) {
-          const prices = await stripe.prices.list({ product: p.id, active: true, limit: 10 });
-          if (prices.data.length === 0) {
-            rows.push({
-              product_id: p.id,
-              product_name: p.name,
-              product_description: p.description,
-              product_metadata: p.metadata,
-              price_id: null,
-              unit_amount: null,
-              currency: null,
-              recurring: null
-            });
-          } else {
-            for (const pr of prices.data) {
-              rows.push({
-                product_id: p.id,
-                product_name: p.name,
-                product_description: p.description,
-                product_metadata: p.metadata,
-                price_id: pr.id,
-                unit_amount: pr.unit_amount,
-                currency: pr.currency,
-                recurring: pr.recurring
-              });
-            }
-          }
-        }
-        console.log("[Storage] Fetched", rows.length, "products from Stripe API");
-        return rows;
-      } catch (err) {
-        console.error("[Storage] Stripe API fallback error:", err);
-        return [];
-      }
-    }
-    
-    return result.rows;
   }
   
   // Sessions

@@ -2,9 +2,6 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./stripeClient";
-import { WebhookHandlers } from "./webhookHandlers";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { storage } from "./storage";
 
@@ -117,69 +114,6 @@ async function seedUserAssignedNumber() {
   }
 }
 
-async function initStripe() {
-  // In production, prefer PROD_DATABASE_URL over DATABASE_URL
-  const isProduction = process.env.NODE_ENV === "production";
-  const databaseUrl = (isProduction && process.env.PROD_DATABASE_URL)
-    ? process.env.PROD_DATABASE_URL
-    : process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.log("[Stripe] DATABASE_URL not set, skipping Stripe init");
-    return;
-  }
-
-  try {
-    console.log("[Stripe] Initializing schema...");
-    await runMigrations({ databaseUrl });
-    console.log("[Stripe] Schema ready");
-
-    const stripeSync = await getStripeSync();
-    
-    if (!stripeSync) {
-      console.log("[Stripe] Stripe not configured - skipping webhook and sync");
-      return;
-    }
-
-    const replitDomains = process.env.REPLIT_DOMAINS;
-    if (replitDomains) {
-      console.log("[Stripe] Setting up managed webhook...");
-      const webhookBaseUrl = `https://${replitDomains.split(",")[0]}`;
-      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-      console.log("[Stripe] Webhook configured");
-    } else {
-      console.log("[Stripe] REPLIT_DOMAINS not set, skipping webhook setup (local dev)");
-    }
-
-    stripeSync.syncBackfill()
-      .then(() => console.log("[Stripe] Data synced"))
-      .catch((err: any) => console.error("[Stripe] Sync error:", err));
-  } catch (error) {
-    console.error("[Stripe] Init error:", error);
-  }
-}
-
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  async (req, res) => {
-    // Stripe temporarily disabled
-    return res.status(200).json({ received: true, disabled: true });
-    const signature = req.headers["stripe-signature"];
-    if (!signature) {
-      return res.status(400).json({ error: "Missing stripe-signature" });
-    }
-
-    try {
-      const sig = Array.isArray(signature) ? signature[0] : signature;
-      await WebhookHandlers.processWebhook(req.body as Buffer, sig);
-      res.status(200).json({ received: true });
-    } catch (error: any) {
-      console.error("[Stripe] Webhook error:", error.message);
-      res.status(400).json({ error: "Webhook processing error" });
-    }
-  }
-);
-
 app.use(
   express.json({
     limit: '10mb', // Increased for audio data in training STT
@@ -258,14 +192,6 @@ app.use((req, res, next) => {
   }
   
   if (dbConnected) {
-    // Stripe temporarily disabled
-    console.log("[Stripe] Stripe integration temporarily disabled");
-    // try {
-    //   await initStripe();
-    // } catch (e: any) {
-    //   console.error("[Server] Stripe init failed:", e.message);
-    // }
-    
     // Only run seed in development mode OR when explicitly requested via RUN_SEED=true
     // NEVER run seed automatically in production - it causes deployment failures
     const shouldSeed = process.env.NODE_ENV === 'development' || process.env.RUN_SEED === 'true';
