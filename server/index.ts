@@ -162,6 +162,8 @@ app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
+    // Stripe temporarily disabled
+    return res.status(200).json({ received: true, disabled: true });
     const signature = req.headers["stripe-signature"];
     if (!signature) {
       return res.status(400).json({ error: "Missing stripe-signature" });
@@ -256,11 +258,13 @@ app.use((req, res, next) => {
   }
   
   if (dbConnected) {
-    try {
-      await initStripe();
-    } catch (e: any) {
-      console.error("[Server] Stripe init failed:", e.message);
-    }
+    // Stripe temporarily disabled
+    console.log("[Stripe] Stripe integration temporarily disabled");
+    // try {
+    //   await initStripe();
+    // } catch (e: any) {
+    //   console.error("[Server] Stripe init failed:", e.message);
+    // }
     
     // Only run seed in development mode OR when explicitly requested via RUN_SEED=true
     // NEVER run seed automatically in production - it causes deployment failures
