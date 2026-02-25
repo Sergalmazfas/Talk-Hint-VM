@@ -50,7 +50,7 @@ export default function Dashboard() {
     }
   }
 
-  const hasSubscription = true; // Subscription temporarily disabled
+  const hasSubscription = user?.plan && user.plan !== "free" && user.plan !== "none";
 
   async function handleLogout() {
     await logout();
