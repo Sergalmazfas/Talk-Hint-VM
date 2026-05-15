@@ -112,6 +112,47 @@ export async function registerRoutes(
   console.log("[TalkHint] Serving UI from:", talkhintUiPath);
   app.use("/app", express.static(talkhintUiPath));
 
+  app.get("/expo", (_req, res) => {
+    const expoUrl = "exp://e62acc35-f5e5-43be-91ea-c3ad7b36be85-00-3l7jbsd7n4zci.expo.janeway.replit.dev:8081";
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Open TalkHint in Expo Go</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f14;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+  .card{background:#1a1a24;border:1px solid #2a2a3a;border-radius:20px;padding:36px 28px;max-width:360px;width:100%;text-align:center}
+  .logo{font-size:48px;margin-bottom:16px}
+  h1{font-size:22px;font-weight:700;margin-bottom:8px}
+  .sub{color:#8888aa;font-size:14px;margin-bottom:32px;line-height:1.5}
+  .btn{display:block;background:#6366f1;color:#fff;text-decoration:none;border-radius:14px;padding:16px 24px;font-size:17px;font-weight:700;margin-bottom:16px;transition:opacity .15s}
+  .btn:active{opacity:.8}
+  .url-box{background:#0f0f18;border:1px solid #2a2a3a;border-radius:10px;padding:12px 14px;font-size:11px;color:#6666aa;word-break:break-all;font-family:monospace;text-align:left;margin-bottom:20px}
+  .hint{font-size:12px;color:#55556a;line-height:1.6}
+  .step{display:flex;align-items:flex-start;gap:10px;text-align:left;margin-bottom:10px}
+  .step-num{background:#6366f1;color:#fff;font-size:11px;font-weight:700;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">📱</div>
+  <h1>Open in Expo Go</h1>
+  <p class="sub">TalkHint mobile app — tap the button below on your iPhone</p>
+  <a class="btn" href="${expoUrl}">Open TalkHint in Expo Go</a>
+  <div class="url-box">${expoUrl}</div>
+  <div class="hint">
+    <div class="step"><div class="step-num">1</div><span>Убедитесь что Expo Go установлен (App Store)</span></div>
+    <div class="step"><div class="step-num">2</div><span>Нажмите кнопку выше — iPhone откроет Expo Go автоматически</span></div>
+    <div class="step"><div class="step-num">3</div><span>В приложении → Settings → введите URL сервера</span></div>
+  </div>
+</div>
+</body>
+</html>`);
+  });
+
   app.get("/api/calls", async (_req, res) => {
     try {
       const calls = await storage.getAllCalls();
