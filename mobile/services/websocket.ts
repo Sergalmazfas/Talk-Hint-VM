@@ -2,6 +2,9 @@ import { useAppStore } from '../store/appStore';
 
 type MessageHandler = (msg: any) => void;
 
+// WebSocket readyState constants (matches both DOM and React Native)
+const WS_OPEN = 1;
+
 class TalkHintWebSocket {
   private ws: WebSocket | null = null;
   private url: string = '';
@@ -11,29 +14,41 @@ class TalkHintWebSocket {
 
   connect(serverUrl: string) {
     this.intentionallyClosed = false;
-    const wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/$/, '');
+    // Replace http(s) with ws(s) for WebSocket URL
+    const wsUrl = serverUrl
+      .replace(/^https:\/\//, 'wss://')
+      .replace(/^http:\/\//, 'ws://')
+      .replace(/\/$/, '');
     this.url = `${wsUrl}/ui`;
 
     this.cleanup();
-    this.ws = new WebSocket(this.url);
 
-    this.ws.onopen = () => {
-      console.log('[WS] Connected to TalkHint backend');
+    try {
+      this.ws = new (global as any).WebSocket(this.url);
+    } catch (e) {
+      console.error('[WS] Failed to create WebSocket:', e);
+      return;
+    }
+
+    this.ws!.onopen = () => {
+      console.log('[WS] Connected to TalkHint backend:', this.url);
       useAppStore.getState().setConnected(true);
       const { language, goal } = useAppStore.getState();
       if (language) this.send({ type: 'set_language', language });
       if (goal) this.send({ type: 'set_goal', goal });
     };
 
-    this.ws.onmessage = (event) => {
+    this.ws!.onmessage = (event: any) => {
       try {
         const msg = JSON.parse(event.data);
         this.handlers.forEach((h) => h(msg));
         this.handleInternal(msg);
-      } catch {}
+      } catch {
+        // ignore malformed messages
+      }
     };
 
-    this.ws.onclose = () => {
+    this.ws!.onclose = () => {
       console.log('[WS] Disconnected');
       useAppStore.getState().setConnected(false);
       if (!this.intentionallyClosed) {
@@ -41,7 +56,7 @@ class TalkHintWebSocket {
       }
     };
 
-    this.ws.onerror = (err) => {
+    this.ws!.onerror = (err: any) => {
       console.log('[WS] Error', err);
     };
   }
@@ -52,22 +67,14 @@ class TalkHintWebSocket {
     switch (msg.type) {
       case 'guest_transcript':
         if (msg.text) {
-          store.addTranscript({
-            speaker: 'gst',
-            text: msg.text,
-            isFinal: msg.isFinal ?? true,
-          });
+          store.addTranscript({ speaker: 'gst', text: msg.text, isFinal: msg.isFinal ?? true });
         }
         break;
 
       case 'owner_transcript':
       case 'hon_transcript':
         if (msg.text) {
-          store.addTranscript({
-            speaker: 'hon',
-            text: msg.text,
-            isFinal: msg.isFinal ?? true,
-          });
+          store.addTranscript({ speaker: 'hon', text: msg.text, isFinal: msg.isFinal ?? true });
         }
         break;
 
@@ -84,12 +91,7 @@ class TalkHintWebSocket {
 
       case 'hint':
         if (msg.suggestion) {
-          store.setHints([
-            {
-              en: msg.suggestion.en || '',
-              translation: msg.suggestion.translation || '',
-            },
-          ]);
+          store.setHints([{ en: msg.suggestion.en || '', translation: msg.suggestion.translation || '' }]);
         }
         break;
 
@@ -110,7 +112,7 @@ class TalkHintWebSocket {
   }
 
   send(data: object) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws && this.ws.readyState === WS_OPEN) {
       this.ws.send(JSON.stringify(data));
     }
   }
@@ -133,7 +135,7 @@ class TalkHintWebSocket {
     }
     if (this.ws) {
       this.ws.onclose = null;
-      this.ws.close();
+      try { this.ws.close(); } catch {}
       this.ws = null;
     }
   }

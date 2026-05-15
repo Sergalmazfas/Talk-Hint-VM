@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -16,8 +17,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.talkhint.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "TalkHint uses microphone to transcribe your voice during phone calls and training sessions.",
-        "NSCameraUsageDescription": "TalkHint does not use the camera.",
+        "NSMicrophoneUsageDescription": "TalkHint uses your microphone to transcribe calls in real time.",
         "UIBackgroundModes": ["audio", "voip"]
       }
     },
@@ -27,7 +27,7 @@
         "backgroundColor": "#0a0a0a"
       },
       "package": "com.talkhint.app",
-      "permissions": ["RECORD_AUDIO", "INTERNET"]
+      "permissions": ["android.permission.RECORD_AUDIO", "android.permission.INTERNET"]
     },
     "plugins": [
       "expo-router",

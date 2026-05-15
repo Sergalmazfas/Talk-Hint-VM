@@ -10,18 +10,23 @@ export function useMicrophone() {
   const setMicActive = useAppStore((s) => s.setMicActive);
   const isMicActive = useAppStore((s) => s.isMicActive);
 
-  const requestPermission = useCallback(async () => {
-    const { status } = await Audio.requestPermissionsAsync();
-    const granted = status === 'granted';
-    setHasPermission(granted);
-    if (!granted) {
-      Alert.alert(
-        'Microphone Required',
-        'TalkHint needs microphone access to transcribe your calls. Please enable it in Settings.',
-        [{ text: 'OK' }]
-      );
+  const requestPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      const granted = status === 'granted';
+      setHasPermission(granted);
+      if (!granted) {
+        Alert.alert(
+          'Microphone Required',
+          'TalkHint needs microphone access to transcribe your calls. Please enable it in iPhone Settings → Privacy → Microphone.',
+          [{ text: 'OK' }]
+        );
+      }
+      return granted;
+    } catch (e) {
+      console.error('[Mic] Permission error:', e);
+      return false;
     }
-    return granted;
   }, []);
 
   const startRecording = useCallback(async () => {
@@ -40,9 +45,7 @@ export function useMicrophone() {
 
       recordingRef.current = recording;
       setMicActive(true);
-
       wsClient.send({ type: 'start', sessionId: Date.now().toString(36) });
-
     } catch (err) {
       console.error('[Mic] Start error:', err);
       setMicActive(false);
@@ -50,17 +53,22 @@ export function useMicrophone() {
   }, [hasPermission, requestPermission, setMicActive]);
 
   const stopRecording = useCallback(async () => {
-    if (!recordingRef.current) return;
+    const rec = recordingRef.current;
+    if (!rec) return;
+
+    recordingRef.current = null;
+    setMicActive(false);
 
     try {
-      await recordingRef.current.stopAndUnloadAsync();
-      recordingRef.current = null;
+      await rec.stopAndUnloadAsync();
     } catch (err) {
       console.error('[Mic] Stop error:', err);
-    } finally {
-      setMicActive(false);
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
     }
+
+    // Restore audio mode safely
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    } catch {}
   }, [setMicActive]);
 
   const toggleMic = useCallback(async () => {

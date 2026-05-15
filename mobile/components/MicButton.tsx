@@ -11,38 +11,52 @@ interface Props {
 
 export function MicButton({ isActive, onPress, disabled }: Props) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const pulseLoop = useRef<Animated.CompositeAnimation | null>(null);
+  // Using any to avoid strict typing issues with Animated.CompositeAnimation across RN versions
+  const pulseLoopRef = useRef<any>(null);
 
   useEffect(() => {
     if (isActive) {
-      pulseLoop.current = Animated.loop(
+      pulseLoopRef.current = Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.35, duration: 700, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+          Animated.timing(pulseAnim, {
+            toValue: 1.35,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
         ])
       );
-      pulseLoop.current.start();
+      pulseLoopRef.current.start();
     } else {
-      pulseLoop.current?.stop();
-      Animated.timing(pulseAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+      if (pulseLoopRef.current) {
+        pulseLoopRef.current.stop();
+        pulseLoopRef.current = null;
+      }
+      Animated.timing(pulseAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
   return (
     <View style={styles.wrapper}>
       {isActive && (
         <Animated.View
-          style={[
-            styles.pulse,
-            { transform: [{ scale: pulseAnim }] },
-          ]}
+          style={[styles.pulse, { transform: [{ scale: pulseAnim }] }]}
         />
       )}
       <TouchableOpacity
         style={[
           styles.btn,
           isActive ? styles.btnActive : styles.btnIdle,
-          disabled && styles.btnDisabled,
+          disabled === true && styles.btnDisabled,
         ]}
         onPress={onPress}
         disabled={disabled}
