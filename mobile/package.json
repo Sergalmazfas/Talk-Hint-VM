@@ -34,6 +34,7 @@
     "@babel/core": "^7.25.2",
     "@expo/ngrok": "^4.1.3",
     "@types/react": "~18.3.12",
+    "localtunnel": "^2.0.2",
     "typescript": "^5.3.3"
   },
   "private": true

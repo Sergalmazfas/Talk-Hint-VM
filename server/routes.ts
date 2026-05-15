@@ -7,6 +7,7 @@ import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
 import express from "express";
+import fs from "fs";
 import twilio from "twilio";
 import crypto from "crypto";
 import { registerUser, loginUser, createSession, authMiddleware, deleteSession } from "./auth";
@@ -112,8 +113,13 @@ export async function registerRoutes(
   console.log("[TalkHint] Serving UI from:", talkhintUiPath);
   app.use("/app", express.static(talkhintUiPath));
 
+  app.get("/api/expo-url", (_req, res) => {
+    let url = "";
+    try { url = fs.readFileSync("/tmp/expo-tunnel-url.txt", "utf8").trim(); } catch (_) {}
+    res.json({ url: url || null });
+  });
+
   app.get("/expo", (_req, res) => {
-    const expoUrl = "exp://e62acc35-f5e5-43be-91ea-c3ad7b36be85-00-3l7jbsd7n4zci.expo.janeway.replit.dev:8081";
     res.setHeader("Content-Type", "text/html");
     res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -130,25 +136,50 @@ export async function registerRoutes(
   .sub{color:#8888aa;font-size:14px;margin-bottom:32px;line-height:1.5}
   .btn{display:block;background:#6366f1;color:#fff;text-decoration:none;border-radius:14px;padding:16px 24px;font-size:17px;font-weight:700;margin-bottom:16px;transition:opacity .15s}
   .btn:active{opacity:.8}
-  .url-box{background:#0f0f18;border:1px solid #2a2a3a;border-radius:10px;padding:12px 14px;font-size:11px;color:#6666aa;word-break:break-all;font-family:monospace;text-align:left;margin-bottom:20px}
+  .btn.disabled{background:#333;pointer-events:none}
+  .url-box{background:#0f0f18;border:1px solid #2a2a3a;border-radius:10px;padding:12px 14px;font-size:11px;color:#6666aa;word-break:break-all;font-family:monospace;text-align:left;margin-bottom:20px;min-height:36px}
   .hint{font-size:12px;color:#55556a;line-height:1.6}
   .step{display:flex;align-items:flex-start;gap:10px;text-align:left;margin-bottom:10px}
   .step-num{background:#6366f1;color:#fff;font-size:11px;font-weight:700;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+  .status{font-size:11px;color:#55aaa0;margin-bottom:8px}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">📱</div>
   <h1>Open in Expo Go</h1>
-  <p class="sub">TalkHint mobile app — tap the button below on your iPhone</p>
-  <a class="btn" href="${expoUrl}">Open TalkHint in Expo Go</a>
-  <div class="url-box">${expoUrl}</div>
+  <p class="sub">TalkHint mobile app — tap button on iPhone</p>
+  <div class="status" id="status">Loading tunnel URL...</div>
+  <a class="btn disabled" id="btn" href="#">Open TalkHint in Expo Go</a>
+  <div class="url-box" id="urlbox">Waiting for tunnel...</div>
   <div class="hint">
-    <div class="step"><div class="step-num">1</div><span>Убедитесь что Expo Go установлен (App Store)</span></div>
-    <div class="step"><div class="step-num">2</div><span>Нажмите кнопку выше — iPhone откроет Expo Go автоматически</span></div>
-    <div class="step"><div class="step-num">3</div><span>В приложении → Settings → введите URL сервера</span></div>
+    <div class="step"><div class="step-num">1</div><span>Expo Go — App Store</span></div>
+    <div class="step"><div class="step-num">2</div><span>Нажмите кнопку выше или введите URL вручную в Expo Go</span></div>
+    <div class="step"><div class="step-num">3</div><span>Settings → введите URL вашего TalkHint сервера</span></div>
   </div>
 </div>
+<script>
+async function load() {
+  try {
+    const r = await fetch('/api/expo-url');
+    const { url } = await r.json();
+    if (url) {
+      document.getElementById('btn').href = url;
+      document.getElementById('btn').classList.remove('disabled');
+      document.getElementById('urlbox').textContent = url;
+      document.getElementById('status').textContent = '✅ Tunnel active';
+      document.getElementById('status').style.color = '#55cc88';
+    } else {
+      document.getElementById('status').textContent = '⏳ Tunnel starting...';
+      setTimeout(load, 3000);
+    }
+  } catch(e) {
+    document.getElementById('status').textContent = '⚠️ Could not load URL';
+    setTimeout(load, 5000);
+  }
+}
+load();
+</script>
 </body>
 </html>`);
   });

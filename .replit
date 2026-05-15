@@ -59,7 +59,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd mobile && npm install --legacy-peer-deps && REACT_NATIVE_PACKAGER_HOSTNAME=${REPLIT_EXPO_DEV_DOMAIN} npx expo start --port 8081 --lan"
+args = "cd mobile && npm install --legacy-peer-deps && node start-tunnel.js"
 
 [agent]
 mockupState = "FULLSTACK"
