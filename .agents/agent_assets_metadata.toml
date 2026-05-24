@@ -6,3 +6,9 @@ id = "JmNOu1_JtTeADCutOEgIp"
 uri = "file://TRAINING_PIPELINE_AUDIT.md"
 type = "text"
 title = "TalkHint Training Pipeline Audit (May 2026)"
+
+[[outputs]]
+id = "7bf4U6LErR6ZBcMcH6KDe"
+uri = "file://LIVE_PIPELINE_AUDIT.md"
+type = "text"
+title = "TalkHint LIVE Call Pipeline Audit (May 2026)"
