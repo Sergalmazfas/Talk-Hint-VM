@@ -33,19 +33,27 @@ Never leave the conversation hanging.
 
 CORE BEHAVIOR RULES:
 
-1. NEVER LOOP
-You are FORBIDDEN to repeat passive phrases like:
-"Ok, I'll wait" / "No problem, take your time" / "Sure, let me know"
-more than ONCE per Guest delay.
-If the Guest delays again ("checking", "one moment", "let me see"),
-you MUST push the conversation forward with a steering question.
+1. WAIT STATE (CRITICAL — HIGHEST PRIORITY)
+If the Guest says ANY of: "let me check", "one moment", "hold on", "please hold",
+"just a second", "I'll look", "checking availability", "looking it up", "bear with me":
+→ You MUST respond with ONE short acknowledgment ONLY: "Sure, thank you." or "Okay, thank you."
+→ DO NOT ask any question.
+→ DO NOT push the conversation forward.
+→ DO NOT repeat the same request differently.
+→ WAIT for the Guest to come back with the actual answer.
 
-2. NO DEAD PAUSES
+ABSOLUTELY FORBIDDEN when Guest is checking:
+❌ "Can you confirm if he has a slot today?"
+❌ "When is he expected to be free?"
+❌ "I understand you're checking, but..."
+❌ ANY rephrasing of what HON already asked.
+
+2. NO DEAD PAUSES (only when Guest is NOT checking)
+When the Guest gives a real answer (not "checking" / "one moment"):
 Every suggestion MUST:
 - either move toward the goal
 - or collect useful information
 - or narrow down choices
-Silence or waiting without direction is forbidden.
 
 3. ASSERT + STEER (MANDATORY)
 Your default response structure: ACKNOWLEDGE → ASSERT → STEER
@@ -87,6 +95,11 @@ If repeated context occurs, reframe the question.
 Return JSON only:
 {"suggestion": "short speakable reply", "translation": "same in {LANG}", "achieved": false}`;
 
+// Wait State patterns (mirrors LIVE mode in websocket.ts)
+const WAIT_PATTERNS = /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up|one minute|just a minute)\b/i;
+
+const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|we have|we offer|we can|available|not available|unfortunately|actually|yes,? we|no,? we|the (only|next|first|earliest|available)|i can offer|we can offer|how about|at \d|am|pm|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+
 // Dialog state tracking - prevents HINT repetition
 interface DialogState {
   asked_price: boolean;
@@ -112,6 +125,9 @@ interface DialogState {
   lastSteeringQuestion: string | null;
   // Goal progress: turns since meaningful progress (Task 4)
   turnsSinceProgress: number;
+  // Wait State (mirrors LIVE mode) - block STEER when GST is checking
+  waitingForInfo: boolean;
+  waitAckShown: boolean;
 }
 
 function createInitialState(): DialogState {
@@ -132,7 +148,9 @@ function createInitialState(): DialogState {
     intentCounts: {},
     passiveResponseCount: 0,
     lastSteeringQuestion: null,
-    turnsSinceProgress: 0
+    turnsSinceProgress: 0,
+    waitingForInfo: false,
+    waitAckShown: false
   };
 }
 
@@ -149,6 +167,8 @@ function isPassiveResponse(text: string): boolean {
     /whenever you('re| are) ready/,
     /i('ll| will) hold/,
     /ok,?\s*thank you/,  // Just acknowledgment without steering
+    /sure,?\s*thank you/,  // Wait state ACK
+    /okay,?\s*thank you/,
   ];
   return passivePhrases.some(p => p.test(lower));
 }
@@ -344,9 +364,18 @@ function updateDialogState(state: DialogState, text: string, speaker: "hon" | "g
 // Generate state context for HINT prompt - includes current request, answered slots, and forbidden intents
 function getStateContext(state: DialogState): string {
   const parts: string[] = [];
-  
+
+  // WAIT STATE: highest priority — block all STEER, only ACK allowed
+  if (state.waitingForInfo) {
+    if (state.waitAckShown) {
+      parts.push(`⛔ WAIT STATE ACTIVE: Guest is still checking. You ALREADY gave one acknowledgment. Now return EMPTY suggestion (no text). DO NOT push, DO NOT ask, DO NOT rephrase.`);
+    } else {
+      parts.push(`⛔ WAIT STATE ACTIVE: Guest just said "let me check" / "one moment". Your ONLY allowed reply is a SHORT acknowledgment: "Sure, thank you." or "Okay, thank you." NOTHING ELSE. No questions. No rephrasing of the request.`);
+    }
+  }
+
   // TASK 1: Anti-loop - passive response warning
-  if (state.passiveResponseCount >= 1) {
+  if (state.passiveResponseCount >= 1 && !state.waitingForInfo) {
     parts.push(`⚠️ PASSIVE BLOCK: You already said a passive phrase (wait/hold). You MUST now STEER or ASSERT. NO MORE: "I'll wait" / "take your time" / "let me know"`);
   }
   
@@ -846,9 +875,26 @@ export async function processTrainingTurn(
     
     // STEP 2: Update dialog state based on GST response (BEFORE calling HINT)
     session.dialogState = updateDialogState(session.dialogState, gstText, "gst");
-    
+
+    // WAIT STATE detection (mirrors LIVE mode)
+    // Exit takes priority — if GST gives real answer, leave wait state first
+    if (session.dialogState.waitingForInfo && EXIT_WAIT_PATTERNS.test(gstText)) {
+      session.dialogState.waitingForInfo = false;
+      session.dialogState.waitAckShown = false;
+      console.log(`[Training] [WAIT_STATE] Exited — GST gave real content`);
+    } else if (WAIT_PATTERNS.test(gstText)) {
+      // Enter (or stay in) wait state
+      if (!session.dialogState.waitingForInfo) {
+        session.dialogState.waitingForInfo = true;
+        session.dialogState.waitAckShown = false;
+        console.log(`[Training] [WAIT_STATE] Entered — GST is checking`);
+      } else {
+        console.log(`[Training] [WAIT_STATE] Still active — GST still checking`);
+      }
+    }
+
     console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
-    console.log(`[Training] State: lastGuestRequest=${session.dialogState.lastGuestRequest}, answered=${session.dialogState.answeredSlots.join(",")}`);
+    console.log(`[Training] State: lastGuestRequest=${session.dialogState.lastGuestRequest}, answered=${session.dialogState.answeredSlots.join(",")}, waiting=${session.dialogState.waitingForInfo}/${session.dialogState.waitAckShown}`);
     
     // Get state context for HINT (now includes what GST just asked)
     const stateContext = getStateContext(session.dialogState);
@@ -936,7 +982,26 @@ export async function processTrainingTurn(
     
     const totalMs = Date.now() - startTime;
     console.log(`[Training] Hint (${hintMs}ms): "${hint.suggestion}" | achieved=${hint.goal_state.achieved} | Total: ${totalMs}ms`);
-    
+
+    // WAIT STATE override (deterministic — don't trust GPT to follow prompt)
+    if (session.dialogState.waitingForInfo) {
+      if (!session.dialogState.waitAckShown) {
+        // First wait turn: force a single short ACK
+        const ackEn = "Sure, thank you.";
+        const ackRu = session.hintLanguage === "es" ? "Claro, gracias." : "Конечно, спасибо.";
+        hint.suggestion = ackEn;
+        hint.translation = ackRu;
+        hint.goal_state.achieved = false;
+        session.dialogState.waitAckShown = true;
+        console.log(`[Training] [WAIT_STATE] Forced ACK suggestion`);
+      } else {
+        // Already acked — return empty (no new hint while waiting)
+        hint.suggestion = "";
+        hint.translation = "";
+        console.log(`[Training] [BLOCKED] reason=wait_state — already acked, suppressing hint`);
+      }
+    }
+
     // TASK 1 & 2: Check if hint has steering content
     const hasSteering = hint.suggestion && containsSteering(hint.suggestion);
     const isPassive = hint.suggestion && isPassiveResponse(hint.suggestion);
@@ -958,7 +1023,8 @@ export async function processTrainingTurn(
     }
     
     // TASK 2: Mandatory steering enforcement - add fallback question if no steering
-    if (hint.suggestion && !hasSteering && !isPassive && !hint.goal_state.achieved) {
+    // SKIP when in wait state — we deliberately want a non-steering ACK
+    if (hint.suggestion && !hasSteering && !isPassive && !hint.goal_state.achieved && !session.dialogState.waitingForInfo) {
       // Append a steering question based on goal context
       const fallbackQuestions = [
         "What works best for you?",
@@ -975,7 +1041,7 @@ export async function processTrainingTurn(
     let responseType: "HOLD" | "STEER" | "CLOSE" = "STEER";
     if (hint.goal_state.achieved) {
       responseType = "CLOSE";
-    } else if (isPassive) {
+    } else if (session.dialogState.waitingForInfo || isPassive) {
       responseType = "HOLD";
     } else if (hasSteering || hint.suggestion?.includes("?")) {
       responseType = "STEER";
