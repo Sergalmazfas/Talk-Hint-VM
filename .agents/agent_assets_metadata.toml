@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "JmNOu1_JtTeADCutOEgIp"
+uri = "file://TRAINING_PIPELINE_AUDIT.md"
+type = "text"
+title = "TalkHint Training Pipeline Audit (May 2026)"
