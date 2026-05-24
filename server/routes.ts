@@ -787,6 +787,27 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     console.log("  apiKey:", apiKey?.substring(0, 10) + "...");
     console.log("  twimlApp:", TWILIO_TWIML_APP_SID?.substring(0, 10) + "...");
     console.log("  callerId:", TWILIO_PHONE_NUMBER || "NOT SET");
+
+    // Fire-and-forget pre-warm: kills 500-1500ms OpenAI cold-start tax on the
+    // first hint. Runs during the 3-10s PSTN ringing window so it's free latency.
+    if (process.env.OPENAI_API_KEY) {
+      fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          max_tokens: 1,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+        signal: AbortSignal.timeout(3000),
+      })
+        .then((r) => console.log(r.ok ? "[prewarm] OpenAI warmed" : `[prewarm] OpenAI warm-up non-2xx: ${r.status}`))
+        .catch((e: any) => console.warn("[prewarm] OpenAI warm-up failed (non-critical):", e.message));
+    }
+
     res.json({ token: token.toJwt(), identity });
   });
 

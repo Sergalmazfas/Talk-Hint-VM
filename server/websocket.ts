@@ -153,8 +153,12 @@ Guest just spoke.
 1) Translate guest's words to ${langName}. 
 2) Suggest what user should say next - a short reply IN ENGLISH (under 15 words) that moves toward the goal.
 3) Translate that suggestion to ${langName}.
+4) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
 
-Return JSON: {"translation":"guest's words in ${langName}", "suggestion":{"en":"reply in ENGLISH", "translation":"same reply in ${langName}"}}`
+Return JSON only, no markdown:
+{"translation":"guest's words in ${langName}",
+ "suggestion":{"en":"reply in ENGLISH","translation":"same reply in ${langName}"},
+ "sentiment":"positive|neutral|negative|urgent|confused"}`
           },
           {
             role: "user",
@@ -182,10 +186,17 @@ Remember: Your suggestion must ADVANCE the goal above. If guest said "let me che
     
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      const sentimentRaw = typeof parsed.sentiment === "string" ? parsed.sentiment.toLowerCase().trim() : "";
+      const validSentiment = ["positive", "neutral", "negative"].includes(sentimentRaw)
+        ? (sentimentRaw as "positive" | "neutral" | "negative")
+        : (sentimentRaw === "urgent" || sentimentRaw === "confused")
+          ? "negative"
+          : undefined;
       return {
         translation: parsed.translation || "",
         explanation: parsed.explanation || undefined,
         suggestion: parsed.suggestion || undefined,
+        sentiment: validSentiment ? { sentiment: validSentiment, score: 1 } : undefined,
       };
     }
     
@@ -941,7 +952,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         // ===== ANTI-LOOP GUARD: Duplicate suggestion check =====
         if (lastSuggestionText) {
           const similarity = textSimilarity(suggestionText, lastSuggestionText);
-          if (similarity > 0.8) {
+          if (similarity > 0.7) {
             log(`[BLOCKED] reason=duplicate_suggestion similarity=${(similarity * 100).toFixed(0)}% - too similar to last`, "websocket");
             return;
           }
@@ -1064,7 +1075,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       log(`[DG] ${track}: connecting...`, "deepgram");
       
       // Use raw WebSocket for more control
-      const dgUrl = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&encoding=mulaw&sample_rate=8000&channels=1&interim_results=true&punctuate=true&vad_events=true";
+      const dgUrl = "wss://api.deepgram.com/v1/listen?model=nova-3&language=en-US&encoding=mulaw&sample_rate=8000&channels=1&interim_results=true&punctuate=true&vad_events=true";
       
       let keepaliveInterval: NodeJS.Timeout | null = null;
       let reconnectAttempts = 0;
@@ -1401,107 +1412,5 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     });
   }
   
-  // Filler phrases to use during GPT thinking time
-  const FILLER_PHRASES = [
-    { en: "Hmm, let me think...", ru: "Хмм, дайте подумать..." },
-    { en: "Oh, that's interesting...", ru: "О, это интересно..." },
-    { en: "I see, and so...", ru: "Понятно, и так..." },
-    { en: "Right, right...", ru: "Да, да..." },
-    { en: "Uh-huh, go on...", ru: "Угу, продолжайте..." },
-    { en: "Well, you know...", ru: "Ну, знаете..." },
-  ];
-  
-  let lastFillerTime = 0;
-  let fillerIndex = 0;
-  
-  function getNextFiller(): { en: string; ru: string } {
-    const filler = FILLER_PHRASES[fillerIndex % FILLER_PHRASES.length];
-    fillerIndex++;
-    return filler;
-  }
-  
-  // Send a filler phrase to keep conversation flowing
-  function sendFiller() {
-    const now = Date.now();
-    if (now - lastFillerTime < 5000) return; // Don't send fillers too often
-    
-    lastFillerTime = now;
-    const filler = getNextFiller();
-    uiBroadcast({ 
-      type: "filler", 
-      text: filler.en, 
-      translation: filler.ru 
-    });
-    log(`Filler: ${filler.en}`, "openai");
-  }
-  
-  // Generate AI hints based on conversation
-  async function generateHints(history: { role: string; text: string }[]) {
-    if (history.length < 1) return;
-    
-    const recentContext = history.slice(-5).map(h => `${h.role}: ${h.text}`).join("\n");
-    const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
-    
-    // Start a timer for filler phrase
-    const fillerTimer = setTimeout(() => sendFiller(), 2000);
-    
-    try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `${TALKHINT_GOLDEN_PROMPT}
-
-USER'S CALL GOAL: ${currentGoal || "Have a successful conversation"}
-
-This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
-
-Based on the conversation, give 1-2 SHORT phrases the user should SAY next.
-Each phrase must move toward the GOAL above.
-Each phrase must be under 15 words.
-Include ${langName} translation.
-
-Return JSON only:
-{"hints": [{"en": "English phrase to say", "translation": "${langName} translation"}]}`
-            },
-            {
-              role: "user",
-              content: `Goal: ${currentGoal || "Have a successful conversation"}\n\nRecent conversation:\n${recentContext}\n\nWhat should user say next to achieve their goal?`
-            }
-          ],
-          temperature: 0.5,
-          max_tokens: 200,
-        }),
-      });
-      
-      clearTimeout(fillerTimer);
-      
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices[0]?.message?.content;
-        
-        try {
-          const parsed = JSON.parse(content);
-          if (parsed.hints) {
-            uiBroadcast({ type: "hints", hints: parsed.hints });
-            log(`Generated ${parsed.hints.length} hints`, "openai");
-          }
-        } catch {
-          log("Failed to parse hints JSON", "openai");
-        }
-      }
-    } catch (err: any) {
-      clearTimeout(fillerTimer);
-      log(`Hint generation error: ${err.message}`, "openai");
-    }
-  }
-
   return wss;
 }

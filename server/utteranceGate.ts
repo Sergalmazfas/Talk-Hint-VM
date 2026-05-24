@@ -28,7 +28,13 @@ interface IngestResult {
   utteranceId: number;
 }
 
-const END_SILENCE_MS = 1000;  // 800-1200ms optimal for detecting end of speech
+// Time to wait for additional audio after a FINAL transcript before flushing.
+// Deepgram VAD's UtteranceEnd fires ~250ms after speech stops and force-flushes
+// immediately (see websocket.ts forceFlush handler), so this is just a safety net.
+const END_SILENCE_AFTER_FINAL_MS = 500;
+// Time to wait after a PARTIAL transcript when no final has arrived yet.
+// Keep larger — protects mid-sentence pauses from being treated as end-of-speech.
+const END_SILENCE_AFTER_PARTIAL_MS = 1000;
 const MIN_CHARS = 10;
 const MAX_BUFFER_CHARS = 400;
 
@@ -110,7 +116,7 @@ export class UtteranceGate {
         if (result.shouldGenerate) {
           console.log(`[utteranceGate] speaker=${speaker} silence_timeout -> generate=true`);
         }
-      }, END_SILENCE_MS);
+      }, END_SILENCE_AFTER_FINAL_MS);
       
       return {
         shouldGenerate: false,
@@ -134,7 +140,7 @@ export class UtteranceGate {
         } else {
           console.log(`[utteranceGate] speaker=${speaker} partial_silence_timeout -> skipped (no final in utterance)`);
         }
-      }, END_SILENCE_MS);
+      }, END_SILENCE_AFTER_PARTIAL_MS);
       
       return {
         shouldGenerate: false,
