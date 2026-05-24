@@ -1872,8 +1872,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       // Determine content type
       const contentType = mimeType || "audio/webm";
       
-      // Call Deepgram prerecorded API
-      const response = await fetch("https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true", {
+      // Call Deepgram prerecorded API — nova-3 is Deepgram's fastest model for English
+      const response = await fetch("https://api.deepgram.com/v1/listen?model=nova-3&language=en&punctuate=true", {
         method: "POST",
         headers: {
           "Authorization": `Token ${DEEPGRAM_API_KEY}`,

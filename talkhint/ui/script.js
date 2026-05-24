@@ -2951,7 +2951,10 @@ async function startRecording() {
     
     log('[Mic] Using mime type: ' + (mimeType || 'default'));
     
-    const options = mimeType ? { mimeType } : {};
+    // 32 kbps opus is enough for clean speech and cuts upload size 3-4x
+    const options = mimeType
+      ? { mimeType, audioBitsPerSecond: 32000 }
+      : { audioBitsPerSecond: 32000 };
     mediaRecorder = new MediaRecorder(stream, options);
     audioChunks = [];
     
@@ -2977,7 +2980,14 @@ async function startRecording() {
       
       const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
       log('[Mic] Audio blob size: ' + audioBlob.size + ' bytes');
-      
+
+      // Skip tiny/empty blobs (spurious taps) — avoids Deepgram 400 "corrupt data" errors
+      if (audioBlob.size < 2000) {
+        log('[Mic] Blob too small, skipping transcription');
+        UI.micBtn.classList.remove('processing');
+        return;
+      }
+
       // Convert to base64 and send to STT
       const base64Audio = await blobToBase64(audioBlob);
       await sendAudioForTranscription(base64Audio, mimeType || 'audio/webm');
