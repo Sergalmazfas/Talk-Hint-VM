@@ -1,4 +1,5 @@
-# TalkHint v2 - Real-time Voice Assistant
+# TalkHint v2 - Real-time Voice Ass
+istant
 
 ## Overview
 TalkHint is an AI-powered real-time voice assistant designed for phone calls. It offers live transcription, translation hints, and GPT-powered suggestions during conversations. The system integrates Twilio for call handling, Deepgram for speech-to-text, and OpenAI's Realtime API for AI assistance. TalkHint v2 introduces subscription-based plans with Stripe, focusing on a simplified Basic plan. The project aims to provide an advanced conversational AI experience, enhancing communication efficiency and effectiveness for users during phone interactions.
@@ -27,6 +28,9 @@ The system incorporates a Goal State Engine, a state machine that tracks convers
 ### Build and Deployment
 Vite is used for frontend bundling, while esbuild handles server bundling with selective dependency inclusion for optimized cold starts. Graceful shutdowns are managed with SIGTERM/SIGINT handlers. For production voice calls, Reserved VM Deployment is recommended to ensure consistent uptime for WebSocket connections, avoiding issues with autoscaling.
 
+### Stripe Integration (Manual)
+Stripe runs in **manual mode** — no Replit Stripe connector / `stripe-replit-sync` package. The backend uses only `STRIPE_SECRET_KEY` (server) and `STRIPE_PUBLISHABLE_KEY` (client). Webhook signature is verified manually via `stripe.webhooks.constructEvent` using `STRIPE_WEBHOOK_SECRET`. The webhook endpoint must be registered manually in the Stripe Dashboard (`/api/stripe/webhook`) for events `checkout.session.completed` and `customer.subscription.created/updated/deleted`. Product/subscription data is fetched directly from the Stripe API on demand (no DB sync schema).
+
 ## External Dependencies
 
 ### Voice & Telephony
@@ -41,6 +45,9 @@ Vite is used for frontend bundling, while esbuild handles server bundling with s
 ### Database
 - **PostgreSQL**: Primary database.
 - **Drizzle ORM**: Used for database interactions and migrations.
+
+### Payments
+- **Stripe** (manual): `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`. No Replit Stripe connector.
 
 ### Utilities
 - **FFmpeg**: System dependency for audio format conversions.
