@@ -111,7 +111,7 @@ export async function sendIncomingCallPush(
   fromNumber: string,
   callSid: string
 ): Promise<number> {
-  return sendPushToUser(userId, {
+  const webResult = await sendPushToUser(userId, {
     title: '📞 Incoming Call',
     body: `From ${fromNumber}`,
     icon: '/icon-192.png',
@@ -125,6 +125,17 @@ export async function sendIncomingCallPush(
       url: `/app?incoming=1&callSid=${callSid}`,
     },
   });
+
+  // New: also dispatch via multi-channel router (iOS and future platforms)
+  try {
+    const { routeIncomingCallPush } = await import('./pushChannels/router');
+    const result = await routeIncomingCallPush({ callSid, fromNumber, userId });
+    console.log(`[Push] Multi-channel router: sent=${result.sent}, failed=${result.failed}`);
+  } catch (e: any) {
+    console.error(`[Push] Router error (non-fatal):`, e.message);
+  }
+
+  return webResult;
 }
 
 export function getVapidPublicKey(): string | undefined {

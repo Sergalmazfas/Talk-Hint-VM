@@ -16,9 +16,9 @@ import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
-import { pendingCalls, users, phoneNumbers } from "@shared/schema";
+import { pendingCalls, users, phoneNumbers, deviceTokens } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -577,6 +577,84 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       res.json({ success: true, message: "Subscription saved" });
     } catch (error: any) {
       console.error("[Push] Subscribe error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Generic device token registration (platform-agnostic)
+  // Used by iOS app, future Android app, etc.
+  app.post("/api/devices/register", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { platform, token, bundleId, appVersion, deviceModel, environment } = req.body;
+
+      if (!platform || !token) {
+        return res.status(400).json({ error: "platform and token required" });
+      }
+
+      const allowedPlatforms = ["ios", "android"];
+      if (!allowedPlatforms.includes(platform)) {
+        return res.status(400).json({ error: `platform must be one of: ${allowedPlatforms.join(", ")}` });
+      }
+
+      await db.insert(deviceTokens).values({
+        userId: user.id,
+        platform,
+        token,
+        bundleId: bundleId || null,
+        appVersion: appVersion || null,
+        deviceModel: deviceModel || null,
+        environment: environment || "production",
+        isActive: true,
+      }).onConflictDoUpdate({
+        target: [deviceTokens.token, deviceTokens.platform],
+        set: {
+          userId: user.id,
+          bundleId: bundleId || null,
+          appVersion: appVersion || null,
+          deviceModel: deviceModel || null,
+          environment: environment || "production",
+          isActive: true,
+          lastUsedAt: new Date(),
+        },
+      });
+
+      console.log(`[Devices] Registered ${platform} device for user ${user.id}`);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Devices] Register error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/devices/unregister", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      if (!user) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      const { token, platform } = req.body;
+      if (!token || !platform) {
+        return res.status(400).json({ error: "token and platform required" });
+      }
+
+      await db.delete(deviceTokens).where(
+        and(
+          eq(deviceTokens.userId, user.id),
+          eq(deviceTokens.token, token),
+          eq(deviceTokens.platform, platform)
+        )
+      );
+
+      console.log(`[Devices] Unregistered ${platform} device for user ${user.id}`);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Devices] Unregister error:", error);
       res.status(500).json({ error: error.message });
     }
   });
