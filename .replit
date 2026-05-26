@@ -63,8 +63,6 @@ args = "cd mobile && npm install --legacy-peer-deps && node start-tunnel.js"
 
 [agent]
 mockupState = "FULLSTACK"
-integrations = ["stripe:2.0.0", "javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0"]
-
 [userenv]
 
 [userenv.shared]
