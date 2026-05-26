@@ -450,107 +450,87 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(calls);
   }
   
-  // Stripe queries from stripe schema
+  // Stripe queries (direct Stripe API; no sync schema)
   async getProduct(productId: string): Promise<any> {
-    const result = await db.execute(
-      sql`SELECT * FROM stripe.products WHERE id = ${productId}`
-    );
-    return result.rows[0] || null;
-  }
-  
-  async getSubscription(subscriptionId: string): Promise<any> {
-    const result = await db.execute(
-      sql`SELECT * FROM stripe.subscriptions WHERE id = ${subscriptionId}`
-    );
-    return result.rows[0] || null;
-  }
-  
-  async listProducts(active = true): Promise<any[]> {
-    const result = await db.execute(
-      sql`SELECT * FROM stripe.products WHERE active = ${active}`
-    );
-    return result.rows;
-  }
-  
-  async listProductsWithPrices(active = true): Promise<any[]> {
-    let result: any = { rows: [] };
-    
-    // Try database cache first
+    const { getUncachableStripeClient } = await import("./stripeClient");
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) return null;
     try {
-      result = await db.execute(
-        sql`
-          SELECT 
-            p.id as product_id,
-            p.name as product_name,
-            p.description as product_description,
-            p.metadata as product_metadata,
-            pr.id as price_id,
-            pr.unit_amount,
-            pr.currency,
-            pr.recurring
-          FROM stripe.products p
-          LEFT JOIN stripe.prices pr ON pr.product = p.id AND pr.active = true
-          WHERE p.active = ${active}
-          ORDER BY pr.unit_amount
-        `
-      );
-    } catch (dbErr) {
-      console.log("[Storage] Stripe cache query failed, falling back to API:", (dbErr as Error).message);
+      return await stripe.products.retrieve(productId);
+    } catch (err) {
+      console.error("[Storage] getProduct error:", (err as Error).message);
+      return null;
     }
-    
-    // Fallback to direct Stripe API if sync cache is empty or failed
-    if (result.rows.length === 0) {
-      console.log("[Storage] Stripe cache empty, fetching from API...");
-      try {
-        const { getUncachableStripeClient } = await import("./stripeClient");
-        const stripe = await getUncachableStripeClient();
-        if (!stripe) {
-          console.log("[Storage] No Stripe client available for fallback");
-          return [];
-        }
-        
-        console.log("[Storage] Stripe client obtained, fetching products...");
-        const products = await stripe.products.list({ active, limit: 20 });
-        console.log("[Storage] Got", products.data.length, "products from Stripe");
-        const rows: any[] = [];
-        
-        for (const p of products.data) {
-          const prices = await stripe.prices.list({ product: p.id, active: true, limit: 10 });
-          if (prices.data.length === 0) {
+  }
+
+  async getSubscription(subscriptionId: string): Promise<any> {
+    const { getUncachableStripeClient } = await import("./stripeClient");
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) return null;
+    try {
+      return await stripe.subscriptions.retrieve(subscriptionId);
+    } catch (err) {
+      console.error("[Storage] getSubscription error:", (err as Error).message);
+      return null;
+    }
+  }
+
+  async listProducts(active = true): Promise<any[]> {
+    const { getUncachableStripeClient } = await import("./stripeClient");
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) return [];
+    try {
+      const products = await stripe.products.list({ active, limit: 100 });
+      return products.data;
+    } catch (err) {
+      console.error("[Storage] listProducts error:", (err as Error).message);
+      return [];
+    }
+  }
+
+  async listProductsWithPrices(active = true): Promise<any[]> {
+    const { getUncachableStripeClient } = await import("./stripeClient");
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) {
+      console.log("[Storage] No Stripe client available");
+      return [];
+    }
+    try {
+      const products = await stripe.products.list({ active, limit: 20 });
+      const rows: any[] = [];
+      for (const p of products.data) {
+        const prices = await stripe.prices.list({ product: p.id, active: true, limit: 10 });
+        if (prices.data.length === 0) {
+          rows.push({
+            product_id: p.id,
+            product_name: p.name,
+            product_description: p.description,
+            product_metadata: p.metadata,
+            price_id: null,
+            unit_amount: null,
+            currency: null,
+            recurring: null,
+          });
+        } else {
+          for (const pr of prices.data) {
             rows.push({
               product_id: p.id,
               product_name: p.name,
               product_description: p.description,
               product_metadata: p.metadata,
-              price_id: null,
-              unit_amount: null,
-              currency: null,
-              recurring: null
+              price_id: pr.id,
+              unit_amount: pr.unit_amount,
+              currency: pr.currency,
+              recurring: pr.recurring,
             });
-          } else {
-            for (const pr of prices.data) {
-              rows.push({
-                product_id: p.id,
-                product_name: p.name,
-                product_description: p.description,
-                product_metadata: p.metadata,
-                price_id: pr.id,
-                unit_amount: pr.unit_amount,
-                currency: pr.currency,
-                recurring: pr.recurring
-              });
-            }
           }
         }
-        console.log("[Storage] Fetched", rows.length, "products from Stripe API");
-        return rows;
-      } catch (err) {
-        console.error("[Storage] Stripe API fallback error:", err);
-        return [];
       }
+      return rows;
+    } catch (err) {
+      console.error("[Storage] listProductsWithPrices error:", (err as Error).message);
+      return [];
     }
-    
-    return result.rows;
   }
   
   // Sessions

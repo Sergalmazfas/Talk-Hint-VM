@@ -1,4 +1,4 @@
-import { getStripeSync, getUncachableStripeClient } from './stripeClient';
+import { getUncachableStripeClient } from './stripeClient';
 import { storage } from './storage';
 
 // SIMPLIFIED: All subscriptions = Basic plan
@@ -20,24 +20,27 @@ export class WebhookHandlers {
       );
     }
 
-    const sync = await getStripeSync();
-    if (!sync) {
-      console.error('[Webhook] Stripe sync not available');
-      return;
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) {
+      // Throw so route returns non-2xx and Stripe retries
+      throw new Error('[Webhook] Stripe client not available (STRIPE_SECRET_KEY missing)');
     }
-    
-    // Process webhook via Replit sync (handles signature verification internally)
-    const event = await sync.processWebhook(payload, signature);
-    
-    // Handle subscription events
+
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.error('[Webhook] STRIPE_WEBHOOK_SECRET not set - cannot verify signature');
+      throw new Error('STRIPE_WEBHOOK_SECRET not configured');
+    }
+
+    // Manually verify signature and parse event
+    const event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+
     if (event) {
       await this.handleSubscriptionEvents(event);
     }
   }
   
   static async handleSubscriptionEvents(event: any): Promise<void> {
-    const stripe = await getUncachableStripeClient();
-    
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;

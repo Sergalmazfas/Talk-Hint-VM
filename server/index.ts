@@ -2,8 +2,6 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { runMigrations } from "stripe-replit-sync";
-import { getStripeSync } from "./stripeClient";
 import { WebhookHandlers } from "./webhookHandlers";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { storage } from "./storage";
@@ -117,45 +115,15 @@ async function seedUserAssignedNumber() {
   }
 }
 
-async function initStripe() {
-  // In production, prefer PROD_DATABASE_URL over DATABASE_URL
-  const isProduction = process.env.NODE_ENV === "production";
-  const databaseUrl = (isProduction && process.env.PROD_DATABASE_URL)
-    ? process.env.PROD_DATABASE_URL
-    : process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    console.log("[Stripe] DATABASE_URL not set, skipping Stripe init");
+function initStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    console.log("[Stripe] STRIPE_SECRET_KEY not set - Stripe disabled");
     return;
   }
-
-  try {
-    console.log("[Stripe] Initializing schema...");
-    await runMigrations({ databaseUrl });
-    console.log("[Stripe] Schema ready");
-
-    const stripeSync = await getStripeSync();
-    
-    if (!stripeSync) {
-      console.log("[Stripe] Stripe not configured - skipping webhook and sync");
-      return;
-    }
-
-    const replitDomains = process.env.REPLIT_DOMAINS;
-    if (replitDomains) {
-      console.log("[Stripe] Setting up managed webhook...");
-      const webhookBaseUrl = `https://${replitDomains.split(",")[0]}`;
-      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-      console.log("[Stripe] Webhook configured");
-    } else {
-      console.log("[Stripe] REPLIT_DOMAINS not set, skipping webhook setup (local dev)");
-    }
-
-    stripeSync.syncBackfill()
-      .then(() => console.log("[Stripe] Data synced"))
-      .catch((err: any) => console.error("[Stripe] Sync error:", err));
-  } catch (error) {
-    console.error("[Stripe] Init error:", error);
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    console.log("[Stripe] STRIPE_WEBHOOK_SECRET not set - webhook signature verification will fail");
   }
+  console.log("[Stripe] Manual mode (no Replit connector). Configure webhook in Stripe Dashboard.");
 }
 
 app.post(
@@ -256,11 +224,7 @@ app.use((req, res, next) => {
   }
   
   if (dbConnected) {
-    try {
-      await initStripe();
-    } catch (e: any) {
-      console.error("[Server] Stripe init failed:", e.message);
-    }
+    initStripe();
     
     // Only run seed in development mode OR when explicitly requested via RUN_SEED=true
     // NEVER run seed automatically in production - it causes deployment failures
