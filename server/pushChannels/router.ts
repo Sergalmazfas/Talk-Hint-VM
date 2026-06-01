@@ -2,7 +2,7 @@ import { db } from "../db";
 import { deviceTokens } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { PushChannel, IncomingCallPushPayload } from "./types";
-import { IOSPushChannel } from "./iosPushChannel";
+import { IOSPushChannel, TerminalTokenError } from "./iosPushChannel";
 
 // Web push is intentionally NOT registered here — it requires p256dh/auth keys
 // that are not stored in device_tokens. Web dispatch is handled by the legacy
@@ -43,10 +43,22 @@ export async function routeIncomingCallPush(
       continue;
     }
     try {
-      await channel.sendIncomingCall(t.token, payload);
+      await channel.sendIncomingCall(t.token, payload, {
+        environment: t.environment ?? "production",
+      });
       sent++;
     } catch (e: any) {
-      console.error(`[Push Router] Failed to send via ${t.platform}:`, e.message);
+      if (e instanceof TerminalTokenError) {
+        console.warn(
+          `[Push Router] Deactivating dead ${t.platform} token (reason=${e.reason})`
+        );
+        await db
+          .update(deviceTokens)
+          .set({ isActive: false })
+          .where(eq(deviceTokens.id, t.id));
+      } else {
+        console.error(`[Push Router] Failed to send via ${t.platform}:`, e.message);
+      }
       failed++;
     }
   }
