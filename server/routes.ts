@@ -664,22 +664,31 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     try {
       const user = (req as any).user;
       const { callSid } = req.body;
+      // clientType tells the hold loop how to bridge: "browser" (default) -> <Dial><Client>,
+      // "ios" -> caller joins a conference that the iOS app connects into outbound.
+      const clientType = req.body.clientType === "ios" ? "ios" : "browser";
 
       if (!callSid) {
         return res.status(400).json({ error: "callSid required" });
       }
 
-      // Update the status - the hold loop will detect this and put caller in conference
-      await db.update(pendingCalls)
-        .set({ status: "accepted" })
-        .where(eq(pendingCalls.callSid, callSid));
+      // Ownership check: only the user who owns this pending call may accept it.
+      const updated = await db.update(pendingCalls)
+        .set({ status: "accepted", clientType })
+        .where(and(eq(pendingCalls.callSid, callSid), eq(pendingCalls.userId, user.id)))
+        .returning({ id: pendingCalls.id });
+
+      if (updated.length === 0) {
+        console.warn(`[Call] Accept denied - no pending call ${callSid} owned by user ${user.id}`);
+        return res.status(404).json({ error: "Pending call not found" });
+      }
 
       const timestamp = new Date().toISOString();
-      console.log(`[Call] ${callSid} @ ${timestamp} - Accept received, status changed to 'accepted'`);
+      console.log(`[Call] ${callSid} @ ${timestamp} - Accept received (clientType=${clientType}), status changed to 'accepted'`);
       
-      // Return conference name so browser can join
+      // Return conference name so the client can join (iOS uses it for outbound connect)
       const conferenceRoom = `call-${callSid}`;
-      res.json({ success: true, status: "accepted", conference: conferenceRoom });
+      res.json({ success: true, status: "accepted", clientType, conference: conferenceRoom });
     } catch (error: any) {
       console.error("[Call] Accept error:", error);
       res.status(500).json({ error: error.message });
@@ -688,16 +697,23 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
 
   app.post("/api/call/reject", authMiddleware, async (req, res) => {
     try {
+      const user = (req as any).user;
       const { callSid } = req.body;
 
       if (!callSid) {
         return res.status(400).json({ error: "callSid required" });
       }
 
-      // Update pending call status
-      await db.update(pendingCalls)
+      // Ownership check: only the user who owns this pending call may reject it.
+      const updated = await db.update(pendingCalls)
         .set({ status: "rejected" })
-        .where(eq(pendingCalls.callSid, callSid));
+        .where(and(eq(pendingCalls.callSid, callSid), eq(pendingCalls.userId, user.id)))
+        .returning({ id: pendingCalls.id });
+
+      if (updated.length === 0) {
+        console.warn(`[Call] Reject denied - no pending call ${callSid} owned by user ${user.id}`);
+        return res.status(404).json({ error: "Pending call not found" });
+      }
 
       // Hangup the call
       const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
@@ -742,15 +758,12 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       console.log(`[Hold] Call ${callSid} status: ${pendingCall.status}, expired: ${isExpired}`);
       
       if (pendingCall.status === "accepted") {
-        // User accepted - connect caller to user's browser client
-        const callUserId = pendingCall.userId || userId;
-        const clientIdentity = `user-${callUserId}`;
-        console.log(`[Hold] ${callSid} ACCEPTED - route=BROWSER, connecting to client:${clientIdentity}`);
-        
         const host = req.get("host") || "talkhint.app";
         const streamUrl = `wss://${host}/twilio-stream`;
         
-        // Start media stream for transcription
+        // Start media stream for transcription. The caller leg with both_tracks
+        // captures the caller's audio plus whatever is played to the caller (the
+        // bridged agent), so transcription works for both client and conference paths.
         const start = twimlResponse.start();
         start.stream({
           url: streamUrl,
@@ -759,16 +772,41 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         
         twimlResponse.say({ voice: "alice" }, "Connecting you now.");
         
-        // Dial user's browser client (not PSTN forwarding)
-        const dial = twimlResponse.dial({
-          callerId: pendingCall.fromNumber || "",
-          answerOnBridge: true,
-          timeout: CALL_TIMEOUT,
-          timeLimit: CALL_TIME_LIMIT
-        });
-        dial.client(clientIdentity);
-        
-        console.log(`[Hold] ${callSid} DIALING browser client: ${clientIdentity} | streamUrl: ${streamUrl}`);
+        if (pendingCall.clientType === "ios") {
+          // iOS path: caller joins a per-call conference and waits. The iOS app
+          // connects into the same conference via an outbound Twilio connect()
+          // (handled in /twilio/voice), bridging the two legs.
+          const conferenceRoom = `call-${callSid}`;
+          console.log(`[Hold] ${callSid} ACCEPTED - route=IOS, caller joining conference: ${conferenceRoom}`);
+          
+          const dial = twimlResponse.dial({
+            callerId: pendingCall.fromNumber || "",
+            timeLimit: CALL_TIME_LIMIT
+          });
+          dial.conference({
+            startConferenceOnEnter: false, // caller waits until the iOS agent joins
+            endConferenceOnExit: true,     // end the call when the caller hangs up
+            beep: "false",
+          }, conferenceRoom);
+          
+          console.log(`[Hold] ${callSid} CONFERENCE bridge ready: ${conferenceRoom} | streamUrl: ${streamUrl}`);
+          
+        } else {
+          // Browser path (unchanged): dial the user's browser client directly.
+          const callUserId = pendingCall.userId || userId;
+          const clientIdentity = `user-${callUserId}`;
+          console.log(`[Hold] ${callSid} ACCEPTED - route=BROWSER, connecting to client:${clientIdentity}`);
+          
+          const dial = twimlResponse.dial({
+            callerId: pendingCall.fromNumber || "",
+            answerOnBridge: true,
+            timeout: CALL_TIMEOUT,
+            timeLimit: CALL_TIME_LIMIT
+          });
+          dial.client(clientIdentity);
+          
+          console.log(`[Hold] ${callSid} DIALING browser client: ${clientIdentity} | streamUrl: ${streamUrl}`);
+        }
         
       } else if (pendingCall.status === "rejected" || isExpired) {
         // User rejected or timeout
@@ -898,6 +936,8 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     const customCallerId = req.body.CallerId;
     const callSid = req.body.CallSid;
     const direction = req.body.Direction || "unknown";
+    // Custom param from a client outbound connect() to join a call conference (iOS path)
+    const joinConferenceRoom = req.body.conferenceRoom as string | undefined;
     
     const timestamp = new Date().toISOString();
     console.log(`[TwiML Voice] ===== CALL ${callSid} @ ${timestamp} =====`);
@@ -950,7 +990,57 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       }
     }
 
-    if (ownerUserId) {
+    if (isFromBrowser && joinConferenceRoom) {
+      // CLIENT CONFERENCE JOIN (iOS path): the app's outbound connect() joins the
+      // per-call conference. The held PSTN caller is placed into the same conference
+      // by the hold loop, bridging the two legs without dialing the client directly.
+      //
+      // Authorization: `fromNumber` is the Twilio client identity ("client:user-{id}"),
+      // which Twilio derives from the signed access token and cannot be spoofed by the
+      // client. We verify the conference's owning pending call belongs to that same user,
+      // is accepted, and is an iOS call before allowing the join — this blocks a user
+      // from joining (eavesdropping/hijacking) another user's call by guessing a callSid.
+      let joinAuthorized = false;
+      const identity = fromNumber.replace(/^client:/, ""); // e.g. "user-123"
+      const roomCallSid = joinConferenceRoom.startsWith("call-")
+        ? joinConferenceRoom.slice("call-".length)
+        : null;
+
+      if (roomCallSid && identity.startsWith("user-")) {
+        const joiningUserId = identity.slice("user-".length);
+        try {
+          const [pending] = await db.select()
+            .from(pendingCalls)
+            .where(eq(pendingCalls.callSid, roomCallSid))
+            .limit(1);
+          joinAuthorized = !!pending
+            && pending.userId === joiningUserId
+            && pending.status === "accepted"
+            && pending.clientType === "ios";
+          if (!joinAuthorized) {
+            console.warn(`[TwiML Voice] CONFERENCE JOIN denied for ${fromNumber} -> ${joinConferenceRoom} (pending owner/status/type mismatch)`);
+          }
+        } catch (e) {
+          console.error("[TwiML Voice] Error validating conference join:", e);
+        }
+      } else {
+        console.warn(`[TwiML Voice] CONFERENCE JOIN denied - malformed identity/room: ${fromNumber} / ${joinConferenceRoom}`);
+      }
+
+      if (joinAuthorized) {
+        console.log(`[TwiML Voice] CONFERENCE JOIN from ${fromNumber} -> ${joinConferenceRoom}`);
+        const dial = twimlResponse.dial({});
+        dial.conference({
+          startConferenceOnEnter: true, // the agent joining starts the conference
+          endConferenceOnExit: true,    // end the call when the agent hangs up
+          beep: "false",
+        }, joinConferenceRoom);
+        console.log("[TwiML Voice] Returning CONFERENCE JOIN TwiML for", joinConferenceRoom);
+      } else {
+        twimlResponse.say({ voice: "alice" }, "This call is no longer available. Goodbye.");
+        twimlResponse.hangup();
+      }
+    } else if (ownerUserId) {
       // INCOMING CALL: Send push notification and HOLD the call
       console.log("[TwiML Voice] INCOMING CALL from", fromNumber, "to", toNumber);
       

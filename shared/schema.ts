@@ -151,6 +151,7 @@ export const pendingCalls = pgTable("pending_calls", {
   fromNumber: text("from_number").notNull(),
   toNumber: text("to_number").notNull(),
   status: text("status").notNull().default("ringing"),
+  clientType: text("client_type").notNull().default("browser"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   expiresAt: timestamp("expires_at").notNull(),
 });
