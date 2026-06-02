@@ -1,2 +1,3 @@
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct cert-based VoIP APNs from our Engine (not Twilio); bundle app.talkhint, topic app.talkhint.voip, reuses web call flow.
 - [drizzle-kit push interactive blocker](drizzle-push-interactive-blocker.md) — db:push can hang on a rename prompt (out-of-schema user_sessions); apply DDL via executeSql instead, never accept the rename.
+- [Production rollout / DB schema strategy](prod-rollout-strategy.md) — Reserved VM + managed PG: prod schema goes via Publish flow, NOT prod-migrate.ts; Twilio sig check force-enabled in prod.

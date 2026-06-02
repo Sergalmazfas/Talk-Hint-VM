@@ -11,7 +11,10 @@
 import { Pool } from 'pg';
 import twilio from 'twilio';
 
-const PRODUCTION_URL = 'https://talkhint.app';
+// The production URL becomes known only after the first Publish. Allow it to be
+// overridden via PRODUCTION_URL (e.g. the generated *.replit.app domain or a
+// verified custom domain) and fall back to the planned custom domain.
+const PRODUCTION_URL = process.env.PRODUCTION_URL || 'https://talkhint.app';
 const DEV_URL = process.env.REPLIT_DEV_DOMAIN 
   ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
   : 'https://talkhint.app';

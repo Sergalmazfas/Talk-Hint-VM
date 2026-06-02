@@ -26,7 +26,19 @@ const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 const TWILIO_TWIML_APP_SID = process.env.TWILIO_TWIML_APP_SID;
 const TWILIO_API_KEY = process.env.TWILIO_API_KEY;
 const TWILIO_API_SECRET = process.env.TWILIO_API_SECRET;
-const DISABLE_TWILIO_SIGNATURE_CHECK = process.env.DISABLE_TWILIO_SIGNATURE_CHECK === "true";
+// Security: the /twilio/voice conference-join trust boundary relies on Twilio
+// setting From=client:user-{id} on the signed request. That trust collapses if
+// signature verification is off, so we NEVER honor the disable flag in production
+// — it can only relax the check in non-production (local dev) environments.
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const SIGNATURE_CHECK_DISABLE_REQUESTED = process.env.DISABLE_TWILIO_SIGNATURE_CHECK === "true";
+const DISABLE_TWILIO_SIGNATURE_CHECK = SIGNATURE_CHECK_DISABLE_REQUESTED && !IS_PRODUCTION;
+if (SIGNATURE_CHECK_DISABLE_REQUESTED && IS_PRODUCTION) {
+  console.warn(
+    "[Twilio Sig] DISABLE_TWILIO_SIGNATURE_CHECK is set but IGNORED in production — " +
+    "signature verification stays ENABLED to protect the conference-join trust boundary."
+  );
+}
 
 // Call timeout in seconds - prevents early disconnect during silence/pauses
 const CALL_TIMEOUT = parseInt(process.env.TALKHINT_CALL_TIMEOUT || "90", 10);
