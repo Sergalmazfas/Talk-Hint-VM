@@ -1,11 +1,26 @@
 /**
  * Script to configure Twilio voice webhooks for all numbers in the pool
- * 
- * Usage: 
+ *
+ * Usage:
  *   npx tsx scripts/configure-twilio-webhooks.ts
  *   npx tsx scripts/configure-twilio-webhooks.ts --production
- * 
- * This script updates the voiceUrl for all phone numbers to point to the correct webhook endpoint
+ *
+ * This script updates the voiceUrl/statusCallback for every phone number in the
+ * pool to point at the correct webhook endpoint.
+ *
+ * Webhook target URL (where Twilio sends calls) is decoupled from the database
+ * the number pool is read from:
+ *   - With --production, webhooks point at PRODUCTION_URL (the live deployed app).
+ *   - Without it, webhooks point at the current dev domain (REPLIT_DEV_DOMAIN).
+ *
+ * The number pool is ALWAYS read from the active database connection:
+ *   - PROD_DATABASE_URL if it is set (external DB setups, e.g. Neon on Autoscale).
+ *   - Otherwise DATABASE_URL (Reserved VM on Replit-managed PostgreSQL, where the
+ *     production pool lives in the managed prod DB and PROD_DATABASE_URL is unset).
+ *
+ * To repoint all numbers after your first Publish (Reserved VM + managed PG):
+ *   PRODUCTION_URL=https://your-app.replit.app npx tsx scripts/configure-twilio-webhooks.ts --production
+ *   (run from the deployed environment, or with the prod DATABASE_URL exported)
  */
 
 import { Pool } from 'pg';
@@ -15,33 +30,42 @@ import twilio from 'twilio';
 // overridden via PRODUCTION_URL (e.g. the generated *.replit.app domain or a
 // verified custom domain) and fall back to the planned custom domain.
 const PRODUCTION_URL = process.env.PRODUCTION_URL || 'https://talkhint.app';
-const DEV_URL = process.env.REPLIT_DEV_DOMAIN 
-  ? `https://${process.env.REPLIT_DEV_DOMAIN}` 
+const DEV_URL = process.env.REPLIT_DEV_DOMAIN
+  ? `https://${process.env.REPLIT_DEV_DOMAIN}`
   : 'https://talkhint.app';
 
 async function configureWebhooks() {
   const isProduction = process.argv.includes('--production');
+
+  // Webhook target URL is independent of which DB we read the pool from.
   const baseUrl = isProduction ? PRODUCTION_URL : DEV_URL;
   const webhookUrl = `${baseUrl}/twilio/voice`;
   const statusUrl = `${baseUrl}/twilio/status`;
-  
+
+  // Read the number pool from the active database. Prefer PROD_DATABASE_URL when
+  // it is explicitly set (external DB), otherwise use DATABASE_URL (Reserved VM
+  // on Replit-managed PostgreSQL, where PROD_DATABASE_URL is not set).
+  const dbUrl = process.env.PROD_DATABASE_URL || process.env.DATABASE_URL;
+
+  // Internal Replit-managed hosts (helium/lithium) do not use external SSL;
+  // external databases (e.g. Neon) require it.
+  const isInternalDb = !!dbUrl && (dbUrl.includes('helium') || dbUrl.includes('lithium'));
+  const dbSource = process.env.PROD_DATABASE_URL ? 'PROD_DATABASE_URL' : 'DATABASE_URL';
+
   console.log(`\n=== Twilio Webhook Configuration ===`);
   console.log(`Mode: ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT'}`);
   console.log(`Webhook URL: ${webhookUrl}`);
-  console.log(`Status URL: ${statusUrl}\n`);
-
-  const dbUrl = isProduction 
-    ? process.env.PROD_DATABASE_URL 
-    : process.env.DATABASE_URL;
+  console.log(`Status URL: ${statusUrl}`);
+  console.log(`DB source: ${dbSource}${isInternalDb ? ' (internal)' : ' (external)'}\n`);
 
   if (!dbUrl) {
-    console.error('Error: Database URL not found');
+    console.error('Error: Database URL not found (set DATABASE_URL or PROD_DATABASE_URL)');
     process.exit(1);
   }
 
-  const pool = new Pool({ 
+  const pool = new Pool({
     connectionString: dbUrl,
-    ssl: isProduction ? { rejectUnauthorized: false } : undefined
+    ssl: isInternalDb ? undefined : { rejectUnauthorized: false },
   });
 
   try {
