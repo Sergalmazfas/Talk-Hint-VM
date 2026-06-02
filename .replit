@@ -60,3 +60,7 @@ DISABLE_TWILIO_SIGNATURE_CHECK = "true"
 
 [userenv.production]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
