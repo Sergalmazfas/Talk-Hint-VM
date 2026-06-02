@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import CallKit
 import AVFoundation
 import TwilioVoice
@@ -30,6 +31,7 @@ final class CallManager: NSObject {
 
     private var sessions: [UUID: CallSession] = [:]
     private var answerActions: [UUID: CXAnswerCallAction] = [:]
+    private var inCallScreen: InCallViewController?
 
     private override init() {
         let config = CXProviderConfiguration()
@@ -85,6 +87,38 @@ final class CallManager: NSObject {
     private func endSession(_ uuid: UUID) {
         sessions[uuid] = nil
         answerActions[uuid] = nil
+        tearDownInCallScreen()
+    }
+
+    // MARK: - In-call assistant screen
+
+    /// Presents the live transcript/hint screen once a call connects.
+    private func presentInCallScreen(for uuid: UUID) {
+        guard inCallScreen == nil, let session = sessions[uuid] else { return }
+        guard let top = Self.topViewController() else { return }
+        let screen = InCallViewController(callerName: session.fromNumber)
+        inCallScreen = screen
+        top.present(screen, animated: true)
+    }
+
+    /// Closes the live assistant screen when the call ends.
+    private func tearDownInCallScreen() {
+        guard let screen = inCallScreen else { return }
+        inCallScreen = nil
+        screen.teardown()
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        guard var top = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+            ?? scene?.windows.first?.rootViewController else { return nil }
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        return top
     }
 }
 
@@ -98,6 +132,7 @@ extension CallManager: CXProviderDelegate {
         sessions.removeAll()
         answerActions.removeAll()
         audioDevice.isEnabled = false
+        tearDownInCallScreen()
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
@@ -172,6 +207,7 @@ extension CallManager: CallDelegate {
         guard let uuid = call.uuid else { return }
         answerActions[uuid]?.fulfill()
         answerActions[uuid] = nil
+        presentInCallScreen(for: uuid)
     }
 
     func callDidFailToConnect(call: Call, error: Error) {

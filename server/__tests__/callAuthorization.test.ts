@@ -157,6 +157,8 @@ vi.mock("../auth", () => ({
 // Avoid heavy / network-bound singletons (OpenAI, WebSocket, Stripe, Twilio mgmt).
 vi.mock("../websocket", () => ({
   setupWebSocket: vi.fn(),
+  setCallOwner: vi.fn(),
+  clearCallOwner: vi.fn(),
   TALKHINT_GOLDEN_PROMPT: "",
   PREP_PROMPT: "",
   LANGUAGE_NAMES: {},

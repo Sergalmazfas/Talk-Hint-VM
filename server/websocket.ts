@@ -6,6 +6,10 @@ import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getM
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
+import { getSessionUserId } from "./auth";
+import { db } from "./db";
+import { pendingCalls } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -215,6 +219,23 @@ function getRealtimePrompt(mode: string = "universal"): string {
 let currentMode = "universal";
 let currentLanguage = "ru"; // Default to Russian, can be "ru" or "es"
 const uiClients = new Set<WebSocket>();
+// Each /ui (and /honor-stream) socket is bound to the user it authenticated as,
+// so live transcripts/hints are delivered only to that user — never broadcast
+// to every connected client.
+const uiClientUsers = new Map<WebSocket, string>();
+// callSid -> owning userId. Populated when a call is accepted so the Twilio
+// media stream can route its transcripts/suggestions to the right user.
+const callOwners = new Map<string, string>();
+
+/** Records which user owns a call (called from the /api/call/accept route). */
+export function setCallOwner(callSid: string, userId: string) {
+  callOwners.set(callSid, userId);
+}
+
+/** Forgets a call's owner (call ended / rejected). */
+export function clearCallOwner(callSid: string) {
+  callOwners.delete(callSid);
+}
 
 // Filter JSON from text - never show raw JSON to users
 function filterJsonFromText(text: string): string {
@@ -247,15 +268,23 @@ function filterJsonFromText(text: string): string {
   return filtered || text;
 }
 
-function uiBroadcast(message: object) {
+// Delivers a message only to the connected /ui sockets belonging to `userId`.
+// Fails closed: if the owning user is unknown, the message is dropped rather
+// than leaked to other users' clients.
+function sendToUser(userId: string | undefined, message: object) {
+  if (!userId) {
+    log(`[sendToUser] No owner for ${(message as any).type} - dropping (fail-closed)`, "server");
+    return;
+  }
   const data = JSON.stringify(message);
-  const openClients = Array.from(uiClients).filter(c => c.readyState === WebSocket.OPEN).length;
-  log(`[uiBroadcast] Sending to ${openClients} clients: ${(message as any).type}`, "server");
+  let sent = 0;
   uiClients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN && uiClientUsers.get(client) === userId) {
       client.send(data);
+      sent++;
     }
   });
+  log(`[sendToUser] ${(message as any).type} -> ${sent} client(s) for user ${userId}`, "server");
 }
 
 // No audio conversion needed - OpenAI accepts mulaw (pcmu) directly from Twilio
@@ -449,22 +478,53 @@ export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
-    const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
+    const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
+    const pathname = parsedUrl.pathname;
 
-    if (["/twilio-stream", "/media", "/honor-stream", "/ui"].includes(pathname)) {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit("connection", ws, request, pathname);
-      });
-    } else {
+    if (!["/twilio-stream", "/media", "/honor-stream", "/ui"].includes(pathname)) {
       socket.destroy();
+      return;
     }
+
+    // Client-facing channels (the iOS in-call screen and the browser UI) carry
+    // live call transcripts and AI hints, so they MUST authenticate as a user.
+    // The Twilio media channels (/twilio-stream, /media) are machine-to-machine
+    // from Twilio and are not user-authenticated here.
+    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream";
+    if (requiresAuth) {
+      const token = parsedUrl.searchParams.get("token");
+      if (!token) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      getSessionUserId(token)
+        .then((userId) => {
+          if (!userId) {
+            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+            socket.destroy();
+            return;
+          }
+          wss.handleUpgrade(request, socket, head, (ws) => {
+            wss.emit("connection", ws, request, pathname, userId);
+          });
+        })
+        .catch(() => {
+          socket.destroy();
+        });
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request, pathname);
+    });
   });
 
-  wss.on("connection", (ws: WebSocket, request: any, pathname: string) => {
+  wss.on("connection", (ws: WebSocket, request: any, pathname: string, userId?: string) => {
     if (pathname === "/ui") {
-      handleUIConnection(ws);
+      handleUIConnection(ws, userId);
     } else if (pathname === "/honor-stream") {
-      handleHonorStream(ws);
+      handleHonorStream(ws, userId);
     } else if (pathname === "/twilio-stream" || pathname === "/media") {
       log(`Twilio Media Stream connected via ${pathname}`, "twilio");
       handleTwilioStream(ws);
@@ -530,9 +590,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     }
   }
   
-  function handleUIConnection(ws: WebSocket) {
-    log("UI client connected", "server");
+  function handleUIConnection(ws: WebSocket, userId?: string) {
+    log(`UI client connected (user ${userId})`, "server");
     uiClients.add(ws);
+    if (userId) uiClientUsers.set(ws, userId);
 
     ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), goal: currentGoal }));
 
@@ -566,13 +627,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     ws.on("close", () => {
       log("UI client disconnected", "server");
       uiClients.delete(ws);
+      uiClientUsers.delete(ws);
     });
   }
 
-  function handleHonorStream(ws: WebSocket) {
+  function handleHonorStream(ws: WebSocket, userId?: string) {
     log("Browser mic connected", "honor");
     let gptHandler: GPTRealtimeHandler | null = null;
     let sessionId: string | null = null;
+    // Route this honor session's transcripts/responses only to its owner.
+    const uiBroadcast = (message: object) => sendToUser(userId, message);
 
     ws.on("message", async (data: Buffer) => {
       try {
@@ -636,8 +700,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     log(`[TwilioStream] Connected at ${startTime}`, "twilio");
     let streamSid: string | null = null;
     let callSid: string | null = null;
+    let streamUserId: string | undefined; // Owner of this call (set on "start" from callOwners)
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
+    // Route this call's transcripts/suggestions only to the owning user's UI clients.
+    const uiBroadcast = (message: object) => sendToUser(streamUserId, message);
     let goalEngine: GoalEngine | null = null; // Goal State Engine per call
     let deepgramReady = false; // Flag to track if Deepgram is ready
     const audioBuffer: { track: string; data: Buffer }[] = []; // Buffer for early audio
@@ -1286,6 +1353,30 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             if (message.start) {
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
+
+              // Resolve which user owns this call so its transcripts/hints go
+              // only to that user. The call is accepted (setCallOwner) before
+              // Twilio opens the media stream, so the map is normally populated;
+              // fall back to the pendingCalls table just in case.
+              streamUserId = callOwners.get(callSid);
+              if (!streamUserId) {
+                const sidForLookup = callSid;
+                db.select({ userId: pendingCalls.userId })
+                  .from(pendingCalls)
+                  .where(eq(pendingCalls.callSid, sidForLookup))
+                  .limit(1)
+                  .then((rows) => {
+                    const uid = rows[0]?.userId;
+                    if (uid) {
+                      streamUserId = uid;
+                      callOwners.set(sidForLookup, uid);
+                      log(`[TwilioStream] Resolved owner ${uid} for ${sidForLookup} via DB`, "twilio");
+                    } else {
+                      log(`[TwilioStream] No owner found for ${sidForLookup}`, "twilio");
+                    }
+                  })
+                  .catch((err) => log(`[TwilioStream] Owner lookup failed: ${err}`, "twilio"));
+              }
               
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;
@@ -1393,6 +1484,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (callSid) {
         removeEngine(callSid);
         utteranceGate.cleanup(callSid);
+        clearCallOwner(callSid);
       }
       
       // Reset hint throttling, anti-loop guards, and wait state for next call

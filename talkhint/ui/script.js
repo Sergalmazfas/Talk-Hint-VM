@@ -254,7 +254,14 @@ function log(msg) {
 
 function getWSUrl(path) {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return protocol + '//' + window.location.host + path;
+  let url = protocol + '//' + window.location.host + path;
+  // The /ui (and /honor-stream) channels now require an authenticated token so
+  // each user only receives their own call's transcripts and hints.
+  const token = getAuthToken();
+  if (token) {
+    url += (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  }
+  return url;
 }
 
 function getAuthToken() {

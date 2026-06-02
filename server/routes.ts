@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES } from "./websocket";
+import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner } from "./websocket";
 import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { z } from "zod";
 import path from "path";
@@ -695,6 +695,10 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         return res.status(404).json({ error: "Pending call not found" });
       }
 
+      // Bind this call to its owner so the Twilio media stream routes live
+      // transcripts/hints only to this user's UI clients.
+      setCallOwner(callSid, user.id);
+
       const timestamp = new Date().toISOString();
       console.log(`[Call] ${callSid} @ ${timestamp} - Accept received (clientType=${clientType}), status changed to 'accepted'`);
       
@@ -726,6 +730,9 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         console.warn(`[Call] Reject denied - no pending call ${callSid} owned by user ${user.id}`);
         return res.status(404).json({ error: "Pending call not found" });
       }
+
+      // Call is over before it began — drop any owner binding.
+      clearCallOwner(callSid);
 
       // Hangup the call
       const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
