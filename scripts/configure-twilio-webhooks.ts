@@ -18,7 +18,13 @@
  *   - Otherwise DATABASE_URL (Reserved VM on Replit-managed PostgreSQL, where the
  *     production pool lives in the managed prod DB and PROD_DATABASE_URL is unset).
  *
- * To repoint all numbers after your first Publish (Reserved VM + managed PG):
+ * NOTE: Repointing now happens AUTOMATICALLY on production server startup (see
+ * repointWebhooksOnStartup in server/index.ts), so every Publish re-claims the
+ * pool's inbound webhooks for the live build without any manual step. This
+ * script remains as a manual fallback (e.g. to repoint at a custom domain, or
+ * when running from outside the deployed VM).
+ *
+ * To repoint all numbers manually (Reserved VM + managed PG):
  *   PRODUCTION_URL=https://your-app.replit.app npx tsx scripts/configure-twilio-webhooks.ts --production
  *   (run from the deployed environment, or with the prod DATABASE_URL exported)
  */

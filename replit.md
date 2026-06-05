@@ -28,6 +28,8 @@ The system incorporates a Goal State Engine, a state machine that tracks convers
 ### Build and Deployment
 Vite is used for frontend bundling, while esbuild handles server bundling with selective dependency inclusion for optimized cold starts. Graceful shutdowns are managed with SIGTERM/SIGINT handlers. For production voice calls, Reserved VM Deployment is recommended to ensure consistent uptime for WebSocket connections, avoiding issues with autoscaling.
 
+On every production startup (i.e. after each Publish), the server automatically repoints all Twilio pool numbers' voice/status webhooks at the live production URL via `repointWebhooksOnStartup` in `server/index.ts`. The URL is resolved from `PRODUCTION_URL` → `REPLIT_DEPLOYMENT_URL` → first host in `REPLIT_DOMAINS` → fallback. This is idempotent and logs which numbers were updated. Set `DISABLE_AUTO_WEBHOOK_REPOINT=true` to opt out. `scripts/configure-twilio-webhooks.ts` remains as a manual fallback.
+
 ### Stripe Integration (Manual)
 Stripe runs in **manual mode** — no Replit Stripe connector / `stripe-replit-sync` package. The backend uses only `STRIPE_SECRET_KEY` (server) and `STRIPE_PUBLISHABLE_KEY` (client). Webhook signature is verified manually via `stripe.webhooks.constructEvent` using `STRIPE_WEBHOOK_SECRET`. The webhook endpoint must be registered manually in the Stripe Dashboard (`/api/stripe/webhook`) for events `checkout.session.completed` and `customer.subscription.created/updated/deleted`. Product/subscription data is fetched directly from the Stripe API on demand (no DB sync schema).
 
