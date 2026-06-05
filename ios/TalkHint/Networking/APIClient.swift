@@ -289,6 +289,84 @@ final class APIClient {
         return UserPrompt(id: id, name: name, content: content, isActive: isActive)
     }
 
+    // MARK: - Call history
+
+    /// A finished/recorded call as stored in the backend `calls` table.
+    struct CallRecord {
+        let id: String
+        let userId: String?
+        let callSid: String
+        let fromNumber: String
+        let toNumber: String
+        let status: String
+        let startedAt: Date?
+        let endedAt: Date?
+        let transcript: String?
+    }
+
+    /// Fetches the signed-in user's past calls, newest first. The backend
+    /// `/api/calls` route is unscoped (returns every user's calls), so user
+    /// scoping is enforced here. This fails CLOSED: if the current user id is
+    /// unknown we refuse rather than risk exposing other users' history.
+    func calls() async throws -> [CallRecord] {
+        guard let mine = SessionStore.shared.userId else { throw APIError.notAuthenticated }
+        let data = try await request("/api/calls", method: "GET", json: nil, authenticated: true)
+        guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr
+            .compactMap { Self.parseCall($0) }
+            .filter { $0.userId == mine }
+            .sorted { ($0.startedAt ?? .distantPast) > ($1.startedAt ?? .distantPast) }
+    }
+
+    /// Fetches a single call (including its full transcript) by id. Enforces
+    /// ownership client-side because the backend route is unscoped: a record
+    /// belonging to another user is treated as not authorized.
+    func call(id: String) async throws -> CallRecord {
+        guard let mine = SessionStore.shared.userId else { throw APIError.notAuthenticated }
+        let data = try await request("/api/calls/\(id)", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let call = Self.parseCall(obj) else {
+            throw APIError.decoding
+        }
+        guard call.userId == mine else { throw APIError.notAuthenticated }
+        return call
+    }
+
+    private static func parseCall(_ item: [String: Any]) -> CallRecord? {
+        guard let id = item["id"] as? String,
+              let callSid = item["callSid"] as? String else { return nil }
+        return CallRecord(
+            id: id,
+            userId: item["userId"] as? String,
+            callSid: callSid,
+            fromNumber: (item["fromNumber"] as? String) ?? "",
+            toNumber: (item["toNumber"] as? String) ?? "",
+            status: (item["status"] as? String) ?? "",
+            startedAt: parseDate(item["startedAt"]),
+            endedAt: parseDate(item["endedAt"]),
+            transcript: item["transcript"] as? String
+        )
+    }
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoFormatterNoFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private static func parseDate(_ value: Any?) -> Date? {
+        guard let s = value as? String else { return nil }
+        return isoFormatter.date(from: s) ?? isoFormatterNoFraction.date(from: s)
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

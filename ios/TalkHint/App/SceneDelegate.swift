@@ -49,10 +49,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         assistant.tabBarItem = UITabBarItem(
             title: "Assistant", image: UIImage(systemName: "wand.and.stars"), tag: 2)
 
-        let history = PlaceholderViewController(
-            featureTitle: "Call History",
-            message: "Review your past calls and transcripts here. Coming soon.",
-            systemImageName: "clock.arrow.circlepath")
+        let history = CallHistoryViewController()
         history.tabBarItem = UITabBarItem(
             title: "History", image: UIImage(systemName: "clock"), tag: 3)
 
