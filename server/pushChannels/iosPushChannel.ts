@@ -21,9 +21,9 @@ export function normalizePem(raw: string | undefined): string | undefined {
   // "\n" (backslash + n). Convert those to real newlines first — otherwise the
   // stray "n" survives the base64 cleanup below and corrupts the body.
   const s = raw.trim().replace(/\\r\\n|\\n|\\r/g, "\n");
-  const blocks = [
-    ...s.matchAll(/-----BEGIN ([A-Z0-9 ]+?)-----([\s\S]*?)-----END \1-----/g),
-  ];
+  const blocks = Array.from(
+    s.matchAll(/-----BEGIN ([A-Z0-9 ]+?)-----([\s\S]*?)-----END \1-----/g),
+  );
   if (blocks.length === 0) return s;
   return (
     blocks

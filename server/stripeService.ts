@@ -4,6 +4,7 @@ import { getUncachableStripeClient } from './stripeClient';
 export class StripeService {
   async createCustomer(email: string, userId: string) {
     const stripe = await getUncachableStripeClient();
+    if (!stripe) throw new Error('Stripe is not configured (STRIPE_SECRET_KEY not set)');
     return await stripe.customers.create({
       email,
       metadata: { userId },
@@ -18,6 +19,7 @@ export class StripeService {
     metadata?: Record<string, string>
   ) {
     const stripe = await getUncachableStripeClient();
+    if (!stripe) throw new Error('Stripe is not configured (STRIPE_SECRET_KEY not set)');
     return await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
@@ -31,6 +33,7 @@ export class StripeService {
 
   async createCustomerPortalSession(customerId: string, returnUrl: string) {
     const stripe = await getUncachableStripeClient();
+    if (!stripe) throw new Error('Stripe is not configured (STRIPE_SECRET_KEY not set)');
     return await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl,
