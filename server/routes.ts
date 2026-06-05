@@ -1163,6 +1163,11 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       } else if (fromNumber && fromNumber.startsWith("client:user-")) {
         // User-based identity: lookup from phoneNumbers
         const userId = fromNumber.replace("client:user-", "");
+        // Register this outbound call's owner so its live transcripts/hints are
+        // routed to that user's /ui socket. Without this the media stream has no
+        // owner and sendToUser drops everything fail-closed (no hints on screen).
+        setCallOwner(callSid, userId);
+        console.log(`[TwiML Voice] Registered call owner ${userId} for ${callSid}`);
         console.log(`[TwiML Voice] Looking up number for user: ${userId}`);
         try {
           const userNumbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, userId)).limit(1);

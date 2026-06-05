@@ -192,6 +192,7 @@ vi.mock("../training", () => ({
 
 // Import AFTER mocks are registered.
 const { registerRoutes } = await import("../routes");
+const { setCallOwner } = await import("../websocket");
 
 const OWNER = "owner-user-1";
 const ATTACKER = "attacker-user-2";
@@ -374,5 +375,45 @@ describe("/api/twilio/hold browser bridge (regression)", () => {
     expect(holdRes.status).toBe(200);
     expect(holdRes.text).toContain("<Conference");
     expect(holdRes.text).not.toContain("<Client>");
+  });
+});
+
+describe("/twilio/voice outbound call ownership (regression)", () => {
+  beforeEach(() => {
+    (setCallOwner as any).mockClear();
+  });
+
+  it("registers the call owner for a browser outbound call so hints route to that user", async () => {
+    // Browser outbound: From is the signed client identity, To is the dialed PSTN number.
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({
+        From: `client:user-${OWNER}`,
+        To: "+15559998888",
+        CallSid: CALL_SID,
+      });
+
+    expect(res.status).toBe(200);
+    // Outbound TwiML must start the media stream and dial the target.
+    expect(res.text).toContain("<Stream");
+    expect(res.text).toContain("<Dial");
+    // The fix: without this the media stream has no owner and every
+    // transcript/hint is dropped fail-closed (empty screen during the call).
+    expect(setCallOwner).toHaveBeenCalledWith(CALL_SID, OWNER);
+  });
+
+  it("does NOT register an owner for a line-based outbound call (unowned by design)", async () => {
+    const res = await request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({
+        From: "client:line_1",
+        To: "+15559998888",
+        CallSid: CALL_SID,
+      });
+
+    expect(res.status).toBe(200);
+    expect(setCallOwner).not.toHaveBeenCalled();
   });
 });

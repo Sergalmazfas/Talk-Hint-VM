@@ -21,6 +21,14 @@ Code review rejected the first iOS-hint implementation for exactly this (optiona
   `setCallOwner` in `/api/call/accept` (accept always precedes the Twilio media stream),
   with a `pendingCalls` DB fallback on the stream `start` event. Cleared on reject and
   stream close.
+- EVERY call origination path must register an owner, or `sendToUser` silently drops all
+  its transcripts/hints fail-closed (empty screen, no error). Incoming calls register via
+  `pendingCalls` + accept; **browser OUTBOUND calls must call `setCallOwner(callSid, userId)`
+  directly in the `/twilio/voice` `client:user-{id}` branch** — they have no accept step and
+  no pendingCalls row, so this is the only owner source. This bit us in prod: outbound calls
+  worked end-to-end (Deepgram/GPT ran) but showed nothing because the stream had no owner.
+- `client:line_X` (line-based) outbound calls remain intentionally unowned — `/ui` auth needs
+  a real `session.userId`; line sessions have none. Live hints don't route for line identity.
 - Each handler shadows `uiBroadcast` with a local that routes to its user, so existing
   broadcast call-sites need no change as long as they stay inside the handler.
 - Global `currentGoal`/`currentMode`/`currentLanguage` remain process-wide (pre-existing
