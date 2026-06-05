@@ -20,9 +20,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func showRoot(loggedIn: Bool) {
         if loggedIn {
-            let webApp = WebAppViewController()
-            webApp.onLoggedOut = { [weak self] in self?.showRoot(loggedIn: false) }
-            window?.rootViewController = UINavigationController(rootViewController: webApp)
+            let home = HomeViewController()
+            home.onLoggedOut = { [weak self] in self?.showRoot(loggedIn: false) }
+            window?.rootViewController = UINavigationController(rootViewController: home)
         } else {
             let login = LoginViewController()
             login.onLoggedIn = { [weak self] in
