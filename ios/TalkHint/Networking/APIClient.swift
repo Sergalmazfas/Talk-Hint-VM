@@ -43,6 +43,40 @@ final class APIClient {
         return LoginResult(token: token, userId: userId, email: emailOut)
     }
 
+    /// URL that starts the Replit OIDC ("Continue with Google") flow for the
+    /// native app. /api/callback returns to the `talkhint://` scheme.
+    var googleLoginURL: URL? {
+        AppConfig.baseURL.appendingPathComponent("/api/login/ios")
+    }
+
+    struct MeResult { let userId: String; let email: String }
+
+    /// Fetches the current user using an explicit Bearer token (used right
+    /// after the OAuth callback, before the token is saved to SessionStore).
+    func me(token: String) async throws -> MeResult {
+        var req = URLRequest(url: AppConfig.baseURL.appendingPathComponent("/api/auth/me"))
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
+        guard (200..<300).contains(http.statusCode) else {
+            var message = ""
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                message = (obj["error"] as? String) ?? ""
+            }
+            throw APIError.http(http.statusCode, message)
+        }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let user = obj["user"] as? [String: Any],
+              let userId = user["id"] as? String else {
+            throw APIError.decoding
+        }
+        let email = (user["email"] as? String) ?? ""
+        return MeResult(userId: userId, email: email)
+    }
+
     func logout() async {
         _ = try? await request("/api/auth/logout", method: "POST", json: [:], authenticated: true)
     }

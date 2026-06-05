@@ -168,18 +168,49 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
+  // Native iOS entry point for the same OIDC flow. We tag this login with a
+  // short-lived cookie so /api/callback knows to return the session token to
+  // the app via the `talkhint://` custom scheme instead of the web `/?token=`.
+  app.get("/api/login/ios", (req, res, next) => {
+    res.cookie("ios_oauth", "1", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 10 * 60 * 1000,
+    });
+    ensureStrategy(req.hostname);
+    passport.authenticate(`replitauth:${req.hostname}`, {
+      prompt: "login consent",
+      scope: ["openid", "email", "profile", "offline_access"],
+    })(req, res, next);
+  });
+
   app.get("/api/callback", (req, res, next) => {
     ensureStrategy(req.hostname);
+
+    // If this login was started from the iOS app, return results to the app's
+    // custom scheme so ASWebAuthenticationSession can capture them.
+    const wantsIos = (req.headers.cookie || "")
+      .split(";")
+      .some((c) => c.trim() === "ios_oauth=1");
+    const failRedirect = (reason: string) => {
+      if (wantsIos) {
+        res.clearCookie("ios_oauth");
+        return res.redirect(`talkhint://auth?error=${reason}`);
+      }
+      return res.redirect(`/?error=${reason}`);
+    };
+
     passport.authenticate(`replitauth:${req.hostname}`, async (err: any, user: any) => {
       if (err || !user) {
         console.error("[OAuth] Auth failed:", err);
-        return res.redirect("/?error=auth_failed");
+        return failRedirect("auth_failed");
       }
       
       req.login(user, async (loginErr) => {
         if (loginErr) {
           console.error("[OAuth] Login failed:", loginErr);
-          return res.redirect("/?error=login_failed");
+          return failRedirect("login_failed");
         }
         
         try {
@@ -191,22 +222,26 @@ export async function setupAuth(app: Express) {
           
           if (!userId) {
             console.error("[OAuth] No user ID found");
-            return res.redirect("/?error=no_user_id");
+            return failRedirect("no_user_id");
           }
           
           const dbUser = await authStorage.getUser(userId);
           if (!dbUser) {
             console.error("[OAuth] User not found in storage:", userId);
-            return res.redirect("/?error=user_not_found");
+            return failRedirect("user_not_found");
           }
           
           const token = await createSession(dbUser.id);
           console.log("[OAuth] Created session token for user:", dbUser.id);
           
+          if (wantsIos) {
+            res.clearCookie("ios_oauth");
+            return res.redirect(`talkhint://auth?token=${token}`);
+          }
           res.redirect(`/?token=${token}`);
         } catch (error) {
           console.error("[OAuth] Token creation failed:", error);
-          res.redirect("/?error=token_failed");
+          return failRedirect("token_failed");
         }
       });
     })(req, res, next);
