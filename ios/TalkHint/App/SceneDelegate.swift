@@ -20,9 +20,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func showRoot(loggedIn: Bool) {
         if loggedIn {
-            let home = HomeViewController()
-            home.onLoggedOut = { [weak self] in self?.showRoot(loggedIn: false) }
-            window?.rootViewController = UINavigationController(rootViewController: home)
+            window?.rootViewController = makeMainTabController()
         } else {
             let login = LoginViewController()
             login.onLoggedIn = { [weak self] in
@@ -31,5 +29,51 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
             window?.rootViewController = UINavigationController(rootViewController: login)
         }
+    }
+
+    /// Builds the main tab bar shown after login. The Calls and Account tabs are
+    /// live (Stage 1); Numbers, Assistant and History are placeholders that later
+    /// stages replace with their real screens.
+    private func makeMainTabController() -> UITabBarController {
+        let tabController = UITabBarController()
+
+        let calls = HomeViewController()
+        calls.tabBarItem = UITabBarItem(
+            title: "Calls", image: UIImage(systemName: "phone.fill"), tag: 0)
+
+        let numbers = PlaceholderViewController(
+            featureTitle: "Phone Numbers",
+            message: "Choose and manage your phone numbers here. Coming soon.",
+            systemImageName: "number.circle")
+        numbers.tabBarItem = UITabBarItem(
+            title: "Numbers", image: UIImage(systemName: "number"), tag: 1)
+
+        let assistant = PlaceholderViewController(
+            featureTitle: "Assistant",
+            message: "Pick a mode, manage prompts and set your call goal here. Coming soon.",
+            systemImageName: "wand.and.stars")
+        assistant.tabBarItem = UITabBarItem(
+            title: "Assistant", image: UIImage(systemName: "wand.and.stars"), tag: 2)
+
+        let history = PlaceholderViewController(
+            featureTitle: "Call History",
+            message: "Review your past calls and transcripts here. Coming soon.",
+            systemImageName: "clock.arrow.circlepath")
+        history.tabBarItem = UITabBarItem(
+            title: "History", image: UIImage(systemName: "clock"), tag: 3)
+
+        let account = AccountViewController()
+        account.onLoggedOut = { [weak self] in self?.showRoot(loggedIn: false) }
+        account.tabBarItem = UITabBarItem(
+            title: "Account", image: UIImage(systemName: "person.crop.circle"), tag: 4)
+
+        tabController.viewControllers = [
+            UINavigationController(rootViewController: calls),
+            UINavigationController(rootViewController: numbers),
+            UINavigationController(rootViewController: assistant),
+            UINavigationController(rootViewController: history),
+            UINavigationController(rootViewController: account),
+        ]
+        return tabController
     }
 }

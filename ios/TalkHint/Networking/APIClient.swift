@@ -132,6 +132,38 @@ final class APIClient {
         return token
     }
 
+    // MARK: - Account & subscription
+
+    struct SubscriptionInfo { let plan: String; let hasStripeCustomer: Bool }
+
+    /// Fetches the current plan / subscription status (read-only).
+    func subscription() async throws -> SubscriptionInfo {
+        let data = try await request("/api/subscription", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let plan = obj["plan"] as? String else {
+            throw APIError.decoding
+        }
+        let hasCustomer = (obj["stripeCustomerId"] as? String) != nil
+        return SubscriptionInfo(plan: plan, hasStripeCustomer: hasCustomer)
+    }
+
+    struct PhoneNumberItem { let id: String; let number: String; let name: String }
+
+    /// Fetches the phone numbers assigned to the signed-in user.
+    func numbers() async throws -> [PhoneNumberItem] {
+        let data = try await request("/api/numbers", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["numbers"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr.compactMap { item in
+            guard let id = item["id"] as? String,
+                  let number = item["twilioNumber"] as? String else { return nil }
+            let name = (item["name"] as? String) ?? ""
+            return PhoneNumberItem(id: id, number: number, name: name)
+        }
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {
