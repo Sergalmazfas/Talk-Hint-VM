@@ -701,6 +701,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let streamUserId: string | undefined; // Owner of this call (set on "start" from callOwners)
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
+    // True when the media stream rides the CALLER's leg (incoming answered call /
+    // iOS conference bridge). On that leg inbound = caller (GUEST) and outbound =
+    // bridged agent (OWNER) — i.e. mirror of a browser outbound call.
+    let streamOnCallerLeg = false;
     // Route this call's transcripts/suggestions only to the owning user's UI clients.
     const uiBroadcast = (message: object) => sendToUser(streamUserId, message);
     let goalEngine: GoalEngine | null = null; // Goal State Engine per call
@@ -1253,7 +1257,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           }
           if (response.type === "UtteranceEnd") {
             log(`[DG] ${track}: UtteranceEnd -> forcing flush`, "deepgram");
-            const isGuestTrack = (track === "outbound");
+            // On the caller-leg stream the tracks are mirrored: inbound = GST.
+            const isGuestTrack = streamOnCallerLeg ? (track === "inbound") : (track === "outbound");
             const speakerCode = isGuestTrack ? "GST" : "HON";
             utteranceGate.forceFlush(callSid || "unknown", speakerCode as "GST" | "HON");
             return;
@@ -1265,17 +1270,18 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             const speechFinal = response.speech_final === true;
             
             // Track mapping (CORRECTED):
-            // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio
-            // Browser outbound call (isPstnForwarding=false): inbound=HON (browser mic), outbound=GST (remote PSTN)
-            // PSTN forwarding (isPstnForwarding=true): inbound=HON (mobile owner), outbound=GST (original caller)
-            // Both modes have SAME mapping: inbound=HON, outbound=GST
-            const isGuestTrack = (track === "outbound");
-            const isOwnerTrack = (track === "inbound");
+            // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio.
+            // Owner-leg stream (browser outbound call): inbound=HON (browser mic), outbound=GST (remote PSTN).
+            // Caller-leg stream (incoming answered: browser <Dial><Client> AND iOS conference bridge):
+            //   the stream rides the caller's leg, so inbound=GST (caller), outbound=HON (bridged agent).
+            //   This is the mirror of the owner-leg case and is what fixes iOS CALLER/YOU being swapped.
+            const isGuestTrack = streamOnCallerLeg ? (track === "inbound") : (track === "outbound");
+            const isOwnerTrack = streamOnCallerLeg ? (track === "outbound") : (track === "inbound");
             const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
             const speakerCode = isGuestTrack ? "GST" : "HON";
             
             // Debug: log track mapping decision
-            log(`[TrackDebug] track=${track}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
+            log(`[TrackDebug] track=${track}, callerLeg=${streamOnCallerLeg}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
             
             // Use utteranceGate to wait for complete utterance before GPT
             utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
@@ -1438,13 +1444,20 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;
               isPstnForwarding = callType === "pstn_forwarding";
+              // Incoming answered calls (browser <Dial><Client> and the iOS
+              // <Dial><Conference> bridge) attach the stream to the CALLER's leg,
+              // so inbound/outbound are mirrored vs a browser outbound call.
+              streamOnCallerLeg = callType === "incoming_answered";
               
-              log(`Stream started: ${callSid}, callType: ${callType || 'browser'}, isPstnForwarding: ${isPstnForwarding}`, "twilio");
+              log(`Stream started: ${callSid}, callType: ${callType || 'browser'}, isPstnForwarding: ${isPstnForwarding}, streamOnCallerLeg: ${streamOnCallerLeg}`, "twilio");
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");
               
               // Log track roles for debugging
-              // BOTH modes: inbound=HON (owner), outbound=GST (guest)
-              log(`[Track Mapping] HON=inbound, GST=outbound (same for all modes)`, "twilio");
+              if (streamOnCallerLeg) {
+                log(`[Track Mapping] caller-leg stream: GST=inbound, HON=outbound`, "twilio");
+              } else {
+                log(`[Track Mapping] owner-leg stream: HON=inbound, GST=outbound`, "twilio");
+              }
               
               // Initialize Goal State Engine for this call
               goalEngine = getOrCreateEngine(callSid);
