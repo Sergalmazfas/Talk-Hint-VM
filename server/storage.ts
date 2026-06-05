@@ -11,6 +11,7 @@ import {
 import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, sql, gt } from "drizzle-orm";
 import { configureVoiceWebhook } from "./twilioService";
+import { resolveProductionBaseUrl } from "./baseUrl";
 
 export const memoryUsers = new Map<string, User>();
 export const memorySessions = new Map<string, Session>();
@@ -295,23 +296,35 @@ export class DatabaseStorage implements IStorage {
       
       await client.query('COMMIT');
       
-      // Configure webhook for the assigned number (async, don't block)
-      const host = process.env.REPLIT_DEPLOYMENT_URL || 'talkhint.app';
-      const webhookUrl = `https://${host}/twilio/voice`;
-      configureVoiceWebhook(
-        avail.twilio_sid,
-        webhookUrl,
-        avail.subaccount_sid || undefined,
-        avail.subaccount_token || undefined
-      ).then(result => {
-        if (result.success) {
-          console.log(`[Storage] Webhook configured for ${avail.twilio_number}`);
-        } else {
-          console.error(`[Storage] Webhook config failed for ${avail.twilio_number}: ${result.error}`);
-        }
-      }).catch(err => {
-        console.error("[Storage] Webhook config error:", err.message);
-      });
+      // Configure webhook for the assigned number (async, don't block).
+      // Resolve the live production URL from env vars instead of guessing a
+      // hardcoded host: silently pointing the webhook at the wrong host would
+      // break inbound calls for this number with no obvious error.
+      const baseUrl = resolveProductionBaseUrl();
+      if (!baseUrl) {
+        console.warn(
+          `[Storage] ⚠️  Skipped webhook config for ${avail.twilio_number}: ` +
+          `could not resolve a live production URL. Set PRODUCTION_URL to the ` +
+          `live deployed app URL (e.g. https://your-app.replit.app), or ensure ` +
+          `REPLIT_DEPLOYMENT_URL / REPLIT_DOMAINS are present.`
+        );
+      } else {
+        const webhookUrl = `${baseUrl}/twilio/voice`;
+        configureVoiceWebhook(
+          avail.twilio_sid,
+          webhookUrl,
+          avail.subaccount_sid || undefined,
+          avail.subaccount_token || undefined
+        ).then(result => {
+          if (result.success) {
+            console.log(`[Storage] Webhook configured for ${avail.twilio_number}`);
+          } else {
+            console.error(`[Storage] Webhook config failed for ${avail.twilio_number}: ${result.error}`);
+          }
+        }).catch(err => {
+          console.error("[Storage] Webhook config error:", err.message);
+        });
+      }
       
       // Check if we need to replenish pool (async, don't wait)
       this.checkAndReplenishPool().catch(err => {
