@@ -32,10 +32,10 @@
 import { Pool } from 'pg';
 import twilio from 'twilio';
 
-// The production URL becomes known only after the first Publish. Allow it to be
-// overridden via PRODUCTION_URL (e.g. the generated *.replit.app domain or a
-// verified custom domain) and fall back to the planned custom domain.
-const PRODUCTION_URL = process.env.PRODUCTION_URL || 'https://talkhint.app';
+// The production URL becomes known only after the first Publish. It must be
+// supplied explicitly via PRODUCTION_URL (e.g. the generated *.replit.app domain
+// or a verified custom domain) so we never silently point numbers at the wrong
+// place. In dev we fall back to the current Replit dev domain.
 const DEV_URL = process.env.REPLIT_DEV_DOMAIN
   ? `https://${process.env.REPLIT_DEV_DOMAIN}`
   : 'https://talkhint.app';
@@ -43,8 +43,21 @@ const DEV_URL = process.env.REPLIT_DEV_DOMAIN
 async function configureWebhooks() {
   const isProduction = process.argv.includes('--production');
 
+  // Fail loudly in production when the live URL is unknown. Silently falling
+  // back to a hardcoded domain would point every number at the wrong place and
+  // break inbound calls with no obvious error.
+  if (isProduction && !process.env.PRODUCTION_URL) {
+    console.error(
+      'Error: --production was used but PRODUCTION_URL is not set.\n' +
+        'Set PRODUCTION_URL to the live deployed app URL so webhooks point at the right place.\n' +
+        'Example:\n' +
+        '  PRODUCTION_URL=https://your-app.replit.app npx tsx scripts/configure-twilio-webhooks.ts --production'
+    );
+    process.exit(1);
+  }
+
   // Webhook target URL is independent of which DB we read the pool from.
-  const baseUrl = isProduction ? PRODUCTION_URL : DEV_URL;
+  const baseUrl = isProduction ? process.env.PRODUCTION_URL! : DEV_URL;
   const webhookUrl = `${baseUrl}/twilio/voice`;
   const statusUrl = `${baseUrl}/twilio/status`;
 
