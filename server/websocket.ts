@@ -120,6 +120,21 @@ Score: 1.0 = very strong emotion, 0.0 = neutral. Be concise.`
 }
 
 // Translate guest speech and generate suggestion
+const PREAMBLE_PATTERNS = [
+  /^(i understand|i see|i hear you|i get it|that makes sense)[,.]?\s*/i,
+  /^(of course|certainly|absolutely|sure)[,.]?\s*/i,
+  /^(great|perfect|wonderful|excellent|awesome)[,!.]?\s*/i,
+  /^(let me|allow me|let's)[^.!?]*[,.]?\s*/i,
+  /^(okay|ok|alright)[,.]?\s*/i,
+];
+function stripPreamble(text: string): string {
+  let result = text.trim();
+  for (const pattern of PREAMBLE_PATTERNS) {
+    result = result.replace(pattern, '');
+  }
+  return result.trim();
+}
+
 async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
@@ -194,10 +209,18 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
         : (sentimentRaw === "urgent" || sentimentRaw === "confused")
           ? "negative"
           : undefined;
+      let suggestion = parsed.suggestion || undefined;
+      if (suggestion) {
+        suggestion = {
+          ...suggestion,
+          en: typeof suggestion.en === "string" ? stripPreamble(suggestion.en) : suggestion.en,
+          translation: typeof suggestion.translation === "string" ? stripPreamble(suggestion.translation) : suggestion.translation,
+        };
+      }
       return {
         translation: parsed.translation || "",
         explanation: parsed.explanation || undefined,
-        suggestion: parsed.suggestion || undefined,
+        suggestion,
         sentiment: validSentiment ? { sentiment: validSentiment, score: 1 } : undefined,
       };
     }
@@ -747,7 +770,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       /^(ok(ay)?|right|sure|alright|got\s+it|i\s+see|uh[\s-]?huh)\.?$/i,
       /^(yeah|yep|yup|nope|nah)\.?$/i,
       /^hmm+\.?$/i,
-      /^(let'?s?\s+go|let'?s?\s+do\s+(it|this|that))\.?$/i
+      /^(let'?s?\s+go|let'?s?\s+do\s+(it|this|that))\.?$/i,
+      /^i understand(\.)?$/i,
+      /^i understand you(\.)?$/i,
+      /^understood(\.)?$/i,
     ];
     
     // Farewell / closing phrases - conversation is wrapping up, no steer needed (translation still shown)
