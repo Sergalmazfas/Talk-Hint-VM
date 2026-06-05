@@ -36,10 +36,14 @@ class AuthStorage implements IAuthStorage {
       email: userData.email || `oauth_${userData.id}@replit.user`,
       password: null,
       language: "ru",
+      forwardingPhone: null,
+      callMode: "live",
       plan: "free",
       authProvider: "replit",
       stripeCustomerId: null,
       stripeSubscriptionId: null,
+      twilioSubaccountSid: null,
+      twilioSubaccountToken: null,
       createdAt: new Date(),
     };
 
