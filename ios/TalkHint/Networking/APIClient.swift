@@ -164,6 +164,37 @@ final class APIClient {
         }
     }
 
+    struct AvailablePhoneNumber { let id: String; let number: String; let country: String }
+
+    /// Fetches numbers from the unassigned pool the user can claim.
+    func availableNumbers() async throws -> [AvailablePhoneNumber] {
+        let data = try await request("/api/numbers/available", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["numbers"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr.compactMap { item in
+            guard let id = item["id"] as? String,
+                  let number = item["twilioNumber"] as? String else { return nil }
+            let country = (item["country"] as? String) ?? ""
+            return AvailablePhoneNumber(id: id, number: number, country: country)
+        }
+    }
+
+    /// Claims a pool number for the signed-in user with a friendly name.
+    /// Returns the id of the newly assigned phone number.
+    @discardableResult
+    func assignNumber(numberId: String, name: String) async throws -> String {
+        let body: [String: Any] = ["numberId": numberId, "name": name, "type": "personal"]
+        let data = try await request("/api/numbers", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let phoneNumber = obj["phoneNumber"] as? [String: Any],
+              let id = phoneNumber["id"] as? String else {
+            throw APIError.decoding
+        }
+        return id
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

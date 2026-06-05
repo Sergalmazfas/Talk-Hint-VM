@@ -41,10 +41,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         calls.tabBarItem = UITabBarItem(
             title: "Calls", image: UIImage(systemName: "phone.fill"), tag: 0)
 
-        let numbers = PlaceholderViewController(
-            featureTitle: "Phone Numbers",
-            message: "Choose and manage your phone numbers here. Coming soon.",
-            systemImageName: "number.circle")
+        let numbers = NumbersViewController()
         numbers.tabBarItem = UITabBarItem(
             title: "Numbers", image: UIImage(systemName: "number"), tag: 1)
 

@@ -114,10 +114,10 @@ final class AccountViewController: UIViewController {
             }
 
             if let numbers = try? await numbersResult {
-                if let first = numbers.first {
-                    let label = first.name.isEmpty ? first.number : "\(first.name) · \(first.number)"
-                    let extra = numbers.count > 1 ? "\(label) (+\(numbers.count - 1) more)" : label
-                    numberValue.text = extra
+                let active = numbers.first(where: { $0.id == SessionStore.shared.activeNumberId }) ?? numbers.first
+                if let active = active {
+                    let label = active.name.isEmpty ? active.number : "\(active.name) · \(active.number)"
+                    numberValue.text = numbers.count > 1 ? "\(label) (+\(numbers.count - 1) more)" : label
                 } else {
                     numberValue.text = "None yet"
                 }
