@@ -7,15 +7,19 @@ import { configureAllPoolWebhooks } from "./twilioService";
  *   1. PRODUCTION_URL  (explicit override, matches scripts/configure-twilio-webhooks.ts)
  *   2. REPLIT_DEPLOYMENT_URL
  *   3. first host in REPLIT_DOMAINS (set to the production domain inside the deployed VM)
- *   4. fallback to the planned custom domain
- * Returns a normalized `https://host` string with no trailing slash.
+ *
+ * Returns a normalized `https://host` string with no trailing slash, or `null`
+ * when none of the env vars are set. We intentionally do NOT fall back to a
+ * hardcoded guess: silently pointing every Twilio webhook at the wrong host
+ * breaks all inbound calls with no obvious error. Callers must handle `null`.
  */
-export function resolveProductionBaseUrl(): string {
+export function resolveProductionBaseUrl(): string | null {
   const raw =
     process.env.PRODUCTION_URL ||
     process.env.REPLIT_DEPLOYMENT_URL ||
-    (process.env.REPLIT_DOMAINS || '').split(',')[0].trim() ||
-    'talkhint.app';
+    (process.env.REPLIT_DOMAINS || '').split(',')[0].trim();
+
+  if (!raw) return null;
 
   const host = raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
   return `https://${host}`;
@@ -42,6 +46,19 @@ export async function repointWebhooksOnStartup() {
   }
 
   const baseUrl = resolveProductionBaseUrl();
+  if (!baseUrl) {
+    console.warn(
+      '\n' +
+        '************************************************************************\n' +
+        '[Webhook Repoint] ⚠️  SKIPPED: could not resolve a live production URL.\n' +
+        '  Twilio pool webhooks were NOT repointed, so inbound calls may reach a\n' +
+        '  stale or wrong host. Set PRODUCTION_URL to the live deployed app URL\n' +
+        '  (e.g. https://your-app.replit.app), or ensure REPLIT_DEPLOYMENT_URL /\n' +
+        '  REPLIT_DOMAINS are present, then re-publish.\n' +
+        '************************************************************************\n',
+    );
+    return;
+  }
   console.log(`[Webhook Repoint] Repointing pool webhooks at ${baseUrl}/twilio/voice`);
 
   try {

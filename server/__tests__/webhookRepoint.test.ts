@@ -80,8 +80,8 @@ describe("resolveProductionBaseUrl precedence", () => {
     expect(resolveProductionBaseUrl()).toBe("https://first.example.com");
   });
 
-  it("falls back to the planned custom domain when nothing is set", () => {
-    expect(resolveProductionBaseUrl()).toBe("https://talkhint.app");
+  it("returns null when nothing is set instead of guessing a host", () => {
+    expect(resolveProductionBaseUrl()).toBeNull();
   });
 
   it("normalizes an http:// scheme to https://", () => {
@@ -180,8 +180,24 @@ describe("repointWebhooksOnStartup", () => {
     expect(h.configureAllPoolWebhooks).not.toHaveBeenCalled();
   });
 
+  it("warns and skips repointing when no live URL can be resolved", async () => {
+    setTwilioCreds();
+    // No PRODUCTION_URL / REPLIT_DEPLOYMENT_URL / REPLIT_DOMAINS set.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await repointWebhooksOnStartup();
+
+    expect(h.getAllAvailableNumbers).not.toHaveBeenCalled();
+    expect(h.configureAllPoolWebhooks).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/PRODUCTION_URL/);
+
+    warnSpy.mockRestore();
+  });
+
   it("does not call configureAllPoolWebhooks when the pool is empty", async () => {
     setTwilioCreds();
+    process.env.PRODUCTION_URL = "https://live.example.com";
     h.getAllAvailableNumbers.mockResolvedValue([]);
 
     await repointWebhooksOnStartup();
@@ -192,6 +208,7 @@ describe("repointWebhooksOnStartup", () => {
 
   it("swallows storage errors so a failed repoint never crashes startup", async () => {
     setTwilioCreds();
+    process.env.PRODUCTION_URL = "https://live.example.com";
     h.getAllAvailableNumbers.mockRejectedValue(new Error("db down"));
 
     await expect(repointWebhooksOnStartup()).resolves.toBeUndefined();
