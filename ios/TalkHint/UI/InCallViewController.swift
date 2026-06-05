@@ -1,4 +1,5 @@
 import UIKit
+import AVFoundation
 
 /// Full-screen in-call assistant shown while a call is connected. Renders the
 /// live transcript (caller + owner) and AI hint suggestions streamed from the
@@ -16,6 +17,9 @@ final class InCallViewController: UIViewController {
     private let goalField = UITextField()
     private let questionField = UITextField()
     private var inputBottomConstraint: NSLayoutConstraint?
+
+    private let speakerButton = UIButton(type: .system)
+    private var isSpeakerOn = false
 
     init(callerName: String) {
         self.callerName = callerName
@@ -77,6 +81,9 @@ final class InCallViewController: UIViewController {
         view.addSubview(header)
         view.addSubview(scrollView)
 
+        let controlsRow = buildControlsRow()
+        view.addSubview(controlsRow)
+
         let inputBar = buildInputBar()
         view.addSubview(inputBar)
 
@@ -91,7 +98,11 @@ final class InCallViewController: UIViewController {
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 16),
             scrollView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: inputBar.topAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: controlsRow.topAnchor, constant: -8),
+
+            controlsRow.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
+            controlsRow.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            controlsRow.bottomAnchor.constraint(equalTo: inputBar.topAnchor, constant: -8),
 
             inputBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
             inputBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
@@ -154,6 +165,54 @@ final class InCallViewController: UIViewController {
         bar.spacing = 8
         bar.translatesAutoresizingMaskIntoConstraints = false
         return bar
+    }
+
+    private func buildControlsRow() -> UIView {
+        speakerButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        speakerButton.layer.cornerRadius = 10
+        speakerButton.addTarget(self, action: #selector(speakerTapped), for: .touchUpInside)
+        speakerButton.accessibilityIdentifier = "button-speaker"
+        updateSpeakerButton()
+
+        let endButton = UIButton(type: .system)
+        endButton.setTitle("End Call", for: .normal)
+        endButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        endButton.setTitleColor(.white, for: .normal)
+        endButton.backgroundColor = .systemRed
+        endButton.layer.cornerRadius = 10
+        endButton.addTarget(self, action: #selector(endCallTapped), for: .touchUpInside)
+        endButton.accessibilityIdentifier = "button-end-call"
+
+        let row = UIStackView(arrangedSubviews: [speakerButton, endButton])
+        row.axis = .horizontal
+        row.spacing = 12
+        row.distribution = .fillEqually
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.heightAnchor.constraint(equalToConstant: 50).isActive = true
+        return row
+    }
+
+    private func updateSpeakerButton() {
+        speakerButton.setTitle(isSpeakerOn ? "🔊 Speaker On" : "🔊 Speaker", for: .normal)
+        speakerButton.backgroundColor = isSpeakerOn
+            ? UIColor.systemBlue.withAlphaComponent(0.20)
+            : .secondarySystemBackground
+    }
+
+    @objc private func speakerTapped() {
+        isSpeakerOn.toggle()
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.overrideOutputAudioPort(isSpeakerOn ? .speaker : .none)
+        } catch {
+            print("[InCall] speaker toggle failed: \(error.localizedDescription)")
+            isSpeakerOn.toggle() // revert intent if the override was rejected
+        }
+        updateSpeakerButton()
+    }
+
+    @objc private func endCallTapped() {
+        CallManager.shared.endCall()
     }
 
     private func observeKeyboard() {

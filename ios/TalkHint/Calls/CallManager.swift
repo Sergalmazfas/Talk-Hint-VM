@@ -114,6 +114,25 @@ final class CallManager: NSObject {
         }
     }
 
+    /// Ends the currently active call by requesting a `CXEndCallAction` through
+    /// CallKit, so the existing `CXEndCallAction` handler runs and the audio
+    /// session / Twilio leg are released correctly. Called by the in-call
+    /// assistant screen's End Call button — never tear down the screen directly.
+    func endCall() {
+        // Prefer a connected call; fall back to any tracked session.
+        let uuid = sessions.first(where: { $0.value.twilioCall != nil })?.key
+            ?? sessions.keys.first
+        guard let callUUID = uuid else { return }
+
+        let endAction = CXEndCallAction(call: callUUID)
+        let transaction = CXTransaction(action: endAction)
+        callController.request(transaction) { error in
+            if let error = error {
+                print("[CallManager] endCall request failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func endSession(_ uuid: UUID) {
         sessions[uuid] = nil
         answerActions[uuid] = nil
