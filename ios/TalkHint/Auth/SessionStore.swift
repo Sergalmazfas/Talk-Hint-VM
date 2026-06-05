@@ -10,6 +10,25 @@ final class SessionStore {
     private let userIdKey = "talkhint.user.id"
     private let emailKey = "talkhint.user.email"
     private let activeNumberIdKey = "talkhint.active.number.id"
+    private let activeModeKey = "talkhint.assistant.mode"
+    private let languageKey = "talkhint.assistant.language"
+    private let callGoalKey = "talkhint.assistant.goal"
+    private let activePromptIdKey = "talkhint.assistant.prompt.id"
+
+    /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
+    /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
+    static let availableModes: [(id: String, name: String)] = [
+        ("universal", "Universal Assistant"),
+        ("massage", "Massage Salon Assistant"),
+        ("dispatcher", "Dispatcher Assistant"),
+    ]
+
+    /// Languages the live assistant accepts for translations (server only honors
+    /// "ru" / "es" on `set_language`).
+    static let availableLanguages: [(code: String, name: String)] = [
+        ("ru", "Русский"),
+        ("es", "Español"),
+    ]
 
     private init() {}
 
@@ -32,6 +51,40 @@ final class SessionStore {
         }
     }
 
+    /// The built-in assistant mode applied to live calls (`set_mode`). Defaults
+    /// to "universal" to match the backend default.
+    var activeMode: String {
+        get { UserDefaults.standard.string(forKey: activeModeKey) ?? "universal" }
+        set { UserDefaults.standard.set(newValue, forKey: activeModeKey) }
+    }
+
+    /// The native language used for translations/hints (`set_language`). Server
+    /// only honors "ru" / "es"; defaults to "ru".
+    var language: String {
+        get { UserDefaults.standard.string(forKey: languageKey) ?? "ru" }
+        set { UserDefaults.standard.set(newValue, forKey: languageKey) }
+    }
+
+    /// The call goal sent to the live assistant (`set_goal`). Empty string means
+    /// no goal is set.
+    var callGoal: String {
+        get { UserDefaults.standard.string(forKey: callGoalKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: callGoalKey) }
+    }
+
+    /// The user prompt the user marked active. Tracked locally so the Assistant
+    /// tab can show a checkmark; the backend persists `isActive` per prompt.
+    var activePromptId: String? {
+        get { UserDefaults.standard.string(forKey: activePromptIdKey) }
+        set {
+            if let value = newValue {
+                UserDefaults.standard.set(value, forKey: activePromptIdKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: activePromptIdKey)
+            }
+        }
+    }
+
     func save(token: String, userId: String, email: String) {
         Keychain.set(token, for: tokenKey)
         UserDefaults.standard.set(userId, forKey: userIdKey)
@@ -43,5 +96,9 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: emailKey)
         UserDefaults.standard.removeObject(forKey: activeNumberIdKey)
+        UserDefaults.standard.removeObject(forKey: activeModeKey)
+        UserDefaults.standard.removeObject(forKey: languageKey)
+        UserDefaults.standard.removeObject(forKey: callGoalKey)
+        UserDefaults.standard.removeObject(forKey: activePromptIdKey)
     }
 }

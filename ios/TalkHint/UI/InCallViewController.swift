@@ -111,6 +111,7 @@ final class InCallViewController: UIViewController {
 
     private func buildInputBar() -> UIView {
         goalField.placeholder = "Set call goal (e.g. book a table)"
+        goalField.text = SessionStore.shared.callGoal
         goalField.borderStyle = .roundedRect
         goalField.font = .preferredFont(forTextStyle: .subheadline)
         goalField.returnKeyType = .done
@@ -185,6 +186,7 @@ final class InCallViewController: UIViewController {
         let goal = goalField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !goal.isEmpty else { return }
         stream.setGoal(goal)
+        SessionStore.shared.callGoal = goal
         statusLabel.text = "Goal set: \(goal)"
         goalField.resignFirstResponder()
     }

@@ -65,6 +65,30 @@ final class CallHintStream: NSObject {
         send(["type": "set_goal", "goal": goal])
     }
 
+    /// Sets the native language used for translations/hints. Server honors
+    /// "ru" / "es".
+    func setLanguage(_ language: String) {
+        send(["type": "set_language", "language": language])
+    }
+
+    /// Sets the built-in assistant mode (universal / massage / dispatcher).
+    func setMode(_ mode: String) {
+        send(["type": "set_mode", "mode": mode])
+    }
+
+    /// Pushes the user's saved Assistant-tab selections (mode, language, goal) to
+    /// the live socket so each call reflects what they chose. Called right after
+    /// the socket connects.
+    private func applyPersistedSelections() {
+        let store = SessionStore.shared
+        setMode(store.activeMode)
+        setLanguage(store.language)
+        let goal = store.callGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !goal.isEmpty {
+            setGoal(goal)
+        }
+    }
+
     private func send(_ payload: [String: Any]) {
         guard let task = task,
               let data = try? JSONSerialization.data(withJSONObject: payload),
@@ -88,6 +112,7 @@ final class CallHintStream: NSObject {
         self.task = task
         task.resume()
         receiveNext()
+        applyPersistedSelections()
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isActive else { return }

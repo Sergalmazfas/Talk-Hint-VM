@@ -195,6 +195,100 @@ final class APIClient {
         return id
     }
 
+    // MARK: - Prompts & templates
+
+    struct UserPrompt {
+        let id: String
+        let name: String
+        let content: String
+        var isActive: Bool
+    }
+
+    /// Fetches the signed-in user's saved prompts.
+    func prompts() async throws -> [UserPrompt] {
+        let data = try await request("/api/prompts", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["prompts"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr.compactMap { Self.parsePrompt($0) }
+    }
+
+    /// Creates a new prompt and returns it.
+    @discardableResult
+    func createPrompt(name: String, content: String) async throws -> UserPrompt {
+        let body: [String: Any] = ["name": name, "content": content]
+        let data = try await request("/api/prompts", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let promptObj = obj["prompt"] as? [String: Any],
+              let prompt = Self.parsePrompt(promptObj) else {
+            throw APIError.decoding
+        }
+        return prompt
+    }
+
+    /// Updates a prompt's name/content and/or active flag. Only the provided
+    /// fields are sent.
+    func updatePrompt(id: String, name: String? = nil, content: String? = nil, isActive: Bool? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let name = name { body["name"] = name }
+        if let content = content { body["content"] = content }
+        if let isActive = isActive { body["isActive"] = isActive }
+        _ = try await request("/api/prompts/\(id)", method: "PUT", json: body, authenticated: true)
+    }
+
+    func deletePrompt(id: String) async throws {
+        _ = try await request("/api/prompts/\(id)", method: "DELETE", json: nil, authenticated: true)
+    }
+
+    struct PromptTemplate {
+        let id: String
+        let name: String
+        let category: String
+        let contentRu: String
+        let contentEn: String
+        let contentEs: String
+
+        /// Returns the template body for the given language code, falling back to
+        /// English.
+        func content(for language: String) -> String {
+            switch language {
+            case "ru": return contentRu.isEmpty ? contentEn : contentRu
+            case "es": return contentEs.isEmpty ? contentEn : contentEs
+            default: return contentEn
+            }
+        }
+    }
+
+    /// Fetches the built-in prompt templates (public endpoint).
+    func templates() async throws -> [PromptTemplate] {
+        let data = try await request("/api/templates", method: "GET", json: nil, authenticated: false)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["templates"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr.compactMap { item in
+            guard let id = item["id"] as? String,
+                  let name = item["name"] as? String else { return nil }
+            return PromptTemplate(
+                id: id,
+                name: name,
+                category: (item["category"] as? String) ?? "",
+                contentRu: (item["contentRu"] as? String) ?? "",
+                contentEn: (item["contentEn"] as? String) ?? "",
+                contentEs: (item["contentEs"] as? String) ?? ""
+            )
+        }
+    }
+
+    private static func parsePrompt(_ item: [String: Any]) -> UserPrompt? {
+        guard let id = item["id"] as? String,
+              let name = item["name"] as? String else { return nil }
+        let content = (item["content"] as? String) ?? ""
+        let isActive = (item["isActive"] as? Bool) ?? false
+        return UserPrompt(id: id, name: name, content: content, isActive: isActive)
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

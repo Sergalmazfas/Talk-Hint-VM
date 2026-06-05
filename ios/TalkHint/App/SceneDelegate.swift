@@ -45,10 +45,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         numbers.tabBarItem = UITabBarItem(
             title: "Numbers", image: UIImage(systemName: "number"), tag: 1)
 
-        let assistant = PlaceholderViewController(
-            featureTitle: "Assistant",
-            message: "Pick a mode, manage prompts and set your call goal here. Coming soon.",
-            systemImageName: "wand.and.stars")
+        let assistant = AssistantViewController()
         assistant.tabBarItem = UITabBarItem(
             title: "Assistant", image: UIImage(systemName: "wand.and.stars"), tag: 2)
 
