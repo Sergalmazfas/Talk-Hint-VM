@@ -166,15 +166,13 @@ Return JSON only, no markdown:
           },
           {
             role: "user",
-            content: `USER'S GOAL: ${goal || "Have a successful conversation"}
+            content: `Guest said: "${text}"
 
-Guest said: "${text}"
-
-Remember: Your suggestion must ADVANCE the goal above. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`
+Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`
           }
         ],
         temperature: 0.4,
-        max_tokens: 120
+        max_tokens: 80
       }),
     });
 
