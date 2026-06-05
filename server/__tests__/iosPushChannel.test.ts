@@ -77,7 +77,7 @@ process.env.APNS_CERT_PEM = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFI
 process.env.APNS_KEY_PEM = "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----";
 process.env.APNS_BUNDLE_ID = "app.talkhint";
 
-const { IOSPushChannel, TerminalTokenError } = await import("../pushChannels/iosPushChannel");
+const { IOSPushChannel, TerminalTokenError, normalizePem } = await import("../pushChannels/iosPushChannel");
 
 const payload = { callSid: "CA-1", fromNumber: "+15550001111", userId: "user-1" };
 
@@ -139,6 +139,45 @@ describe("IOSPushChannel notification shape", () => {
       fromNumber: "+15550001111",
       userId: "user-1",
     });
+  });
+});
+
+describe("normalizePem", () => {
+  // A base64 body longer than 64 chars so we can assert re-wrapping.
+  const body = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVmZ2hpamtsbW5vcA==";
+
+  const expected =
+    "-----BEGIN CERTIFICATE-----\n" +
+    body.match(/.{1,64}/g)!.join("\n") +
+    "\n-----END CERTIFICATE-----\n";
+
+  it("rebuilds a single-line PEM (newlines stripped by the secret store)", () => {
+    const singleLine = `-----BEGIN CERTIFICATE-----${body}-----END CERTIFICATE-----`;
+    expect(normalizePem(singleLine)).toBe(expected);
+  });
+
+  it("is idempotent on an already-valid PEM", () => {
+    expect(normalizePem(expected)).toBe(expected);
+  });
+
+  it("recovers a PEM stored with escaped literal \\n sequences", () => {
+    const escaped =
+      `-----BEGIN CERTIFICATE-----\\n${body.match(/.{1,64}/g)!.join("\\n")}\\n-----END CERTIFICATE-----`;
+    expect(normalizePem(escaped)).toBe(expected);
+  });
+
+  it("normalizes every block in a multi-block blob (e.g. a cert chain)", () => {
+    const blob = `-----BEGIN CERTIFICATE-----${body}-----END CERTIFICATE----------BEGIN CERTIFICATE-----${body}-----END CERTIFICATE-----`;
+    const out = normalizePem(blob)!;
+    expect(out.match(/-----BEGIN CERTIFICATE-----/g)).toHaveLength(2);
+    expect(out.match(/-----END CERTIFICATE-----/g)).toHaveLength(2);
+    expect(out).not.toContain(`${body}-----`);
+  });
+
+  it("leaves a non-PEM string unchanged and passes through empty values", () => {
+    expect(normalizePem("not a pem")).toBe("not a pem");
+    expect(normalizePem(undefined)).toBeUndefined();
+    expect(normalizePem("")).toBe("");
   });
 });
 

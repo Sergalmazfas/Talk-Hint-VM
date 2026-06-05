@@ -10,8 +10,36 @@ import { PushChannel, IncomingCallPushPayload, PushSendOptions } from "./types";
 // Optional config:
 //   APNS_BUNDLE_ID — app bundle id (default "app.talkhint").
 //                    The VoIP push topic is always `${bundleId}.voip`.
-const APNS_CERT_PEM = process.env.APNS_CERT_PEM;
-const APNS_KEY_PEM = process.env.APNS_KEY_PEM;
+// Secret stores frequently strip the newlines out of PEM blobs, leaving the
+// whole certificate/key on a single line — which OpenSSL refuses to parse
+// ("no start line"). Rebuild a well-formed PEM: keep each BEGIN/END marker on
+// its own line and rewrap the base64 body at 64 chars. Handles multi-block
+// blobs (e.g. a cert chain) and is a no-op for already-valid PEMs.
+export function normalizePem(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  // Some secret stores escape newlines as the literal two-character sequence
+  // "\n" (backslash + n). Convert those to real newlines first — otherwise the
+  // stray "n" survives the base64 cleanup below and corrupts the body.
+  const s = raw.trim().replace(/\\r\\n|\\n|\\r/g, "\n");
+  const blocks = [
+    ...s.matchAll(/-----BEGIN ([A-Z0-9 ]+?)-----([\s\S]*?)-----END \1-----/g),
+  ];
+  if (blocks.length === 0) return s;
+  return (
+    blocks
+      .map((b) => {
+        const label = b[1].trim();
+        const body = (
+          b[2].replace(/[^A-Za-z0-9+/=]/g, "").match(/.{1,64}/g) || []
+        ).join("\n");
+        return `-----BEGIN ${label}-----\n${body}\n-----END ${label}-----`;
+      })
+      .join("\n") + "\n"
+  );
+}
+
+const APNS_CERT_PEM = normalizePem(process.env.APNS_CERT_PEM);
+const APNS_KEY_PEM = normalizePem(process.env.APNS_KEY_PEM);
 const APNS_BUNDLE_ID = process.env.APNS_BUNDLE_ID || "app.talkhint";
 const VOIP_TOPIC = `${APNS_BUNDLE_ID}.voip`;
 
