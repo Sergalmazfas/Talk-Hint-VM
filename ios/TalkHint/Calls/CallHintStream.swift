@@ -10,6 +10,8 @@ enum CallHintEvent {
     case suggestion(en: String, translation: String?)
     /// A low-latency "fast layer" phrase to fill a pause.
     case fastPhrase(text: String, translation: String?)
+    /// A reply to a question the user typed via "Ask AI".
+    case aiResponse(text: String, isError: Bool)
 }
 
 protocol CallHintStreamDelegate: AnyObject {
@@ -48,6 +50,26 @@ final class CallHintStream: NSObject {
         task = nil
         session?.invalidateAndCancel()
         session = nil
+    }
+
+    /// Sends a free-form question to the assistant. The reply arrives as an
+    /// `ai_response` event on the feed.
+    func askAI(_ question: String, goal: String? = nil) {
+        var payload: [String: Any] = ["type": "ask_ai", "question": question]
+        if let goal = goal, !goal.isEmpty { payload["goal"] = goal }
+        send(payload)
+    }
+
+    /// Sets (or updates) the goal for the active call.
+    func setGoal(_ goal: String) {
+        send(["type": "set_goal", "goal": goal])
+    }
+
+    private func send(_ payload: [String: Any]) {
+        guard let task = task,
+              let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else { return }
+        task.send(.string(text)) { _ in }
     }
 
     private func openSocket() {
@@ -141,6 +163,9 @@ final class CallHintStream: NSObject {
         case "fast_phrase":
             guard let body = obj["text"] as? String, !body.isEmpty else { return }
             event = .fastPhrase(text: body, translation: nonEmpty(obj["translation"]))
+        case "ai_response":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return }
+            event = .aiResponse(text: body, isError: (obj["error"] as? Bool) ?? false)
         default:
             event = nil
         }
