@@ -53,16 +53,21 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         history.tabBarItem = UITabBarItem(
             title: "History", image: UIImage(systemName: "clock"), tag: 3)
 
+        let settings = SettingsViewController()
+        settings.tabBarItem = UITabBarItem(
+            title: "Settings", image: UIImage(systemName: "gearshape"), tag: 4)
+
         let account = AccountViewController()
         account.onLoggedOut = { [weak self] in self?.showRoot(loggedIn: false) }
         account.tabBarItem = UITabBarItem(
-            title: "Account", image: UIImage(systemName: "person.crop.circle"), tag: 4)
+            title: "Account", image: UIImage(systemName: "person.crop.circle"), tag: 5)
 
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),
             UINavigationController(rootViewController: numbers),
             UINavigationController(rootViewController: assistant),
             UINavigationController(rootViewController: history),
+            UINavigationController(rootViewController: settings),
             UINavigationController(rootViewController: account),
         ]
         return tabController

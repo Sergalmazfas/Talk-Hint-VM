@@ -23,10 +23,11 @@ final class CallManager: NSObject {
 
     private struct CallSession {
         let uuid: UUID
-        let callSid: String
-        let fromNumber: String
+        let callSid: String?      // nil for outgoing calls (Twilio assigns the SID)
+        let remoteLabel: String
         var twilioCall: Call?
         var answered: Bool
+        let isOutgoing: Bool
     }
 
     private var sessions: [UUID: CallSession] = [:]
@@ -53,7 +54,7 @@ final class CallManager: NSObject {
     /// PushKit completion handler must run only after `reportNewIncomingCall`.
     func reportIncomingCall(callSid: String, fromNumber: String, completion: @escaping () -> Void) {
         let uuid = UUID()
-        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, fromNumber: fromNumber, twilioCall: nil, answered: false)
+        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -84,6 +85,35 @@ final class CallManager: NSObject {
         }
     }
 
+    /// Places an outbound call to a typed phone number, reusing the existing
+    /// Twilio token + TwiML voice flow — no second calling path.
+    ///
+    /// Flow (client-initiated, mirrors the incoming path):
+    ///   1. `CXStartCallAction` shows the native outgoing-call UI.
+    ///   2. `GET /api/token` returns a Twilio access token, then
+    ///      `TwilioVoiceSDK.connect(params: ["To": number])` dials. The backend
+    ///      `/twilio/voice` handler dials the number with the user's caller ID,
+    ///      starts the transcription media stream and registers this user as the
+    ///      call owner so the `/ui` hint feed is routed back to them.
+    ///   3. On connect the live assistant screen opens (`presentInCallScreen`).
+    ///
+    /// `number` must be E.164 (leading "+"), which the backend requires to route
+    /// the outbound dial.
+    func startOutgoingCall(to number: String) {
+        let uuid = UUID()
+        sessions[uuid] = CallSession(uuid: uuid, callSid: nil, remoteLabel: number,
+                                     twilioCall: nil, answered: false, isOutgoing: true)
+
+        let handle = CXHandle(type: .phoneNumber, value: number)
+        let startAction = CXStartCallAction(call: uuid, handle: handle)
+        let transaction = CXTransaction(action: startAction)
+        callController.request(transaction) { [weak self] error in
+            guard let error = error else { return }
+            print("[CallManager] startOutgoingCall request failed: \(error.localizedDescription)")
+            Task { @MainActor in self?.sessions[uuid] = nil }
+        }
+    }
+
     private func endSession(_ uuid: UUID) {
         sessions[uuid] = nil
         answerActions[uuid] = nil
@@ -96,7 +126,7 @@ final class CallManager: NSObject {
     private func presentInCallScreen(for uuid: UUID) {
         guard inCallScreen == nil, let session = sessions[uuid] else { return }
         guard let top = Self.topViewController() else { return }
-        let screen = InCallViewController(callerName: session.fromNumber)
+        let screen = InCallViewController(callerName: session.remoteLabel)
         inCallScreen = screen
         top.present(screen, animated: true)
     }
@@ -135,6 +165,51 @@ extension CallManager: CXProviderDelegate {
         tearDownInCallScreen()
     }
 
+    func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        guard var session = sessions[action.callUUID] else {
+            action.fail()
+            return
+        }
+
+        // CallKit will activate the audio session; keep it disabled until then.
+        audioDevice.isEnabled = false
+        let uuid = action.callUUID
+        let number = session.remoteLabel
+
+        provider.reportOutgoingCall(with: uuid, startedConnectingAt: Date())
+
+        Task { @MainActor in
+            do {
+                let accessToken = try await APIClient.shared.fetchTwilioAccessToken()
+
+                // The call may have been canceled (CXEndCallAction) while we
+                // awaited the token. If so, the session is gone — abort instead
+                // of resurrecting it / connecting a ghost Twilio call. Safe
+                // because @MainActor means no interleaving past this point.
+                guard self.sessions[uuid] != nil else {
+                    action.fail()
+                    return
+                }
+
+                let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
+                    builder.params = ["To": number]
+                    builder.uuid = uuid
+                }
+                let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
+
+                session.twilioCall = call
+                session.answered = true
+                self.sessions[uuid] = session
+                action.fulfill()
+                // callDidConnect reports the connected time and opens the screen.
+            } catch {
+                action.fail()
+                self.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+                self.endSession(uuid)
+            }
+        }
+    }
+
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         guard var session = sessions[action.callUUID] else {
             action.fail()
@@ -145,7 +220,12 @@ extension CallManager: CXProviderDelegate {
         audioDevice.isEnabled = false
         answerActions[action.callUUID] = action
 
-        let callSid = session.callSid
+        guard let callSid = session.callSid else {
+            // Incoming calls always carry a callSid; bail safely if missing.
+            answerActions[action.callUUID] = nil
+            action.fail()
+            return
+        }
         let uuid = action.callUUID
 
         Task { @MainActor in
@@ -179,11 +259,10 @@ extension CallManager: CXProviderDelegate {
         }
 
         if let call = session.twilioCall {
-            // Active call -> hang up the Twilio leg.
+            // Active call (incoming or outgoing) -> hang up the Twilio leg.
             call.disconnect()
-        } else if !session.answered {
-            // User declined before answering -> reject on the backend.
-            let callSid = session.callSid
+        } else if !session.answered, !session.isOutgoing, let callSid = session.callSid {
+            // User declined an incoming call before answering -> reject on the backend.
             Task { try? await APIClient.shared.rejectCall(callSid: callSid) }
         }
 
@@ -207,6 +286,9 @@ extension CallManager: CallDelegate {
         guard let uuid = call.uuid else { return }
         answerActions[uuid]?.fulfill()
         answerActions[uuid] = nil
+        if sessions[uuid]?.isOutgoing == true {
+            provider.reportOutgoingCall(with: uuid, connectedAt: Date())
+        }
         presentInCallScreen(for: uuid)
     }
 

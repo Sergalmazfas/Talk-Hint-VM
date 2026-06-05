@@ -12,6 +12,7 @@ final class SessionStore {
     private let activeNumberIdKey = "talkhint.active.number.id"
     private let activeModeKey = "talkhint.assistant.mode"
     private let languageKey = "talkhint.assistant.language"
+    private let callModeKey = "talkhint.user.call.mode"
     private let callGoalKey = "talkhint.assistant.goal"
     private let activePromptIdKey = "talkhint.assistant.prompt.id"
 
@@ -65,6 +66,16 @@ final class SessionStore {
         set { UserDefaults.standard.set(newValue, forKey: languageKey) }
     }
 
+    /// How incoming calls are handled, persisted to the backend via
+    /// `POST /api/user/call-mode` (enum live / forwarding / training). The
+    /// backend exposes no GET for it, so this local copy is the display source
+    /// of truth and is kept in sync on every successful update. Defaults to
+    /// "live" to match the backend default.
+    var callMode: String {
+        get { UserDefaults.standard.string(forKey: callModeKey) ?? "live" }
+        set { UserDefaults.standard.set(newValue, forKey: callModeKey) }
+    }
+
     /// The call goal sent to the live assistant (`set_goal`). Empty string means
     /// no goal is set.
     var callGoal: String {
@@ -98,6 +109,7 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: activeNumberIdKey)
         UserDefaults.standard.removeObject(forKey: activeModeKey)
         UserDefaults.standard.removeObject(forKey: languageKey)
+        UserDefaults.standard.removeObject(forKey: callModeKey)
         UserDefaults.standard.removeObject(forKey: callGoalKey)
         UserDefaults.standard.removeObject(forKey: activePromptIdKey)
     }

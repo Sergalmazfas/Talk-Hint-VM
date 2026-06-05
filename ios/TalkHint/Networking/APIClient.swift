@@ -367,6 +367,35 @@ final class APIClient {
         return isoFormatter.date(from: s) ?? isoFormatterNoFraction.date(from: s)
     }
 
+    // MARK: - Settings
+
+    /// Fetches the user's current SMS/voice forwarding number (nil if unset).
+    func forwardingPhone() async throws -> String? {
+        let data = try await request("/api/settings/forwarding", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return obj["forwardingPhone"] as? String
+    }
+
+    /// Sets (or clears, when `phone` is nil/empty) the forwarding number. Returns
+    /// the normalized value the backend stored.
+    @discardableResult
+    func setForwardingPhone(_ phone: String?) async throws -> String? {
+        let body: [String: Any] = ["forwardingPhone": phone ?? ""]
+        let data = try await request("/api/settings/forwarding", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return obj["forwardingPhone"] as? String
+    }
+
+    /// Updates how incoming calls are handled. Accepts "live", "forwarding" or
+    /// "training" (the backend `callMode` enum).
+    func setCallMode(_ mode: String) async throws {
+        _ = try await request("/api/user/call-mode", method: "POST", json: ["callMode": mode], authenticated: true)
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {
