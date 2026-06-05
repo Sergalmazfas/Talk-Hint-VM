@@ -718,6 +718,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Anti-loop guards - prevents cycling on same emotions/suggestions
     let lastSuggestionIntent = "";         // Last intent type (enthusiasm/ask_date/etc)
     let lastSuggestionText = "";           // Last suggestion text for duplicate check
+    const recentSuggestions: string[] = []; // Last few suggestions for duplicate window
+    const RECENT_SUGGESTIONS_MAX = 4;      // How many past suggestions to compare against
+    const DUPLICATE_SIMILARITY = 0.5;      // Block if >=50% similar to any recent suggestion
+
+    // Anti-echo (cross-track) - same speech transcribed on BOTH tracks (mic/speaker bleed)
+    const recentUtterances: { speaker: "GST" | "HON"; norm: string; ts: number }[] = [];
+    const ECHO_WINDOW_MS = 1200;           // Window to treat opposite-track repeat as echo (acoustic bleed is near-instant)
+    const ECHO_SIMILARITY = 0.85;          // Similarity threshold to call it an echo (high, to spare legit turn-taking)
     
     // Wait State - when GST says "let me check", block STEER until new content
     let waitingForInfo = false;            // True when GST is checking/looking
@@ -740,6 +748,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       /^(let'?s?\s+go|let'?s?\s+do\s+(it|this|that))\.?$/i
     ];
     
+    // Farewell / closing phrases - conversation is wrapping up, no steer needed (translation still shown)
+    const FAREWELL_PATTERNS = /\b(see you|talk to you|speak (to|with) you|catch you|bye|goodbye|good bye|take care|have a (good|great|nice)|thanks?( so much| a lot)?|thank you|appreciate it|see ya|until (then|monday|tomorrow|next)|looking forward)\b/i;
+
     // Keywords that indicate meaningful content (don't block)
     const MEANINGFUL_KEYWORDS = /\b(yes|no|when|where|what|how|price|cost|time|date|day|week|month|hour|minute|dollar|euro|available|book|schedule|appointment|cancel|change|confirm|sure|alright|definitely|absolutely|of course|please|thank|sounds good|deal|agreed|perfect|let me|i need|i want|i would|i will|can i|could you)\b/i;
     
@@ -817,6 +828,26 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     
     // Utterance Gate - wait for end of speech before generating hints
     const utteranceGate = new UtteranceGate(async (speaker, text, utteranceId) => {
+      // ===== ANTI-ECHO: drop the same speech echoed onto the opposite track =====
+      // On speakerphone the mic captures the remote audio (and vice versa), so the
+      // same words get transcribed on BOTH Deepgram tracks. Keep the first, drop the echo.
+      const norm = normalizeText(text);
+      const nowTs = Date.now();
+      // prune old entries
+      while (recentUtterances.length && nowTs - recentUtterances[0].ts > ECHO_WINDOW_MS) {
+        recentUtterances.shift();
+      }
+      if (norm) {
+        const echo = recentUtterances.find(
+          (u) => u.speaker !== speaker && textSimilarity(norm, u.norm) >= ECHO_SIMILARITY
+        );
+        if (echo) {
+          log(`[BLOCKED] reason=echo speaker=${speaker} text="${text.substring(0, 30)}" - mirrored on ${echo.speaker} track`, "websocket");
+          return;
+        }
+        recentUtterances.push({ speaker, norm, ts: nowTs });
+      }
+
       if (speaker === "GST") {
         await handleGuestUtteranceComplete(text, utteranceId);
       } else {
@@ -902,6 +933,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (reactionOnly && !goalJustAchieved) {
         log(`[REACTION_ONLY] text="${text.substring(0, 30)}" - will translate but skip suggestion`, "websocket");
       }
+      // Farewell / closing phrases: conversation is wrapping up, no steer needed.
+      // Guard against false positives like "Thanks, what time works best?" - if the
+      // utterance asks a question or has an actionable scheduling keyword, it's NOT a farewell.
+      const isFarewell =
+        FAREWELL_PATTERNS.test(text) &&
+        !/\?/.test(text) &&
+        !/\b(when|what time|which|how|can you|could you|would you|book|schedule|reschedule|change|cancel|available|price|cost)\b/i.test(text);
+      if (isFarewell && !goalJustAchieved) {
+        log(`[FAREWELL] text="${text.substring(0, 30)}" - will translate but skip suggestion`, "websocket");
+      }
       
       // ALWAYS get translation for guest transcript
       fastLayer.setLanguage(currentLanguage);
@@ -970,6 +1011,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         log(`[BLOCKED] reason=reaction_only text="${text.substring(0, 30)}" - suggestion skipped`, "websocket");
         return;
       }
+
+      // Check: farewell filter (skip suggestion, but translation was shown above)
+      if (isFarewell && !goalJustAchieved) {
+        log(`[BLOCKED] reason=farewell text="${text.substring(0, 30)}" - suggestion skipped`, "websocket");
+        return;
+      }
       
       // ===== WAIT STATE: Show 1 ACK, then block STEER =====
       if (waitingForInfo && !goalJustAchieved) {
@@ -1016,13 +1063,21 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           return;
         }
         
-        // ===== ANTI-LOOP GUARD: Duplicate suggestion check =====
-        if (lastSuggestionText) {
-          const similarity = textSimilarity(suggestionText, lastSuggestionText);
-          if (similarity > 0.7) {
-            log(`[BLOCKED] reason=duplicate_suggestion similarity=${(similarity * 100).toFixed(0)}% - too similar to last`, "websocket");
-            return;
-          }
+        // ===== ANTI-LOOP GUARD: Duplicate suggestion check (window of recent hints) =====
+        let maxSim = 0;
+        for (const prev of recentSuggestions) {
+          const sim = textSimilarity(suggestionText, prev);
+          if (sim > maxSim) maxSim = sim;
+        }
+        if (maxSim >= DUPLICATE_SIMILARITY) {
+          log(`[BLOCKED] reason=duplicate_suggestion similarity=${(maxSim * 100).toFixed(0)}% - too similar to a recent hint`, "websocket");
+          return;
+        }
+
+        // Final re-check: goal may have been achieved while GPT was generating (async race)
+        if (goalAchievedFlag) {
+          log(`[BLOCKED] reason=goal_achieved (post-generation) utteranceId=${utteranceId} - no hint`, "websocket");
+          return;
         }
         
         // Record hint shown for throttling
@@ -1030,6 +1085,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         lastHintUtteranceId = utteranceId;
         lastSuggestionIntent = currentIntent;
         lastSuggestionText = suggestionText;
+        recentSuggestions.push(suggestionText);
+        if (recentSuggestions.length > RECENT_SUGGESTIONS_MAX) recentSuggestions.shift();
         
         log(`[Suggestion] Sending to HON, basedOn=GST, utteranceId=${utteranceId}, intent=${currentIntent}`, "websocket");
         uiBroadcast({
@@ -1082,6 +1139,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         
         if (goalUpdate.goalAchieved) {
+          goalAchievedFlag = true; // HARD STOP: goal can be achieved on the owner's reply too
+          log(`[GoalAchieved] HARD STOP activated (on HON utterance) - no more hints`, "goal");
           uiBroadcast({
             type: "goal_achieved",
             target: "HON",
