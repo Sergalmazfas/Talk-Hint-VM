@@ -39,7 +39,7 @@ describe("UtteranceGate.commitTurn", () => {
     expect(result.reason).toBe("end_of_turn");
     expect(result.utteranceId).toBe(1);
     expect(onGenerate).toHaveBeenCalledTimes(1);
-    expect(onGenerate).toHaveBeenCalledWith("GST", "I would like to book an appointment", 1);
+    expect(onGenerate).toHaveBeenCalledWith("GST", "I would like to book an appointment", 1, undefined);
   });
 
   it("trims surrounding whitespace before committing", () => {
@@ -49,7 +49,15 @@ describe("UtteranceGate.commitTurn", () => {
 
     expect(result.shouldGenerate).toBe(true);
     expect(result.text).toBe("hello there friend");
-    expect(onGenerate).toHaveBeenCalledWith("GST", "hello there friend", 1);
+    expect(onGenerate).toHaveBeenCalledWith("GST", "hello there friend", 1, undefined);
+  });
+
+  it("forwards the end-of-turn confidence to onGenerate when provided", () => {
+    const { gate, onGenerate } = makeGate();
+
+    gate.commitTurn(CALL, "HON", "I would like to book an appointment", 0.42);
+
+    expect(onGenerate).toHaveBeenCalledWith("HON", "I would like to book an appointment", 1, 0.42);
   });
 
   it("blocks turns shorter than MIN_CHARS and does not fire onGenerate", () => {

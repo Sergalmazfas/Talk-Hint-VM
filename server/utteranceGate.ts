@@ -22,9 +22,9 @@ const MIN_CHARS = 10;
 
 export class UtteranceGate {
   private states: Map<string, TurnState> = new Map();
-  private onGenerate: (speaker: Speaker, text: string, utteranceId: number) => void;
+  private onGenerate: (speaker: Speaker, text: string, utteranceId: number, confidence?: number) => void;
 
-  constructor(onGenerate: (speaker: Speaker, text: string, utteranceId: number) => void) {
+  constructor(onGenerate: (speaker: Speaker, text: string, utteranceId: number, confidence?: number) => void) {
     this.onGenerate = onGenerate;
   }
 
@@ -44,7 +44,7 @@ export class UtteranceGate {
    * onGenerate callback (downstream GPT/translation pipeline) unless the turn is
    * empty, too short, or an exact repeat of the previous committed turn.
    */
-  commitTurn(callId: string, speaker: Speaker, text: string): CommitResult {
+  commitTurn(callId: string, speaker: Speaker, text: string, confidence?: number): CommitResult {
     const state = this.getState(callId, speaker);
     const trimmed = (text || "").trim();
 
@@ -69,7 +69,7 @@ export class UtteranceGate {
 
     console.log(`[utteranceGate] speaker=${speaker} event=end_of_turn utteranceId=${state.utteranceId} len=${trimmed.length} generate=true`);
 
-    this.onGenerate(speaker, trimmed, state.utteranceId);
+    this.onGenerate(speaker, trimmed, state.utteranceId, confidence);
 
     return { shouldGenerate: true, reason: "end_of_turn", text: trimmed, utteranceId: state.utteranceId };
   }

@@ -855,7 +855,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
     
     // Utterance Gate - wait for end of speech before generating hints
-    const utteranceGate = new UtteranceGate(async (speaker, text, utteranceId) => {
+    const utteranceGate = new UtteranceGate(async (speaker, text, utteranceId, confidence) => {
       // ===== ANTI-ECHO: drop the same speech echoed onto the opposite track =====
       // On speakerphone the mic captures the remote audio (and vice versa), so the
       // same words get transcribed on BOTH Deepgram tracks. Keep the first, drop the echo.
@@ -879,7 +879,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (speaker === "GST") {
         await handleGuestUtteranceComplete(text, utteranceId);
       } else {
-        handleOwnerUtteranceComplete(text, utteranceId);
+        handleOwnerUtteranceComplete(text, utteranceId, confidence);
       }
     });
     
@@ -1132,7 +1132,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     }
     
     // Handler for complete HON utterance (after debounce)
-    function handleOwnerUtteranceComplete(text: string, utteranceId: number) {
+    function handleOwnerUtteranceComplete(text: string, utteranceId: number, confidence?: number) {
       log(`[UtteranceComplete] HON utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
       // Add to conversation log
@@ -1187,6 +1187,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         text: text,
         isFinal: true,
         isComplete: true,
+        confidence,
         utteranceId,
         callSid
       });
@@ -1332,7 +1333,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             }
             
             // Commit the completed turn → runs translation/hint pipeline via onGenerate.
-            utteranceGate.commitTurn(callSid || "unknown", speakerCode as "GST" | "HON", transcript);
+            utteranceGate.commitTurn(callSid || "unknown", speakerCode as "GST" | "HON", transcript, eotConf);
           }
         } catch (err: any) {
           log(`[Deepgram] Parse error: ${err.message}`, "deepgram");
