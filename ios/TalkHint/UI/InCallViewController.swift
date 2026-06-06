@@ -19,6 +19,7 @@ final class InCallViewController: UIViewController {
     private var inputBottomConstraint: NSLayoutConstraint?
 
     private let routeButton = UIButton(type: .system)
+    private let muteButton = UIButton(type: .system)
 
     init(callerName: String) {
         self.callerName = callerName
@@ -177,6 +178,15 @@ final class InCallViewController: UIViewController {
         routeButton.accessibilityIdentifier = "button-audio-route"
         updateRouteButton()
 
+        muteButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        muteButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        muteButton.titleLabel?.minimumScaleFactor = 0.7
+        muteButton.titleLabel?.lineBreakMode = .byTruncatingTail
+        muteButton.layer.cornerRadius = 10
+        muteButton.addTarget(self, action: #selector(muteButtonTapped), for: .touchUpInside)
+        muteButton.accessibilityIdentifier = "button-mute"
+        updateMuteButton()
+
         let endButton = UIButton(type: .system)
         endButton.setTitle("End Call", for: .normal)
         endButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
@@ -186,7 +196,7 @@ final class InCallViewController: UIViewController {
         endButton.addTarget(self, action: #selector(endCallTapped), for: .touchUpInside)
         endButton.accessibilityIdentifier = "button-end-call"
 
-        let row = UIStackView(arrangedSubviews: [routeButton, endButton])
+        let row = UIStackView(arrangedSubviews: [routeButton, muteButton, endButton])
         row.axis = .horizontal
         row.spacing = 12
         row.distribution = .fillEqually
@@ -334,6 +344,19 @@ final class InCallViewController: UIViewController {
         DispatchQueue.main.async { [weak self] in
             self?.updateRouteButton()
         }
+    }
+
+    private func updateMuteButton() {
+        let muted = CallManager.shared.isMuted
+        muteButton.setTitle(muted ? "🔇 Muted" : "🎙 Mute", for: .normal)
+        muteButton.backgroundColor = muted
+            ? UIColor.systemRed.withAlphaComponent(0.20)
+            : .secondarySystemBackground
+    }
+
+    @objc private func muteButtonTapped() {
+        CallManager.shared.toggleMute()
+        updateMuteButton()
     }
 
     @objc private func endCallTapped() {

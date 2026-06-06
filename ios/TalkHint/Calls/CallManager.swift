@@ -139,6 +139,30 @@ final class CallManager: NSObject {
         tearDownInCallScreen()
     }
 
+    // MARK: - Mute
+
+    /// The active Twilio call, if any (prefers a connected leg).
+    private var activeCall: Call? {
+        sessions.first(where: { $0.value.twilioCall != nil })?.value.twilioCall
+    }
+
+    /// Whether the active call's microphone is currently muted. Returns false
+    /// when there is no active call.
+    var isMuted: Bool {
+        activeCall?.isMuted ?? false
+    }
+
+    /// Toggles the active Twilio call's outgoing audio (microphone) and returns
+    /// the resulting mute state. No-op (returns false) when there is no active
+    /// call.
+    @discardableResult
+    func toggleMute() -> Bool {
+        guard let call = activeCall else { return false }
+        let newValue = !call.isMuted
+        call.isMuted = newValue
+        return newValue
+    }
+
     // MARK: - In-call assistant screen
 
     /// Presents the live transcript/hint screen once a call connects.
