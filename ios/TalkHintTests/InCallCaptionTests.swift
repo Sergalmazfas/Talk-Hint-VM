@@ -208,6 +208,75 @@ final class InCallCaptionTests: XCTestCase {
                        "there must remain exactly one suggestion banner")
     }
 
+    /// Drives the controller through its real `CallHintStreamDelegate` across the
+    /// full recovery lifecycle — connect → disconnect(retry) → terminal — and
+    /// asserts the reconnect spinner animates only during the transient retry
+    /// state, the status label surfaces the escalating "attempt N of M" progress
+    /// while retrying, and the manual retry button stays hidden until the socket
+    /// finally gives up. This covers the view-controller wiring that the pure
+    /// `reconnectingStatusText` unit tests cannot reach.
+    func testReconnectIndicatorAcrossFullRetryCycle() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        // Baseline: nothing in flight, so the spinner is stopped and the manual
+        // retry affordance is hidden.
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating,
+                       "spinner must be stopped before any disconnect")
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "retry button must be hidden before terminal failure")
+
+        // Connected: still no spinner, still no retry button.
+        vc.callHintStreamDidConnect(stream)
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating,
+                       "spinner must not animate in the connected state")
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "retry button must stay hidden while connected")
+        XCTAssertEqual(statusText(vc), "Live assistant connected")
+
+        // First retry: spinner spins, status names attempt 1 of 5, retry hidden.
+        vc.callHintStream(stream, didDisconnectWillRetryAttempt: 1, of: 5)
+        XCTAssertTrue(reconnectSpinner(vc).isAnimating,
+                      "spinner must animate during a reconnect attempt")
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "retry button must stay hidden mid-retry")
+        let firstStatus = statusText(vc) ?? ""
+        XCTAssertTrue(firstStatus.contains("1"), "status should name attempt 1")
+        XCTAssertTrue(firstStatus.contains("5"), "status should name the ceiling")
+        XCTAssertTrue(firstStatus.lowercased().contains("attempt"),
+                      "status should mention the attempt count")
+
+        // Later retry: spinner keeps spinning, status advances to attempt 2,
+        // retry still hidden, and the wording changes (never frozen).
+        vc.callHintStream(stream, didDisconnectWillRetryAttempt: 2, of: 5)
+        XCTAssertTrue(reconnectSpinner(vc).isAnimating,
+                      "spinner must keep animating across successive retries")
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "retry button must stay hidden across successive retries")
+        let secondStatus = statusText(vc) ?? ""
+        XCTAssertTrue(secondStatus.contains("2"), "status should advance to attempt 2")
+        XCTAssertNotEqual(firstStatus, secondStatus,
+                          "status must change between retries so it never looks frozen")
+
+        // Terminal: socket gave up — spinner stops, retry button appears, and the
+        // status reflects the unavailable state.
+        vc.callHintStreamDidFailTerminally(stream)
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating,
+                       "spinner must stop once recovery has terminally failed")
+        XCTAssertFalse(retryButton(vc).isHidden,
+                       "retry button must appear in the terminal state")
+        XCTAssertEqual(statusText(vc), "Live assistant unavailable. Check your connection.")
+
+        // Recovery after a manual retry: a fresh connect re-hides the retry button
+        // and stops the spinner, returning to the steady connected state.
+        vc.callHintStreamDidConnect(stream)
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating,
+                       "spinner must be stopped again after reconnecting")
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "retry button must hide again after a successful reconnect")
+        XCTAssertEqual(statusText(vc), "Live assistant connected")
+    }
+
     // MARK: - Helpers
 
     private func makeLoadedViewController() -> InCallViewController {
@@ -238,6 +307,30 @@ final class InCallCaptionTests: XCTestCase {
 
     private func suggestionText(_ vc: UIViewController) -> String? {
         (label(withIdentifier: "text-suggestion", in: vc.view))?.text
+    }
+
+    private func statusText(_ vc: UIViewController) -> String? {
+        (label(withIdentifier: "text-incall-status", in: vc.view))?.text
+    }
+
+    private func reconnectSpinner(_ vc: UIViewController) -> UIActivityIndicatorView {
+        guard let spinner = descendants(of: vc.view)
+            .compactMap({ $0 as? UIActivityIndicatorView })
+            .first(where: { $0.accessibilityIdentifier == "spinner-incall-reconnect" }) else {
+            XCTFail("reconnect spinner not found in hierarchy")
+            return UIActivityIndicatorView()
+        }
+        return spinner
+    }
+
+    private func retryButton(_ vc: UIViewController) -> UIButton {
+        guard let button = descendants(of: vc.view)
+            .compactMap({ $0 as? UIButton })
+            .first(where: { $0.accessibilityIdentifier == "button-incall-retry" }) else {
+            XCTFail("retry button not found in hierarchy")
+            return UIButton()
+        }
+        return button
     }
 
     /// The primary (top) label of a card: the `text-*` label that is not the
