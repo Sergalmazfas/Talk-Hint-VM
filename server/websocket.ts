@@ -980,6 +980,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         goalAchievedFlag ||
         reactionOnly ||
         isFarewell ||
+        (waitingForInfo && waitAckShown) ||
         (lastHintTs > 0 && now - lastHintTs < HINT_COOLDOWN_MS);
       fastLayer.onGstUtteranceEnd(suppressFiller);
       
