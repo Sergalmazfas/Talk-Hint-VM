@@ -20,7 +20,14 @@ enum CallHintEvent: Equatable {
 protocol CallHintStreamDelegate: AnyObject {
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent)
     func callHintStreamDidConnect(_ stream: CallHintStream)
-    func callHintStreamDidDisconnect(_ stream: CallHintStream)
+    /// The socket dropped mid-call and the stream is about to retry. `attempt` is
+    /// the 1-based count of consecutive failed reconnects so far and `maxAttempts`
+    /// is the give-up ceiling, so the UI can convey recovery progress (e.g.
+    /// "attempt 2 of 5") instead of a static "Reconnecting…" label before the
+    /// terminal `callHintStreamDidFailTerminally` state is reached.
+    func callHintStream(_ stream: CallHintStream,
+                        didDisconnectWillRetryAttempt attempt: Int,
+                        of maxAttempts: Int)
     /// The socket dropped and reconnecting failed `maxReconnectAttempts` times in
     /// a row, so the stream has given up. The feed is now stopped (no further
     /// auto-reconnects); the UI should surface a terminal "connection lost" state
@@ -208,9 +215,12 @@ final class CallHintStream: NSObject {
             return
         }
 
+        let attempt = reconnectAttempts
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isActive else { return }
-            self.delegate?.callHintStreamDidDisconnect(self)
+            self.delegate?.callHintStream(self,
+                                          didDisconnectWillRetryAttempt: attempt,
+                                          of: CallHintStream.maxReconnectAttempts)
         }
 
         let delay = CallHintStream.reconnectDelay(for: reconnectAttempts)
@@ -244,6 +254,21 @@ final class CallHintStream: NSObject {
     /// silent regression, the same risk the decode/encode tests guard against.
     static func reconnectDelay(for attempt: Int) -> Double {
         min(Double(attempt) * 1.5, 6.0)
+    }
+
+    /// Human-readable status line shown while the live `/ui` socket is retrying
+    /// mid-call. Surfaces the 1-based `attempt` count out of `maxAttempts` so the
+    /// feed conveys progress (not a frozen "Reconnecting…"), and escalates the
+    /// wording on the final attempt before the terminal give-up state.
+    ///
+    /// Pure (no networking, no dispatch) so the transient-state copy can be
+    /// unit-tested directly, mirroring the timing / give-up helpers — a dropped
+    /// attempt count or lost escalation would otherwise be a silent UX regression.
+    static func reconnectingStatusText(attempt: Int, of maxAttempts: Int) -> String {
+        let lead = attempt >= maxAttempts
+            ? "Still trying to reconnect"
+            : "Reconnecting to live assistant"
+        return "\(lead)… (attempt \(attempt) of \(maxAttempts))"
     }
 
     private func handle(text: String) {

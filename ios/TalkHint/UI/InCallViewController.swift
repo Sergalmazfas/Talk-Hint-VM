@@ -11,6 +11,7 @@ final class InCallViewController: UIViewController {
     private let stream = CallHintStream()
 
     private let statusLabel = UILabel()
+    private let reconnectSpinner = UIActivityIndicatorView(style: .medium)
     private let retryButton = UIButton(type: .system)
     private let scrollView = UIScrollView()
     private let feedStack = UIStackView()
@@ -84,6 +85,12 @@ final class InCallViewController: UIViewController {
         statusLabel.numberOfLines = 0
         statusLabel.accessibilityIdentifier = "text-incall-status"
 
+        // Animated spinner shown only while a reconnect is in flight, so the
+        // transient "Reconnecting…" state reads as in-progress rather than frozen.
+        reconnectSpinner.hidesWhenStopped = true
+        reconnectSpinner.setContentHuggingPriority(.required, for: .horizontal)
+        reconnectSpinner.accessibilityIdentifier = "spinner-incall-reconnect"
+
         retryButton.setTitle("Reconnect", for: .normal)
         retryButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
         retryButton.isHidden = true
@@ -99,7 +106,14 @@ final class InCallViewController: UIViewController {
         scrollView.accessibilityIdentifier = "scroll-incall-feed"
         scrollView.addSubview(feedStack)
 
-        let header = UIStackView(arrangedSubviews: [titleLabel, statusLabel, retryButton])
+        // Spinner sits inline with the status text so the reconnect indicator and
+        // its label move together and stay centered under the title.
+        let statusRow = UIStackView(arrangedSubviews: [reconnectSpinner, statusLabel])
+        statusRow.axis = .horizontal
+        statusRow.spacing = 6
+        statusRow.alignment = .center
+
+        let header = UIStackView(arrangedSubviews: [titleLabel, statusRow, retryButton])
         header.axis = .vertical
         header.spacing = 4
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -709,16 +723,23 @@ extension InCallViewController: CallHintStreamDelegate {
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
         statusLabel.text = "Live assistant connected"
+        reconnectSpinner.stopAnimating()
         retryButton.isHidden = true
     }
 
-    func callHintStreamDidDisconnect(_ stream: CallHintStream) {
-        statusLabel.text = "Reconnecting to live assistant…"
+    func callHintStream(_ stream: CallHintStream,
+                        didDisconnectWillRetryAttempt attempt: Int,
+                        of maxAttempts: Int) {
+        // Show progress (attempt N of M) with a live spinner so the feed reads as
+        // actively recovering, not frozen, until the terminal state is reached.
+        statusLabel.text = CallHintStream.reconnectingStatusText(attempt: attempt, of: maxAttempts)
+        reconnectSpinner.startAnimating()
         retryButton.isHidden = true
     }
 
     func callHintStreamDidFailTerminally(_ stream: CallHintStream) {
         statusLabel.text = "Live assistant unavailable. Check your connection."
+        reconnectSpinner.stopAnimating()
         retryButton.isHidden = false
     }
 }
