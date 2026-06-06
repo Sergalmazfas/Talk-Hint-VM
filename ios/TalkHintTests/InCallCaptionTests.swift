@@ -401,6 +401,50 @@ final class InCallCaptionTests: XCTestCase {
                        "a successful connect must restore the normal reconnect label")
     }
 
+    /// The session-expiry path: when the live `/ui` socket drops because the
+    /// session is no longer valid, `CallHintStream.handleDisconnect` fires
+    /// `callHintStreamDidRequireSignIn` (rather than the terminal give-up). This
+    /// drives the controller through that exact delegate callback and asserts it
+    /// surfaces the *sign-in* affordance — an actionable status, a visible "Sign
+    /// in" button, no spinner — and specifically NOT the misleading "connection
+    /// lost" terminal copy. To make the distinction unambiguous, the controller is
+    /// first put into the terminal "connection lost" state, then the auth-rejected
+    /// disconnect must flip it over. Without this, a regression that routed an
+    /// expired session into the terminal path (or left a stale "Reconnect" label)
+    /// would strand the user with no way back into the live assistant.
+    func testAuthRejectedDisconnectFlipsToSignInNotConnectionLost() {
+        let vc = makeLoadedViewController()
+        let stream = vc.hintStream
+
+        // Establish the contrast: drive the controller into the terminal
+        // "connection lost" state first, so we can prove the sign-in callback
+        // actually replaces it rather than coincidentally matching.
+        vc.callHintStreamDidFailTerminally(stream)
+        XCTAssertEqual(statusText(vc), "Live assistant unavailable. Check your connection.",
+                       "precondition: controller is in the terminal connection-lost state")
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Reconnect",
+                       "precondition: terminal state offers a plain reconnect")
+
+        // The auth-rejection branch of handleDisconnect fires this callback.
+        vc.callHintStreamDidRequireSignIn(stream)
+
+        // The status must switch to the actionable sign-in message — never the
+        // "connection lost" terminal copy that would imply a transient network blip.
+        XCTAssertEqual(statusText(vc), "Sign in to use the live assistant",
+                       "an auth-rejected disconnect must surface the sign-in message")
+        XCTAssertNotEqual(statusText(vc), "Live assistant unavailable. Check your connection.",
+                          "the sign-in state must not read as the connection-lost terminal state")
+
+        // The retry affordance becomes an actionable, visible "Sign in" button and
+        // the reconnect spinner is stopped (we are not mid-retry).
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Sign in",
+                       "the retry button must relabel to a sign-in action")
+        XCTAssertFalse(retryButton(vc).isHidden,
+                       "the sign-in button must stay visible so the user can recover")
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating,
+                       "the reconnect spinner must not spin in the sign-in state")
+    }
+
     // MARK: - Helpers
 
     /// Runs the main run loop briefly so `DispatchQueue.main.async` delegate

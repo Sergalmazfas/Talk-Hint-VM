@@ -226,55 +226,91 @@ final class CallHintStream: NSObject {
 
         // The server rejects an expired/revoked session by refusing the WebSocket
         // upgrade with an HTTP 401 (see `setupWebSocket` on the backend), which
-        // surfaces here as the handshake response on the failed task. If the drop
-        // was an auth rejection rather than a transient network blip, stop and
-        // surface the actionable "sign in" state instead of retrying into the
-        // misleading "Live assistant unavailable. Check your connection." terminal
-        // path — same recovery affordance as the no-token case in `openSocket()`.
+        // surfaces here as the handshake response on the failed task. The decision
+        // of how to react — sign-in vs. terminal give-up vs. another retry — is
+        // factored into the pure `disconnectAction(...)` below so it can be
+        // unit-tested without a live socket; this method just reads the handshake
+        // status, tears the socket down, and applies the chosen action.
         let statusCode = (task?.response as? HTTPURLResponse)?.statusCode
 
-        // Connection dropped mid-call: notify and retry with backoff.
+        // Connection dropped mid-call: tear the socket down before reacting.
         task = nil
         session?.invalidateAndCancel()
         session = nil
 
-        if CallHintStream.isAuthRejection(statusCode: statusCode) {
+        switch CallHintStream.disconnectAction(handshakeStatusCode: statusCode,
+                                               priorAttempts: reconnectAttempts) {
+        case .signIn:
+            // Auth rejection (expired/revoked session): stop and surface the
+            // actionable "sign in" state instead of retrying into the misleading
+            // "Live assistant unavailable. Check your connection." terminal path —
+            // same recovery affordance as the no-token case in `openSocket()`.
             isActive = false
             reconnectAttempts = 0
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.delegate?.callHintStreamDidRequireSignIn(self)
             }
-            return
-        }
 
-        reconnectAttempts += 1
-
-        // Give up after too many consecutive failures (server outage, revoked
-        // auth, etc.) instead of retrying forever behind a frozen feed. Surface a
-        // terminal state the UI can show, and stop so the user can retry by hand.
-        if CallHintStream.shouldGiveUp(after: reconnectAttempts) {
+        case .giveUp:
+            // Too many consecutive failures (server outage, etc.): stop retrying
+            // behind a frozen feed and surface a terminal state the user can
+            // retry by hand.
+            reconnectAttempts += 1
             isActive = false
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 self.delegate?.callHintStreamDidFailTerminally(self)
             }
-            return
-        }
 
-        let attempt = reconnectAttempts
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.isActive else { return }
-            self.delegate?.callHintStream(self,
-                                          didDisconnectWillRetryAttempt: attempt,
-                                          of: CallHintStream.maxReconnectAttempts)
-        }
+        case .retry(let attempt):
+            // Transient drop: notify progress and reconnect with backoff.
+            reconnectAttempts = attempt
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self, self.isActive else { return }
+                self.delegate?.callHintStream(self,
+                                              didDisconnectWillRetryAttempt: attempt,
+                                              of: CallHintStream.maxReconnectAttempts)
+            }
 
-        let delay = CallHintStream.reconnectDelay(for: reconnectAttempts)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self, self.isActive else { return }
-            self.openSocket()
+            let delay = CallHintStream.reconnectDelay(for: attempt)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self, self.isActive else { return }
+                self.openSocket()
+            }
         }
+    }
+
+    /// How the stream should react to a mid-call `/ui` socket drop, decided purely
+    /// from the failed handshake's HTTP status and the count of prior consecutive
+    /// reconnect failures.
+    enum DisconnectAction: Equatable {
+        /// The session is expired/revoked (auth rejection): stop and demand sign-in.
+        case signIn
+        /// Too many consecutive failures: stop and report a terminal failure.
+        case giveUp
+        /// A transient drop: reconnect as the given 1-based attempt number.
+        case retry(attempt: Int)
+    }
+
+    /// Pure decision for `handleDisconnect`: maps a failed handshake status code
+    /// and the prior reconnect-attempt count to the action the stream should take.
+    /// An auth rejection (401/403) always routes to `.signIn`; otherwise the next
+    /// attempt either trips the give-up ceiling (`.giveUp`) or schedules another
+    /// `.retry`.
+    ///
+    /// Side-effect free (no networking, no dispatch) so the disconnect wiring —
+    /// specifically the sign-in vs. reconnect branch the live `handleDisconnect`
+    /// takes — can be unit-tested directly without a live socket. A bad edit
+    /// (sending expired sessions down the retry path, or auth rejections into a
+    /// reconnect loop) would otherwise be a silent regression, the same risk the
+    /// `isAuthRejection` / give-up / timing helpers guard against.
+    static func disconnectAction(handshakeStatusCode statusCode: Int?,
+                                 priorAttempts: Int) -> DisconnectAction {
+        if isAuthRejection(statusCode: statusCode) { return .signIn }
+        let attempt = priorAttempts + 1
+        if shouldGiveUp(after: attempt) { return .giveUp }
+        return .retry(attempt: attempt)
     }
 
     /// Maximum number of consecutive failed reconnects before the stream gives up
