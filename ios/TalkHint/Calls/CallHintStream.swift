@@ -187,11 +187,22 @@ final class CallHintStream: NSObject {
         }
 
         reconnectAttempts += 1
-        let delay = min(Double(reconnectAttempts) * 1.5, 6.0)
+        let delay = CallHintStream.reconnectDelay(for: reconnectAttempts)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self, self.isActive else { return }
             self.openSocket()
         }
+    }
+
+    /// Backoff delay (seconds) before the `attempt`-th reconnect after the live
+    /// `/ui` socket drops mid-call. Grows linearly with the attempt count and is
+    /// capped at 6s so retries neither hammer the server nor stall the feed.
+    ///
+    /// Pure (no networking, no dispatch) so the timing contract can be unit-tested
+    /// directly — a bad edit (dropped cap, zeroed multiplier) would otherwise be a
+    /// silent regression, the same risk the decode/encode tests guard against.
+    static func reconnectDelay(for attempt: Int) -> Double {
+        min(Double(attempt) * 1.5, 6.0)
     }
 
     private func handle(text: String) {
