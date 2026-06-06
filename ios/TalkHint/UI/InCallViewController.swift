@@ -10,6 +10,11 @@ final class InCallViewController: UIViewController {
     private let callerName: String
     private let stream = CallHintStream()
 
+    /// Test seam: the live hint stream that the "Reconnect" button drives via
+    /// `retryTapped`, exposed so the manual-reconnect path can be observed
+    /// through the real instance instead of a stand-in.
+    var hintStream: CallHintStream { stream }
+
     private let statusLabel = UILabel()
     private let reconnectSpinner = UIActivityIndicatorView(style: .medium)
     private let retryButton = UIButton(type: .system)

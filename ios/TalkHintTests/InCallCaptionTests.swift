@@ -277,6 +277,45 @@ final class InCallCaptionTests: XCTestCase {
         XCTAssertEqual(statusText(vc), "Live assistant connected")
     }
 
+    /// Drives the controller into the terminal "gave up" state and then taps the
+    /// real "Reconnect" button, asserting the manual recovery path actually
+    /// re-arms the live stream — not just relabels the status. Without this, a
+    /// regression in `retryTapped` (e.g. dropping the `stream.retry()` call, or
+    /// not re-hiding the button) would strand users on the terminal screen with
+    /// no way back, undetected by the delegate-driven lifecycle test above.
+    func testManualReconnectButtonReArmsStreamAfterTerminalFailure() {
+        let vc = makeLoadedViewController()
+        // Drive the controller's *own* stream — the same instance the Reconnect
+        // button calls `retry()` on — so the assertion exercises the real path.
+        let stream = vc.hintStream
+
+        // Reproduce the post-terminal state: the failure path leaves the stream
+        // inactive (give-up resets `isActive`), and the controller has shown the
+        // terminal UI via the delegate callback.
+        stream.disconnect()
+        XCTAssertFalse(stream.isActive,
+                       "precondition: a terminally failed stream is no longer active")
+        vc.callHintStreamDidFailTerminally(stream)
+        XCTAssertFalse(retryButton(vc).isHidden,
+                       "retry button must be visible in the terminal state")
+        XCTAssertEqual(statusText(vc), "Live assistant unavailable. Check your connection.")
+
+        // Tap the actual button so the production target/action wiring runs.
+        retryButton(vc).sendActions(for: .touchUpInside)
+
+        // The button hides again and the status returns to the reconnecting copy.
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "retry button must hide again once a manual reconnect starts")
+        XCTAssertEqual(statusText(vc), "Reconnecting to live assistant…",
+                       "status must update to the reconnecting wording on manual retry")
+
+        // The decisive assertion: `stream.retry()` actually re-armed the stream
+        // (connect() ran rather than no-opping), so the manual button genuinely
+        // reconnects the live assistant instead of only changing the label.
+        XCTAssertTrue(stream.isActive,
+                      "manual retry must re-open the live stream, not just relabel the status")
+    }
+
     // MARK: - Helpers
 
     private func makeLoadedViewController() -> InCallViewController {

@@ -47,7 +47,12 @@ final class CallHintStream: NSObject {
 
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
-    private var isActive = false
+    /// Whether the stream currently considers itself live — `true` from `connect()`
+    /// (and through auto-reconnect attempts) until `disconnect()` or a terminal
+    /// give-up. The setter stays private; the getter is exposed so tests can
+    /// confirm the manual `retry()` path actually re-armed the stream rather than
+    /// no-opping.
+    private(set) var isActive = false
     private var reconnectAttempts = 0
 
     /// Starts the connection. Safe to call once per call session.
