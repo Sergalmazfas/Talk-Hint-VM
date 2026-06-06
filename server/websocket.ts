@@ -974,7 +974,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       // ALWAYS get translation for guest transcript
       fastLayer.setLanguage(currentLanguage);
-      fastLayer.onGstUtteranceEnd();
+      // Suppress the filler when the upcoming GPT hint will be blocked anyway —
+      // otherwise the user sees a filler phrase with no real hint following it.
+      const suppressFiller =
+        goalAchievedFlag ||
+        reactionOnly ||
+        isFarewell ||
+        (lastHintTs > 0 && now - lastHintTs < HINT_COOLDOWN_MS);
+      fastLayer.onGstUtteranceEnd(suppressFiller);
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
       const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);

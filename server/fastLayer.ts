@@ -186,10 +186,17 @@ export class FastLayerManager {
     this.language = lang;
   }
   
-  onGstUtteranceEnd() {
+  onGstUtteranceEnd(suppressFiller: boolean = false) {
     this.gptResponsePending = true;
     this.gptRequestStartTime = Date.now();
     this.fastPhraseUsedThisTurn = false;
+    
+    // Don't schedule a filler when the real hint is already going to be blocked
+    // (goal achieved / reaction-only / farewell / hint cooldown).
+    if (suppressFiller) {
+      log(`[FastLayer] Filler suppressed (upcoming hint will be blocked)`, "fast");
+      return;
+    }
     
     setTimeout(() => {
       this.checkAndEmitFastPhrase();
