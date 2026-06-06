@@ -19,7 +19,6 @@ final class InCallViewController: UIViewController {
     private var inputBottomConstraint: NSLayoutConstraint?
 
     private let speakerButton = UIButton(type: .system)
-    private var isSpeakerOn = false
 
     init(callerName: String) {
         self.callerName = callerName
@@ -115,6 +114,7 @@ final class InCallViewController: UIViewController {
         ])
 
         observeKeyboard()
+        observeAudioRoute()
         let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tap.cancelsTouchesInView = false
         scrollView.addGestureRecognizer(tap)
@@ -192,23 +192,45 @@ final class InCallViewController: UIViewController {
         return row
     }
 
+    /// True when the session's current output route is the built-in speaker.
+    private var isSpeakerRouteActive: Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs
+            .contains { $0.portType == .builtInSpeaker }
+    }
+
     private func updateSpeakerButton() {
-        speakerButton.setTitle(isSpeakerOn ? "🔊 Speaker On" : "🔊 Speaker", for: .normal)
-        speakerButton.backgroundColor = isSpeakerOn
+        let on = isSpeakerRouteActive
+        speakerButton.setTitle(on ? "🔊 Speaker On" : "🔊 Speaker", for: .normal)
+        speakerButton.backgroundColor = on
             ? UIColor.systemBlue.withAlphaComponent(0.20)
             : .secondarySystemBackground
     }
 
     @objc private func speakerTapped() {
-        isSpeakerOn.toggle()
         let session = AVAudioSession.sharedInstance()
+        let turnOn = !isSpeakerRouteActive
         do {
-            try session.overrideOutputAudioPort(isSpeakerOn ? .speaker : .none)
+            try session.overrideOutputAudioPort(turnOn ? .speaker : .none)
         } catch {
             print("[InCall] speaker toggle failed: \(error.localizedDescription)")
-            isSpeakerOn.toggle() // revert intent if the override was rejected
         }
+        // Reflect the real route after the override (route-change notification
+        // will also fire, but update immediately for responsiveness).
         updateSpeakerButton()
+    }
+
+    private func observeAudioRoute() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(audioRouteChanged(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil)
+    }
+
+    @objc private func audioRouteChanged(_ note: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateSpeakerButton()
+        }
     }
 
     @objc private func endCallTapped() {
