@@ -4,8 +4,9 @@ import Foundation
 enum CallHintEvent {
     /// What the caller (the other party) said, optionally translated.
     case guestTranscript(text: String, translation: String?, isFinal: Bool)
-    /// What the user (the phone owner) said.
-    case ownerTranscript(text: String, isFinal: Bool)
+    /// What the user (the phone owner) said. `confidence` is the STT confidence
+    /// score when the server provides one (used to filter garbled finals).
+    case ownerTranscript(text: String, confidence: Double?, isFinal: Bool)
     /// A GPT reply suggestion for the user to say, with its translation.
     case suggestion(en: String, translation: String?)
     /// A low-latency "fast layer" phrase to fill a pause.
@@ -180,6 +181,7 @@ final class CallHintStream: NSObject {
             guard let body = obj["text"] as? String, !body.isEmpty else { return }
             event = .ownerTranscript(
                 text: body,
+                confidence: (obj["confidence"] as? NSNumber)?.doubleValue,
                 isFinal: (obj["isFinal"] as? Bool) ?? false
             )
         case "suggestion":

@@ -629,7 +629,13 @@ extension InCallViewController: CallHintStreamDelegate {
                              title: "CALLER", titleColor: .systemBlue,
                              primary: text, secondary: translation,
                              testIdSuffix: "guest", isFinal: isFinal)
-        case .ownerTranscript(let text, let isFinal):
+        case .ownerTranscript(let text, let confidence, let isFinal):
+            // Drop obviously garbled finals so noisy STT never hits the YOU line,
+            // matching the web UI's `isGarbageSTT` guard. Interim text still
+            // updates in place.
+            if isFinal && isGarbageSTT(text, confidence: confidence) {
+                return
+            }
             upsertTranscript(card: &currentYouCard,
                              title: "YOU", titleColor: .systemGray,
                              primary: text, secondary: nil,
@@ -649,6 +655,37 @@ extension InCallViewController: CallHintStreamDelegate {
                         .withAlphaComponent(0.12),
                        testIdSuffix: "ai-response")
         }
+    }
+
+    /// Mirrors the web UI's `isGarbageSTT`: drops short / low-confidence /
+    /// known-noise owner finals so garbled speech-to-text never shows on the
+    /// YOU line. `confidence` is only checked when the server provides one.
+    private func isGarbageSTT(_ text: String, confidence: Double?) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+
+        // Too short - likely garbage.
+        let words = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+        if words.count < 3 { return true }
+
+        // Low confidence.
+        if let confidence = confidence, confidence < 0.65 { return true }
+
+        // Common garbage patterns.
+        let garbagePatterns = [
+            "^(so|the|and|but|or|um|uh|like)\\s*$",
+            "^(does it|so the|stairs|I'm stay|I stay)\\.?$",
+            "^\\w{1,3}\\.?$"
+        ]
+        let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        for pattern in garbagePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+               regex.firstMatch(in: trimmed, options: [], range: range) != nil {
+                return true
+            }
+        }
+
+        return false
     }
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {

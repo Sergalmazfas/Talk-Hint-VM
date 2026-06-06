@@ -64,7 +64,7 @@ final class InCallCaptionTests: XCTestCase {
         vc.callHintStream(stream, didReceive:
             .guestTranscript(text: "guest one", translation: nil, isFinal: false))
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "owner one", isFinal: false))
+            .ownerTranscript(text: "owner one", confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "guest + owner should be two separate cards")
 
         // Updating the guest must not touch the owner's live card.
@@ -87,9 +87,51 @@ final class InCallCaptionTests: XCTestCase {
 
         // Owner's own final updates the owner card in place (no new card).
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "owner final", isFinal: true))
+            .ownerTranscript(text: "owner final caption", confidence: nil, isFinal: true))
         XCTAssertEqual(feedCards(vc).count, 3, "owner finalize must not add a card")
-        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner final")
+        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner final caption")
+    }
+
+    /// Garbled owner finals (too short / known-noise) are dropped so they never
+    /// reach the YOU line, while a clean final still renders — matching the web
+    /// UI's `isGarbageSTT` guard. Interim text always updates in place.
+    func testGarbledOwnerFinalIsSuppressed() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        // Interim is never filtered, even when short.
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "so", confidence: nil, isFinal: false))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "so",
+                       "interim owner text must always render")
+
+        // A garbled final (too short) must not replace the live card.
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "um uh", confidence: nil, isFinal: true))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "so",
+                       "garbled owner final must be suppressed, leaving the live card")
+
+        // A clean final still finalizes the card in place.
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "I would like to book", confidence: nil, isFinal: true))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book",
+                       "a clean owner final must render normally")
+    }
+
+    /// A low-confidence owner final is dropped even when the text looks fine,
+    /// mirroring the web's `confidence < 0.65` check.
+    func testLowConfidenceOwnerFinalIsSuppressed() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "I would like to book", confidence: 0.4, isFinal: false))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book")
+
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "please confirm the booking", confidence: 0.4, isFinal: true))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book",
+                       "low-confidence owner final must be suppressed")
     }
 
     /// The pinned SUGGESTION banner is hidden until the first suggestion, then
