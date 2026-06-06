@@ -363,6 +363,44 @@ final class InCallCaptionTests: XCTestCase {
                        "the reconnect spinner must not spin in the signed-out state")
     }
 
+    /// In the signed-out state the retry button must become an actionable "Sign
+    /// in" affordance (not a plain "Reconnect"), and tapping it must route the
+    /// user to the login screen — closing the loop so they can actually recover
+    /// the live assistant. A later successful connect must restore the button to
+    /// its normal "Reconnect" role. Without this, a regression in the label/route
+    /// wiring would leave the user tapping "Reconnect" into the same failure.
+    func testSignedOutStateRoutesRetryButtonToLogin() {
+        SessionStore.shared.clear()
+        defer { SessionStore.shared.clear() }
+
+        let vc = makeLoadedViewController()
+        // A real window so `present(_:animated:)` has somewhere to attach.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        let stream = vc.hintStream
+
+        vc.callHintStreamDidRequireSignIn(stream)
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Sign in",
+                       "signed-out state must relabel the button as a sign-in action")
+        XCTAssertFalse(retryButton(vc).isHidden,
+                       "the sign-in button must be visible when signed out")
+
+        // Tapping must present the login screen rather than re-trying the socket.
+        retryButton(vc).sendActions(for: .touchUpInside)
+        let presented = expectation(description: "login presented")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { presented.fulfill() }
+        wait(for: [presented], timeout: 2.0)
+        let nav = vc.presentedViewController as? UINavigationController
+        XCTAssertTrue(nav?.viewControllers.first is LoginViewController,
+                      "tapping the sign-in button must route to the login screen")
+
+        // A subsequent successful connect restores the plain "Reconnect" role.
+        vc.callHintStreamDidConnect(stream)
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Reconnect",
+                       "a successful connect must restore the normal reconnect label")
+    }
+
     // MARK: - Helpers
 
     /// Runs the main run loop briefly so `DispatchQueue.main.async` delegate

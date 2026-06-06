@@ -39,6 +39,12 @@ final class InCallViewController: UIViewController {
     private var currentCallerCard: FeedCard?
     private var currentYouCard: FeedCard?
 
+    // True when the stream stopped because the user is signed out. In this state
+    // the retry button acts as a "Sign in" affordance (presenting the login
+    // screen) rather than a plain reconnect, since reconnecting without a token
+    // would just fail again. Reset once a connect/retry path takes over.
+    private var needsSignIn = false
+
     init(callerName: String) {
         self.callerName = callerName
         super.init(nibName: nil, bundle: nil)
@@ -497,8 +503,50 @@ final class InCallViewController: UIViewController {
     }
 
     @objc private func retryTapped() {
+        // When signed out, "Reconnect" instead routes the user to the login
+        // screen — reconnecting without a token would just fail again and strand
+        // them on the same sign-in message. Once they sign in we re-arm the stream.
+        if needsSignIn {
+            presentSignIn()
+            return
+        }
         retryButton.isHidden = true
         statusLabel.text = "Reconnecting to live assistant…"
+        stream.retry()
+    }
+
+    /// Presents the login screen over the in-call assistant so the user can sign
+    /// back in without leaving the call. On success we re-arm the live stream so
+    /// the assistant feed comes back; on cancel we leave the sign-in prompt in
+    /// place so they can try again.
+    private func presentSignIn() {
+        let login = LoginViewController()
+        login.onLoggedIn = { [weak self] in
+            self?.dismiss(animated: true) {
+                self?.resumeAfterSignIn()
+            }
+        }
+        let nav = UINavigationController(rootViewController: login)
+        login.navigationItem.leftBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .cancel,
+            target: self,
+            action: #selector(dismissSignIn))
+        present(nav, animated: true)
+    }
+
+    @objc private func dismissSignIn() {
+        dismiss(animated: true)
+    }
+
+    /// Re-establishes the live assistant stream after the user signs back in from
+    /// the in-call screen, returning the retry button to its normal "Reconnect"
+    /// role.
+    private func resumeAfterSignIn() {
+        needsSignIn = false
+        retryButton.setTitle("Reconnect", for: .normal)
+        retryButton.isHidden = true
+        statusLabel.text = "Reconnecting to live assistant…"
+        reconnectSpinner.startAnimating()
         stream.retry()
     }
 
@@ -727,6 +775,8 @@ extension InCallViewController: CallHintStreamDelegate {
     }
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
+        needsSignIn = false
+        retryButton.setTitle("Reconnect", for: .normal)
         statusLabel.text = "Live assistant connected"
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = true
@@ -735,6 +785,10 @@ extension InCallViewController: CallHintStreamDelegate {
     func callHintStream(_ stream: CallHintStream,
                         didDisconnectWillRetryAttempt attempt: Int,
                         of maxAttempts: Int) {
+        // A live network retry, not a sign-in failure — restore the plain
+        // "Reconnect" affordance in case we were previously in the signed-out state.
+        needsSignIn = false
+        retryButton.setTitle("Reconnect", for: .normal)
         // Show progress (attempt N of M) with a live spinner so the feed reads as
         // actively recovering, not frozen, until the terminal state is reached.
         statusLabel.text = CallHintStream.reconnectingStatusText(attempt: attempt, of: maxAttempts)
@@ -743,6 +797,9 @@ extension InCallViewController: CallHintStreamDelegate {
     }
 
     func callHintStreamDidFailTerminally(_ stream: CallHintStream) {
+        // A network/server give-up (not a missing token) — the button reconnects.
+        needsSignIn = false
+        retryButton.setTitle("Reconnect", for: .normal)
         statusLabel.text = "Live assistant unavailable. Check your connection."
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = false
@@ -750,10 +807,13 @@ extension InCallViewController: CallHintStreamDelegate {
 
     func callHintStreamDidRequireSignIn(_ stream: CallHintStream) {
         // The stream stopped because there's no valid session token (signed out).
-        // Show an actionable message instead of a stuck "Reconnecting…" label.
-        // Keep the retry button visible so the user can try again after signing in.
+        // Show an actionable message and turn the retry button into a "Sign in"
+        // action that routes to the login screen, so the user can actually recover
+        // the live assistant instead of re-hitting the same sign-in message.
+        needsSignIn = true
         statusLabel.text = "Sign in to use the live assistant"
         reconnectSpinner.stopAnimating()
+        retryButton.setTitle("Sign in", for: .normal)
         retryButton.isHidden = false
     }
 }
