@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single item rendered in the in-call assistant feed.
-enum CallHintEvent {
+enum CallHintEvent: Equatable {
     /// What the caller (the other party) said, optionally translated.
     case guestTranscript(text: String, translation: String?, isFinal: Bool)
     /// What the user (the phone owner) said. `confidence` is the STT confidence
@@ -164,47 +164,52 @@ final class CallHintStream: NSObject {
     }
 
     private func handle(text: String) {
-        guard let data = text.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = obj["type"] as? String else { return }
-
-        let event: CallHintEvent?
-        switch type {
-        case "guest_transcript":
-            guard let body = obj["text"] as? String, !body.isEmpty else { return }
-            event = .guestTranscript(
-                text: body,
-                translation: nonEmpty(obj["translation"]),
-                isFinal: (obj["isFinal"] as? Bool) ?? false
-            )
-        case "owner_transcript":
-            guard let body = obj["text"] as? String, !body.isEmpty else { return }
-            event = .ownerTranscript(
-                text: body,
-                confidence: (obj["confidence"] as? NSNumber)?.doubleValue,
-                isFinal: (obj["isFinal"] as? Bool) ?? false
-            )
-        case "suggestion":
-            guard let en = obj["en"] as? String, !en.isEmpty else { return }
-            event = .suggestion(en: en, translation: nonEmpty(obj["translation"]))
-        case "fast_phrase":
-            guard let body = obj["text"] as? String, !body.isEmpty else { return }
-            event = .fastPhrase(text: body, translation: nonEmpty(obj["translation"]))
-        case "ai_response":
-            guard let body = obj["text"] as? String, !body.isEmpty else { return }
-            event = .aiResponse(text: body, isError: (obj["error"] as? Bool) ?? false)
-        default:
-            event = nil
-        }
-
-        guard let event = event else { return }
+        guard let event = CallHintStream.decode(text) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.delegate?.callHintStream(self, didReceive: event)
         }
     }
 
-    private func nonEmpty(_ value: Any?) -> String? {
+    /// Pure parser for a single `/ui` WebSocket text frame. Returns the decoded
+    /// `CallHintEvent`, or `nil` when the payload is malformed, has an unknown
+    /// `type`, or carries an empty body. Kept side-effect free (no networking, no
+    /// dispatching) so it can be unit-tested directly.
+    static func decode(_ text: String) -> CallHintEvent? {
+        guard let data = text.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else { return nil }
+
+        switch type {
+        case "guest_transcript":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
+            return .guestTranscript(
+                text: body,
+                translation: nonEmpty(obj["translation"]),
+                isFinal: (obj["isFinal"] as? Bool) ?? false
+            )
+        case "owner_transcript":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
+            return .ownerTranscript(
+                text: body,
+                confidence: (obj["confidence"] as? NSNumber)?.doubleValue,
+                isFinal: (obj["isFinal"] as? Bool) ?? false
+            )
+        case "suggestion":
+            guard let en = obj["en"] as? String, !en.isEmpty else { return nil }
+            return .suggestion(en: en, translation: nonEmpty(obj["translation"]))
+        case "fast_phrase":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
+            return .fastPhrase(text: body, translation: nonEmpty(obj["translation"]))
+        case "ai_response":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
+            return .aiResponse(text: body, isError: (obj["error"] as? Bool) ?? false)
+        default:
+            return nil
+        }
+    }
+
+    private static func nonEmpty(_ value: Any?) -> String? {
         guard let s = value as? String, !s.isEmpty else { return nil }
         return s
     }
