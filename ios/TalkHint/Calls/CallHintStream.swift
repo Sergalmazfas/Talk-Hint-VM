@@ -56,25 +56,54 @@ final class CallHintStream: NSObject {
     /// Sends a free-form question to the assistant. The reply arrives as an
     /// `ai_response` event on the feed.
     func askAI(_ question: String, goal: String? = nil) {
-        var payload: [String: Any] = ["type": "ask_ai", "question": question]
-        if let goal = goal, !goal.isEmpty { payload["goal"] = goal }
-        send(payload)
+        send(CallHintStream.askAIPayload(question: question, goal: goal))
     }
 
     /// Sets (or updates) the goal for the active call.
     func setGoal(_ goal: String) {
-        send(["type": "set_goal", "goal": goal])
+        send(CallHintStream.setGoalPayload(goal: goal))
     }
 
     /// Sets the native language used for translations/hints. Server honors
     /// "ru" / "es".
     func setLanguage(_ language: String) {
-        send(["type": "set_language", "language": language])
+        send(CallHintStream.setLanguagePayload(language: language))
     }
 
     /// Sets the built-in assistant mode (universal / massage / dispatcher).
     func setMode(_ mode: String) {
-        send(["type": "set_mode", "mode": mode])
+        send(CallHintStream.setModePayload(mode: mode))
+    }
+
+    // MARK: - Pure outgoing-payload builders
+    //
+    // These mirror `decode(_:)` on the inbound side: side-effect free (no
+    // networking, no dispatch) so the exact JSON contract sent to the backend
+    // can be unit-tested directly. A renamed key or dropped field (e.g.
+    // "question", "goal", "language", "mode") would silently break live-call
+    // control, so the builders are the single source of truth for what we send.
+
+    /// Builds the `ask_ai` control message. The optional `goal` is omitted
+    /// entirely when nil or empty (the server treats an absent goal as "unchanged").
+    static func askAIPayload(question: String, goal: String? = nil) -> [String: Any] {
+        var payload: [String: Any] = ["type": "ask_ai", "question": question]
+        if let goal = goal, !goal.isEmpty { payload["goal"] = goal }
+        return payload
+    }
+
+    /// Builds the `set_goal` control message.
+    static func setGoalPayload(goal: String) -> [String: Any] {
+        ["type": "set_goal", "goal": goal]
+    }
+
+    /// Builds the `set_language` control message.
+    static func setLanguagePayload(language: String) -> [String: Any] {
+        ["type": "set_language", "language": language]
+    }
+
+    /// Builds the `set_mode` control message.
+    static func setModePayload(mode: String) -> [String: Any] {
+        ["type": "set_mode", "mode": mode]
     }
 
     /// Pushes the user's saved Assistant-tab selections (mode, language, goal) to
