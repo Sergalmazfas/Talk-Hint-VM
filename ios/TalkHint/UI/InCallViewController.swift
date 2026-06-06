@@ -11,6 +11,7 @@ final class InCallViewController: UIViewController {
     private let stream = CallHintStream()
 
     private let statusLabel = UILabel()
+    private let retryButton = UIButton(type: .system)
     private let scrollView = UIScrollView()
     private let feedStack = UIStackView()
 
@@ -83,6 +84,12 @@ final class InCallViewController: UIViewController {
         statusLabel.numberOfLines = 0
         statusLabel.accessibilityIdentifier = "text-incall-status"
 
+        retryButton.setTitle("Reconnect", for: .normal)
+        retryButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+        retryButton.isHidden = true
+        retryButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+        retryButton.accessibilityIdentifier = "button-incall-retry"
+
         feedStack.axis = .vertical
         feedStack.spacing = 10
         feedStack.translatesAutoresizingMaskIntoConstraints = false
@@ -92,7 +99,7 @@ final class InCallViewController: UIViewController {
         scrollView.accessibilityIdentifier = "scroll-incall-feed"
         scrollView.addSubview(feedStack)
 
-        let header = UIStackView(arrangedSubviews: [titleLabel, statusLabel])
+        let header = UIStackView(arrangedSubviews: [titleLabel, statusLabel, retryButton])
         header.axis = .vertical
         header.spacing = 4
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -470,6 +477,12 @@ final class InCallViewController: UIViewController {
         goalField.resignFirstResponder()
     }
 
+    @objc private func retryTapped() {
+        retryButton.isHidden = true
+        statusLabel.text = "Reconnecting to live assistant…"
+        stream.retry()
+    }
+
     @objc private func askTapped() {
         let question = questionField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !question.isEmpty else { return }
@@ -696,10 +709,17 @@ extension InCallViewController: CallHintStreamDelegate {
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
         statusLabel.text = "Live assistant connected"
+        retryButton.isHidden = true
     }
 
     func callHintStreamDidDisconnect(_ stream: CallHintStream) {
         statusLabel.text = "Reconnecting to live assistant…"
+        retryButton.isHidden = true
+    }
+
+    func callHintStreamDidFailTerminally(_ stream: CallHintStream) {
+        statusLabel.text = "Live assistant unavailable. Check your connection."
+        retryButton.isHidden = false
     }
 }
 

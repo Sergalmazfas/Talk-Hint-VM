@@ -21,6 +21,11 @@ protocol CallHintStreamDelegate: AnyObject {
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent)
     func callHintStreamDidConnect(_ stream: CallHintStream)
     func callHintStreamDidDisconnect(_ stream: CallHintStream)
+    /// The socket dropped and reconnecting failed `maxReconnectAttempts` times in
+    /// a row, so the stream has given up. The feed is now stopped (no further
+    /// auto-reconnects); the UI should surface a terminal "connection lost" state
+    /// and offer the user a way to retry via `retry()`.
+    func callHintStreamDidFailTerminally(_ stream: CallHintStream)
 }
 
 /// Subscribes to the backend `/ui` WebSocket and surfaces live transcripts and
@@ -44,6 +49,14 @@ final class CallHintStream: NSObject {
         isActive = true
         reconnectAttempts = 0
         openSocket()
+    }
+
+    /// Re-arms the stream after it gave up (see `callHintStreamDidFailTerminally`).
+    /// Backs the user-facing "retry" affordance: resets the failure counter and
+    /// reopens the socket. No-op while the stream is already active.
+    func retry() {
+        guard !isActive else { return }
+        connect()
     }
 
     /// Tears the connection down cleanly. Safe to call multiple times.
@@ -181,17 +194,45 @@ final class CallHintStream: NSObject {
         session?.invalidateAndCancel()
         session = nil
 
+        reconnectAttempts += 1
+
+        // Give up after too many consecutive failures (server outage, revoked
+        // auth, etc.) instead of retrying forever behind a frozen feed. Surface a
+        // terminal state the UI can show, and stop so the user can retry by hand.
+        if CallHintStream.shouldGiveUp(after: reconnectAttempts) {
+            isActive = false
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.delegate?.callHintStreamDidFailTerminally(self)
+            }
+            return
+        }
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isActive else { return }
             self.delegate?.callHintStreamDidDisconnect(self)
         }
 
-        reconnectAttempts += 1
         let delay = CallHintStream.reconnectDelay(for: reconnectAttempts)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self, self.isActive else { return }
             self.openSocket()
         }
+    }
+
+    /// Maximum number of consecutive failed reconnects before the stream gives up
+    /// and reports a terminal failure instead of retrying indefinitely.
+    static let maxReconnectAttempts = 5
+
+    /// Whether the stream should stop retrying after `attempt` consecutive failed
+    /// reconnects. Returns `true` once the count reaches `maxReconnectAttempts`.
+    ///
+    /// Pure (no networking, no dispatch) so the give-up threshold can be
+    /// unit-tested directly — a bad edit (off-by-one, dropped ceiling) would
+    /// otherwise either strand users on a frozen feed forever or give up after a
+    /// single blip, the same silent-regression risk the timing tests guard against.
+    static func shouldGiveUp(after attempt: Int) -> Bool {
+        attempt >= maxReconnectAttempts
     }
 
     /// Backoff delay (seconds) before the `attempt`-th reconnect after the live
