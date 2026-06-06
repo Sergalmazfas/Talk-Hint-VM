@@ -974,7 +974,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       // ALWAYS get translation for guest transcript
       fastLayer.setLanguage(currentLanguage);
-      fastLayer.onGstUtteranceEnd();
+      // fastLayer.onGstUtteranceEnd(); // Fast Layer disabled — silence while GPT thinks is better than an irrelevant filler
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
       const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);
