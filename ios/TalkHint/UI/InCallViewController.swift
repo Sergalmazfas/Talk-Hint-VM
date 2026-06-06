@@ -18,7 +18,7 @@ final class InCallViewController: UIViewController {
     private let questionField = UITextField()
     private var inputBottomConstraint: NSLayoutConstraint?
 
-    private let speakerButton = UIButton(type: .system)
+    private let routeButton = UIButton(type: .system)
 
     init(callerName: String) {
         self.callerName = callerName
@@ -168,11 +168,14 @@ final class InCallViewController: UIViewController {
     }
 
     private func buildControlsRow() -> UIView {
-        speakerButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
-        speakerButton.layer.cornerRadius = 10
-        speakerButton.addTarget(self, action: #selector(speakerTapped), for: .touchUpInside)
-        speakerButton.accessibilityIdentifier = "button-speaker"
-        updateSpeakerButton()
+        routeButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        routeButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        routeButton.titleLabel?.minimumScaleFactor = 0.7
+        routeButton.titleLabel?.lineBreakMode = .byTruncatingTail
+        routeButton.layer.cornerRadius = 10
+        routeButton.addTarget(self, action: #selector(routeButtonTapped), for: .touchUpInside)
+        routeButton.accessibilityIdentifier = "button-audio-route"
+        updateRouteButton()
 
         let endButton = UIButton(type: .system)
         endButton.setTitle("End Call", for: .normal)
@@ -183,7 +186,7 @@ final class InCallViewController: UIViewController {
         endButton.addTarget(self, action: #selector(endCallTapped), for: .touchUpInside)
         endButton.accessibilityIdentifier = "button-end-call"
 
-        let row = UIStackView(arrangedSubviews: [speakerButton, endButton])
+        let row = UIStackView(arrangedSubviews: [routeButton, endButton])
         row.axis = .horizontal
         row.spacing = 12
         row.distribution = .fillEqually
@@ -198,25 +201,125 @@ final class InCallViewController: UIViewController {
             .contains { $0.portType == .builtInSpeaker }
     }
 
-    private func updateSpeakerButton() {
-        let on = isSpeakerRouteActive
-        speakerButton.setTitle(on ? "🔊 Speaker On" : "🔊 Speaker", for: .normal)
-        speakerButton.backgroundColor = on
+    /// Icon + short name describing the current audio output route, used to
+    /// label the route button so it always reflects the live route.
+    private func currentRouteLabel() -> String {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        guard let port = outputs.first else { return "🔈 Audio" }
+        switch port.portType {
+        case .builtInSpeaker:
+            return "🔊 Speaker"
+        case .builtInReceiver:
+            return "📱 iPhone"
+        case .headphones, .headsetMic:
+            return "🎧 Headphones"
+        case .bluetoothHFP, .bluetoothA2DP, .bluetoothLE:
+            return "🎧 \(port.portName)"
+        case .usbAudio:
+            return "🎧 \(port.portName)"
+        case .carAudio:
+            return "🚗 \(port.portName)"
+        default:
+            return "🔈 \(port.portName)"
+        }
+    }
+
+    private func updateRouteButton() {
+        routeButton.setTitle(currentRouteLabel(), for: .normal)
+        routeButton.backgroundColor = isSpeakerRouteActive
             ? UIColor.systemBlue.withAlphaComponent(0.20)
             : .secondarySystemBackground
     }
 
-    @objc private func speakerTapped() {
-        let session = AVAudioSession.sharedInstance()
-        let turnOn = !isSpeakerRouteActive
-        do {
-            try session.overrideOutputAudioPort(turnOn ? .speaker : .none)
-        } catch {
-            print("[InCall] speaker toggle failed: \(error.localizedDescription)")
+    /// External (non-built-in) input ports the user can explicitly select as a
+    /// call output — Bluetooth headsets, wired headsets, USB, and car audio.
+    private static func isSelectableExternal(_ type: AVAudioSession.Port) -> Bool {
+        switch type {
+        case .bluetoothHFP, .bluetoothLE, .headsetMic, .headphones, .usbAudio, .carAudio:
+            return true
+        default:
+            return false
         }
-        // Reflect the real route after the override (route-change notification
-        // will also fire, but update immediately for responsiveness).
-        updateSpeakerButton()
+    }
+
+    @objc private func routeButtonTapped() {
+        let session = AVAudioSession.sharedInstance()
+        let currentType = session.currentRoute.outputs.first?.portType
+        let sheet = UIAlertController(title: "Audio Output", message: nil,
+                                      preferredStyle: .actionSheet)
+
+        sheet.addAction(routeAction(title: "iPhone",
+                                    selected: currentType == .builtInReceiver) { [weak self] in
+            self?.routeToBuiltInReceiver()
+        })
+        sheet.addAction(routeAction(title: "Speaker",
+                                    selected: currentType == .builtInSpeaker) { [weak self] in
+            self?.routeToSpeaker()
+        })
+
+        for input in session.availableInputs ?? []
+        where Self.isSelectableExternal(input.portType) {
+            let selected = session.currentRoute.outputs
+                .contains { $0.portType == input.portType }
+            sheet.addAction(routeAction(title: input.portName, selected: selected) { [weak self] in
+                self?.routeToInput(input)
+            })
+        }
+
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        // Required for iPad — anchor the action sheet to the route button.
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = routeButton
+            popover.sourceRect = routeButton.bounds
+        }
+        present(sheet, animated: true)
+    }
+
+    private func routeAction(title: String,
+                             selected: Bool,
+                             handler: @escaping () -> Void) -> UIAlertAction {
+        let action = UIAlertAction(title: selected ? "✓ \(title)" : title,
+                                   style: .default) { _ in handler() }
+        action.accessibilityIdentifier = "action-route-\(title)"
+        return action
+    }
+
+    private func routeToSpeaker() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.overrideOutputAudioPort(.speaker)
+        } catch {
+            print("[InCall] route to speaker failed: \(error.localizedDescription)")
+        }
+        updateRouteButton()
+    }
+
+    private func routeToBuiltInReceiver() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.overrideOutputAudioPort(.none)
+            if let builtIn = session.availableInputs?
+                .first(where: { $0.portType == .builtInMic }) {
+                try session.setPreferredInput(builtIn)
+            }
+        } catch {
+            print("[InCall] route to iPhone failed: \(error.localizedDescription)")
+        }
+        updateRouteButton()
+    }
+
+    private func routeToInput(_ input: AVAudioSessionPortDescription) {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            // Clear any speaker override, then steer both directions at the
+            // chosen external device by setting it as the preferred input.
+            try session.overrideOutputAudioPort(.none)
+            try session.setPreferredInput(input)
+        } catch {
+            print("[InCall] route to \(input.portName) failed: \(error.localizedDescription)")
+        }
+        updateRouteButton()
     }
 
     private func observeAudioRoute() {
@@ -229,7 +332,7 @@ final class InCallViewController: UIViewController {
 
     @objc private func audioRouteChanged(_ note: Notification) {
         DispatchQueue.main.async { [weak self] in
-            self?.updateSpeakerButton()
+            self?.updateRouteButton()
         }
     }
 
