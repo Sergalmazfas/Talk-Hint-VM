@@ -14,12 +14,23 @@ final class InCallViewController: UIViewController {
     private let scrollView = UIScrollView()
     private let feedStack = UIStackView()
 
+    // Pinned suggestion banner — always visible above the controls.
+    private let suggestionBanner = UIView()
+    private let suggestionPrimaryLabel = UILabel()
+    private let suggestionSecondaryLabel = UILabel()
+
     private let goalField = UITextField()
     private let questionField = UITextField()
     private var inputBottomConstraint: NSLayoutConstraint?
 
     private let routeButton = UIButton(type: .system)
     private let muteButton = UIButton(type: .system)
+
+    // Live (non-finalized) transcript card per speaker, kept independently —
+    // like `interimMessages['guest']` / `interimMessages['you']` in the web.
+    // Each is finalized only by its own `isFinal: true`.
+    private var currentCallerCard: FeedCard?
+    private var currentYouCard: FeedCard?
 
     init(callerName: String) {
         self.callerName = callerName
@@ -89,13 +100,19 @@ final class InCallViewController: UIViewController {
         view.addSubview(scrollView)
 
         let controlsRow = buildControlsRow()
-        view.addSubview(controlsRow)
-
         let inputBar = buildInputBar()
-        view.addSubview(inputBar)
+        let suggestionBanner = buildSuggestionBanner()
+
+        // Suggestion banner + controls + input stacked together and pinned to the
+        // bottom; the banner sits just above the controls so it never scrolls away.
+        let bottomStack = UIStackView(arrangedSubviews: [suggestionBanner, controlsRow, inputBar])
+        bottomStack.axis = .vertical
+        bottomStack.spacing = 8
+        bottomStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bottomStack)
 
         let guide = view.safeAreaLayoutGuide
-        let bottomConstraint = inputBar.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -8)
+        let bottomConstraint = bottomStack.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -8)
         inputBottomConstraint = bottomConstraint
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: guide.topAnchor, constant: 16),
@@ -105,14 +122,10 @@ final class InCallViewController: UIViewController {
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 16),
             scrollView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: controlsRow.topAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: bottomStack.topAnchor, constant: -8),
 
-            controlsRow.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
-            controlsRow.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
-            controlsRow.bottomAnchor.constraint(equalTo: inputBar.topAnchor, constant: -8),
-
-            inputBar.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
-            inputBar.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            bottomStack.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
+            bottomStack.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
             bottomConstraint,
 
             feedStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 8),
@@ -173,6 +186,48 @@ final class InCallViewController: UIViewController {
         bar.spacing = 8
         bar.translatesAutoresizingMaskIntoConstraints = false
         return bar
+    }
+
+    /// The pinned "SUGGESTION" banner shown above the controls. Hidden until the
+    /// first suggestion arrives, then updated in place with the latest one so it
+    /// stays visible and never scrolls away with the transcript feed.
+    private func buildSuggestionBanner() -> UIView {
+        suggestionBanner.backgroundColor = .systemGreen.withAlphaComponent(0.18)
+        suggestionBanner.layer.cornerRadius = 12
+        suggestionBanner.isHidden = true
+        suggestionBanner.accessibilityIdentifier = "card-suggestion"
+
+        let tag = UILabel()
+        tag.text = "SUGGESTION"
+        tag.font = .preferredFont(forTextStyle: .caption2)
+        tag.textColor = .systemGreen
+
+        // Larger, bold primary text so the suggestion stands out at a glance.
+        let titleFont = UIFont.preferredFont(forTextStyle: .title3)
+        suggestionPrimaryLabel.font = titleFont.fontDescriptor
+            .withSymbolicTraits(.traitBold)
+            .map { UIFont(descriptor: $0, size: 0) } ?? titleFont
+        suggestionPrimaryLabel.numberOfLines = 0
+        suggestionPrimaryLabel.accessibilityIdentifier = "text-suggestion"
+
+        suggestionSecondaryLabel.font = .preferredFont(forTextStyle: .subheadline)
+        suggestionSecondaryLabel.textColor = .secondaryLabel
+        suggestionSecondaryLabel.numberOfLines = 0
+        suggestionSecondaryLabel.isHidden = true
+        suggestionSecondaryLabel.accessibilityIdentifier = "text-suggestion-translation"
+
+        let labels = UIStackView(arrangedSubviews: [tag, suggestionPrimaryLabel, suggestionSecondaryLabel])
+        labels.axis = .vertical
+        labels.spacing = 2
+        labels.translatesAutoresizingMaskIntoConstraints = false
+        suggestionBanner.addSubview(labels)
+        NSLayoutConstraint.activate([
+            labels.topAnchor.constraint(equalTo: suggestionBanner.topAnchor, constant: 10),
+            labels.bottomAnchor.constraint(equalTo: suggestionBanner.bottomAnchor, constant: -10),
+            labels.leadingAnchor.constraint(equalTo: suggestionBanner.leadingAnchor, constant: 12),
+            labels.trailingAnchor.constraint(equalTo: suggestionBanner.trailingAnchor, constant: -12),
+        ])
+        return suggestionBanner
     }
 
     private func buildControlsRow() -> UIView {
@@ -429,12 +484,44 @@ final class InCallViewController: UIViewController {
 
     // MARK: - Feed rendering
 
+    /// A transcript card whose text can be updated in place while a speaker is
+    /// still talking (interim results), then frozen when the turn is final.
+    /// Mirrors the web `interimMessages[type]` behavior in `script.js`.
+    private final class FeedCard {
+        let view: UIView
+        let primaryLabel: UILabel
+        let secondaryLabel: UILabel
+
+        init(view: UIView, primaryLabel: UILabel, secondaryLabel: UILabel) {
+            self.view = view
+            self.primaryLabel = primaryLabel
+            self.secondaryLabel = secondaryLabel
+        }
+
+        /// Replace (not append) the card's text — the interim update path.
+        func update(primary: String, secondary: String?) {
+            primaryLabel.text = primary
+            if let secondary = secondary, !secondary.isEmpty {
+                secondaryLabel.text = secondary
+                secondaryLabel.isHidden = false
+            } else {
+                secondaryLabel.isHidden = true
+            }
+        }
+
+        /// Dim interim text (matches the web's 0.7 opacity); full opacity on final.
+        func setInterim(_ interim: Bool) {
+            view.alpha = interim ? 0.7 : 1.0
+        }
+    }
+
+    @discardableResult
     private func appendCard(title: String,
                             titleColor: UIColor,
                             primary: String,
                             secondary: String?,
                             background: UIColor,
-                            testIdSuffix: String) {
+                            testIdSuffix: String) -> FeedCard {
         let card = UIView()
         card.backgroundColor = background
         card.layer.cornerRadius = 12
@@ -452,19 +539,22 @@ final class InCallViewController: UIViewController {
         primaryLabel.numberOfLines = 0
         primaryLabel.accessibilityIdentifier = "text-\(testIdSuffix)"
 
-        let labels = UIStackView(arrangedSubviews: [tag, primaryLabel])
+        // Always create the translation label so it can be filled in later when
+        // an interim transcript is finalized; hidden until it has content.
+        let secondaryLabel = UILabel()
+        secondaryLabel.font = .preferredFont(forTextStyle: .subheadline)
+        secondaryLabel.textColor = .secondaryLabel
+        secondaryLabel.numberOfLines = 0
+        secondaryLabel.accessibilityIdentifier = "text-\(testIdSuffix)-translation"
+        if let secondary = secondary, !secondary.isEmpty {
+            secondaryLabel.text = secondary
+        } else {
+            secondaryLabel.isHidden = true
+        }
+
+        let labels = UIStackView(arrangedSubviews: [tag, primaryLabel, secondaryLabel])
         labels.axis = .vertical
         labels.spacing = 2
-
-        if let secondary = secondary {
-            let secondaryLabel = UILabel()
-            secondaryLabel.text = secondary
-            secondaryLabel.font = .preferredFont(forTextStyle: .subheadline)
-            secondaryLabel.textColor = .secondaryLabel
-            secondaryLabel.numberOfLines = 0
-            secondaryLabel.accessibilityIdentifier = "text-\(testIdSuffix)-translation"
-            labels.addArrangedSubview(secondaryLabel)
-        }
 
         labels.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(labels)
@@ -477,6 +567,46 @@ final class InCallViewController: UIViewController {
 
         feedStack.addArrangedSubview(card)
         scrollToBottom()
+        return FeedCard(view: card, primaryLabel: primaryLabel, secondaryLabel: secondaryLabel)
+    }
+
+    /// Update the speaker's live card in place for interim results, or create a
+    /// new one if none is open. On `isFinal` the card is frozen and its slot is
+    /// cleared so the next utterance starts a fresh card.
+    private func upsertTranscript(card: inout FeedCard?,
+                                  title: String,
+                                  titleColor: UIColor,
+                                  primary: String,
+                                  secondary: String?,
+                                  testIdSuffix: String,
+                                  isFinal: Bool) {
+        if let existing = card {
+            existing.update(primary: primary, secondary: secondary)
+            existing.setInterim(!isFinal)
+            scrollToBottom()
+        } else {
+            let new = appendCard(title: title, titleColor: titleColor,
+                                 primary: primary, secondary: secondary,
+                                 background: .secondarySystemBackground,
+                                 testIdSuffix: testIdSuffix)
+            new.setInterim(!isFinal)
+            card = new
+        }
+        if isFinal {
+            card = nil
+        }
+    }
+
+    /// Show or replace the pinned suggestion banner with the latest suggestion.
+    private func showSuggestion(en: String, translation: String?) {
+        suggestionPrimaryLabel.text = en
+        if let translation = translation, !translation.isEmpty {
+            suggestionSecondaryLabel.text = translation
+            suggestionSecondaryLabel.isHidden = false
+        } else {
+            suggestionSecondaryLabel.isHidden = true
+        }
+        suggestionBanner.isHidden = false
     }
 
     private func scrollToBottom() {
@@ -494,21 +624,18 @@ final class InCallViewController: UIViewController {
 extension InCallViewController: CallHintStreamDelegate {
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent) {
         switch event {
-        case .guestTranscript(let text, let translation, _):
-            appendCard(title: "CALLER", titleColor: .systemBlue,
-                       primary: text, secondary: translation,
-                       background: .secondarySystemBackground,
-                       testIdSuffix: "guest")
-        case .ownerTranscript(let text, _):
-            appendCard(title: "YOU", titleColor: .systemGray,
-                       primary: text, secondary: nil,
-                       background: .secondarySystemBackground,
-                       testIdSuffix: "owner")
+        case .guestTranscript(let text, let translation, let isFinal):
+            upsertTranscript(card: &currentCallerCard,
+                             title: "CALLER", titleColor: .systemBlue,
+                             primary: text, secondary: translation,
+                             testIdSuffix: "guest", isFinal: isFinal)
+        case .ownerTranscript(let text, let isFinal):
+            upsertTranscript(card: &currentYouCard,
+                             title: "YOU", titleColor: .systemGray,
+                             primary: text, secondary: nil,
+                             testIdSuffix: "owner", isFinal: isFinal)
         case .suggestion(let en, let translation):
-            appendCard(title: "SUGGESTION", titleColor: .systemGreen,
-                       primary: en, secondary: translation,
-                       background: .systemGreen.withAlphaComponent(0.12),
-                       testIdSuffix: "suggestion")
+            showSuggestion(en: en, translation: translation)
         case .fastPhrase(let text, let translation):
             appendCard(title: "QUICK PHRASE", titleColor: .systemOrange,
                        primary: text, secondary: translation,
