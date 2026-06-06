@@ -146,21 +146,37 @@ final class CallManager: NSObject {
         sessions.first(where: { $0.value.twilioCall != nil })?.value.twilioCall
     }
 
+    /// The UUID of the active (connected) call, used to drive CallKit mute
+    /// transactions. Falls back to any tracked session.
+    private var activeCallUUID: UUID? {
+        sessions.first(where: { $0.value.twilioCall != nil })?.key ?? sessions.keys.first
+    }
+
     /// Whether the active call's microphone is currently muted. Returns false
     /// when there is no active call.
     var isMuted: Bool {
         activeCall?.isMuted ?? false
     }
 
-    /// Toggles the active Twilio call's outgoing audio (microphone) and returns
-    /// the resulting mute state. No-op (returns false) when there is no active
-    /// call.
-    @discardableResult
-    func toggleMute() -> Bool {
-        guard let call = activeCall else { return false }
-        let newValue = !call.isMuted
-        call.isMuted = newValue
-        return newValue
+    /// Requests the active call be (un)muted through CallKit so the native call
+    /// UI stays the single source of truth. The Twilio leg is muted in the
+    /// `CXSetMutedCallAction` handler, which then refreshes the in-call screen.
+    /// No-op when there is no active call.
+    func setMuted(_ muted: Bool) {
+        guard let uuid = activeCallUUID else { return }
+        let action = CXSetMutedCallAction(call: uuid, muted: muted)
+        let transaction = CXTransaction(action: action)
+        callController.request(transaction) { error in
+            if let error = error {
+                print("[CallManager] setMuted request failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Toggles the active call's microphone via CallKit. No-op when there is no
+    /// active call.
+    func toggleMute() {
+        setMuted(!isMuted)
     }
 
     // MARK: - In-call assistant screen
@@ -311,6 +327,15 @@ extension CallManager: CXProviderDelegate {
 
         endSession(action.callUUID)
         action.fulfill()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        // Fires for both our own setMuted() requests and external mute changes
+        // (native CallKit UI, accessory buttons). Apply to the Twilio leg and
+        // refresh the in-call screen so its button never drifts from the call.
+        sessions[action.callUUID]?.twilioCall?.isMuted = action.isMuted
+        action.fulfill()
+        inCallScreen?.refreshMuteButton()
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {

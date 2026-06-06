@@ -38,6 +38,13 @@ final class InCallViewController: UIViewController {
         stream.connect()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // The mute state may have changed while another screen (e.g. the native
+        // CallKit UI) was on top — resync the button when we re-appear.
+        updateMuteButton()
+    }
+
     /// Called by CallManager when the call ends — closes the stream and dismisses.
     func teardown() {
         stream.disconnect()
@@ -354,9 +361,19 @@ final class InCallViewController: UIViewController {
             : .secondarySystemBackground
     }
 
+    /// Called by CallManager whenever the call's mute state changes (including
+    /// external sources like CallKit's native mute) so the button never drifts
+    /// from the real Twilio call state.
+    func refreshMuteButton() {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateMuteButton()
+        }
+    }
+
     @objc private func muteButtonTapped() {
+        // Drive the mute through CallKit; the resulting CXSetMutedCallAction
+        // applies it to the call and calls back into refreshMuteButton().
         CallManager.shared.toggleMute()
-        updateMuteButton()
     }
 
     @objc private func endCallTapped() {
