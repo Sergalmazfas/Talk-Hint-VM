@@ -299,6 +299,7 @@ final class APIClient {
         let fromNumber: String
         let toNumber: String
         let status: String
+        let direction: String?
         let startedAt: Date?
         let endedAt: Date?
         let transcript: String?
@@ -344,6 +345,7 @@ final class APIClient {
             fromNumber: (item["fromNumber"] as? String) ?? "",
             toNumber: (item["toNumber"] as? String) ?? "",
             status: (item["status"] as? String) ?? "",
+            direction: item["direction"] as? String,
             startedAt: parseDate(item["startedAt"]),
             endedAt: parseDate(item["endedAt"]),
             transcript: item["transcript"] as? String

@@ -78,7 +78,23 @@ final class CallHistoryViewController: UITableViewController {
     private func subtitle(_ call: APIClient.CallRecord) -> String {
         let status = call.status.isEmpty ? "" : call.status.capitalized
         let time = call.startedAt.map { Self.dateFormatter.string(from: $0) } ?? ""
-        return [status, time].filter { !$0.isEmpty }.joined(separator: " · ")
+        let direction = directionLabel(call)
+        return [direction, status, time].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func isOutgoing(_ call: APIClient.CallRecord) -> Bool {
+        call.direction?.lowercased() == "outgoing"
+    }
+
+    private func directionLabel(_ call: APIClient.CallRecord) -> String {
+        guard let dir = call.direction?.lowercased(), !dir.isEmpty else { return "" }
+        return isOutgoing(call) ? "Outgoing" : "Incoming"
+    }
+
+    private func directionImage(_ call: APIClient.CallRecord) -> UIImage? {
+        guard let dir = call.direction?.lowercased(), !dir.isEmpty else { return nil }
+        let name = isOutgoing(call) ? "arrow.up.right" : "arrow.down.left"
+        return UIImage(systemName: name)
     }
 
     // MARK: - Table data
@@ -106,6 +122,10 @@ final class CallHistoryViewController: UITableViewController {
         config.text = party.isEmpty ? "Unknown" : party
         config.secondaryText = subtitle(call)
         config.secondaryTextProperties.color = .secondaryLabel
+        if let image = directionImage(call) {
+            config.image = image
+            config.imageProperties.tintColor = isOutgoing(call) ? .systemBlue : .systemGreen
+        }
         cell.selectionStyle = .default
         cell.accessoryType = .disclosureIndicator
         cell.accessibilityIdentifier = "cell-call-\(call.id)"
