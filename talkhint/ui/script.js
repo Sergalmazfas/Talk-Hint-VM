@@ -1216,6 +1216,12 @@ function handleMessage(data) {
     case 'guest_transcript':
     case 'gst_transcript':
       if (data.text) {
+        // STT garbage filter for GST/CALLER
+        if (data.isFinal && isGarbageSTT(data.text, data.confidence)) {
+          log('Filtered garbage GST STT: ' + data.text);
+          break;
+        }
+
         // For interim results, update last message instead of adding new
         if (data.isFinal === false) {
           updateLastInterim('guest', data.text);

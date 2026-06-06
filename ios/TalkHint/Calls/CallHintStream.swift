@@ -3,7 +3,9 @@ import Foundation
 /// A single item rendered in the in-call assistant feed.
 enum CallHintEvent: Equatable {
     /// What the caller (the other party) said, optionally translated.
-    case guestTranscript(text: String, translation: String?, isFinal: Bool)
+    /// `confidence` is the STT confidence score when the server provides one
+    /// (used to filter garbled finals on the CALLER line).
+    case guestTranscript(text: String, translation: String?, confidence: Double?, isFinal: Bool)
     /// What the user (the phone owner) said. `confidence` is the STT confidence
     /// score when the server provides one (used to filter garbled finals).
     case ownerTranscript(text: String, confidence: Double?, isFinal: Bool)
@@ -215,6 +217,7 @@ final class CallHintStream: NSObject {
             return .guestTranscript(
                 text: body,
                 translation: nonEmpty(obj["translation"]),
+                confidence: (obj["confidence"] as? NSNumber)?.doubleValue,
                 isFinal: (obj["isFinal"] as? Bool) ?? false
             )
         case "owner_transcript":

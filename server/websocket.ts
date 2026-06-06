@@ -877,14 +877,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       }
 
       if (speaker === "GST") {
-        await handleGuestUtteranceComplete(text, utteranceId);
+        await handleGuestUtteranceComplete(text, utteranceId, confidence);
       } else {
         handleOwnerUtteranceComplete(text, utteranceId, confidence);
       }
     });
     
     // Handler for complete GST utterance (after debounce)
-    async function handleGuestUtteranceComplete(text: string, utteranceId: number) {
+    async function handleGuestUtteranceComplete(text: string, utteranceId: number, confidence?: number) {
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
       const now = Date.now();
@@ -988,6 +988,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         translation: translated.translation,
         isFinal: true,
         isComplete: true,
+        confidence,
         utteranceId,
         callSid
       });

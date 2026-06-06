@@ -23,7 +23,7 @@ final class InCallCaptionTests: XCTestCase {
 
         // First interim → one live (dimmed) card.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Hel", translation: nil, isFinal: false))
+            .guestTranscript(text: "Hel", translation: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 1, "interim should create exactly one card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hel")
         XCTAssertEqual(feedCards(vc)[0].alpha, 0.7, accuracy: 0.001,
@@ -31,13 +31,13 @@ final class InCallCaptionTests: XCTestCase {
 
         // Second interim → same card, text replaced in place.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Hello there", translation: nil, isFinal: false))
+            .guestTranscript(text: "Hello there", translation: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 1, "interim update must not add a card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hello there")
 
         // Final → still the same card, now frozen at full opacity.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Hello there friend", translation: "Privet drug", isFinal: true))
+            .guestTranscript(text: "Hello there friend", translation: "Privet drug", confidence: nil, isFinal: true))
         XCTAssertEqual(feedCards(vc).count, 1, "finalizing must not add a card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hello there friend")
         XCTAssertEqual(feedCards(vc)[0].alpha, 1.0, accuracy: 0.001,
@@ -47,7 +47,7 @@ final class InCallCaptionTests: XCTestCase {
 
         // Next utterance → a new card appears after the frozen one.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Are you still there", translation: nil, isFinal: false))
+            .guestTranscript(text: "Are you still there", translation: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "a new utterance must create a new card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hello there friend",
                        "the previous final card must remain unchanged")
@@ -62,14 +62,14 @@ final class InCallCaptionTests: XCTestCase {
         let stream = CallHintStream()
 
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest one", translation: nil, isFinal: false))
+            .guestTranscript(text: "guest one", translation: nil, confidence: nil, isFinal: false))
         vc.callHintStream(stream, didReceive:
             .ownerTranscript(text: "owner one", confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "guest + owner should be two separate cards")
 
         // Updating the guest must not touch the owner's live card.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest two", translation: nil, isFinal: false))
+            .guestTranscript(text: "guest two", translation: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "guest update must reuse its own card")
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "guest two")
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner one",
@@ -78,9 +78,9 @@ final class InCallCaptionTests: XCTestCase {
         // Finalizing the guest leaves the owner card still live; a new guest line
         // opens a third card while the owner card stays the same instance.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest final", translation: nil, isFinal: true))
+            .guestTranscript(text: "guest final", translation: nil, confidence: nil, isFinal: true))
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest three", translation: nil, isFinal: false))
+            .guestTranscript(text: "guest three", translation: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 3)
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner one",
                        "owner live card persists across guest finalize + new card")
@@ -132,6 +132,49 @@ final class InCallCaptionTests: XCTestCase {
             .ownerTranscript(text: "please confirm the booking", confidence: 0.4, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book",
                        "low-confidence owner final must be suppressed")
+    }
+
+    /// Garbled caller (guest) finals (too short / known-noise) are dropped so
+    /// they never reach the CALLER line, while a clean final still renders —
+    /// matching the web UI's `isGarbageSTT` guard. Interim text always updates
+    /// in place.
+    func testGarbledGuestFinalIsSuppressed() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        // Interim is never filtered, even when short.
+        vc.callHintStream(stream, didReceive:
+            .guestTranscript(text: "so", translation: nil, confidence: nil, isFinal: false))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "so",
+                       "interim guest text must always render")
+
+        // A garbled final (too short) must not replace the live card.
+        vc.callHintStream(stream, didReceive:
+            .guestTranscript(text: "um uh", translation: nil, confidence: nil, isFinal: true))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "so",
+                       "garbled guest final must be suppressed, leaving the live card")
+
+        // A clean final still finalizes the card in place.
+        vc.callHintStream(stream, didReceive:
+            .guestTranscript(text: "I would like to book", translation: nil, confidence: nil, isFinal: true))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "I would like to book",
+                       "a clean guest final must render normally")
+    }
+
+    /// A low-confidence caller (guest) final is dropped even when the text looks
+    /// fine, mirroring the web's `confidence < 0.65` check.
+    func testLowConfidenceGuestFinalIsSuppressed() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        vc.callHintStream(stream, didReceive:
+            .guestTranscript(text: "I would like to book", translation: nil, confidence: 0.4, isFinal: false))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "I would like to book")
+
+        vc.callHintStream(stream, didReceive:
+            .guestTranscript(text: "please confirm the booking", translation: nil, confidence: 0.4, isFinal: true))
+        XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "I would like to book",
+                       "low-confidence guest final must be suppressed")
     }
 
     /// The pinned SUGGESTION banner is hidden until the first suggestion, then

@@ -17,18 +17,18 @@ final class CallHintStreamDecodeTests: XCTestCase {
     // MARK: guest_transcript
 
     func testGuestTranscriptWithTranslationAndFinal() {
-        let json = #"{"type":"guest_transcript","text":"Hello there","translation":"Privet","isFinal":true}"#
+        let json = #"{"type":"guest_transcript","text":"Hello there","translation":"Privet","confidence":0.92,"isFinal":true}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .guestTranscript(text: "Hello there", translation: "Privet", isFinal: true)
+            .guestTranscript(text: "Hello there", translation: "Privet", confidence: 0.92, isFinal: true)
         )
     }
 
-    func testGuestTranscriptDefaultsIsFinalFalseWhenMissing() {
+    func testGuestTranscriptDefaultsConfidenceNilAndIsFinalFalse() {
         let json = #"{"type":"guest_transcript","text":"Hel"}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .guestTranscript(text: "Hel", translation: nil, isFinal: false)
+            .guestTranscript(text: "Hel", translation: nil, confidence: nil, isFinal: false)
         )
     }
 
@@ -36,7 +36,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"guest_transcript","text":"Hi","translation":"","isFinal":false}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .guestTranscript(text: "Hi", translation: nil, isFinal: false)
+            .guestTranscript(text: "Hi", translation: nil, confidence: nil, isFinal: false)
         )
     }
 

@@ -624,7 +624,13 @@ final class InCallViewController: UIViewController {
 extension InCallViewController: CallHintStreamDelegate {
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent) {
         switch event {
-        case .guestTranscript(let text, let translation, let isFinal):
+        case .guestTranscript(let text, let translation, let confidence, let isFinal):
+            // Drop obviously garbled finals so noisy STT never hits the CALLER
+            // line, matching the web UI's `isGarbageSTT` guard. Interim text
+            // still updates in place.
+            if isFinal && isGarbageSTT(text, confidence: confidence) {
+                return
+            }
             upsertTranscript(card: &currentCallerCard,
                              title: "CALLER", titleColor: .systemBlue,
                              primary: text, secondary: translation,
