@@ -1241,11 +1241,18 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         track: "both_tracks"
       });
       
+      // action fires when the <Dial> completes, on the PARENT (client) leg, so its
+      // CallSid matches the record created above and DialCallStatus gives the final
+      // outcome. The phone-number-level statusCallback does NOT fire for these
+      // TwiML-app-originated outbound legs, so this is how we capture call end.
+      const dialStatusUrl = `https://${host}/twilio/dial-status`;
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
         answerOnBridge: true,
         timeout: CALL_TIMEOUT,
-        timeLimit: CALL_TIME_LIMIT
+        timeLimit: CALL_TIME_LIMIT,
+        action: dialStatusUrl,
+        method: "POST"
       });
       dial.number(toNumber);
       console.log("[TwiML Voice] Dialing:", toNumber, "with stream:", streamUrl);
@@ -1287,6 +1294,53 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     }
     
     res.status(200).send("OK");
+  });
+
+  // Dial action callback - fires when an outbound <Dial> completes.
+  // Unlike the phone-number-level statusCallback (which only fires reliably for
+  // INBOUND calls), this is requested on the PARENT/client leg of a browser- or
+  // iOS-originated outbound call, so req.body.CallSid matches the record created
+  // in /twilio/voice. DialCallStatus carries the final outcome of the dialed leg
+  // (completed/busy/no-answer/failed/canceled). We stamp the record's final
+  // status and endedAt here so outbound calls don't stay stuck "active".
+  app.post("/twilio/dial-status", validateTwilioSignature, async (req, res) => {
+    const callSid = req.body.CallSid;
+    const dialCallStatus = req.body.DialCallStatus;
+    const timestamp = new Date().toISOString();
+
+    console.log(`[Twilio DialStatus] ${callSid} @ ${timestamp} - DialCallStatus: ${dialCallStatus}`);
+    console.log(`[Twilio DialStatus] Full body:`, JSON.stringify(req.body));
+
+    if (callSid && dialCallStatus) {
+      // DialCallStatus is always terminal for the dialed leg. Map "answered" (the
+      // call connected and later ended normally) to our "completed" status; the
+      // rest already match our terminal vocabulary.
+      const terminal = ["completed", "answered", "busy", "failed", "no-answer", "canceled"];
+      try {
+        const call = await storage.getCallByCallSid(callSid);
+        if (call) {
+          // Don't clobber a terminal status already set by /twilio/status.
+          const alreadyEnded = !!call.endedAt;
+          if (!alreadyEnded) {
+            const mappedStatus = dialCallStatus === "answered" ? "completed" : dialCallStatus;
+            const updates: Partial<typeof call> = { status: mappedStatus };
+            if (terminal.includes(dialCallStatus)) {
+              updates.endedAt = new Date();
+            }
+            await storage.updateCall(call.id, updates);
+            console.log(`[Twilio DialStatus] Updated call ${callSid} -> status=${mappedStatus}`);
+          }
+        } else {
+          console.log(`[Twilio DialStatus] No call record found for ${callSid}`);
+        }
+      } catch (e: any) {
+        console.error(`[Twilio DialStatus] Failed to update call record for ${callSid}:`, e.message);
+      }
+    }
+
+    // Empty TwiML: the dial is over, so let the parent leg hang up (same behavior
+    // as before, when the TwiML document simply ended after <Dial>).
+    res.type("text/xml").send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
   });
 
   // Twilio outbound webhook - returns TwiML for basic voice call

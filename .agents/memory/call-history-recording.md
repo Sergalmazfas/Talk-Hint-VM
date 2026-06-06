@@ -18,9 +18,12 @@ History tab (`GET /api/calls`) was effectively always empty.
 phone-number level (see `twilioService.ts`, derived `/twilio/voice`→`/twilio/status`).
 It fires reliably for INBOUND calls to our numbers, but a browser/iOS-originated
 OUTBOUND call's parent leg goes through the TwiML app, so its terminal status may
-never reach `/twilio/status` — outbound records can stay `status:"active"` with no
-`endedAt`. If reliable outbound final-status is needed, set `statusCallback` on the
-outbound `<Dial>`/REST call explicitly rather than relying on number config.
+never reach `/twilio/status`. Fix: the outbound `<Dial>` in `/twilio/voice` sets
+`action`→`/twilio/dial-status`, which fires on the PARENT/client leg (so its
+`CallSid` matches the record) with `DialCallStatus` (answered→completed, plus
+busy/no-answer/failed/canceled). That handler stamps final status + `endedAt`,
+skipping records already terminal-stamped by `/twilio/status`. Don't rely on
+number-level statusCallback for outbound end.
 
 `GET /api/calls` and `/api/calls/:id` are now `authMiddleware`-scoped to the
 caller (`getUserCalls`, plus `userId` ownership check returning 404). The iOS
