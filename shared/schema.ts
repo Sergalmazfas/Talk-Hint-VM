@@ -88,6 +88,7 @@ export const calls = pgTable("calls", {
   callSid: text("call_sid").notNull().unique(),
   fromNumber: text("from_number").notNull(),
   toNumber: text("to_number").notNull(),
+  direction: text("direction").notNull().default("incoming"),
   status: text("status").notNull().default("active"),
   startedAt: timestamp("started_at").notNull().defaultNow(),
   endedAt: timestamp("ended_at"),

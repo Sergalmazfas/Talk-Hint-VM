@@ -5,4 +5,5 @@
 - [Twilio track→speaker mapping](twilio-track-role-mapping.md) — inbound/outbound→Owner/Guest depends on which leg the <Stream> rides; caller-leg (callType=incoming_answered) is mirrored vs owner-leg (browser outbound).
 - [Twilio auth token vs SID mis-paste](twilio-auth-token-gotcha.md) — 401 code 20003 came from pasting the Account SID (34ch, "AC…") into TWILIO_AUTH_TOKEN; real token is 32ch, no "AC".
 - [Secrets audit findings](secrets-audit.md) — Twilio/VAPID ok; APNS PEMs stored single-line (normalize in code, never Buffer.from raw); Stripe secret=TEST vs publishable=LIVE mismatch + webhook secret missing.
+- [Call-history recording lifecycle](call-history-recording.md) — records created in /twilio/voice, finalized in /twilio/status; outbound final-status unreliable (statusCallback is number-level); /api/calls is auth-scoped.
 - [Production rollout / DB schema strategy](prod-rollout-strategy.md) — Reserved VM + managed PG: prod schema goes via Publish flow, NOT prod-migrate.ts; Twilio sig check force-enabled in prod.

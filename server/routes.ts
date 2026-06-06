@@ -196,19 +196,22 @@ load();
 </html>`);
   });
 
-  app.get("/api/calls", async (_req, res) => {
+  app.get("/api/calls", authMiddleware, async (req, res) => {
     try {
-      const calls = await storage.getAllCalls();
+      const user = (req as any).user;
+      const calls = await storage.getUserCalls(user.id);
       res.json(calls);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch calls" });
     }
   });
 
-  app.get("/api/calls/:id", async (req, res) => {
+  app.get("/api/calls/:id", authMiddleware, async (req, res) => {
     try {
+      const user = (req as any).user;
       const call = await storage.getCall(req.params.id);
-      if (!call) {
+      // Treat another user's call as not found: never expose it across users.
+      if (!call || call.userId !== user.id) {
         return res.status(404).json({ message: "Call not found" });
       }
       res.json(call);
@@ -980,6 +983,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     // Look up if toNumber is one of our phone numbers
     // Try phoneNumbers table first (user-assigned), then available_numbers (line pool)
     let ownerUserId: string | null = null;
+    let ownerPhoneNumberId: string | null = null;
     let lineId: number | null = null;
     let lineName: string | null = null;
     
@@ -989,6 +993,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         const phoneNumber = await storage.getPhoneNumberByTwilio(toNumber);
         if (phoneNumber) {
           ownerUserId = phoneNumber.userId;
+          ownerPhoneNumberId = phoneNumber.id;
           console.log("[TwiML Voice] INCOMING: Found owner userId:", ownerUserId);
         } else {
           // Second try: available_numbers pool (line-based)
@@ -1080,6 +1085,26 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         console.log("[TwiML Voice] Saved pending call:", callSid);
       } catch (e: any) {
         console.error("[TwiML Voice] Failed to save pending call:", e.message);
+      }
+
+      // Record this incoming call in history (scoped to the number's owner).
+      // Final status/endedAt are filled in later by the /twilio/status callback.
+      try {
+        const existing = await storage.getCallByCallSid(callSid);
+        if (!existing) {
+          await storage.createCall({
+            userId: ownerUserId,
+            phoneNumberId: ownerPhoneNumberId,
+            callSid,
+            fromNumber,
+            toNumber,
+            direction: "incoming",
+            status: "ringing",
+          });
+          console.log("[TwiML Voice] Created incoming call record:", callSid);
+        }
+      } catch (e: any) {
+        console.error("[TwiML Voice] Failed to create incoming call record:", e.message);
       }
       
       // Send push notification (async, don't wait)
@@ -1185,6 +1210,29 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       }
       
       console.log(`[TwiML Voice] OUTBOUND CALL to ${toNumber} from ${userCallerId}`);
+
+      // Record this outbound call in history, scoped to the placing user. Only
+      // user-based outbound calls have a known owner; line-based calls don't, so
+      // we skip those. Final status/endedAt come later via /twilio/status.
+      if (fromNumber && fromNumber.startsWith("client:user-")) {
+        const placingUserId = fromNumber.replace("client:user-", "");
+        try {
+          const existing = await storage.getCallByCallSid(callSid);
+          if (!existing) {
+            await storage.createCall({
+              userId: placingUserId,
+              callSid,
+              fromNumber: String(userCallerId ?? ""),
+              toNumber: String(toNumber),
+              direction: "outgoing",
+              status: "active",
+            });
+            console.log("[TwiML Voice] Created outgoing call record:", callSid);
+          }
+        } catch (e: any) {
+          console.error("[TwiML Voice] Failed to create outgoing call record:", e.message);
+        }
+      }
       
       // Start media stream for transcription
       const start = twimlResponse.start();
@@ -1212,15 +1260,32 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
   });
 
   // Twilio status callback endpoint - receives call status updates
-  app.post("/twilio/status", validateTwilioSignature, (req, res) => {
+  app.post("/twilio/status", validateTwilioSignature, async (req, res) => {
     const callSid = req.body.CallSid;
     const callStatus = req.body.CallStatus;
     const timestamp = new Date().toISOString();
     
     console.log(`[Twilio Status] ${callSid} @ ${timestamp} - Status: ${callStatus}`);
     console.log(`[Twilio Status] Full body:`, JSON.stringify(req.body));
+
+    // Reflect the call's latest status in history. Terminal statuses also stamp
+    // endedAt so the History tab shows when the call finished.
+    if (callSid && callStatus) {
+      const terminal = ["completed", "busy", "failed", "no-answer", "canceled"];
+      try {
+        const call = await storage.getCallByCallSid(callSid);
+        if (call) {
+          const updates: Partial<typeof call> = { status: callStatus };
+          if (terminal.includes(callStatus)) {
+            updates.endedAt = new Date();
+          }
+          await storage.updateCall(call.id, updates);
+        }
+      } catch (e: any) {
+        console.error(`[Twilio Status] Failed to update call record for ${callSid}:`, e.message);
+      }
+    }
     
-    // Just acknowledge - we can add more logic here later if needed
     res.status(200).send("OK");
   });
 

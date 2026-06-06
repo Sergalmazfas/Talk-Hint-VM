@@ -305,9 +305,9 @@ final class APIClient {
     }
 
     /// Fetches the signed-in user's past calls, newest first. The backend
-    /// `/api/calls` route is unscoped (returns every user's calls), so user
-    /// scoping is enforced here. This fails CLOSED: if the current user id is
-    /// unknown we refuse rather than risk exposing other users' history.
+    /// `/api/calls` route is now user-scoped server-side; this client-side
+    /// filter is kept as defense in depth. It fails CLOSED: if the current user
+    /// id is unknown we refuse rather than risk exposing other users' history.
     func calls() async throws -> [CallRecord] {
         guard let mine = SessionStore.shared.userId else { throw APIError.notAuthenticated }
         let data = try await request("/api/calls", method: "GET", json: nil, authenticated: true)
@@ -320,9 +320,9 @@ final class APIClient {
             .sorted { ($0.startedAt ?? .distantPast) > ($1.startedAt ?? .distantPast) }
     }
 
-    /// Fetches a single call (including its full transcript) by id. Enforces
-    /// ownership client-side because the backend route is unscoped: a record
-    /// belonging to another user is treated as not authorized.
+    /// Fetches a single call (including its full transcript) by id. The backend
+    /// now enforces ownership server-side (404 for another user's call); this
+    /// client-side ownership check is kept as defense in depth.
     func call(id: String) async throws -> CallRecord {
         guard let mine = SessionStore.shared.userId else { throw APIError.notAuthenticated }
         let data = try await request("/api/calls/\(id)", method: "GET", json: nil, authenticated: true)
