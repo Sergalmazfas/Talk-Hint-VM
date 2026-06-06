@@ -1228,8 +1228,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     function setupDeepgram(track: string, onReconnect?: () => void) {
       log(`[DG] ${track}: connecting...`, "deepgram");
       
-      // Use raw WebSocket for more control
-      const dgUrl = "wss://api.deepgram.com/v1/listen?model=nova-3&language=en-US&encoding=mulaw&sample_rate=8000&channels=1&interim_results=true&punctuate=true&vad_events=true";
+      // Use raw WebSocket for more control.
+      // Deepgram Flux (v2): conversational STT with model-native turn detection.
+      // It emits TurnInfo events (StartOfTurn/Update/EndOfTurn) instead of
+      // is_final/speech_final + VAD, so end-of-turn is decided by meaning/intonation.
+      // mulaw @ 8kHz is supported natively (Twilio's format) — no transcoding.
+      // eager mode is OFF (no eager_eot_threshold) — EndOfTurn-only pipeline.
+      const dgUrl = "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=mulaw&sample_rate=8000&eot_threshold=0.7&eot_timeout_ms=3000";
       
       let keepaliveInterval: NodeJS.Timeout | null = null;
       let reconnectAttempts = 0;
@@ -1262,62 +1267,72 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       dgWs.on("open", () => {
         log(`[DG] ${track}: open`, "deepgram");
         reconnectAttempts = 0;
-        
-        // Start keepalive ping every 10 seconds
-        keepaliveInterval = setInterval(() => {
-          if (dgWs.readyState === WebSocket.OPEN) {
-            dgWs.send(JSON.stringify({ type: "KeepAlive" }));
-            log(`[DG] ${track}: keepalive ping`, "deepgram");
-          }
-        }, 10000);
+        // Flux has a server-side watchdog (it injects silence on gaps), so no
+        // manual KeepAlive ping is needed — and v2 ignores the v1 KeepAlive msg.
       });
       
       dgWs.on("message", async (data: any) => {
         try {
           const response = JSON.parse(data.toString());
           
-          // Handle VAD events (SpeechStarted, UtteranceEnd)
-          if (response.type === "SpeechStarted") {
-            log(`[DG] ${track}: SpeechStarted`, "deepgram");
-            return;
-          }
-          if (response.type === "UtteranceEnd") {
-            log(`[DG] ${track}: UtteranceEnd -> forcing flush`, "deepgram");
-            // On the caller-leg stream the tracks are mirrored: inbound = GST.
-            const isGuestTrack = streamOnCallerLeg ? (track === "inbound") : (track === "outbound");
-            const speakerCode = isGuestTrack ? "GST" : "HON";
-            utteranceGate.forceFlush(callSid || "unknown", speakerCode as "GST" | "HON");
+          // Flux (v2) speaks in TurnInfo events instead of is_final/VAD.
+          if (response.type !== "TurnInfo") {
+            // Connected / Metadata / Error etc. — log and ignore.
+            if (response.type === "Error" || response.type === "Warning") {
+              log(`[DG] ${track}: ${response.type} - ${response.description || response.message || JSON.stringify(response)}`, "deepgram");
+            }
             return;
           }
           
-          const transcript = response.channel?.alternatives?.[0]?.transcript;
-          if (transcript && transcript.trim()) {
-            const isFinal = response.is_final;
-            const speechFinal = response.speech_final === true;
-            
-            // Track mapping (CORRECTED):
-            // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio.
-            // Owner-leg stream (browser outbound call): inbound=HON (browser mic), outbound=GST (remote PSTN).
-            // Caller-leg stream (incoming answered: browser <Dial><Client> AND iOS conference bridge):
-            //   the stream rides the caller's leg, so inbound=GST (caller), outbound=HON (bridged agent).
-            //   This is the mirror of the owner-leg case and is what fixes iOS CALLER/YOU being swapped.
-            const isGuestTrack = streamOnCallerLeg ? (track === "inbound") : (track === "outbound");
-            const isOwnerTrack = streamOnCallerLeg ? (track === "outbound") : (track === "inbound");
-            const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
-            const speakerCode = isGuestTrack ? "GST" : "HON";
-            
-            // Debug: log track mapping decision
-            log(`[TrackDebug] track=${track}, callerLeg=${streamOnCallerLeg}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} isFinal=${isFinal} speechFinal=${speechFinal}`, "deepgram");
-            
-            // Use utteranceGate to wait for complete utterance before GPT
-            utteranceGate.processTranscript(callSid || "unknown", speakerCode as "GST" | "HON", transcript, isFinal, speechFinal, false);
-            
-            // Broadcast partial/final transcripts immediately for UI display
+          const event: string = response.event; // StartOfTurn | Update | EndOfTurn
+          const transcript: string = (response.transcript || "").trim();
+          
+          // Track mapping (CORRECTED):
+          // Twilio Media Streams: inbound = audio INTO Twilio, outbound = audio OUT OF Twilio.
+          // Owner-leg stream (browser outbound call): inbound=HON (browser mic), outbound=GST (remote PSTN).
+          // Caller-leg stream (incoming answered: browser <Dial><Client> AND iOS conference bridge):
+          //   the stream rides the caller's leg, so inbound=GST (caller), outbound=HON (bridged agent).
+          //   This is the mirror of the owner-leg case and is what fixes iOS CALLER/YOU being swapped.
+          const isGuestTrack = streamOnCallerLeg ? (track === "inbound") : (track === "outbound");
+          const isOwnerTrack = streamOnCallerLeg ? (track === "outbound") : (track === "inbound");
+          const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
+          const speakerCode = isGuestTrack ? "GST" : "HON";
+          
+          if (event === "StartOfTurn") {
+            log(`[DG] ${track}: StartOfTurn speaker=${speakerLabel}`, "deepgram");
+            return;
+          }
+          
+          if (!transcript) {
+            return;
+          }
+          
+          if (event === "Update") {
+            // Interim turn-in-progress text — show live, do not run the pipeline.
             if (isGuestTrack) {
-              uiBroadcast({ type: "guest_transcript", text: transcript, isFinal, callSid });
+              uiBroadcast({ type: "guest_transcript", text: transcript, isFinal: false, callSid });
             } else {
-              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal, callSid });
+              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal: false, callSid });
             }
+            return;
+          }
+          
+          if (event === "EndOfTurn") {
+            const eotConf = response.end_of_turn_confidence;
+            log(`[TrackDebug] track=${track}, callerLeg=${streamOnCallerLeg}, isPstn=${isPstnForwarding}, isGuest=${isGuestTrack}, speaker=${speakerLabel} event=EndOfTurn conf=${eotConf}`, "deepgram");
+            
+            // Show the completed turn text immediately as interim. The canonical
+            // FINAL (guest carries translation; owner carries isComplete) is emitted
+            // once by handle{Guest,Owner}UtteranceComplete via onGenerate below —
+            // marking this isFinal would double-fire the same final to UI consumers.
+            if (isGuestTrack) {
+              uiBroadcast({ type: "guest_transcript", text: transcript, isFinal: false, callSid });
+            } else {
+              uiBroadcast({ type: "owner_transcript", text: transcript, isFinal: false, callSid });
+            }
+            
+            // Commit the completed turn → runs translation/hint pipeline via onGenerate.
+            utteranceGate.commitTurn(callSid || "unknown", speakerCode as "GST" | "HON", transcript);
           }
         } catch (err: any) {
           log(`[Deepgram] Parse error: ${err.message}`, "deepgram");
