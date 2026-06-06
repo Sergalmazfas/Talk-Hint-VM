@@ -284,6 +284,12 @@ final class InCallCaptionTests: XCTestCase {
     /// not re-hiding the button) would strand users on the terminal screen with
     /// no way back, undetected by the delegate-driven lifecycle test above.
     func testManualReconnectButtonReArmsStreamAfterTerminalFailure() {
+        // A signed-in user: the live socket can authenticate, so a manual retry
+        // genuinely re-opens the stream. (The signed-out case is covered by
+        // `testNoTokenReconnectSurfacesSignInState`.)
+        SessionStore.shared.save(token: "test-token", userId: "u1", email: "u1@example.com")
+        defer { SessionStore.shared.clear() }
+
         let vc = makeLoadedViewController()
         // Drive the controller's *own* stream — the same instance the Reconnect
         // button calls `retry()` on — so the assertion exercises the real path.
@@ -316,7 +322,56 @@ final class InCallCaptionTests: XCTestCase {
                       "manual retry must re-open the live stream, not just relabel the status")
     }
 
+    /// The silent-failure case the manual-reconnect test above cannot cover: when
+    /// the user is signed out (no session token), tapping "Reconnect" must NOT
+    /// leave the stream stuck "active" behind a frozen "Reconnecting…" label.
+    /// Instead `openSocket()` must stop the stream (`isActive == false`) and the
+    /// controller must surface an actionable "sign in" message with the retry
+    /// button still available — not spin forever with no recovery.
+    func testNoTokenReconnectSurfacesSignInState() {
+        // Ensure the signed-out precondition regardless of prior test state.
+        SessionStore.shared.clear()
+        XCTAssertNil(SessionStore.shared.token,
+                     "precondition: no session token (signed out)")
+
+        let vc = makeLoadedViewController()
+        let stream = vc.hintStream
+
+        // viewDidLoad already called connect(); with no token the stream must have
+        // immediately stopped rather than staying active and retrying forever.
+        XCTAssertFalse(stream.isActive,
+                       "a signed-out connect must not leave the stream active")
+
+        // Tap the real "Reconnect" button so the production retryTapped → retry()
+        // → connect() → openSocket() path runs end to end.
+        retryButton(vc).sendActions(for: .touchUpInside)
+
+        // The stream must stop again synchronously inside openSocket — never left
+        // active behind the "Reconnecting…" label that retryTapped set.
+        XCTAssertFalse(stream.isActive,
+                       "a signed-out manual retry must stop the stream, not strand it active")
+
+        // The sign-in delegate hops to the main queue, so pump the run loop before
+        // asserting the surfaced UI.
+        pumpMainQueue()
+
+        XCTAssertEqual(statusText(vc), "Sign in to use the live assistant",
+                       "signed-out retry must show an actionable sign-in message")
+        XCTAssertFalse(retryButton(vc).isHidden,
+                       "the retry button must stay available after a signed-out retry")
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating,
+                       "the reconnect spinner must not spin in the signed-out state")
+    }
+
     // MARK: - Helpers
+
+    /// Runs the main run loop briefly so `DispatchQueue.main.async` delegate
+    /// callbacks (e.g. the sign-in notification) are delivered before assertions.
+    private func pumpMainQueue() {
+        let expectation = expectation(description: "drain main queue")
+        DispatchQueue.main.async { expectation.fulfill() }
+        wait(for: [expectation], timeout: 1.0)
+    }
 
     private func makeLoadedViewController() -> InCallViewController {
         let vc = InCallViewController(callerName: "Tester")

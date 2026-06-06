@@ -747,6 +747,15 @@ extension InCallViewController: CallHintStreamDelegate {
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = false
     }
+
+    func callHintStreamDidRequireSignIn(_ stream: CallHintStream) {
+        // The stream stopped because there's no valid session token (signed out).
+        // Show an actionable message instead of a stuck "Reconnecting…" label.
+        // Keep the retry button visible so the user can try again after signing in.
+        statusLabel.text = "Sign in to use the live assistant"
+        reconnectSpinner.stopAnimating()
+        retryButton.isHidden = false
+    }
 }
 
 // MARK: - UITextFieldDelegate

@@ -33,6 +33,14 @@ protocol CallHintStreamDelegate: AnyObject {
     /// auto-reconnects); the UI should surface a terminal "connection lost" state
     /// and offer the user a way to retry via `retry()`.
     func callHintStreamDidFailTerminally(_ stream: CallHintStream)
+    /// The stream cannot authenticate because there is no valid session token —
+    /// the user is signed out. The stream has stopped (`isActive == false`) and
+    /// will not retry on its own. Distinct from `callHintStreamDidFailTerminally`
+    /// (a network/server give-up): here the user must sign in, so the UI should
+    /// surface an actionable "sign in" state rather than a stuck "Reconnecting…"
+    /// label. This is the silent-failure case the manual-reconnect retry path
+    /// would otherwise hit when `openSocket()` returns early with no token.
+    func callHintStreamDidRequireSignIn(_ stream: CallHintStream)
 }
 
 /// Subscribes to the backend `/ui` WebSocket and surfaces live transcripts and
@@ -154,7 +162,21 @@ final class CallHintStream: NSObject {
     }
 
     private func openSocket() {
-        guard isActive, let token = SessionStore.shared.token else { return }
+        guard isActive else { return }
+
+        // No valid session token means the user is signed out, so the live `/ui`
+        // socket can never authenticate. Stop the stream and surface an actionable
+        // "sign in" state instead of silently leaving `isActive == true` (which
+        // would strand the manual "Reconnect" path on a frozen "Reconnecting…"
+        // label with no recovery).
+        guard let token = SessionStore.shared.token, !token.isEmpty else {
+            isActive = false
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.delegate?.callHintStreamDidRequireSignIn(self)
+            }
+            return
+        }
 
         var components = URLComponents(
             url: AppConfig.webSocketBaseURL.appendingPathComponent("ui"),
