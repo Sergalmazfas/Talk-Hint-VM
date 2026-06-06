@@ -34,3 +34,25 @@ targets:
     dependencies:
       - package: TwilioVoice
         product: TwilioVoice
+  TalkHintTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: TalkHintTests
+    dependencies:
+      - target: TalkHint
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TalkHint.app/TalkHint"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  TalkHint:
+    build:
+      targets:
+        TalkHint: all
+        TalkHintTests: [test]
+    test:
+      targets:
+        - TalkHintTests

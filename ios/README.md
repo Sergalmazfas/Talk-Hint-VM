@@ -104,6 +104,34 @@ PushKit/CallKit do not work in the Simulator — use a physical iPhone.
 | `Calls/CallManager.swift` | CallKit provider + Twilio Voice connect/disconnect |
 | `UI/LoginViewController.swift`, `UI/HomeViewController.swift` | Minimal UI |
 
+## Tests
+
+`TalkHintTests` is a hosted unit-test target (declared in `project.yml`, sources
+in `TalkHintTests/`). `InCallCaptionTests` guards the live-caption logic in
+`InCallViewController` so the per-speaker upsert/finalize flow and the pinned
+suggestion banner can't silently regress:
+
+- interim transcript events update one card in place, finalize it on `isFinal`,
+  and start a fresh card for the next utterance;
+- the caller ("CALLER") and owner ("YOU") cards update independently;
+- the SUGGESTION banner becomes visible and updates in place without adding any
+  feed cards.
+
+The tests drive the controller through its real `CallHintStreamDelegate` entry
+point (the same path the `/ui` WebSocket feeds) and inspect the rendered view
+hierarchy by `accessibilityIdentifier`, so they exercise production code rather
+than a copy of it.
+
+```bash
+cd ios
+xcodegen generate
+xcodebuild test -scheme TalkHint \
+  -destination 'platform=iOS Simulator,name=iPhone 15'
+```
+
+> Like the rest of the app, these tests build only on a Mac with Xcode — they
+> cannot be compiled or run on Replit (Linux).
+
 ## Notes & gotchas
 
 - Every received VoIP push **must** report a call to CallKit before the PushKit
