@@ -223,10 +223,30 @@ final class CallHintStream: NSObject {
 
     private func handleDisconnect() {
         guard isActive else { return }
+
+        // The server rejects an expired/revoked session by refusing the WebSocket
+        // upgrade with an HTTP 401 (see `setupWebSocket` on the backend), which
+        // surfaces here as the handshake response on the failed task. If the drop
+        // was an auth rejection rather than a transient network blip, stop and
+        // surface the actionable "sign in" state instead of retrying into the
+        // misleading "Live assistant unavailable. Check your connection." terminal
+        // path — same recovery affordance as the no-token case in `openSocket()`.
+        let statusCode = (task?.response as? HTTPURLResponse)?.statusCode
+
         // Connection dropped mid-call: notify and retry with backoff.
         task = nil
         session?.invalidateAndCancel()
         session = nil
+
+        if CallHintStream.isAuthRejection(statusCode: statusCode) {
+            isActive = false
+            reconnectAttempts = 0
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.delegate?.callHintStreamDidRequireSignIn(self)
+            }
+            return
+        }
 
         reconnectAttempts += 1
 
@@ -270,6 +290,24 @@ final class CallHintStream: NSObject {
     /// single blip, the same silent-regression risk the timing tests guard against.
     static func shouldGiveUp(after attempt: Int) -> Bool {
         attempt >= maxReconnectAttempts
+    }
+
+    /// Whether a dropped `/ui` socket was an authentication rejection (the
+    /// session token is expired or revoked) rather than a transient network
+    /// failure. The backend refuses an unauthenticated WebSocket upgrade with an
+    /// HTTP 401 (see `setupWebSocket`); 403 is treated the same way defensively.
+    /// When `true`, the stream must surface `callHintStreamDidRequireSignIn` (the
+    /// actionable "sign in" state) instead of retrying as a network blip and
+    /// stranding the user on the misleading "connection lost" terminal state.
+    ///
+    /// Pure (no networking, no dispatch) so the auth-vs-network distinction can be
+    /// unit-tested directly — a bad edit (matching the wrong codes, dropping the
+    /// nil guard) would otherwise silently send expired-session users down the
+    /// dead-end retry path, the same silent-regression risk the other helpers
+    /// guard against.
+    static func isAuthRejection(statusCode: Int?) -> Bool {
+        guard let code = statusCode else { return false }
+        return code == 401 || code == 403
     }
 
     /// Backoff delay (seconds) before the `attempt`-th reconnect after the live
