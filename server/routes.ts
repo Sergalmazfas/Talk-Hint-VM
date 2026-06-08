@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner } from "./websocket";
+import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner, getHintFallbackStats } from "./websocket";
 import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { z } from "zod";
 import path from "path";
@@ -225,6 +225,7 @@ load();
       status: "ok", 
       timestamp: new Date().toISOString(),
       websocket: "ready",
+      hintFallback: getHintFallbackStats(),
     });
   });
 

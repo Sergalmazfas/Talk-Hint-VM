@@ -182,6 +182,21 @@ async function generateWithGemini(model: string, systemPrompt: string, userPromp
 // (error, timeout, or empty/unparseable output) so live calls never lose hints.
 const OPENAI_FALLBACK_MODEL = "gpt-4.1-mini";
 
+// Counters to spot Gemini degradation: how often the Gemini hint path was tried
+// vs. how often it failed and fell back to OpenAI. Exposed via getHintFallbackStats()
+// (surfaced on GET /api/health) and logged on every fallback as a running rate.
+let geminiHintAttempts = 0;
+let geminiHintFallbacks = 0;
+
+export function getHintFallbackStats() {
+  const rate = geminiHintAttempts > 0 ? geminiHintFallbacks / geminiHintAttempts : 0;
+  return {
+    geminiAttempts: geminiHintAttempts,
+    geminiFallbacks: geminiHintFallbacks,
+    fallbackRatePct: Math.round(rate * 1000) / 10, // percent, 1 decimal place
+  };
+}
+
 async function generateWithOpenAI(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -248,13 +263,16 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     if (currentModel.startsWith("gemini")) {
       // Try Gemini first; on any failure (error, timeout, or empty/unparseable
       // output) fall back to OpenAI so the live call never loses its hint.
+      geminiHintAttempts++;
       try {
         content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
         if (!content || !/\{[\s\S]*\}/.test(content)) {
           throw new Error("empty or unparseable response");
         }
       } catch (gemErr: any) {
-        log(`Gemini (${currentModel}) failed: ${gemErr.message} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL}`, "openai");
+        geminiHintFallbacks++;
+        const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
+        log(`Gemini (${currentModel}) failed: ${gemErr.message} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
         content = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
       }
     } else {
