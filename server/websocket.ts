@@ -135,6 +135,10 @@ function stripPreamble(text: string): string {
   return result.trim();
 }
 
+// Model used for live hint generation (translation + suggestion).
+// Override without a code change via the HINT_MODEL env var (e.g. "gpt-4.1-mini").
+const HINT_MODEL = process.env.HINT_MODEL || "gpt-4o-mini";
+
 async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
@@ -158,7 +162,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: HINT_MODEL,
         messages: [
           {
             role: "system",
@@ -745,7 +749,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastSuggestionText = "";           // Last suggestion text for duplicate check
     const recentSuggestions: string[] = []; // Last few suggestions for duplicate window
     const RECENT_SUGGESTIONS_MAX = 4;      // How many past suggestions to compare against
-    const DUPLICATE_SIMILARITY = 0.5;      // Block if >=50% similar to any recent suggestion
+    const DUPLICATE_SIMILARITY = 0.8;      // Block if >=80% similar to any recent suggestion
 
     // Anti-echo (cross-track) - same speech transcribed on BOTH tracks (mic/speaker bleed)
     const recentUtterances: { speaker: "GST" | "HON"; norm: string; ts: number }[] = [];
@@ -977,7 +981,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // fastLayer.onGstUtteranceEnd(); // Fast Layer disabled — silence while GPT thinks is better than an irrelevant filler
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
+      const gptStart = Date.now();
       const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);
+      const gptMs = Date.now() - gptStart;
+      log(`[TIMING] model=${HINT_MODEL} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
       fastLayer.onGptResponseReceived();
       
@@ -992,6 +999,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         utteranceId,
         callSid
       });
+      // Reaction time for the caption (it shows even when the suggestion is blocked).
+      // `now` is captured at handler entry ≈ Deepgram EndOfTurn (commitTurn fires this synchronously).
+      log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms (gpt=${gptMs}ms) utteranceId=${utteranceId}`, "websocket");
       
       // ===== HINT THROTTLING CHECKS (only for suggestions, not transcripts) =====
       
@@ -1129,6 +1139,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           utteranceId,
           callSid
         });
+        // Full reaction time: from end of guest's turn to the suggestion leaving the server.
+        log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms (gpt=${gptMs}ms) utteranceId=${utteranceId}`, "websocket");
       }
     }
     
