@@ -178,6 +178,35 @@ async function generateWithGemini(model: string, systemPrompt: string, userPromp
   return Array.isArray(parts) ? parts.map((p: any) => p.text || "").join("") : "";
 }
 
+// OpenAI model used as the automatic fallback when the Gemini provider fails
+// (error, timeout, or empty/unparseable output) so live calls never lose hints.
+const OPENAI_FALLBACK_MODEL = "gpt-4.1-mini";
+
+async function generateWithOpenAI(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.4,
+      max_tokens: 80
+    }),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`GPT API error: ${response.status} ${errText.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
 async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
@@ -217,31 +246,19 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
 
     let content = "";
     if (currentModel.startsWith("gemini")) {
-      content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
-    } else {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: currentModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ],
-          temperature: 0.4,
-          max_tokens: 80
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`GPT API error: ${response.status}`);
+      // Try Gemini first; on any failure (error, timeout, or empty/unparseable
+      // output) fall back to OpenAI so the live call never loses its hint.
+      try {
+        content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
+        if (!content || !/\{[\s\S]*\}/.test(content)) {
+          throw new Error("empty or unparseable response");
+        }
+      } catch (gemErr: any) {
+        log(`Gemini (${currentModel}) failed: ${gemErr.message} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL}`, "openai");
+        content = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
       }
-
-      const data = await response.json();
-      content = data.choices?.[0]?.message?.content || "";
+    } else {
+      content = await generateWithOpenAI(currentModel, systemPrompt, userPrompt);
     }
     
     // Parse JSON response - return immediately without waiting for sentiment
