@@ -1133,7 +1133,7 @@ function connectWebSocket() {
       language: savedLang
     }));
     log('Sent initial language: ' + savedLang);
-    var savedModel = localStorage.getItem('talkhint_model') || 'gpt-4.1-mini';
+    var savedModel = localStorage.getItem('talkhint_model') || 'gemini-2.5-flash-lite';
     socket.send(JSON.stringify({
       type: 'set_model',
       model: savedModel
@@ -1195,7 +1195,9 @@ function handleMessage(data) {
   switch (data.type) {
     case 'connected':
       log('Server confirmed connection');
-      if (data.model) syncModelFromServer(data.model);
+      // Don't sync model from `connected` — it reflects the server's pre-set_model
+      // state and would clobber the user's saved choice on first connect. The
+      // server confirms the adopted model via `model_changed` (handled below).
       break;
 
     case 'model_changed':
@@ -1865,7 +1867,7 @@ var MODEL_DISPLAY = {
 
 function updateModelSelector(modelId) {
   var nameEl = document.getElementById('currentModelName');
-  if (nameEl) nameEl.textContent = MODEL_DISPLAY[modelId] || MODEL_DISPLAY['gpt-4.1-mini'];
+  if (nameEl) nameEl.textContent = MODEL_DISPLAY[modelId] || MODEL_DISPLAY['gemini-2.5-flash-lite'];
 }
 
 // Reconcile the UI + localStorage with the model the server actually applied
@@ -1935,7 +1937,7 @@ document.addEventListener('click', function(e) {
 });
 
 (function initModel() {
-  var savedModel = localStorage.getItem('talkhint_model') || 'gpt-4.1-mini';
+  var savedModel = localStorage.getItem('talkhint_model') || 'gemini-2.5-flash-lite';
   updateModelSelector(savedModel);
   var modelItem = document.querySelector('[data-model="' + savedModel + '"]');
   if (modelItem) modelItem.classList.add('active');

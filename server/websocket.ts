@@ -137,7 +137,7 @@ function stripPreamble(text: string): string {
 
 // Model used for live hint generation (translation + suggestion).
 // Override the default without a code change via the HINT_MODEL env var.
-const HINT_MODEL = process.env.HINT_MODEL || "gpt-4.1-mini";
+const HINT_MODEL = process.env.HINT_MODEL || "gemini-2.5-flash-lite";
 // Models the user is allowed to pick from the settings UI.
 // gemini-* models are routed to Google Gemini; everything else to OpenAI.
 const ALLOWED_HINT_MODELS = [
@@ -145,7 +145,7 @@ const ALLOWED_HINT_MODELS = [
   "gemini-2.5-flash-lite", "gemini-2.5-flash",
 ];
 // Active model — global (single-user app), changeable at runtime via set_model.
-let currentModel = ALLOWED_HINT_MODELS.includes(HINT_MODEL) ? HINT_MODEL : "gpt-4.1-mini";
+let currentModel = ALLOWED_HINT_MODELS.includes(HINT_MODEL) ? HINT_MODEL : "gemini-2.5-flash-lite";
 
 // Google Gemini key. The secret was added as GEMINI_API_KAY (typo) — accept either name.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KAY || "";
