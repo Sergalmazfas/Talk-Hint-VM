@@ -445,7 +445,118 @@ final class InCallCaptionTests: XCTestCase {
                        "the reconnect spinner must not spin in the sign-in state")
     }
 
+    /// The recovery path Task #63 wired up but left untested: after the in-call
+    /// screen drops into the sign-in state, the user taps "Sign in", logs in
+    /// successfully, and `resumeAfterSignIn` must re-arm the live assistant. This
+    /// drives the real flow end to end — require-sign-in → tap "Sign in" → present
+    /// login → fire `LoginViewController.onLoggedIn` (with a freshly saved session,
+    /// as the real login does) → dismiss → resume — and asserts the stream is
+    /// genuinely re-armed (`isActive == true`), the login screen is gone, and the
+    /// retry button returns to its hidden "Reconnect" role with a reconnecting/
+    /// connected status. Without this, a regression in `presentSignIn`/
+    /// `resumeAfterSignIn` would strand users on the sign-in prompt even after a
+    /// successful login.
+    func testSignInSuccessReArmsStreamAndRestoresReconnect() {
+        SessionStore.shared.clear()
+        defer { SessionStore.shared.clear() }
+
+        let vc = makeLoadedViewController()
+        // A real window so `present`/`dismiss` have somewhere to attach.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        let stream = vc.hintStream
+
+        // Session expired mid-call: surface the actionable sign-in affordance.
+        vc.callHintStreamDidRequireSignIn(stream)
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Sign in",
+                       "precondition: the retry button is in its sign-in role")
+        XCTAssertFalse(stream.isActive,
+                       "precondition: a signed-out stream is not active")
+
+        // Tap "Sign in" → the login screen is presented over the call.
+        retryButton(vc).sendActions(for: .touchUpInside)
+        waitForMainQueue(seconds: 0.4)
+        guard let nav = vc.presentedViewController as? UINavigationController,
+              let login = nav.viewControllers.first as? LoginViewController else {
+            return XCTFail("tapping sign-in must present the login screen")
+        }
+
+        // Simulate a successful login exactly as `LoginViewController` does: persist
+        // the new session first, then fire its `onLoggedIn` completion.
+        SessionStore.shared.save(token: "test-token", userId: "u1", email: "u1@example.com")
+        login.onLoggedIn?()
+
+        // `onLoggedIn` dismisses the login screen and, on the dismiss completion,
+        // calls `resumeAfterSignIn` (which re-arms the stream) — pump the run loop
+        // long enough for the dismiss animation + completion to run.
+        waitForMainQueue(seconds: 0.6)
+
+        XCTAssertTrue(stream.isActive,
+                      "a successful sign-in must re-arm the live stream")
+        XCTAssertNil(vc.presentedViewController,
+                     "the login screen must be dismissed after a successful sign-in")
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Reconnect",
+                       "the retry button must return to its plain reconnect role")
+        XCTAssertTrue(retryButton(vc).isHidden,
+                      "the retry button must hide once recovery is underway")
+        let status = statusText(vc) ?? ""
+        XCTAssertTrue(status == "Reconnecting to live assistant…"
+                        || status == "Live assistant connected",
+                      "status must reflect reconnecting/connected after sign-in, got: \(status)")
+    }
+
+    /// The cancel branch of the same recovery flow: if the user opens the login
+    /// screen from the in-call sign-in prompt but cancels instead of logging in,
+    /// the controller must leave the sign-in prompt exactly as it was — button
+    /// still labeled "Sign in" and visible, status still asking them to sign in,
+    /// and the stream NOT re-armed — so they can simply try again. A regression
+    /// that cleared the sign-in state on cancel would strand them with no way back.
+    func testSignInCancelLeavesSignInPromptInPlace() {
+        SessionStore.shared.clear()
+        defer { SessionStore.shared.clear() }
+
+        let vc = makeLoadedViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = vc
+        window.makeKeyAndVisible()
+        let stream = vc.hintStream
+
+        vc.callHintStreamDidRequireSignIn(stream)
+        retryButton(vc).sendActions(for: .touchUpInside)
+        waitForMainQueue(seconds: 0.4)
+        guard let nav = vc.presentedViewController as? UINavigationController,
+              let cancelItem = nav.viewControllers.first?.navigationItem.leftBarButtonItem else {
+            return XCTFail("tapping sign-in must present a login screen with a cancel button")
+        }
+
+        // Tap the real cancel bar-button (its production target/action) so the
+        // dismiss-without-login path runs end to end.
+        _ = cancelItem.target?.perform(cancelItem.action, with: cancelItem)
+        waitForMainQueue(seconds: 0.6)
+
+        XCTAssertNil(vc.presentedViewController,
+                     "cancelling must dismiss the login screen")
+        XCTAssertFalse(stream.isActive,
+                       "cancelling sign-in must not re-arm the live stream")
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Sign in",
+                       "cancelling must leave the sign-in affordance in place")
+        XCTAssertFalse(retryButton(vc).isHidden,
+                       "the sign-in button must stay visible after cancel so the user can retry")
+        XCTAssertEqual(statusText(vc), "Sign in to use the live assistant",
+                       "status must still prompt the user to sign in after cancel")
+    }
+
     // MARK: - Helpers
+
+    /// Runs the main run loop for a fixed interval so presentation/dismissal
+    /// animations and their completion handlers (e.g. `resumeAfterSignIn` on the
+    /// dismiss completion) finish before assertions.
+    private func waitForMainQueue(seconds: TimeInterval) {
+        let expectation = expectation(description: "wait \(seconds)s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { expectation.fulfill() }
+        wait(for: [expectation], timeout: seconds + 1.0)
+    }
 
     /// Runs the main run loop briefly so `DispatchQueue.main.async` delegate
     /// callbacks (e.g. the sign-in notification) are delivered before assertions.
