@@ -983,6 +983,34 @@
         </div>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="section-label">🤖 AI Model</div>
+      <div class="language-selector" id="modelSelector" data-testid="button-model-selector" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #f3f4f6; border-radius: 8px; cursor: pointer; transition: background 0.2s;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>⚡</span>
+          <span id="currentModelName">GPT-4.1 mini</span>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="#6b7280"><path d="M7 10l5 5 5-5z"/></svg>
+      </div>
+      <div class="language-dropdown" id="modelDropdown" style="display: none; margin-top: 4px; background: white; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden;">
+        <div class="language-item" data-model="gpt-4.1-mini" data-testid="model-gpt-41-mini">
+          <span>⚡</span>
+          <span>GPT-4.1 mini — balanced</span>
+        </div>
+        <div class="language-item" data-model="gpt-4.1-nano" data-testid="model-gpt-41-nano">
+          <span>🚀</span>
+          <span>GPT-4.1 nano — fastest</span>
+        </div>
+        <div class="language-item" data-model="gpt-4o-mini" data-testid="model-gpt-4o-mini">
+          <span>💡</span>
+          <span>GPT-4o mini — legacy</span>
+        </div>
+        <div class="language-item" data-model="gpt-4o" data-testid="model-gpt-4o">
+          <span>🧠</span>
+          <span>GPT-4o — smartest</span>
+        </div>
+      </div>
+    </div>
     <div class="sidebar-section" id="forwardingSection" style="display: none;">
       <div class="section-label">📞 Forwarding Number</div>
       <div style="padding: 8px 12px;">

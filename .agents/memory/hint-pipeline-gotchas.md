@@ -21,3 +21,8 @@ Near-identical hints (e.g. "Please confirm … Monday at 5 PM" vs "I need to con
 **Farewell suppression must exempt questions/actionable lines.**
 Blocking hints on farewell phrases ("see you", "thanks") is right for closings, but a bare `thanks`/`thank you` match suppresses valid lines like "Thanks, what time works best?".
 **How to apply:** treat as farewell only if it matches the farewell regex AND has no "?" AND no actionable/scheduling keyword.
+
+**Hint model + mode + language are intentionally module-global, NOT per-user.**
+`currentModel` (set via `set_model`), `currentMode`, and `currentLanguage` are all module-level globals in server/websocket.ts; any /ui client mutates them for everyone.
+**Why:** the app is operated as effectively single-user; the model selector was added to match the existing mode/language pattern. Making only the model per-user would be inconsistent and confusing.
+**How to apply:** if you ever scope one of these per-user/per-call, scope ALL THREE together and thread them through the call/stream context, not just the env var. Until then, keep them consistent. `set_model` is allowlist-validated (`ALLOWED_HINT_MODELS`); default + env override is `HINT_MODEL`.

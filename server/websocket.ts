@@ -136,8 +136,12 @@ function stripPreamble(text: string): string {
 }
 
 // Model used for live hint generation (translation + suggestion).
-// Override without a code change via the HINT_MODEL env var (e.g. "gpt-4.1-mini").
-const HINT_MODEL = process.env.HINT_MODEL || "gpt-4o-mini";
+// Override the default without a code change via the HINT_MODEL env var.
+const HINT_MODEL = process.env.HINT_MODEL || "gpt-4.1-mini";
+// Models the user is allowed to pick from the settings UI.
+const ALLOWED_HINT_MODELS = ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "gpt-4o"];
+// Active model — global (single-user app), changeable at runtime via set_model.
+let currentModel = ALLOWED_HINT_MODELS.includes(HINT_MODEL) ? HINT_MODEL : "gpt-4.1-mini";
 
 async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
@@ -162,7 +166,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: HINT_MODEL,
+        model: currentModel,
         messages: [
           {
             role: "system",
@@ -620,7 +624,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     uiClients.add(ws);
     if (userId) uiClientUsers.set(ws, userId);
 
-    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), goal: currentGoal }));
+    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), goal: currentGoal, model: currentModel }));
 
     ws.on("message", (data: Buffer) => {
       try {
@@ -639,6 +643,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             currentLanguage = lang;
             log(`Language changed to: ${currentLanguage}`, "server");
             ws.send(JSON.stringify({ type: "language_changed", language: currentLanguage }));
+          }
+        } else if (message.type === "set_model") {
+          const model = message.model;
+          if (ALLOWED_HINT_MODELS.includes(model)) {
+            currentModel = model;
+            log(`Hint model changed to: ${currentModel}`, "server");
+            ws.send(JSON.stringify({ type: "model_changed", model: currentModel }));
+          } else {
+            log(`Rejected unknown hint model: ${model}`, "server");
+            ws.send(JSON.stringify({ type: "model_changed", model: currentModel }));
           }
         } else if (message.type === "ask_ai") {
           const question = message.question || "";
@@ -984,7 +998,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const gptStart = Date.now();
       const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);
       const gptMs = Date.now() - gptStart;
-      log(`[TIMING] model=${HINT_MODEL} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
+      log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
       fastLayer.onGptResponseReceived();
       

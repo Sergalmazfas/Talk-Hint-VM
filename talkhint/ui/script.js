@@ -1133,6 +1133,12 @@ function connectWebSocket() {
       language: savedLang
     }));
     log('Sent initial language: ' + savedLang);
+    var savedModel = localStorage.getItem('talkhint_model') || 'gpt-4.1-mini';
+    socket.send(JSON.stringify({
+      type: 'set_model',
+      model: savedModel
+    }));
+    log('Sent initial model: ' + savedModel);
   };
 
   socket.onmessage = function(event) {
@@ -1189,6 +1195,11 @@ function handleMessage(data) {
   switch (data.type) {
     case 'connected':
       log('Server confirmed connection');
+      if (data.model) syncModelFromServer(data.model);
+      break;
+
+    case 'model_changed':
+      if (data.model) syncModelFromServer(data.model);
       break;
 
     case 'owner_transcript':
@@ -1787,7 +1798,7 @@ function selectLanguage(langCode) {
   var dropdown = document.getElementById('languageDropdown');
   if (dropdown) dropdown.style.display = 'none';
   
-  document.querySelectorAll('.language-item').forEach(function(item) {
+  document.querySelectorAll('[data-lang]').forEach(function(item) {
     item.classList.remove('active');
   });
   
@@ -1840,6 +1851,92 @@ document.addEventListener('click', function(e) {
   if (langItem) {
     langItem.classList.add('active');
   }
+})();
+
+// AI Model selector
+var MODEL_DISPLAY = {
+  'gpt-4.1-mini': 'GPT-4.1 mini',
+  'gpt-4.1-nano': 'GPT-4.1 nano',
+  'gpt-4o-mini': 'GPT-4o mini',
+  'gpt-4o': 'GPT-4o'
+};
+
+function updateModelSelector(modelId) {
+  var nameEl = document.getElementById('currentModelName');
+  if (nameEl) nameEl.textContent = MODEL_DISPLAY[modelId] || MODEL_DISPLAY['gpt-4.1-mini'];
+}
+
+// Reconcile the UI + localStorage with the model the server actually applied
+// (e.g. after a rejected/unknown local value or on reconnect).
+function syncModelFromServer(modelId) {
+  if (!MODEL_DISPLAY[modelId]) return;
+  localStorage.setItem('talkhint_model', modelId);
+  updateModelSelector(modelId);
+  document.querySelectorAll('[data-model]').forEach(function(item) {
+    item.classList.toggle('active', item.getAttribute('data-model') === modelId);
+  });
+  log('Model confirmed by server: ' + modelId);
+}
+
+function toggleModelDropdown() {
+  var dropdown = document.getElementById('modelDropdown');
+  if (dropdown) {
+    dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function selectModel(modelId) {
+  localStorage.setItem('talkhint_model', modelId);
+  log('Selected model: ' + modelId);
+
+  updateModelSelector(modelId);
+
+  var dropdown = document.getElementById('modelDropdown');
+  if (dropdown) dropdown.style.display = 'none';
+
+  document.querySelectorAll('[data-model]').forEach(function(item) {
+    item.classList.remove('active');
+  });
+  var selectedItem = document.querySelector('[data-model="' + modelId + '"]');
+  if (selectedItem) selectedItem.classList.add('active');
+
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      type: 'set_model',
+      model: modelId
+    }));
+  }
+}
+
+var modelSelector = document.getElementById('modelSelector');
+if (modelSelector) {
+  modelSelector.addEventListener('click', function(e) {
+    e.stopPropagation();
+    toggleModelDropdown();
+  });
+}
+
+document.querySelectorAll('[data-model]').forEach(function(item) {
+  item.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var modelId = this.getAttribute('data-model');
+    if (modelId) selectModel(modelId);
+  });
+});
+
+document.addEventListener('click', function(e) {
+  var dropdown = document.getElementById('modelDropdown');
+  var selector = document.getElementById('modelSelector');
+  if (dropdown && selector && !selector.contains(e.target) && !dropdown.contains(e.target)) {
+    dropdown.style.display = 'none';
+  }
+});
+
+(function initModel() {
+  var savedModel = localStorage.getItem('talkhint_model') || 'gpt-4.1-mini';
+  updateModelSelector(savedModel);
+  var modelItem = document.querySelector('[data-model="' + savedModel + '"]');
+  if (modelItem) modelItem.classList.add('active');
 })();
 
 // Call Mode Toggle (Live / Training)
