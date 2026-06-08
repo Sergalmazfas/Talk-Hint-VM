@@ -26,3 +26,8 @@ Blocking hints on farewell phrases ("see you", "thanks") is right for closings, 
 `currentModel` (set via `set_model`), `currentMode`, and `currentLanguage` are all module-level globals in server/websocket.ts; any /ui client mutates them for everyone.
 **Why:** the app is operated as effectively single-user; the model selector was added to match the existing mode/language pattern. Making only the model per-user would be inconsistent and confusing.
 **How to apply:** if you ever scope one of these per-user/per-call, scope ALL THREE together and thread them through the call/stream context, not just the env var. Until then, keep them consistent. `set_model` is allowlist-validated (`ALLOWED_HINT_MODELS`); default + env override is `HINT_MODEL`.
+
+**Gemini 2.5 quirks for short live hints.**
+Gemini 2.5 models "think" by default — for short JSON hints that adds latency AND can consume the whole output budget, leaving `candidates[0].content.parts[].text` empty. Always set `generationConfig.thinkingConfig.thinkingBudget=0` for hint-style calls.
+**Why:** without it the call "succeeds" (HTTP 200) but returns no usable text, which looks like a parsing bug.
+**How to apply:** also don't validate Gemini API keys by an `AIza` prefix — a valid working key here was ~53 chars and did NOT start with `AIza`. New hint providers just need an `ALLOWED_HINT_MODELS` entry + a model-name branch in `translateAndSuggest`; no SDK (both providers use global `fetch`).

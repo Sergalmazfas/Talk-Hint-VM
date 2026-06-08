@@ -1858,7 +1858,9 @@ var MODEL_DISPLAY = {
   'gpt-4.1-mini': 'GPT-4.1 mini',
   'gpt-4.1-nano': 'GPT-4.1 nano',
   'gpt-4o-mini': 'GPT-4o mini',
-  'gpt-4o': 'GPT-4o'
+  'gpt-4o': 'GPT-4o',
+  'gemini-2.5-flash-lite': 'Gemini 2.5 Flash-Lite',
+  'gemini-2.5-flash': 'Gemini 2.5 Flash'
 };
 
 function updateModelSelector(modelId) {

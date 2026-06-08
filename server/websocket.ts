@@ -139,9 +139,44 @@ function stripPreamble(text: string): string {
 // Override the default without a code change via the HINT_MODEL env var.
 const HINT_MODEL = process.env.HINT_MODEL || "gpt-4.1-mini";
 // Models the user is allowed to pick from the settings UI.
-const ALLOWED_HINT_MODELS = ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "gpt-4o"];
+// gemini-* models are routed to Google Gemini; everything else to OpenAI.
+const ALLOWED_HINT_MODELS = [
+  "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "gpt-4o",
+  "gemini-2.5-flash-lite", "gemini-2.5-flash",
+];
 // Active model — global (single-user app), changeable at runtime via set_model.
 let currentModel = ALLOWED_HINT_MODELS.includes(HINT_MODEL) ? HINT_MODEL : "gpt-4.1-mini";
+
+// Google Gemini key. The secret was added as GEMINI_API_KAY (typo) — accept either name.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KAY || "";
+
+// Call Google Gemini (generateContent REST). Used when currentModel is a gemini-* model.
+// thinkingBudget=0 disables "thinking" so short hints stay fast and don't burn the token budget.
+async function generateWithGemini(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY (or GEMINI_API_KAY) is not set");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+      generationConfig: {
+        temperature: 0.4,
+        maxOutputTokens: 250,
+        responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    }),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`Gemini API error: ${response.status} ${errText.slice(0, 200)}`);
+  }
+  const data: any = await response.json();
+  const parts = data.candidates?.[0]?.content?.parts;
+  return Array.isArray(parts) ? parts.map((p: any) => p.text || "").join("") : "";
+}
 
 async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
   translation: string;
@@ -158,19 +193,8 @@ async function translateAndSuggest(text: string, goal: string, language: string 
     const contextSection = conversationContext 
       ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n` 
       : "";
-    
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: currentModel,
-        messages: [
-          {
-            role: "system",
-            content: `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
+
+    const systemPrompt = `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 
@@ -185,26 +209,40 @@ Guest just spoke.
 Return JSON only, no markdown:
 {"translation":"guest's words in ${langName}",
  "suggestion":{"en":"reply in ENGLISH","translation":"same reply in ${langName}"},
- "sentiment":"positive|neutral|negative|urgent|confused"}`
-          },
-          {
-            role: "user",
-            content: `Guest said: "${text}"
+ "sentiment":"positive|neutral|negative|urgent|confused"}`;
 
-Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`
-          }
-        ],
-        temperature: 0.4,
-        max_tokens: 80
-      }),
-    });
+    const userPrompt = `Guest said: "${text}"
 
-    if (!response.ok) {
-      throw new Error(`GPT API error: ${response.status}`);
+Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`;
+
+    let content = "";
+    if (currentModel.startsWith("gemini")) {
+      content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
+    } else {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: currentModel,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.4,
+          max_tokens: 80
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`GPT API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      content = data.choices?.[0]?.message?.content || "";
     }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "";
     
     // Parse JSON response - return immediately without waiting for sentiment
     const jsonMatch = content.match(/\{[\s\S]*\}/);
