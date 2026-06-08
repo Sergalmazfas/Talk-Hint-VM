@@ -222,7 +222,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -259,31 +259,16 @@ Return JSON only, no markdown:
 
 Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`;
 
-    let content = "";
-    if (currentModel.startsWith("gemini")) {
-      // Try Gemini first; on any failure (error, timeout, or empty/unparseable
-      // output) fall back to OpenAI so the live call never loses its hint.
-      geminiHintAttempts++;
+    // Parse a model's JSON reply into our hint shape (or null if unparseable).
+    const parseHint = (raw: string) => {
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+      let parsed: any;
       try {
-        content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
-        if (!content || !/\{[\s\S]*\}/.test(content)) {
-          throw new Error("empty or unparseable response");
-        }
-      } catch (gemErr: any) {
-        geminiHintFallbacks++;
-        const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
-        log(`Gemini (${currentModel}) failed: ${gemErr.message} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
-        content = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        return null;
       }
-    } else {
-      content = await generateWithOpenAI(currentModel, systemPrompt, userPrompt);
-    }
-    
-    // Parse JSON response - return immediately without waiting for sentiment
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
       const sentimentRaw = typeof parsed.sentiment === "string" ? parsed.sentiment.toLowerCase().trim() : "";
       const validSentiment = ["positive", "neutral", "negative"].includes(sentimentRaw)
         ? (sentimentRaw as "positive" | "neutral" | "negative")
@@ -304,9 +289,58 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
         suggestion,
         sentiment: validSentiment ? { sentiment: validSentiment, score: 1 } : undefined,
       };
+    };
+
+    const hasSuggestion = (r: ReturnType<typeof parseHint>) =>
+      !!(r && r.suggestion && typeof r.suggestion.en === "string" && r.suggestion.en.trim().length > 0);
+
+    let content = "";
+    let result: ReturnType<typeof parseHint> = null;
+
+    if (currentModel.startsWith("gemini")) {
+      // Try Gemini first; on any failure (error, timeout, or empty/unparseable
+      // output) fall back to OpenAI so the live call never loses its hint.
+      geminiHintAttempts++;
+      let fellBack = false;
+      try {
+        content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
+        if (!content || !/\{[\s\S]*\}/.test(content)) {
+          throw new Error("empty or unparseable response");
+        }
+        result = parseHint(content);
+      } catch (gemErr: any) {
+        geminiHintFallbacks++;
+        fellBack = true;
+        const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
+        log(`Gemini (${currentModel}) failed: ${gemErr.message} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
+        content = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
+        result = parseHint(content);
+      }
+
+      // Gemini sometimes returns a valid translation but silently drops the
+      // suggestion. On a turn that should have a hint (not a reaction/farewell)
+      // that means a dead turn for the user, so treat a missing suggestion as a
+      // fallback trigger and ask OpenAI for a proper hint.
+      if (!fellBack && forceSuggestion && !hasSuggestion(result)) {
+        geminiHintFallbacks++;
+        const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
+        log(`Gemini (${currentModel}) returned no suggestion — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
+        try {
+          const fbResult = parseHint(await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt));
+          if (hasSuggestion(fbResult)) {
+            // Keep Gemini's translation if OpenAI didn't supply its own.
+            result = { ...fbResult!, translation: fbResult!.translation || result?.translation || "" };
+          }
+        } catch (fbErr: any) {
+          log(`OpenAI suggestion fallback failed: ${fbErr.message}`, "openai");
+        }
+      }
+    } else {
+      content = await generateWithOpenAI(currentModel, systemPrompt, userPrompt);
+      result = parseHint(content);
     }
-    
-    return { translation: "" };
+
+    return result ?? { translation: "" };
   } catch (err: any) {
     log(`Translation error: ${err.message}`, "openai");
     return { translation: "" };
@@ -1069,7 +1103,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
       const gptStart = Date.now();
-      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory);
+      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell);
       const gptMs = Date.now() - gptStart;
       log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
