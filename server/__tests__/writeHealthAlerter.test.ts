@@ -222,6 +222,95 @@ describe("checkWriteHealthOnce", () => {
   });
 });
 
+describe("recovery notifications", () => {
+  it("sends a single 'recovered' message once a previously-alerting table is healthy with new writes", async () => {
+    configureSms();
+    process.env.WRITE_HEALTH_ALERT_COOLDOWN_MS = "0"; // recovery window defaults to cooldown
+
+    // Table starts failing → alert.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 2, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    expect(await checkWriteHealthOnce()).toBe(1);
+
+    // Failures stop rising and new successful writes land → recovery.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 7, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    expect(await checkWriteHealthOnce()).toBe(0); // recovery isn't counted as an alert
+
+    expect(h.messagesCreate).toHaveBeenCalledTimes(2);
+    const recoveryBody = h.messagesCreate.mock.calls[1][0].body as string;
+    expect(recoveryBody).toContain("RECOVERED");
+    expect(recoveryBody).toContain("table=contact_memory");
+
+    // A subsequent healthy check does NOT send another recovery.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 9, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    await checkWriteHealthOnce();
+    expect(h.messagesCreate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not recover without new successful writes after the alert", async () => {
+    configureSms();
+    process.env.WRITE_HEALTH_ALERT_COOLDOWN_MS = "0";
+
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 2, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    await checkWriteHealthOnce();
+
+    // Failures stop rising but successes are unchanged → not proven healthy.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 2, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    expect(await checkWriteHealthOnce()).toBe(0);
+    expect(h.messagesCreate).toHaveBeenCalledTimes(1); // only the original alert
+  });
+
+  it("debounces recovery so a flapping table doesn't spam alert/recover/alert", async () => {
+    configureSms();
+    // Long window: recovery requires a sustained healthy period.
+    process.env.WRITE_HEALTH_ALERT_COOLDOWN_MS = String(60 * 60 * 1000);
+
+    // Initial failure → alert.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 2, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    await checkWriteHealthOnce();
+    expect(h.messagesCreate).toHaveBeenCalledTimes(1);
+
+    // Brief healthy blip with new writes — but the long window hasn't elapsed.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 5, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    expect(await checkWriteHealthOnce()).toBe(0);
+    expect(h.messagesCreate).toHaveBeenCalledTimes(1); // no premature recovery
+
+    // Fails again before the window elapsed: no recovery was sent, and the new
+    // failure is throttled (still in cooldown), so no alert spam either.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 6, 5, driftError("2026-06-09T00:10:00.000Z")),
+    );
+    expect(await checkWriteHealthOnce()).toBe(0);
+    expect(h.messagesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send a recovery for a table that never alerted", async () => {
+    configureSms();
+    process.env.WRITE_HEALTH_ALERT_COOLDOWN_MS = "0";
+
+    // Healthy from the start, accumulating successes — should never notify.
+    h.getWriteHealth.mockReturnValue(emptyHealth("calls", 0, 3));
+    await checkWriteHealthOnce();
+    h.getWriteHealth.mockReturnValue(emptyHealth("calls", 0, 10));
+    await checkWriteHealthOnce();
+
+    expect(h.messagesCreate).not.toHaveBeenCalled();
+  });
+});
+
 describe("sendWriteHealthAlert", () => {
   it("logs only (no SMS) when no recipient is configured", async () => {
     process.env.TWILIO_ACCOUNT_SID = "AC_test_sid";

@@ -14,6 +14,13 @@ import { getWriteHealth } from "./storage";
 //
 // Alerts are throttled per-table so a sustained outage doesn't spam the channel,
 // and each message names the table, operation, and pg-code for fast triage.
+//
+// The poller also closes the loop: once a table that previously alerted goes a
+// sustained window with successful writes and no new failures, it sends a single
+// "recovered" notification so on-call gets a positive all-clear instead of
+// having to manually re-poll /api/health. Recovery is debounced over the same
+// window concept as alert throttling, so a flapping table can't spam the channel
+// with alert/recover/alert churn.
 // ---------------------------------------------------------------------------
 
 // Defaults (overridable via env, read at call time so tests can tweak them).
@@ -30,6 +37,14 @@ function cooldownMs(): number {
   return Number.isFinite(v) && v >= 0 ? v : DEFAULT_COOLDOWN_MS;
 }
 
+// How long a previously-alerting table must stay healthy (successful writes, no
+// new failures) before we declare recovery. Defaults to the alert cooldown so
+// recovery is debounced on the same time scale as alerting.
+function recoveryWindowMs(): number {
+  const v = Number(process.env.WRITE_HEALTH_RECOVERY_WINDOW_MS);
+  return Number.isFinite(v) && v >= 0 ? v : cooldownMs();
+}
+
 interface TableAlertState {
   // Failure count we last reconciled with (only advanced once an alert for the
   // rise is actually sent, so a throttled rise stays pending and fires after the
@@ -39,6 +54,16 @@ interface TableAlertState {
   // `lastError.at` of the error we last alerted on — lets a fresh schema-drift
   // error re-alert even if the failure counter didn't move between checks.
   lastAlertedErrorAt?: string;
+  // True once we've actually sent an alert for this table and have NOT yet sent
+  // the matching recovery. Only an alerting table can recover, so a throttled
+  // (never-sent) rise won't later produce a phantom "all clear".
+  alerting: boolean;
+  // writeSuccesses captured at the moment we last alerted — recovery requires
+  // new successful writes beyond this baseline, not just the absence of failures.
+  successesAtAlert: number;
+  // First time we observed a sustained-healthy check while alerting. Reset to
+  // undefined whenever a new failure shows up, so a flap restarts the window.
+  healthySince?: number;
 }
 
 const alertStateByTable: Record<string, TableAlertState> = {};
@@ -102,6 +127,15 @@ function formatAlert(table: string, health: ReturnType<typeof getWriteHealth>[st
   );
 }
 
+// Build the positive "all clear" message sent once a previously-failing table
+// has sustained successful writes again.
+function formatRecovery(table: string, health: ReturnType<typeof getWriteHealth>[string]): string {
+  return (
+    `✅ DB writes RECOVERED on table=${table} — successful writes resumed with no new failures. ` +
+    `writeSuccesses=${health.writeSuccesses} writeFailures=${health.writeFailures} (total).`
+  );
+}
+
 // One evaluation pass over the write-health snapshot. Returns the number of
 // alerts actually sent (suppressed-by-throttle ones are not counted).
 export async function checkWriteHealthOnce(): Promise<number> {
@@ -110,12 +144,18 @@ export async function checkWriteHealthOnce(): Promise<number> {
   const snapshot = getWriteHealth();
   const now = Date.now();
   const cooldown = cooldownMs();
+  const recoveryWindow = recoveryWindowMs();
   let sent = 0;
 
   for (const [table, health] of Object.entries(snapshot)) {
     let state = alertStateByTable[table];
     if (!state) {
-      state = { reconciledFailures: 0, lastAlertAt: 0 };
+      state = {
+        reconciledFailures: 0,
+        lastAlertAt: 0,
+        alerting: false,
+        successesAtAlert: 0,
+      };
       alertStateByTable[table] = state;
     }
 
@@ -127,8 +167,29 @@ export async function checkWriteHealthOnce(): Promise<number> {
     if (!failuresRose && !freshDriftError) {
       // Nothing new — keep our baseline in sync.
       state.reconciledFailures = health.writeFailures;
+      // Recovery: a table that previously alerted gets a single "all clear" once
+      // it has logged new successful writes and stayed clean for the recovery
+      // window. Debounced via healthySince so a flap (failure mid-window) resets
+      // the timer instead of firing alert/recover/alert.
+      if (state.alerting) {
+        const hasNewSuccesses = health.writeSuccesses > state.successesAtAlert;
+        if (!hasNewSuccesses) {
+          // No proof writes are flowing again — don't start the recovery clock.
+          state.healthySince = undefined;
+        } else {
+          if (state.healthySince === undefined) state.healthySince = now;
+          if (now - state.healthySince >= recoveryWindow) {
+            await sendWriteHealthAlert(formatRecovery(table, health));
+            state.alerting = false;
+            state.healthySince = undefined;
+          }
+        }
+      }
       continue;
     }
+
+    // A new failure voids any in-progress recovery window.
+    state.healthySince = undefined;
 
     // Throttle: leave the rise pending (do NOT advance reconciledFailures) so it
     // re-fires once the cooldown elapses instead of being lost.
@@ -145,6 +206,8 @@ export async function checkWriteHealthOnce(): Promise<number> {
     state.reconciledFailures = health.writeFailures;
     state.lastAlertAt = now;
     state.lastAlertedErrorAt = err?.at;
+    state.alerting = true;
+    state.successesAtAlert = health.writeSuccesses;
   }
 
   return sent;
