@@ -39,9 +39,14 @@ const ENV_KEYS = [
   "TWILIO_ACCOUNT_SID",
   "TWILIO_AUTH_TOKEN",
   "TWILIO_PHONE_NUMBER",
+  "WRITE_HEALTH_ALERT_EMAIL",
+  "WRITE_HEALTH_ALERT_EMAIL_FROM",
+  "WRITE_HEALTH_ALERT_EMAIL_SUBJECT",
+  "SENDGRID_API_KEY",
 ] as const;
 
 let savedEnv: Record<string, string | undefined>;
+let fetchMock: ReturnType<typeof vi.fn>;
 
 function emptyHealth(table: string, writeFailures: number, writeSuccesses = 0, lastError: any = null) {
   return { [table]: { writeSuccesses, writeFailures, lastError } };
@@ -79,6 +84,12 @@ beforeEach(() => {
   h.getWriteHealth.mockReset();
   h.messagesCreate.mockReset();
   h.messagesCreate.mockResolvedValue({ sid: "SM_test" });
+  fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 202,
+    text: async () => "",
+  });
+  vi.stubGlobal("fetch", fetchMock);
   __resetWriteHealthAlerterState();
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -91,6 +102,7 @@ afterEach(() => {
     else process.env[k] = savedEnv[k];
   }
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function configureSms() {
@@ -98,6 +110,12 @@ function configureSms() {
   process.env.TWILIO_AUTH_TOKEN = "test_token";
   process.env.TWILIO_PHONE_NUMBER = "+15550000000";
   process.env.WRITE_HEALTH_ALERT_PHONE = "+15551111111";
+}
+
+function configureEmail() {
+  process.env.WRITE_HEALTH_ALERT_EMAIL = "oncall@example.com";
+  process.env.WRITE_HEALTH_ALERT_EMAIL_FROM = "alerts@talkhint.app";
+  process.env.SENDGRID_API_KEY = "SG.test_key";
 }
 
 describe("checkWriteHealthOnce", () => {
@@ -323,6 +341,20 @@ describe("sendWriteHealthAlert", () => {
     expect(h.messagesCreate).not.toHaveBeenCalled();
   });
 
+  it("logs only (no channel) when neither SMS nor email is configured", async () => {
+    const warn = vi.spyOn(console, "warn");
+
+    await sendWriteHealthAlert("boom");
+
+    expect(h.messagesCreate).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      warn.mock.calls.some((c) =>
+        String(c[0]).includes("No alert channel configured"),
+      ),
+    ).toBe(true);
+  });
+
   it("logs only (no SMS) when Twilio credentials are missing", async () => {
     process.env.WRITE_HEALTH_ALERT_PHONE = "+15551111111";
     // No Twilio creds / sender.
@@ -343,5 +375,77 @@ describe("sendWriteHealthAlert", () => {
       from: "+15550000000",
       to: "+15551111111",
     });
+  });
+
+  it("sends an email via SendGrid when email is configured", async () => {
+    configureEmail();
+
+    await sendWriteHealthAlert("boom");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.sendgrid.com/v3/mail/send");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer SG.test_key");
+    const payload = JSON.parse(init.body);
+    expect(payload.from).toEqual({ email: "alerts@talkhint.app" });
+    expect(payload.personalizations[0].to).toEqual([
+      { email: "oncall@example.com" },
+    ]);
+    expect(payload.content[0].value).toBe("boom");
+  });
+
+  it("emails every recipient in a comma-separated list", async () => {
+    configureEmail();
+    process.env.WRITE_HEALTH_ALERT_EMAIL =
+      "a@example.com, b@example.com;c@example.com";
+
+    await sendWriteHealthAlert("boom");
+
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.personalizations[0].to).toEqual([
+      { email: "a@example.com" },
+      { email: "b@example.com" },
+      { email: "c@example.com" },
+    ]);
+  });
+
+  it("sends both SMS and email when both channels are configured", async () => {
+    configureSms();
+    configureEmail();
+
+    await sendWriteHealthAlert("boom");
+
+    expect(h.messagesCreate).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not email when recipient is set but provider/sender is missing", async () => {
+    process.env.WRITE_HEALTH_ALERT_EMAIL = "oncall@example.com";
+    // No WRITE_HEALTH_ALERT_EMAIL_FROM / SENDGRID_API_KEY.
+
+    await sendWriteHealthAlert("boom");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never throws when the email provider errors out", async () => {
+    configureEmail();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => "sendgrid down",
+    });
+
+    await expect(sendWriteHealthAlert("boom")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never throws when the email fetch rejects", async () => {
+    configureEmail();
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+
+    await expect(sendWriteHealthAlert("boom")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

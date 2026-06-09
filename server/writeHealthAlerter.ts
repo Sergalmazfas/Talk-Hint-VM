@@ -8,9 +8,15 @@ import { getWriteHealth } from "./storage";
 // writeSuccesses/writeFailures/lastError + schema-drift flags), but nothing
 // actively watched that signal — a human had to poll the endpoint. This module
 // is the missing watcher: a lightweight background check that reads the same
-// write-health snapshot and pushes an alert (Twilio SMS + loud log) the moment
-// any table's failure counter rises or a schema-drift error appears, so the
-// silent caller-name class of bug is caught early instead of in support tickets.
+// write-health snapshot and pushes an alert (loud log + any configured
+// channels) the moment any table's failure counter rises or a schema-drift
+// error appears, so the silent caller-name class of bug is caught early instead
+// of in support tickets.
+//
+// Delivery channels are opt-in and independent: Twilio SMS (WRITE_HEALTH_ALERT_
+// PHONE) and/or SendGrid email (WRITE_HEALTH_ALERT_EMAIL). Configuring email in
+// addition to SMS means an alert survives one channel being down. If neither is
+// configured, the loud log is the only delivery.
 //
 // Alerts are throttled per-table so a sustained outage doesn't spam the channel,
 // and each message names the table, operation, and pg-code for fast triage.
@@ -77,28 +83,22 @@ function isDisabled(): boolean {
   return process.env.DISABLE_WRITE_HEALTH_ALERTS === "true";
 }
 
-// Send the alert: always log loudly, and SMS the on-call number when Twilio +
-// a recipient are configured. Never throws — alerting must not crash the poller.
-export async function sendWriteHealthAlert(body: string): Promise<void> {
-  console.error(`[WriteHealthAlert] ${body}`);
-
+// Try to deliver the alert by SMS. Returns true if SMS was configured and an
+// attempt was made (regardless of Twilio success), false if SMS is not
+// configured at all. Never throws.
+async function trySendSms(body: string): Promise<boolean> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   const to = process.env.WRITE_HEALTH_ALERT_PHONE;
   const from =
     process.env.WRITE_HEALTH_ALERT_FROM || process.env.TWILIO_PHONE_NUMBER;
 
-  if (!to) {
-    console.warn(
-      "[WriteHealthAlert] No WRITE_HEALTH_ALERT_PHONE configured — alert logged only, no SMS sent.",
-    );
-    return;
-  }
+  if (!to) return false;
   if (!accountSid || !authToken || !from) {
     console.warn(
-      "[WriteHealthAlert] Twilio credentials or sender number missing — alert logged only, no SMS sent.",
+      "[WriteHealthAlert] WRITE_HEALTH_ALERT_PHONE set but Twilio credentials or sender number missing — no SMS sent.",
     );
-    return;
+    return false;
   }
 
   try {
@@ -108,6 +108,91 @@ export async function sendWriteHealthAlert(body: string): Promise<void> {
   } catch (err: any) {
     console.error(
       `[WriteHealthAlert] Failed to send SMS: ${err?.message ?? err}`,
+    );
+  }
+  return true;
+}
+
+// Parse a comma/semicolon/whitespace-separated recipient list into trimmed,
+// non-empty addresses.
+function parseEmailRecipients(raw: string): string[] {
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Try to deliver the alert by email via the SendGrid HTTP API (no SDK
+// dependency — plain fetch). Opt-in: only attempts when a recipient list, a
+// sender, and SENDGRID_API_KEY are all configured. Returns true if email was
+// configured and an attempt was made, false otherwise. Never throws.
+async function trySendEmail(body: string): Promise<boolean> {
+  const rawTo = process.env.WRITE_HEALTH_ALERT_EMAIL;
+  if (!rawTo) return false;
+
+  const recipients = parseEmailRecipients(rawTo);
+  const from = process.env.WRITE_HEALTH_ALERT_EMAIL_FROM;
+  const apiKey = process.env.SENDGRID_API_KEY;
+
+  if (recipients.length === 0) return false;
+  if (!from || !apiKey) {
+    console.warn(
+      "[WriteHealthAlert] WRITE_HEALTH_ALERT_EMAIL set but WRITE_HEALTH_ALERT_EMAIL_FROM or SENDGRID_API_KEY missing — no email sent.",
+    );
+    return false;
+  }
+
+  const subject =
+    process.env.WRITE_HEALTH_ALERT_EMAIL_SUBJECT ||
+    "🚨 TalkHint DB write-health alert";
+
+  try {
+    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: recipients.map((email) => ({ email })) }],
+        from: { email: from },
+        subject,
+        content: [{ type: "text/plain", value: body }],
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error(
+        `[WriteHealthAlert] Failed to send email: HTTP ${res.status} ${detail}`,
+      );
+    } else {
+      console.log(
+        `[WriteHealthAlert] Email sent to ${recipients.join(", ")}`,
+      );
+    }
+  } catch (err: any) {
+    console.error(
+      `[WriteHealthAlert] Failed to send email: ${err?.message ?? err}`,
+    );
+  }
+  return true;
+}
+
+// Send the alert: always log loudly, then fan out to every configured channel
+// (Twilio SMS and/or SendGrid email — both opt-in and independent). If no
+// channel is configured, the loud log is the only delivery. Never throws —
+// alerting must not crash the poller.
+export async function sendWriteHealthAlert(body: string): Promise<void> {
+  console.error(`[WriteHealthAlert] ${body}`);
+
+  const [smsAttempted, emailAttempted] = await Promise.all([
+    trySendSms(body),
+    trySendEmail(body),
+  ]);
+
+  if (!smsAttempted && !emailAttempted) {
+    console.warn(
+      "[WriteHealthAlert] No alert channel configured (set WRITE_HEALTH_ALERT_PHONE and/or WRITE_HEALTH_ALERT_EMAIL) — alert logged only.",
     );
   }
 }
