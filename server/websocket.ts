@@ -12,6 +12,7 @@ import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
+import { formatContactMemory, deriveOtherPartyPhone, buildContextSections } from "./contactMemory";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -239,18 +240,12 @@ async function translateAndSuggest(text: string, goal: string, language: string 
       ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n` 
       : "";
 
-    const userContextSection = userContext && userContext.trim()
-      ? `\n\nUSER_CONTEXT (about the user you are assisting — use it to adapt your suggestions to their profession, business, goals, and tone; never read it aloud or expose it to the guest):\n${userContext.trim()}\n`
-      : "";
-
-    const contactContextSection = contactContext && contactContext.trim()
-      ? `\n\nCONTACT_CONTEXT (history about THIS specific caller from prior calls — what they wanted, what was agreed, notes, and how important they are; use it for continuity and to reference past agreements; never read it aloud or expose it to the guest):\n${contactContext.trim()}\n`
-      : "";
+    const contextSections = buildContextSections(userContext, contactContext);
 
     const systemPrompt = `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
-${userContextSection}${contactContextSection}
+${contextSections}
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 
@@ -354,16 +349,6 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     log(`Translation error: ${err.message}`, "openai");
     return { translation: "" };
   }
-}
-
-// Render a saved contact_memory row into the CONTACT_CONTEXT prompt block text.
-function formatContactMemory(mem: { summary?: string | null; notes?: string | null; importance?: string | null; lastCallAt?: Date | null }): string {
-  const parts: string[] = [];
-  if (mem.lastCallAt) parts.push(`Last call: ${new Date(mem.lastCallAt).toISOString().slice(0, 10)}`);
-  if (mem.importance && mem.importance.trim()) parts.push(`Importance: ${mem.importance.trim()}`);
-  if (mem.summary && mem.summary.trim()) parts.push(`Summary: ${mem.summary.trim()}`);
-  if (mem.notes && mem.notes.trim()) parts.push(`Notes: ${mem.notes.trim()}`);
-  return parts.join("\n");
 }
 
 // After a call ends, summarize the transcript and upsert the contact's memory.
@@ -1754,9 +1739,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                     log(`[ContactMemory] No call record for ${sidForContact}, skipping contact load`, "twilio");
                     return;
                   }
-                  const phone = call.direction === "outgoing" ? call.toNumber : call.fromNumber;
-                  if (!phone || phone.startsWith("client:") || !phone.startsWith("+")) {
-                    log(`[ContactMemory] No usable other-party phone for ${sidForContact} (got "${phone}")`, "twilio");
+                  const phone = deriveOtherPartyPhone(call);
+                  if (!phone) {
+                    const raw = call.direction === "outgoing" ? call.toNumber : call.fromNumber;
+                    log(`[ContactMemory] No usable other-party phone for ${sidForContact} (got "${raw}")`, "twilio");
                     return;
                   }
                   otherPartyPhone = phone;
