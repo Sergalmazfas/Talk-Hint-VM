@@ -853,6 +853,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let callSid: string | null = null;
     let streamUserId: string | undefined; // Owner of this call (set on "start" from callOwners)
     let ownerContext = ""; // Owner's "My Context" free-text, loaded once on "start"
+    let ownerContextReady: Promise<void> = Promise.resolve(); // resolves once ownerContext is loaded
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -1108,6 +1109,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // fastLayer.onGstUtteranceEnd(); // Fast Layer disabled — silence while GPT thinks is better than an irrelevant filler
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
+      // Ensure the owner's "My Context" has finished loading so EVERY hint —
+      // including the first turn — is personalized (load is kicked off on "start").
+      await ownerContextReady;
       const gptStart = Date.now();
       const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext);
       const gptMs = Date.now() - gptStart;
@@ -1605,8 +1609,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               // fall back to the pendingCalls table just in case.
               // Load the owner's "My Context" once per call so every hint can be
               // personalized. Best-effort: failures leave ownerContext empty.
-              const loadOwnerContext = (uid: string) => {
-                storage.getUserContext(uid)
+              ownerContext = ""; // reset any stale value before (re)loading for this call
+              const loadOwnerContext = (uid: string): Promise<void> => {
+                return storage.getUserContext(uid)
                   .then((ctx) => {
                     ownerContext = ctx || "";
                     if (ownerContext) {
@@ -1618,10 +1623,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
               streamUserId = callOwners.get(callSid);
               if (streamUserId) {
-                loadOwnerContext(streamUserId);
+                ownerContextReady = loadOwnerContext(streamUserId);
               } else {
                 const sidForLookup = callSid;
-                db.select({ userId: pendingCalls.userId })
+                ownerContextReady = db.select({ userId: pendingCalls.userId })
                   .from(pendingCalls)
                   .where(eq(pendingCalls.callSid, sidForLookup))
                   .limit(1)
@@ -1630,8 +1635,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                     if (uid) {
                       streamUserId = uid;
                       callOwners.set(sidForLookup, uid);
-                      loadOwnerContext(uid);
                       log(`[TwilioStream] Resolved owner ${uid} for ${sidForLookup} via DB`, "twilio");
+                      return loadOwnerContext(uid);
                     } else {
                       log(`[TwilioStream] No owner found for ${sidForLookup}`, "twilio");
                     }

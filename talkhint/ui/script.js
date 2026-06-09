@@ -2795,6 +2795,117 @@ if (saveForwardingBtn) {
   saveForwardingBtn.addEventListener('click', saveForwardingPhone);
 }
 
+// ===== My Context (Personal Context) =====
+var CONTEXT_TEMPLATES = {
+  cdl: "I'm a CDL truck driver looking for dispatch/driving jobs. I have OTR experience and a clean driving record. On calls, help me ask about pay per mile, routes, home time, and equipment. Keep replies short and professional. Never claim endorsements or certifications I haven't confirmed.",
+  massage: "I run a massage salon. Services: Classic massage ($80/hr), Deep tissue ($100/hr), Sports massage ($120/90min). I want to book clients, confirm date/time, and upsell add-ons like hot stones. Keep replies warm, friendly, and concise.",
+  universal: "I'm a small business owner handling calls with clients and partners. My goal is to be clear, polite, and move every call toward a concrete next step (a booking, a price agreement, or a follow-up). Keep suggestions short and natural."
+};
+
+function authHeaders() {
+  var token = getAuthToken();
+  var headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return headers;
+}
+
+async function loadUserContext() {
+  try {
+    var response = await fetch('/api/user/context', {
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      var data = await response.json();
+      var textarea = document.getElementById('contextText');
+      if (textarea) textarea.value = data.context || '';
+      updateContextStatus(data.context || '');
+    }
+  } catch (error) {
+    log('Context load error: ' + error.message);
+  }
+}
+
+function updateContextStatus(context) {
+  var statusEl = document.getElementById('contextStatus');
+  if (!statusEl) return;
+  if (context && context.trim()) {
+    statusEl.textContent = '✓ Context set (' + context.trim().length + ' chars)';
+    statusEl.style.color = '#10b981';
+  } else {
+    statusEl.textContent = 'Not set';
+    statusEl.style.color = '#6b7280';
+  }
+}
+
+async function saveUserContext() {
+  var textarea = document.getElementById('contextText');
+  if (!textarea) return;
+  var saveBtn = document.getElementById('contextModalSave');
+  if (saveBtn) saveBtn.disabled = true;
+  try {
+    var response = await fetch('/api/user/context', {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders(),
+      body: JSON.stringify({ context: textarea.value })
+    });
+    if (response.ok) {
+      var data = await response.json();
+      if (data.context !== undefined) textarea.value = data.context;
+      updateContextStatus(data.context || textarea.value);
+      closeContextModal();
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Failed to save context: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Context save error: ' + error.message);
+    alert('Failed to save context: ' + error.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+function openContextModal() {
+  var modal = document.getElementById('contextModal');
+  if (modal) modal.classList.add('active');
+}
+
+function closeContextModal() {
+  var modal = document.getElementById('contextModal');
+  if (modal) modal.classList.remove('active');
+}
+
+(function initContextUI() {
+  var editBtn = document.getElementById('editContextBtn');
+  if (editBtn) editBtn.addEventListener('click', openContextModal);
+
+  var closeBtn = document.getElementById('contextModalClose');
+  if (closeBtn) closeBtn.addEventListener('click', closeContextModal);
+
+  var cancelBtn = document.getElementById('contextModalCancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeContextModal);
+
+  var saveBtn = document.getElementById('contextModalSave');
+  if (saveBtn) saveBtn.addEventListener('click', saveUserContext);
+
+  var modal = document.getElementById('contextModal');
+  if (modal) modal.addEventListener('click', function(e) {
+    if (e.target === modal) closeContextModal();
+  });
+
+  document.querySelectorAll('[data-context-template]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var key = btn.getAttribute('data-context-template');
+      var textarea = document.getElementById('contextText');
+      if (textarea && CONTEXT_TEMPLATES[key]) textarea.value = CONTEXT_TEMPLATES[key];
+    });
+  });
+})();
+
+loadUserContext();
+
 // Service Worker and Push Notifications
 var swRegistration = null;
 var notificationsBtn = document.getElementById('enableNotificationsBtn');

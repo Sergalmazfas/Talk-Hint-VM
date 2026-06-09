@@ -32,6 +32,11 @@ Gemini 2.5 models "think" by default — for short JSON hints that adds latency 
 **Why:** without it the call "succeeds" (HTTP 200) but returns no usable text, which looks like a parsing bug.
 **How to apply:** also don't validate Gemini API keys by an `AIza` prefix — a valid working key here was ~53 chars and did NOT start with `AIza`. New hint providers just need an `ALLOWED_HINT_MODELS` entry + a model-name branch in `translateAndSuggest`; no SDK (both providers use global `fetch`). Gemini is the default hint model, so the Gemini path auto-falls-back to OpenAI (`gpt-4.1-mini`) on error/empty output — keep that fallback whenever the default depends on a non-OpenAI provider, or a provider outage silently kills all live hints.
 
+**Per-call async data loaded on Twilio "start" must be AWAITED before the first hint, not fire-and-forget.**
+Per-user "My Context" (and any per-call lookup kicked off in the `case "start"` handler) loads asynchronously. If you only `.then()` it, the first guest turn can reach `translateAndSuggest` before the load resolves → the first hint(s) run with empty context, violating "injected into EVERY hint".
+**Why:** hint generation fires on guest-utterance-complete, which can race ahead of the start-time DB read.
+**How to apply:** store the load as a promise (`ownerContextReady`) on the connection scope and `await` it just before `translateAndSuggest`; after first resolution it's a no-op. Reset the value (`ownerContext = ""`) at each `start` to avoid stale carryover. Keep it per-connection, NOT module-global (it's genuinely per-user, unlike model/mode/language).
+
 **A provider fallback gated only on "empty/unparseable" is NOT enough — also fall back on parsed-but-incomplete.**
 gemini-2.5-flash-lite often returns well-formed JSON with a `translation` but silently omits `suggestion`. That parses fine, so an empty-output-only fallback never fires and the user gets the translation with NO hint — looks like "hints stopped after one" on a live call.
 **Why:** a real 62s call gave exactly one suggestion; logs showed the 2nd guest turn produced a caption/`[TIMING]` but no `[Suggestion]` and no `[BLOCKED]` line → `translated.suggestion` was just absent.

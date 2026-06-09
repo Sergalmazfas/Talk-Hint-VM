@@ -37,6 +37,7 @@ class AuthStorage implements IAuthStorage {
       password: null,
       language: "ru",
       forwardingPhone: null,
+      userContext: null,
       callMode: "live",
       plan: "free",
       authProvider: "replit",

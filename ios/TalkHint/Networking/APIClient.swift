@@ -398,6 +398,28 @@ final class APIClient {
         _ = try await request("/api/user/call-mode", method: "POST", json: ["callMode": mode], authenticated: true)
     }
 
+    /// Fetches the user's saved "My Context" free-text block (empty string if
+    /// unset). This context is auto-injected into every live hint.
+    func userContext() async throws -> String {
+        let data = try await request("/api/user/context", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return (obj["context"] as? String) ?? ""
+    }
+
+    /// Saves (or clears, when empty) the user's "My Context". Returns the value
+    /// the backend stored.
+    @discardableResult
+    func setUserContext(_ context: String) async throws -> String {
+        let body: [String: Any] = ["context": context]
+        let data = try await request("/api/user/context", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return (obj["context"] as? String) ?? context
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

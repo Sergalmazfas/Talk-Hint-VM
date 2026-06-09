@@ -1019,6 +1019,13 @@
         </div>
       </div>
     </div>
+    <div class="sidebar-section" id="contextSection">
+      <div class="section-label">🧠 My Context</div>
+      <div style="padding: 8px 12px;">
+        <button id="editContextBtn" class="btn btn-secondary btn-small" data-testid="button-edit-context" style="width: 100%; font-size: 0.85rem; padding: 8px;">✏️ Edit my context</button>
+        <div id="contextStatus" style="font-size: 0.75rem; color: #6b7280; margin-top: 6px; text-align: center;"></div>
+      </div>
+    </div>
     <div class="sidebar-section" id="forwardingSection" style="display: none;">
       <div class="section-label">📞 Forwarding Number</div>
       <div style="padding: 8px 12px;">
@@ -1129,6 +1136,31 @@
       <div class="modal-footer" id="modalFooter">
         <button class="btn btn-secondary" id="modalCancel" data-testid="button-modal-cancel">Cancel</button>
         <button class="btn btn-primary" id="modalSave" data-testid="button-modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="contextModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">🧠 My Context</span>
+        <button class="modal-close" id="contextModalClose" data-testid="button-context-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">About you</label>
+          <div style="display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary btn-small" data-context-template="cdl" data-testid="button-template-cdl">CDL Driver</button>
+            <button class="btn btn-secondary btn-small" data-context-template="massage" data-testid="button-template-massage">Massage</button>
+            <button class="btn btn-secondary btn-small" data-context-template="universal" data-testid="button-template-universal">Universal</button>
+          </div>
+          <textarea class="form-textarea" id="contextText" placeholder="Describe yourself: your profession, business, what you offer, your goals and tone. The assistant uses this on every call." data-testid="input-context"></textarea>
+          <div class="form-hint">Example: I'm a CDL truck driver looking for dispatch jobs. I have 3 years OTR experience, clean record. Keep replies short and professional.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="contextModalCancel" data-testid="button-context-cancel">Cancel</button>
+        <button class="btn btn-primary" id="contextModalSave" data-testid="button-context-save">Save</button>
       </div>
     </div>
   </div>
