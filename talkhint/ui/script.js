@@ -2959,9 +2959,11 @@ function renderContacts() {
     var meta = [];
     if (c.importance && c.importance.trim()) meta.push('★ ' + escapeHtml(c.importance.trim()));
     if (lastCall) meta.push('Last call: ' + lastCall);
+    var hasName = c.name && c.name.trim();
     return '' +
       '<div class="contact-row" data-testid="row-contact-' + escapeHtml(c.id) + '" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-bottom:8px;">' +
-        '<div style="font-weight:600; margin-bottom:2px;" data-testid="text-contact-phone-' + escapeHtml(c.id) + '">' + escapeHtml(c.phoneNumber) + '</div>' +
+        (hasName ? '<div style="font-weight:600; margin-bottom:2px;" data-testid="text-contact-name-' + escapeHtml(c.id) + '">' + escapeHtml(c.name.trim()) + '</div>' : '') +
+        '<div style="' + (hasName ? 'font-size:0.85rem; color:#6b7280;' : 'font-weight:600;') + ' margin-bottom:2px;" data-testid="text-contact-phone-' + escapeHtml(c.id) + '">' + escapeHtml(c.phoneNumber) + '</div>' +
         (meta.length ? '<div style="font-size:0.75rem; color:#6b7280; margin-bottom:6px;">' + meta.join(' · ') + '</div>' : '') +
         (c.summary && c.summary.trim() ? '<div style="font-size:0.85rem; margin-bottom:4px;">' + escapeHtml(c.summary.trim()) + '</div>' : '') +
         (c.notes && c.notes.trim() ? '<div style="font-size:0.8rem; color:#374151; margin-bottom:6px;"><em>Notes:</em> ' + escapeHtml(c.notes.trim()) + '</div>' : '') +
@@ -3000,10 +3002,12 @@ function openContactEditModal(id) {
   if (!contact) return;
   editingContactId = id;
   var title = document.getElementById('contactEditTitle');
-  if (title) title.textContent = 'Edit ' + contact.phoneNumber;
+  if (title) title.textContent = 'Edit ' + (contact.name && contact.name.trim() ? contact.name.trim() : contact.phoneNumber);
+  var nameField = document.getElementById('contactName');
   var imp = document.getElementById('contactImportance');
   var sum = document.getElementById('contactSummary');
   var notes = document.getElementById('contactNotes');
+  if (nameField) nameField.value = contact.name || '';
   if (imp) imp.value = contact.importance || '';
   if (sum) sum.value = contact.summary || '';
   if (notes) notes.value = contact.notes || '';
@@ -3021,6 +3025,7 @@ async function saveContact() {
   if (!editingContactId) return;
   var saveBtn = document.getElementById('contactEditSave');
   if (saveBtn) saveBtn.disabled = true;
+  var nameField = document.getElementById('contactName');
   var imp = document.getElementById('contactImportance');
   var sum = document.getElementById('contactSummary');
   var notes = document.getElementById('contactNotes');
@@ -3030,6 +3035,7 @@ async function saveContact() {
       credentials: 'include',
       headers: authHeaders(),
       body: JSON.stringify({
+        name: nameField ? nameField.value : '',
         importance: imp ? imp.value : '',
         summary: sum ? sum.value : '',
         notes: notes ? notes.value : ''

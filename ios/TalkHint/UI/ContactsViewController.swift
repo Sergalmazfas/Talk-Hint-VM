@@ -68,8 +68,14 @@ final class ContactsViewController: UITableViewController {
         }
 
         let contact = contacts[indexPath.row]
-        config.text = contact.phoneNumber
+        let trimmedName = contact.name?.trimmingCharacters(in: .whitespacesAndNewlines)
         var detailParts: [String] = []
+        if let name = trimmedName, !name.isEmpty {
+            config.text = name
+            detailParts.append(contact.phoneNumber)
+        } else {
+            config.text = contact.phoneNumber
+        }
         if let importance = contact.importance?.trimmingCharacters(in: .whitespacesAndNewlines), !importance.isEmpty {
             detailParts.append("★ \(importance)")
         }
@@ -145,6 +151,7 @@ final class ContactEditorViewController: UIViewController {
     private let contact: APIClient.ContactMemoryItem
     private let onSave: (APIClient.ContactMemoryItem) -> Void
 
+    private let nameField = UITextField()
     private let importanceField = UITextField()
     private let summaryView = UITextView()
     private let notesView = UITextView()
@@ -166,6 +173,14 @@ final class ContactEditorViewController: UIViewController {
             barButtonSystemItem: .save, target: self, action: #selector(save))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-contact-save"
 
+        let nameLabel = makeLabel("Name")
+        nameField.text = contact.name
+        nameField.placeholder = "e.g. John from accounting"
+        nameField.borderStyle = .roundedRect
+        nameField.backgroundColor = .secondarySystemGroupedBackground
+        nameField.translatesAutoresizingMaskIntoConstraints = false
+        nameField.accessibilityIdentifier = "input-contact-name"
+
         let importanceLabel = makeLabel("Importance")
         importanceField.text = contact.importance
         importanceField.placeholder = "e.g. VIP, regular, one-time"
@@ -181,12 +196,14 @@ final class ContactEditorViewController: UIViewController {
         configureTextView(notesView, text: contact.notes, identifier: "input-contact-notes")
 
         let stack = UIStackView(arrangedSubviews: [
+            nameLabel, nameField,
             importanceLabel, importanceField,
             summaryLabel, summaryView,
             notesLabel, notesView,
         ])
         stack.axis = .vertical
         stack.spacing = 8
+        stack.setCustomSpacing(20, after: nameField)
         stack.setCustomSpacing(20, after: importanceField)
         stack.setCustomSpacing(20, after: summaryView)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -197,6 +214,7 @@ final class ContactEditorViewController: UIViewController {
             stack.topAnchor.constraint(equalTo: guide.topAnchor, constant: 16),
             stack.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            nameField.heightAnchor.constraint(equalToConstant: 44),
             importanceField.heightAnchor.constraint(equalToConstant: 44),
             summaryView.heightAnchor.constraint(equalToConstant: 120),
             notesView.heightAnchor.constraint(equalToConstant: 120),
@@ -222,13 +240,14 @@ final class ContactEditorViewController: UIViewController {
 
     @objc private func save() {
         navigationItem.rightBarButtonItem?.isEnabled = false
+        let name = nameField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let importance = importanceField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let summary = summaryView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let notes = notesView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { @MainActor in
             do {
                 let updated = try await APIClient.shared.updateContact(
-                    id: contact.id, summary: summary, notes: notes, importance: importance)
+                    id: contact.id, name: name, summary: summary, notes: notes, importance: importance)
                 onSave(updated)
                 navigationController?.popViewController(animated: true)
             } catch {

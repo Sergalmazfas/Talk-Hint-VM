@@ -11,6 +11,7 @@
 //      blocks in the correct order (USER_CONTEXT first, CONTACT_CONTEXT after).
 
 export interface ContactMemoryFields {
+  name?: string | null;
   summary?: string | null;
   notes?: string | null;
   importance?: string | null;
@@ -20,6 +21,7 @@ export interface ContactMemoryFields {
 // Render a saved contact_memory row into the CONTACT_CONTEXT prompt block text.
 export function formatContactMemory(mem: ContactMemoryFields): string {
   const parts: string[] = [];
+  if (mem.name && mem.name.trim()) parts.push(`Name: ${mem.name.trim()}`);
   if (mem.lastCallAt) parts.push(`Last call: ${new Date(mem.lastCallAt).toISOString().slice(0, 10)}`);
   if (mem.importance && mem.importance.trim()) parts.push(`Importance: ${mem.importance.trim()}`);
   if (mem.summary && mem.summary.trim()) parts.push(`Summary: ${mem.summary.trim()}`);

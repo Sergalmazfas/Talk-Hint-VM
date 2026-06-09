@@ -114,6 +114,7 @@ export const contactMemory = pgTable("contact_memory", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   phoneNumber: text("phone_number").notNull(),
+  name: text("name"),
   summary: text("summary"),
   notes: text("notes"),
   importance: text("importance"),

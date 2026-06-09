@@ -78,6 +78,7 @@ describe("deriveOtherPartyPhone", () => {
 describe("formatContactMemory", () => {
   it("renders all populated fields in a stable order", () => {
     const text = formatContactMemory({
+      name: "John from accounting",
       lastCallAt: new Date("2026-01-15T10:30:00Z"),
       importance: "high",
       summary: "Regular client booking a massage.",
@@ -85,12 +86,18 @@ describe("formatContactMemory", () => {
     });
     expect(text).toBe(
       [
+        "Name: John from accounting",
         "Last call: 2026-01-15",
         "Importance: high",
         "Summary: Regular client booking a massage.",
         "Notes: Prefers evenings; allergic to lavender.",
       ].join("\n"),
     );
+  });
+
+  it("omits a whitespace-only name and trims a populated one", () => {
+    expect(formatContactMemory({ name: "   ", summary: "x" })).toBe("Summary: x");
+    expect(formatContactMemory({ name: "  Jane  " })).toBe("Name: Jane");
   });
 
   it("omits empty / whitespace-only / missing fields", () => {

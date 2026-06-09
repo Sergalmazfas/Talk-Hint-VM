@@ -67,6 +67,7 @@ export interface IStorage {
   upsertContactMemory(data: {
     userId: string;
     phoneNumber: string;
+    name?: string | null;
     summary?: string | null;
     notes?: string | null;
     importance?: string | null;
@@ -74,6 +75,7 @@ export interface IStorage {
   }): Promise<ContactMemory | undefined>;
   listContactMemories(userId: string): Promise<ContactMemory[]>;
   updateContactMemoryById(userId: string, id: string, fields: {
+    name?: string | null;
     summary?: string | null;
     notes?: string | null;
     importance?: string | null;
@@ -520,6 +522,7 @@ export class DatabaseStorage implements IStorage {
   async upsertContactMemory(data: {
     userId: string;
     phoneNumber: string;
+    name?: string | null;
     summary?: string | null;
     notes?: string | null;
     importance?: string | null;
@@ -528,10 +531,21 @@ export class DatabaseStorage implements IStorage {
     if (!isDatabaseAvailable()) return undefined;
     try {
       const now = new Date();
+      // Don't overwrite a user-set name on conflict unless one was provided:
+      // the post-call summarizer upserts without a name and must not wipe it.
+      const conflictSet: Record<string, any> = {
+        summary: data.summary ?? null,
+        notes: data.notes ?? null,
+        importance: data.importance ?? null,
+        lastCallAt: data.lastCallAt ?? now,
+        updatedAt: now,
+      };
+      if (data.name !== undefined) conflictSet.name = data.name;
       const [row] = await db.insert(contactMemory)
         .values({
           userId: data.userId,
           phoneNumber: data.phoneNumber,
+          name: data.name ?? null,
           summary: data.summary ?? null,
           notes: data.notes ?? null,
           importance: data.importance ?? null,
@@ -539,13 +553,7 @@ export class DatabaseStorage implements IStorage {
         })
         .onConflictDoUpdate({
           target: [contactMemory.userId, contactMemory.phoneNumber],
-          set: {
-            summary: data.summary ?? null,
-            notes: data.notes ?? null,
-            importance: data.importance ?? null,
-            lastCallAt: data.lastCallAt ?? now,
-            updatedAt: now,
-          },
+          set: conflictSet,
         })
         .returning();
       return row;
@@ -569,6 +577,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateContactMemoryById(userId: string, id: string, fields: {
+    name?: string | null;
     summary?: string | null;
     notes?: string | null;
     importance?: string | null;
@@ -576,6 +585,7 @@ export class DatabaseStorage implements IStorage {
     if (!isDatabaseAvailable()) return undefined;
     try {
       const set: Record<string, any> = { updatedAt: new Date() };
+      if (fields.name !== undefined) set.name = fields.name;
       if (fields.summary !== undefined) set.summary = fields.summary;
       if (fields.notes !== undefined) set.notes = fields.notes;
       if (fields.importance !== undefined) set.importance = fields.importance;

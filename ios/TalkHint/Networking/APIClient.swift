@@ -425,6 +425,7 @@ final class APIClient {
     struct ContactMemoryItem {
         let id: String
         let phoneNumber: String
+        let name: String?
         let summary: String?
         let notes: String?
         let importance: String?
@@ -444,8 +445,8 @@ final class APIClient {
 
     /// Updates the editable fields of one contact memory. Returns the stored row.
     @discardableResult
-    func updateContact(id: String, summary: String, notes: String, importance: String) async throws -> ContactMemoryItem {
-        let body: [String: Any] = ["summary": summary, "notes": notes, "importance": importance]
+    func updateContact(id: String, name: String, summary: String, notes: String, importance: String) async throws -> ContactMemoryItem {
+        let body: [String: Any] = ["name": name, "summary": summary, "notes": notes, "importance": importance]
         let data = try await request("/api/contacts/\(id)", method: "PUT", json: body, authenticated: true)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let contact = obj["contact"] as? [String: Any],
@@ -466,6 +467,7 @@ final class APIClient {
         return ContactMemoryItem(
             id: id,
             phoneNumber: phone,
+            name: item["name"] as? String,
             summary: item["summary"] as? String,
             notes: item["notes"] as? String,
             importance: item["importance"] as? String,

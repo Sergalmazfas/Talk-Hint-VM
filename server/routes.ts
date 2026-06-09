@@ -1671,13 +1671,17 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     try {
       const user = (req as any).user;
       const { id } = req.params;
-      const { summary, notes, importance } = req.body ?? {};
-      for (const [key, value] of Object.entries({ summary, notes, importance })) {
+      const { name, summary, notes, importance } = req.body ?? {};
+      for (const [key, value] of Object.entries({ name, summary, notes, importance })) {
         if (value !== undefined && value !== null && typeof value !== "string") {
           return res.status(400).json({ error: `${key} must be a string` });
         }
       }
+      // Empty/whitespace name clears it back to null.
+      const normalizedName =
+        name === undefined ? undefined : (typeof name === "string" && name.trim() ? name.trim() : null);
       const updated = await storage.updateContactMemoryById(user.id, id, {
+        ...(normalizedName !== undefined ? { name: normalizedName } : {}),
         ...(summary !== undefined ? { summary } : {}),
         ...(notes !== undefined ? { notes } : {}),
         ...(importance !== undefined ? { importance } : {}),
