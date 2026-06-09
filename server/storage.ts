@@ -27,11 +27,12 @@ export const MAX_USER_CONTEXT_LENGTH = 4000;
 // us proactively report when the live DB is missing columns the schema declares.
 // ---------------------------------------------------------------------------
 
-interface ContactMemoryWriteHealth {
+interface WriteHealth {
   writeSuccesses: number;
   writeFailures: number;
   lastError: {
     at: string;
+    operation?: string;
     code?: string;
     message: string;
     table?: string;
@@ -42,11 +43,25 @@ interface ContactMemoryWriteHealth {
   } | null;
 }
 
-const contactMemoryHealth: ContactMemoryWriteHealth = {
-  writeSuccesses: 0,
-  writeFailures: 0,
-  lastError: null,
-};
+// Per-table write-health registry. Every silent write path records success or
+// failure here so DB failures and schema drift are visible (counters + last
+// error surfaced on /api/health) instead of being swallowed by a catch that
+// quietly returns undefined/[]/false — the exact pattern behind the missing
+// caller-name bug.
+const writeHealthByTable: Record<string, WriteHealth> = {};
+
+function getWriteHealthFor(table: string): WriteHealth {
+  let health = writeHealthByTable[table];
+  if (!health) {
+    health = { writeSuccesses: 0, writeFailures: 0, lastError: null };
+    writeHealthByTable[table] = health;
+  }
+  return health;
+}
+
+function recordWriteSuccess(table: string): void {
+  getWriteHealthFor(table).writeSuccesses += 1;
+}
 
 // Postgres SQLSTATE codes that indicate the live DB no longer matches the schema.
 const SCHEMA_DRIFT_PG_CODES = new Set([
@@ -55,15 +70,19 @@ const SCHEMA_DRIFT_PG_CODES = new Set([
   "42704", // undefined_object
 ]);
 
-function recordContactMemoryWriteFailure(error: any): void {
-  contactMemoryHealth.writeFailures += 1;
+// Record + loudly log a failed write. Schema-drift pg codes are flagged
+// distinctly so a migration gap is obvious vs. a generic DB error.
+function recordWriteFailure(table: string, operation: string, error: any): void {
+  const health = getWriteHealthFor(table);
+  health.writeFailures += 1;
   const code: string | undefined = error?.code;
   const isSchemaDrift = !!code && SCHEMA_DRIFT_PG_CODES.has(code);
-  contactMemoryHealth.lastError = {
+  health.lastError = {
     at: new Date().toISOString(),
+    operation,
     code,
     message: error?.message ?? String(error),
-    table: error?.table,
+    table: error?.table ?? table,
     column: error?.column,
     constraint: error?.constraint,
     detail: error?.detail,
@@ -71,25 +90,39 @@ function recordContactMemoryWriteFailure(error: any): void {
   };
   if (isSchemaDrift) {
     console.error(
-      `[Storage][DRIFT] contact_memory write FAILED due to schema drift — the live DB is missing a column/table the schema declares. ` +
-        `pgCode=${code} table=${error?.table ?? "contact_memory"} column=${error?.column ?? "?"} ` +
+      `[Storage][DRIFT] ${table} write FAILED (${operation}) due to schema drift — the live DB is missing a column/table the schema declares. ` +
+        `pgCode=${code} table=${error?.table ?? table} column=${error?.column ?? "?"} ` +
         `constraint=${error?.constraint ?? "-"} detail=${error?.detail ?? "-"} message="${error?.message}". ` +
-        `Caller details are NOT being saved. Run the contact_memory drift check (/api/health) and apply the missing DDL.`,
+        `Data is NOT being saved. Check the /api/health drift report and apply the missing DDL.`,
     );
   } else {
     console.error(
-      `[Storage] upsertContactMemory FAILED (caller details not saved) — pgCode=${code ?? "n/a"} ` +
-        `table=${error?.table ?? "contact_memory"} column=${error?.column ?? "-"} detail=${error?.detail ?? "-"}:`,
+      `[Storage] ${operation} FAILED (write to ${table} did not persist) — pgCode=${code ?? "n/a"} ` +
+        `table=${error?.table ?? table} column=${error?.column ?? "-"} detail=${error?.detail ?? "-"}:`,
       error,
     );
   }
 }
 
-export function getContactMemoryHealth(): ContactMemoryWriteHealth {
+// Snapshot of all per-table write health, for /api/health.
+export function getWriteHealth(): Record<string, WriteHealth> {
+  const snapshot: Record<string, WriteHealth> = {};
+  for (const [table, health] of Object.entries(writeHealthByTable)) {
+    snapshot[table] = {
+      writeSuccesses: health.writeSuccesses,
+      writeFailures: health.writeFailures,
+      lastError: health.lastError,
+    };
+  }
+  return snapshot;
+}
+
+export function getContactMemoryHealth(): WriteHealth {
+  const health = getWriteHealthFor("contact_memory");
   return {
-    writeSuccesses: contactMemoryHealth.writeSuccesses,
-    writeFailures: contactMemoryHealth.writeFailures,
-    lastError: contactMemoryHealth.lastError,
+    writeSuccesses: health.writeSuccesses,
+    writeFailures: health.writeFailures,
+    lastError: health.lastError,
   };
 }
 
@@ -292,9 +325,10 @@ export class DatabaseStorage implements IStorage {
     }
     try {
       const [newUser] = await db.insert(users).values(user).returning();
+      recordWriteSuccess("users");
       return newUser;
     } catch (error) {
-      console.error("[Storage] createUser error:", error);
+      recordWriteFailure("users", "createUser", error);
       const fallbackUser: User = {
         id: crypto.randomUUID(),
         email: user.email,
@@ -330,9 +364,10 @@ export class DatabaseStorage implements IStorage {
     }
     try {
       const [updated] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+      recordWriteSuccess("users");
       return updated;
     } catch (error) {
-      console.error("[Storage] updateUser error:", error);
+      recordWriteFailure("users", "updateUser", error);
       return undefined;
     }
   }
@@ -622,13 +657,27 @@ export class DatabaseStorage implements IStorage {
   }
   
   async createCall(call: InsertCall): Promise<Call> {
-    const [newCall] = await db.insert(calls).values(call).returning();
-    return newCall;
+    try {
+      const [newCall] = await db.insert(calls).values(call).returning();
+      recordWriteSuccess("calls");
+      return newCall;
+    } catch (error) {
+      // Keep the loud throwing behavior (caller depends on it) but record +
+      // log the failure with table/column/pg-code context for visibility.
+      recordWriteFailure("calls", "createCall", error);
+      throw error;
+    }
   }
   
   async updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined> {
-    const [updated] = await db.update(calls).set(updates).where(eq(calls.id, id)).returning();
-    return updated;
+    try {
+      const [updated] = await db.update(calls).set(updates).where(eq(calls.id, id)).returning();
+      recordWriteSuccess("calls");
+      return updated;
+    } catch (error) {
+      recordWriteFailure("calls", "updateCall", error);
+      throw error;
+    }
   }
   
   async getUserCalls(userId: string): Promise<Call[]> {
@@ -698,10 +747,10 @@ export class DatabaseStorage implements IStorage {
           set: conflictSet,
         })
         .returning();
-      contactMemoryHealth.writeSuccesses += 1;
+      recordWriteSuccess("contact_memory");
       return row;
     } catch (error) {
-      recordContactMemoryWriteFailure(error);
+      recordWriteFailure("contact_memory", "upsertContactMemory", error);
       return undefined;
     }
   }
@@ -736,9 +785,10 @@ export class DatabaseStorage implements IStorage {
         .set(set)
         .where(and(eq(contactMemory.id, id), eq(contactMemory.userId, userId)))
         .returning();
+      recordWriteSuccess("contact_memory");
       return row;
     } catch (error) {
-      console.error("[Storage] updateContactMemoryById error:", error);
+      recordWriteFailure("contact_memory", "updateContactMemoryById", error);
       return undefined;
     }
   }
@@ -749,9 +799,10 @@ export class DatabaseStorage implements IStorage {
       const rows = await db.delete(contactMemory)
         .where(and(eq(contactMemory.id, id), eq(contactMemory.userId, userId)))
         .returning();
+      recordWriteSuccess("contact_memory");
       return rows.length > 0;
     } catch (error) {
-      console.error("[Storage] deleteContactMemoryById error:", error);
+      recordWriteFailure("contact_memory", "deleteContactMemoryById", error);
       return false;
     }
   }
@@ -788,9 +839,10 @@ export class DatabaseStorage implements IStorage {
           sortOrder: data.sortOrder ?? 0,
         })
         .returning();
+      recordWriteSuccess("knowledge_cards");
       return row;
     } catch (error) {
-      console.error("[Storage] createKnowledgeCard error:", error);
+      recordWriteFailure("knowledge_cards", "createKnowledgeCard", error);
       return undefined;
     }
   }
@@ -812,9 +864,10 @@ export class DatabaseStorage implements IStorage {
         .set(set)
         .where(and(eq(knowledgeCards.id, id), eq(knowledgeCards.userId, userId)))
         .returning();
+      recordWriteSuccess("knowledge_cards");
       return row;
     } catch (error) {
-      console.error("[Storage] updateKnowledgeCardById error:", error);
+      recordWriteFailure("knowledge_cards", "updateKnowledgeCardById", error);
       return undefined;
     }
   }
@@ -825,9 +878,10 @@ export class DatabaseStorage implements IStorage {
       const rows = await db.delete(knowledgeCards)
         .where(and(eq(knowledgeCards.id, id), eq(knowledgeCards.userId, userId)))
         .returning();
+      recordWriteSuccess("knowledge_cards");
       return rows.length > 0;
     } catch (error) {
-      console.error("[Storage] deleteKnowledgeCardById error:", error);
+      recordWriteFailure("knowledge_cards", "deleteKnowledgeCardById", error);
       return false;
     }
   }
@@ -925,9 +979,10 @@ export class DatabaseStorage implements IStorage {
     }
     try {
       const [session] = await db.insert(sessions).values({ id, userId, expiresAt }).returning();
+      recordWriteSuccess("sessions");
       return session;
     } catch (error) {
-      console.error("[Storage] createSession error:", error);
+      recordWriteFailure("sessions", "createSession", error);
       const session: Session = { id, userId, expiresAt, createdAt: new Date() };
       memorySessions.set(id, session);
       return session;
@@ -964,8 +1019,9 @@ export class DatabaseStorage implements IStorage {
     }
     try {
       await db.delete(sessions).where(eq(sessions.id, id));
+      recordWriteSuccess("sessions");
     } catch (error) {
-      console.error("[Storage] deleteSession error:", error);
+      recordWriteFailure("sessions", "deleteSession", error);
       memorySessions.delete(id);
     }
   }
@@ -982,8 +1038,9 @@ export class DatabaseStorage implements IStorage {
     }
     try {
       await db.delete(sessions).where(sql`${sessions.expiresAt} < NOW()`);
+      recordWriteSuccess("sessions");
     } catch (error) {
-      console.error("[Storage] cleanExpiredSessions error:", error);
+      recordWriteFailure("sessions", "cleanExpiredSessions", error);
     }
   }
 }
