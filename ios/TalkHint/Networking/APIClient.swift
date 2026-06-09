@@ -303,6 +303,8 @@ final class APIClient {
         let startedAt: Date?
         let endedAt: Date?
         let transcript: String?
+        /// Saved friendly name for the other party (from contact memory), when set.
+        let contactName: String?
     }
 
     /// Fetches the signed-in user's past calls, newest first. The backend
@@ -348,7 +350,8 @@ final class APIClient {
             direction: item["direction"] as? String,
             startedAt: parseDate(item["startedAt"]),
             endedAt: parseDate(item["endedAt"]),
-            transcript: item["transcript"] as? String
+            transcript: item["transcript"] as? String,
+            contactName: item["contactName"] as? String
         )
     }
 

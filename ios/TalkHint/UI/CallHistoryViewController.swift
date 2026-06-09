@@ -75,11 +75,21 @@ final class CallHistoryViewController: UITableViewController {
         return call.fromNumber.isEmpty ? call.toNumber : call.fromNumber
     }
 
+    /// Trimmed saved contact name for the other party, when one exists.
+    private func contactName(_ call: APIClient.CallRecord) -> String? {
+        guard let name = call.contactName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
     private func subtitle(_ call: APIClient.CallRecord) -> String {
         let status = call.status.isEmpty ? "" : call.status.capitalized
         let time = call.startedAt.map { Self.dateFormatter.string(from: $0) } ?? ""
         let direction = directionLabel(call)
-        return [direction, status, time].filter { !$0.isEmpty }.joined(separator: " · ")
+        // When a saved name is shown as the title, surface the raw number here so
+        // it's still visible.
+        let number = contactName(call) != nil ? otherParty(call) : ""
+        return [number, direction, status, time].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private func isOutgoing(_ call: APIClient.CallRecord) -> Bool {
@@ -119,7 +129,9 @@ final class CallHistoryViewController: UITableViewController {
 
         let call = calls[indexPath.row]
         let party = otherParty(call)
-        config.text = party.isEmpty ? "Unknown" : party
+        // Prefer the saved contact name; fall back to the raw number.
+        let title = contactName(call) ?? (party.isEmpty ? "Unknown" : party)
+        config.text = title
         config.secondaryText = subtitle(call)
         config.secondaryTextProperties.color = .secondaryLabel
         if let image = directionImage(call) {

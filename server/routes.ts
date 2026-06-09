@@ -16,6 +16,7 @@ import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
+import { deriveOtherPartyPhone } from "./contactMemory";
 import { pendingCalls, users, phoneNumbers, deviceTokens } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
@@ -200,7 +201,21 @@ load();
     try {
       const user = (req as any).user;
       const calls = await storage.getUserCalls(user.id);
-      res.json(calls);
+      // Attach the saved contact name (when one exists) so call history can show
+      // a recognizable caller. Build a phone -> name map from the user's saved
+      // contacts once, then look up each call's other-party number, instead of
+      // querying per call.
+      const memories = await storage.listContactMemories(user.id);
+      const nameByPhone = new Map<string, string>();
+      for (const m of memories) {
+        if (m.name && m.name.trim()) nameByPhone.set(m.phoneNumber, m.name.trim());
+      }
+      const enriched = calls.map((call) => {
+        const phone = deriveOtherPartyPhone(call);
+        const contactName = phone ? nameByPhone.get(phone) ?? null : null;
+        return { ...call, contactName };
+      });
+      res.json(enriched);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch calls" });
     }
@@ -214,7 +229,10 @@ load();
       if (!call || call.userId !== user.id) {
         return res.status(404).json({ message: "Call not found" });
       }
-      res.json(call);
+      const phone = deriveOtherPartyPhone(call);
+      const mem = phone ? await storage.getContactMemory(user.id, phone) : undefined;
+      const contactName = mem?.name && mem.name.trim() ? mem.name.trim() : null;
+      res.json({ ...call, contactName });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch call" });
     }

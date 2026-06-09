@@ -20,7 +20,12 @@ final class CallDetailViewController: UITableViewController {
         self.call = call
         self.otherParty = otherParty
         super.init(style: .insetGrouped)
-        title = otherParty.isEmpty ? "Call" : otherParty
+        let name = call.contactName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty {
+            title = name
+        } else {
+            title = otherParty.isEmpty ? "Call" : otherParty
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -62,7 +67,15 @@ final class CallDetailViewController: UITableViewController {
 
     private var detailRows: [DetailRow] {
         var rows: [DetailRow] = []
-        rows.append(DetailRow(label: "With", value: otherParty.isEmpty ? "Unknown" : otherParty))
+        let name = call.contactName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty {
+            rows.append(DetailRow(label: "With", value: name))
+            if !otherParty.isEmpty {
+                rows.append(DetailRow(label: "Number", value: otherParty))
+            }
+        } else {
+            rows.append(DetailRow(label: "With", value: otherParty.isEmpty ? "Unknown" : otherParty))
+        }
         if !call.status.isEmpty {
             rows.append(DetailRow(label: "Status", value: call.status.capitalized))
         }
