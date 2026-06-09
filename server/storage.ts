@@ -13,6 +13,8 @@ import { eq, and, sql, gt } from "drizzle-orm";
 import { configureVoiceWebhook } from "./twilioService";
 import { resolveProductionBaseUrl } from "./baseUrl";
 
+export const MAX_USER_CONTEXT_LENGTH = 4000;
+
 export const memoryUsers = new Map<string, User>();
 export const memorySessions = new Map<string, Session>();
 export const memoryUsersByEmail = new Map<string, User>();
@@ -24,6 +26,8 @@ export interface IStorage {
   getUserByStripeCustomerId(customerId: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
+  getUserContext(id: string): Promise<string>;
+  setUserContext(id: string, context: string): Promise<string>;
   
   // Phone Numbers
   getPhoneNumber(id: string): Promise<PhoneNumber | undefined>;
@@ -116,6 +120,7 @@ export class DatabaseStorage implements IStorage {
         password: user.password || null,
         language: user.language || "ru",
         forwardingPhone: user.forwardingPhone ?? null,
+        userContext: null,
         callMode: user.callMode ?? "live",
         plan: "free",
         authProvider: (user as any).authProvider || "email",
@@ -141,6 +146,7 @@ export class DatabaseStorage implements IStorage {
         password: user.password || null,
         language: user.language || "ru",
         forwardingPhone: user.forwardingPhone ?? null,
+        userContext: null,
         callMode: user.callMode ?? "live",
         plan: "free",
         authProvider: (user as any).authProvider || "email",
@@ -174,6 +180,17 @@ export class DatabaseStorage implements IStorage {
       console.error("[Storage] updateUser error:", error);
       return undefined;
     }
+  }
+
+  async getUserContext(id: string): Promise<string> {
+    const user = await this.getUser(id);
+    return user?.userContext ?? "";
+  }
+
+  async setUserContext(id: string, context: string): Promise<string> {
+    const trimmed = (context ?? "").slice(0, MAX_USER_CONTEXT_LENGTH);
+    const updated = await this.updateUser(id, { userContext: trimmed || null });
+    return updated?.userContext ?? "";
   }
   
   // Phone Numbers

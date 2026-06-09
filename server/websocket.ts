@@ -7,6 +7,7 @@ import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
 import { getSessionUserId } from "./auth";
+import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -222,7 +223,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -238,10 +239,14 @@ async function translateAndSuggest(text: string, goal: string, language: string 
       ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n` 
       : "";
 
+    const userContextSection = userContext && userContext.trim()
+      ? `\n\nUSER_CONTEXT (about the user you are assisting — use it to adapt your suggestions to their profession, business, goals, and tone; never read it aloud or expose it to the guest):\n${userContext.trim()}\n`
+      : "";
+
     const systemPrompt = `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
-
+${userContextSection}
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 
@@ -847,6 +852,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let streamSid: string | null = null;
     let callSid: string | null = null;
     let streamUserId: string | undefined; // Owner of this call (set on "start" from callOwners)
+    let ownerContext = ""; // Owner's "My Context" free-text, loaded once on "start"
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -1103,7 +1109,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
       const gptStart = Date.now();
-      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell);
+      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext);
       const gptMs = Date.now() - gptStart;
       log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
@@ -1597,8 +1603,23 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               // only to that user. The call is accepted (setCallOwner) before
               // Twilio opens the media stream, so the map is normally populated;
               // fall back to the pendingCalls table just in case.
+              // Load the owner's "My Context" once per call so every hint can be
+              // personalized. Best-effort: failures leave ownerContext empty.
+              const loadOwnerContext = (uid: string) => {
+                storage.getUserContext(uid)
+                  .then((ctx) => {
+                    ownerContext = ctx || "";
+                    if (ownerContext) {
+                      log(`[TwilioStream] Loaded user context for ${uid} (${ownerContext.length} chars)`, "twilio");
+                    }
+                  })
+                  .catch((err) => log(`[TwilioStream] User context load failed: ${err}`, "twilio"));
+              };
+
               streamUserId = callOwners.get(callSid);
-              if (!streamUserId) {
+              if (streamUserId) {
+                loadOwnerContext(streamUserId);
+              } else {
                 const sidForLookup = callSid;
                 db.select({ userId: pendingCalls.userId })
                   .from(pendingCalls)
@@ -1609,6 +1630,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                     if (uid) {
                       streamUserId = uid;
                       callOwners.set(sidForLookup, uid);
+                      loadOwnerContext(uid);
                       log(`[TwilioStream] Resolved owner ${uid} for ${sidForLookup} via DB`, "twilio");
                     } else {
                       log(`[TwilioStream] No owner found for ${sidForLookup}`, "twilio");

@@ -9,6 +9,7 @@ export const users = pgTable("users", {
   password: text("password"),
   language: text("language").notNull().default("ru"),
   forwardingPhone: text("forwarding_phone"),
+  userContext: text("user_context"),
   callMode: text("call_mode").notNull().default("live"),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
@@ -22,6 +23,7 @@ export const users = pgTable("users", {
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+  userContext: true,
   stripeCustomerId: true,
   stripeSubscriptionId: true,
   plan: true,

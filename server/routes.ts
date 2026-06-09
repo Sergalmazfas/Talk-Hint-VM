@@ -1627,6 +1627,34 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Personal Context ("My Context") — free-text injected into every live hint.
+  app.get("/api/user/context", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const context = await storage.getUserContext(user.id);
+      res.json({ context });
+    } catch (error: any) {
+      console.error("[Context] Get error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/user/context", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { context } = req.body;
+      if (context !== undefined && context !== null && typeof context !== "string") {
+        return res.status(400).json({ error: "context must be a string" });
+      }
+      const saved = await storage.setUserContext(user.id, context ?? "");
+      console.log(`[Context] User ${user.id} updated context (${saved.length} chars)`);
+      res.json({ success: true, context: saved });
+    } catch (error: any) {
+      console.error("[Context] Update error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Stripe endpoints
   app.get("/api/stripe/config", async (req, res) => {
     try {
