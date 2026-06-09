@@ -56,6 +56,10 @@ const h = vi.hoisted(() => {
               pred = p;
               return result;
             },
+            orderBy() {
+              // Ordering is irrelevant to the scoping/field assertions here.
+              return result;
+            },
             then(resolve: any, reject: any) {
               return Promise.resolve(run()).then(resolve, reject);
             },
@@ -117,6 +121,52 @@ const h = vi.hoisted(() => {
           return builder;
         },
       };
+    },
+    update() {
+      return {
+        set(setVals: any) {
+          let pred: any = null;
+          const run = () => {
+            const matched = store.rows.filter((r) => matchPred(r, pred));
+            for (const r of matched) Object.assign(r, setVals);
+            return matched.map((r) => ({ ...r }));
+          };
+          const builder: any = {
+            where(p: any) {
+              pred = p;
+              return builder;
+            },
+            returning() {
+              return Promise.resolve(run());
+            },
+            then(resolve: any, reject: any) {
+              return Promise.resolve(run()).then(resolve, reject);
+            },
+          };
+          return builder;
+        },
+      };
+    },
+    delete() {
+      let pred: any = null;
+      const run = () => {
+        const matched = store.rows.filter((r) => matchPred(r, pred));
+        store.rows = store.rows.filter((r) => !matchPred(r, pred));
+        return matched.map((r) => ({ ...r }));
+      };
+      const builder: any = {
+        where(p: any) {
+          pred = p;
+          return builder;
+        },
+        returning() {
+          return Promise.resolve(run());
+        },
+        then(resolve: any, reject: any) {
+          return Promise.resolve(run()).then(resolve, reject);
+        },
+      };
+      return builder;
     },
   };
 
@@ -239,5 +289,145 @@ describe("getContactMemory", () => {
     const mem = await storage.getContactMemory(USER_A, PHONE);
     expect(mem!.summary).toBe("v2");
     expect(mem!.importance).toBe("high");
+  });
+});
+
+describe("listContactMemories", () => {
+  it("returns only the calling user's rows", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: "+1111", summary: "A1" });
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: "+2222", summary: "A2" });
+    await storage.upsertContactMemory({ userId: USER_B, phoneNumber: "+3333", summary: "B1" });
+
+    const forA = await storage.listContactMemories(USER_A);
+    expect(forA).toHaveLength(2);
+    expect(forA.every((c) => c.userId === USER_A)).toBe(true);
+
+    const forB = await storage.listContactMemories(USER_B);
+    expect(forB).toHaveLength(1);
+    expect(forB[0].userId).toBe(USER_B);
+  });
+
+  it("returns an empty array for a user with no contacts", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "x" });
+    const forB = await storage.listContactMemories(USER_B);
+    expect(forB).toEqual([]);
+  });
+});
+
+describe("updateContactMemoryById", () => {
+  it("updates a row the user owns and returns the new values", async () => {
+    const row = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      summary: "old summary",
+      notes: "old notes",
+      importance: "low",
+    });
+
+    const updated = await storage.updateContactMemoryById(USER_A, row!.id, {
+      summary: "new summary",
+      importance: "high",
+    });
+
+    expect(updated).toBeDefined();
+    expect(updated!.id).toBe(row!.id);
+    expect(updated!.summary).toBe("new summary");
+    expect(updated!.importance).toBe("high");
+  });
+
+  it("only changes the fields provided, leaving others untouched", async () => {
+    const row = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      name: "Jane",
+      summary: "keep me",
+      notes: "keep notes",
+      importance: "medium",
+    });
+
+    await storage.updateContactMemoryById(USER_A, row!.id, { name: "Janet" });
+
+    const after = await storage.getContactMemory(USER_A, PHONE);
+    expect(after!.name).toBe("Janet");
+    expect(after!.summary).toBe("keep me");
+    expect(after!.notes).toBe("keep notes");
+    expect(after!.importance).toBe("medium");
+  });
+
+  it("preserves lastCallAt (it is never part of the update set)", async () => {
+    const lastCallAt = new Date("2026-02-01T08:00:00Z");
+    const row = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      summary: "s",
+      lastCallAt,
+    });
+
+    await storage.updateContactMemoryById(USER_A, row!.id, { summary: "edited" });
+
+    const after = await storage.getContactMemory(USER_A, PHONE);
+    expect(after!.lastCallAt).toEqual(lastCallAt);
+    expect(after!.summary).toBe("edited");
+  });
+
+  it("cannot update another user's row (scoped by userId) and leaves it unchanged", async () => {
+    const row = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      summary: "A's private summary",
+    });
+
+    const result = await storage.updateContactMemoryById(USER_B, row!.id, {
+      summary: "B tried to edit",
+    });
+
+    expect(result).toBeUndefined();
+    // A's row is untouched.
+    const stillA = await storage.getContactMemory(USER_A, PHONE);
+    expect(stillA!.summary).toBe("A's private summary");
+  });
+
+  it("returns undefined for an unknown id", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "x" });
+    const result = await storage.updateContactMemoryById(USER_A, "cm-does-not-exist", { summary: "y" });
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("deleteContactMemoryById", () => {
+  it("deletes a row the user owns and returns true", async () => {
+    const row = await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "x" });
+
+    const ok = await storage.deleteContactMemoryById(USER_A, row!.id);
+    expect(ok).toBe(true);
+    expect(h.store.rows).toHaveLength(0);
+  });
+
+  it("cannot delete another user's row (scoped by userId) and leaves it intact", async () => {
+    const row = await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "A's row" });
+
+    const ok = await storage.deleteContactMemoryById(USER_B, row!.id);
+    expect(ok).toBe(false);
+    expect(h.store.rows).toHaveLength(1);
+    const stillA = await storage.getContactMemory(USER_A, PHONE);
+    expect(stillA!.summary).toBe("A's row");
+  });
+
+  it("returns false for an unknown id", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "x" });
+    const ok = await storage.deleteContactMemoryById(USER_A, "cm-does-not-exist");
+    expect(ok).toBe(false);
+    expect(h.store.rows).toHaveLength(1);
+  });
+
+  it("deletes only the targeted row, not the user's other contacts", async () => {
+    const r1 = await storage.upsertContactMemory({ userId: USER_A, phoneNumber: "+1111", summary: "one" });
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: "+2222", summary: "two" });
+
+    const ok = await storage.deleteContactMemoryById(USER_A, r1!.id);
+    expect(ok).toBe(true);
+    const remaining = await storage.listContactMemories(USER_A);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].phoneNumber).toBe("+2222");
   });
 });
