@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage, getContactMemoryHealth, getWriteHealth, checkSchemaDrift } from "./storage";
 import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner, getHintFallbackStats } from "./websocket";
 import { getAlertChannelStatus, getWriteHealthAlertState } from "./writeHealthAlerter";
+import { HEALTH_STATUS_PAGE_HTML } from "./healthStatusPage";
 import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { z } from "zod";
 import path from "path";
@@ -262,6 +263,11 @@ load();
       alertChannels: getAlertChannelStatus(),
       writeHealthAlerts: getWriteHealthAlertState(),
     });
+  });
+
+  // Human-readable DB save-health status page for on-call (renders /api/health).
+  app.get("/health", (_req, res) => {
+    res.type("html").send(HEALTH_STATUS_PAGE_HTML);
   });
 
   // Diagnostic endpoint to help debug domain/deployment issues
