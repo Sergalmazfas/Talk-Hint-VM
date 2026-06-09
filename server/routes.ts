@@ -17,6 +17,7 @@ import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, con
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
 import { deriveOtherPartyPhone } from "./contactMemory";
+import { getAlertChannelStatus } from "./writeHealthAlerter";
 import { pendingCalls, users, phoneNumbers, deviceTokens } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
@@ -258,6 +259,7 @@ load();
       },
       schemaDrift,
       writes: getWriteHealth(),
+      alertChannels: getAlertChannelStatus(),
     });
   });
 

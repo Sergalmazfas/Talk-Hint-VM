@@ -137,4 +137,99 @@ describe("GET /api/health", () => {
     expect(res.body.contactMemory.drift).toHaveProperty("missingColumns");
     expect(Array.isArray(res.body.contactMemory.drift.missingColumns)).toBe(true);
   });
+
+  it("reports which alert channels are configured and ready", async () => {
+    const prev = { ...process.env };
+    delete process.env.WRITE_HEALTH_ALERT_PHONE;
+    delete process.env.WRITE_HEALTH_ALERT_EMAIL;
+    delete process.env.DISABLE_WRITE_HEALTH_ALERTS;
+
+    try {
+      const res = await request(app).get("/api/health");
+
+      expect(res.status).toBe(200);
+      expect(res.body.alertChannels).toBeDefined();
+      expect(res.body.alertChannels).toHaveProperty("anyReady", false);
+      expect(res.body.alertChannels).toHaveProperty("disabled", false);
+      // Nothing configured → both channels off, no secrets leaked.
+      expect(res.body.alertChannels.sms).toEqual({
+        configured: false,
+        ready: false,
+        missing: [],
+      });
+      expect(res.body.alertChannels.email).toEqual({
+        configured: false,
+        ready: false,
+        missing: [],
+      });
+    } finally {
+      process.env = prev;
+    }
+  });
+
+  it("flags a partially-configured channel as not-ready and names what's missing", async () => {
+    const prev = { ...process.env };
+    process.env.WRITE_HEALTH_ALERT_EMAIL = "ops@example.com";
+    delete process.env.WRITE_HEALTH_ALERT_EMAIL_FROM;
+    delete process.env.SENDGRID_API_KEY;
+
+    try {
+      const res = await request(app).get("/api/health");
+
+      expect(res.status).toBe(200);
+      expect(res.body.alertChannels.email.configured).toBe(true);
+      expect(res.body.alertChannels.email.ready).toBe(false);
+      expect(res.body.alertChannels.email.missing).toContain("SENDGRID_API_KEY");
+      expect(res.body.alertChannels.email.missing).toContain(
+        "WRITE_HEALTH_ALERT_EMAIL_FROM",
+      );
+      // No secret values appear anywhere in the response.
+      expect(JSON.stringify(res.body)).not.toContain("ops@example.com");
+    } finally {
+      process.env = prev;
+    }
+  });
+
+  it("shows a recipient set to a malformed value as configured-but-not-ready", async () => {
+    const prev = { ...process.env };
+    process.env.WRITE_HEALTH_ALERT_EMAIL = "   ";
+    process.env.WRITE_HEALTH_ALERT_EMAIL_FROM = "alerts@example.com";
+    process.env.SENDGRID_API_KEY = "sg-key";
+
+    try {
+      const res = await request(app).get("/api/health");
+
+      expect(res.status).toBe(200);
+      expect(res.body.alertChannels.email.configured).toBe(true);
+      expect(res.body.alertChannels.email.ready).toBe(false);
+      expect(res.body.alertChannels.email.missing).toContain(
+        "WRITE_HEALTH_ALERT_EMAIL (no valid recipients)",
+      );
+    } finally {
+      process.env = prev;
+    }
+  });
+
+  it("flags a partially-configured SMS channel as not-ready", async () => {
+    const prev = { ...process.env };
+    process.env.WRITE_HEALTH_ALERT_PHONE = "+15551234567";
+    delete process.env.TWILIO_ACCOUNT_SID;
+    delete process.env.TWILIO_AUTH_TOKEN;
+    delete process.env.WRITE_HEALTH_ALERT_FROM;
+    delete process.env.TWILIO_PHONE_NUMBER;
+
+    try {
+      const res = await request(app).get("/api/health");
+
+      expect(res.status).toBe(200);
+      expect(res.body.alertChannels.sms.configured).toBe(true);
+      expect(res.body.alertChannels.sms.ready).toBe(false);
+      expect(res.body.alertChannels.sms.missing).toContain("TWILIO_ACCOUNT_SID");
+      expect(res.body.alertChannels.sms.missing).toContain("TWILIO_AUTH_TOKEN");
+      // The recipient phone number must not leak into the response.
+      expect(JSON.stringify(res.body)).not.toContain("+15551234567");
+    } finally {
+      process.env = prev;
+    }
+  });
 });

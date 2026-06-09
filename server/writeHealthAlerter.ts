@@ -83,6 +83,65 @@ function isDisabled(): boolean {
   return process.env.DISABLE_WRITE_HEALTH_ALERTS === "true";
 }
 
+// A channel is "configured" when its recipient is set, and "ready" when every
+// credential/sender it needs to actually deliver is also present. This lets the
+// team confirm alerting is wired up via GET /api/health BEFORE a real incident,
+// instead of finding a silent gap (recipient set, provider missing) only when
+// an alert fires. No secret values are exposed — only boolean readiness flags.
+export interface AlertChannelStatus {
+  configured: boolean;
+  ready: boolean;
+  missing: string[];
+}
+
+export interface AlertChannelsStatus {
+  disabled: boolean;
+  anyReady: boolean;
+  sms: AlertChannelStatus;
+  email: AlertChannelStatus;
+}
+
+export function getAlertChannelStatus(): AlertChannelsStatus {
+  const smsConfigured = !!process.env.WRITE_HEALTH_ALERT_PHONE;
+  const smsMissing: string[] = [];
+  if (smsConfigured) {
+    if (!process.env.TWILIO_ACCOUNT_SID) smsMissing.push("TWILIO_ACCOUNT_SID");
+    if (!process.env.TWILIO_AUTH_TOKEN) smsMissing.push("TWILIO_AUTH_TOKEN");
+    if (!process.env.WRITE_HEALTH_ALERT_FROM && !process.env.TWILIO_PHONE_NUMBER)
+      smsMissing.push("WRITE_HEALTH_ALERT_FROM (or TWILIO_PHONE_NUMBER)");
+  }
+  const sms: AlertChannelStatus = {
+    configured: smsConfigured,
+    ready: smsConfigured && smsMissing.length === 0,
+    missing: smsMissing,
+  };
+
+  // "configured" reflects raw intent (the env var is set) so a malformed value
+  // surfaces as configured-but-not-ready instead of silently disappearing.
+  const rawEmail = process.env.WRITE_HEALTH_ALERT_EMAIL;
+  const emailConfigured = !!rawEmail;
+  const emailMissing: string[] = [];
+  if (emailConfigured) {
+    if (parseEmailRecipients(rawEmail!).length === 0)
+      emailMissing.push("WRITE_HEALTH_ALERT_EMAIL (no valid recipients)");
+    if (!process.env.WRITE_HEALTH_ALERT_EMAIL_FROM)
+      emailMissing.push("WRITE_HEALTH_ALERT_EMAIL_FROM");
+    if (!process.env.SENDGRID_API_KEY) emailMissing.push("SENDGRID_API_KEY");
+  }
+  const email: AlertChannelStatus = {
+    configured: emailConfigured,
+    ready: emailConfigured && emailMissing.length === 0,
+    missing: emailMissing,
+  };
+
+  return {
+    disabled: isDisabled(),
+    anyReady: !isDisabled() && (sms.ready || email.ready),
+    sms,
+    email,
+  };
+}
+
 // Try to deliver the alert by SMS. Returns true if SMS was configured and an
 // attempt was made (regardless of Twilio success), false if SMS is not
 // configured at all. Never throws.
