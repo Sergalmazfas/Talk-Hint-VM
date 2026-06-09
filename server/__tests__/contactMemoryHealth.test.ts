@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 const h = vi.hoisted(() => {
   const state = {
     insertError: null as any,
-    liveColumns: [] as string[],
+    liveColumnsByTable: {} as Record<string, string[]>,
     queryError: null as any,
   };
 
@@ -43,9 +43,16 @@ const h = vi.hoisted(() => {
   };
 
   const pool = {
-    query: async (_sql: string, _params: any[]) => {
+    query: async (_sql: string, params: any[]) => {
       if (state.queryError) throw state.queryError;
-      return { rows: state.liveColumns.map((c) => ({ column_name: c })) };
+      const tableNames: string[] = params?.[0] ?? [];
+      const rows: Array<{ table_name: string; column_name: string }> = [];
+      for (const t of tableNames) {
+        for (const c of state.liveColumnsByTable[t] ?? []) {
+          rows.push({ table_name: t, column_name: c });
+        }
+      }
+      return { rows };
     },
   };
 
@@ -66,26 +73,37 @@ vi.mock("../twilioService", () => ({
   configureVoiceWebhook: vi.fn(),
 }));
 
-const { storage, getContactMemoryHealth, checkContactMemoryDrift } = await import("../storage");
+const { storage, getContactMemoryHealth, checkContactMemoryDrift, checkSchemaDrift } = await import("../storage");
+const { getTableColumns } = await import("drizzle-orm");
+const schema = await import("@shared/schema");
+
+// Map of live table name -> drizzle table, mirroring APP_TABLES in storage.ts.
+const TABLE_DEFS: Record<string, any> = {
+  users: schema.users,
+  phone_numbers: schema.phoneNumbers,
+  user_prompts: schema.userPrompts,
+  prompt_templates: schema.promptTemplates,
+  calls: schema.calls,
+  contact_memory: schema.contactMemory,
+  knowledge_cards: schema.knowledgeCards,
+  available_numbers: schema.availableNumbers,
+  sessions: schema.sessions,
+};
+
+const columnsFor = (table: any): string[] =>
+  Object.values(getTableColumns(table)).map((col: any) => col.name as string);
 
 // The schema-declared columns for contact_memory (snake_case, as stored live).
-const ALL_COLUMNS = [
-  "id",
-  "user_id",
-  "phone_number",
-  "name",
-  "summary",
-  "notes",
-  "importance",
-  "last_call_at",
-  "created_at",
-  "updated_at",
-];
+const ALL_COLUMNS = columnsFor(schema.contactMemory);
+
+// A live DB whose columns exactly match every app table's schema (no drift).
+const fullLiveColumns = (): Record<string, string[]> =>
+  Object.fromEntries(Object.entries(TABLE_DEFS).map(([name, table]) => [name, columnsFor(table)]));
 
 beforeEach(() => {
   h.state.insertError = null;
   h.state.queryError = null;
-  h.state.liveColumns = [...ALL_COLUMNS];
+  h.state.liveColumnsByTable = fullLiveColumns();
 });
 
 describe("upsertContactMemory write-failure alerts", () => {
@@ -159,9 +177,19 @@ describe("upsertContactMemory write-failure alerts", () => {
 });
 
 describe("checkContactMemoryDrift", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
   it("reports missing columns when the live table lacks a schema-declared column", async () => {
     // The live DB is missing the column behind the caller-name bug.
-    h.state.liveColumns = ALL_COLUMNS.filter((c) => c !== "name");
+    h.state.liveColumnsByTable.contact_memory = ALL_COLUMNS.filter((c) => c !== "name");
 
     const report = await checkContactMemoryDrift();
 
@@ -172,7 +200,9 @@ describe("checkContactMemoryDrift", () => {
   });
 
   it("reports more than one missing column when several are absent", async () => {
-    h.state.liveColumns = ALL_COLUMNS.filter((c) => c !== "name" && c !== "importance");
+    h.state.liveColumnsByTable.contact_memory = ALL_COLUMNS.filter(
+      (c) => c !== "name" && c !== "importance",
+    );
 
     const report = await checkContactMemoryDrift();
 
@@ -181,12 +211,84 @@ describe("checkContactMemoryDrift", () => {
   });
 
   it("reports ok when the live columns match the schema", async () => {
-    h.state.liveColumns = [...ALL_COLUMNS];
+    h.state.liveColumnsByTable.contact_memory = [...ALL_COLUMNS];
 
     const report = await checkContactMemoryDrift();
 
     expect(report.checked).toBe(true);
     expect(report.ok).toBe(true);
     expect(report.missingColumns).toEqual([]);
+  });
+});
+
+describe("checkSchemaDrift", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+  });
+
+  it("reports ok for every app table when the live columns match the schema", async () => {
+    const report = await checkSchemaDrift();
+
+    expect(report.checked).toBe(true);
+    expect(report.ok).toBe(true);
+    // Every declared app table is checked, not just contact_memory.
+    const checkedTables = report.tables.map((t) => t.table).sort();
+    expect(checkedTables).toEqual(Object.keys(TABLE_DEFS).sort());
+    expect(report.tables.every((t) => t.ok && t.missingColumns.length === 0)).toBe(true);
+  });
+
+  it("detects drift on a non-contact-memory table (e.g. calls)", async () => {
+    h.state.liveColumnsByTable.calls = columnsFor(schema.calls).filter((c) => c !== "transcript");
+
+    const report = await checkSchemaDrift();
+
+    expect(report.ok).toBe(false);
+    const callsReport = report.tables.find((t) => t.table === "calls");
+    expect(callsReport!.ok).toBe(false);
+    expect(callsReport!.missingColumns).toContain("transcript");
+    // Other tables remain healthy.
+    expect(report.tables.find((t) => t.table === "contact_memory")!.ok).toBe(true);
+  });
+
+  it("detects drift across several tables at once", async () => {
+    h.state.liveColumnsByTable.knowledge_cards = columnsFor(schema.knowledgeCards).filter(
+      (c) => c !== "body",
+    );
+    h.state.liveColumnsByTable.user_prompts = columnsFor(schema.userPrompts).filter(
+      (c) => c !== "content",
+    );
+
+    const report = await checkSchemaDrift();
+
+    expect(report.ok).toBe(false);
+    expect(report.tables.find((t) => t.table === "knowledge_cards")!.missingColumns).toContain("body");
+    expect(report.tables.find((t) => t.table === "user_prompts")!.missingColumns).toContain("content");
+  });
+
+  it("reports a missing table as fully drifted (all columns missing)", async () => {
+    delete h.state.liveColumnsByTable.knowledge_cards;
+
+    const report = await checkSchemaDrift();
+
+    expect(report.ok).toBe(false);
+    const kc = report.tables.find((t) => t.table === "knowledge_cards")!;
+    expect(kc.ok).toBe(false);
+    expect(kc.missingColumns).toEqual(expect.arrayContaining(columnsFor(schema.knowledgeCards)));
+  });
+
+  it("marks every table as errored when the drift query throws", async () => {
+    h.state.queryError = new Error("information_schema unavailable");
+
+    const report = await checkSchemaDrift();
+
+    expect(report.checked).toBe(true);
+    expect(report.ok).toBe(false);
+    expect(report.tables.every((t) => !t.ok && t.error)).toBe(true);
   });
 });

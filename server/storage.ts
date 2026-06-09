@@ -126,6 +126,13 @@ export function getContactMemoryHealth(): WriteHealth {
   };
 }
 
+export interface TableDriftReport {
+  table: string;
+  ok: boolean;
+  missingColumns: string[];
+  error?: string;
+}
+
 export interface ContactMemoryDriftReport {
   checked: boolean;
   ok: boolean;
@@ -134,36 +141,99 @@ export interface ContactMemoryDriftReport {
   error?: string;
 }
 
+export interface SchemaDriftReport {
+  checked: boolean;
+  ok: boolean;
+  tables: TableDriftReport[];
+}
+
+// Every app table the Drizzle schema declares, keyed by its live DB table name.
+// Drift on any of these can silently break writes, so all of them are checked.
+const APP_TABLES: Record<string, any> = {
+  users,
+  phone_numbers: phoneNumbers,
+  user_prompts: userPrompts,
+  prompt_templates: promptTemplates,
+  calls,
+  contact_memory: contactMemory,
+  knowledge_cards: knowledgeCards,
+  available_numbers: availableNumbers,
+  sessions,
+};
+
+// Compare the columns the Drizzle schema declares against what actually exists
+// in the live DB (information_schema) for every app table. Returns, per table,
+// the list of declared columns missing from the live table so drift is visible
+// instead of silently breaking writes.
+export async function checkSchemaDrift(): Promise<SchemaDriftReport> {
+  const tableNames = Object.keys(APP_TABLES);
+  if (!isDatabaseAvailable() || !pool) {
+    return {
+      checked: false,
+      ok: true,
+      tables: tableNames.map((table) => ({ table, ok: true, missingColumns: [] })),
+    };
+  }
+  try {
+    const result = await pool.query(
+      `SELECT table_name, column_name FROM information_schema.columns WHERE table_name = ANY($1)`,
+      [tableNames],
+    );
+    const liveColumnsByTable = new Map<string, Set<string>>();
+    for (const row of result.rows as any[]) {
+      const t = row.table_name as string;
+      if (!liveColumnsByTable.has(t)) liveColumnsByTable.set(t, new Set());
+      liveColumnsByTable.get(t)!.add(row.column_name as string);
+    }
+    const tables: TableDriftReport[] = tableNames.map((table) => {
+      const expectedColumns = Object.values(getTableColumns(APP_TABLES[table])).map(
+        (col: any) => col.name as string,
+      );
+      const liveColumns = liveColumnsByTable.get(table) ?? new Set<string>();
+      const missingColumns = expectedColumns.filter((c) => !liveColumns.has(c));
+      if (missingColumns.length > 0) {
+        console.error(
+          `[Storage][DRIFT] ${table} is missing column(s) the schema declares: ${missingColumns.join(", ")}. ` +
+            `Writes to this table will fail silently until the DB is migrated.`,
+        );
+      }
+      return { table, ok: missingColumns.length === 0, missingColumns };
+    });
+    return { checked: true, ok: tables.every((t) => t.ok), tables };
+  } catch (error: any) {
+    console.error("[Storage][DRIFT] schema drift check failed:", error?.message ?? error);
+    return {
+      checked: true,
+      ok: false,
+      tables: tableNames.map((table) => ({
+        table,
+        ok: false,
+        missingColumns: [],
+        error: error?.message ?? String(error),
+      })),
+    };
+  }
+}
+
 // Compare the columns the Drizzle schema declares for contact_memory against
 // what actually exists in the live DB (information_schema). Returns the list of
 // declared columns missing from the live table so drift is visible instead of
-// silently breaking writes.
+// silently breaking writes. Kept as a thin wrapper over checkSchemaDrift for
+// the contact_memory-specific health report.
 export async function checkContactMemoryDrift(): Promise<ContactMemoryDriftReport> {
   const table = "contact_memory";
-  if (!isDatabaseAvailable() || !pool) {
-    return { checked: false, ok: true, table, missingColumns: [] };
+  const report = await checkSchemaDrift();
+  const tableReport = report.tables.find((t) => t.table === table);
+  if (!tableReport) {
+    return { checked: report.checked, ok: true, table, missingColumns: [] };
   }
-  const expectedColumns = Object.values(getTableColumns(contactMemory)).map(
-    (col: any) => col.name as string,
-  );
-  try {
-    const result = await pool.query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
-      [table],
-    );
-    const liveColumns = new Set(result.rows.map((r: any) => r.column_name as string));
-    const missingColumns = expectedColumns.filter((c) => !liveColumns.has(c));
-    if (missingColumns.length > 0) {
-      console.error(
-        `[Storage][DRIFT] contact_memory is missing column(s) the schema declares: ${missingColumns.join(", ")}. ` +
-          `Caller-detail writes will fail silently until the DB is migrated.`,
-      );
-    }
-    return { checked: true, ok: missingColumns.length === 0, table, missingColumns };
-  } catch (error: any) {
-    console.error("[Storage][DRIFT] contact_memory drift check failed:", error?.message ?? error);
-    return { checked: true, ok: false, table, missingColumns: [], error: error?.message ?? String(error) };
-  }
+  return {
+    checked: report.checked,
+    ok: tableReport.ok,
+    table,
+    missingColumns: tableReport.missingColumns,
+    error: tableReport.error,
+  };
 }
 
 export const memoryUsers = new Map<string, User>();

@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage, getContactMemoryHealth, getWriteHealth, checkContactMemoryDrift } from "./storage";
+import { storage, getContactMemoryHealth, getWriteHealth, checkSchemaDrift } from "./storage";
 import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner, getHintFallbackStats } from "./websocket";
 import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { z } from "zod";
@@ -239,7 +239,8 @@ load();
   });
 
   app.get("/api/health", async (_req, res) => {
-    const contactMemoryDrift = await checkContactMemoryDrift();
+    const schemaDrift = await checkSchemaDrift();
+    const contactMemoryDrift = schemaDrift.tables.find((t) => t.table === "contact_memory");
     res.json({ 
       status: "ok", 
       timestamp: new Date().toISOString(),
@@ -247,8 +248,15 @@ load();
       hintFallback: getHintFallbackStats(),
       contactMemory: {
         writes: getContactMemoryHealth(),
-        drift: contactMemoryDrift,
+        drift: {
+          checked: schemaDrift.checked,
+          ok: contactMemoryDrift?.ok ?? true,
+          table: "contact_memory",
+          missingColumns: contactMemoryDrift?.missingColumns ?? [],
+          ...(contactMemoryDrift?.error ? { error: contactMemoryDrift.error } : {}),
+        },
       },
+      schemaDrift,
       writes: getWriteHealth(),
     });
   });
