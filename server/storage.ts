@@ -11,11 +11,127 @@ import {
   users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
-import { eq, and, sql, gt, desc } from "drizzle-orm";
+import { eq, and, sql, gt, desc, getTableColumns } from "drizzle-orm";
 import { configureVoiceWebhook } from "./twilioService";
 import { resolveProductionBaseUrl } from "./baseUrl";
 
 export const MAX_USER_CONTEXT_LENGTH = 4000;
+
+// ---------------------------------------------------------------------------
+// Contact-memory write health + schema-drift detection
+//
+// The root cause behind missing caller names in production was a silent column
+// drift: upsertContactMemory caught the DB error and returned undefined, so
+// nothing looked broken while names were never saved. The tracker below makes
+// those failures loud (counters + last error surfaced on /api/health) and lets
+// us proactively report when the live DB is missing columns the schema declares.
+// ---------------------------------------------------------------------------
+
+interface ContactMemoryWriteHealth {
+  writeSuccesses: number;
+  writeFailures: number;
+  lastError: {
+    at: string;
+    code?: string;
+    message: string;
+    table?: string;
+    column?: string;
+    constraint?: string;
+    detail?: string;
+    isSchemaDrift: boolean;
+  } | null;
+}
+
+const contactMemoryHealth: ContactMemoryWriteHealth = {
+  writeSuccesses: 0,
+  writeFailures: 0,
+  lastError: null,
+};
+
+// Postgres SQLSTATE codes that indicate the live DB no longer matches the schema.
+const SCHEMA_DRIFT_PG_CODES = new Set([
+  "42703", // undefined_column
+  "42P01", // undefined_table
+  "42704", // undefined_object
+]);
+
+function recordContactMemoryWriteFailure(error: any): void {
+  contactMemoryHealth.writeFailures += 1;
+  const code: string | undefined = error?.code;
+  const isSchemaDrift = !!code && SCHEMA_DRIFT_PG_CODES.has(code);
+  contactMemoryHealth.lastError = {
+    at: new Date().toISOString(),
+    code,
+    message: error?.message ?? String(error),
+    table: error?.table,
+    column: error?.column,
+    constraint: error?.constraint,
+    detail: error?.detail,
+    isSchemaDrift,
+  };
+  if (isSchemaDrift) {
+    console.error(
+      `[Storage][DRIFT] contact_memory write FAILED due to schema drift — the live DB is missing a column/table the schema declares. ` +
+        `pgCode=${code} table=${error?.table ?? "contact_memory"} column=${error?.column ?? "?"} ` +
+        `constraint=${error?.constraint ?? "-"} detail=${error?.detail ?? "-"} message="${error?.message}". ` +
+        `Caller details are NOT being saved. Run the contact_memory drift check (/api/health) and apply the missing DDL.`,
+    );
+  } else {
+    console.error(
+      `[Storage] upsertContactMemory FAILED (caller details not saved) — pgCode=${code ?? "n/a"} ` +
+        `table=${error?.table ?? "contact_memory"} column=${error?.column ?? "-"} detail=${error?.detail ?? "-"}:`,
+      error,
+    );
+  }
+}
+
+export function getContactMemoryHealth(): ContactMemoryWriteHealth {
+  return {
+    writeSuccesses: contactMemoryHealth.writeSuccesses,
+    writeFailures: contactMemoryHealth.writeFailures,
+    lastError: contactMemoryHealth.lastError,
+  };
+}
+
+export interface ContactMemoryDriftReport {
+  checked: boolean;
+  ok: boolean;
+  table: string;
+  missingColumns: string[];
+  error?: string;
+}
+
+// Compare the columns the Drizzle schema declares for contact_memory against
+// what actually exists in the live DB (information_schema). Returns the list of
+// declared columns missing from the live table so drift is visible instead of
+// silently breaking writes.
+export async function checkContactMemoryDrift(): Promise<ContactMemoryDriftReport> {
+  const table = "contact_memory";
+  if (!isDatabaseAvailable() || !pool) {
+    return { checked: false, ok: true, table, missingColumns: [] };
+  }
+  const expectedColumns = Object.values(getTableColumns(contactMemory)).map(
+    (col: any) => col.name as string,
+  );
+  try {
+    const result = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+      [table],
+    );
+    const liveColumns = new Set(result.rows.map((r: any) => r.column_name as string));
+    const missingColumns = expectedColumns.filter((c) => !liveColumns.has(c));
+    if (missingColumns.length > 0) {
+      console.error(
+        `[Storage][DRIFT] contact_memory is missing column(s) the schema declares: ${missingColumns.join(", ")}. ` +
+          `Caller-detail writes will fail silently until the DB is migrated.`,
+      );
+    }
+    return { checked: true, ok: missingColumns.length === 0, table, missingColumns };
+  } catch (error: any) {
+    console.error("[Storage][DRIFT] contact_memory drift check failed:", error?.message ?? error);
+    return { checked: true, ok: false, table, missingColumns: [], error: error?.message ?? String(error) };
+  }
+}
 
 export const memoryUsers = new Map<string, User>();
 export const memorySessions = new Map<string, Session>();
@@ -582,9 +698,10 @@ export class DatabaseStorage implements IStorage {
           set: conflictSet,
         })
         .returning();
+      contactMemoryHealth.writeSuccesses += 1;
       return row;
     } catch (error) {
-      console.error("[Storage] upsertContactMemory error:", error);
+      recordContactMemoryWriteFailure(error);
       return undefined;
     }
   }
