@@ -209,7 +209,8 @@ export function formatStaticCards(
 export const CONTACT_SUMMARY_SYSTEM_PROMPT = `You summarize a finished phone call into durable memory about the OTHER party (the contact), for use as context on future calls. Be concise and factual. Do not invent facts not present in the transcript.
 
 Return JSON only, no markdown:
-{"summary":"1-3 sentences: who the contact is and what this call was about / what they wanted",
+{"name":"the contact's own name if they clearly state it during the call (e.g. \\"this is John\\"), otherwise empty string. Never guess.",
+ "summary":"1-3 sentences: who the contact is and what this call was about / what they wanted",
  "notes":"key facts, preferences, and any agreements or next steps (short)",
  "importance":"low|medium|high"}`;
 
@@ -224,6 +225,7 @@ export function buildContactSummaryUserPrompt(convo: string): string {
 }
 
 export interface ParsedContactSummary {
+  name: string;
   summary: string;
   notes: string;
   importance: string;
@@ -231,8 +233,9 @@ export interface ParsedContactSummary {
 
 // Pure parse + normalize of the model's summary output. Returns null when the
 // output has no JSON object, can't be parsed as JSON, or yields neither a
-// summary nor notes. `importance` is lower-cased/trimmed and constrained to
-// low|medium|high, defaulting to "medium" for anything else.
+// summary nor notes. `name` is the contact's own name when the model extracted
+// one (empty string otherwise). `importance` is lower-cased/trimmed and
+// constrained to low|medium|high, defaulting to "medium" for anything else.
 export function parseContactSummary(raw: string): ParsedContactSummary | null {
   const match = raw?.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -244,6 +247,7 @@ export function parseContactSummary(raw: string): ParsedContactSummary | null {
     return null;
   }
 
+  const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
   const notes = typeof parsed.notes === "string" ? parsed.notes.trim() : "";
   const importanceRaw =
@@ -252,12 +256,15 @@ export function parseContactSummary(raw: string): ParsedContactSummary | null {
 
   if (!summary && !notes) return null;
 
-  return { summary, notes, importance };
+  return { name, summary, notes, importance };
 }
 
 export interface ContactMemorySaveInput {
   userId: string;
   phoneNumber: string;
+  // Only set when the summarizer auto-filled a name (contact had none). Left
+  // absent so upsertContactMemory preserves any user-set name on conflict.
+  name?: string | null;
   summary: string | null;
   notes: string | null;
   importance: string;
@@ -270,6 +277,10 @@ export interface SummarizeAndSaveDeps {
   generate: (systemPrompt: string, userPrompt: string) => Promise<string>;
   // Persist the normalized memory row.
   save: (input: ContactMemorySaveInput) => Promise<unknown>;
+  // Optional: look up the contact's existing name so the auto-filled name never
+  // overwrites a name the user already set (or the model previously extracted).
+  // Returns the stored name, or null/undefined when there is none.
+  getExistingName?: () => Promise<string | null | undefined>;
   // Optional structured logging hook (no-op when omitted).
   log?: (message: string) => void;
   // Optional clock injection for deterministic tests.
@@ -303,17 +314,39 @@ export async function summarizeAndSaveContactMemory(
     return;
   }
 
+  // Auto-fill the contact's name only when the model extracted one AND the
+  // contact has no existing name. We never overwrite a name the user (or an
+  // earlier call) already set. Looking it up failing must not block the save.
+  let nameToSave: string | undefined;
+  if (parsed.name) {
+    let existingName: string | null | undefined;
+    try {
+      existingName = deps.getExistingName ? await deps.getExistingName() : undefined;
+    } catch (err: any) {
+      deps.log?.(`[ContactMemory] existing-name lookup failed: ${err?.message ?? err}`);
+      existingName = undefined;
+    }
+    if (!(typeof existingName === "string" && existingName.trim())) {
+      nameToSave = parsed.name;
+    } else {
+      deps.log?.(`[ContactMemory] keeping existing name for ${phoneNumber}, not overwriting`);
+    }
+  }
+
   try {
-    const saved = await deps.save({
+    const input: ContactMemorySaveInput = {
       userId,
       phoneNumber,
       summary: parsed.summary || null,
       notes: parsed.notes || null,
       importance: parsed.importance,
       lastCallAt: (deps.now ?? (() => new Date()))(),
-    });
+    };
+    if (nameToSave !== undefined) input.name = nameToSave;
+    const saved = await deps.save(input);
     if (saved) {
-      deps.log?.(`[ContactMemory] saved memory for ${phoneNumber} (importance=${parsed.importance})`);
+      const namePart = nameToSave ? ` name="${nameToSave}"` : "";
+      deps.log?.(`[ContactMemory] saved memory for ${phoneNumber} (importance=${parsed.importance})${namePart}`);
     }
   } catch (err: any) {
     deps.log?.(`[ContactMemory] save failed: ${err?.message ?? err}`);

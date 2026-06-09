@@ -369,6 +369,10 @@ async function summarizeAndSaveContactMemory(
         withOpenAI: generateWithOpenAI,
       }),
     save: (input) => storage.upsertContactMemory(input),
+    // Auto-filled name must never overwrite a user-set name: gate on the
+    // contact's current stored name before passing it to the upsert.
+    getExistingName: () =>
+      storage.getContactMemory(userId, phoneNumber).then((c) => c?.name ?? null),
     log: (message) => log(message, "websocket"),
   });
 }

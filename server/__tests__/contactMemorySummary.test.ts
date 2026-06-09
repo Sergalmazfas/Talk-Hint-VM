@@ -35,10 +35,32 @@ describe("parseContactSummary", () => {
       }),
     );
     expect(parsed).toEqual({
+      name: "",
       summary: "Returning client booking a massage.",
       notes: "Prefers Tuesday evenings.",
       importance: "high",
     });
+  });
+
+  it("extracts and trims the contact's name when present", () => {
+    const parsed = parseContactSummary(
+      JSON.stringify({
+        name: "  John  ",
+        summary: "Caller introduced himself.",
+        notes: "",
+        importance: "low",
+      }),
+    );
+    expect(parsed!.name).toBe("John");
+  });
+
+  it("returns an empty name when none is provided or it isn't a string", () => {
+    expect(
+      parseContactSummary(JSON.stringify({ summary: "s", notes: "n" }))!.name,
+    ).toBe("");
+    expect(
+      parseContactSummary(JSON.stringify({ name: 42, summary: "s", notes: "n" }))!.name,
+    ).toBe("");
   });
 
   it("extracts the JSON object even when wrapped in prose / markdown fences", () => {
@@ -130,6 +152,85 @@ describe("summarizeAndSaveContactMemory", () => {
       importance: "high",
       lastCallAt: now,
     });
+  });
+
+  it("auto-fills the name when the contact has no existing name", async () => {
+    const save = vi.fn(async () => ({ id: "cm-name" }));
+    const getExistingName = vi.fn(async () => null);
+
+    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () =>
+        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
+      save,
+      getExistingName,
+    });
+
+    expect(getExistingName).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].name).toBe("John");
+  });
+
+  it("does NOT overwrite an existing name", async () => {
+    const save = vi.fn(async () => ({ id: "cm-keep" }));
+    const getExistingName = vi.fn(async () => "Jonathan");
+
+    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () =>
+        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
+      save,
+      getExistingName,
+    });
+
+    expect(getExistingName).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    // No name key is sent, so the upsert preserves the stored name.
+    expect(save.mock.calls[0][0]).not.toHaveProperty("name");
+  });
+
+  it("treats a blank/whitespace existing name as empty and fills it", async () => {
+    const save = vi.fn(async () => ({ id: "cm-blank" }));
+
+    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () =>
+        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
+      save,
+      getExistingName: async () => "   ",
+    });
+
+    expect(save.mock.calls[0][0].name).toBe("John");
+  });
+
+  it("does not look up or send a name when the model extracted none", async () => {
+    const save = vi.fn(async () => ({ id: "cm-noname" }));
+    const getExistingName = vi.fn(async () => null);
+
+    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () => JSON.stringify({ summary: "Wants a quote.", notes: "", importance: "low" }),
+      save,
+      getExistingName,
+    });
+
+    expect(getExistingName).not.toHaveBeenCalled();
+    expect(save.mock.calls[0][0]).not.toHaveProperty("name");
+  });
+
+  it("still saves (filling the name) when the existing-name lookup throws", async () => {
+    const save = vi.fn(async () => ({ id: "cm-lookup-fail" }));
+    const log = vi.fn();
+
+    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () =>
+        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
+      save,
+      getExistingName: async () => {
+        throw new Error("db down");
+      },
+      log,
+    });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].name).toBe("John");
+    expect(log).toHaveBeenCalled();
   });
 
   it("stores null for an empty notes field while keeping the summary", async () => {
