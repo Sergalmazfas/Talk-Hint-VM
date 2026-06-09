@@ -228,21 +228,33 @@ app.use((req, res, next) => {
   if (dbConnected) {
     initStripe();
 
-    // Surface any contact_memory schema drift at startup so a missing column
-    // (which would otherwise silently break caller-detail saves) is loud and
+    // Surface schema drift for EVERY app table at startup so a missing column
+    // or table (which would otherwise silently break writes) is loud and
     // visible in the deploy logs immediately, not just on /api/health.
+    // checkSchemaDrift already logs a [Storage][DRIFT] line per drifted table;
+    // here we add a single startup summary and never crash on failure.
     try {
-      const { checkContactMemoryDrift } = await import("./storage");
-      const drift = await checkContactMemoryDrift();
+      const { checkSchemaDrift } = await import("./storage");
+      const drift = await checkSchemaDrift();
       if (drift.checked && !drift.ok) {
+        const driftedTables = drift.tables.filter((t) => !t.ok);
+        const summary = driftedTables
+          .map((t) =>
+            t.error
+              ? `${t.table} (error=${t.error})`
+              : `${t.table} (missing: ${t.missingColumns.join(", ") || "unknown"})`,
+          )
+          .join("; ");
         console.error(
-          `[Server][DRIFT] contact_memory drift detected on startup — missing column(s): ${drift.missingColumns.join(", ") || "(unknown)"}${drift.error ? ` error=${drift.error}` : ""}. Caller-detail writes will fail until migrated.`,
+          `[Server][DRIFT] database schema drift detected on startup — ${driftedTables.length} table(s) affected: ${summary}. Writes to these tables will fail until the DB is migrated.`,
         );
       } else if (drift.checked) {
-        console.log("[Server] contact_memory schema OK (no drift)");
+        console.log("[Server] database schema OK (no drift across all app tables)");
+      } else {
+        console.log("[Server] schema drift check skipped (database unavailable)");
       }
     } catch (e: any) {
-      console.error("[Server] contact_memory drift check failed:", e?.message ?? e);
+      console.error("[Server] schema drift check failed:", e?.message ?? e);
     }
     
     // Only run seed in development mode OR when explicitly requested via RUN_SEED=true
