@@ -27,6 +27,7 @@ vi.mock("twilio", () => ({
 const {
   checkWriteHealthOnce,
   sendWriteHealthAlert,
+  getWriteHealthAlertState,
   __resetWriteHealthAlerterState,
 } = await import("../writeHealthAlerter");
 
@@ -326,6 +327,75 @@ describe("recovery notifications", () => {
     await checkWriteHealthOnce();
 
     expect(h.messagesCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("getWriteHealthAlertState", () => {
+  it("is empty before any table has been observed", () => {
+    expect(getWriteHealthAlertState()).toEqual({});
+  });
+
+  it("reports a table as alerting with a lastAlertAt timestamp after an alert", async () => {
+    configureSms();
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 0, driftError("2026-06-09T00:00:00.000Z")),
+    );
+
+    await checkWriteHealthOnce();
+
+    const state = getWriteHealthAlertState();
+    expect(state.contact_memory.alerting).toBe(true);
+    expect(typeof state.contact_memory.lastAlertAt).toBe("string");
+    expect(state.contact_memory.lastRecoveryAt).toBeNull();
+  });
+
+  it("reports a healthy (never-alerted) table as not alerting with null timestamps", async () => {
+    configureSms();
+    h.getWriteHealth.mockReturnValue(emptyHealth("calls", 0, 5));
+
+    await checkWriteHealthOnce();
+
+    expect(getWriteHealthAlertState().calls).toEqual({
+      alerting: false,
+      lastAlertAt: null,
+      lastRecoveryAt: null,
+    });
+  });
+
+  it("flips alerting→false and records lastRecoveryAt once a table recovers", async () => {
+    configureSms();
+    process.env.WRITE_HEALTH_ALERT_COOLDOWN_MS = "0";
+
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 2, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    await checkWriteHealthOnce();
+    expect(getWriteHealthAlertState().contact_memory.alerting).toBe(true);
+
+    // New successful writes, no new failures → recovery.
+    h.getWriteHealth.mockReturnValue(
+      emptyHealth("contact_memory", 1, 7, driftError("2026-06-09T00:00:00.000Z")),
+    );
+    await checkWriteHealthOnce();
+
+    const state = getWriteHealthAlertState();
+    expect(state.contact_memory.alerting).toBe(false);
+    expect(typeof state.contact_memory.lastAlertAt).toBe("string");
+    expect(typeof state.contact_memory.lastRecoveryAt).toBe("string");
+  });
+
+  it("tracks each table independently", async () => {
+    configureSms();
+    h.getWriteHealth.mockReturnValue({
+      contact_memory: { writeSuccesses: 0, writeFailures: 1, lastError: driftError("2026-06-09T00:00:00.000Z") },
+      calls: { writeSuccesses: 5, writeFailures: 0, lastError: null },
+    });
+
+    await checkWriteHealthOnce();
+
+    const state = getWriteHealthAlertState();
+    expect(state.contact_memory.alerting).toBe(true);
+    expect(state.calls.alerting).toBe(false);
   });
 });
 

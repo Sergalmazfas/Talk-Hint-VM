@@ -9,6 +9,7 @@ The background poller (`checkWriteHealthOnce`) watches `getWriteHealth()` per ta
 - Recovery requires *new* `writeSuccesses` since the alert, not merely the absence of new failures. A table with stalled writes (no new successes) must not be declared recovered.
 - Only a table that actually *sent* an alert (`alerting=true`) can recover; a throttled/never-sent rise must not later produce a phantom all-clear.
 - Recovery is debounced via `healthySince` over `recoveryWindowMs()` (defaults to the alert `cooldownMs()`); any new failure mid-window resets `healthySince` so a flap can't spam alert/recover/alert.
+- The alerter's per-table state is surfaced read-only at `/api/health` under `writeHealthAlerts` via `getWriteHealthAlertState()` (per table: `alerting`, `lastAlertAt`, `lastRecoveryAt` as ISO|null). Set `lastRecoveryAt` wherever recovery is declared, and keep the getter JSON-friendly (ISO strings, not raw ms).
 
 **Why:** on-call had no positive confirmation writes were healthy again after an outage/drift fix and had to manually re-poll /api/health.
 

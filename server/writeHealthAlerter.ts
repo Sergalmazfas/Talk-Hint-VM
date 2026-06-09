@@ -70,6 +70,22 @@ interface TableAlertState {
   // First time we observed a sustained-healthy check while alerting. Reset to
   // undefined whenever a new failure shows up, so a flap restarts the window.
   healthySince?: number;
+  // Wall-clock time of the last "recovered" all-clear we sent for this table.
+  // Stays set after recovery so on-call can see when writes last came back.
+  lastRecoveryAt?: number;
+}
+
+// Read-only view of a table's alerter state, exposed via /api/health so on-call
+// can see at a glance which tables are currently alerting vs. recovered without
+// waiting for the next notification.
+export interface WriteHealthAlertStateSnapshot {
+  // True if this table is currently in an alerting state (an alert was sent and
+  // no matching recovery has been issued yet).
+  alerting: boolean;
+  // ISO timestamp of the last alert sent for this table, or null if never.
+  lastAlertAt: string | null;
+  // ISO timestamp of the last recovery ("all clear") sent, or null if never.
+  lastRecoveryAt: string | null;
 }
 
 const alertStateByTable: Record<string, TableAlertState> = {};
@@ -326,6 +342,7 @@ export async function checkWriteHealthOnce(): Promise<number> {
             await sendWriteHealthAlert(formatRecovery(table, health));
             state.alerting = false;
             state.healthySince = undefined;
+            state.lastRecoveryAt = now;
           }
         }
       }
@@ -381,6 +398,28 @@ export function startWriteHealthAlerter(): boolean {
     `[WriteHealthAlert] Started — polling write health every ${Math.round(interval / 1000)}s`,
   );
   return true;
+}
+
+// Expose the alerter's per-table state so on-call can see current status (which
+// tables are alerting vs. recovered) at any moment via /api/health, instead of
+// having to wait for the next SMS/email notification. Returns a plain,
+// JSON-friendly snapshot with ISO timestamps; tables the alerter has never
+// observed simply won't appear.
+export function getWriteHealthAlertState(): Record<string, WriteHealthAlertStateSnapshot> {
+  const out: Record<string, WriteHealthAlertStateSnapshot> = {};
+  for (const [table, state] of Object.entries(alertStateByTable)) {
+    out[table] = {
+      alerting: state.alerting,
+      lastAlertAt: state.lastAlertAt
+        ? new Date(state.lastAlertAt).toISOString()
+        : null,
+      lastRecoveryAt:
+        state.lastRecoveryAt != null
+          ? new Date(state.lastRecoveryAt).toISOString()
+          : null,
+    };
+  }
+  return out;
 }
 
 // Stop the poller — for tests / graceful shutdown.
