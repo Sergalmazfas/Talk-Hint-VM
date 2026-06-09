@@ -6,6 +6,7 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { storage } from "./storage";
 import { repointWebhooksOnStartup } from "./webhookRepoint";
+import { startWriteHealthAlerter, stopWriteHealthAlerter } from "./writeHealthAlerter";
 
 const app = express();
 app.set('trust proxy', true);
@@ -267,6 +268,11 @@ app.use((req, res, next) => {
         console.error('[Webhook Repoint] Unexpected failure:', e.message);
       });
     }
+
+    // Actively watch DB write health and push an alert (SMS + loud log) when any
+    // table's write failures rise or schema drift appears, instead of waiting
+    // for someone to poll /api/health. Opt out with DISABLE_WRITE_HEALTH_ALERTS.
+    startWriteHealthAlerter();
   }
   
   // Setup Replit Auth (Google, GitHub, etc.) BEFORE other routes
@@ -318,6 +324,7 @@ app.use((req, res, next) => {
   const gracefulShutdown = (signal: string) => {
     console.log(`\n[Server] Received ${signal} at ${new Date().toISOString()}`);
     console.log("[Server] Starting graceful shutdown...");
+    stopWriteHealthAlerter();
     
     // Close HTTP server (stop accepting new connections)
     httpServer.close((err) => {
