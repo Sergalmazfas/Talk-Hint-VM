@@ -12,7 +12,7 @@ import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
-import { formatContactMemory, deriveOtherPartyPhone, buildContextSections } from "./contactMemory";
+import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -358,68 +358,25 @@ async function summarizeAndSaveContactMemory(
   phoneNumber: string,
   transcript: { speaker: string; text: string }[]
 ): Promise<void> {
-  const convo = transcript.map((t) => `${t.speaker}: ${t.text}`).join("\n").slice(0, 6000);
-  if (!convo.trim()) return;
-
-  const systemPrompt = `You summarize a finished phone call into durable memory about the OTHER party (the contact), for use as context on future calls. Be concise and factual. Do not invent facts not present in the transcript.
-
-Return JSON only, no markdown:
-{"summary":"1-3 sentences: who the contact is and what this call was about / what they wanted",
- "notes":"key facts, preferences, and any agreements or next steps (short)",
- "importance":"low|medium|high"}`;
-  const userPrompt = `Call transcript (Owner = the TalkHint user, Guest = the contact):\n${convo}`;
-
-  let raw = "";
-  try {
-    if (currentModel.startsWith("gemini")) {
-      try {
-        raw = await generateWithGemini(currentModel, systemPrompt, userPrompt);
-        if (!raw || !/\{[\s\S]*\}/.test(raw)) throw new Error("empty or unparseable");
-      } catch {
-        raw = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
+  await runSummarizeAndSaveContactMemory(userId, phoneNumber, transcript, {
+    // Provider routing mirrors translateAndSuggest: gemini models try Gemini
+    // first and fall back to OpenAI on empty/unparseable output; everything else
+    // goes straight to OpenAI.
+    generate: async (systemPrompt, userPrompt) => {
+      if (currentModel.startsWith("gemini")) {
+        try {
+          const raw = await generateWithGemini(currentModel, systemPrompt, userPrompt);
+          if (!raw || !/\{[\s\S]*\}/.test(raw)) throw new Error("empty or unparseable");
+          return raw;
+        } catch {
+          return generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
+        }
       }
-    } else {
-      raw = await generateWithOpenAI(currentModel, systemPrompt, userPrompt);
-    }
-  } catch (err: any) {
-    log(`[ContactMemory] summarization failed: ${err.message}`, "openai");
-    return;
-  }
-
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) {
-    log(`[ContactMemory] no JSON in summary output`, "websocket");
-    return;
-  }
-  let parsed: any;
-  try {
-    parsed = JSON.parse(match[0]);
-  } catch {
-    log(`[ContactMemory] could not parse summary JSON`, "websocket");
-    return;
-  }
-
-  const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
-  const notes = typeof parsed.notes === "string" ? parsed.notes.trim() : "";
-  const importanceRaw = typeof parsed.importance === "string" ? parsed.importance.toLowerCase().trim() : "";
-  const importance = ["low", "medium", "high"].includes(importanceRaw) ? importanceRaw : "medium";
-
-  if (!summary && !notes) {
-    log(`[ContactMemory] empty summary, skipping save for ${phoneNumber}`, "websocket");
-    return;
-  }
-
-  const saved = await storage.upsertContactMemory({
-    userId,
-    phoneNumber,
-    summary: summary || null,
-    notes: notes || null,
-    importance,
-    lastCallAt: new Date(),
+      return generateWithOpenAI(currentModel, systemPrompt, userPrompt);
+    },
+    save: (input) => storage.upsertContactMemory(input),
+    log: (message) => log(message, "websocket"),
   });
-  if (saved) {
-    log(`[ContactMemory] saved memory for ${phoneNumber} (importance=${importance})`, "websocket");
-  }
 }
 
 // Use getModePrompt from shared/prompts.ts instead of local PROMPTS

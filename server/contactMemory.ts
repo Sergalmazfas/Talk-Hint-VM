@@ -64,3 +64,124 @@ export function buildContactContextSection(contactContext: string): string {
 export function buildContextSections(userContext: string, contactContext: string): string {
   return buildUserContextSection(userContext) + buildContactContextSection(contactContext);
 }
+
+// ---------------------------------------------------------------------------
+// Post-call summarization: turn a finished transcript into durable contact
+// memory. The model call and the storage write are injected (see
+// SummarizeAndSaveDeps) so the orchestration can be unit tested without a live
+// OpenAI/Gemini call or a Postgres connection.
+// ---------------------------------------------------------------------------
+
+export const CONTACT_SUMMARY_SYSTEM_PROMPT = `You summarize a finished phone call into durable memory about the OTHER party (the contact), for use as context on future calls. Be concise and factual. Do not invent facts not present in the transcript.
+
+Return JSON only, no markdown:
+{"summary":"1-3 sentences: who the contact is and what this call was about / what they wanted",
+ "notes":"key facts, preferences, and any agreements or next steps (short)",
+ "importance":"low|medium|high"}`;
+
+// Flatten a transcript into the "Speaker: text" block fed to the model, capped
+// at 6000 chars to bound prompt size.
+export function buildTranscriptConvo(transcript: { speaker: string; text: string }[]): string {
+  return transcript.map((t) => `${t.speaker}: ${t.text}`).join("\n").slice(0, 6000);
+}
+
+export function buildContactSummaryUserPrompt(convo: string): string {
+  return `Call transcript (Owner = the TalkHint user, Guest = the contact):\n${convo}`;
+}
+
+export interface ParsedContactSummary {
+  summary: string;
+  notes: string;
+  importance: string;
+}
+
+// Pure parse + normalize of the model's summary output. Returns null when the
+// output has no JSON object, can't be parsed as JSON, or yields neither a
+// summary nor notes. `importance` is lower-cased/trimmed and constrained to
+// low|medium|high, defaulting to "medium" for anything else.
+export function parseContactSummary(raw: string): ParsedContactSummary | null {
+  const match = raw?.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+
+  const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+  const notes = typeof parsed.notes === "string" ? parsed.notes.trim() : "";
+  const importanceRaw =
+    typeof parsed.importance === "string" ? parsed.importance.toLowerCase().trim() : "";
+  const importance = ["low", "medium", "high"].includes(importanceRaw) ? importanceRaw : "medium";
+
+  if (!summary && !notes) return null;
+
+  return { summary, notes, importance };
+}
+
+export interface ContactMemorySaveInput {
+  userId: string;
+  phoneNumber: string;
+  summary: string | null;
+  notes: string | null;
+  importance: string;
+  lastCallAt: Date;
+}
+
+export interface SummarizeAndSaveDeps {
+  // Run the summarization model. Receives the system + user prompts and returns
+  // the raw model text. Implementations encapsulate provider routing/fallback.
+  generate: (systemPrompt: string, userPrompt: string) => Promise<string>;
+  // Persist the normalized memory row.
+  save: (input: ContactMemorySaveInput) => Promise<unknown>;
+  // Optional structured logging hook (no-op when omitted).
+  log?: (message: string) => void;
+  // Optional clock injection for deterministic tests.
+  now?: () => Date;
+}
+
+// After a call ends, summarize the transcript and upsert the contact's memory.
+// Designed to run detached from call teardown — it never throws out of the
+// generate/parse/save path. Skips work when the transcript is empty, when the
+// model output is unusable, or when the parsed summary has no content.
+export async function summarizeAndSaveContactMemory(
+  userId: string,
+  phoneNumber: string,
+  transcript: { speaker: string; text: string }[],
+  deps: SummarizeAndSaveDeps,
+): Promise<void> {
+  const convo = buildTranscriptConvo(transcript);
+  if (!convo.trim()) return;
+
+  let raw = "";
+  try {
+    raw = await deps.generate(CONTACT_SUMMARY_SYSTEM_PROMPT, buildContactSummaryUserPrompt(convo));
+  } catch (err: any) {
+    deps.log?.(`[ContactMemory] summarization failed: ${err?.message ?? err}`);
+    return;
+  }
+
+  const parsed = parseContactSummary(raw);
+  if (!parsed) {
+    deps.log?.(`[ContactMemory] no usable summary in model output for ${phoneNumber}`);
+    return;
+  }
+
+  try {
+    const saved = await deps.save({
+      userId,
+      phoneNumber,
+      summary: parsed.summary || null,
+      notes: parsed.notes || null,
+      importance: parsed.importance,
+      lastCallAt: (deps.now ?? (() => new Date()))(),
+    });
+    if (saved) {
+      deps.log?.(`[ContactMemory] saved memory for ${phoneNumber} (importance=${parsed.importance})`);
+    }
+  } catch (err: any) {
+    deps.log?.(`[ContactMemory] save failed: ${err?.message ?? err}`);
+  }
+}
