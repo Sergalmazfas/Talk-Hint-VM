@@ -6,7 +6,8 @@ import {
   type PromptTemplate,
   type AvailableNumber,
   type Session,
-  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions
+  type ContactMemory,
+  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, sql, gt } from "drizzle-orm";
@@ -60,7 +61,18 @@ export interface IStorage {
   updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined>;
   getUserCalls(userId: string): Promise<Call[]>;
   getAllCalls(): Promise<Call[]>;
-  
+
+  // Contact Memory (per-user, per-phone)
+  getContactMemory(userId: string, phoneNumber: string): Promise<ContactMemory | undefined>;
+  upsertContactMemory(data: {
+    userId: string;
+    phoneNumber: string;
+    summary?: string | null;
+    notes?: string | null;
+    importance?: string | null;
+    lastCallAt?: Date;
+  }): Promise<ContactMemory | undefined>;
+
   // Stripe
   getProduct(productId: string): Promise<any>;
   getSubscription(subscriptionId: string): Promise<any>;
@@ -482,6 +494,58 @@ export class DatabaseStorage implements IStorage {
   
   async getAllCalls(): Promise<Call[]> {
     return db.select().from(calls);
+  }
+
+  // Contact Memory (per-user, per-phone)
+  async getContactMemory(userId: string, phoneNumber: string): Promise<ContactMemory | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.select()
+        .from(contactMemory)
+        .where(and(eq(contactMemory.userId, userId), eq(contactMemory.phoneNumber, phoneNumber)));
+      return row;
+    } catch (error) {
+      console.error("[Storage] getContactMemory error:", error);
+      return undefined;
+    }
+  }
+
+  async upsertContactMemory(data: {
+    userId: string;
+    phoneNumber: string;
+    summary?: string | null;
+    notes?: string | null;
+    importance?: string | null;
+    lastCallAt?: Date;
+  }): Promise<ContactMemory | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const now = new Date();
+      const [row] = await db.insert(contactMemory)
+        .values({
+          userId: data.userId,
+          phoneNumber: data.phoneNumber,
+          summary: data.summary ?? null,
+          notes: data.notes ?? null,
+          importance: data.importance ?? null,
+          lastCallAt: data.lastCallAt ?? now,
+        })
+        .onConflictDoUpdate({
+          target: [contactMemory.userId, contactMemory.phoneNumber],
+          set: {
+            summary: data.summary ?? null,
+            notes: data.notes ?? null,
+            importance: data.importance ?? null,
+            lastCallAt: data.lastCallAt ?? now,
+            updatedAt: now,
+          },
+        })
+        .returning();
+      return row;
+    } catch (error) {
+      console.error("[Storage] upsertContactMemory error:", error);
+      return undefined;
+    }
   }
   
   // Stripe queries (direct Stripe API; no sync schema)

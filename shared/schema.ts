@@ -106,6 +106,33 @@ export const insertCallSchema = createInsertSchema(calls).omit({
 export type InsertCall = z.infer<typeof insertCallSchema>;
 export type Call = typeof calls.$inferSelect;
 
+// Per-user, per-phone contact memory. Keyed by BOTH user_id and phone_number so
+// the same number can hold different history for different TalkHint users.
+// Upserted after each call with an AI summary; loaded once per call as
+// CONTACT_CONTEXT for continuity.
+export const contactMemory = pgTable("contact_memory", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  phoneNumber: text("phone_number").notNull(),
+  summary: text("summary"),
+  notes: text("notes"),
+  importance: text("importance"),
+  lastCallAt: timestamp("last_call_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  userPhoneUnique: uniqueIndex("contact_memory_user_phone_unique").on(table.userId, table.phoneNumber),
+}));
+
+export const insertContactMemorySchema = createInsertSchema(contactMemory).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertContactMemory = z.infer<typeof insertContactMemorySchema>;
+export type ContactMemory = typeof contactMemory.$inferSelect;
+
 export const availableNumbers = pgTable("available_numbers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   twilioNumber: text("twilio_number").notNull().unique(),

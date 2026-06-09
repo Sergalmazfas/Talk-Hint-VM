@@ -223,7 +223,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -243,10 +243,14 @@ async function translateAndSuggest(text: string, goal: string, language: string 
       ? `\n\nUSER_CONTEXT (about the user you are assisting — use it to adapt your suggestions to their profession, business, goals, and tone; never read it aloud or expose it to the guest):\n${userContext.trim()}\n`
       : "";
 
+    const contactContextSection = contactContext && contactContext.trim()
+      ? `\n\nCONTACT_CONTEXT (history about THIS specific caller from prior calls — what they wanted, what was agreed, notes, and how important they are; use it for continuity and to reference past agreements; never read it aloud or expose it to the guest):\n${contactContext.trim()}\n`
+      : "";
+
     const systemPrompt = `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
-${userContextSection}
+${userContextSection}${contactContextSection}
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 
@@ -349,6 +353,87 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
   } catch (err: any) {
     log(`Translation error: ${err.message}`, "openai");
     return { translation: "" };
+  }
+}
+
+// Render a saved contact_memory row into the CONTACT_CONTEXT prompt block text.
+function formatContactMemory(mem: { summary?: string | null; notes?: string | null; importance?: string | null; lastCallAt?: Date | null }): string {
+  const parts: string[] = [];
+  if (mem.lastCallAt) parts.push(`Last call: ${new Date(mem.lastCallAt).toISOString().slice(0, 10)}`);
+  if (mem.importance && mem.importance.trim()) parts.push(`Importance: ${mem.importance.trim()}`);
+  if (mem.summary && mem.summary.trim()) parts.push(`Summary: ${mem.summary.trim()}`);
+  if (mem.notes && mem.notes.trim()) parts.push(`Notes: ${mem.notes.trim()}`);
+  return parts.join("\n");
+}
+
+// After a call ends, summarize the transcript and upsert the contact's memory.
+// Runs detached from call teardown — never block the websocket close path on it.
+async function summarizeAndSaveContactMemory(
+  userId: string,
+  phoneNumber: string,
+  transcript: { speaker: string; text: string }[]
+): Promise<void> {
+  const convo = transcript.map((t) => `${t.speaker}: ${t.text}`).join("\n").slice(0, 6000);
+  if (!convo.trim()) return;
+
+  const systemPrompt = `You summarize a finished phone call into durable memory about the OTHER party (the contact), for use as context on future calls. Be concise and factual. Do not invent facts not present in the transcript.
+
+Return JSON only, no markdown:
+{"summary":"1-3 sentences: who the contact is and what this call was about / what they wanted",
+ "notes":"key facts, preferences, and any agreements or next steps (short)",
+ "importance":"low|medium|high"}`;
+  const userPrompt = `Call transcript (Owner = the TalkHint user, Guest = the contact):\n${convo}`;
+
+  let raw = "";
+  try {
+    if (currentModel.startsWith("gemini")) {
+      try {
+        raw = await generateWithGemini(currentModel, systemPrompt, userPrompt);
+        if (!raw || !/\{[\s\S]*\}/.test(raw)) throw new Error("empty or unparseable");
+      } catch {
+        raw = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
+      }
+    } else {
+      raw = await generateWithOpenAI(currentModel, systemPrompt, userPrompt);
+    }
+  } catch (err: any) {
+    log(`[ContactMemory] summarization failed: ${err.message}`, "openai");
+    return;
+  }
+
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) {
+    log(`[ContactMemory] no JSON in summary output`, "websocket");
+    return;
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    log(`[ContactMemory] could not parse summary JSON`, "websocket");
+    return;
+  }
+
+  const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
+  const notes = typeof parsed.notes === "string" ? parsed.notes.trim() : "";
+  const importanceRaw = typeof parsed.importance === "string" ? parsed.importance.toLowerCase().trim() : "";
+  const importance = ["low", "medium", "high"].includes(importanceRaw) ? importanceRaw : "medium";
+
+  if (!summary && !notes) {
+    log(`[ContactMemory] empty summary, skipping save for ${phoneNumber}`, "websocket");
+    return;
+  }
+
+  const saved = await storage.upsertContactMemory({
+    userId,
+    phoneNumber,
+    summary: summary || null,
+    notes: notes || null,
+    importance,
+    lastCallAt: new Date(),
+  });
+  if (saved) {
+    log(`[ContactMemory] saved memory for ${phoneNumber} (importance=${importance})`, "websocket");
   }
 }
 
@@ -854,6 +939,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let streamUserId: string | undefined; // Owner of this call (set on "start" from callOwners)
     let ownerContext = ""; // Owner's "My Context" free-text, loaded once on "start"
     let ownerContextReady: Promise<void> = Promise.resolve(); // resolves once ownerContext is loaded
+    let contactContext = ""; // CONTACT_CONTEXT for the other party, loaded once on "start"
+    let otherPartyPhone = ""; // The other party's phone (caller for inbound, dialed for outbound)
+    let contactContextReady: Promise<void> = Promise.resolve(); // resolves once contactContext is loaded
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -985,6 +1073,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     
     // Conversation history for context
     const conversationLog: { speaker: string; text: string; timestamp: number }[] = [];
+    // Full transcript for this call (unbounded by the conversationLog window) —
+    // used to summarize the call into contact memory on teardown.
+    const fullConversation: { speaker: string; text: string }[] = [];
     
     // Utterance Gate - wait for end of speech before generating hints
     const utteranceGate = new UtteranceGate(async (speaker, text, utteranceId, confidence) => {
@@ -1028,6 +1119,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         timestamp: now
       });
       if (conversationLog.length > 10) conversationLog.shift();
+      fullConversation.push({ speaker: "Guest", text });
       
       // ALWAYS update GoalEngine (even if hints are blocked)
       let goalJustAchieved = false;
@@ -1112,8 +1204,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Ensure the owner's "My Context" has finished loading so EVERY hint —
       // including the first turn — is personalized (load is kicked off on "start").
       await ownerContextReady;
+      await contactContextReady;
       const gptStart = Date.now();
-      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext);
+      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext, contactContext);
       const gptMs = Date.now() - gptStart;
       log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
@@ -1286,6 +1379,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         timestamp: Date.now()
       });
       if (conversationLog.length > 10) conversationLog.shift();
+      fullConversation.push({ speaker: "Owner", text });
       
       // Update GoalEngine
       if (goalEngine) {
@@ -1643,7 +1737,39 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                   })
                   .catch((err) => log(`[TwilioStream] Owner lookup failed: ${err}`, "twilio"));
               }
-              
+
+              // Load this caller's CONTACT_CONTEXT once the owner is known. The
+              // other party's phone comes from the call record: for outbound it's
+              // the dialed number (toNumber), for inbound it's the caller
+              // (fromNumber) — never the user's own Twilio number, and never a
+              // "client:" identity. Best-effort; failures leave contactContext empty.
+              contactContext = "";   // reset stale values before (re)loading
+              otherPartyPhone = "";
+              const sidForContact = callSid;
+              contactContextReady = ownerContextReady
+                .then(async () => {
+                  if (!streamUserId || !sidForContact) return;
+                  const call = await storage.getCallByCallSid(sidForContact);
+                  if (!call) {
+                    log(`[ContactMemory] No call record for ${sidForContact}, skipping contact load`, "twilio");
+                    return;
+                  }
+                  const phone = call.direction === "outgoing" ? call.toNumber : call.fromNumber;
+                  if (!phone || phone.startsWith("client:") || !phone.startsWith("+")) {
+                    log(`[ContactMemory] No usable other-party phone for ${sidForContact} (got "${phone}")`, "twilio");
+                    return;
+                  }
+                  otherPartyPhone = phone;
+                  const mem = await storage.getContactMemory(streamUserId, phone);
+                  if (mem) {
+                    contactContext = formatContactMemory(mem);
+                    log(`[ContactMemory] Loaded memory for ${phone} (${contactContext.length} chars)`, "twilio");
+                  } else {
+                    log(`[ContactMemory] No prior memory for ${phone}`, "twilio");
+                  }
+                })
+                .catch((err) => log(`[ContactMemory] Contact context load failed: ${err}`, "twilio"));
+
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;
               isPstnForwarding = callType === "pstn_forwarding";
@@ -1740,7 +1866,18 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const reasonStr = reason.toString() || "no reason";
       const duration = ((Date.now() - new Date(startTime).getTime()) / 1000).toFixed(1);
       log(`[Twilio] WS closed code=${code} reason="${reasonStr}" duration=${duration}s callSid=${callSid}`, "twilio");
-      
+
+      // Contact memory: summarize this call and upsert it for (owner, other party).
+      // Detached on purpose — summarization makes a model call, so it must NEVER
+      // block call teardown. Capture the needed state before cleanup runs below.
+      const memUserId = streamUserId;
+      const memPhone = otherPartyPhone;
+      const memTranscript = fullConversation.slice();
+      if (memUserId && memPhone && memTranscript.length > 0) {
+        void summarizeAndSaveContactMemory(memUserId, memPhone, memTranscript)
+          .catch((err) => log(`[ContactMemory] save failed: ${err}`, "websocket"));
+      }
+
       // Clear keepalive interval
       clearInterval(twilioKeepaliveInterval);
       
