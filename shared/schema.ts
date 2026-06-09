@@ -134,6 +134,35 @@ export const insertContactMemorySchema = createInsertSchema(contactMemory).omit(
 export type InsertContactMemory = z.infer<typeof insertContactMemorySchema>;
 export type ContactMemory = typeof contactMemory.$inferSelect;
 
+// Static Context: per-user "knowledge cards" (Level 3 of the Personal Context
+// System). Small, always-on title + body facts injected into every live hint.
+// `cardType` is "project" (portfolio item) or "company" (own business/service
+// facts). `sortOrder` is importance (lower = higher priority); ties broken by
+// most-recently-updated when truncating to the prompt size cap.
+export const knowledgeCards = pgTable("knowledge_cards", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  cardType: text("card_type").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  userTypeIdx: index("knowledge_cards_user_type_idx").on(table.userId, table.cardType),
+}));
+
+export const insertKnowledgeCardSchema = createInsertSchema(knowledgeCards).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertKnowledgeCard = z.infer<typeof insertKnowledgeCardSchema>;
+export type KnowledgeCard = typeof knowledgeCards.$inferSelect;
+export const KNOWLEDGE_CARD_TYPES = ["project", "company"] as const;
+export type KnowledgeCardType = (typeof KNOWLEDGE_CARD_TYPES)[number];
+
 export const availableNumbers = pgTable("available_numbers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   twilioNumber: text("twilio_number").notNull().unique(),

@@ -1731,6 +1731,107 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Knowledge Cards ("Static Context") — per-user reusable project & company/
+  // services facts injected into every live hint. Scoped to the owning user.
+  const CARD_TYPES = ["project", "company"];
+  const MAX_CARD_TITLE = 120;
+  const MAX_CARD_BODY = 600;
+
+  app.get("/api/cards", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const cards = await storage.listKnowledgeCards(user.id);
+      res.json({ cards });
+    } catch (error: any) {
+      console.error("[Cards] List error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/cards", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { cardType, title, body, sortOrder } = req.body ?? {};
+      if (!CARD_TYPES.includes(cardType)) {
+        return res.status(400).json({ error: "cardType must be 'project' or 'company'" });
+      }
+      if (typeof title !== "string" || !title.trim()) {
+        return res.status(400).json({ error: "title is required" });
+      }
+      if (typeof body !== "string" || !body.trim()) {
+        return res.status(400).json({ error: "body is required" });
+      }
+      if (sortOrder !== undefined && !Number.isInteger(sortOrder)) {
+        return res.status(400).json({ error: "sortOrder must be an integer" });
+      }
+      const created = await storage.createKnowledgeCard({
+        userId: user.id,
+        cardType,
+        title: title.trim().slice(0, MAX_CARD_TITLE),
+        body: body.trim().slice(0, MAX_CARD_BODY),
+        sortOrder: Number.isInteger(sortOrder) ? sortOrder : 0,
+      });
+      if (!created) {
+        return res.status(500).json({ error: "Failed to create card" });
+      }
+      console.log(`[Cards] User ${user.id} created ${cardType} card ${created.id}`);
+      res.json({ success: true, card: created });
+    } catch (error: any) {
+      console.error("[Cards] Create error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/cards/:id", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { id } = req.params;
+      const { cardType, title, body, sortOrder } = req.body ?? {};
+      if (cardType !== undefined && !CARD_TYPES.includes(cardType)) {
+        return res.status(400).json({ error: "cardType must be 'project' or 'company'" });
+      }
+      if (title !== undefined && (typeof title !== "string" || !title.trim())) {
+        return res.status(400).json({ error: "title must be a non-empty string" });
+      }
+      if (body !== undefined && (typeof body !== "string" || !body.trim())) {
+        return res.status(400).json({ error: "body must be a non-empty string" });
+      }
+      if (sortOrder !== undefined && !Number.isInteger(sortOrder)) {
+        return res.status(400).json({ error: "sortOrder must be an integer" });
+      }
+      const updated = await storage.updateKnowledgeCardById(user.id, id, {
+        ...(cardType !== undefined ? { cardType } : {}),
+        ...(title !== undefined ? { title: title.trim().slice(0, MAX_CARD_TITLE) } : {}),
+        ...(body !== undefined ? { body: body.trim().slice(0, MAX_CARD_BODY) } : {}),
+        ...(sortOrder !== undefined ? { sortOrder } : {}),
+      });
+      if (!updated) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      console.log(`[Cards] User ${user.id} updated card ${id}`);
+      res.json({ success: true, card: updated });
+    } catch (error: any) {
+      console.error("[Cards] Update error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/cards/:id", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { id } = req.params;
+      const deleted = await storage.deleteKnowledgeCardById(user.id, id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Card not found" });
+      }
+      console.log(`[Cards] User ${user.id} deleted card ${id}`);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Cards] Delete error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Stripe endpoints
   app.get("/api/stripe/config", async (req, res) => {
     try {

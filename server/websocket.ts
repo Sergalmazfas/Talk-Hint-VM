@@ -12,7 +12,7 @@ import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
-import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
+import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
 import { routeGenerate } from "./hintProvider";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -225,7 +225,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -241,7 +241,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
       ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n` 
       : "";
 
-    const contextSections = buildContextSections(userContext, contactContext);
+    const contextSections = buildContextProviderChain({ userContext, contactContext, staticCards });
 
     const systemPrompt = `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
@@ -878,6 +878,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let contactContext = ""; // CONTACT_CONTEXT for the other party, loaded once on "start"
     let otherPartyPhone = ""; // The other party's phone (caller for inbound, dialed for outbound)
     let contactContextReady: Promise<void> = Promise.resolve(); // resolves once contactContext is loaded
+    let staticCards = ""; // STATIC_CARDS (owner's project/company knowledge cards), loaded once on "start"
+    let staticCardsReady: Promise<void> = Promise.resolve(); // resolves once staticCards is loaded
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -1141,8 +1143,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // including the first turn — is personalized (load is kicked off on "start").
       await ownerContextReady;
       await contactContextReady;
+      await staticCardsReady;
       const gptStart = Date.now();
-      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext, contactContext);
+      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext, contactContext, staticCards);
       const gptMs = Date.now() - gptStart;
       log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
@@ -1706,6 +1709,22 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                   }
                 })
                 .catch((err) => log(`[ContactMemory] Contact context load failed: ${err}`, "twilio"));
+
+              // Load the owner's STATIC_CARDS (project/company knowledge cards)
+              // once the owner is known. Best-effort: failures leave the block
+              // empty. Cards are scoped to the owning user and capped in size by
+              // formatStaticCards so card volume can't blow the hint budget.
+              staticCards = ""; // reset stale value before (re)loading for this call
+              staticCardsReady = ownerContextReady
+                .then(async () => {
+                  if (!streamUserId) return;
+                  const cards = await storage.listKnowledgeCards(streamUserId);
+                  staticCards = formatStaticCards(cards);
+                  if (staticCards) {
+                    log(`[StaticCards] Loaded ${cards.length} card(s) for ${streamUserId} (${staticCards.length} chars)`, "twilio");
+                  }
+                })
+                .catch((err) => log(`[StaticCards] Static cards load failed: ${err}`, "twilio"));
 
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;

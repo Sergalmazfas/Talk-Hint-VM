@@ -1033,6 +1033,13 @@
         <div id="contactsStatus" style="font-size: 0.75rem; color: #6b7280; margin-top: 6px; text-align: center;"></div>
       </div>
     </div>
+    <div class="sidebar-section" id="cardsSection">
+      <div class="section-label">📇 Static Context</div>
+      <div style="padding: 8px 12px;">
+        <button id="openCardsBtn" class="btn btn-secondary btn-small" data-testid="button-open-cards" style="width: 100%; font-size: 0.85rem; padding: 8px;">🗂️ Manage cards</button>
+        <div id="cardsStatus" style="font-size: 0.75rem; color: #6b7280; margin-top: 6px; text-align: center;"></div>
+      </div>
+    </div>
     <div class="sidebar-section" id="forwardingSection" style="display: none;">
       <div class="section-label">📞 Forwarding Number</div>
       <div style="padding: 8px 12px;">
@@ -1215,6 +1222,60 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="contactEditCancel" data-testid="button-contact-edit-cancel">Cancel</button>
         <button class="btn btn-primary" id="contactEditSave" data-testid="button-contact-edit-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="cardsModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">📇 Static Context</span>
+        <button class="modal-close" id="cardsModalClose" data-testid="button-cards-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-hint" style="margin-bottom: 8px;">Short facts the assistant always knows on every call — your projects and what your company offers.</div>
+        <div style="display:flex; gap:8px; margin-bottom:12px;">
+          <button class="btn btn-primary btn-small" id="addProjectCardBtn" data-testid="button-add-project-card" style="flex:1;">➕ Add project</button>
+          <button class="btn btn-primary btn-small" id="addCompanyCardBtn" data-testid="button-add-company-card" style="flex:1;">➕ Add company / service</button>
+        </div>
+        <div id="cardsList" data-testid="list-cards"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cardsModalCancel" data-testid="button-cards-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="cardEditModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="cardEditTitle">Edit card</span>
+        <button class="modal-close" id="cardEditModalClose" data-testid="button-card-edit-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <select class="form-input" id="cardType" data-testid="select-card-type" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
+            <option value="project">Project</option>
+            <option value="company">Company / Service</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Title</label>
+          <input type="text" class="form-input" id="cardTitle" placeholder="e.g. E-commerce site for Acme" data-testid="input-card-title" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Details</label>
+          <textarea class="form-textarea" id="cardBody" placeholder="A few short facts: what it is, key numbers, prices, outcomes." data-testid="input-card-body"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Priority (lower shows first)</label>
+          <input type="number" class="form-input" id="cardSortOrder" placeholder="0" data-testid="input-card-sort-order" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cardEditCancel" data-testid="button-card-edit-cancel">Cancel</button>
+        <button class="btn btn-primary" id="cardEditSave" data-testid="button-card-edit-save">Save</button>
       </div>
     </div>
   </div>

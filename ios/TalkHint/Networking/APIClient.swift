@@ -477,6 +477,68 @@ final class APIClient {
             lastCallAt: Self.parseDate(item["lastCallAt"]))
     }
 
+    // MARK: - Knowledge Cards (Static Context)
+
+    struct KnowledgeCardItem {
+        let id: String
+        let cardType: String   // "project" | "company"
+        let title: String
+        let body: String
+        let sortOrder: Int
+    }
+
+    /// Fetches the signed-in user's static-context cards (projects + company /
+    /// services). Server route `/api/cards` is user-scoped and returns them in
+    /// priority order (sortOrder asc, then most recently updated).
+    func knowledgeCards() async throws -> [KnowledgeCardItem] {
+        let data = try await request("/api/cards", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["cards"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr.compactMap { Self.parseCard($0) }
+    }
+
+    /// Creates a new card. Returns the stored row.
+    @discardableResult
+    func createCard(cardType: String, title: String, body: String, sortOrder: Int) async throws -> KnowledgeCardItem {
+        let payload: [String: Any] = ["cardType": cardType, "title": title, "body": body, "sortOrder": sortOrder]
+        let data = try await request("/api/cards", method: "POST", json: payload, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let card = obj["card"] as? [String: Any],
+              let parsed = Self.parseCard(card) else {
+            throw APIError.decoding
+        }
+        return parsed
+    }
+
+    /// Updates one card. Returns the stored row.
+    @discardableResult
+    func updateCard(id: String, cardType: String, title: String, body: String, sortOrder: Int) async throws -> KnowledgeCardItem {
+        let payload: [String: Any] = ["cardType": cardType, "title": title, "body": body, "sortOrder": sortOrder]
+        let data = try await request("/api/cards/\(id)", method: "PUT", json: payload, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let card = obj["card"] as? [String: Any],
+              let parsed = Self.parseCard(card) else {
+            throw APIError.decoding
+        }
+        return parsed
+    }
+
+    /// Deletes one card.
+    func deleteCard(id: String) async throws {
+        _ = try await request("/api/cards/\(id)", method: "DELETE", json: nil, authenticated: true)
+    }
+
+    private static func parseCard(_ item: [String: Any]) -> KnowledgeCardItem? {
+        guard let id = item["id"] as? String,
+              let cardType = item["cardType"] as? String,
+              let title = item["title"] as? String,
+              let body = item["body"] as? String else { return nil }
+        let sortOrder = (item["sortOrder"] as? Int) ?? 0
+        return KnowledgeCardItem(id: id, cardType: cardType, title: title, body: body, sortOrder: sortOrder)
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

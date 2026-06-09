@@ -3085,6 +3085,217 @@ async function deleteContact(id) {
   }
 }
 
+// ===== Static Context (Knowledge Cards) =====
+var cardsCache = [];
+var editingCardId = null;
+
+var CARD_TYPE_LABELS = { project: 'Projects', company: 'Company / Services' };
+
+async function loadCards() {
+  var listEl = document.getElementById('cardsList');
+  if (listEl) listEl.innerHTML = '<div style="color:#6b7280; padding:8px;">Loading...</div>';
+  try {
+    var response = await fetch('/api/cards', {
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      var data = await response.json();
+      cardsCache = data.cards || [];
+      renderCards();
+      updateCardsStatus();
+    } else {
+      if (listEl) listEl.innerHTML = '<div style="color:#ef4444; padding:8px;">Failed to load cards (' + response.status + ')</div>';
+    }
+  } catch (error) {
+    log('Cards load error: ' + error.message);
+    if (listEl) listEl.innerHTML = '<div style="color:#ef4444; padding:8px;">Failed to load cards</div>';
+  }
+}
+
+function updateCardsStatus() {
+  var statusEl = document.getElementById('cardsStatus');
+  if (!statusEl) return;
+  var n = cardsCache.length;
+  statusEl.textContent = n ? (n + (n === 1 ? ' card' : ' cards')) : 'No cards yet';
+}
+
+function renderCardRow(c) {
+  return '<div class="card-row" data-testid="row-card-' + escapeHtml(c.id) + '" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-bottom:8px;">' +
+    '<div style="font-weight:600; margin-bottom:2px;" data-testid="text-card-title-' + escapeHtml(c.id) + '">' + escapeHtml(c.title || '') + '</div>' +
+    '<div style="font-size:0.85rem; color:#6b7280; margin-bottom:6px; white-space:pre-wrap;" data-testid="text-card-body-' + escapeHtml(c.id) + '">' + escapeHtml(c.body || '') + '</div>' +
+    '<div style="display:flex; gap:6px;">' +
+      '<button class="btn btn-secondary btn-small" data-card-edit="' + escapeHtml(c.id) + '" data-testid="button-edit-card-' + escapeHtml(c.id) + '">Edit</button>' +
+      '<button class="btn btn-secondary btn-small" data-card-delete="' + escapeHtml(c.id) + '" data-testid="button-delete-card-' + escapeHtml(c.id) + '">Delete</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderCards() {
+  var listEl = document.getElementById('cardsList');
+  if (!listEl) return;
+  if (!cardsCache.length) {
+    listEl.innerHTML = '<div style="color:#6b7280; padding:8px;">No cards yet. Add a project or a company/service fact so the assistant can answer questions about your work on every call.</div>';
+    return;
+  }
+  var html = '';
+  ['project', 'company'].forEach(function(type) {
+    var group = cardsCache.filter(function(c) { return c.cardType === type; });
+    if (!group.length) return;
+    html += '<div style="font-size:0.8rem; font-weight:700; color:#374151; margin:6px 0;">' + escapeHtml(CARD_TYPE_LABELS[type]) + '</div>';
+    html += group.map(renderCardRow).join('');
+  });
+  listEl.innerHTML = html;
+  listEl.querySelectorAll('[data-card-edit]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      openCardEditModal(btn.getAttribute('data-card-edit'));
+    });
+  });
+  listEl.querySelectorAll('[data-card-delete]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      deleteCard(btn.getAttribute('data-card-delete'));
+    });
+  });
+}
+
+function openCardsModal() {
+  var modal = document.getElementById('cardsModal');
+  if (modal) modal.classList.add('active');
+  loadCards();
+}
+
+function closeCardsModal() {
+  var modal = document.getElementById('cardsModal');
+  if (modal) modal.classList.remove('active');
+}
+
+function openCardEditModal(id) {
+  var card = cardsCache.filter(function(c) { return c.id === id; })[0];
+  editingCardId = id || null;
+  var titleEl = document.getElementById('cardEditTitle');
+  var typeEl = document.getElementById('cardType');
+  var titleField = document.getElementById('cardTitle');
+  var bodyField = document.getElementById('cardBody');
+  var sortField = document.getElementById('cardSortOrder');
+  if (card) {
+    if (titleEl) titleEl.textContent = 'Edit card';
+    if (typeEl) typeEl.value = card.cardType || 'project';
+    if (titleField) titleField.value = card.title || '';
+    if (bodyField) bodyField.value = card.body || '';
+    if (sortField) sortField.value = (card.sortOrder != null ? card.sortOrder : 0);
+  } else {
+    if (titleEl) titleEl.textContent = 'New card';
+    if (titleField) titleField.value = '';
+    if (bodyField) bodyField.value = '';
+    if (sortField) sortField.value = 0;
+  }
+  var modal = document.getElementById('cardEditModal');
+  if (modal) modal.classList.add('active');
+}
+
+function openNewCardModal(type) {
+  openCardEditModal(null);
+  var typeEl = document.getElementById('cardType');
+  if (typeEl) typeEl.value = type || 'project';
+}
+
+function closeCardEditModal() {
+  editingCardId = null;
+  var modal = document.getElementById('cardEditModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function saveCard() {
+  var saveBtn = document.getElementById('cardEditSave');
+  if (saveBtn) saveBtn.disabled = true;
+  var typeEl = document.getElementById('cardType');
+  var titleField = document.getElementById('cardTitle');
+  var bodyField = document.getElementById('cardBody');
+  var sortField = document.getElementById('cardSortOrder');
+  var payload = {
+    cardType: typeEl ? typeEl.value : 'project',
+    title: titleField ? titleField.value.trim() : '',
+    body: bodyField ? bodyField.value.trim() : '',
+    sortOrder: sortField && sortField.value !== '' ? Number(sortField.value) : 0
+  };
+  if (!payload.title) { alert('Title is required'); if (saveBtn) saveBtn.disabled = false; return; }
+  if (!payload.body) { alert('Details are required'); if (saveBtn) saveBtn.disabled = false; return; }
+  try {
+    var url = editingCardId ? '/api/cards/' + encodeURIComponent(editingCardId) : '/api/cards';
+    var method = editingCardId ? 'PUT' : 'POST';
+    var response = await fetch(url, {
+      method: method,
+      credentials: 'include',
+      headers: authHeaders(),
+      body: JSON.stringify(payload)
+    });
+    if (response.ok) {
+      await loadCards();
+      closeCardEditModal();
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Failed to save card: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Card save error: ' + error.message);
+    alert('Failed to save card: ' + error.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function deleteCard(id) {
+  var card = cardsCache.filter(function(c) { return c.id === id; })[0];
+  if (!confirm('Delete "' + (card ? card.title : 'this card') + '"? This cannot be undone.')) return;
+  try {
+    var response = await fetch('/api/cards/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      cardsCache = cardsCache.filter(function(c) { return c.id !== id; });
+      renderCards();
+      updateCardsStatus();
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Failed to delete card: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Card delete error: ' + error.message);
+    alert('Failed to delete card: ' + error.message);
+  }
+}
+
+(function initCardsUI() {
+  var openBtn = document.getElementById('openCardsBtn');
+  if (openBtn) openBtn.addEventListener('click', openCardsModal);
+  var closeBtn = document.getElementById('cardsModalClose');
+  if (closeBtn) closeBtn.addEventListener('click', closeCardsModal);
+  var cancelBtn = document.getElementById('cardsModalCancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeCardsModal);
+  var cardsModal = document.getElementById('cardsModal');
+  if (cardsModal) cardsModal.addEventListener('click', function(e) {
+    if (e.target === cardsModal) closeCardsModal();
+  });
+
+  var addProject = document.getElementById('addProjectCardBtn');
+  if (addProject) addProject.addEventListener('click', function() { openNewCardModal('project'); });
+  var addCompany = document.getElementById('addCompanyCardBtn');
+  if (addCompany) addCompany.addEventListener('click', function() { openNewCardModal('company'); });
+
+  var editClose = document.getElementById('cardEditModalClose');
+  if (editClose) editClose.addEventListener('click', closeCardEditModal);
+  var editCancel = document.getElementById('cardEditCancel');
+  if (editCancel) editCancel.addEventListener('click', closeCardEditModal);
+  var editSave = document.getElementById('cardEditSave');
+  if (editSave) editSave.addEventListener('click', saveCard);
+  var editModal = document.getElementById('cardEditModal');
+  if (editModal) editModal.addEventListener('click', function(e) {
+    if (e.target === editModal) closeCardEditModal();
+  });
+})();
+
 (function initContactsUI() {
   var openBtn = document.getElementById('openContactsBtn');
   if (openBtn) openBtn.addEventListener('click', openContactsModal);

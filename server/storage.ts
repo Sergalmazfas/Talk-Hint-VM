@@ -7,7 +7,8 @@ import {
   type AvailableNumber,
   type Session,
   type ContactMemory,
-  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory
+  type KnowledgeCard, type InsertKnowledgeCard,
+  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, sql, gt, desc } from "drizzle-orm";
@@ -81,6 +82,23 @@ export interface IStorage {
     importance?: string | null;
   }): Promise<ContactMemory | undefined>;
   deleteContactMemoryById(userId: string, id: string): Promise<boolean>;
+
+  // Knowledge Cards (per-user static context: projects + company/services)
+  listKnowledgeCards(userId: string): Promise<KnowledgeCard[]>;
+  createKnowledgeCard(data: {
+    userId: string;
+    cardType: string;
+    title: string;
+    body: string;
+    sortOrder?: number;
+  }): Promise<KnowledgeCard | undefined>;
+  updateKnowledgeCardById(userId: string, id: string, fields: {
+    cardType?: string;
+    title?: string;
+    body?: string;
+    sortOrder?: number;
+  }): Promise<KnowledgeCard | undefined>;
+  deleteKnowledgeCardById(userId: string, id: string): Promise<boolean>;
 
   // Stripe
   getProduct(productId: string): Promise<any>;
@@ -613,6 +631,82 @@ export class DatabaseStorage implements IStorage {
     }
   }
   
+  // Knowledge Cards (per-user static context: projects + company/services)
+  async listKnowledgeCards(userId: string): Promise<KnowledgeCard[]> {
+    if (!isDatabaseAvailable()) return [];
+    try {
+      return await db.select()
+        .from(knowledgeCards)
+        .where(eq(knowledgeCards.userId, userId))
+        .orderBy(knowledgeCards.sortOrder, desc(knowledgeCards.updatedAt));
+    } catch (error) {
+      console.error("[Storage] listKnowledgeCards error:", error);
+      return [];
+    }
+  }
+
+  async createKnowledgeCard(data: {
+    userId: string;
+    cardType: string;
+    title: string;
+    body: string;
+    sortOrder?: number;
+  }): Promise<KnowledgeCard | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.insert(knowledgeCards)
+        .values({
+          userId: data.userId,
+          cardType: data.cardType,
+          title: data.title,
+          body: data.body,
+          sortOrder: data.sortOrder ?? 0,
+        })
+        .returning();
+      return row;
+    } catch (error) {
+      console.error("[Storage] createKnowledgeCard error:", error);
+      return undefined;
+    }
+  }
+
+  async updateKnowledgeCardById(userId: string, id: string, fields: {
+    cardType?: string;
+    title?: string;
+    body?: string;
+    sortOrder?: number;
+  }): Promise<KnowledgeCard | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const set: Record<string, any> = { updatedAt: new Date() };
+      if (fields.cardType !== undefined) set.cardType = fields.cardType;
+      if (fields.title !== undefined) set.title = fields.title;
+      if (fields.body !== undefined) set.body = fields.body;
+      if (fields.sortOrder !== undefined) set.sortOrder = fields.sortOrder;
+      const [row] = await db.update(knowledgeCards)
+        .set(set)
+        .where(and(eq(knowledgeCards.id, id), eq(knowledgeCards.userId, userId)))
+        .returning();
+      return row;
+    } catch (error) {
+      console.error("[Storage] updateKnowledgeCardById error:", error);
+      return undefined;
+    }
+  }
+
+  async deleteKnowledgeCardById(userId: string, id: string): Promise<boolean> {
+    if (!isDatabaseAvailable()) return false;
+    try {
+      const rows = await db.delete(knowledgeCards)
+        .where(and(eq(knowledgeCards.id, id), eq(knowledgeCards.userId, userId)))
+        .returning();
+      return rows.length > 0;
+    } catch (error) {
+      console.error("[Storage] deleteKnowledgeCardById error:", error);
+      return false;
+    }
+  }
+
   // Stripe queries (direct Stripe API; no sync schema)
   async getProduct(productId: string): Promise<any> {
     const { getUncachableStripeClient } = await import("./stripeClient");

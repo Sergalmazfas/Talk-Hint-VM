@@ -12,6 +12,7 @@ final class AssistantViewController: UITableViewController {
         case goal
         case context
         case contacts
+        case cards
         case library
     }
 
@@ -61,6 +62,7 @@ final class AssistantViewController: UITableViewController {
         case .goal: return 1
         case .context: return 1
         case .contacts: return 1
+        case .cards: return 1
         case .library: return 2
         }
     }
@@ -72,6 +74,7 @@ final class AssistantViewController: UITableViewController {
         case .goal: return "Call goal"
         case .context: return "My context"
         case .contacts: return "Contacts"
+        case .cards: return "Static context"
         case .library: return "Prompts"
         }
     }
@@ -81,6 +84,7 @@ final class AssistantViewController: UITableViewController {
         case .goal: return "Applied to your next call to keep the assistant on track."
         case .context: return "Tell the assistant about you (job, business, tone). Added to every call's hints."
         case .contacts: return "View, fix or delete what the assistant remembers about each caller."
+        case .cards: return "Short facts about your projects and company the assistant uses on every call."
         default: return nil
         }
     }
@@ -119,6 +123,10 @@ final class AssistantViewController: UITableViewController {
             config.text = "Manage contacts"
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-contacts"
+        case .cards:
+            config.text = "Manage cards"
+            cell.accessoryType = .disclosureIndicator
+            cell.accessibilityIdentifier = "cell-cards"
         case .library:
             if indexPath.row == 0 {
                 config.text = "Browse templates"
@@ -152,6 +160,8 @@ final class AssistantViewController: UITableViewController {
             navigationController?.pushViewController(editor, animated: true)
         case .contacts:
             navigationController?.pushViewController(ContactsViewController(), animated: true)
+        case .cards:
+            navigationController?.pushViewController(KnowledgeCardsViewController(), animated: true)
         case .library:
             if indexPath.row == 0 {
                 navigationController?.pushViewController(TemplatesViewController(), animated: true)

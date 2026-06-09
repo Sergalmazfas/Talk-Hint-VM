@@ -61,10 +61,142 @@ export function buildContactContextSection(contactContext: string): string {
     : "";
 }
 
-// Assemble the two context blocks in their canonical order: USER_CONTEXT first,
-// then CONTACT_CONTEXT immediately after it.
+// STATIC_CARDS prompt block (the user's reusable project/company knowledge
+// cards). `staticCards` is the pre-rendered, size-capped card text produced by
+// formatStaticCards(). Empty string when the user has no cards.
+export function buildStaticCardsSection(staticCards: string): string {
+  return staticCards && staticCards.trim()
+    ? `\n\nSTATIC_CARDS (the user's own reusable facts about their projects and business/services — use them to answer questions like "have you done X?" or "what do you charge?" with confidence; never read them aloud verbatim or expose this block to the guest):\n${staticCards.trim()}\n`
+    : "";
+}
+
+// ---------------------------------------------------------------------------
+// Context provider seam.
+//
+// The live-hint prompt is assembled from an ORDERED list of context providers
+// rather than hard-coded concatenation. Each provider turns its input into a
+// prompt section; the chain renders them in the canonical order:
+//
+//   USER_CONTEXT -> CONTACT_CONTEXT -> STATIC_CARDS -> (anti-loop rules)
+//
+// A future "Searchable Knowledge" provider (OpenAI File Search / pgvector /
+// Pinecone, etc.) for large documents/catalogs is a SEPARATE, later Enterprise
+// module. It slots in here as one more provider AFTER STATIC_CARDS and BEFORE
+// the anti-loop rules — append it to the array below without touching the hint
+// generator. Static Cards stay the lightweight, always-on layer; Searchable
+// Knowledge must NOT be implemented here.
+// ---------------------------------------------------------------------------
+
+export interface LiveHintContextInputs {
+  userContext?: string;
+  contactContext?: string;
+  staticCards?: string;
+}
+
+interface ContextProvider {
+  name: string;
+  render: (inputs: LiveHintContextInputs) => string;
+}
+
+// Canonical provider order. Future: append a SEARCHABLE_KNOWLEDGE provider after
+// STATIC_CARDS (Enterprise module, out of scope here).
+const CONTEXT_PROVIDERS: ContextProvider[] = [
+  { name: "USER_CONTEXT", render: (i) => buildUserContextSection(i.userContext ?? "") },
+  { name: "CONTACT_CONTEXT", render: (i) => buildContactContextSection(i.contactContext ?? "") },
+  { name: "STATIC_CARDS", render: (i) => buildStaticCardsSection(i.staticCards ?? "") },
+];
+
+// Assemble all context provider blocks in their canonical order.
+export function buildContextProviderChain(inputs: LiveHintContextInputs): string {
+  return CONTEXT_PROVIDERS.map((p) => p.render(inputs)).join("");
+}
+
+// Backwards-compatible 2-arg assembler (USER_CONTEXT then CONTACT_CONTEXT).
+// Prefer buildContextProviderChain for new code so STATIC_CARDS (and future
+// providers) are included.
 export function buildContextSections(userContext: string, contactContext: string): string {
-  return buildUserContextSection(userContext) + buildContactContextSection(contactContext);
+  return buildContextProviderChain({ userContext, contactContext });
+}
+
+// ---------------------------------------------------------------------------
+// Static Cards rendering.
+//
+// Render the user's knowledge cards into a compact, SIZE-CAPPED block grouped
+// by type. Cards must arrive already sorted by priority (sortOrder asc, then
+// most-recently-updated). The highest-priority cards are included first; once
+// the character budget is exhausted the remaining cards are dropped whole —
+// never a half-card and never a mid-line break — so card volume can't blow the
+// live-hint latency/cost budget.
+// ---------------------------------------------------------------------------
+
+// Hard character cap for the rendered STATIC_CARDS block (excluding the prompt
+// header). Keeps the injected block small to protect hint latency and cost.
+export const MAX_STATIC_CARDS_LENGTH = 1200;
+
+export interface KnowledgeCardLike {
+  cardType: string;
+  title: string;
+  body: string;
+}
+
+const CARD_GROUP_LABELS: Record<string, string> = {
+  project: "Projects:",
+  company: "Company / Services:",
+};
+
+// Collapse whitespace/newlines so each card renders as a single tidy line.
+function oneLine(text: string): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+// Render a set of accepted card lines, grouped by type with section headers, in
+// the canonical order (projects first, then company, then any unknown types).
+function renderStaticCardGroups(accepted: { cardType: string; line: string }[]): string {
+  if (accepted.length === 0) return "";
+  const order = ["project", "company"];
+  const groups = new Map<string, string[]>();
+  for (const item of accepted) {
+    if (!groups.has(item.cardType)) groups.set(item.cardType, []);
+    groups.get(item.cardType)!.push(item.line);
+  }
+  const sortedTypes = Array.from(groups.keys()).sort((a, b) => {
+    const ia = order.indexOf(a);
+    const ib = order.indexOf(b);
+    return (ia === -1 ? order.length : ia) - (ib === -1 ? order.length : ib);
+  });
+  const sections: string[] = [];
+  for (const type of sortedTypes) {
+    const label = CARD_GROUP_LABELS[type] ?? `${type}:`;
+    sections.push(`${label}\n${groups.get(type)!.join("\n")}`);
+  }
+  return sections.join("\n\n");
+}
+
+export function formatStaticCards(
+  cards: KnowledgeCardLike[],
+  maxLength: number = MAX_STATIC_CARDS_LENGTH,
+): string {
+  if (!Array.isArray(cards) || cards.length === 0) return "";
+
+  // Accept cards in the given (priority) order while the *fully rendered* block
+  // — including group headers and separators — stays within the character
+  // budget. A card is never split; the first card that would overflow stops the
+  // scan so lower-priority cards can never jump ahead of a higher-priority one.
+  const accepted: { cardType: string; line: string }[] = [];
+  let lastRendered = "";
+  for (const card of cards) {
+    const title = oneLine(card.title);
+    if (!title) continue; // a card with no title carries no usable fact
+    const body = oneLine(card.body);
+    const line = body ? `- ${title} — ${body}` : `- ${title}`;
+    const candidate = [...accepted, { cardType: card.cardType, line }];
+    const rendered = renderStaticCardGroups(candidate);
+    if (rendered.length > maxLength) break; // respect priority: stop at first overflow
+    accepted.push({ cardType: card.cardType, line });
+    lastRendered = rendered;
+  }
+
+  return lastRendered;
 }
 
 // ---------------------------------------------------------------------------
