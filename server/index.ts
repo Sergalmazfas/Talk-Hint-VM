@@ -6,7 +6,7 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { storage } from "./storage";
 import { repointWebhooksOnStartup } from "./webhookRepoint";
-import { startWriteHealthAlerter, stopWriteHealthAlerter } from "./writeHealthAlerter";
+import { startWriteHealthAlerter, stopWriteHealthAlerter, getAlertChannelStatus } from "./writeHealthAlerter";
 
 const app = express();
 app.set('trust proxy', true);
@@ -285,6 +285,26 @@ app.use((req, res, next) => {
     // table's write failures rise or schema drift appears, instead of waiting
     // for someone to poll /api/health. Opt out with DISABLE_WRITE_HEALTH_ALERTS.
     startWriteHealthAlerter();
+
+    // The alerter is only useful if a delivery channel can actually reach a
+    // human. Like the schema-drift check above, surface a loud startup warning
+    // when no channel is ready so a broken alerting setup is visible right after
+    // every Publish — not discovered during a real save-failure incident. Stays
+    // silent when at least one channel is ready, or when alerting is disabled.
+    const channels = getAlertChannelStatus();
+    if (!channels.disabled && !channels.anyReady) {
+      const partial: string[] = [];
+      if (channels.sms.configured && !channels.sms.ready)
+        partial.push(`SMS missing: ${channels.sms.missing.join(", ")}`);
+      if (channels.email.configured && !channels.email.ready)
+        partial.push(`email missing: ${channels.email.missing.join(", ")}`);
+      const detail = partial.length
+        ? ` Configured but not ready — ${partial.join("; ")}.`
+        : " No channel configured (set WRITE_HEALTH_ALERT_PHONE and/or WRITE_HEALTH_ALERT_EMAIL).";
+      console.warn(
+        `[WriteHealthAlert] No delivery channel ready — DB save failures will be logged only, not delivered.${detail}`,
+      );
+    }
   }
   
   // Setup Replit Auth (Google, GitHub, etc.) BEFORE other routes
