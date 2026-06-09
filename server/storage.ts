@@ -558,7 +558,15 @@ export class DatabaseStorage implements IStorage {
         lastCallAt: data.lastCallAt ?? now,
         updatedAt: now,
       };
-      if (data.name !== undefined) conflictSet.name = data.name;
+      // Auto-fill the name in a single atomic write: keep the existing name when
+      // it is already set (non-blank), otherwise take the incoming one. Folding
+      // the "only set if empty" rule into COALESCE removes the read-then-write
+      // race where two near-simultaneous calls both see "no name" and both
+      // write. NULLIF(TRIM(...), '') treats a blank/whitespace stored name as
+      // empty so it can still be filled.
+      if (data.name !== undefined) {
+        conflictSet.name = sql`coalesce(nullif(trim(${contactMemory.name}), ''), ${data.name ?? null})`;
+      }
       const [row] = await db.insert(contactMemory)
         .values({
           userId: data.userId,

@@ -81,7 +81,18 @@ const h = vi.hoisted(() => {
                 (row) => row.userId === r.userId && row.phoneNumber === r.phoneNumber,
               );
               if (existing) {
-                if (conflictSet) Object.assign(existing, conflictSet);
+                if (conflictSet) {
+                  const resolved = { ...conflictSet };
+                  // upsertContactMemory sets `name` to a drizzle sql COALESCE
+                  // expression (an object, not a plain string/null). Emulate
+                  // `coalesce(nullif(trim(existing.name), ''), incoming.name)`
+                  // so the atomic never-overwrite-name behaviour is exercised.
+                  if (resolved.name && typeof resolved.name === "object") {
+                    const current = typeof existing.name === "string" ? existing.name.trim() : "";
+                    resolved.name = current ? existing.name : r.name ?? null;
+                  }
+                  Object.assign(existing, resolved);
+                }
                 out.push({ ...existing });
               } else {
                 const now = new Date();
@@ -256,6 +267,53 @@ describe("upsertContactMemory", () => {
     expect(saved!.notes).toBeNull();
     expect(saved!.importance).toBeNull();
     expect(saved!.lastCallAt).toBeInstanceOf(Date);
+  });
+
+  it("auto-fills the name when the contact has none yet", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "first" });
+    const filled = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      name: "John",
+      summary: "second",
+    });
+    expect(filled!.name).toBe("John");
+  });
+
+  it("never overwrites an existing name on conflict (atomic COALESCE)", async () => {
+    // The user (or an earlier call) has already set a name.
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, name: "Jonathan", summary: "v1" });
+
+    // A later auto-fill tries to write a different name in the same upsert.
+    const after = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      name: "John",
+      summary: "v2",
+    });
+
+    // Name is preserved; the rest of the row still updates.
+    expect(after!.name).toBe("Jonathan");
+    expect(after!.summary).toBe("v2");
+  });
+
+  it("treats a blank/whitespace stored name as empty and fills it", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, name: "   ", summary: "v1" });
+    const after = await storage.upsertContactMemory({
+      userId: USER_A,
+      phoneNumber: PHONE,
+      name: "John",
+      summary: "v2",
+    });
+    expect(after!.name).toBe("John");
+  });
+
+  it("leaves the name untouched when an upsert omits it (no race window)", async () => {
+    await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, name: "Jane", summary: "v1" });
+    // The post-call summarizer with no extracted name upserts without `name`.
+    const after = await storage.upsertContactMemory({ userId: USER_A, phoneNumber: PHONE, summary: "v2" });
+    expect(after!.name).toBe("Jane");
+    expect(after!.summary).toBe("v2");
   });
 });
 

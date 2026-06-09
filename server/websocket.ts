@@ -368,11 +368,10 @@ async function summarizeAndSaveContactMemory(
         withGemini: generateWithGemini,
         withOpenAI: generateWithOpenAI,
       }),
+    // The upsert fills the auto-extracted name atomically (COALESCE) — it only
+    // writes a missing name and never overwrites a user-set one, so no separate
+    // read-then-write name gate is needed here (avoids the race window).
     save: (input) => storage.upsertContactMemory(input),
-    // Auto-filled name must never overwrite a user-set name: gate on the
-    // contact's current stored name before passing it to the upsert.
-    getExistingName: () =>
-      storage.getContactMemory(userId, phoneNumber).then((c) => c?.name ?? null),
     log: (message) => log(message, "websocket"),
   });
 }

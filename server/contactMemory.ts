@@ -262,8 +262,10 @@ export function parseContactSummary(raw: string): ParsedContactSummary | null {
 export interface ContactMemorySaveInput {
   userId: string;
   phoneNumber: string;
-  // Only set when the summarizer auto-filled a name (contact had none). Left
-  // absent so upsertContactMemory preserves any user-set name on conflict.
+  // Set whenever the model extracted the contact's own name. The upsert applies
+  // it atomically via COALESCE — it only fills a missing name and never
+  // overwrites one the user (or an earlier call) already set, so there is no
+  // read-then-write race here.
   name?: string | null;
   summary: string | null;
   notes: string | null;
@@ -277,10 +279,6 @@ export interface SummarizeAndSaveDeps {
   generate: (systemPrompt: string, userPrompt: string) => Promise<string>;
   // Persist the normalized memory row.
   save: (input: ContactMemorySaveInput) => Promise<unknown>;
-  // Optional: look up the contact's existing name so the auto-filled name never
-  // overwrites a name the user already set (or the model previously extracted).
-  // Returns the stored name, or null/undefined when there is none.
-  getExistingName?: () => Promise<string | null | undefined>;
   // Optional structured logging hook (no-op when omitted).
   log?: (message: string) => void;
   // Optional clock injection for deterministic tests.
@@ -314,24 +312,11 @@ export async function summarizeAndSaveContactMemory(
     return;
   }
 
-  // Auto-fill the contact's name only when the model extracted one AND the
-  // contact has no existing name. We never overwrite a name the user (or an
-  // earlier call) already set. Looking it up failing must not block the save.
-  let nameToSave: string | undefined;
-  if (parsed.name) {
-    let existingName: string | null | undefined;
-    try {
-      existingName = deps.getExistingName ? await deps.getExistingName() : undefined;
-    } catch (err: any) {
-      deps.log?.(`[ContactMemory] existing-name lookup failed: ${err?.message ?? err}`);
-      existingName = undefined;
-    }
-    if (!(typeof existingName === "string" && existingName.trim())) {
-      nameToSave = parsed.name;
-    } else {
-      deps.log?.(`[ContactMemory] keeping existing name for ${phoneNumber}, not overwriting`);
-    }
-  }
+  // Pass the model-extracted name straight to the upsert. The upsert fills it
+  // atomically (COALESCE) — it only writes the name when the contact has none
+  // yet and never overwrites a name the user (or an earlier call) already set,
+  // so there is no read-then-write race to guard here.
+  const nameToSave: string | undefined = parsed.name ? parsed.name : undefined;
 
   try {
     const input: ContactMemorySaveInput = {

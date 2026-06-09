@@ -154,83 +154,32 @@ describe("summarizeAndSaveContactMemory", () => {
     });
   });
 
-  it("auto-fills the name when the contact has no existing name", async () => {
+  it("passes the model-extracted name to the upsert (which fills it atomically)", async () => {
     const save = vi.fn(async () => ({ id: "cm-name" }));
-    const getExistingName = vi.fn(async () => null);
 
     await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
       generate: async () =>
         JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
       save,
-      getExistingName,
     });
 
-    expect(getExistingName).toHaveBeenCalledTimes(1);
     expect(save).toHaveBeenCalledTimes(1);
+    // The "never overwrite a user-set name" guarantee now lives in the upsert
+    // (COALESCE), so the summarizer always forwards the extracted name and lets
+    // the single atomic write decide — no read-then-write step here.
     expect(save.mock.calls[0][0].name).toBe("John");
   });
 
-  it("does NOT overwrite an existing name", async () => {
-    const save = vi.fn(async () => ({ id: "cm-keep" }));
-    const getExistingName = vi.fn(async () => "Jonathan");
-
-    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
-      generate: async () =>
-        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
-      save,
-      getExistingName,
-    });
-
-    expect(getExistingName).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledTimes(1);
-    // No name key is sent, so the upsert preserves the stored name.
-    expect(save.mock.calls[0][0]).not.toHaveProperty("name");
-  });
-
-  it("treats a blank/whitespace existing name as empty and fills it", async () => {
-    const save = vi.fn(async () => ({ id: "cm-blank" }));
-
-    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
-      generate: async () =>
-        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
-      save,
-      getExistingName: async () => "   ",
-    });
-
-    expect(save.mock.calls[0][0].name).toBe("John");
-  });
-
-  it("does not look up or send a name when the model extracted none", async () => {
+  it("does not send a name when the model extracted none", async () => {
     const save = vi.fn(async () => ({ id: "cm-noname" }));
-    const getExistingName = vi.fn(async () => null);
 
     await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
       generate: async () => JSON.stringify({ summary: "Wants a quote.", notes: "", importance: "low" }),
       save,
-      getExistingName,
     });
 
-    expect(getExistingName).not.toHaveBeenCalled();
+    // Without an extracted name the upsert must not touch the name column at all.
     expect(save.mock.calls[0][0]).not.toHaveProperty("name");
-  });
-
-  it("still saves (filling the name) when the existing-name lookup throws", async () => {
-    const save = vi.fn(async () => ({ id: "cm-lookup-fail" }));
-    const log = vi.fn();
-
-    await summarizeAndSaveContactMemory(USER_ID, PHONE, TRANSCRIPT, {
-      generate: async () =>
-        JSON.stringify({ name: "John", summary: "Caller introduced himself.", notes: "", importance: "low" }),
-      save,
-      getExistingName: async () => {
-        throw new Error("db down");
-      },
-      log,
-    });
-
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][0].name).toBe("John");
-    expect(log).toHaveBeenCalled();
   });
 
   it("stores null for an empty notes field while keeping the summary", async () => {
