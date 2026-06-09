@@ -13,6 +13,7 @@ import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
+import { routeGenerate } from "./hintProvider";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -298,50 +299,47 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     const hasSuggestion = (r: ReturnType<typeof parseHint>) =>
       !!(r && r.suggestion && typeof r.suggestion.en === "string" && r.suggestion.en.trim().length > 0);
 
-    let content = "";
-    let result: ReturnType<typeof parseHint> = null;
+    const isGemini = currentModel.startsWith("gemini");
+    // Count every Gemini attempt so getHintFallbackStats() can report a rate.
+    if (isGemini) geminiHintAttempts++;
+    let fellBack = false;
 
-    if (currentModel.startsWith("gemini")) {
-      // Try Gemini first; on any failure (error, timeout, or empty/unparseable
-      // output) fall back to OpenAI so the live call never loses its hint.
-      geminiHintAttempts++;
-      let fellBack = false;
-      try {
-        content = await generateWithGemini(currentModel, systemPrompt, userPrompt);
-        if (!content || !/\{[\s\S]*\}/.test(content)) {
-          throw new Error("empty or unparseable response");
-        }
-        result = parseHint(content);
-      } catch (gemErr: any) {
+    // Provider routing + fallback lives in routeGenerate (tested in
+    // server/__tests__/hintProvider.test.ts): gemini models try Gemini first and
+    // fall back to OpenAI on any error / empty / unparseable output; everything
+    // else goes straight to OpenAI. The onFallback hook records the fallback for
+    // the /api/health stats and logs the running rate.
+    const content = await routeGenerate(systemPrompt, userPrompt, {
+      model: currentModel,
+      fallbackModel: OPENAI_FALLBACK_MODEL,
+      withGemini: generateWithGemini,
+      withOpenAI: generateWithOpenAI,
+      onFallback: (gemErr: any) => {
         geminiHintFallbacks++;
         fellBack = true;
         const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
-        log(`Gemini (${currentModel}) failed: ${gemErr.message} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
-        content = await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
-        result = parseHint(content);
-      }
+        log(`Gemini (${currentModel}) failed: ${gemErr?.message ?? gemErr} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
+      },
+    });
+    let result = parseHint(content);
 
-      // Gemini sometimes returns a valid translation but silently drops the
-      // suggestion. On a turn that should have a hint (not a reaction/farewell)
-      // that means a dead turn for the user, so treat a missing suggestion as a
-      // fallback trigger and ask OpenAI for a proper hint.
-      if (!fellBack && forceSuggestion && !hasSuggestion(result)) {
-        geminiHintFallbacks++;
-        const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
-        log(`Gemini (${currentModel}) returned no suggestion — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
-        try {
-          const fbResult = parseHint(await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt));
-          if (hasSuggestion(fbResult)) {
-            // Keep Gemini's translation if OpenAI didn't supply its own.
-            result = { ...fbResult!, translation: fbResult!.translation || result?.translation || "" };
-          }
-        } catch (fbErr: any) {
-          log(`OpenAI suggestion fallback failed: ${fbErr.message}`, "openai");
+    // Gemini sometimes returns a valid translation but silently drops the
+    // suggestion. On a turn that should have a hint (not a reaction/farewell)
+    // that means a dead turn for the user, so treat a missing suggestion as a
+    // fallback trigger and ask OpenAI for a proper hint.
+    if (isGemini && !fellBack && forceSuggestion && !hasSuggestion(result)) {
+      geminiHintFallbacks++;
+      const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
+      log(`Gemini (${currentModel}) returned no suggestion — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
+      try {
+        const fbResult = parseHint(await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt));
+        if (hasSuggestion(fbResult)) {
+          // Keep Gemini's translation if OpenAI didn't supply its own.
+          result = { ...fbResult!, translation: fbResult!.translation || result?.translation || "" };
         }
+      } catch (fbErr: any) {
+        log(`OpenAI suggestion fallback failed: ${fbErr.message}`, "openai");
       }
-    } else {
-      content = await generateWithOpenAI(currentModel, systemPrompt, userPrompt);
-      result = parseHint(content);
     }
 
     return result ?? { translation: "" };
@@ -361,19 +359,15 @@ async function summarizeAndSaveContactMemory(
   await runSummarizeAndSaveContactMemory(userId, phoneNumber, transcript, {
     // Provider routing mirrors translateAndSuggest: gemini models try Gemini
     // first and fall back to OpenAI on empty/unparseable output; everything else
-    // goes straight to OpenAI.
-    generate: async (systemPrompt, userPrompt) => {
-      if (currentModel.startsWith("gemini")) {
-        try {
-          const raw = await generateWithGemini(currentModel, systemPrompt, userPrompt);
-          if (!raw || !/\{[\s\S]*\}/.test(raw)) throw new Error("empty or unparseable");
-          return raw;
-        } catch {
-          return generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt);
-        }
-      }
-      return generateWithOpenAI(currentModel, systemPrompt, userPrompt);
-    },
+    // goes straight to OpenAI. The decision lives in routeGenerate (tested in
+    // server/__tests__/hintProvider.test.ts).
+    generate: (systemPrompt, userPrompt) =>
+      routeGenerate(systemPrompt, userPrompt, {
+        model: currentModel,
+        fallbackModel: OPENAI_FALLBACK_MODEL,
+        withGemini: generateWithGemini,
+        withOpenAI: generateWithOpenAI,
+      }),
     save: (input) => storage.upsertContactMemory(input),
     log: (message) => log(message, "websocket"),
   });
