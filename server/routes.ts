@@ -1655,6 +1655,60 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Contact Memory ("Contacts") — per-caller AI memory the user can view/edit/delete.
+  app.get("/api/contacts", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const contacts = await storage.listContactMemories(user.id);
+      res.json({ contacts });
+    } catch (error: any) {
+      console.error("[Contacts] List error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/contacts/:id", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { id } = req.params;
+      const { summary, notes, importance } = req.body ?? {};
+      for (const [key, value] of Object.entries({ summary, notes, importance })) {
+        if (value !== undefined && value !== null && typeof value !== "string") {
+          return res.status(400).json({ error: `${key} must be a string` });
+        }
+      }
+      const updated = await storage.updateContactMemoryById(user.id, id, {
+        ...(summary !== undefined ? { summary } : {}),
+        ...(notes !== undefined ? { notes } : {}),
+        ...(importance !== undefined ? { importance } : {}),
+      });
+      if (!updated) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
+      console.log(`[Contacts] User ${user.id} updated contact ${id}`);
+      res.json({ success: true, contact: updated });
+    } catch (error: any) {
+      console.error("[Contacts] Update error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/contacts/:id", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { id } = req.params;
+      const deleted = await storage.deleteContactMemoryById(user.id, id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Contact not found" });
+      }
+      console.log(`[Contacts] User ${user.id} deleted contact ${id}`);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Contacts] Delete error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Stripe endpoints
   app.get("/api/stripe/config", async (req, res) => {
     try {

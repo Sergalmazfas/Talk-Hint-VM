@@ -10,7 +10,7 @@ import {
   users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
-import { eq, and, sql, gt } from "drizzle-orm";
+import { eq, and, sql, gt, desc } from "drizzle-orm";
 import { configureVoiceWebhook } from "./twilioService";
 import { resolveProductionBaseUrl } from "./baseUrl";
 
@@ -72,6 +72,13 @@ export interface IStorage {
     importance?: string | null;
     lastCallAt?: Date;
   }): Promise<ContactMemory | undefined>;
+  listContactMemories(userId: string): Promise<ContactMemory[]>;
+  updateContactMemoryById(userId: string, id: string, fields: {
+    summary?: string | null;
+    notes?: string | null;
+    importance?: string | null;
+  }): Promise<ContactMemory | undefined>;
+  deleteContactMemoryById(userId: string, id: string): Promise<boolean>;
 
   // Stripe
   getProduct(productId: string): Promise<any>;
@@ -545,6 +552,54 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("[Storage] upsertContactMemory error:", error);
       return undefined;
+    }
+  }
+
+  async listContactMemories(userId: string): Promise<ContactMemory[]> {
+    if (!isDatabaseAvailable()) return [];
+    try {
+      return await db.select()
+        .from(contactMemory)
+        .where(eq(contactMemory.userId, userId))
+        .orderBy(desc(contactMemory.lastCallAt));
+    } catch (error) {
+      console.error("[Storage] listContactMemories error:", error);
+      return [];
+    }
+  }
+
+  async updateContactMemoryById(userId: string, id: string, fields: {
+    summary?: string | null;
+    notes?: string | null;
+    importance?: string | null;
+  }): Promise<ContactMemory | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const set: Record<string, any> = { updatedAt: new Date() };
+      if (fields.summary !== undefined) set.summary = fields.summary;
+      if (fields.notes !== undefined) set.notes = fields.notes;
+      if (fields.importance !== undefined) set.importance = fields.importance;
+      const [row] = await db.update(contactMemory)
+        .set(set)
+        .where(and(eq(contactMemory.id, id), eq(contactMemory.userId, userId)))
+        .returning();
+      return row;
+    } catch (error) {
+      console.error("[Storage] updateContactMemoryById error:", error);
+      return undefined;
+    }
+  }
+
+  async deleteContactMemoryById(userId: string, id: string): Promise<boolean> {
+    if (!isDatabaseAvailable()) return false;
+    try {
+      const rows = await db.delete(contactMemory)
+        .where(and(eq(contactMemory.id, id), eq(contactMemory.userId, userId)))
+        .returning();
+      return rows.length > 0;
+    } catch (error) {
+      console.error("[Storage] deleteContactMemoryById error:", error);
+      return false;
     }
   }
   

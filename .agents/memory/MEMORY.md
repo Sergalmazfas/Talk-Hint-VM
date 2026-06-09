@@ -8,3 +8,4 @@
 - [Call-history recording lifecycle](call-history-recording.md) — records created in /twilio/voice, finalized in /twilio/status; outbound final-status unreliable (statusCallback is number-level); /api/calls is auth-scoped.
 - [Deepgram Flux (v2) STT](deepgram-flux-stt.md) — Flux owns turn detection (TurnInfo events); gate is a thin commitTurn finalizer; μ-law 8kHz native; no KeepAlive; eager off.
 - [Production rollout / DB schema strategy](prod-rollout-strategy.md) — Reserved VM + managed PG: prod schema goes via Publish flow, NOT prod-migrate.ts; Twilio sig check force-enabled in prod.
+- [iOS XcodeGen source globbing](ios-xcodegen-sources.md) — new .swift files under ios/TalkHint auto-included via project.yml; no pbxproj edits, prefer one file per VC.

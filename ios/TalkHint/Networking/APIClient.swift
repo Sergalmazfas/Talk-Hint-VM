@@ -420,6 +420,58 @@ final class APIClient {
         return (obj["context"] as? String) ?? context
     }
 
+    // MARK: - Contacts (Contact Memory)
+
+    struct ContactMemoryItem {
+        let id: String
+        let phoneNumber: String
+        let summary: String?
+        let notes: String?
+        let importance: String?
+        let lastCallAt: Date?
+    }
+
+    /// Fetches the per-caller memories the assistant has saved for the signed-in
+    /// user (newest call first). Server route `/api/contacts` is user-scoped.
+    func contacts() async throws -> [ContactMemoryItem] {
+        let data = try await request("/api/contacts", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = obj["contacts"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        return arr.compactMap { Self.parseContact($0) }
+    }
+
+    /// Updates the editable fields of one contact memory. Returns the stored row.
+    @discardableResult
+    func updateContact(id: String, summary: String, notes: String, importance: String) async throws -> ContactMemoryItem {
+        let body: [String: Any] = ["summary": summary, "notes": notes, "importance": importance]
+        let data = try await request("/api/contacts/\(id)", method: "PUT", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let contact = obj["contact"] as? [String: Any],
+              let parsed = Self.parseContact(contact) else {
+            throw APIError.decoding
+        }
+        return parsed
+    }
+
+    /// Deletes everything the assistant remembers about one caller.
+    func deleteContact(id: String) async throws {
+        _ = try await request("/api/contacts/\(id)", method: "DELETE", json: nil, authenticated: true)
+    }
+
+    private static func parseContact(_ item: [String: Any]) -> ContactMemoryItem? {
+        guard let id = item["id"] as? String,
+              let phone = item["phoneNumber"] as? String else { return nil }
+        return ContactMemoryItem(
+            id: id,
+            phoneNumber: phone,
+            summary: item["summary"] as? String,
+            notes: item["notes"] as? String,
+            importance: item["importance"] as? String,
+            lastCallAt: Self.parseDate(item["lastCallAt"]))
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

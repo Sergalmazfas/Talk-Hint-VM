@@ -2906,6 +2906,204 @@ function closeContextModal() {
 
 loadUserContext();
 
+// ===== Contacts (Contact Memory) =====
+var contactsCache = [];
+var editingContactId = null;
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadContacts() {
+  var listEl = document.getElementById('contactsList');
+  if (listEl) listEl.innerHTML = '<div style="color:#6b7280; padding:8px;">Loading…</div>';
+  try {
+    var response = await fetch('/api/contacts', {
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      var data = await response.json();
+      contactsCache = data.contacts || [];
+      renderContacts();
+      updateContactsStatus();
+    } else if (listEl) {
+      listEl.innerHTML = '<div style="color:#ef4444; padding:8px;">Failed to load contacts (' + response.status + ')</div>';
+    }
+  } catch (error) {
+    log('Contacts load error: ' + error.message);
+    if (listEl) listEl.innerHTML = '<div style="color:#ef4444; padding:8px;">Failed to load contacts</div>';
+  }
+}
+
+function updateContactsStatus() {
+  var statusEl = document.getElementById('contactsStatus');
+  if (!statusEl) return;
+  var n = contactsCache.length;
+  statusEl.textContent = n ? (n + (n === 1 ? ' contact' : ' contacts')) : 'No contacts yet';
+}
+
+function renderContacts() {
+  var listEl = document.getElementById('contactsList');
+  if (!listEl) return;
+  if (!contactsCache.length) {
+    listEl.innerHTML = '<div style="color:#6b7280; padding:8px;">No saved contacts yet. After a call, the assistant remembers the caller here.</div>';
+    return;
+  }
+  listEl.innerHTML = contactsCache.map(function(c) {
+    var lastCall = c.lastCallAt ? new Date(c.lastCallAt).toISOString().slice(0, 10) : '';
+    var meta = [];
+    if (c.importance && c.importance.trim()) meta.push('★ ' + escapeHtml(c.importance.trim()));
+    if (lastCall) meta.push('Last call: ' + lastCall);
+    return '' +
+      '<div class="contact-row" data-testid="row-contact-' + escapeHtml(c.id) + '" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-bottom:8px;">' +
+        '<div style="font-weight:600; margin-bottom:2px;" data-testid="text-contact-phone-' + escapeHtml(c.id) + '">' + escapeHtml(c.phoneNumber) + '</div>' +
+        (meta.length ? '<div style="font-size:0.75rem; color:#6b7280; margin-bottom:6px;">' + meta.join(' · ') + '</div>' : '') +
+        (c.summary && c.summary.trim() ? '<div style="font-size:0.85rem; margin-bottom:4px;">' + escapeHtml(c.summary.trim()) + '</div>' : '') +
+        (c.notes && c.notes.trim() ? '<div style="font-size:0.8rem; color:#374151; margin-bottom:6px;"><em>Notes:</em> ' + escapeHtml(c.notes.trim()) + '</div>' : '') +
+        '<div style="display:flex; gap:8px; margin-top:6px;">' +
+          '<button class="btn btn-secondary btn-small" data-contact-edit="' + escapeHtml(c.id) + '" data-testid="button-edit-contact-' + escapeHtml(c.id) + '">Edit</button>' +
+          '<button class="btn btn-secondary btn-small" data-contact-delete="' + escapeHtml(c.id) + '" data-testid="button-delete-contact-' + escapeHtml(c.id) + '">Delete</button>' +
+        '</div>' +
+      '</div>';
+  }).join('');
+
+  listEl.querySelectorAll('[data-contact-edit]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      openContactEditModal(btn.getAttribute('data-contact-edit'));
+    });
+  });
+  listEl.querySelectorAll('[data-contact-delete]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      deleteContact(btn.getAttribute('data-contact-delete'));
+    });
+  });
+}
+
+function openContactsModal() {
+  var modal = document.getElementById('contactsModal');
+  if (modal) modal.classList.add('active');
+  loadContacts();
+}
+
+function closeContactsModal() {
+  var modal = document.getElementById('contactsModal');
+  if (modal) modal.classList.remove('active');
+}
+
+function openContactEditModal(id) {
+  var contact = contactsCache.filter(function(c) { return c.id === id; })[0];
+  if (!contact) return;
+  editingContactId = id;
+  var title = document.getElementById('contactEditTitle');
+  if (title) title.textContent = 'Edit ' + contact.phoneNumber;
+  var imp = document.getElementById('contactImportance');
+  var sum = document.getElementById('contactSummary');
+  var notes = document.getElementById('contactNotes');
+  if (imp) imp.value = contact.importance || '';
+  if (sum) sum.value = contact.summary || '';
+  if (notes) notes.value = contact.notes || '';
+  var modal = document.getElementById('contactEditModal');
+  if (modal) modal.classList.add('active');
+}
+
+function closeContactEditModal() {
+  editingContactId = null;
+  var modal = document.getElementById('contactEditModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function saveContact() {
+  if (!editingContactId) return;
+  var saveBtn = document.getElementById('contactEditSave');
+  if (saveBtn) saveBtn.disabled = true;
+  var imp = document.getElementById('contactImportance');
+  var sum = document.getElementById('contactSummary');
+  var notes = document.getElementById('contactNotes');
+  try {
+    var response = await fetch('/api/contacts/' + encodeURIComponent(editingContactId), {
+      method: 'PUT',
+      credentials: 'include',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        importance: imp ? imp.value : '',
+        summary: sum ? sum.value : '',
+        notes: notes ? notes.value : ''
+      })
+    });
+    if (response.ok) {
+      var data = await response.json();
+      if (data.contact) {
+        contactsCache = contactsCache.map(function(c) {
+          return c.id === data.contact.id ? data.contact : c;
+        });
+        renderContacts();
+      }
+      closeContactEditModal();
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Failed to save contact: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Contact save error: ' + error.message);
+    alert('Failed to save contact: ' + error.message);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function deleteContact(id) {
+  var contact = contactsCache.filter(function(c) { return c.id === id; })[0];
+  if (!confirm('Delete what the assistant remembers about ' + (contact ? contact.phoneNumber : 'this caller') + '? This cannot be undone.')) return;
+  try {
+    var response = await fetch('/api/contacts/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      contactsCache = contactsCache.filter(function(c) { return c.id !== id; });
+      renderContacts();
+      updateContactsStatus();
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Failed to delete contact: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Contact delete error: ' + error.message);
+    alert('Failed to delete contact: ' + error.message);
+  }
+}
+
+(function initContactsUI() {
+  var openBtn = document.getElementById('openContactsBtn');
+  if (openBtn) openBtn.addEventListener('click', openContactsModal);
+
+  var closeBtn = document.getElementById('contactsModalClose');
+  if (closeBtn) closeBtn.addEventListener('click', closeContactsModal);
+  var cancelBtn = document.getElementById('contactsModalCancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeContactsModal);
+  var contactsModal = document.getElementById('contactsModal');
+  if (contactsModal) contactsModal.addEventListener('click', function(e) {
+    if (e.target === contactsModal) closeContactsModal();
+  });
+
+  var editClose = document.getElementById('contactEditModalClose');
+  if (editClose) editClose.addEventListener('click', closeContactEditModal);
+  var editCancel = document.getElementById('contactEditCancel');
+  if (editCancel) editCancel.addEventListener('click', closeContactEditModal);
+  var editSave = document.getElementById('contactEditSave');
+  if (editSave) editSave.addEventListener('click', saveContact);
+  var editModal = document.getElementById('contactEditModal');
+  if (editModal) editModal.addEventListener('click', function(e) {
+    if (e.target === editModal) closeContactEditModal();
+  });
+})();
+
 // Service Worker and Push Notifications
 var swRegistration = null;
 var notificationsBtn = document.getElementById('enableNotificationsBtn');
