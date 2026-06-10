@@ -211,13 +211,23 @@ export const HEALTH_STATUS_PAGE_HTML = `<!DOCTYPE html>
     }
 
     async function load() {
+      const banner = document.getElementById('banner');
+      const bannerText = document.getElementById('banner-text');
       try {
-        const res = await fetch('/api/health', { cache: 'no-store' });
+        // Forward the on-call token (if this page was opened as /health?token=…)
+        // to the data endpoint, which is what's actually access-gated in prod.
+        const token = new URLSearchParams(window.location.search).get('token');
+        const url = '/api/health' + (token ? ('?token=' + encodeURIComponent(token)) : '');
+        const res = await fetch(url, { cache: 'no-store' });
+        if (res.status === 401) {
+          banner.className = 'banner unknown';
+          bannerText.textContent =
+            'This page needs the on-call token. Open it as /health?token=YOUR_TOKEN.';
+          return;
+        }
         const data = await res.json();
         render(data);
       } catch (err) {
-        const banner = document.getElementById('banner');
-        const bannerText = document.getElementById('banner-text');
         banner.className = 'banner unknown';
         bannerText.textContent = 'Could not reach the health endpoint: ' + (err && err.message ? err.message : err);
       }
@@ -226,6 +236,48 @@ export const HEALTH_STATUS_PAGE_HTML = `<!DOCTYPE html>
     document.getElementById('refresh').addEventListener('click', load);
     load();
     setInterval(load, 30000);
+  </script>
+</body>
+</html>`;
+
+// ---------------------------------------------------------------------------
+// Shown instead of the dashboard when /health is opened in production without a
+// valid on-call token. It exposes NO operational internals — just a prompt to
+// re-open the page with the shared token, which then unlocks the live data.
+// ---------------------------------------------------------------------------
+export const HEALTH_TOKEN_PROMPT_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Database Save Health — token required</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; color: #111827; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 28px; max-width: 420px; width: 100%; }
+    h1 { font-size: 20px; margin-bottom: 8px; }
+    p { color: #6b7280; font-size: 14px; margin-bottom: 18px; }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; font: inherit; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; }
+    button { font: inherit; padding: 10px 16px; border-radius: 8px; border: none; background: #6366f1; color: #fff; cursor: pointer; }
+    button:hover { background: #4f46e5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>On-call token required</h1>
+    <p>This status page is restricted. Enter the on-call token to view database save health.</p>
+    <form id="form">
+      <input id="token" type="password" placeholder="On-call token" autocomplete="off" data-testid="input-health-token" />
+      <button type="submit" data-testid="button-health-token-submit">View</button>
+    </form>
+  </div>
+  <script>
+    document.getElementById('form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var t = document.getElementById('token').value.trim();
+      if (t) window.location.href = '/health?token=' + encodeURIComponent(t);
+    });
   </script>
 </body>
 </html>`;

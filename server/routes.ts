@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage, getContactMemoryHealth, getWriteHealth, checkSchemaDrift } from "./storage";
 import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner, getHintFallbackStats } from "./websocket";
 import { getAlertChannelStatus, getWriteHealthAlertState } from "./writeHealthAlerter";
-import { HEALTH_STATUS_PAGE_HTML } from "./healthStatusPage";
+import { HEALTH_STATUS_PAGE_HTML, HEALTH_TOKEN_PROMPT_HTML } from "./healthStatusPage";
 import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
 import { z } from "zod";
 import path from "path";
@@ -104,6 +104,41 @@ function validateTwilioSignature(req: express.Request, res: express.Response, ne
   
   console.log("[Twilio Sig] Valid signature for:", url);
   next();
+}
+
+// ---------------------------------------------------------------------------
+// Save-health status access gate.
+//
+// /health (the human page) and /api/health (its JSON data source) expose
+// operational internals — table names, save-failure counts, schema-drift
+// errors. They contain no secrets or user data, but for a production deployment
+// we let the team gate them behind a shared on-call token. Protection is
+// opt-in: it only activates in production AND only when HEALTH_STATUS_TOKEN is
+// set, so local/dev stays frictionless and existing deployments / uptime
+// monitors don't break until an operator chooses to lock the page down. Env is
+// read live (not at module load) so it can be toggled per request/test. The
+// token may be supplied as ?token=, an x-health-token header, or a Bearer
+// header, and is compared in constant time.
+// ---------------------------------------------------------------------------
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+function healthAccessAllowed(req: express.Request): boolean {
+  // Frictionless outside production.
+  if (process.env.NODE_ENV !== "production") return true;
+  const expected = process.env.HEALTH_STATUS_TOKEN;
+  // Opt-in: no token configured means the page stays open (today's behavior).
+  if (!expected) return true;
+  const authHeader = req.headers.authorization;
+  const provided =
+    (typeof req.query.token === "string" ? req.query.token : "") ||
+    (typeof req.headers["x-health-token"] === "string" ? (req.headers["x-health-token"] as string) : "") ||
+    (authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : "");
+  return !!provided && timingSafeEqualStr(provided, expected);
 }
 
 // Handle both ESM (development) and CommonJS (production bundle)
@@ -241,7 +276,10 @@ load();
     }
   });
 
-  app.get("/api/health", async (_req, res) => {
+  app.get("/api/health", async (req, res) => {
+    if (!healthAccessAllowed(req)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     const schemaDrift = await checkSchemaDrift();
     const contactMemoryDrift = schemaDrift.tables.find((t) => t.table === "contact_memory");
     res.json({ 
@@ -268,7 +306,12 @@ load();
   });
 
   // Human-readable DB save-health status page for on-call (renders /api/health).
-  app.get("/health", (_req, res) => {
+  // In production with a token configured, an unauthenticated visitor gets a
+  // token prompt (no internals) instead of the dashboard.
+  app.get("/health", (req, res) => {
+    if (!healthAccessAllowed(req)) {
+      return res.status(401).type("html").send(HEALTH_TOKEN_PROMPT_HTML);
+    }
     res.type("html").send(HEALTH_STATUS_PAGE_HTML);
   });
 

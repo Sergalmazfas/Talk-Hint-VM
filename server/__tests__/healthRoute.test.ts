@@ -233,3 +233,121 @@ describe("GET /api/health", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Production access gate for the save-health endpoints. The gate is opt-in:
+// it only restricts access in production AND only when HEALTH_STATUS_TOKEN is
+// set. Outside production, or with no token configured, both endpoints stay
+// open (frictionless dev / today's behavior). When locked, the JSON endpoint
+// returns 401 with no internals, and the HTML page returns a token prompt
+// rather than the dashboard.
+// ---------------------------------------------------------------------------
+describe("save-health access gate", () => {
+  function withEnv(
+    env: Record<string, string | undefined>,
+    run: () => Promise<void>,
+  ) {
+    const prev = { ...process.env };
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    return run().finally(() => {
+      process.env = prev;
+    });
+  }
+
+  it("stays open outside production even when a token is configured", async () => {
+    await withEnv(
+      { NODE_ENV: "test", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        const api = await request(app).get("/api/health");
+        expect(api.status).toBe(200);
+        const page = await request(app).get("/health");
+        expect(page.status).toBe(200);
+        expect(page.text).toContain("Database Save Health");
+      },
+    );
+  });
+
+  it("stays open in production when no token is configured (opt-in)", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: undefined },
+      async () => {
+        const api = await request(app).get("/api/health");
+        expect(api.status).toBe(200);
+        const page = await request(app).get("/health");
+        expect(page.status).toBe(200);
+        expect(page.text).toContain("Database Save Health");
+      },
+    );
+  });
+
+  it("blocks /api/health in production without a valid token", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        const res = await request(app).get("/api/health");
+        expect(res.status).toBe(401);
+        expect(res.body).toEqual({ error: "Unauthorized" });
+        // No internals leak in the unauthorized body.
+        expect(JSON.stringify(res.body)).not.toContain("writeSuccesses");
+      },
+    );
+  });
+
+  it("blocks /api/health when the token is wrong", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        const res = await request(app).get("/api/health?token=nope");
+        expect(res.status).toBe(401);
+      },
+    );
+  });
+
+  it("allows /api/health with the token via query, x-health-token, or Bearer", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        const viaQuery = await request(app).get("/api/health?token=s3cret");
+        expect(viaQuery.status).toBe(200);
+        expect(viaQuery.body.status).toBe("ok");
+
+        const viaHeader = await request(app)
+          .get("/api/health")
+          .set("x-health-token", "s3cret");
+        expect(viaHeader.status).toBe(200);
+
+        const viaBearer = await request(app)
+          .get("/api/health")
+          .set("Authorization", "Bearer s3cret");
+        expect(viaBearer.status).toBe(200);
+      },
+    );
+  });
+
+  it("serves a token prompt (no internals) for /health when locked", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        const res = await request(app).get("/health");
+        expect(res.status).toBe(401);
+        expect(res.text).toContain("On-call token required");
+        // The real dashboard markup must not be served when locked.
+        expect(res.text).not.toContain("Per-table status");
+      },
+    );
+  });
+
+  it("serves the dashboard for /health with a valid token", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        const res = await request(app).get("/health?token=s3cret");
+        expect(res.status).toBe(200);
+        expect(res.text).toContain("Per-table status");
+      },
+    );
+  });
+});
