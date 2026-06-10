@@ -312,7 +312,20 @@ app.use((req, res, next) => {
       );
     }
   }
-  
+
+  // The save-health page (/health + /api/health) is gated in production: access
+  // is denied unless a valid HEALTH_STATUS_TOKEN or an authenticated app session
+  // is presented. If the token is unset after a Publish, the page is only
+  // reachable via an authenticated app session — the bookmark/uptime-monitor
+  // (?token=) path is effectively disabled. Surface a loud startup warning so
+  // that misconfiguration is noticed right after deploy, not when an operator
+  // can't open /health during an incident. Silent in dev and when set.
+  if (process.env.NODE_ENV === "production" && !process.env.HEALTH_STATUS_TOKEN) {
+    console.warn(
+      "[Health] HEALTH_STATUS_TOKEN not set — /health and /api/health are reachable only via an authenticated app session (shared-token / bookmark / uptime-monitor access is disabled). Set HEALTH_STATUS_TOKEN to enable on-call token access.",
+    );
+  }
+
   // Setup Replit Auth (Google, GitHub, etc.) BEFORE other routes
   try {
     await setupAuth(app);
