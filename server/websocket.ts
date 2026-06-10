@@ -13,6 +13,7 @@ import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
+import { sendCallToAirAtoma } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1835,6 +1836,36 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (memUserId && memPhone && memTranscript.length > 0) {
         void summarizeAndSaveContactMemory(memUserId, memPhone, memTranscript)
           .catch((err) => log(`[ContactMemory] save failed: ${err}`, "websocket"));
+      }
+
+      // AirAtoma CRM: push the finished call's transcript to the external webhook
+      // (POST /api/talkhint/webhook). Detached + best-effort — like the contact
+      // summarization above it makes a network call, so it must NEVER block call
+      // teardown. No-op unless AIRATOMA_WEBHOOK_URL is configured.
+      const airCallSid = callSid;
+      const airDurationSecs = (Date.now() - new Date(startTime).getTime()) / 1000;
+      if (memUserId && airCallSid && memTranscript.length > 0) {
+        void (async () => {
+          // callerName = the contact's saved name, falling back to their phone.
+          let callerName = memPhone || "Unknown";
+          if (memPhone) {
+            try {
+              const mem = await storage.getContactMemory(memUserId, memPhone);
+              if (mem?.name && mem.name.trim()) callerName = mem.name.trim();
+            } catch {
+              // fall back to phone number on lookup failure
+            }
+          }
+          await sendCallToAirAtoma(
+            {
+              callId: airCallSid,
+              transcript: memTranscript,
+              callerName,
+              durationSecs: airDurationSecs,
+            },
+            (m) => log(m, "websocket"),
+          );
+        })().catch((err) => log(`[AirAtoma] send failed: ${err}`, "websocket"));
       }
 
       // Clear keepalive interval
