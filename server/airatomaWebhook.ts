@@ -20,6 +20,9 @@ export interface AirAtomaCallInput {
   callerName: string;
   durationSecs: number;
   recordingUrl?: string | null;
+  // Per-user destination. When set, the call goes to this user's personal
+  // AirAtoma webhook instead of the server-wide AIRATOMA_WEBHOOK_URL env var.
+  targetUrl?: string | null;
 }
 
 // The JSON body AirAtoma's webhook expects.
@@ -81,14 +84,21 @@ export interface AirAtomaPostResult {
 export async function attemptAirAtomaPost(
   payload: AirAtomaPayload,
   logger: Logger = defaultLogger,
+  targetUrl?: string | null,
 ): Promise<AirAtomaPostResult> {
-  const url = process.env.AIRATOMA_WEBHOOK_URL;
+  // Prefer the per-user destination; fall back to the server-wide env var so
+  // the existing single-tenant setup keeps working unchanged.
+  const url = targetUrl || process.env.AIRATOMA_WEBHOOK_URL;
   const cfg = airAtomaConfigError(url);
   if (cfg) return { ok: false, error: `config:${cfg}` };
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // SECURITY: only attach the shared secret when sending to the operator-configured
+  // endpoint (the env URL). Never leak it to a user-supplied personal webhook URL —
+  // otherwise any user could harvest the secret by pointing their URL at themselves.
   const secret = process.env.TALKHINT_WEBHOOK_SECRET;
-  if (secret) headers["x-talkhint-secret"] = secret;
+  const isTrustedDestination = !!url && url === process.env.AIRATOMA_WEBHOOK_URL;
+  if (secret && isTrustedDestination) headers["x-talkhint-secret"] = secret;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AIRATOMA_TIMEOUT_MS);
@@ -146,6 +156,44 @@ export function buildAirAtomaPayload(input: AirAtomaCallInput): AirAtomaPayload 
 export function airAtomaConfigError(url: string | undefined | null): "unset" | "invalid" | null {
   if (!url) return "unset";
   if (!/^https?:\/\//.test(url)) return "invalid";
+  return null;
+}
+
+// Validate a USER-supplied webhook URL before saving it. Beyond requiring http(s),
+// this blocks SSRF-prone destinations (loopback, link-local/cloud-metadata, and
+// RFC1918 private ranges) and embedded credentials. Returns an error code or null
+// when the URL is an acceptable public endpoint. (DNS rebinding — a public name
+// that resolves to a private IP — is a residual risk not covered by literal checks.)
+export function validateUserWebhookUrl(raw: string): "invalid_url" | "invalid_scheme" | "has_credentials" | "private_host" | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "invalid_url";
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return "invalid_scheme";
+  if (u.username || u.password) return "has_credentials";
+
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host === "metadata") {
+    return "private_host";
+  }
+  // Reject ALL IPv6 literals. A real public AirAtoma endpoint uses a hostname, so
+  // disallowing IPv6 literals outright cleanly blocks loopback (::1), link-local
+  // (fe80::/10), unique-local (fc00::/7), site-local (fec0::/10) and IPv4-mapped
+  // forms (::ffff:127.0.0.1) without fragile per-range parsing of normalized text.
+  if (host.includes(":")) return "private_host";
+  // IPv4 literal private / loopback / link-local / reserved ranges
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 0 || a === 10 || a === 127) return "private_host";
+    if (a === 172 && b >= 16 && b <= 31) return "private_host";
+    if (a === 192 && b === 168) return "private_host";
+    if (a === 169 && b === 254) return "private_host"; // link-local + cloud metadata
+    if (a >= 224) return "private_host"; // multicast / reserved
+  }
   return null;
 }
 

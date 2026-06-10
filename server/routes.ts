@@ -20,6 +20,7 @@ import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pus
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
 import { deriveOtherPartyPhone } from "./contactMemory";
 import { pendingCalls, users, phoneNumbers, deviceTokens } from "@shared/schema";
+import { validateUserWebhookUrl } from "./airatomaWebhook";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
@@ -1665,6 +1666,51 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       res.json({ success: true, forwardingPhone: normalized });
     } catch (error: any) {
       console.error("[Settings] Forwarding update error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Per-user AirAtoma webhook URL. Each user can point their finished-call
+  // transcripts at their own AirAtoma CRM endpoint. Empty value clears it (and
+  // the server then falls back to the AIRATOMA_WEBHOOK_URL env var, if set).
+  app.get("/api/settings/airatoma", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const [dbUser] = await db.select().from(users).where(eq(users.id, user.id));
+      res.json({ airatomaWebhookUrl: dbUser?.airatomaWebhookUrl || null });
+    } catch (error: any) {
+      console.error("[Settings] AirAtoma get error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/settings/airatoma", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { airatomaWebhookUrl } = req.body;
+
+      const trimmed = typeof airatomaWebhookUrl === "string" ? airatomaWebhookUrl.trim() : "";
+      // Allow empty to clear; otherwise require a safe public http(s) URL (blocks
+      // SSRF-prone destinations: loopback/private/link-local/metadata, credentials).
+      if (trimmed) {
+        const err = validateUserWebhookUrl(trimmed);
+        if (err === "private_host") {
+          return res.status(400).json({ error: "Этот адрес недоступен. Укажите публичный URL вашего AirAtoma." });
+        }
+        if (err) {
+          return res.status(400).json({ error: "Введите корректный URL, начинающийся с http:// или https://" });
+        }
+      }
+
+      const normalized = trimmed || null;
+      await db.update(users)
+        .set({ airatomaWebhookUrl: normalized })
+        .where(eq(users.id, user.id));
+
+      console.log(`[Settings] User ${user.id} updated AirAtoma webhook URL (${normalized ? "set" : "cleared"})`);
+      res.json({ success: true, airatomaWebhookUrl: normalized });
+    } catch (error: any) {
+      console.error("[Settings] AirAtoma update error:", error);
       res.status(500).json({ error: error.message });
     }
   });

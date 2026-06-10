@@ -68,26 +68,30 @@ export async function deliverCallToAirAtoma(
   input: AirAtomaCallInput,
   logger: Logger = defaultLogger,
 ): Promise<void> {
-  const cfg = airAtomaConfigError(process.env.AIRATOMA_WEBHOOK_URL);
-  if (cfg === "unset") return; // integration off — nothing to queue
+  // Destination is the call owner's personal URL, falling back to the server-wide
+  // env var so the existing single-tenant setup keeps working unchanged.
+  const targetUrl = input.targetUrl || process.env.AIRATOMA_WEBHOOK_URL;
+  const cfg = airAtomaConfigError(targetUrl);
+  if (cfg === "unset") return; // no URL for this user/server — nothing to queue
   if (cfg === "invalid") {
-    logger(`[AirAtoma] Invalid AIRATOMA_WEBHOOK_URL — skipping send for call ${input.callId}`);
+    logger(`[AirAtoma] Invalid webhook URL — skipping send for call ${input.callId}`);
     return;
   }
 
   const payload = buildAirAtomaPayload(input);
 
-  // Persist BEFORE attempting so a crash mid-send still leaves a row to retry.
-  const row = await storage.enqueueAirAtomaDelivery(payload);
+  // Persist BEFORE attempting (with the destination) so a crash mid-send still
+  // leaves a row to retry — and retries always go to the right user's URL.
+  const row = await storage.enqueueAirAtomaDelivery(payload, targetUrl);
   if (!row) {
     // Could not persist (DB down). Fall back to a one-shot best-effort send so we
     // don't fully regress; without a row there's nothing to retry later.
     logger(`[AirAtoma] Could not persist delivery for call ${payload.callId} — sending once without retry`);
-    await attemptAirAtomaPost(payload, logger);
+    await attemptAirAtomaPost(payload, logger, targetUrl);
     return;
   }
 
-  const result = await attemptAirAtomaPost(payload, logger);
+  const result = await attemptAirAtomaPost(payload, logger, targetUrl);
   await recordAttempt(row.id, payload.callId, row.attempts + 1, result.ok, result.error, logger);
 }
 
@@ -96,17 +100,21 @@ export async function deliverCallToAirAtoma(
 export async function processDueAirAtomaDeliveries(
   logger: Logger = defaultLogger,
 ): Promise<number> {
-  // If the URL has been removed, leave rows untouched (they'll resume when it's
-  // restored) rather than burning attempts against a missing endpoint.
-  if (airAtomaConfigError(process.env.AIRATOMA_WEBHOOK_URL)) return 0;
-
   const due = await storage.getDueAirAtomaDeliveries(BATCH_SIZE);
+  let attempted = 0;
   for (const row of due) {
     const payload = row.payload as AirAtomaPayload;
-    const result = await attemptAirAtomaPost(payload, logger);
+    // Each row carries its own destination (the owning user's URL captured at
+    // enqueue), falling back to the env var for legacy rows.
+    const targetUrl = row.targetUrl || process.env.AIRATOMA_WEBHOOK_URL;
+    // If that URL is missing/invalid (e.g. the user cleared it), leave the row
+    // untouched so it resumes when a valid URL is restored — don't burn attempts.
+    if (airAtomaConfigError(targetUrl)) continue;
+    const result = await attemptAirAtomaPost(payload, logger, targetUrl);
     await recordAttempt(row.id, payload.callId, row.attempts + 1, result.ok, result.error, logger);
+    attempted++;
   }
-  return due.length;
+  return attempted;
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;

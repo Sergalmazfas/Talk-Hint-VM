@@ -4,8 +4,10 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Phone, LogOut, Crown, Check } from "lucide-react";
+import { Phone, LogOut, Crown, Check, Webhook } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface PhoneNumber {
@@ -22,6 +24,8 @@ export default function Dashboard() {
   const [numbers, setNumbers] = useState<PhoneNumber[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSubscribeDialog, setShowSubscribeDialog] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [savingWebhook, setSavingWebhook] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -43,10 +47,56 @@ export default function Dashboard() {
         const data = await numbersRes.json();
         setNumbers(data.numbers || []);
       }
+
+      const webhookRes = await fetch("/api/settings/airatoma", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (webhookRes.ok) {
+        const data = await webhookRes.json();
+        setWebhookUrl(data.airatomaWebhookUrl || "");
+      }
     } catch (error) {
       console.error("Failed to fetch data:", error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveWebhook() {
+    setSavingWebhook(true);
+    try {
+      const res = await fetch("/api/settings/airatoma", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ airatomaWebhookUrl: webhookUrl.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWebhookUrl(data.airatomaWebhookUrl || "");
+        toast({
+          title: "Сохранено",
+          description: data.airatomaWebhookUrl
+            ? "Транскрипты звонков будут отправляться на ваш webhook."
+            : "Персональный webhook очищен.",
+        });
+      } else {
+        toast({
+          title: "Не удалось сохранить",
+          description: data.error || "Проверьте URL и попробуйте снова.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Ошибка сети",
+        description: "Не удалось сохранить webhook. Попробуйте снова.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingWebhook(false);
     }
   }
 
@@ -178,6 +228,43 @@ export default function Dashboard() {
 {/* FROZEN: Work Number upsell hidden for Basic plan simplification */}
             </div>
           )}
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-xl font-semibold text-white flex items-center gap-2 mb-6">
+            <Webhook className="w-5 h-5 text-cyan-400" />
+            AirAtoma Webhook
+          </h2>
+          <Card className="bg-gray-800/50 border-gray-700">
+            <CardContent className="py-6 space-y-3">
+              <Label htmlFor="airatoma-webhook" className="text-gray-300">
+                Ваш персональный webhook URL
+              </Label>
+              <p className="text-gray-400 text-sm">
+                После каждого звонка транскрипт автоматически отправится на этот адрес.
+                Оставьте поле пустым, чтобы отключить.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Input
+                  id="airatoma-webhook"
+                  type="url"
+                  placeholder="https://ваш-airatoma.example.com/api/talkhint/webhook"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  className="bg-gray-900 border-gray-600 text-white"
+                  data-testid="input-airatoma-webhook"
+                />
+                <Button
+                  onClick={saveWebhook}
+                  disabled={savingWebhook}
+                  className="bg-cyan-600 hover:bg-cyan-700 shrink-0"
+                  data-testid="button-save-airatoma-webhook"
+                >
+                  {savingWebhook ? "Сохранение..." : "Сохранить"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </section>
       </main>
 

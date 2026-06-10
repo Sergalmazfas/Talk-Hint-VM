@@ -17,6 +17,7 @@ export const users = pgTable("users", {
   authProvider: text("auth_provider").default("email"),
   twilioSubaccountSid: text("twilio_subaccount_sid"),
   twilioSubaccountToken: text("twilio_subaccount_token"),
+  airatomaWebhookUrl: text("airatoma_webhook_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -254,6 +255,7 @@ export const airatomaDeliveries = pgTable("airatoma_deliveries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   callId: text("call_id").notNull().unique(),
   payload: jsonb("payload").notNull(),
+  targetUrl: text("target_url"),
   status: text("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"),

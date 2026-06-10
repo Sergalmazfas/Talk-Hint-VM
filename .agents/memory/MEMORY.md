@@ -11,3 +11,4 @@
 - [iOS XcodeGen source globbing](ios-xcodegen-sources.md) — new .swift files under ios/TalkHint auto-included via project.yml; no pbxproj edits, prefer one file per VC.
 - [Web has no call history view](web-no-call-history.md) — only iOS renders /api/calls; talkhint/ui has Contacts + live-call only, React client has none.
 - [Write-health alerter conventions](write-health-alerter.md) — checkWriteHealthOnce return counts only failure alerts (not recoveries); recovery needs NEW writeSuccesses + sustained window.
+- [AirAtoma per-user webhook security](airatoma-per-user-webhook-security.md) — shared secret ONLY to env URL (never user URLs); SSRF guard rejects private IPv4 + all IPv6 literals before save.

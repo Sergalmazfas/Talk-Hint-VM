@@ -1856,12 +1856,24 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               // fall back to phone number on lookup failure
             }
           }
+          // Per-user destination: send to the call owner's personal AirAtoma URL.
+          // Falls back to the server-wide env var inside deliverCallToAirAtoma.
+          let targetUrl: string | null = null;
+          try {
+            const owner = await storage.getUser(memUserId);
+            if (owner?.airatomaWebhookUrl && owner.airatomaWebhookUrl.trim()) {
+              targetUrl = owner.airatomaWebhookUrl.trim();
+            }
+          } catch {
+            // fall back to env-configured URL on lookup failure
+          }
           await deliverCallToAirAtoma(
             {
               callId: airCallSid,
               transcript: memTranscript,
               callerName,
               durationSecs: airDurationSecs,
+              targetUrl,
             },
             (m) => log(m, "websocket"),
           );

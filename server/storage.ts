@@ -341,7 +341,7 @@ export interface IStorage {
   deleteKnowledgeCardById(userId: string, id: string): Promise<boolean>;
 
   // AirAtoma delivery queue (durable retry of the outbound CRM webhook)
-  enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload): Promise<AiratomaDelivery | undefined>;
+  enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload, targetUrl?: string | null): Promise<AiratomaDelivery | undefined>;
   getDueAirAtomaDeliveries(limit: number): Promise<AiratomaDelivery[]>;
   markAirAtomaDeliverySucceeded(id: string, attempts: number): Promise<void>;
   markAirAtomaDeliveryRetry(id: string, attempts: number, nextAttemptAt: Date, error: string | null): Promise<void>;
@@ -415,6 +415,7 @@ export class DatabaseStorage implements IStorage {
         stripeSubscriptionId: null,
         twilioSubaccountSid: null,
         twilioSubaccountToken: null,
+        airatomaWebhookUrl: null,
         createdAt: new Date(),
       };
       memoryUsers.set(newUser.id, newUser);
@@ -442,6 +443,7 @@ export class DatabaseStorage implements IStorage {
         stripeSubscriptionId: null,
         twilioSubaccountSid: null,
         twilioSubaccountToken: null,
+        airatomaWebhookUrl: null,
         createdAt: new Date(),
       };
       memoryUsers.set(fallbackUser.id, fallbackUser);
@@ -1147,13 +1149,14 @@ export class DatabaseStorage implements IStorage {
   // Buffer a finished call's webhook payload so it can be retried if AirAtoma is
   // unreachable. Keyed by callId (one row per call); a re-ended call refreshes
   // the payload and re-arms the row as pending so it sends again.
-  async enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload): Promise<AiratomaDelivery | undefined> {
+  async enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload, targetUrl?: string | null): Promise<AiratomaDelivery | undefined> {
     if (!isDatabaseAvailable()) return undefined;
     try {
       const [row] = await db.insert(airatomaDeliveries)
         .values({
           callId: payload.callId,
           payload,
+          targetUrl: targetUrl ?? null,
           status: "pending",
           attempts: 0,
           nextAttemptAt: new Date(),
@@ -1162,6 +1165,7 @@ export class DatabaseStorage implements IStorage {
           target: airatomaDeliveries.callId,
           set: {
             payload,
+            targetUrl: targetUrl ?? null,
             status: "pending",
             attempts: 0,
             lastError: null,

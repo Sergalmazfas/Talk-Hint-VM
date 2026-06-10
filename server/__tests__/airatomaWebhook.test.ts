@@ -9,6 +9,8 @@ import { describe, it, expect } from "vitest";
 // These are dependency-free, so no DB / Deepgram / server bootstrap is needed.
 // ---------------------------------------------------------------------------
 
+import { afterEach, vi } from "vitest";
+
 const {
   renderTranscriptText,
   buildAirAtomaPayload,
@@ -16,6 +18,8 @@ const {
   airAtomaBackoffMs,
   decideAirAtomaOutcome,
   MAX_AIRATOMA_ATTEMPTS,
+  validateUserWebhookUrl,
+  attemptAirAtomaPost,
 } = await import("../airatomaWebhook");
 
 describe("renderTranscriptText", () => {
@@ -144,5 +148,84 @@ describe("decideAirAtomaOutcome", () => {
   it("gives up once the attempt budget is exhausted", () => {
     expect(decideAirAtomaOutcome(MAX_AIRATOMA_ATTEMPTS, false)).toBe("failed");
     expect(decideAirAtomaOutcome(MAX_AIRATOMA_ATTEMPTS + 1, false)).toBe("failed");
+  });
+});
+
+describe("validateUserWebhookUrl (SSRF guard)", () => {
+  it("accepts a normal public https URL", () => {
+    expect(validateUserWebhookUrl("https://crm.example.com/api/talkhint/webhook")).toBeNull();
+    expect(validateUserWebhookUrl("http://crm.example.com/hook")).toBeNull();
+  });
+
+  it("rejects non-http(s) schemes and malformed URLs", () => {
+    expect(validateUserWebhookUrl("ftp://example.com")).toBe("invalid_scheme");
+    expect(validateUserWebhookUrl("file:///etc/passwd")).toBe("invalid_scheme");
+    expect(validateUserWebhookUrl("not a url")).toBe("invalid_url");
+  });
+
+  it("rejects embedded credentials", () => {
+    expect(validateUserWebhookUrl("https://user:pass@example.com/hook")).toBe("has_credentials");
+  });
+
+  it("blocks loopback, private, link-local and metadata hosts", () => {
+    expect(validateUserWebhookUrl("http://localhost/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://127.0.0.1/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://10.0.0.5/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://172.16.0.1/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://192.168.1.1/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://169.254.169.254/latest/meta-data")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://svc.internal/hook")).toBe("private_host");
+  });
+
+  it("blocks IPv6 literals (loopback, link-local, ULA, IPv4-mapped)", () => {
+    expect(validateUserWebhookUrl("http://[::1]/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://[::]/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://[fe80::1]/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://[fc00::1]/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://[fd00::1]/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://[::ffff:127.0.0.1]/hook")).toBe("private_host");
+    expect(validateUserWebhookUrl("http://[2606:4700::1]/hook")).toBe("private_host");
+  });
+});
+
+describe("attemptAirAtomaPost secret handling", () => {
+  const ENV_URL = "https://trusted-airatoma.example.com/hook";
+  const USER_URL = "https://user-controlled.example.com/hook";
+  const payload = { callId: "CA1", transcript: "x", callerName: "Y", durationSecs: 1 };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.AIRATOMA_WEBHOOK_URL;
+    delete process.env.TALKHINT_WEBHOOK_SECRET;
+  });
+
+  function stubFetch() {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as any);
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("does NOT send x-talkhint-secret to a user-supplied URL", async () => {
+    process.env.AIRATOMA_WEBHOOK_URL = ENV_URL;
+    process.env.TALKHINT_WEBHOOK_SECRET = "shhh";
+    const fetchMock = stubFetch();
+
+    await attemptAirAtomaPost(payload as any, () => {}, USER_URL);
+
+    const [calledUrl, opts] = fetchMock.mock.calls[0];
+    expect(calledUrl).toBe(USER_URL);
+    expect((opts.headers as Record<string, string>)["x-talkhint-secret"]).toBeUndefined();
+  });
+
+  it("DOES send x-talkhint-secret to the operator-configured env URL", async () => {
+    process.env.AIRATOMA_WEBHOOK_URL = ENV_URL;
+    process.env.TALKHINT_WEBHOOK_SECRET = "shhh";
+    const fetchMock = stubFetch();
+
+    await attemptAirAtomaPost(payload as any, () => {}, ENV_URL);
+
+    const [calledUrl, opts] = fetchMock.mock.calls[0];
+    expect(calledUrl).toBe(ENV_URL);
+    expect((opts.headers as Record<string, string>)["x-talkhint-secret"]).toBe("shhh");
   });
 });

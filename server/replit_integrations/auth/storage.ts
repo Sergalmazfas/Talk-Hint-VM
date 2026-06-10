@@ -45,6 +45,7 @@ class AuthStorage implements IAuthStorage {
       stripeSubscriptionId: null,
       twilioSubaccountSid: null,
       twilioSubaccountToken: null,
+      airatomaWebhookUrl: null,
       createdAt: new Date(),
     };
 
