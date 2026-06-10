@@ -9,8 +9,14 @@ import { describe, it, expect } from "vitest";
 // These are dependency-free, so no DB / Deepgram / server bootstrap is needed.
 // ---------------------------------------------------------------------------
 
-const { renderTranscriptText, buildAirAtomaPayload, airAtomaConfigError } =
-  await import("../airatomaWebhook");
+const {
+  renderTranscriptText,
+  buildAirAtomaPayload,
+  airAtomaConfigError,
+  airAtomaBackoffMs,
+  decideAirAtomaOutcome,
+  MAX_AIRATOMA_ATTEMPTS,
+} = await import("../airatomaWebhook");
 
 describe("renderTranscriptText", () => {
   it("joins turns as 'Speaker: text' lines", () => {
@@ -102,5 +108,41 @@ describe("airAtomaConfigError", () => {
   it("accepts http and https URLs", () => {
     expect(airAtomaConfigError("http://localhost:3000/api/talkhint/webhook")).toBeNull();
     expect(airAtomaConfigError("https://airatoma.example/api/talkhint/webhook")).toBeNull();
+  });
+});
+
+describe("airAtomaBackoffMs", () => {
+  it("doubles each attempt starting at 30s", () => {
+    expect(airAtomaBackoffMs(1)).toBe(30_000);
+    expect(airAtomaBackoffMs(2)).toBe(60_000);
+    expect(airAtomaBackoffMs(3)).toBe(120_000);
+    expect(airAtomaBackoffMs(4)).toBe(240_000);
+  });
+
+  it("caps the delay at 30 minutes", () => {
+    expect(airAtomaBackoffMs(7)).toBe(30 * 60_000);
+    expect(airAtomaBackoffMs(50)).toBe(30 * 60_000);
+  });
+
+  it("treats attempt counts below 1 as the first attempt", () => {
+    expect(airAtomaBackoffMs(0)).toBe(30_000);
+    expect(airAtomaBackoffMs(-3)).toBe(30_000);
+  });
+});
+
+describe("decideAirAtomaOutcome", () => {
+  it("marks a successful attempt delivered", () => {
+    expect(decideAirAtomaOutcome(1, true)).toBe("delivered");
+    expect(decideAirAtomaOutcome(MAX_AIRATOMA_ATTEMPTS, true)).toBe("delivered");
+  });
+
+  it("retries a failure while attempts remain", () => {
+    expect(decideAirAtomaOutcome(1, false)).toBe("retry");
+    expect(decideAirAtomaOutcome(MAX_AIRATOMA_ATTEMPTS - 1, false)).toBe("retry");
+  });
+
+  it("gives up once the attempt budget is exhausted", () => {
+    expect(decideAirAtomaOutcome(MAX_AIRATOMA_ATTEMPTS, false)).toBe("failed");
+    expect(decideAirAtomaOutcome(MAX_AIRATOMA_ATTEMPTS + 1, false)).toBe("failed");
   });
 });

@@ -243,3 +243,32 @@ export const insertDeviceTokenSchema = createInsertSchema(deviceTokens).omit({
 
 export type InsertDeviceToken = z.infer<typeof insertDeviceTokenSchema>;
 export type DeviceToken = typeof deviceTokens.$inferSelect;
+
+// Persistent retry queue for outbound AirAtoma webhook deliveries. After a call
+// ends its transcript is POSTed to the AirAtoma CRM; if AirAtoma is briefly
+// unreachable (timeout, 5xx, network blip) the payload is buffered here and
+// retried with backoff so no call summary is lost. AirAtoma dedupes on callId
+// (Twilio CallSid), so re-sends are always safe. `status` is "pending" (still to
+// deliver / retry), "delivered" (succeeded) or "failed" (retries exhausted).
+export const airatomaDeliveries = pgTable("airatoma_deliveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  callId: text("call_id").notNull().unique(),
+  payload: jsonb("payload").notNull(),
+  status: text("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  nextAttemptAt: timestamp("next_attempt_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  dueIdx: index("airatoma_deliveries_status_next_idx").on(t.status, t.nextAttemptAt),
+}));
+
+export const insertAiratomaDeliverySchema = createInsertSchema(airatomaDeliveries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAiratomaDelivery = z.infer<typeof insertAiratomaDeliverySchema>;
+export type AiratomaDelivery = typeof airatomaDeliveries.$inferSelect;

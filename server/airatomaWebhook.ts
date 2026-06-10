@@ -39,6 +39,84 @@ const defaultLogger: Logger = (message) => console.log(message);
 // never leave a fetch hanging and accumulating in memory across many calls.
 export const AIRATOMA_TIMEOUT_MS = 5000;
 
+// Retry policy for the persistent delivery queue. A failed/timed-out send is
+// buffered and retried with exponential backoff (30s, 60s, 120s, … capped at
+// 30min) until it succeeds or MAX_AIRATOMA_ATTEMPTS is reached, after which the
+// row is marked "failed" so operators can see it stopped retrying.
+export const MAX_AIRATOMA_ATTEMPTS = 8;
+const AIRATOMA_BACKOFF_BASE_MS = 30_000;
+const AIRATOMA_BACKOFF_CAP_MS = 30 * 60_000;
+
+// Milliseconds to wait before the next attempt, given how many attempts have
+// already been made (>= 1). Pure + exported so the backoff curve is unit-testable.
+export function airAtomaBackoffMs(attemptsMade: number): number {
+  const n = Math.max(1, Math.floor(attemptsMade));
+  const ms = AIRATOMA_BACKOFF_BASE_MS * 2 ** (n - 1);
+  return Math.min(ms, AIRATOMA_BACKOFF_CAP_MS);
+}
+
+// Given how many attempts have been made and whether the latest one succeeded,
+// decide the row's next state. Pure + exported for testing.
+export function decideAirAtomaOutcome(
+  attemptsMade: number,
+  ok: boolean,
+): "delivered" | "retry" | "failed" {
+  if (ok) return "delivered";
+  return attemptsMade >= MAX_AIRATOMA_ATTEMPTS ? "failed" : "retry";
+}
+
+// Result of a single POST attempt. Unlike sendCallToAirAtoma this surfaces the
+// outcome instead of swallowing it, so the delivery queue can decide whether to
+// mark the row delivered, schedule a retry, or give up.
+export interface AirAtomaPostResult {
+  ok: boolean;
+  status?: number;
+  error?: string;
+}
+
+// Perform a single best-effort POST of an already-built payload. Never throws —
+// returns { ok } so callers can persist the outcome. Reads AIRATOMA_WEBHOOK_URL
+// and TALKHINT_WEBHOOK_SECRET from the environment; assumes the URL has already
+// passed airAtomaConfigError (returns ok:false with a config error otherwise).
+export async function attemptAirAtomaPost(
+  payload: AirAtomaPayload,
+  logger: Logger = defaultLogger,
+): Promise<AirAtomaPostResult> {
+  const url = process.env.AIRATOMA_WEBHOOK_URL;
+  const cfg = airAtomaConfigError(url);
+  if (cfg) return { ok: false, error: `config:${cfg}` };
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const secret = process.env.TALKHINT_WEBHOOK_SECRET;
+  if (secret) headers["x-talkhint-secret"] = secret;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AIRATOMA_TIMEOUT_MS);
+  try {
+    const res = await fetch(url as string, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (res.ok) {
+      logger(`[AirAtoma] Sent call ${payload.callId} (status ${res.status})`);
+      return { ok: true, status: res.status };
+    }
+    logger(`[AirAtoma] Webhook returned ${res.status} for call ${payload.callId}`);
+    return { ok: false, status: res.status, error: `http_${res.status}` };
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      logger(`[AirAtoma] Webhook timed out after ${AIRATOMA_TIMEOUT_MS}ms for call ${payload.callId}`);
+      return { ok: false, error: "timeout" };
+    }
+    logger(`[AirAtoma] Webhook send failed for call ${payload.callId}: ${err?.message || err}`);
+    return { ok: false, error: String(err?.message || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Flatten a transcript into "Speaker: text" lines. Unlike the contact-memory
 // summarizer this is NOT capped — AirAtoma should receive the full transcript.
 export function renderTranscriptText(turns: CallTurn[]): string {
@@ -87,32 +165,5 @@ export async function sendCallToAirAtoma(
   }
 
   const payload = buildAirAtomaPayload(input);
-
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const secret = process.env.TALKHINT_WEBHOOK_SECRET;
-  if (secret) headers["x-talkhint-secret"] = secret;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AIRATOMA_TIMEOUT_MS);
-  try {
-    const res = await fetch(url as string, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    if (res.ok) {
-      logger(`[AirAtoma] Sent call ${payload.callId} (status ${res.status})`);
-    } else {
-      logger(`[AirAtoma] Webhook returned ${res.status} for call ${payload.callId}`);
-    }
-  } catch (err: any) {
-    if (err?.name === "AbortError") {
-      logger(`[AirAtoma] Webhook timed out after ${AIRATOMA_TIMEOUT_MS}ms for call ${payload.callId}`);
-    } else {
-      logger(`[AirAtoma] Webhook send failed for call ${payload.callId}: ${err?.message || err}`);
-    }
-  } finally {
-    clearTimeout(timer);
-  }
+  await attemptAirAtomaPost(payload, logger);
 }

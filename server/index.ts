@@ -7,6 +7,7 @@ import { setupAuth, registerAuthRoutes } from "./replit_integrations/auth";
 import { storage } from "./storage";
 import { repointWebhooksOnStartup } from "./webhookRepoint";
 import { startWriteHealthAlerter, stopWriteHealthAlerter, getAlertChannelStatus } from "./writeHealthAlerter";
+import { startAirAtomaRetryWorker, stopAirAtomaRetryWorker } from "./airatomaRetryWorker";
 
 const app = express();
 app.set('trust proxy', true);
@@ -286,6 +287,11 @@ app.use((req, res, next) => {
     // for someone to poll /api/health. Opt out with DISABLE_WRITE_HEALTH_ALERTS.
     startWriteHealthAlerter();
 
+    // Durably retry failed AirAtoma webhook deliveries so a brief CRM outage
+    // never drops a finished call's transcript. No-op until AIRATOMA_WEBHOOK_URL
+    // is set; opt out with DISABLE_AIRATOMA_RETRY=true.
+    startAirAtomaRetryWorker();
+
     // The alerter is only useful if a delivery channel can actually reach a
     // human. Like the schema-drift check above, surface a loud startup warning
     // when no channel is ready so a broken alerting setup is visible right after
@@ -357,6 +363,7 @@ app.use((req, res, next) => {
     console.log(`\n[Server] Received ${signal} at ${new Date().toISOString()}`);
     console.log("[Server] Starting graceful shutdown...");
     stopWriteHealthAlerter();
+    stopAirAtomaRetryWorker();
     
     // Close HTTP server (stop accepting new connections)
     httpServer.close((err) => {

@@ -13,7 +13,7 @@ import { pendingCalls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
-import { sendCallToAirAtoma } from "./airatomaWebhook";
+import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { routeGenerate } from "./hintProvider";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1856,7 +1856,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               // fall back to phone number on lookup failure
             }
           }
-          await sendCallToAirAtoma(
+          await deliverCallToAirAtoma(
             {
               callId: airCallSid,
               transcript: memTranscript,

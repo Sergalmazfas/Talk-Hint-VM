@@ -8,10 +8,11 @@ import {
   type Session,
   type ContactMemory,
   type KnowledgeCard, type InsertKnowledgeCard,
-  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards
+  type AiratomaDelivery,
+  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards, airatomaDeliveries
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
-import { eq, and, sql, gt, desc, getTableColumns } from "drizzle-orm";
+import { eq, and, or, sql, gt, lte, desc, asc, getTableColumns } from "drizzle-orm";
 import { configureVoiceWebhook } from "./twilioService";
 import { resolveProductionBaseUrl } from "./baseUrl";
 
@@ -159,6 +160,7 @@ const APP_TABLES: Record<string, any> = {
   knowledge_cards: knowledgeCards,
   available_numbers: availableNumbers,
   sessions,
+  airatoma_deliveries: airatomaDeliveries,
 };
 
 // Compare the columns the Drizzle schema declares against what actually exists
@@ -240,6 +242,25 @@ export const memoryUsers = new Map<string, User>();
 export const memorySessions = new Map<string, Session>();
 export const memoryUsersByEmail = new Map<string, User>();
 
+// The JSON body buffered for an AirAtoma delivery (mirrors AirAtomaPayload in
+// ./airatomaWebhook; kept structural to avoid a server->shared import cycle).
+export interface AirAtomaDeliveryPayload {
+  callId: string;
+  transcript: string;
+  callerName: string;
+  durationSecs: number;
+  recordingUrl?: string;
+}
+
+// Operator-facing counts surfaced on GET /api/health so a backlog or a stuck
+// (failed) delivery is visible without reading logs.
+export interface AirAtomaDeliveryStats {
+  pending: number;
+  delivered: number;
+  failed: number;
+  total: number;
+}
+
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
@@ -318,6 +339,14 @@ export interface IStorage {
     sortOrder?: number;
   }): Promise<KnowledgeCard | undefined>;
   deleteKnowledgeCardById(userId: string, id: string): Promise<boolean>;
+
+  // AirAtoma delivery queue (durable retry of the outbound CRM webhook)
+  enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload): Promise<AiratomaDelivery | undefined>;
+  getDueAirAtomaDeliveries(limit: number): Promise<AiratomaDelivery[]>;
+  markAirAtomaDeliverySucceeded(id: string, attempts: number): Promise<void>;
+  markAirAtomaDeliveryRetry(id: string, attempts: number, nextAttemptAt: Date, error: string | null): Promise<void>;
+  markAirAtomaDeliveryFailed(id: string, attempts: number, error: string | null): Promise<void>;
+  getAirAtomaDeliveryStats(): Promise<AirAtomaDeliveryStats>;
 
   // Stripe
   getProduct(productId: string): Promise<any>;
@@ -1111,6 +1140,120 @@ export class DatabaseStorage implements IStorage {
       recordWriteSuccess("sessions");
     } catch (error) {
       recordWriteFailure("sessions", "cleanExpiredSessions", error);
+    }
+  }
+
+  // AirAtoma delivery queue -------------------------------------------------
+  // Buffer a finished call's webhook payload so it can be retried if AirAtoma is
+  // unreachable. Keyed by callId (one row per call); a re-ended call refreshes
+  // the payload and re-arms the row as pending so it sends again.
+  async enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload): Promise<AiratomaDelivery | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.insert(airatomaDeliveries)
+        .values({
+          callId: payload.callId,
+          payload,
+          status: "pending",
+          attempts: 0,
+          nextAttemptAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: airatomaDeliveries.callId,
+          set: {
+            payload,
+            status: "pending",
+            attempts: 0,
+            lastError: null,
+            nextAttemptAt: new Date(),
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+      recordWriteSuccess("airatoma_deliveries");
+      return row;
+    } catch (error) {
+      recordWriteFailure("airatoma_deliveries", "enqueueAirAtomaDelivery", error);
+      return undefined;
+    }
+  }
+
+  // Rows that are still pending and whose backoff window has elapsed, oldest first.
+  async getDueAirAtomaDeliveries(limit: number): Promise<AiratomaDelivery[]> {
+    if (!isDatabaseAvailable()) return [];
+    try {
+      return await db.select()
+        .from(airatomaDeliveries)
+        .where(and(
+          eq(airatomaDeliveries.status, "pending"),
+          lte(airatomaDeliveries.nextAttemptAt, new Date()),
+        ))
+        .orderBy(asc(airatomaDeliveries.nextAttemptAt))
+        .limit(limit);
+    } catch (error) {
+      console.error("[Storage] getDueAirAtomaDeliveries error:", error);
+      return [];
+    }
+  }
+
+  async markAirAtomaDeliverySucceeded(id: string, attempts: number): Promise<void> {
+    if (!isDatabaseAvailable()) return;
+    try {
+      await db.update(airatomaDeliveries)
+        .set({ status: "delivered", attempts, lastError: null, updatedAt: new Date() })
+        .where(eq(airatomaDeliveries.id, id));
+      recordWriteSuccess("airatoma_deliveries");
+    } catch (error) {
+      recordWriteFailure("airatoma_deliveries", "markAirAtomaDeliverySucceeded", error);
+    }
+  }
+
+  async markAirAtomaDeliveryRetry(id: string, attempts: number, nextAttemptAt: Date, error: string | null): Promise<void> {
+    if (!isDatabaseAvailable()) return;
+    try {
+      await db.update(airatomaDeliveries)
+        .set({ status: "pending", attempts, lastError: error, nextAttemptAt, updatedAt: new Date() })
+        .where(eq(airatomaDeliveries.id, id));
+      recordWriteSuccess("airatoma_deliveries");
+    } catch (err) {
+      recordWriteFailure("airatoma_deliveries", "markAirAtomaDeliveryRetry", err);
+    }
+  }
+
+  async markAirAtomaDeliveryFailed(id: string, attempts: number, error: string | null): Promise<void> {
+    if (!isDatabaseAvailable()) return;
+    try {
+      await db.update(airatomaDeliveries)
+        .set({ status: "failed", attempts, lastError: error, updatedAt: new Date() })
+        .where(eq(airatomaDeliveries.id, id));
+      recordWriteSuccess("airatoma_deliveries");
+    } catch (err) {
+      recordWriteFailure("airatoma_deliveries", "markAirAtomaDeliveryFailed", err);
+    }
+  }
+
+  async getAirAtomaDeliveryStats(): Promise<AirAtomaDeliveryStats> {
+    const empty: AirAtomaDeliveryStats = { pending: 0, delivered: 0, failed: 0, total: 0 };
+    if (!isDatabaseAvailable()) return empty;
+    try {
+      const rows = await db.select({
+        status: airatomaDeliveries.status,
+        count: sql<number>`count(*)::int`,
+      })
+        .from(airatomaDeliveries)
+        .groupBy(airatomaDeliveries.status);
+      const stats = { ...empty };
+      for (const r of rows as Array<{ status: string; count: number }>) {
+        const n = Number(r.count) || 0;
+        if (r.status === "pending") stats.pending = n;
+        else if (r.status === "delivered") stats.delivered = n;
+        else if (r.status === "failed") stats.failed = n;
+        stats.total += n;
+      }
+      return stats;
+    } catch (error) {
+      console.error("[Storage] getAirAtomaDeliveryStats error:", error);
+      return empty;
     }
   }
 }

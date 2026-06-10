@@ -88,6 +88,7 @@ const TABLE_DEFS: Record<string, any> = {
   knowledge_cards: schema.knowledgeCards,
   available_numbers: schema.availableNumbers,
   sessions: schema.sessions,
+  airatoma_deliveries: schema.airatomaDeliveries,
 };
 
 const columnsFor = (table: any): string[] =>

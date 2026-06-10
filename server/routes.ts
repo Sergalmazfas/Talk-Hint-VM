@@ -262,6 +262,7 @@ load();
       writes: getWriteHealth(),
       alertChannels: getAlertChannelStatus(),
       writeHealthAlerts: getWriteHealthAlertState(),
+      airatomaDeliveries: await storage.getAirAtomaDeliveryStats(),
     });
   });
 
