@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
 import { createServer } from "http";
 import request from "supertest";
+import { getSessionUserId } from "../auth";
 
 // ---------------------------------------------------------------------------
 // Route-level coverage for /api/health: the endpoint must surface the
@@ -235,12 +236,14 @@ describe("GET /api/health", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Production access gate for the save-health endpoints. The gate is opt-in:
-// it only restricts access in production AND only when HEALTH_STATUS_TOKEN is
-// set. Outside production, or with no token configured, both endpoints stay
-// open (frictionless dev / today's behavior). When locked, the JSON endpoint
-// returns 401 with no internals, and the HTML page returns a token prompt
-// rather than the dashboard.
+// Production access gate for the save-health endpoints. The gate is secure by
+// default in production: access is DENIED unless the requester proves they
+// belong, via either a valid shared on-call token (HEALTH_STATUS_TOKEN, sent as
+// ?token=, an x-health-token header, or a Bearer header) or a valid
+// authenticated app session (the same Bearer session token the /app UI uses).
+// Outside production both endpoints stay open (frictionless dev). When denied,
+// the JSON endpoint returns 401 with no internals, and the HTML page returns a
+// token prompt rather than the dashboard.
 // ---------------------------------------------------------------------------
 describe("save-health access gate", () => {
   function withEnv(
@@ -257,6 +260,11 @@ describe("save-health access gate", () => {
     });
   }
 
+  beforeEach(() => {
+    // Default: no valid session unless a test opts in.
+    vi.mocked(getSessionUserId).mockResolvedValue(undefined);
+  });
+
   it("stays open outside production even when a token is configured", async () => {
     await withEnv(
       { NODE_ENV: "test", HEALTH_STATUS_TOKEN: "s3cret" },
@@ -270,15 +278,18 @@ describe("save-health access gate", () => {
     );
   });
 
-  it("stays open in production when no token is configured (opt-in)", async () => {
+  it("denies access in production when no token is configured and no session", async () => {
     await withEnv(
       { NODE_ENV: "production", HEALTH_STATUS_TOKEN: undefined },
       async () => {
         const api = await request(app).get("/api/health");
-        expect(api.status).toBe(200);
+        expect(api.status).toBe(401);
+        expect(api.body).toEqual({ error: "Unauthorized" });
+
         const page = await request(app).get("/health");
-        expect(page.status).toBe(200);
-        expect(page.text).toContain("Database Save Health");
+        expect(page.status).toBe(401);
+        expect(page.text).toContain("On-call token required");
+        expect(page.text).not.toContain("Per-table status");
       },
     );
   });
@@ -323,6 +334,40 @@ describe("save-health access gate", () => {
           .get("/api/health")
           .set("Authorization", "Bearer s3cret");
         expect(viaBearer.status).toBe(200);
+      },
+    );
+  });
+
+  it("allows a valid session even when a token is configured but the wrong token is sent", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
+      async () => {
+        vi.mocked(getSessionUserId).mockResolvedValue("u1");
+        const res = await request(app)
+          .get("/api/health?token=wrong")
+          .set("Authorization", "Bearer valid-session-token");
+        expect(res.status).toBe(200);
+        expect(res.body.status).toBe("ok");
+      },
+    );
+  });
+
+  it("allows access in production via a valid authenticated app session", async () => {
+    await withEnv(
+      { NODE_ENV: "production", HEALTH_STATUS_TOKEN: undefined },
+      async () => {
+        vi.mocked(getSessionUserId).mockResolvedValue("u1");
+        const api = await request(app)
+          .get("/api/health")
+          .set("Authorization", "Bearer valid-session-token");
+        expect(api.status).toBe(200);
+        expect(api.body.status).toBe("ok");
+
+        const page = await request(app)
+          .get("/health")
+          .set("Authorization", "Bearer valid-session-token");
+        expect(page.status).toBe(200);
+        expect(page.text).toContain("Per-table status");
       },
     );
   });

@@ -12,7 +12,7 @@ import express from "express";
 import fs from "fs";
 import twilio from "twilio";
 import crypto from "crypto";
-import { registerUser, loginUser, createSession, authMiddleware, deleteSession } from "./auth";
+import { registerUser, loginUser, createSession, authMiddleware, deleteSession, getSessionUserId } from "./auth";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
@@ -111,14 +111,16 @@ function validateTwilioSignature(req: express.Request, res: express.Response, ne
 //
 // /health (the human page) and /api/health (its JSON data source) expose
 // operational internals — table names, save-failure counts, schema-drift
-// errors. They contain no secrets or user data, but for a production deployment
-// we let the team gate them behind a shared on-call token. Protection is
-// opt-in: it only activates in production AND only when HEALTH_STATUS_TOKEN is
-// set, so local/dev stays frictionless and existing deployments / uptime
-// monitors don't break until an operator chooses to lock the page down. Env is
-// read live (not at module load) so it can be toggled per request/test. The
-// token may be supplied as ?token=, an x-health-token header, or a Bearer
-// header, and is compared in constant time.
+// errors. They contain no secrets or user data, but they should not be public
+// in production. The gate is *secure by default in production*: access is
+// DENIED unless the requester proves they belong, via either
+//   (1) a valid shared on-call token (HEALTH_STATUS_TOKEN), supplied as
+//       ?token=, an x-health-token header, or a Bearer header (constant-time
+//       compared), or
+//   (2) a valid authenticated app session (the same Bearer session token the
+//       /app UI uses).
+// Outside production the page stays fully open so local/dev is frictionless.
+// Env is read live (not at module load) so it can be toggled per request/test.
 // ---------------------------------------------------------------------------
 function timingSafeEqualStr(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -127,18 +129,35 @@ function timingSafeEqualStr(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ab, bb);
 }
 
-function healthAccessAllowed(req: express.Request): boolean {
+async function healthAccessAllowed(req: express.Request): Promise<boolean> {
   // Frictionless outside production.
   if (process.env.NODE_ENV !== "production") return true;
-  const expected = process.env.HEALTH_STATUS_TOKEN;
-  // Opt-in: no token configured means the page stays open (today's behavior).
-  if (!expected) return true;
+
   const authHeader = req.headers.authorization;
-  const provided =
-    (typeof req.query.token === "string" ? req.query.token : "") ||
-    (typeof req.headers["x-health-token"] === "string" ? (req.headers["x-health-token"] as string) : "") ||
-    (authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : "");
-  return !!provided && timingSafeEqualStr(provided, expected);
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : "";
+
+  // (1) Shared on-call token.
+  const expected = process.env.HEALTH_STATUS_TOKEN;
+  if (expected) {
+    const provided =
+      (typeof req.query.token === "string" ? req.query.token : "") ||
+      (typeof req.headers["x-health-token"] === "string" ? (req.headers["x-health-token"] as string) : "") ||
+      bearer;
+    if (provided && timingSafeEqualStr(provided, expected)) return true;
+  }
+
+  // (2) Authenticated app session (same Bearer session token the /app UI uses).
+  if (bearer) {
+    try {
+      const userId = await getSessionUserId(bearer);
+      if (userId) return true;
+    } catch {
+      // Treat a session-lookup failure as no access; never throw from the gate.
+    }
+  }
+
+  // Secure by default: deny in production when neither check passes.
+  return false;
 }
 
 // Handle both ESM (development) and CommonJS (production bundle)
@@ -277,7 +296,7 @@ load();
   });
 
   app.get("/api/health", async (req, res) => {
-    if (!healthAccessAllowed(req)) {
+    if (!(await healthAccessAllowed(req))) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const schemaDrift = await checkSchemaDrift();
@@ -306,10 +325,10 @@ load();
   });
 
   // Human-readable DB save-health status page for on-call (renders /api/health).
-  // In production with a token configured, an unauthenticated visitor gets a
+  // In production, an unauthenticated visitor without a valid token gets a
   // token prompt (no internals) instead of the dashboard.
-  app.get("/health", (req, res) => {
-    if (!healthAccessAllowed(req)) {
+  app.get("/health", async (req, res) => {
+    if (!(await healthAccessAllowed(req))) {
       return res.status(401).type("html").send(HEALTH_TOKEN_PROMPT_HTML);
     }
     res.type("html").send(HEALTH_STATUS_PAGE_HTML);
