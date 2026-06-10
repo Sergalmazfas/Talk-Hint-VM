@@ -163,6 +163,21 @@
       color: #6b7280;
     }
     .new-folder-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+
+    .health-status-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      text-decoration: none;
+    }
+    .health-status-link:hover { background: #f3f4f6; color: #6b7280; }
     
     .sidebar-section {
       padding: 12px 8px;
@@ -1068,6 +1083,11 @@
         <span>➕</span>
         <span>New prompt</span>
       </button>
+      <!-- On-call shortcut: opens the DB save-health status page (infra only, no user data) -->
+      <a class="health-status-link" href="/health" target="_blank" rel="noopener" data-testid="link-system-status">
+        <span>🩺</span>
+        <span>System status</span>
+      </a>
     </div>
   </aside>
   
