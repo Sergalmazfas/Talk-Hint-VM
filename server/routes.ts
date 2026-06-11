@@ -20,7 +20,8 @@ import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pus
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
 import { deriveOtherPartyPhone } from "./contactMemory";
 import { pendingCalls, users, phoneNumbers, deviceTokens } from "@shared/schema";
-import { validateUserWebhookUrl } from "./airatomaWebhook";
+import { validateUserWebhookUrl, parseTranscriptText } from "./airatomaWebhook";
+import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
@@ -167,6 +168,70 @@ try {
 } catch {
   // Fallback for CommonJS production build
   __dirnameResolved = process.cwd();
+}
+
+// Backstop for the AirAtoma delivery, driven by the /twilio/status callback.
+// The primary delivery is enqueued from the /twilio-stream WebSocket close
+// handler; if the process crashed mid-teardown that never ran. Here we recover
+// it from the transcript persisted on the call record, but ONLY when no delivery
+// row exists yet for this callId — so under normal operation (close handler ran)
+// this is a no-op and never double-sends. Re-sends are safe anyway (AirAtoma
+// dedupes on callId + the queue upserts on callId), so even a rare race with the
+// close handler at worst causes one extra POST. Never throws.
+async function recoverAirAtomaDeliveryIfMissing(
+  callSid: string,
+  durationSecsHint?: number,
+): Promise<void> {
+  const existing = await storage.getAirAtomaDeliveryByCallId(callSid);
+  if (existing) return; // the WebSocket-close path already handled this call
+
+  const call = await storage.getCallByCallSid(callSid);
+  if (!call || !call.userId) return;
+
+  const transcriptText = (call.transcript || "").trim();
+  if (!transcriptText) return; // nothing was captured (e.g. crash before any turn)
+
+  // Other party = the caller on an incoming call, the dialed number otherwise.
+  const otherPhone = call.direction === "incoming" ? call.fromNumber : call.toNumber;
+  let callerName = otherPhone || "Unknown";
+  if (otherPhone) {
+    try {
+      const mem = await storage.getContactMemory(call.userId, otherPhone);
+      if (mem?.name && mem.name.trim()) callerName = mem.name.trim();
+    } catch {
+      // fall back to the phone number on lookup failure
+    }
+  }
+
+  // Prefer Twilio's reported CallDuration; otherwise derive from the record.
+  let durationSecs = durationSecsHint ?? 0;
+  if (!durationSecs && call.endedAt && call.startedAt) {
+    durationSecs = Math.max(
+      0,
+      (new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()) / 1000,
+    );
+  }
+
+  // Send to the owner's personal AirAtoma URL (falls back to the server-wide env
+  // var inside deliverCallToAirAtoma).
+  let targetUrl: string | null = null;
+  try {
+    const owner = await storage.getUser(call.userId);
+    if (owner?.airatomaWebhookUrl && owner.airatomaWebhookUrl.trim()) {
+      targetUrl = owner.airatomaWebhookUrl.trim();
+    }
+  } catch {
+    // fall back to env-configured URL on lookup failure
+  }
+
+  console.log(`[Twilio Status] AirAtoma backstop recovering call ${callSid} (no delivery row found)`);
+  await deliverCallToAirAtoma({
+    callId: callSid,
+    transcript: parseTranscriptText(transcriptText),
+    callerName,
+    durationSecs,
+    targetUrl,
+  });
 }
 
 export async function registerRoutes(
@@ -1396,6 +1461,18 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         }
       } catch (e: any) {
         console.error(`[Twilio Status] Failed to update call record for ${callSid}:`, e.message);
+      }
+
+      // Backstop: the primary AirAtoma delivery is enqueued from the /twilio-stream
+      // WebSocket close handler. If the server crashed mid-teardown that enqueue
+      // never ran and the call would be lost forever. On a terminal status, recover
+      // it here from the transcript persisted on the call record — but ONLY when no
+      // delivery row exists yet, so we never double-send alongside the normal path.
+      if (terminal.includes(callStatus)) {
+        const callDurationSecs = Number(req.body.CallDuration) || undefined;
+        void recoverAirAtomaDeliveryIfMissing(callSid, callDurationSecs).catch((e: any) =>
+          console.error(`[Twilio Status] AirAtoma backstop failed for ${callSid}:`, e?.message ?? e),
+        );
       }
     }
     

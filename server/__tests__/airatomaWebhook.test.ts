@@ -13,6 +13,7 @@ import { afterEach, vi } from "vitest";
 
 const {
   renderTranscriptText,
+  parseTranscriptText,
   buildAirAtomaPayload,
   airAtomaConfigError,
   airAtomaBackoffMs,
@@ -36,6 +37,32 @@ describe("renderTranscriptText", () => {
 
   it("returns an empty string for no turns", () => {
     expect(renderTranscriptText([])).toBe("");
+  });
+});
+
+describe("parseTranscriptText", () => {
+  it("round-trips renderTranscriptText for typical single-line turns", () => {
+    const turns = [
+      { speaker: "Owner", text: "Hi there" },
+      { speaker: "Guest", text: "Hello, how much is it?" },
+    ];
+    expect(parseTranscriptText(renderTranscriptText(turns))).toEqual(turns);
+  });
+
+  it("returns an empty array for an empty string", () => {
+    expect(parseTranscriptText("")).toEqual([]);
+  });
+
+  it("keeps a prefixless line as a turn with an empty speaker", () => {
+    expect(parseTranscriptText("just some text")).toEqual([
+      { speaker: "", text: "just some text" },
+    ]);
+  });
+
+  it("only splits on the first ': ' so text may contain colons", () => {
+    expect(parseTranscriptText("Guest: it costs $5: a great deal")).toEqual([
+      { speaker: "Guest", text: "it costs $5: a great deal" },
+    ]);
   });
 });
 

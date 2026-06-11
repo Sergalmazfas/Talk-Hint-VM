@@ -300,6 +300,7 @@ export interface IStorage {
   getCallByCallSid(callSid: string): Promise<Call | undefined>;
   createCall(call: InsertCall): Promise<Call>;
   updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined>;
+  updateCallTranscriptByCallSid(callSid: string, transcript: string): Promise<void>;
   getUserCalls(userId: string): Promise<Call[]>;
   getAllCalls(): Promise<Call[]>;
 
@@ -342,6 +343,7 @@ export interface IStorage {
 
   // AirAtoma delivery queue (durable retry of the outbound CRM webhook)
   enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload, targetUrl?: string | null): Promise<AiratomaDelivery | undefined>;
+  getAirAtomaDeliveryByCallId(callId: string): Promise<AiratomaDelivery | undefined>;
   getDueAirAtomaDeliveries(limit: number): Promise<AiratomaDelivery[]>;
   markAirAtomaDeliverySucceeded(id: string, attempts: number): Promise<void>;
   markAirAtomaDeliveryRetry(id: string, attempts: number, nextAttemptAt: Date, error: string | null): Promise<void>;
@@ -780,6 +782,20 @@ export class DatabaseStorage implements IStorage {
       throw error;
     }
   }
+
+  // Persist the running transcript onto the call record, keyed by Twilio CallSid.
+  // Called repeatedly during a live call so the transcript survives a crash before
+  // the WebSocket close handler runs (the /twilio/status backstop reads it back).
+  // Non-throwing — transcript persistence must never break a live call.
+  async updateCallTranscriptByCallSid(callSid: string, transcript: string): Promise<void> {
+    if (!isDatabaseAvailable()) return;
+    try {
+      await db.update(calls).set({ transcript }).where(eq(calls.callSid, callSid));
+      recordWriteSuccess("calls");
+    } catch (error) {
+      recordWriteFailure("calls", "updateCallTranscriptByCallSid", error);
+    }
+  }
   
   async getUserCalls(userId: string): Promise<Call[]> {
     return db.select().from(calls).where(eq(calls.userId, userId));
@@ -1178,6 +1194,22 @@ export class DatabaseStorage implements IStorage {
       return row;
     } catch (error) {
       recordWriteFailure("airatoma_deliveries", "enqueueAirAtomaDelivery", error);
+      return undefined;
+    }
+  }
+
+  // Look up a delivery row by callId. Used by the /twilio/status backstop to avoid
+  // double-enqueuing a call the WebSocket-close path already handled.
+  async getAirAtomaDeliveryByCallId(callId: string): Promise<AiratomaDelivery | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.select()
+        .from(airatomaDeliveries)
+        .where(eq(airatomaDeliveries.callId, callId))
+        .limit(1);
+      return row;
+    } catch (error) {
+      console.error("[Storage] getAirAtomaDeliveryByCallId error:", error);
       return undefined;
     }
   }

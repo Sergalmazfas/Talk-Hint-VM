@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
+import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1018,6 +1019,42 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Full transcript for this call (unbounded by the conversationLog window) —
     // used to summarize the call into contact memory on teardown.
     const fullConversation: { speaker: string; text: string }[] = [];
+
+    // Durably persist the running transcript onto the call record so it survives a
+    // crash before this socket's close handler runs. The /twilio/status backstop
+    // reads it back to recover the AirAtoma delivery. Throttled (one write per
+    // window, trailing flush) so a chatty call doesn't hammer the DB; the close
+    // handler does a final synchronous-ish flush. Fire-and-forget — never blocks.
+    let transcriptPersistTimer: ReturnType<typeof setTimeout> | null = null;
+    let transcriptDirty = false;
+    let lastTranscriptPersistTs = 0;
+    const TRANSCRIPT_PERSIST_MS = 2000;
+    function flushTranscript() {
+      if (!callSid || !transcriptDirty) return;
+      transcriptDirty = false;
+      lastTranscriptPersistTs = Date.now();
+      const text = renderTranscriptText(fullConversation);
+      if (!text) return;
+      void storage
+        .updateCallTranscriptByCallSid(callSid, text)
+        .catch((err) => log(`[Transcript] persist failed: ${err}`, "websocket"));
+    }
+    function persistTranscriptSoon() {
+      transcriptDirty = true;
+      // Leading edge: persist the very first turn (and any turn after a quiet
+      // window) immediately, so a crash right after the first words still leaves a
+      // recoverable transcript. Bursts within the window coalesce into one trailing
+      // write so a chatty call doesn't hammer the DB.
+      if (!transcriptPersistTimer && Date.now() - lastTranscriptPersistTs >= TRANSCRIPT_PERSIST_MS) {
+        flushTranscript();
+        return;
+      }
+      if (transcriptPersistTimer) return;
+      transcriptPersistTimer = setTimeout(() => {
+        transcriptPersistTimer = null;
+        flushTranscript();
+      }, TRANSCRIPT_PERSIST_MS);
+    }
     
     // Utterance Gate - wait for end of speech before generating hints
     const utteranceGate = new UtteranceGate(async (speaker, text, utteranceId, confidence) => {
@@ -1062,6 +1099,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       });
       if (conversationLog.length > 10) conversationLog.shift();
       fullConversation.push({ speaker: "Guest", text });
+      persistTranscriptSoon();
       
       // ALWAYS update GoalEngine (even if hints are blocked)
       let goalJustAchieved = false;
@@ -1323,6 +1361,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       });
       if (conversationLog.length > 10) conversationLog.shift();
       fullConversation.push({ speaker: "Owner", text });
+      persistTranscriptSoon();
       
       // Update GoalEngine
       if (goalEngine) {
@@ -1836,6 +1875,23 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (memUserId && memPhone && memTranscript.length > 0) {
         void summarizeAndSaveContactMemory(memUserId, memPhone, memTranscript)
           .catch((err) => log(`[ContactMemory] save failed: ${err}`, "websocket"));
+      }
+
+      // Final transcript flush: cancel any pending throttled write and persist the
+      // complete transcript now, so the call record (and the /twilio/status backstop)
+      // always has the full text even if the last turns landed inside the throttle
+      // window.
+      if (transcriptPersistTimer) {
+        clearTimeout(transcriptPersistTimer);
+        transcriptPersistTimer = null;
+      }
+      if (callSid && memTranscript.length > 0) {
+        const finalText = renderTranscriptText(memTranscript);
+        if (finalText) {
+          void storage
+            .updateCallTranscriptByCallSid(callSid, finalText)
+            .catch((err) => log(`[Transcript] final persist failed: ${err}`, "websocket"));
+        }
       }
 
       // AirAtoma CRM: push the finished call's transcript to the external webhook

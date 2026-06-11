@@ -133,6 +133,20 @@ export function renderTranscriptText(turns: CallTurn[]): string {
   return turns.map((t) => `${t.speaker}: ${t.text}`).join("\n");
 }
 
+// Inverse of renderTranscriptText: parse a persisted "Speaker: text" transcript
+// string back into turns. Used by the /twilio/status backstop, which only has the
+// transcript persisted on the call record (not the in-memory turn array). Lines
+// without a "Speaker: " prefix are kept as a turn with an empty speaker so no
+// content is lost. Round-trips renderTranscriptText for typical single-line turns.
+export function parseTranscriptText(text: string): CallTurn[] {
+  if (!text) return [];
+  return text.split("\n").map((line) => {
+    const idx = line.indexOf(": ");
+    if (idx === -1) return { speaker: "", text: line };
+    return { speaker: line.slice(0, idx), text: line.slice(idx + 2) };
+  });
+}
+
 // Build the exact JSON body for the webhook. durationSecs is normalized to a
 // non-negative whole number; recordingUrl is only included when present (TalkHint
 // does not record calls today, so it is normally omitted).
