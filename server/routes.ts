@@ -213,8 +213,8 @@ async function recoverAirAtomaDeliveryIfMissing(
     );
   }
 
-  // Send to the owner's personal AirAtoma URL (falls back to the server-wide env
-  // var inside deliverCallToAirAtoma).
+  // Send to the owner's personal AirAtoma URL. No server-wide fallback — if the
+  // owner hasn't set one, deliverCallToAirAtoma skips it.
   let targetUrl: string | null = null;
   try {
     const owner = await storage.getUser(call.userId);
@@ -222,7 +222,7 @@ async function recoverAirAtomaDeliveryIfMissing(
       targetUrl = owner.airatomaWebhookUrl.trim();
     }
   } catch {
-    // fall back to env-configured URL on lookup failure
+    // on lookup failure, leave targetUrl null → delivery is skipped
   }
 
   console.log(`[Twilio Status] AirAtoma backstop recovering call ${callSid} (no delivery row found)`);
@@ -1810,9 +1810,9 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
-  // Per-user AirAtoma webhook URL. Each user can point their finished-call
-  // transcripts at their own AirAtoma CRM endpoint. Empty value clears it (and
-  // the server then falls back to the AIRATOMA_WEBHOOK_URL env var, if set).
+  // Per-user AirAtoma webhook URL. Each user points their finished-call
+  // transcripts at their own AirAtoma CRM endpoint. Empty value clears it, which
+  // simply turns delivery off for that user — there is no server-wide fallback.
   app.get("/api/settings/airatoma", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;

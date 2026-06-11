@@ -5,14 +5,24 @@ description: How the shared secret and SSRF guard work when AirAtoma webhook URL
 
 # AirAtoma per-user webhook security
 
-AirAtoma webhook URL is per-user (`users.airatomaWebhookUrl`), falling back to
-`AIRATOMA_WEBHOOK_URL` env for single-tenant. Each delivery row stores its own
-`target_url` (captured at enqueue, reused on retry). Two security invariants must
-hold whenever this surface changes:
+AirAtoma webhook URL is **strictly per-user** (`users.airatomaWebhookUrl`). There is
+**no server-wide env fallback** in the live delivery path: `deliverCallToAirAtoma`
+uses `input.targetUrl` only and `processDueAirAtomaDeliveries` uses `row.targetUrl`
+only — a user with no personal URL simply doesn't deliver. Each delivery row stores
+its own `target_url` (captured at enqueue, reused on retry).
+**Why removed:** with a global `AIRATOMA_WEBHOOK_URL` fallback, a new user who hadn't
+set their own URL would have their call transcripts leak to the operator's global CRM
+endpoint — unacceptable for multi-user onboarding. Auth is the per-account token in
+the URL path (e.g. `…/api/talkhint/webhook/<token>`), so no shared secret is needed.
+The low-level `attemptAirAtomaPost` primitive + legacy `sendCallToAirAtoma` still read
+the env var (kept for their unit tests), but neither is on the per-user routing path.
+
+Two security invariants must hold whenever this surface changes:
 
 1. **Never send the shared `x-talkhint-secret` to a user-supplied URL.** The secret
    is attached only when the destination equals `process.env.AIRATOMA_WEBHOOK_URL`
-   (the operator-configured endpoint).
+   (the operator-configured endpoint). Since the live path no longer routes to the
+   env URL, the secret is effectively never sent — but keep the gate intact.
    **Why:** otherwise any authed user could set their URL to a server they control
    and harvest the global secret. There is no per-user secret by design.
 

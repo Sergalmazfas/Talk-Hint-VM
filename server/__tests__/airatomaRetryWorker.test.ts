@@ -29,7 +29,9 @@ vi.mock("../storage", () => ({ storage: storageMock }));
 const { deliverCallToAirAtoma, processDueAirAtomaDeliveries } = await import("../airatomaRetryWorker");
 const { MAX_AIRATOMA_ATTEMPTS, airAtomaBackoffMs } = await import("../airatomaWebhook");
 
-const ENV_URL = "https://airatoma.example.com/api/talkhint/webhook";
+// Each user supplies their own personal AirAtoma URL — there is no server-wide
+// fallback, so every delivery (immediate or retried) carries an explicit target.
+const TARGET_URL = "https://airatoma.example.com/api/talkhint/webhook/abc123";
 const noopLogger = () => {};
 
 function callInput(callId: string) {
@@ -41,6 +43,7 @@ function callInput(callId: string) {
     ],
     callerName: "Bob",
     durationSecs: 12,
+    targetUrl: TARGET_URL,
   } as any;
 }
 
@@ -48,7 +51,7 @@ function pendingRow(id: string, attempts: number, callId = id) {
   return {
     id,
     attempts,
-    targetUrl: null,
+    targetUrl: TARGET_URL,
     payload: { callId, transcript: "Owner: hello", callerName: "Bob", durationSecs: 12 },
   } as any;
 }
@@ -61,12 +64,10 @@ function stubFetch() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.AIRATOMA_WEBHOOK_URL = ENV_URL;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete process.env.AIRATOMA_WEBHOOK_URL;
 });
 
 describe("deliverCallToAirAtoma (call-end immediate send)", () => {
@@ -129,6 +130,22 @@ describe("deliverCallToAirAtoma (call-end immediate send)", () => {
     expect(storageMock.markAirAtomaDeliveryFailed).toHaveBeenCalledTimes(1);
     expect(storageMock.markAirAtomaDeliveryFailed).toHaveBeenCalledWith("row3", MAX_AIRATOMA_ATTEMPTS, "http_503");
     expect(storageMock.markAirAtomaDeliveryRetry).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fall back to AIRATOMA_WEBHOOK_URL when the user has no personal URL", async () => {
+    // Regression guard: even with the legacy env var set, a call whose owner has
+    // no personal URL must not be delivered (no global catch-all = no cross-user leak).
+    process.env.AIRATOMA_WEBHOOK_URL = "https://operator-global.example.com/hook";
+    try {
+      const fetchMock = stubFetch();
+
+      await deliverCallToAirAtoma({ ...callInput("noTarget"), targetUrl: null }, noopLogger);
+
+      expect(storageMock.enqueueAirAtomaDelivery).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.AIRATOMA_WEBHOOK_URL;
+    }
   });
 
   it("does a one-shot best-effort send (no recordAttempt) when the row cannot be persisted", async () => {
@@ -196,7 +213,7 @@ describe("processDueAirAtomaDeliveries (background poller)", () => {
   });
 
   it("skips rows whose destination URL is missing/invalid without burning an attempt", async () => {
-    delete process.env.AIRATOMA_WEBHOOK_URL; // no env fallback
+    // A row with no personal URL (e.g. the user cleared it) is left untouched.
     storageMock.getDueAirAtomaDeliveries.mockResolvedValue([
       { ...pendingRow("noUrl", 0), targetUrl: null },
     ]);

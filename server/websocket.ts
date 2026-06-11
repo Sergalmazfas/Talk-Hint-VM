@@ -1896,7 +1896,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // AirAtoma CRM: push the finished call to the external webhook
       // (POST /api/talkhint/webhook). Detached + best-effort — like the contact
       // summarization above it makes a network call, so it must NEVER block call
-      // teardown. No-op unless AIRATOMA_WEBHOOK_URL is configured.
+      // teardown. No-op unless the call owner has set a personal AirAtoma URL.
       // NOTE: we send even when the transcript is empty (sub-5s call or Deepgram
       // caught nothing) — a minimal record (caller name/number + duration) so a
       // short call is never silently dropped. The transcript field is just "".
@@ -1915,7 +1915,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             }
           }
           // Per-user destination: send to the call owner's personal AirAtoma URL.
-          // Falls back to the server-wide env var inside deliverCallToAirAtoma.
+          // No server-wide fallback — if the owner hasn't set one, nothing is sent.
           let targetUrl: string | null = null;
           try {
             const owner = await storage.getUser(memUserId);
@@ -1923,7 +1923,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               targetUrl = owner.airatomaWebhookUrl.trim();
             }
           } catch {
-            // fall back to env-configured URL on lookup failure
+            // on lookup failure, leave targetUrl null → delivery is skipped
           }
           await deliverCallToAirAtoma(
             {

@@ -68,11 +68,12 @@ export async function deliverCallToAirAtoma(
   input: AirAtomaCallInput,
   logger: Logger = defaultLogger,
 ): Promise<void> {
-  // Destination is the call owner's personal URL, falling back to the server-wide
-  // env var so the existing single-tenant setup keeps working unchanged.
-  const targetUrl = input.targetUrl || process.env.AIRATOMA_WEBHOOK_URL;
+  // Destination is the call owner's personal AirAtoma URL. There is NO server-wide
+  // fallback: a user who hasn't set their own URL simply doesn't deliver, so one
+  // user's transcripts can never leak to another user's (or the operator's) CRM.
+  const targetUrl = input.targetUrl;
   const cfg = airAtomaConfigError(targetUrl);
-  if (cfg === "unset") return; // no URL for this user/server — nothing to queue
+  if (cfg === "unset") return; // user has no personal URL — nothing to queue
   if (cfg === "invalid") {
     logger(`[AirAtoma] Invalid webhook URL — skipping send for call ${input.callId}`);
     return;
@@ -104,9 +105,9 @@ export async function processDueAirAtomaDeliveries(
   let attempted = 0;
   for (const row of due) {
     const payload = row.payload as AirAtomaPayload;
-    // Each row carries its own destination (the owning user's URL captured at
-    // enqueue), falling back to the env var for legacy rows.
-    const targetUrl = row.targetUrl || process.env.AIRATOMA_WEBHOOK_URL;
+    // Each row carries its own destination (the owning user's personal URL,
+    // captured at enqueue). No env fallback — delivery is strictly per-user.
+    const targetUrl = row.targetUrl;
     // If that URL is missing/invalid (e.g. the user cleared it), leave the row
     // untouched so it resumes when a valid URL is restored — don't burn attempts.
     if (airAtomaConfigError(targetUrl)) continue;
