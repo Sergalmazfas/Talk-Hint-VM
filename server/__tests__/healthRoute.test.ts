@@ -43,6 +43,8 @@ vi.mock("../db", () => ({
   isDevDatabase: true,
 }));
 
+const { storage } = await import("../storage");
+
 vi.mock("../auth", () => ({
   authMiddleware: (req: any, _res: any, next: any) => {
     req.user = { id: "u1", email: "u1@example.com", language: "en", plan: "free" };
@@ -232,6 +234,35 @@ describe("GET /api/health", () => {
     } finally {
       process.env = prev;
     }
+  });
+
+  it("exposes the generic per-table write-health snapshot under `writes`", async () => {
+    // The `writes` map is generic (keyed per table), not contact-memory-only.
+    // Force a tracked write on a non-contact_memory path so the snapshot has a
+    // distinct table entry: db is the empty `{}` fake here, so any write throws
+    // and is recorded via recordWriteFailure keyed by its table.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // createCall records the failure then rethrows, so swallow the throw here.
+    await expect(
+      storage.createCall({ callSid: "CA-health-test", direction: "inbound" } as any),
+    ).rejects.toBeTruthy();
+    errorSpy.mockRestore();
+
+    const res = await request(app).get("/api/health");
+    expect(res.status).toBe(200);
+
+    // Top-level `writes` is a per-table map, separate from contactMemory.writes.
+    expect(res.body.writes).toBeDefined();
+    expect(typeof res.body.writes).toBe("object");
+    expect(res.body.writes).toHaveProperty("calls");
+
+    const callsHealth = res.body.writes.calls;
+    expect(callsHealth).toHaveProperty("writeSuccesses");
+    expect(callsHealth).toHaveProperty("writeFailures");
+    expect(callsHealth).toHaveProperty("lastError");
+    expect(callsHealth.writeFailures).toBeGreaterThan(0);
+    expect(callsHealth.lastError).not.toBeNull();
+    expect(callsHealth.lastError.operation).toBe("createCall");
   });
 });
 
