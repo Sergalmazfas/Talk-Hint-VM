@@ -16,6 +16,7 @@ import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, build
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
+import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -1514,10 +1515,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           // Caller-leg stream (incoming answered: browser <Dial><Client> AND iOS conference bridge):
           //   the stream rides the caller's leg, so inbound=GST (caller), outbound=HON (bridged agent).
           //   This is the mirror of the owner-leg case and is what fixes iOS CALLER/YOU being swapped.
-          const isGuestTrack = streamOnCallerLeg ? (track === "inbound") : (track === "outbound");
-          const isOwnerTrack = streamOnCallerLeg ? (track === "outbound") : (track === "inbound");
-          const speakerLabel = isOwnerTrack ? "Owner" : "Guest";
-          const speakerCode = isGuestTrack ? "GST" : "HON";
+          const { isGuestTrack, speakerLabel, speakerCode } =
+            resolveSpeakerRole(track, streamOnCallerLeg);
           
           if (event === "StartOfTurn") {
             log(`[DG] ${track}: StartOfTurn speaker=${speakerLabel}`, "deepgram");
@@ -1775,7 +1774,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               // Incoming answered calls (browser <Dial><Client> and the iOS
               // <Dial><Conference> bridge) attach the stream to the CALLER's leg,
               // so inbound/outbound are mirrored vs a browser outbound call.
-              streamOnCallerLeg = callType === "incoming_answered";
+              streamOnCallerLeg = streamRidesCallerLeg(callType);
               
               log(`Stream started: ${callSid}, callType: ${callType || 'browser'}, isPstnForwarding: ${isPstnForwarding}, streamOnCallerLeg: ${streamOnCallerLeg}`, "twilio");
               log(`Tracks: ${message.start.tracks?.join(", ")}`, "twilio");

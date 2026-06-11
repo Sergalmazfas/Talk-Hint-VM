@@ -26,7 +26,11 @@ answered calls had the same latent inversion.
 **How to apply:** The hold TwiML tags the caller-leg stream with
 `customParameters.callType === "incoming_answered"`. In the Twilio stream handler
 set `streamOnCallerLeg` from that and invert the track→speaker derivation when
-true — in BOTH the Deepgram `UtteranceEnd` force-flush path and the main
-transcript broadcast path. Outbound (no callType) stays as-is. Note
-`isPstnForwarding` (callType `pstn_forwarding`) is currently non-functional in the
-mapping — don't confuse it with this flag.
+true. Outbound (no callType) stays as-is. Note `isPstnForwarding` (callType
+`pstn_forwarding`) is currently non-functional in the mapping — don't confuse it
+with this flag.
+
+The mapping is now the single source of truth in `server/speakerRoles.ts`
+(`streamRidesCallerLeg`, `resolveSpeakerRole`), pinned by a scenario matrix test.
+**Rule:** any change to callType handling or track→speaker logic must update that
+helper + its test together, never re-inline the ternaries in `websocket.ts`.
