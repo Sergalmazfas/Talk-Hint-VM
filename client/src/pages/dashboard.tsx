@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showSubscribeDialog, setShowSubscribeDialog] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState("");
+  const [savedWebhookUrl, setSavedWebhookUrl] = useState("");
   const [savingWebhook, setSavingWebhook] = useState(false);
 
   useEffect(() => {
@@ -54,6 +55,7 @@ export default function Dashboard() {
       if (webhookRes.ok) {
         const data = await webhookRes.json();
         setWebhookUrl(data.airatomaWebhookUrl || "");
+        setSavedWebhookUrl(data.airatomaWebhookUrl || "");
       }
     } catch (error) {
       console.error("Failed to fetch data:", error);
@@ -76,6 +78,7 @@ export default function Dashboard() {
       const data = await res.json();
       if (res.ok) {
         setWebhookUrl(data.airatomaWebhookUrl || "");
+        setSavedWebhookUrl(data.airatomaWebhookUrl || "");
         toast({
           title: "Сохранено",
           description: data.airatomaWebhookUrl
@@ -263,6 +266,22 @@ export default function Dashboard() {
                   {savingWebhook ? "Сохранение..." : "Сохранить"}
                 </Button>
               </div>
+
+              {webhookUrl.trim() !== savedWebhookUrl ? (
+                <p className="text-amber-400 text-sm flex items-center gap-2" data-testid="status-airatoma-webhook">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  Есть несохранённые изменения — нажмите «Сохранить».
+                </p>
+              ) : savedWebhookUrl ? (
+                <p className="text-green-400 text-sm flex items-center gap-2" data-testid="status-airatoma-webhook">
+                  <Check className="w-4 h-4 shrink-0" />
+                  Адрес сохранён. Транскрипты будут отправляться сюда после каждого звонка.
+                </p>
+              ) : (
+                <p className="text-gray-500 text-sm" data-testid="status-airatoma-webhook">
+                  Адрес не задан — отправка отключена.
+                </p>
+              )}
             </CardContent>
           </Card>
         </section>
