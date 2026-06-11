@@ -82,6 +82,21 @@ describe("buildAirAtomaPayload", () => {
     });
   });
 
+  it("builds a minimal record (empty transcript) for a short/silent call", () => {
+    const payload = buildAirAtomaPayload({
+      callId: "CA999",
+      transcript: [],
+      callerName: "+19543200848",
+      durationSecs: 3,
+    });
+    expect(payload).toEqual({
+      callId: "CA999",
+      transcript: "",
+      callerName: "+19543200848",
+      durationSecs: 3,
+    });
+  });
+
   it("never emits a negative duration", () => {
     const payload = buildAirAtomaPayload({
       callId: "CA1",

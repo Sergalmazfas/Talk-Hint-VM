@@ -188,8 +188,9 @@ async function recoverAirAtomaDeliveryIfMissing(
   const call = await storage.getCallByCallSid(callSid);
   if (!call || !call.userId) return;
 
+  // An empty transcript is fine: we still send a minimal record (caller name/number
+  // + duration) so a sub-5s call or a Deepgram miss is never silently dropped.
   const transcriptText = (call.transcript || "").trim();
-  if (!transcriptText) return; // nothing was captured (e.g. crash before any turn)
 
   // Other party = the caller on an incoming call, the dialed number otherwise.
   const otherPhone = call.direction === "incoming" ? call.fromNumber : call.toNumber;

@@ -23,6 +23,14 @@ backstop has nothing to recover. The leading-edge write closes that window.
 **Why:** durability of the call→AirAtoma handoff; a brief crash must never silently
 drop a finished call.
 
+**Short/silent calls are sent too.** A call under ~5s, or one where Deepgram caught
+nothing, has an empty transcript. Both paths still deliver a **minimal record**
+(callId, callerName→phone fallback, durationSecs; transcript field is `""`) — they
+must NOT skip empty transcripts. `buildAirAtomaPayload([])` renders `transcript:""`.
+**Why:** short/missed calls were silently dropped before; the user wants every call
+logged in the CRM. Tradeoff: this can add CRM noise (e.g. missed/unanswered calls on
+terminal statuses) — intended, restrict trigger statuses if that becomes a problem.
+
 **How to apply:**
 - Idempotency is by `getAirAtomaDeliveryByCallId(callId)` — the backstop only sends
   when NO delivery row exists yet, so the normal WS-close path is never doubled.

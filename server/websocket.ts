@@ -1894,13 +1894,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         }
       }
 
-      // AirAtoma CRM: push the finished call's transcript to the external webhook
+      // AirAtoma CRM: push the finished call to the external webhook
       // (POST /api/talkhint/webhook). Detached + best-effort — like the contact
       // summarization above it makes a network call, so it must NEVER block call
       // teardown. No-op unless AIRATOMA_WEBHOOK_URL is configured.
+      // NOTE: we send even when the transcript is empty (sub-5s call or Deepgram
+      // caught nothing) — a minimal record (caller name/number + duration) so a
+      // short call is never silently dropped. The transcript field is just "".
       const airCallSid = callSid;
       const airDurationSecs = (Date.now() - new Date(startTime).getTime()) / 1000;
-      if (memUserId && airCallSid && memTranscript.length > 0) {
+      if (memUserId && airCallSid) {
         void (async () => {
           // callerName = the contact's saved name, falling back to their phone.
           let callerName = memPhone || "Unknown";
