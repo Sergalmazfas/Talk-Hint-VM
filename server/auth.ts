@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
 
 const SALT_ROUNDS = 12;
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_DURATION_MS = 90 * 24 * 60 * 60 * 1000;
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, SALT_ROUNDS);
