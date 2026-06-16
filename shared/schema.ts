@@ -18,6 +18,8 @@ export const users = pgTable("users", {
   twilioSubaccountSid: text("twilio_subaccount_sid"),
   twilioSubaccountToken: text("twilio_subaccount_token"),
   airatomaWebhookUrl: text("airatoma_webhook_url"),
+  liveHintsEnabled: boolean("live_hints_enabled").notNull().default(true),
+  translationEnabled: boolean("translation_enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

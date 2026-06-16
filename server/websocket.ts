@@ -228,7 +228,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -246,7 +246,11 @@ async function translateAndSuggest(text: string, goal: string, language: string 
 
     const contextSections = buildContextProviderChain({ userContext, contactContext, staticCards });
 
-    const systemPrompt = `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
+    // Translation can be disabled per-user: when off we ask the model NOT to
+    // translate (no guest translation, English-only suggestion) so no extra
+    // translation tokens are spent and the UI shows the original language only.
+    const systemPrompt = translateEnabled
+      ? `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 ${contextSections}
@@ -261,6 +265,20 @@ Guest just spoke.
 Return JSON only, no markdown:
 {"translation":"guest's words in ${langName}",
  "suggestion":{"en":"reply in ENGLISH","translation":"same reply in ${langName}"},
+ "sentiment":"positive|neutral|negative|urgent|confused"}`
+      : `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}.${contextSection}
+
+This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
+${contextSections}
+${LIVE_ANTI_LOOP_RULES}
+
+Guest just spoke. Do NOT translate anything — leave translation fields empty.
+1) Suggest what user should say next - a short reply IN ENGLISH (under 15 words) that moves toward the goal.
+2) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
+
+Return JSON only, no markdown:
+{"translation":"",
+ "suggestion":{"en":"reply in ENGLISH","translation":""},
  "sentiment":"positive|neutral|negative|urgent|confused"}`;
 
     const userPrompt = `Guest said: "${text}"
@@ -343,6 +361,16 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
       } catch (fbErr: any) {
         log(`OpenAI suggestion fallback failed: ${fbErr.message}`, "openai");
       }
+    }
+
+    // Translation disabled: enforce empties even if the model ignored the prompt,
+    // so the guest transcript and the hint are never shown translated.
+    if (!translateEnabled && result) {
+      result = {
+        ...result,
+        translation: "",
+        suggestion: result.suggestion ? { en: result.suggestion.en, translation: "" } : undefined,
+      };
     }
 
     return result ?? { translation: "" };
@@ -886,6 +914,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let contactContextReady: Promise<void> = Promise.resolve(); // resolves once contactContext is loaded
     let staticCards = ""; // STATIC_CARDS (owner's project/company knowledge cards), loaded once on "start"
     let staticCardsReady: Promise<void> = Promise.resolve(); // resolves once staticCards is loaded
+    // Per-user live-call feature toggles (Live Hints + Translation), loaded once on "start".
+    // Defaults ON so a load failure never silently disables hints for a paying user.
+    let callSettings = { liveHintsEnabled: true, translationEnabled: true };
+    let callSettingsReady: Promise<void> = Promise.resolve(); // resolves once callSettings is loaded
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -1187,8 +1219,32 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       await ownerContextReady;
       await contactContextReady;
       await staticCardsReady;
+      await callSettingsReady;
+
+      // Live Hints OFF: skip the model entirely (no GPT/Gemini call), so no
+      // translation and no suggestion are produced. The raw transcript is still
+      // broadcast (original language only), still persisted, and the post-call
+      // summary + AirAtoma CRM delivery still run on close — all independent of
+      // this hint path. Deepgram transcription is untouched.
+      if (!callSettings.liveHintsEnabled) {
+        uiBroadcast({
+          type: "guest_transcript",
+          text,
+          translation: "",
+          isFinal: true,
+          isComplete: true,
+          confidence,
+          utteranceId,
+          callSid,
+        });
+        log(`[HintsOff] live hints disabled — skipping model call utteranceId=${utteranceId}`, "websocket");
+        return;
+      }
+
       const gptStart = Date.now();
-      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext, contactContext, staticCards);
+      // Translation OFF (hints still on): translateAndSuggest skips translating the
+      // guest's words and returns an English-only suggestion (no translated hint).
+      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext, contactContext, staticCards, callSettings.translationEnabled);
       const gptMs = Date.now() - gptStart;
       log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
       
@@ -1220,7 +1276,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           source: "system",
           basedOnSpeaker: "GST",
           en: "All set! Thanks for the call.",
-          translation: currentLanguage === "ru" ? "Готово! Спасибо за звонок." : "¡Todo listo! Gracias por la llamada.",
+          translation: callSettings.translationEnabled
+            ? (currentLanguage === "ru" ? "Готово! Спасибо за звонок." : "¡Todo listo! Gracias por la llamada.")
+            : "",
           utteranceId,
           callSid
         });
@@ -1281,7 +1339,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             source: "wait_state",
             basedOnSpeaker: "GST",
             en: ack.en,
-            translation: ack.translation,
+            translation: callSettings.translationEnabled ? ack.translation : "",
             utteranceId,
             callSid
           });
@@ -1416,6 +1474,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     
     // Fast Layer for quick responses while GPT is thinking
     const fastLayer = new FastLayerManager((phrase: FastPhraseResult, waitTimeMs: number) => {
+      // Fast phrases are a live-hint feature (they fill the hint banner while GPT
+      // thinks), so suppress them entirely when Live Hints is OFF.
+      if (!callSettings.liveHintsEnabled) {
+        return;
+      }
       log(`[FastLayer] Emitting fast_phrase after ${waitTimeMs}ms: "${phrase.text}" (${phrase.category})`, "fast");
       
       // Notify GoalEngine about fast phrase to prevent steer repetition
@@ -1426,7 +1489,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       uiBroadcast({
         type: "fast_phrase",
         text: phrase.text,
-        translation: phrase.translation,
+        translation: callSettings.translationEnabled ? phrase.translation : "",
         category: phrase.category,
         target: "HON",
         timestamp: Date.now(),
@@ -1767,6 +1830,18 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                   }
                 })
                 .catch((err) => log(`[StaticCards] Static cards load failed: ${err}`, "twilio"));
+
+              // Load the owner's live-call feature toggles (Live Hints + Translation)
+              // once the owner is known. Defaults stay ON if the load fails so a
+              // transient error never silently kills hints for the whole call.
+              callSettings = { liveHintsEnabled: true, translationEnabled: true };
+              callSettingsReady = ownerContextReady
+                .then(async () => {
+                  if (!streamUserId) return;
+                  callSettings = await storage.getUserCallSettings(streamUserId);
+                  log(`[CallSettings] liveHints=${callSettings.liveHintsEnabled} translation=${callSettings.translationEnabled} for ${streamUserId}`, "twilio");
+                })
+                .catch((err) => log(`[CallSettings] Load failed (defaults ON): ${err}`, "twilio"));
 
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;

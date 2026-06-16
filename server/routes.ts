@@ -1855,6 +1855,40 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Per-user live-call feature toggles: Live Hints + Translation (both default ON).
+  // Respected during live calls in server/websocket.ts. Disabling hints stops all
+  // GPT/Gemini calls during the call; transcription, transcript saving, post-call
+  // summary, and AirAtoma CRM delivery are unaffected (they run independently).
+  app.get("/api/settings/hints", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const settings = await storage.getUserCallSettings(user.id);
+      res.json(settings);
+    } catch (error: any) {
+      console.error("[Settings] Hints get error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/settings/hints", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { liveHintsEnabled, translationEnabled } = req.body ?? {};
+      if (liveHintsEnabled !== undefined && typeof liveHintsEnabled !== "boolean") {
+        return res.status(400).json({ error: "liveHintsEnabled must be a boolean" });
+      }
+      if (translationEnabled !== undefined && typeof translationEnabled !== "boolean") {
+        return res.status(400).json({ error: "translationEnabled must be a boolean" });
+      }
+      const settings = await storage.setUserCallSettings(user.id, { liveHintsEnabled, translationEnabled });
+      console.log(`[Settings] User ${user.id} updated call features: liveHints=${settings.liveHintsEnabled} translation=${settings.translationEnabled}`);
+      res.json({ success: true, ...settings });
+    } catch (error: any) {
+      console.error("[Settings] Hints update error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Personal Context ("My Context") — free-text injected into every live hint.
   app.get("/api/user/context", authMiddleware, async (req, res) => {
     try {

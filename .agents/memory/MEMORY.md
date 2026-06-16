@@ -12,4 +12,5 @@
 - [Web has no call history view](web-no-call-history.md) — only iOS renders /api/calls; talkhint/ui has Contacts + live-call only, React client has none.
 - [Write-health alerter conventions](write-health-alerter.md) — checkWriteHealthOnce return counts only failure alerts (not recoveries); recovery needs NEW writeSuccesses + sustained window.
 - [AirAtoma per-user webhook security](airatoma-per-user-webhook-security.md) — shared secret ONLY to env URL (never user URLs); SSRF guard rejects private IPv4 + all IPv6 literals before save.
+- [Live-call feature toggles](live-call-feature-toggles.md) — per-user Live Hints / Translation booleans; Hints OFF = no model call; Translation OFF must gate EVERY suggestion path (closing, wait-ACK, fast_phrase), not just translateAndSuggest.
 - [AirAtoma delivery durability backstop](airatoma-delivery-durability.md) — crash-safe call delivery: persist transcript to calls.transcript (leading-edge) + /twilio/status recovers only when no delivery row exists.

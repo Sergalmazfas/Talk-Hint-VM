@@ -46,6 +46,8 @@ class AuthStorage implements IAuthStorage {
       twilioSubaccountSid: null,
       twilioSubaccountToken: null,
       airatomaWebhookUrl: null,
+      liveHintsEnabled: true,
+      translationEnabled: true,
       createdAt: new Date(),
     };
 

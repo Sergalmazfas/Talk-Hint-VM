@@ -15,8 +15,14 @@ final class SettingsViewController: UITableViewController {
 
     private enum Section: Int, CaseIterable {
         case callMode
+        case features
         case forwarding
         case language
+    }
+
+    private enum FeatureRow: Int, CaseIterable {
+        case liveHints
+        case translation
     }
 
     private enum ForwardingRow: Int, CaseIterable {
@@ -32,6 +38,11 @@ final class SettingsViewController: UITableViewController {
     ]
 
     private let forwardingField = UITextField()
+
+    // Per-user live-call toggles, mirrored locally for instant display. Default ON
+    // to match the backend; refreshed from the server on appear.
+    private var liveHintsEnabled = true
+    private var translationEnabled = true
 
     init() {
         super.init(style: .insetGrouped)
@@ -50,6 +61,17 @@ final class SettingsViewController: UITableViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         loadForwarding()
+        loadFeatureSettings()
+    }
+
+    private func loadFeatureSettings() {
+        Task { @MainActor in
+            if let settings = try? await APIClient.shared.callFeatureSettings() {
+                liveHintsEnabled = settings.liveHintsEnabled
+                translationEnabled = settings.translationEnabled
+                tableView.reloadSections(IndexSet(integer: Section.features.rawValue), with: .none)
+            }
+        }
     }
 
     private func configureForwardingField() {
@@ -78,6 +100,7 @@ final class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
         case .callMode: return callModes.count
+        case .features: return FeatureRow.allCases.count
         case .forwarding: return ForwardingRow.allCases.count
         case .language: return SessionStore.availableLanguages.count
         }
@@ -86,6 +109,7 @@ final class SettingsViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .callMode: return "Call handling"
+        case .features: return "Live call assistant"
         case .forwarding: return "Call forwarding"
         case .language: return "Hint language"
         }
@@ -95,6 +119,8 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: section)! {
         case .callMode:
             return "Choose what happens when someone calls your TalkHint number."
+        case .features:
+            return "Live Hints shows AI reply suggestions during a call. Translation translates the live conversation and hints into your hint language. Transcription, saved transcripts, and call summaries always stay on."
         case .forwarding:
             return "Callers are sent here when call handling is set to Forward calls. Also used for SMS call alerts."
         case .language:
@@ -114,6 +140,20 @@ final class SettingsViewController: UITableViewController {
             cell.accessoryType = (SessionStore.shared.callMode == mode.id) ? .checkmark : .none
             cell.accessibilityIdentifier = "cell-callmode-\(mode.id)"
             return cell
+
+        case .features:
+            switch FeatureRow(rawValue: indexPath.row)! {
+            case .liveHints:
+                return featureCell(title: "Enable Live Hints",
+                                   isOn: liveHintsEnabled,
+                                   identifier: "switch-live-hints",
+                                   action: #selector(liveHintsChanged(_:)))
+            case .translation:
+                return featureCell(title: "Enable Translation",
+                                   isOn: translationEnabled,
+                                   identifier: "switch-translation",
+                                   action: #selector(translationChanged(_:)))
+            }
 
         case .forwarding:
             switch ForwardingRow(rawValue: indexPath.row)! {
@@ -159,6 +199,8 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: indexPath.section)! {
         case .callMode:
             selectCallMode(callModes[indexPath.row].id)
+        case .features:
+            break // handled by the UISwitch valueChanged action
         case .forwarding:
             switch ForwardingRow(rawValue: indexPath.row)! {
             case .field: break
@@ -186,6 +228,49 @@ final class SettingsViewController: UITableViewController {
                 SessionStore.shared.callMode = previous
                 tableView.reloadSections(IndexSet(integer: Section.callMode.rawValue), with: .none)
                 showAlert(title: "Could not change call handling", message: error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: - Feature toggles
+
+    private func featureCell(title: String, isOn: Bool, identifier: String, action: Selector) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        cell.selectionStyle = .none
+        cell.textLabel?.text = title
+        let toggle = UISwitch()
+        toggle.isOn = isOn
+        toggle.accessibilityIdentifier = identifier
+        toggle.addTarget(self, action: action, for: .valueChanged)
+        cell.accessoryView = toggle
+        return cell
+    }
+
+    @objc private func liveHintsChanged(_ sender: UISwitch) {
+        updateFeature(liveHints: sender.isOn, sender: sender, previous: liveHintsEnabled) {
+            self.liveHintsEnabled = sender.isOn
+        }
+    }
+
+    @objc private func translationChanged(_ sender: UISwitch) {
+        updateFeature(translation: sender.isOn, sender: sender, previous: translationEnabled) {
+            self.translationEnabled = sender.isOn
+        }
+    }
+
+    /// Persists a single toggle, reverting the switch on failure.
+    private func updateFeature(liveHints: Bool? = nil, translation: Bool? = nil, sender: UISwitch, previous: Bool, apply: @escaping () -> Void) {
+        apply()
+        Task { @MainActor in
+            do {
+                let saved = try await APIClient.shared.setCallFeatureSettings(liveHintsEnabled: liveHints, translationEnabled: translation)
+                liveHintsEnabled = saved.liveHintsEnabled
+                translationEnabled = saved.translationEnabled
+                sender.setOn(liveHints ?? translation ?? sender.isOn, animated: false)
+            } catch {
+                sender.setOn(previous, animated: true)
+                if liveHints != nil { liveHintsEnabled = previous } else { translationEnabled = previous }
+                showAlert(title: "Could not save", message: error.localizedDescription)
             }
         }
     }

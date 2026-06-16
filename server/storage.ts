@@ -270,6 +270,8 @@ export interface IStorage {
   updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
   getUserContext(id: string): Promise<string>;
   setUserContext(id: string, context: string): Promise<string>;
+  getUserCallSettings(id: string): Promise<{ liveHintsEnabled: boolean; translationEnabled: boolean }>;
+  setUserCallSettings(id: string, settings: { liveHintsEnabled?: boolean; translationEnabled?: boolean }): Promise<{ liveHintsEnabled: boolean; translationEnabled: boolean }>;
   
   // Phone Numbers
   getPhoneNumber(id: string): Promise<PhoneNumber | undefined>;
@@ -418,6 +420,8 @@ export class DatabaseStorage implements IStorage {
         twilioSubaccountSid: null,
         twilioSubaccountToken: null,
         airatomaWebhookUrl: null,
+        liveHintsEnabled: true,
+        translationEnabled: true,
         createdAt: new Date(),
       };
       memoryUsers.set(newUser.id, newUser);
@@ -446,6 +450,8 @@ export class DatabaseStorage implements IStorage {
         twilioSubaccountSid: null,
         twilioSubaccountToken: null,
         airatomaWebhookUrl: null,
+        liveHintsEnabled: true,
+        translationEnabled: true,
         createdAt: new Date(),
       };
       memoryUsers.set(fallbackUser.id, fallbackUser);
@@ -484,6 +490,25 @@ export class DatabaseStorage implements IStorage {
     const trimmed = (context ?? "").slice(0, MAX_USER_CONTEXT_LENGTH);
     const updated = await this.updateUser(id, { userContext: trimmed || null });
     return updated?.userContext ?? "";
+  }
+
+  async getUserCallSettings(id: string): Promise<{ liveHintsEnabled: boolean; translationEnabled: boolean }> {
+    const user = await this.getUser(id);
+    return {
+      liveHintsEnabled: user?.liveHintsEnabled ?? true,
+      translationEnabled: user?.translationEnabled ?? true,
+    };
+  }
+
+  async setUserCallSettings(id: string, settings: { liveHintsEnabled?: boolean; translationEnabled?: boolean }): Promise<{ liveHintsEnabled: boolean; translationEnabled: boolean }> {
+    const updates: Partial<User> = {};
+    if (typeof settings.liveHintsEnabled === "boolean") updates.liveHintsEnabled = settings.liveHintsEnabled;
+    if (typeof settings.translationEnabled === "boolean") updates.translationEnabled = settings.translationEnabled;
+    const updated = await this.updateUser(id, updates);
+    return {
+      liveHintsEnabled: updated?.liveHintsEnabled ?? true,
+      translationEnabled: updated?.translationEnabled ?? true,
+    };
   }
   
   // Phone Numbers

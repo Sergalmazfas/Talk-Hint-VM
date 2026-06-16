@@ -401,6 +401,39 @@ final class APIClient {
         _ = try await request("/api/user/call-mode", method: "POST", json: ["callMode": mode], authenticated: true)
     }
 
+    /// Per-user live-call feature toggles (both default ON).
+    struct CallFeatureSettings { let liveHintsEnabled: Bool; let translationEnabled: Bool }
+
+    /// Fetches the user's Live Hints / Translation toggles. Missing fields
+    /// default to ON to match the backend defaults.
+    func callFeatureSettings() async throws -> CallFeatureSettings {
+        let data = try await request("/api/settings/hints", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return CallFeatureSettings(
+            liveHintsEnabled: (obj["liveHintsEnabled"] as? Bool) ?? true,
+            translationEnabled: (obj["translationEnabled"] as? Bool) ?? true
+        )
+    }
+
+    /// Updates the Live Hints / Translation toggles. Only the provided fields are
+    /// sent; returns the stored values.
+    @discardableResult
+    func setCallFeatureSettings(liveHintsEnabled: Bool? = nil, translationEnabled: Bool? = nil) async throws -> CallFeatureSettings {
+        var body: [String: Any] = [:]
+        if let liveHintsEnabled = liveHintsEnabled { body["liveHintsEnabled"] = liveHintsEnabled }
+        if let translationEnabled = translationEnabled { body["translationEnabled"] = translationEnabled }
+        let data = try await request("/api/settings/hints", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return CallFeatureSettings(
+            liveHintsEnabled: (obj["liveHintsEnabled"] as? Bool) ?? true,
+            translationEnabled: (obj["translationEnabled"] as? Bool) ?? true
+        )
+    }
+
     /// Fetches the user's saved "My Context" free-text block (empty string if
     /// unset). This context is auto-injected into every live hint.
     func userContext() async throws -> String {
