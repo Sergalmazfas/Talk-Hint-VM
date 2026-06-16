@@ -12,3 +12,9 @@ id = "7bf4U6LErR6ZBcMcH6KDe"
 uri = "file://LIVE_PIPELINE_AUDIT.md"
 type = "text"
 title = "TalkHint LIVE Call Pipeline Audit (May 2026)"
+
+[[outputs]]
+id = "bYjmkFJ0fZJzg9eD92oHt"
+uri = "file://docs/TalkHint-AirAtom-Status-Audit.md"
+type = "text"
+title = "TalkHint + AirAtom — Status Audit"
