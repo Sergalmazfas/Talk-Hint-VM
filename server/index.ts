@@ -9,6 +9,7 @@ import { repointWebhooksOnStartup } from "./webhookRepoint";
 import { startWriteHealthAlerter, stopWriteHealthAlerter, getAlertChannelStatus } from "./writeHealthAlerter";
 import { startAirAtomaRetryWorker, stopAirAtomaRetryWorker } from "./airatomaRetryWorker";
 import { bootstrapAdminPasswordOnStartup } from "./bootstrapAdminPassword";
+import { provisionUserOnStartup } from "./provisionUser";
 
 const app = express();
 app.set('trust proxy', true);
@@ -318,6 +319,11 @@ app.use((req, res, next) => {
   // is set, set that account's password on startup so a Google-login-only account
   // can also sign in with email + password. No-op when the secret is absent.
   await bootstrapAdminPasswordOnStartup();
+
+  // One-time user provisioning. If ADMIN_PROVISION_USER (JSON with email/password
+  // /name) is set, create the account, ensure a plan that allows a phone number,
+  // and assign a free pool number on startup. No-op when the secret is absent.
+  await provisionUserOnStartup();
 
   // The save-health page (/health + /api/health) is gated in production: access
   // is denied unless a valid HEALTH_STATUS_TOKEN or an authenticated app session
