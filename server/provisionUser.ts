@@ -14,10 +14,15 @@ import { registerUser } from "./auth";
  *   {"email":"leo@talkhint.app","password":"...","name":"Leo"}
  *   - email/password are required (the login credentials)
  *   - name is the phone number's display name (defaults to the email's local part)
+ *   - plan is optional; defaults to "employee" (see step 2)
+ *
+ * These are internal employee accounts, NOT paying subscribers. The app's only
+ * access gate is `plan !== "free"/"none"`, so we mark them "employee" — full
+ * access, no Stripe billing.
  *
  * Steps (each idempotent):
  *   1. Create the user if it doesn't exist.
- *   2. Ensure the plan allows a phone number (free/none -> "basic").
+ *   2. Ensure the account can hold a number (free/none/empty -> "employee").
  *   3. Assign the first free pool number if the user has none.
  *
  * Operational flow:
@@ -32,7 +37,7 @@ export async function provisionUserOnStartup(): Promise<void> {
   const raw = process.env.ADMIN_PROVISION_USER;
   if (!raw) return;
 
-  let spec: { email?: string; password?: string; name?: string };
+  let spec: { email?: string; password?: string; name?: string; plan?: string };
   try {
     spec = JSON.parse(raw);
   } catch {
@@ -63,11 +68,16 @@ export async function provisionUserOnStartup(): Promise<void> {
       console.log(`[Provision] User ${email} already exists (${user.id}).`);
     }
 
-    // 2) Ensure the plan allows a phone number.
+    // 2) Ensure the account can hold a phone number. These are internal employee
+    //    accounts, NOT paying Stripe subscribers — the app's access gate is simply
+    //    `plan !== "free"/"none"`, so we set a distinct "employee" marker that
+    //    unlocks the number without implying a billed subscription. Only set it
+    //    when the plan is empty/free/none so a real plan is never clobbered.
+    const accessPlan = (spec.plan || "employee").trim() || "employee";
     if (!user.plan || user.plan === "free" || user.plan === "none") {
-      const updated = await storage.updateUser(user.id, { plan: "basic" });
+      const updated = await storage.updateUser(user.id, { plan: accessPlan });
       if (updated) user = updated;
-      console.log(`[Provision] Set plan=basic for ${email}.`);
+      console.log(`[Provision] Set plan=${accessPlan} for ${email}.`);
     }
 
     // 3) Assign a free pool number if the user has none.

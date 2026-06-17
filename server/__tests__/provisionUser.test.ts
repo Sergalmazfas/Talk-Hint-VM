@@ -87,7 +87,7 @@ describe("provisionUserOnStartup", () => {
     expect(storageMock.createUser.mock.calls[0][0].email).toBe("leo@talkhint.app");
     expect(storageMock.createUser.mock.calls[0][0].password).not.toBe("Leo123456!");
     // plan upgraded so a number can attach
-    expect(storageMock.updateUser).toHaveBeenCalledWith("u-leo", { plan: "basic" });
+    expect(storageMock.updateUser).toHaveBeenCalledWith("u-leo", { plan: "employee" });
     // first candidate claimed with the given name
     expect(storageMock.assignNumber).toHaveBeenCalledWith("n1", "u-leo", "Leo", "personal");
   });
@@ -105,7 +105,7 @@ describe("provisionUserOnStartup", () => {
     await provisionUserOnStartup();
 
     expect(storageMock.createUser).not.toHaveBeenCalled();
-    expect(storageMock.updateUser).toHaveBeenCalledWith("u-leo", { plan: "basic" });
+    expect(storageMock.updateUser).toHaveBeenCalledWith("u-leo", { plan: "employee" });
     expect(storageMock.assignNumber).toHaveBeenCalledWith("n1", "u-leo", "Leo", "personal");
   });
 
