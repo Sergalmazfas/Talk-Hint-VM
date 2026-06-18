@@ -6,9 +6,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // tooling, so the running server creates the account + assigns a number on
 // startup from the ADMIN_PROVISION_USER secret. Behaviours that matter:
 //   - absent / malformed / incomplete secret is a no-op
-//   - happy path: creates user, sets plan=basic, assigns the first free number
+//   - happy path: creates user, sets plan=employee, assigns the first free number
 //   - idempotent: existing user with a number is left untouched
 //   - falls through to the next candidate when a number is already taken
+//   - assigns a specific requested number (no fallback when unavailable)
+//   - sets a valid AirAtoma URL, rejects an unsafe one
+//   - provisions every entry when given an array
 //
 // `../storage` is mocked so no pg pool is needed. `registerUser` is the real
 // one (it calls storage.getUserByEmail + storage.createUser, both mocked).
@@ -20,6 +23,7 @@ const storageMock = vi.hoisted(() => ({
   updateUser: vi.fn(),
   getUserPhoneNumbers: vi.fn(),
   getAvailableNumbers: vi.fn(),
+  getAllAvailableNumbers: vi.fn(),
   assignNumber: vi.fn(),
 }));
 
@@ -137,5 +141,120 @@ describe("provisionUserOnStartup", () => {
 
     expect(storageMock.assignNumber).toHaveBeenCalledTimes(2);
     expect(storageMock.assignNumber).toHaveBeenLastCalledWith("n2", "u-leo", "Leo", "personal");
+  });
+
+  it("assigns the specific requested number (normalizing spaces)", async () => {
+    process.env.ADMIN_PROVISION_USER = JSON.stringify({
+      email: "cdl@talkhint.app",
+      password: "Cdl123456!",
+      name: "CDL Driver",
+      number: "+1 786 733 1025",
+    });
+    storageMock.getUserByEmail.mockResolvedValue({ id: "u-cdl", plan: "employee" });
+    storageMock.getUserPhoneNumbers.mockResolvedValue([]);
+    storageMock.getAllAvailableNumbers.mockResolvedValue([
+      { id: "n1", twilioNumber: "+15550000001", isAssigned: false },
+      { id: "n5", twilioNumber: "+17867331025", isAssigned: false },
+    ]);
+    storageMock.assignNumber.mockResolvedValue({ twilioNumber: "+17867331025" });
+
+    await provisionUserOnStartup();
+
+    // first-free path must NOT run when a specific number is requested
+    expect(storageMock.getAvailableNumbers).not.toHaveBeenCalled();
+    expect(storageMock.assignNumber).toHaveBeenCalledTimes(1);
+    expect(storageMock.assignNumber).toHaveBeenCalledWith("n5", "u-cdl", "CDL Driver", "personal");
+  });
+
+  it("matches the requested number even without a leading + and with punctuation", async () => {
+    process.env.ADMIN_PROVISION_USER = JSON.stringify({
+      email: "cdl@talkhint.app",
+      password: "Cdl123456!",
+      name: "CDL Driver",
+      number: "1 (786) 733-1025",
+    });
+    storageMock.getUserByEmail.mockResolvedValue({ id: "u-cdl", plan: "employee" });
+    storageMock.getUserPhoneNumbers.mockResolvedValue([]);
+    storageMock.getAllAvailableNumbers.mockResolvedValue([
+      { id: "n5", twilioNumber: "+17867331025", isAssigned: false },
+    ]);
+    storageMock.assignNumber.mockResolvedValue({ twilioNumber: "+17867331025" });
+
+    await provisionUserOnStartup();
+
+    expect(storageMock.assignNumber).toHaveBeenCalledWith("n5", "u-cdl", "CDL Driver", "personal");
+  });
+
+  it("does NOT fall back when the requested number is taken or missing", async () => {
+    process.env.ADMIN_PROVISION_USER = JSON.stringify({
+      email: "cdl@talkhint.app",
+      password: "Cdl123456!",
+      number: "+17867331025",
+    });
+    storageMock.getUserByEmail.mockResolvedValue({ id: "u-cdl", plan: "employee" });
+    storageMock.getUserPhoneNumbers.mockResolvedValue([]);
+    storageMock.getAllAvailableNumbers.mockResolvedValue([
+      { id: "n5", twilioNumber: "+17867331025", isAssigned: true },
+    ]);
+
+    await provisionUserOnStartup();
+
+    expect(storageMock.assignNumber).not.toHaveBeenCalled();
+    expect(storageMock.getAvailableNumbers).not.toHaveBeenCalled();
+  });
+
+  it("sets a valid AirAtoma webhook URL", async () => {
+    const url = "https://crm.airatoma.com/api/talkhint/webhook/tok123";
+    process.env.ADMIN_PROVISION_USER = JSON.stringify({
+      email: "cdl@talkhint.app",
+      password: "Cdl123456!",
+      airatoma: url,
+    });
+    storageMock.getUserByEmail.mockResolvedValue({
+      id: "u-cdl",
+      plan: "employee",
+      airatomaWebhookUrl: null,
+    });
+    storageMock.updateUser.mockResolvedValue({ id: "u-cdl", airatomaWebhookUrl: url });
+    storageMock.getUserPhoneNumbers.mockResolvedValue([{ id: "p1" }]);
+
+    await provisionUserOnStartup();
+
+    expect(storageMock.updateUser).toHaveBeenCalledWith("u-cdl", { airatomaWebhookUrl: url });
+  });
+
+  it("rejects an unsafe AirAtoma URL without writing it", async () => {
+    process.env.ADMIN_PROVISION_USER = JSON.stringify({
+      email: "cdl@talkhint.app",
+      password: "Cdl123456!",
+      airatoma: "http://127.0.0.1/api/talkhint/webhook/tok",
+    });
+    storageMock.getUserByEmail.mockResolvedValue({
+      id: "u-cdl",
+      plan: "employee",
+      airatomaWebhookUrl: null,
+    });
+    storageMock.getUserPhoneNumbers.mockResolvedValue([{ id: "p1" }]);
+
+    await provisionUserOnStartup();
+
+    // plan is already employee + has a number, so updateUser must never be called
+    // (the only candidate write here would be the rejected AirAtoma URL)
+    expect(storageMock.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("provisions every entry when given an array", async () => {
+    process.env.ADMIN_PROVISION_USER = JSON.stringify([
+      { email: "leo@talkhint.app", password: "Leo123456!", name: "Leo" },
+      { email: "cdl@talkhint.app", password: "Cdl123456!", name: "CDL Driver" },
+    ]);
+    storageMock.getUserByEmail.mockResolvedValue({ id: "u-x", plan: "employee" });
+    storageMock.getUserPhoneNumbers.mockResolvedValue([{ id: "p1" }]);
+
+    await provisionUserOnStartup();
+
+    expect(storageMock.getUserByEmail).toHaveBeenCalledTimes(2);
+    expect(storageMock.getUserByEmail).toHaveBeenCalledWith("leo@talkhint.app");
+    expect(storageMock.getUserByEmail).toHaveBeenCalledWith("cdl@talkhint.app");
   });
 });
