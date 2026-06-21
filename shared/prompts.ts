@@ -155,6 +155,74 @@ Remember:
 You are not here to talk.
 You are here to help the user achieve their goal in a live call.`;
 
+// Assemble the LIVE-call coaching system prompt.
+//
+// This is the prompt that translateAndSuggest() sends to the hint model on
+// every guest turn. It is extracted here as a PURE function (no network, no
+// server-only imports) so it can be unit-tested directly against the real
+// assembled string instead of grepping websocket.ts source. Keep all live
+// prompt wording changes here so the regression tests stay meaningful.
+//
+// Inputs:
+//   - goal: the user's call goal (falls back to a generic goal when empty)
+//   - language: target language code (ru/es/en); controls the spoken language
+//   - conversationContext: prior turns, rendered as CONVERSATION HISTORY
+//   - contextSections: pre-assembled context provider chain (USER/CONTACT/cards)
+//   - translateEnabled: when false the model is told NOT to translate (English
+//     suggestion only) so no translation tokens are spent.
+export function buildLiveSystemPrompt(opts: {
+  goal: string;
+  language?: string;
+  conversationContext?: string;
+  contextSections?: string;
+  translateEnabled?: boolean;
+}): string {
+  const {
+    goal,
+    language = "ru",
+    conversationContext = "",
+    contextSections = "",
+    translateEnabled = true,
+  } = opts;
+
+  const langName = LANGUAGE_NAMES[language] || "Russian";
+  const contextSection = conversationContext
+    ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n`
+    : "";
+
+  return translateEnabled
+    ? `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
+
+This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
+${contextSections}
+${LIVE_ANTI_LOOP_RULES}
+
+Guest just spoke. 
+1) Translate guest's words to ${langName}. 
+2) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
+3) Translate that suggestion to ${langName}.
+4) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
+
+Return JSON only, no markdown:
+{"translation":"guest's words in ${langName}",
+ "suggestion":{"en":"reply in ENGLISH","translation":"same reply in ${langName}"},
+ "sentiment":"positive|neutral|negative|urgent|confused"}`
+    : `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}.${contextSection}
+
+This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
+${contextSections}
+${LIVE_ANTI_LOOP_RULES}
+
+Guest just spoke. Do NOT translate anything — leave translation fields empty.
+1) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
+2) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
+
+Return JSON only, no markdown:
+{"translation":"",
+ "suggestion":{"en":"reply in ENGLISH","translation":""},
+ "sentiment":"positive|neutral|negative|urgent|confused"}`;
+}
+
 export const TALKHINT_GOLDEN_PROMPT = `ROLE
 You are TalkHint — a real-time call assistant for HON (the owner of the call).
 

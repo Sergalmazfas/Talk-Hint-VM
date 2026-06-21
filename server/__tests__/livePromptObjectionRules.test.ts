@@ -1,7 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 
 // ---------------------------------------------------------------------------
 // Regression guard for the LIVE-call coaching prompt.
@@ -13,19 +10,17 @@ import { fileURLToPath } from "url";
 //      lives in the shared LIVE_ANTI_LOOP_RULES block embedded into every
 //      assembled live system prompt.
 //   2. The "under 25 words" cap on the suggested spoken reply, which is added
-//      inline where translateAndSuggest assembles the live system prompt in
-//      server/websocket.ts.
+//      where buildLiveSystemPrompt assembles the live system prompt.
 //
 // Both branches of the assembled prompt (translation on / off) carry the cap,
-// so we assert it appears on every suggestion line that survives in the file.
+// so we assert it appears in the real assembled string for both branches.
+// Asserting against buildLiveSystemPrompt's output (instead of grepping
+// websocket.ts source) keeps the test resilient to whitespace/wording shifts
+// while still guarding the actual prompt the model receives.
 // ---------------------------------------------------------------------------
 
-const { LIVE_ANTI_LOOP_RULES } = await import("@shared/prompts");
-
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const websocketSource = readFileSync(
-  path.join(rootDir, "websocket.ts"),
-  "utf8",
+const { LIVE_ANTI_LOOP_RULES, buildLiveSystemPrompt } = await import(
+  "@shared/prompts"
 );
 
 describe("live-call coaching prompt", () => {
@@ -37,18 +32,34 @@ describe("live-call coaching prompt", () => {
   });
 
   it("embeds the objection rule into the assembled live system prompt", () => {
-    // The websocket prompt builder interpolates LIVE_ANTI_LOOP_RULES directly.
-    expect(websocketSource).toContain("${LIVE_ANTI_LOOP_RULES}");
+    for (const translateEnabled of [true, false]) {
+      const prompt = buildLiveSystemPrompt({
+        goal: "Book a meeting",
+        language: "ru",
+        translateEnabled,
+      });
+      expect(prompt).toContain("OBJECTION PRIORITY");
+      expect(prompt).toContain(
+        "Acknowledge -> Reframe -> Credibility -> Controlled question",
+      );
+    }
   });
 
-  it("keeps the under-25-words cap on every suggestion line", () => {
-    const suggestionLines = websocketSource
-      .split("\n")
-      .filter((line) => line.includes("Suggest what user should say next"));
+  it("keeps the under-25-words cap on the suggestion line in both branches", () => {
+    for (const translateEnabled of [true, false]) {
+      const prompt = buildLiveSystemPrompt({
+        goal: "Book a meeting",
+        language: "ru",
+        translateEnabled,
+      });
+      const suggestionLines = prompt
+        .split("\n")
+        .filter((line) => line.includes("Suggest what user should say next"));
 
-    expect(suggestionLines.length).toBeGreaterThan(0);
-    for (const line of suggestionLines) {
-      expect(line).toContain("under 25 words");
+      expect(suggestionLines.length).toBeGreaterThan(0);
+      for (const line of suggestionLines) {
+        expect(line).toContain("under 25 words");
+      }
     }
   });
 });

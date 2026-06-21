@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { log } from "./index";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, buildLiveSystemPrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
@@ -234,52 +234,23 @@ async function translateAndSuggest(text: string, goal: string, language: string 
   suggestion?: { en: string; translation: string };
   sentiment?: { sentiment: 'positive' | 'neutral' | 'negative'; score: number };
 }> {
-  const langName = LANGUAGE_NAMES[language] || "Russian";
-  const langCode = language === "es" ? "ES" : "RU";
-  
   // Don't wait for sentiment - return it separately via callback
   // This makes suggestions appear FASTER
   try {
-    const contextSection = conversationContext 
-      ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n` 
-      : "";
-
     const contextSections = buildContextProviderChain({ userContext, contactContext, staticCards });
 
     // Translation can be disabled per-user: when off we ask the model NOT to
     // translate (no guest translation, English-only suggestion) so no extra
     // translation tokens are spent and the UI shows the original language only.
-    const systemPrompt = translateEnabled
-      ? `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
-
-This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
-${contextSections}
-${LIVE_ANTI_LOOP_RULES}
-
-Guest just spoke. 
-1) Translate guest's words to ${langName}. 
-2) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
-3) Translate that suggestion to ${langName}.
-4) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
-
-Return JSON only, no markdown:
-{"translation":"guest's words in ${langName}",
- "suggestion":{"en":"reply in ENGLISH","translation":"same reply in ${langName}"},
- "sentiment":"positive|neutral|negative|urgent|confused"}`
-      : `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}.${contextSection}
-
-This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
-${contextSections}
-${LIVE_ANTI_LOOP_RULES}
-
-Guest just spoke. Do NOT translate anything — leave translation fields empty.
-1) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
-2) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
-
-Return JSON only, no markdown:
-{"translation":"",
- "suggestion":{"en":"reply in ENGLISH","translation":""},
- "sentiment":"positive|neutral|negative|urgent|confused"}`;
+    // Prompt assembly lives in buildLiveSystemPrompt (shared/prompts.ts) so it
+    // can be unit-tested directly against the real string.
+    const systemPrompt = buildLiveSystemPrompt({
+      goal,
+      language,
+      conversationContext,
+      contextSections,
+      translateEnabled,
+    });
 
     const userPrompt = `Guest said: "${text}"
 
