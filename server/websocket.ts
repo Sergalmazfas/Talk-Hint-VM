@@ -258,7 +258,7 @@ ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 
 1) Translate guest's words to ${langName}. 
-2) Suggest what user should say next - a short reply IN ENGLISH (under 15 words) that moves toward the goal.
+2) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
 3) Translate that suggestion to ${langName}.
 4) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
 
@@ -273,7 +273,7 @@ ${contextSections}
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. Do NOT translate anything — leave translation fields empty.
-1) Suggest what user should say next - a short reply IN ENGLISH (under 15 words) that moves toward the goal.
+1) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
 2) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
 
 Return JSON only, no markdown:
