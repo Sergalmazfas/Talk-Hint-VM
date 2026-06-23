@@ -88,4 +88,34 @@ describe("configureVoiceWebhook", () => {
 
     expect(result).toEqual({ success: false, error: "auth failed" });
   });
+
+  it("falls back to the main account when the subaccount update fails", async () => {
+    // Number was moved off the subaccount onto the main account, but the DB
+    // still has stale subaccount creds. First update (subaccount) throws, then
+    // the main-account retry succeeds.
+    h.update
+      .mockRejectedValueOnce(new Error("not found"))
+      .mockResolvedValueOnce({ phoneNumber: "+15550001111" });
+
+    const result = await configureVoiceWebhook(SID, WEBHOOK_URL, "ACsub", "subtok");
+
+    expect(result).toEqual({ success: true, phoneNumber: "+15550001111" });
+    expect(h.update).toHaveBeenCalledTimes(2);
+    // First tried subaccount creds, then retried with the master account.
+    expect(h.ctorArgs).toEqual([
+      ["ACsub", "subtok"],
+      ["AC_test_sid", "test_token"],
+    ]);
+  });
+
+  it("returns the fallback error when both subaccount and main account fail", async () => {
+    h.update
+      .mockRejectedValueOnce(new Error("subaccount dead"))
+      .mockRejectedValueOnce(new Error("main also failed"));
+
+    const result = await configureVoiceWebhook(SID, WEBHOOK_URL, "ACsub", "subtok");
+
+    expect(result).toEqual({ success: false, error: "main also failed" });
+    expect(h.update).toHaveBeenCalledTimes(2);
+  });
 });

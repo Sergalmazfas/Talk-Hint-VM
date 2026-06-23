@@ -733,17 +733,8 @@ export class DatabaseStorage implements IStorage {
           .list({ areaCode, limit: 1 });
         
         if (numbers.length > 0) {
-          // Create subaccount first
-          console.log(`[Pool] Creating subaccount: ${subaccountName}`);
-          const subaccount = await masterClient.api.accounts.create({
-            friendlyName: subaccountName
-          });
-          
-          // Create client for subaccount
-          const subClient = twilio(subaccount.sid, subaccount.authToken);
-          
           const host = process.env.REPLIT_DEPLOYMENT_URL || 'talkhint-v2.replit.app';
-          const result = await subClient.incomingPhoneNumbers.create({
+          const result = await masterClient.incomingPhoneNumbers.create({
             phoneNumber: numbers[0].phoneNumber,
             voiceUrl: `https://${host}/twilio/voice`,
             voiceMethod: 'POST',
@@ -753,14 +744,14 @@ export class DatabaseStorage implements IStorage {
           await db.insert(availableNumbers).values({
             twilioNumber: result.phoneNumber,
             twilioSid: result.sid,
-            subaccountSid: subaccount.sid,
-            subaccountToken: subaccount.authToken,
+            subaccountSid: null,
+            subaccountToken: null,
             subaccountName: subaccountName,
             isAssigned: false,
             country: 'US'
           });
           
-          console.log(`[Pool] Purchased ${result.phoneNumber} in subaccount ${subaccountName}`);
+          console.log(`[Pool] Purchased ${result.phoneNumber} on main account (slot ${subaccountName})`);
           purchased = true;
         }
       } catch (err: any) {

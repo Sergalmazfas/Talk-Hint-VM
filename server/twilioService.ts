@@ -100,23 +100,39 @@ export async function configureVoiceWebhook(
   subaccountSid?: string,
   subaccountToken?: string
 ): Promise<{ success: boolean; phoneNumber?: string; error?: string }> {
+  const updateParams = {
+    voiceUrl: webhookUrl,
+    voiceMethod: "POST" as const,
+    statusCallback: `${webhookUrl.replace('/twilio/voice', '/twilio/status')}`,
+    statusCallbackMethod: "POST" as const,
+  };
+
   try {
     const client = getTwilioClient(subaccountSid, subaccountToken);
-    
-    const updated = await client.incomingPhoneNumbers(numberSid).update({
-      voiceUrl: webhookUrl,
-      voiceMethod: "POST",
-      statusCallback: `${webhookUrl.replace('/twilio/voice', '/twilio/status')}`,
-      statusCallbackMethod: "POST",
-    });
-    
+    const updated = await client.incomingPhoneNumbers(numberSid).update(updateParams);
     console.log(`[Twilio] Configured webhook for ${updated.phoneNumber}: ${webhookUrl}`);
-    
     return {
       success: true,
       phoneNumber: updated.phoneNumber,
     };
   } catch (error: any) {
+    if (subaccountSid && subaccountToken) {
+      try {
+        const mainClient = getTwilioClient();
+        const updated = await mainClient.incomingPhoneNumbers(numberSid).update(updateParams);
+        console.log(`[Twilio] Configured webhook for ${updated.phoneNumber} (main-account fallback): ${webhookUrl}`);
+        return {
+          success: true,
+          phoneNumber: updated.phoneNumber,
+        };
+      } catch (fallbackError: any) {
+        console.error(`[Twilio] Failed to configure webhook for ${numberSid} (subaccount + main fallback):`, fallbackError.message);
+        return {
+          success: false,
+          error: fallbackError.message,
+        };
+      }
+    }
     console.error(`[Twilio] Failed to configure webhook for ${numberSid}:`, error.message);
     return {
       success: false,
