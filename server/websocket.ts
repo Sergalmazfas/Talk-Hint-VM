@@ -229,7 +229,7 @@ export function getHintFallbackStats() {
   };
 }
 
-async function generateWithOpenAI(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
+async function generateWithOpenAI(model: string, systemPrompt: string, userPrompt: string, maxTokens: number = 80): Promise<string> {
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -243,7 +243,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
         { role: "user", content: userPrompt }
       ],
       temperature: 0.4,
-      max_tokens: 80
+      max_tokens: maxTokens
     }),
   });
   if (!response.ok) {
@@ -332,7 +332,13 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
       model: currentModel,
       fallbackModel: OPENAI_FALLBACK_MODEL,
       withGemini: generateWithGemini,
-      withOpenAI: generateWithOpenAI,
+      // The combined translation+suggestion JSON needs more room than the
+      // default 80-token cap or the reply gets truncated mid-JSON and parseHint
+      // silently drops the suggestion (root cause of "one hint then nothing"
+      // after OpenAI became primary — Gemini used 250 tokens). 250 matches
+      // Gemini; it's a cap, not spend, so short turns still finish early.
+      // Also covers the Gemini->OpenAI fallback inside routeGenerate.
+      withOpenAI: (m: string, s: string, u: string) => generateWithOpenAI(m, s, u, 250),
       onFallback: (gemErr: any) => {
         geminiHintFallbacks++;
         fellBack = true;
@@ -361,7 +367,7 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
       const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
       log(`Gemini (${currentModel}) returned no suggestion — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
       try {
-        const fbResult = parseHint(await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt));
+        const fbResult = parseHint(await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt, 250));
         if (hasSuggestion(fbResult)) {
           // Keep Gemini's translation if OpenAI didn't supply its own.
           result = { ...fbResult!, translation: fbResult!.translation || result?.translation || "" };
