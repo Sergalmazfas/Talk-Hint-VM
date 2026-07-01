@@ -10,8 +10,9 @@ import { getSessionUserId } from "./auth";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
+import type { DialogueEntry } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import type { GoalState, SlotMap } from "../shared/goalTypes";
+import type { GoalState, SlotMap, GoalType } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { renderTranscriptText } from "./airatomaWebhook";
@@ -970,6 +971,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Defaults ON so a load failure never silently disables hints for a paying user.
     let callSettings = { liveHintsEnabled: true, translationEnabled: true };
     let callSettingsReady: Promise<void> = Promise.resolve(); // resolves once callSettings is loaded
+    // Auto-built dialogue libraries for the owner, keyed by goalType. Consulted
+    // FIRST on each guest turn; a hit serves a ready-made line (no LLM call), a
+    // miss falls through to the existing translateAndSuggest hint path.
+    let dialogueLibraries: Record<string, DialogueEntry[]> = {};
+    let dialogueLibrariesReady: Promise<void> = Promise.resolve(); // resolves once libraries are loaded
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -1097,6 +1103,32 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const union = allWords.size;
       return intersection / union; // Jaccard similarity
     }
+
+    // Library-first lookup: find the best ready-made dialogue line for the given
+    // guest utterance within the CURRENT goal type's library. Matches the guest
+    // text against each entry's trigger + variants (Jaccard similarity), and
+    // returns the highest-scoring entry at/above threshold. Returns null on a
+    // miss so the caller falls through to the existing translateAndSuggest path.
+    const DIALOGUE_MATCH_THRESHOLD = 0.6;
+    function matchDialogueLibrary(text: string, goalType: string): DialogueEntry | null {
+      const entries = dialogueLibraries[goalType];
+      if (!entries || entries.length === 0) return null;
+      let best: DialogueEntry | null = null;
+      let bestScore = 0;
+      for (const entry of entries) {
+        if (!entry || !entry.answer) continue;
+        const candidates = [entry.trigger, ...(Array.isArray(entry.variants) ? entry.variants : [])];
+        for (const cand of candidates) {
+          if (!cand) continue;
+          const score = textSimilarity(text, cand);
+          if (score > bestScore) {
+            bestScore = score;
+            best = entry;
+          }
+        }
+      }
+      return bestScore >= DIALOGUE_MATCH_THRESHOLD ? best : null;
+    }
     
     // Twilio WS keepalive ping every 15 seconds to prevent proxy/edge idle disconnect
     const twilioKeepaliveInterval = setInterval(() => {
@@ -1199,6 +1231,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       // ALWAYS update GoalEngine (even if hints are blocked)
       let goalJustAchieved = false;
+      // The goal type the engine currently believes we're in — picks which
+      // dialogue library (if any) to consult for this turn.
+      let detectedGoalType: GoalType = "other";
       if (goalEngine) {
         const goalUpdate = goalEngine.updateOnUtterance({
           speaker: "GST",
@@ -1207,6 +1242,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         
         const state = goalUpdate.state;
+        detectedGoalType = state.goalType;
         const missingSlot = state.missingSlots[0] || "none";
         fastLayer.setGoal(state.goalType, missingSlot);
         
@@ -1283,6 +1319,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       await contactContextReady;
       await staticCardsReady;
       await callSettingsReady;
+      await dialogueLibrariesReady;
 
       // Live Hints OFF: skip the model entirely (no GPT/Gemini call), so no
       // translation and no suggestion are produced. The raw transcript is still
@@ -1324,11 +1361,22 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           ? translateGuestText(text, currentLanguage)
           : Promise.resolve({ translation: "", providerUsed: "translation_off" });
 
+      // ===== LIBRARY-FIRST LOOKUP =====
+      // Before spending an LLM call, look for a ready-made line in the owner's
+      // dialogue library for the CURRENT goal type. A hit is served through the
+      // exact same suggestion path/payload below (no UI change), skipping the
+      // model entirely. A miss falls through to translateAndSuggest, unchanged.
+      const libraryHit = wantSuggestion ? matchDialogueLibrary(text, detectedGoalType) : null;
+      if (libraryHit) {
+        log(`[Dialogue] HIT goal=${detectedGoalType} type=${libraryHit.type} trigger="${libraryHit.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
+      }
+
       const suggestionStart = Date.now();
       // Fired in parallel with the translation so neither waits for the other.
       // translateAndSuggest never throws (it catches internally), so if this turn
       // is blocked before the suggestion is read, the floating promise is safe.
-      const suggestionPromise = wantSuggestion
+      // Skipped on a library hit — the ready line is used instead.
+      const suggestionPromise = (wantSuggestion && !libraryHit)
         ? translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled)
         : null;
 
@@ -1440,13 +1488,29 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         }
       }
       
-      // ----- Suggestion: await the parallel suggestion call -----
-      // We only reach here after all the "no suggestion" guards above returned,
-      // so a suggestion was requested (suggestionPromise is non-null).
-      if (!suggestionPromise) return;
-      const translated = await suggestionPromise;
+      // ----- Suggestion: library line (instant) or the parallel LLM call -----
+      // We only reach here after all the "no suggestion" guards above returned.
+      // On a library hit we build the suggestion from the ready line (no await,
+      // no model call); otherwise we await the LLM suggestion generated above.
+      let translated: {
+        translation?: string;
+        suggestion?: { en: string; translation: string };
+        providerUsed?: string;
+      };
+      if (libraryHit) {
+        translated = {
+          suggestion: {
+            en: libraryHit.answer,
+            translation: translationEnabled ? libraryHit.translation : "",
+          },
+          providerUsed: "library",
+        };
+      } else {
+        if (!suggestionPromise) return;
+        translated = await suggestionPromise;
+      }
       const suggestionMs = Date.now() - suggestionStart;
-      log(`[HINT] model=${currentModel} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
+      log(`[HINT] model=${libraryHit ? "library" : currentModel} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
 
       // Freshness/stale guard: while this suggestion was generating, the Guest started
       // a newer turn. Drop the now-outdated suggestion and do NOT arm the cooldown, so
@@ -1950,6 +2014,27 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                   }
                 })
                 .catch((err) => log(`[StaticCards] Static cards load failed: ${err}`, "twilio"));
+
+              // Load the owner's auto-built dialogue libraries (keyed by goalType)
+              // once the owner is known. Best-effort: a load failure leaves the
+              // map empty, so every turn simply falls through to the existing
+              // live hint path — libraries only ever ADD a fast path, never block.
+              dialogueLibraries = {};
+              dialogueLibrariesReady = ownerContextReady
+                .then(async () => {
+                  if (!streamUserId) return;
+                  const libs = await storage.listDialogueLibraries(streamUserId);
+                  const map: Record<string, DialogueEntry[]> = {};
+                  for (const lib of libs) {
+                    map[lib.goalType] = Array.isArray(lib.entries) ? (lib.entries as DialogueEntry[]) : [];
+                  }
+                  dialogueLibraries = map;
+                  const totalEntries = Object.values(map).reduce((n, e) => n + e.length, 0);
+                  if (libs.length) {
+                    log(`[Dialogue] Loaded ${libs.length} librar${libs.length === 1 ? "y" : "ies"} (${totalEntries} entries) for ${streamUserId}`, "twilio");
+                  }
+                })
+                .catch((err) => log(`[Dialogue] Library load failed: ${err}`, "twilio"));
 
               // Load the owner's live-call feature toggles (Live Hints + Translation)
               // once the owner is known. Defaults stay ON if the load fails so a

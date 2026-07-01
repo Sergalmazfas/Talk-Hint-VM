@@ -18,8 +18,12 @@ import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
-import { deriveOtherPartyPhone } from "./contactMemory";
-import { pendingCalls, users, phoneNumbers, deviceTokens } from "@shared/schema";
+import { deriveOtherPartyPhone, formatStaticCards } from "./contactMemory";
+import { pendingCalls, users, phoneNumbers, deviceTokens, DIALOGUE_ENTRY_TYPES } from "@shared/schema";
+import type { DialogueEntry, DialogueEntryType } from "@shared/schema";
+import { GOAL_REQUIREMENTS, SLOT_KEYS } from "@shared/goalTypes";
+import type { GoalType } from "@shared/goalTypes";
+import { generateDialogueLibrary } from "./dialogueLibraryGenerator";
 import { validateUserWebhookUrl, parseTranscriptText } from "./airatomaWebhook";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { db } from "./db";
@@ -2072,6 +2076,147 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       res.json({ success: true });
     } catch (error: any) {
       console.error("[Cards] Delete error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ===== Dialogue libraries (auto-built per-user, per-goal call answer library) =====
+  const GOAL_TYPES = Object.keys(GOAL_REQUIREMENTS) as GoalType[];
+  const DIALOGUE_TYPE_SET = new Set<string>(DIALOGUE_ENTRY_TYPES as readonly string[]);
+  const SLOT_SET = new Set<string>(SLOT_KEYS as string[]);
+  const MAX_DIALOGUE_ENTRIES = 300;
+
+  // Coerce arbitrary client input into a clean DialogueEntry[]. Anything
+  // malformed is dropped so a bad edit can't corrupt the stored library.
+  function sanitizeDialogueEntries(input: any): DialogueEntry[] {
+    if (!Array.isArray(input)) return [];
+    const out: DialogueEntry[] = [];
+    input.slice(0, MAX_DIALOGUE_ENTRIES).forEach((item: any, i: number) => {
+      if (!item || typeof item !== "object") return;
+      const answer = typeof item.answer === "string" ? item.answer.trim() : "";
+      if (!answer) return;
+      const type = (typeof item.type === "string" && DIALOGUE_TYPE_SET.has(item.type)
+        ? item.type
+        : "typical") as DialogueEntryType;
+      const variants = Array.isArray(item.variants)
+        ? item.variants.filter((v: any) => typeof v === "string" && v.trim()).map((v: string) => v.trim().slice(0, 300))
+        : [];
+      out.push({
+        id: typeof item.id === "string" && item.id ? item.id : crypto.randomUUID(),
+        type,
+        trigger: typeof item.trigger === "string" ? item.trigger.trim().slice(0, 300) : "",
+        variants,
+        answer: answer.slice(0, 600),
+        translation: typeof item.translation === "string" ? item.translation.trim().slice(0, 600) : "",
+        slot: typeof item.slot === "string" && SLOT_SET.has(item.slot) ? item.slot : null,
+        sortOrder: Number.isInteger(item.sortOrder) ? item.sortOrder : i,
+      });
+    });
+    return out;
+  }
+
+  app.get("/api/dialogue-libraries", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const libraries = await storage.listDialogueLibraries(user.id);
+      res.json({ libraries });
+    } catch (error: any) {
+      console.error("[Dialogue] List error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/dialogue-libraries/:goalType", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { goalType } = req.params;
+      if (!GOAL_TYPES.includes(goalType as GoalType)) {
+        return res.status(400).json({ error: "Invalid goalType" });
+      }
+      const library = await storage.getDialogueLibrary(user.id, goalType);
+      if (!library) return res.status(404).json({ error: "Library not found" });
+      res.json({ library });
+    } catch (error: any) {
+      console.error("[Dialogue] Get error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Auto-generate (or regenerate) the library for a goal type from the user's
+  // goal + personal context + knowledge cards. Replaces any existing library for
+  // that goal type (upsert keyed on user+goalType).
+  app.post("/api/dialogue-libraries/generate", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { goalType, goalText, language } = req.body ?? {};
+      if (!GOAL_TYPES.includes(goalType as GoalType)) {
+        return res.status(400).json({ error: "goalType is required and must be a valid goal type" });
+      }
+      const goalTextStr = typeof goalText === "string" ? goalText.trim() : "";
+      const lang = typeof language === "string" && language ? language : "ru";
+      const [userContext, cards] = await Promise.all([
+        storage.getUserContext(user.id),
+        storage.listKnowledgeCards(user.id),
+      ]);
+      const entries = await generateDialogueLibrary({
+        goalType: goalType as GoalType,
+        goalText: goalTextStr,
+        userContext,
+        cards: formatStaticCards(cards),
+        language: lang,
+      });
+      if (!entries.length) {
+        return res.status(502).json({ error: "Generation returned no entries, please try again" });
+      }
+      const library = await storage.upsertDialogueLibrary(user.id, goalType, goalTextStr, entries);
+      if (!library) return res.status(500).json({ error: "Failed to save library" });
+      console.log(`[Dialogue] User ${user.id} generated ${entries.length} entries for goal ${goalType}`);
+      res.json({ success: true, library });
+    } catch (error: any) {
+      console.error("[Dialogue] Generate error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Replace the whole library for a goal type — the management UI sends the full
+  // edited entries array (edit/add/delete/reorder are all just array edits).
+  app.put("/api/dialogue-libraries/:goalType", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { goalType } = req.params;
+      if (!GOAL_TYPES.includes(goalType as GoalType)) {
+        return res.status(400).json({ error: "Invalid goalType" });
+      }
+      const { entries, goalText } = req.body ?? {};
+      if (!Array.isArray(entries)) {
+        return res.status(400).json({ error: "entries array is required" });
+      }
+      const clean = sanitizeDialogueEntries(entries);
+      const existing = await storage.getDialogueLibrary(user.id, goalType);
+      const goalTextStr = typeof goalText === "string" ? goalText.trim() : (existing?.goalText ?? "");
+      const library = await storage.upsertDialogueLibrary(user.id, goalType, goalTextStr, clean);
+      if (!library) return res.status(500).json({ error: "Failed to save library" });
+      console.log(`[Dialogue] User ${user.id} saved ${clean.length} entries for goal ${goalType}`);
+      res.json({ success: true, library });
+    } catch (error: any) {
+      console.error("[Dialogue] Update error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/dialogue-libraries/:goalType", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { goalType } = req.params;
+      if (!GOAL_TYPES.includes(goalType as GoalType)) {
+        return res.status(400).json({ error: "Invalid goalType" });
+      }
+      const deleted = await storage.deleteDialogueLibrary(user.id, goalType);
+      if (!deleted) return res.status(404).json({ error: "Library not found" });
+      console.log(`[Dialogue] User ${user.id} deleted library for goal ${goalType}`);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Dialogue] Delete error:", error);
       res.status(500).json({ error: error.message });
     }
   });

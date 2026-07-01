@@ -166,6 +166,53 @@ export type KnowledgeCard = typeof knowledgeCards.$inferSelect;
 export const KNOWLEDGE_CARD_TYPES = ["project", "company"] as const;
 export type KnowledgeCardType = (typeof KNOWLEDGE_CARD_TYPES)[number];
 
+// Auto-built call dialogue library: per-user, per-goal collection of ready-made
+// question→answer lines served as the PRIMARY hint source during a call (falls
+// through to the live LLM hint path on a miss — no UI change). The whole library
+// is one row with a jsonb `entries` array so regeneration/editing replaces the
+// array in one write instead of doing ~100 per-row inserts. Keyed unique per
+// (userId, goalType) — one library per goal type per user.
+export const dialogueLibraries = pgTable("dialogue_libraries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  goalType: text("goal_type").notNull(),
+  goalText: text("goal_text").notNull().default(""),
+  entries: jsonb("entries").notNull().default(sql`'[]'::jsonb`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  userGoalIdx: uniqueIndex("dialogue_libraries_user_goal_idx").on(t.userId, t.goalType),
+}));
+
+export const DIALOGUE_ENTRY_TYPES = [
+  "opening", "discovery", "typical", "objection", "clarifying", "closing",
+] as const;
+export type DialogueEntryType = (typeof DIALOGUE_ENTRY_TYPES)[number];
+
+// One ready-made line in a dialogue library. `trigger` is the guest
+// question/objection this line answers; `variants` are paraphrases that widen
+// the runtime match; `answer`/`translation` are the ready-to-read reply and its
+// translation; `slot` is the targeted slot (a SlotMap key) or null.
+export interface DialogueEntry {
+  id: string;
+  type: DialogueEntryType;
+  trigger: string;
+  variants: string[];
+  answer: string;
+  translation: string;
+  slot: string | null;
+  sortOrder: number;
+}
+
+export const insertDialogueLibrarySchema = createInsertSchema(dialogueLibraries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertDialogueLibrary = z.infer<typeof insertDialogueLibrarySchema>;
+export type DialogueLibrary = typeof dialogueLibraries.$inferSelect;
+
 export const availableNumbers = pgTable("available_numbers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   twilioNumber: text("twilio_number").notNull().unique(),

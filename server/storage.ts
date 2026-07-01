@@ -9,7 +9,8 @@ import {
   type ContactMemory,
   type KnowledgeCard, type InsertKnowledgeCard,
   type AiratomaDelivery,
-  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards, airatomaDeliveries
+  type DialogueLibrary, type DialogueEntry,
+  users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards, airatomaDeliveries, dialogueLibraries
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, or, sql, gt, lte, desc, asc, getTableColumns } from "drizzle-orm";
@@ -158,6 +159,7 @@ const APP_TABLES: Record<string, any> = {
   calls,
   contact_memory: contactMemory,
   knowledge_cards: knowledgeCards,
+  dialogue_libraries: dialogueLibraries,
   available_numbers: availableNumbers,
   sessions,
   airatoma_deliveries: airatomaDeliveries,
@@ -342,6 +344,12 @@ export interface IStorage {
     sortOrder?: number;
   }): Promise<KnowledgeCard | undefined>;
   deleteKnowledgeCardById(userId: string, id: string): Promise<boolean>;
+
+  // Dialogue libraries (per-user, per-goal auto-built call answer library)
+  listDialogueLibraries(userId: string): Promise<DialogueLibrary[]>;
+  getDialogueLibrary(userId: string, goalType: string): Promise<DialogueLibrary | undefined>;
+  upsertDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined>;
+  deleteDialogueLibrary(userId: string, goalType: string): Promise<boolean>;
 
   // AirAtoma delivery queue (durable retry of the outbound CRM webhook)
   enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload, targetUrl?: string | null): Promise<AiratomaDelivery | undefined>;
@@ -1015,6 +1023,69 @@ export class DatabaseStorage implements IStorage {
       return rows.length > 0;
     } catch (error) {
       recordWriteFailure("knowledge_cards", "deleteKnowledgeCardById", error);
+      return false;
+    }
+  }
+
+  // Dialogue libraries (per-user, per-goal auto-built call answer library)
+  async listDialogueLibraries(userId: string): Promise<DialogueLibrary[]> {
+    if (!isDatabaseAvailable()) return [];
+    try {
+      return await db.select()
+        .from(dialogueLibraries)
+        .where(eq(dialogueLibraries.userId, userId))
+        .orderBy(dialogueLibraries.goalType);
+    } catch (error) {
+      console.error("[Storage] listDialogueLibraries error:", error);
+      return [];
+    }
+  }
+
+  async getDialogueLibrary(userId: string, goalType: string): Promise<DialogueLibrary | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.select()
+        .from(dialogueLibraries)
+        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.goalType, goalType)))
+        .limit(1);
+      return row;
+    } catch (error) {
+      console.error("[Storage] getDialogueLibrary error:", error);
+      return undefined;
+    }
+  }
+
+  // Upsert the whole library for (userId, goalType) — regeneration and editing
+  // both replace the entire entries array in one write (keyed on the unique
+  // (user_id, goal_type) index), so there are never stale per-row leftovers.
+  async upsertDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.insert(dialogueLibraries)
+        .values({ userId, goalType, goalText, entries })
+        .onConflictDoUpdate({
+          target: [dialogueLibraries.userId, dialogueLibraries.goalType],
+          set: { goalText, entries, updatedAt: new Date() },
+        })
+        .returning();
+      recordWriteSuccess("dialogue_libraries");
+      return row;
+    } catch (error) {
+      recordWriteFailure("dialogue_libraries", "upsertDialogueLibrary", error);
+      return undefined;
+    }
+  }
+
+  async deleteDialogueLibrary(userId: string, goalType: string): Promise<boolean> {
+    if (!isDatabaseAvailable()) return false;
+    try {
+      const rows = await db.delete(dialogueLibraries)
+        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.goalType, goalType)))
+        .returning();
+      recordWriteSuccess("dialogue_libraries");
+      return rows.length > 0;
+    } catch (error) {
+      recordWriteFailure("dialogue_libraries", "deleteDialogueLibrary", error);
       return false;
     }
   }

@@ -3296,6 +3296,322 @@ async function deleteCard(id) {
   });
 })();
 
+// ===== Dialogue Library UI =====
+// Ready-made lines served instantly during a call before falling through to GPT.
+// Per goalType; the modal edits one goalType at a time.
+var DIALOGUE_GOAL_LABELS = {
+  booking: 'Запись/Бронирование',
+  pricing: 'Узнать цены',
+  support: 'Техподдержка',
+  info: 'Информация',
+  negotiation: 'Переговоры',
+  other: 'Другое'
+};
+var DIALOGUE_TYPE_LABELS = {
+  opening: 'Opening',
+  discovery: 'Discovery',
+  typical: 'Typical',
+  objection: 'Objection',
+  clarifying: 'Clarifying',
+  closing: 'Closing'
+};
+var dialogueLibrariesCache = {}; // goalType -> library {goalType, goalText, entries[]}
+var dialogueEntries = [];        // entries for the currently selected goalType
+var editingDialogueEntryId = null;
+
+function currentDialogueGoalType() {
+  var sel = document.getElementById('dialogueGoalType');
+  return sel ? sel.value : 'booking';
+}
+
+async function loadDialogueLibraries() {
+  try {
+    var response = await fetch('/api/dialogue-libraries', {
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      var data = await response.json();
+      dialogueLibrariesCache = {};
+      (data.libraries || []).forEach(function(lib) {
+        dialogueLibrariesCache[lib.goalType] = lib;
+      });
+      updateDialogueStatus();
+    }
+  } catch (error) {
+    log('Dialogue libraries load error: ' + error.message);
+  }
+}
+
+function updateDialogueStatus() {
+  var statusEl = document.getElementById('dialogueStatus');
+  if (!statusEl) return;
+  var n = Object.keys(dialogueLibrariesCache).length;
+  statusEl.textContent = n ? (n + (n === 1 ? ' library' : ' libraries')) : 'No libraries yet';
+}
+
+function selectDialogueGoalType(goalType) {
+  var lib = dialogueLibrariesCache[goalType];
+  var goalTextEl = document.getElementById('dialogueGoalText');
+  dialogueEntries = lib && Array.isArray(lib.entries) ? lib.entries.slice() : [];
+  if (goalTextEl) goalTextEl.value = lib ? (lib.goalText || '') : '';
+  renderDialogueEntries();
+}
+
+function renderDialogueEntryRow(e) {
+  var variants = Array.isArray(e.variants) && e.variants.length
+    ? '<div style="font-size:0.75rem; color:#9ca3af; margin-top:2px;">+ ' + e.variants.length + ' variant' + (e.variants.length === 1 ? '' : 's') + '</div>'
+    : '';
+  return '<div class="card-row" data-testid="row-dialogue-' + escapeHtml(e.id) + '" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-bottom:8px;">' +
+    '<div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:#6366f1; margin-bottom:2px;">' + escapeHtml(DIALOGUE_TYPE_LABELS[e.type] || e.type || '') + '</div>' +
+    '<div style="font-weight:600; margin-bottom:2px;" data-testid="text-dialogue-trigger-' + escapeHtml(e.id) + '">' + escapeHtml(e.trigger || '(no trigger)') + '</div>' +
+    variants +
+    '<div style="font-size:0.85rem; color:#374151; margin:4px 0; white-space:pre-wrap;" data-testid="text-dialogue-answer-' + escapeHtml(e.id) + '">' + escapeHtml(e.answer || '') + '</div>' +
+    (e.translation ? '<div style="font-size:0.8rem; color:#6b7280; margin-bottom:6px; white-space:pre-wrap;">' + escapeHtml(e.translation) + '</div>' : '') +
+    '<div style="display:flex; gap:6px;">' +
+      '<button class="btn btn-secondary btn-small" data-dialogue-edit="' + escapeHtml(e.id) + '" data-testid="button-edit-dialogue-' + escapeHtml(e.id) + '">Edit</button>' +
+      '<button class="btn btn-secondary btn-small" data-dialogue-delete="' + escapeHtml(e.id) + '" data-testid="button-delete-dialogue-' + escapeHtml(e.id) + '">Delete</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderDialogueEntries() {
+  var listEl = document.getElementById('dialogueEntriesList');
+  if (!listEl) return;
+  if (!dialogueEntries.length) {
+    listEl.innerHTML = '<div style="color:#6b7280; padding:8px;">No lines yet for this goal. Click "Auto-build" to generate a library from your context and cards, or add lines manually.</div>';
+    return;
+  }
+  var sorted = dialogueEntries.slice().sort(function(a, b) {
+    return (a.sortOrder != null ? a.sortOrder : 0) - (b.sortOrder != null ? b.sortOrder : 0);
+  });
+  listEl.innerHTML = sorted.map(renderDialogueEntryRow).join('');
+  listEl.querySelectorAll('[data-dialogue-edit]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      openDialogueEntryModal(btn.getAttribute('data-dialogue-edit'));
+    });
+  });
+  listEl.querySelectorAll('[data-dialogue-delete]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      deleteDialogueEntry(btn.getAttribute('data-dialogue-delete'));
+    });
+  });
+}
+
+function openDialogueModal() {
+  var modal = document.getElementById('dialogueModal');
+  if (modal) modal.classList.add('active');
+  loadDialogueLibraries().then(function() {
+    selectDialogueGoalType(currentDialogueGoalType());
+  });
+}
+
+function closeDialogueModal() {
+  var modal = document.getElementById('dialogueModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function generateDialogueLibrary() {
+  var btn = document.getElementById('generateDialogueBtn');
+  var goalType = currentDialogueGoalType();
+  var goalTextEl = document.getElementById('dialogueGoalText');
+  var goalText = goalTextEl ? goalTextEl.value.trim() : '';
+  if (dialogueEntries.length && !confirm('Auto-build will REPLACE the current lines for "' + (DIALOGUE_GOAL_LABELS[goalType] || goalType) + '". Continue?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Building...'; }
+  try {
+    var response = await fetch('/api/dialogue-libraries/generate', {
+      method: 'POST',
+      credentials: 'include',
+      headers: authHeaders(),
+      body: JSON.stringify({ goalType: goalType, goalText: goalText })
+    });
+    if (response.ok) {
+      var data = await response.json();
+      if (data.library) {
+        dialogueLibrariesCache[goalType] = data.library;
+        selectDialogueGoalType(goalType);
+        updateDialogueStatus();
+      }
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Auto-build failed: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Dialogue generate error: ' + error.message);
+    alert('Auto-build failed: ' + error.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✨ Auto-build'; }
+  }
+}
+
+async function saveDialogueLibrary() {
+  var goalType = currentDialogueGoalType();
+  var goalTextEl = document.getElementById('dialogueGoalText');
+  var goalText = goalTextEl ? goalTextEl.value.trim() : '';
+  var response = await fetch('/api/dialogue-libraries/' + encodeURIComponent(goalType), {
+    method: 'PUT',
+    credentials: 'include',
+    headers: authHeaders(),
+    body: JSON.stringify({ goalText: goalText, entries: dialogueEntries })
+  });
+  if (response.ok) {
+    var data = await response.json();
+    if (data.library) {
+      dialogueLibrariesCache[goalType] = data.library;
+      dialogueEntries = Array.isArray(data.library.entries) ? data.library.entries.slice() : [];
+      updateDialogueStatus();
+    }
+    return true;
+  }
+  var err = await response.json().catch(function() { return {}; });
+  alert('Failed to save: ' + (err.error || response.status));
+  return false;
+}
+
+async function deleteDialogueLibrary() {
+  var goalType = currentDialogueGoalType();
+  if (!dialogueLibrariesCache[goalType]) { alert('No library to delete for this goal.'); return; }
+  if (!confirm('Delete the entire library for "' + (DIALOGUE_GOAL_LABELS[goalType] || goalType) + '"? This cannot be undone.')) return;
+  try {
+    var response = await fetch('/api/dialogue-libraries/' + encodeURIComponent(goalType), {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: authHeaders()
+    });
+    if (response.ok) {
+      delete dialogueLibrariesCache[goalType];
+      dialogueEntries = [];
+      renderDialogueEntries();
+      updateDialogueStatus();
+    } else {
+      var err = await response.json().catch(function() { return {}; });
+      alert('Failed to delete: ' + (err.error || response.status));
+    }
+  } catch (error) {
+    log('Dialogue delete error: ' + error.message);
+    alert('Failed to delete: ' + error.message);
+  }
+}
+
+function openDialogueEntryModal(id) {
+  var entry = dialogueEntries.filter(function(e) { return e.id === id; })[0];
+  editingDialogueEntryId = id || null;
+  var titleEl = document.getElementById('dialogueEntryTitle');
+  var typeEl = document.getElementById('dialogueEntryType');
+  var triggerEl = document.getElementById('dialogueEntryTrigger');
+  var variantsEl = document.getElementById('dialogueEntryVariants');
+  var answerEl = document.getElementById('dialogueEntryAnswer');
+  var translationEl = document.getElementById('dialogueEntryTranslation');
+  var sortEl = document.getElementById('dialogueEntrySortOrder');
+  if (entry) {
+    if (titleEl) titleEl.textContent = 'Edit line';
+    if (typeEl) typeEl.value = entry.type || 'typical';
+    if (triggerEl) triggerEl.value = entry.trigger || '';
+    if (variantsEl) variantsEl.value = (Array.isArray(entry.variants) ? entry.variants : []).join('\n');
+    if (answerEl) answerEl.value = entry.answer || '';
+    if (translationEl) translationEl.value = entry.translation || '';
+    if (sortEl) sortEl.value = (entry.sortOrder != null ? entry.sortOrder : 0);
+  } else {
+    if (titleEl) titleEl.textContent = 'New line';
+    if (typeEl) typeEl.value = 'typical';
+    if (triggerEl) triggerEl.value = '';
+    if (variantsEl) variantsEl.value = '';
+    if (answerEl) answerEl.value = '';
+    if (translationEl) translationEl.value = '';
+    if (sortEl) sortEl.value = dialogueEntries.length;
+  }
+  var modal = document.getElementById('dialogueEntryModal');
+  if (modal) modal.classList.add('active');
+}
+
+function closeDialogueEntryModal() {
+  editingDialogueEntryId = null;
+  var modal = document.getElementById('dialogueEntryModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function saveDialogueEntry() {
+  var saveBtn = document.getElementById('dialogueEntrySave');
+  if (saveBtn) saveBtn.disabled = true;
+  var typeEl = document.getElementById('dialogueEntryType');
+  var triggerEl = document.getElementById('dialogueEntryTrigger');
+  var variantsEl = document.getElementById('dialogueEntryVariants');
+  var answerEl = document.getElementById('dialogueEntryAnswer');
+  var translationEl = document.getElementById('dialogueEntryTranslation');
+  var sortEl = document.getElementById('dialogueEntrySortOrder');
+  var answer = answerEl ? answerEl.value.trim() : '';
+  if (!answer) { alert('Answer is required'); if (saveBtn) saveBtn.disabled = false; return; }
+  var variants = variantsEl
+    ? variantsEl.value.split('\n').map(function(v) { return v.trim(); }).filter(function(v) { return v; })
+    : [];
+  var entry = {
+    id: editingDialogueEntryId || ('e_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)),
+    type: typeEl ? typeEl.value : 'typical',
+    trigger: triggerEl ? triggerEl.value.trim() : '',
+    variants: variants,
+    answer: answer,
+    translation: translationEl ? translationEl.value.trim() : '',
+    slot: null,
+    sortOrder: sortEl && sortEl.value !== '' ? Number(sortEl.value) : dialogueEntries.length
+  };
+  if (editingDialogueEntryId) {
+    dialogueEntries = dialogueEntries.map(function(e) { return e.id === editingDialogueEntryId ? entry : e; });
+  } else {
+    dialogueEntries.push(entry);
+  }
+  try {
+    var ok = await saveDialogueLibrary();
+    if (ok) {
+      renderDialogueEntries();
+      closeDialogueEntryModal();
+    }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function deleteDialogueEntry(id) {
+  var entry = dialogueEntries.filter(function(e) { return e.id === id; })[0];
+  if (!confirm('Delete this line' + (entry && entry.trigger ? ' ("' + entry.trigger + '")' : '') + '?')) return;
+  dialogueEntries = dialogueEntries.filter(function(e) { return e.id !== id; });
+  var ok = await saveDialogueLibrary();
+  if (ok) renderDialogueEntries();
+}
+
+(function initDialogueUI() {
+  var openBtn = document.getElementById('openDialogueBtn');
+  if (openBtn) openBtn.addEventListener('click', openDialogueModal);
+  var closeBtn = document.getElementById('dialogueModalClose');
+  if (closeBtn) closeBtn.addEventListener('click', closeDialogueModal);
+  var cancelBtn = document.getElementById('dialogueModalCancel');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeDialogueModal);
+  var dialogueModal = document.getElementById('dialogueModal');
+  if (dialogueModal) dialogueModal.addEventListener('click', function(e) {
+    if (e.target === dialogueModal) closeDialogueModal();
+  });
+
+  var goalTypeSel = document.getElementById('dialogueGoalType');
+  if (goalTypeSel) goalTypeSel.addEventListener('change', function() { selectDialogueGoalType(goalTypeSel.value); });
+
+  var genBtn = document.getElementById('generateDialogueBtn');
+  if (genBtn) genBtn.addEventListener('click', generateDialogueLibrary);
+  var addEntryBtn = document.getElementById('addDialogueEntryBtn');
+  if (addEntryBtn) addEntryBtn.addEventListener('click', function() { openDialogueEntryModal(null); });
+  var delLibBtn = document.getElementById('dialogueDeleteBtn');
+  if (delLibBtn) delLibBtn.addEventListener('click', deleteDialogueLibrary);
+
+  var entryClose = document.getElementById('dialogueEntryModalClose');
+  if (entryClose) entryClose.addEventListener('click', closeDialogueEntryModal);
+  var entryCancel = document.getElementById('dialogueEntryCancel');
+  if (entryCancel) entryCancel.addEventListener('click', closeDialogueEntryModal);
+  var entrySave = document.getElementById('dialogueEntrySave');
+  if (entrySave) entrySave.addEventListener('click', saveDialogueEntry);
+  var entryModal = document.getElementById('dialogueEntryModal');
+  if (entryModal) entryModal.addEventListener('click', function(e) {
+    if (e.target === entryModal) closeDialogueEntryModal();
+  });
+})();
+
 (function initContactsUI() {
   var openBtn = document.getElementById('openContactsBtn');
   if (openBtn) openBtn.addEventListener('click', openContactsModal);

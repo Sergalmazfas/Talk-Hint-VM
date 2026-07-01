@@ -89,6 +89,7 @@ const TABLE_DEFS: Record<string, any> = {
   available_numbers: schema.availableNumbers,
   sessions: schema.sessions,
   airatoma_deliveries: schema.airatomaDeliveries,
+  dialogue_libraries: schema.dialogueLibraries,
 };
 
 const columnsFor = (table: any): string[] =>
