@@ -1,14 +1,13 @@
 ---
 name: Dialogue library keyed per goal
-description: Why the auto-built call dialogue library is keyed per-user-per-goal (own UUID id), not per goalType
+description: Why the auto-built call dialogue library is per-user-per-goal, and its warn-not-block sizing rule
 ---
 
-Auto-built call dialogue libraries are stored **per user AND per goal**. Each library's identity is its own UUID `id`; the table has only a plain `index(userId)` — there is deliberately NO `unique(userId, goalType)`.
+Auto-built call dialogue libraries are stored **per user AND per goal**, each identified by its own row id — deliberately NOT one library per goalType.
 
-**Why:** A code review REJECTED an earlier design that keyed one library per `(userId, goalType)`. The product requirement is "saved separately per user and per goal." Goals are free-text (`currentGoal`) plus a `goalType` enum (booking|pricing|support|info|negotiation|other); there is no `goalId` in the system. A user can have multiple distinct goals that share the same goalType, so goalType is a domain attribute, not a key.
+**Why:** A code review rejected an earlier per-`(userId, goalType)` design. The product requirement is "saved separately per user and per goal." Goals are free-text plus a goalType enum (booking|pricing|support|info|negotiation|other); there is no goalId. One user can have several distinct goals of the same type (e.g. two CDL interviews), so goalType is a domain attribute, not a key.
 
 **How to apply:**
-- Storage/routes are keyed by `(userId, id)`: get/create/update/delete all take the library `id`.
-- Runtime selection (`selectActiveLibrary` in server/websocket.ts): pick the library whose `goalText` best fuzzy-matches the active `currentGoal` (textSimilarity ≥ 0.35); else fall back to the first library whose `goalType` === detected goalType.
-- Library-first lookup must always fall through to the unchanged `translateAndSuggest` GPT path on a miss, and must never change in-call UI payload shapes (`guest_transcript`, `suggestion`) — only provider metadata differs (`provider_used="library"`).
-- Entry `slot` is constrained to the goal-engine SLOT_SET in `sanitizeDialogueEntries`; the UI must round-trip the existing slot (not force null) on edit.
+- Runtime picks the active library by best free-text similarity of the live goal vs each library's saved goal text; only when that is not confident does it fall back within the same goalType, and even then it prefers the best in-domain text match over an arbitrary first row.
+- Library-first lookup must always fall through to the unchanged live GPT hint path on a miss, and must never change in-call payload shapes.
+- Generation aims for a large library and auto-tops-up with extra deduped passes if the first pass is short. If it is still under the useful floor, **save it and warn the user** — do not hard-block (matches the user's "не запрещаем, предупреждаем" principle).

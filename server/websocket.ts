@@ -1121,6 +1121,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     function selectActiveLibrary(goalText: string, goalType: string): DialogueLibrary | null {
       if (!dialogueLibraries.length) return null;
       const activeGoal = (goalText || "").trim();
+
+      // 1) Strongest signal: the active goal's free text vs each library's saved
+      // goalText. A confident match here wins outright, so with several similar
+      // goals (e.g. two CDL interviews) we pick the one that actually matches.
       if (activeGoal) {
         let best: DialogueLibrary | null = null;
         let bestScore = 0;
@@ -1134,10 +1138,33 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         }
         if (best && bestScore >= DIALOGUE_GOAL_SELECT_THRESHOLD) return best;
       }
-      // Fall back to the detected domain (goalType). If the user has several goals
-      // of that type we take the first — without an active-goal match we cannot
-      // tell them apart, and any library of the right domain beats an LLM call.
-      return dialogueLibraries.find((lib) => lib.goalType === goalType) || null;
+
+      // 2) No confident goal-text match. Narrow to libraries of the detected
+      // domain (goalType).
+      const sameType = dialogueLibraries.filter((lib) => lib.goalType === goalType);
+      if (sameType.length === 0) return null;
+      if (sameType.length === 1) return sameType[0];
+
+      // 3) Several libraries share this domain. If we have an active goal, still
+      // prefer the BEST goal-text match among them (even below the confident
+      // threshold) rather than blindly taking the first — a best-effort guess is
+      // safer than picking an arbitrary same-type library.
+      if (activeGoal) {
+        let domBest = sameType[0];
+        let domScore = -1;
+        for (const lib of sameType) {
+          const score = lib.goalText ? textSimilarity(activeGoal, lib.goalText) : 0;
+          if (score > domScore) {
+            domScore = score;
+            domBest = lib;
+          }
+        }
+        return domBest;
+      }
+
+      // 4) No active goal to disambiguate multiple same-domain libraries — we
+      // cannot reliably tell them apart, so take the first.
+      return sameType[0];
     }
 
     function matchDialogueLibrary(text: string, goalText: string, goalType: string): { entry: DialogueEntry; library: DialogueLibrary } | null {

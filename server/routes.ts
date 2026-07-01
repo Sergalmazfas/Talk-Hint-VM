@@ -23,7 +23,7 @@ import { pendingCalls, users, phoneNumbers, deviceTokens, DIALOGUE_ENTRY_TYPES }
 import type { DialogueEntry, DialogueEntryType } from "@shared/schema";
 import { GOAL_REQUIREMENTS, SLOT_KEYS } from "@shared/goalTypes";
 import type { GoalType } from "@shared/goalTypes";
-import { generateDialogueLibrary } from "./dialogueLibraryGenerator";
+import { generateDialogueLibrary, MIN_DIALOGUE_ENTRIES } from "./dialogueLibraryGenerator";
 import { validateUserWebhookUrl, parseTranscriptText } from "./airatomaWebhook";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { db } from "./db";
@@ -2164,7 +2164,14 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         : await storage.createDialogueLibrary(user.id, goalType, goalTextStr, entries);
       if (!library) return res.status(500).json({ error: "Failed to save library" });
       console.log(`[Dialogue] User ${user.id} generated ${entries.length} entries for goal ${library.id} (${goalType})`);
-      res.json({ success: true, library });
+      // Warn (don't block — "не запрещаем, предупреждаем") if the library came out
+      // smaller than the useful floor even after top-up passes, so the user knows
+      // to regenerate or add lines rather than silently getting a thin library.
+      const warning =
+        entries.length < MIN_DIALOGUE_ENTRIES
+          ? `Собрано только ${entries.length} реплик (цель — 80–100). Библиотека сохранена, но лучше нажать «Собрать заново» или дополнить вручную.`
+          : undefined;
+      res.json({ success: true, library, warning });
     } catch (error: any) {
       console.error("[Dialogue] Generate error:", error);
       res.status(500).json({ error: error.message });

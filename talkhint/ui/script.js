@@ -3497,6 +3497,7 @@ async function generateDialogueLibrary() {
         showDialogueEditView();
         renderDialogueEntries();
       }
+      if (data.warning) alert(data.warning);
     } else {
       var err = await response.json().catch(function() { return {}; });
       alert('Auto-build failed: ' + (err.error || response.status));

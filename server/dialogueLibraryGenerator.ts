@@ -148,13 +148,77 @@ export interface GenerateDialogueLibraryInput {
   language?: string;
 }
 
-// Generate the full dialogue library in one structured pass. Returns the parsed
-// entries (already id-stamped and ordered). Throws only on an OpenAI transport
-// error; a parseable-but-empty reply yields an empty array (caller decides).
+// A library is only useful if it actually covers the call. If the model returns
+// far fewer than the requested 80-100, we top it up with extra passes instead of
+// saving a thin, mostly-useless library. TARGET is what we aim for; MIN is the
+// floor below which we keep retrying (up to MAX_GENERATION_ATTEMPTS total passes).
+export const MIN_DIALOGUE_ENTRIES = 60;
+const TARGET_DIALOGUE_ENTRIES = 90;
+const MAX_GENERATION_ATTEMPTS = 3;
+
+// Stable dedupe key so top-up passes never re-add a line we already have.
+function entryDedupeKey(e: DialogueEntry): string {
+  return `${e.type}||${e.trigger.toLowerCase().trim()}||${e.answer.toLowerCase().trim()}`;
+}
+
+// Merge newly generated entries into the running set, dropping duplicates and
+// re-stamping sortOrder so the final library is contiguous and ordered.
+function mergeDialogueEntries(existing: DialogueEntry[], incoming: DialogueEntry[]): DialogueEntry[] {
+  const seen = new Set(existing.map(entryDedupeKey));
+  const out = existing.slice();
+  for (const e of incoming) {
+    const key = entryDedupeKey(e);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out.map((e, i) => ({ ...e, sortOrder: i }));
+}
+
+// Ask the model for ADDITIONAL, non-duplicate entries to fill the gaps, listing
+// the triggers we already cover so it doesn't repeat them.
+function buildTopUpPrompt(basePrompt: string, existing: DialogueEntry[], need: number): string {
+  const covered = existing
+    .map((e) => e.trigger)
+    .filter((t) => t)
+    .slice(0, 120)
+    .map((t) => `- ${t}`)
+    .join("\n");
+  return `${basePrompt}
+
+You already produced ${existing.length} entries. Produce ${Math.max(need, 20)} MORE entries to reach a full library — add more "typical" guest questions, more "objection" lines with rebuttals, and more "discovery"/"clarifying" lines. Do NOT repeat any of these already-covered moments:
+${covered}
+
+Output ONLY {"entries": [ ... ]} with the same fields and rules as before.`;
+}
+
+// Generate the full dialogue library. Runs a first structured pass and, if the
+// result is under MIN_DIALOGUE_ENTRIES, does additional top-up passes (deduped)
+// until it reaches the target or runs out of attempts. Returns id-stamped,
+// contiguously-ordered entries. Throws only on an OpenAI transport error during
+// the FIRST pass; a top-up transport error just keeps whatever we already have.
 export async function generateDialogueLibrary(input: GenerateDialogueLibraryInput): Promise<DialogueEntry[]> {
   const language = input.language || "ru";
   const systemPrompt = buildSystemPrompt(input.goalType, language);
-  const userPrompt = buildUserPrompt(input.goalText, input.userContext || "", input.cards || "");
-  const raw = await callOpenAI(systemPrompt, userPrompt);
-  return parseDialogueEntries(raw);
+  const basePrompt = buildUserPrompt(input.goalText, input.userContext || "", input.cards || "");
+
+  let entries: DialogueEntry[] = [];
+  for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS && entries.length < MIN_DIALOGUE_ENTRIES; attempt++) {
+    const prompt =
+      attempt === 1
+        ? basePrompt
+        : buildTopUpPrompt(basePrompt, entries, TARGET_DIALOGUE_ENTRIES - entries.length);
+    let raw: string;
+    try {
+      raw = await callOpenAI(systemPrompt, prompt);
+    } catch (err) {
+      if (attempt === 1) throw err; // first-pass transport error → surface to caller
+      break; // top-up failure: keep what we already generated
+    }
+    const before = entries.length;
+    entries = mergeDialogueEntries(entries, parseDialogueEntries(raw));
+    // If a top-up pass added nothing new, stop retrying — more passes won't help.
+    if (attempt > 1 && entries.length === before) break;
+  }
+  return entries;
 }
