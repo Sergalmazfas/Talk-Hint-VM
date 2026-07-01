@@ -985,6 +985,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Hint throttling - prevents spam of suggestions
     let lastHintTs = 0;                    // Timestamp of last hint shown
     let lastHintUtteranceId = -1;          // Utterance ID of last hint
+    let latestGuestUtteranceId = -1;       // Newest Guest turn seen (freshness/stale guard)
     let goalAchievedFlag = false;          // HARD STOP when goal is achieved
     const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
     
@@ -1175,6 +1176,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
       const now = Date.now();
+      // Freshness guard: record this as the newest Guest turn BEFORE any await, so a
+      // suggestion generated for an older turn can be dropped once a newer turn arrives.
+      latestGuestUtteranceId = utteranceId;
       
       // ALWAYS add to conversation log (even if hints are blocked)
       conversationLog.push({
@@ -1436,6 +1440,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const translated = await suggestionPromise;
       const suggestionMs = Date.now() - suggestionStart;
       log(`[HINT] model=${currentModel} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
+
+      // Freshness/stale guard: while this suggestion was generating, the Guest started
+      // a newer turn. Drop the now-outdated suggestion and do NOT arm the cooldown, so
+      // the newer turn's suggestion is not suppressed.
+      if (utteranceId !== latestGuestUtteranceId) {
+        log(`[BLOCKED] reason=stale utteranceId=${utteranceId} latestGuestUtteranceId=${latestGuestUtteranceId}`, "websocket");
+        return;
+      }
 
       if (translated.suggestion) {
         const suggestionText = translated.suggestion.en;
@@ -2118,6 +2130,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Reset hint throttling, anti-loop guards, and wait state for next call
       lastHintTs = 0;
       lastHintUtteranceId = -1;
+      latestGuestUtteranceId = -1;
       goalAchievedFlag = false;
       lastSuggestionIntent = "";
       lastSuggestionText = "";
