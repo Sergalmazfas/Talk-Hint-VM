@@ -143,7 +143,12 @@ function stripPreamble(text: string): string {
 
 // Model used for live hint generation (translation + suggestion).
 // Override the default without a code change via the HINT_MODEL env var.
-const HINT_MODEL = process.env.HINT_MODEL || "gemini-2.5-flash-lite";
+// Step 1 (live-latency work): OpenAI is now the PRIMARY live-hint provider.
+// Gemini is no longer the default primary because in production it failed on
+// 50-71% of turns and — with no timeout — caused 5-15s stalls. Gemini stays
+// available (user-selectable / as a fallback) but is hard-capped at 700ms
+// (GEMINI_TIMEOUT_MS) so it can never stall a live call again.
+const HINT_MODEL = process.env.HINT_MODEL || "gpt-4.1-mini";
 // Models the user is allowed to pick from the settings UI.
 // gemini-* models are routed to Google Gemini; everything else to OpenAI.
 const ALLOWED_HINT_MODELS = [
@@ -151,30 +156,51 @@ const ALLOWED_HINT_MODELS = [
   "gemini-2.5-flash-lite", "gemini-2.5-flash",
 ];
 // Active model — global (single-user app), changeable at runtime via set_model.
-let currentModel = ALLOWED_HINT_MODELS.includes(HINT_MODEL) ? HINT_MODEL : "gemini-2.5-flash-lite";
+let currentModel = ALLOWED_HINT_MODELS.includes(HINT_MODEL) ? HINT_MODEL : "gpt-4.1-mini";
 
 // Google Gemini key. The secret was added as GEMINI_API_KAY (typo) — accept either name.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KAY || "";
+
+// Hard cap on any Gemini call. Gemini has NO other timeout, so before this a
+// degraded/hung Gemini could block a live turn for 11-15s (seen in prod). With
+// OpenAI now primary, Gemini is only reached when a user explicitly selects it
+// (or as a fallback); either way it must abort fast and let the caller recover.
+const GEMINI_TIMEOUT_MS = 700;
 
 // Call Google Gemini (generateContent REST). Used when currentModel is a gemini-* model.
 // thinkingBudget=0 disables "thinking" so short hints stay fast and don't burn the token budget.
 async function generateWithGemini(model: string, systemPrompt: string, userPrompt: string): Promise<string> {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY (or GEMINI_API_KAY) is not set");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 250,
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 250,
+          responseMimeType: "application/json",
+          thinkingConfig: { thinkingBudget: 0 },
+        },
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    // AbortController fires a DOMException/AbortError; normalize to a clear
+    // timeout error so routeGenerate's fallback path treats it like any failure.
+    if (controller.signal.aborted) {
+      throw new Error(`Gemini timeout after ${GEMINI_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
     throw new Error(`Gemini API error: ${response.status} ${errText.slice(0, 200)}`);
@@ -295,6 +321,7 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     // Count every Gemini attempt so getHintFallbackStats() can report a rate.
     if (isGemini) geminiHintAttempts++;
     let fellBack = false;
+    const providerStart = Date.now();
 
     // Provider routing + fallback lives in routeGenerate (tested in
     // server/__tests__/hintProvider.test.ts): gemini models try Gemini first and
@@ -314,6 +341,17 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
       },
     });
     let result = parseHint(content);
+
+    // Report which provider actually produced this hint + how long the model
+    // leg took (total_hint_latency_ms). With OpenAI primary this is normally
+    // openai:<model>; it reads gemini:* only when a user picks Gemini, or
+    // openai:<fallback> (fallback from ...) when a Gemini attempt failed/timed out.
+    const providerUsed = fellBack
+      ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${currentModel})`
+      : isGemini
+        ? `gemini:${currentModel}`
+        : `openai:${currentModel}`;
+    log(`[HINT] provider_used=${providerUsed} total_hint_latency_ms=${Date.now() - providerStart}`, "openai");
 
     // Gemini sometimes returns a valid translation but silently drops the
     // suggestion. On a turn that should have a hint (not a reaction/farewell)
