@@ -259,6 +259,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
   explanation?: string;
   suggestion?: { en: string; translation: string };
   sentiment?: { sentiment: 'positive' | 'neutral' | 'negative'; score: number };
+  providerUsed?: string;
 }> {
   // Don't wait for sentiment - return it separately via callback
   // This makes suggestions appear FASTER
@@ -321,7 +322,6 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     // Count every Gemini attempt so getHintFallbackStats() can report a rate.
     if (isGemini) geminiHintAttempts++;
     let fellBack = false;
-    const providerStart = Date.now();
 
     // Provider routing + fallback lives in routeGenerate (tested in
     // server/__tests__/hintProvider.test.ts): gemini models try Gemini first and
@@ -342,16 +342,15 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     });
     let result = parseHint(content);
 
-    // Report which provider actually produced this hint + how long the model
-    // leg took (total_hint_latency_ms). With OpenAI primary this is normally
-    // openai:<model>; it reads gemini:* only when a user picks Gemini, or
-    // openai:<fallback> (fallback from ...) when a Gemini attempt failed/timed out.
+    // Which provider actually produced this hint — returned to the caller so the
+    // guest-utterance handler can log provider_used alongside the split
+    // translation/suggestion latencies. openai:<model> normally; gemini:* only
+    // when a user picks Gemini; openai:<fallback> when a Gemini attempt failed.
     const providerUsed = fellBack
       ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${currentModel})`
       : isGemini
         ? `gemini:${currentModel}`
         : `openai:${currentModel}`;
-    log(`[HINT] provider_used=${providerUsed} total_hint_latency_ms=${Date.now() - providerStart}`, "openai");
 
     // Gemini sometimes returns a valid translation but silently drops the
     // suggestion. On a turn that should have a hint (not a reaction/farewell)
@@ -382,10 +381,48 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
       };
     }
 
-    return result ?? { translation: "" };
+    const finalResult = result ?? { translation: "" };
+    return { ...finalResult, providerUsed };
   } catch (err: any) {
     log(`Translation error: ${err.message}`, "openai");
-    return { translation: "" };
+    return { translation: "", providerUsed: "error" };
+  }
+}
+
+// Fast, translation-only call for the live caption. Split out from
+// translateAndSuggest so the guest's translated caption can be shown WITHOUT
+// waiting for the (slower) suggestion generation. It uses the SAME provider
+// routing (routeGenerate) and a JSON contract so the OpenAI/Gemini fallback
+// behaves identically to the suggestion path. This is intentionally a minimal,
+// isolated translator prompt — it is NOT the hint/objection prompt (unchanged).
+async function translateGuestText(text: string, language: string): Promise<{ translation: string; providerUsed: string }> {
+  const langName = language === "es" ? "Spanish" : "Russian";
+  const systemPrompt = `You are a translator. Translate the user's message into ${langName}. Respond with ONLY this JSON and nothing else: {"translation":"<the ${langName} translation>"}`;
+  const isGemini = currentModel.startsWith("gemini");
+  let fellBack = false;
+  try {
+    const raw = await routeGenerate(systemPrompt, text, {
+      model: currentModel,
+      fallbackModel: OPENAI_FALLBACK_MODEL,
+      withGemini: generateWithGemini,
+      withOpenAI: generateWithOpenAI,
+      onFallback: () => { fellBack = true; },
+    });
+    let translation = "";
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { translation = String(JSON.parse(m[0]).translation ?? "").trim(); } catch { translation = ""; }
+    }
+    if (!translation) translation = raw.trim(); // tolerate a plain-text reply
+    const providerUsed = fellBack
+      ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${currentModel})`
+      : isGemini
+        ? `gemini:${currentModel}`
+        : `openai:${currentModel}`;
+    return { translation, providerUsed };
+  } catch (err: any) {
+    log(`Guest translation error: ${err.message}`, "openai");
+    return { translation: "", providerUsed: "error" };
   }
 }
 
@@ -1250,29 +1287,52 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         return;
       }
 
-      const gptStart = Date.now();
-      // Translation OFF (hints still on): translateAndSuggest skips translating the
-      // guest's words and returns an English-only suggestion (no translated hint).
-      const translated = await translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, !reactionOnly && !isFarewell, ownerContext, contactContext, staticCards, callSettings.translationEnabled);
-      const gptMs = Date.now() - gptStart;
-      log(`[TIMING] model=${currentModel} gpt=${gptMs}ms utteranceId=${utteranceId}`, "websocket");
-      
+      // ===== SPLIT: translation (caption) and suggestion are two independent
+      // model calls fired in PARALLEL. The caption is broadcast as soon as the
+      // small translation call resolves — it no longer waits for the slower
+      // suggestion generation. The suggestion keeps the existing combined prompt
+      // + all downstream guards unchanged.
+      const translationEnabled = callSettings.translationEnabled;
+
+      // A suggestion is only generated for turns that can actually receive one.
+      // Reaction-only / farewell / goal-achieved / wait-state turns never emit a
+      // model suggestion (they're blocked below or answered with a static
+      // phrase), so we skip that call instead of generating and discarding it.
+      const wantSuggestion =
+        !reactionOnly && !isFarewell && !goalJustAchieved && !goalAchievedFlag && !waitingForInfo;
+
+      const translationStart = Date.now();
+      const translationPromise: Promise<{ translation: string; providerUsed: string }> =
+        translationEnabled
+          ? translateGuestText(text, currentLanguage)
+          : Promise.resolve({ translation: "", providerUsed: "translation_off" });
+
+      const suggestionStart = Date.now();
+      // Fired in parallel with the translation so neither waits for the other.
+      // translateAndSuggest never throws (it catches internally), so if this turn
+      // is blocked before the suggestion is read, the floating promise is safe.
+      const suggestionPromise = wantSuggestion
+        ? translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled)
+        : null;
+
+      // ----- Caption: broadcast as soon as the translation resolves -----
+      const tr = await translationPromise;
+      const translationMs = Date.now() - translationStart;
       fastLayer.onGptResponseReceived();
-      
-      // ALWAYS broadcast translation (even if suggestion is blocked)
-      uiBroadcast({ 
+      // ALWAYS broadcast the guest transcript (caption), even if the suggestion
+      // is later blocked. Payload shape is unchanged (backward-compatible UI).
+      uiBroadcast({
         type: "guest_transcript",
         text: text,
-        translation: translated.translation,
+        translation: tr.translation,
         isFinal: true,
         isComplete: true,
         confidence,
         utteranceId,
         callSid
       });
-      // Reaction time for the caption (it shows even when the suggestion is blocked).
       // `now` is captured at handler entry ≈ Deepgram EndOfTurn (commitTurn fires this synchronously).
-      log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms (gpt=${gptMs}ms) utteranceId=${utteranceId}`, "websocket");
+      log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${translationMs} provider_used=${tr.providerUsed} utteranceId=${utteranceId}`, "websocket");
       
       // ===== HINT THROTTLING CHECKS (only for suggestions, not transcripts) =====
       
@@ -1363,6 +1423,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         }
       }
       
+      // ----- Suggestion: await the parallel suggestion call -----
+      // We only reach here after all the "no suggestion" guards above returned,
+      // so a suggestion was requested (suggestionPromise is non-null).
+      if (!suggestionPromise) return;
+      const translated = await suggestionPromise;
+      const suggestionMs = Date.now() - suggestionStart;
+      log(`[HINT] model=${currentModel} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
+
       if (translated.suggestion) {
         const suggestionText = translated.suggestion.en;
         
@@ -1413,7 +1481,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           callSid
         });
         // Full reaction time: from end of guest's turn to the suggestion leaving the server.
-        log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms (gpt=${gptMs}ms) utteranceId=${utteranceId}`, "websocket");
+        log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms suggestion_latency_ms=${suggestionMs} utteranceId=${utteranceId}`, "websocket");
       }
     }
     
