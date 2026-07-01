@@ -996,6 +996,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     const RECENT_SUGGESTIONS_MAX = 4;      // How many past suggestions to compare against
     const DUPLICATE_SIMILARITY = 0.8;      // Block if >=80% similar to any recent suggestion
 
+    // Self-overlap guard - don't suggest something the owner (HON) already said.
+    // The suggestion is what HON should say next; if HON already voiced essentially
+    // the same thing recently, repeating it as a hint is pure noise.
+    const recentOwnerUtterances: string[] = []; // Last few HON turns for self-overlap check
+    const RECENT_OWNER_MAX = 3;            // How many past HON turns to compare against
+    const SELF_OVERLAP_SIMILARITY = 0.7;   // Block suggestion if >=70% similar to a recent HON turn
+
     // Anti-echo (cross-track) - same speech transcribed on BOTH tracks (mic/speaker bleed)
     const recentUtterances: { speaker: "GST" | "HON"; norm: string; ts: number }[] = [];
     const ECHO_WINDOW_MS = 1200;           // Window to treat opposite-track repeat as echo (acoustic bleed is near-instant)
@@ -1472,6 +1479,20 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           return;
         }
 
+        // ===== SELF-OVERLAP GUARD: don't suggest what HON already said =====
+        // The suggestion is what HON should say next; if HON already voiced essentially
+        // the same thing in a recent turn, it's redundant noise. Drop it and do NOT arm
+        // the cooldown, so a genuinely new suggestion on the next turn isn't suppressed.
+        let maxOwnerSim = 0;
+        for (const prev of recentOwnerUtterances) {
+          const sim = textSimilarity(suggestionText, prev);
+          if (sim > maxOwnerSim) maxOwnerSim = sim;
+        }
+        if (maxOwnerSim >= SELF_OVERLAP_SIMILARITY) {
+          log(`[BLOCKED] reason=self_overlap similarity=${(maxOwnerSim * 100).toFixed(0)}% - HON already said this`, "websocket");
+          return;
+        }
+
         // Final re-check: goal may have been achieved while GPT was generating (async race)
         if (goalAchievedFlag) {
           log(`[BLOCKED] reason=goal_achieved (post-generation) utteranceId=${utteranceId} - no hint`, "websocket");
@@ -1516,6 +1537,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (conversationLog.length > 10) conversationLog.shift();
       fullConversation.push({ speaker: "Owner", text });
       persistTranscriptSoon();
+
+      // Track recent HON turns for the self-overlap guard (don't re-suggest what HON just said)
+      recentOwnerUtterances.push(text);
+      if (recentOwnerUtterances.length > RECENT_OWNER_MAX) recentOwnerUtterances.shift();
       
       // Update GoalEngine
       if (goalEngine) {
@@ -2134,6 +2159,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       goalAchievedFlag = false;
       lastSuggestionIntent = "";
       lastSuggestionText = "";
+      recentOwnerUtterances.length = 0;
       waitingForInfo = false;
       waitAckShown = false;
       waitingSlot = null;
