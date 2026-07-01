@@ -2126,34 +2126,25 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
-  app.get("/api/dialogue-libraries/:goalType", authMiddleware, async (req, res) => {
-    try {
-      const user = (req as any).user;
-      const { goalType } = req.params;
-      if (!GOAL_TYPES.includes(goalType as GoalType)) {
-        return res.status(400).json({ error: "Invalid goalType" });
-      }
-      const library = await storage.getDialogueLibrary(user.id, goalType);
-      if (!library) return res.status(404).json({ error: "Library not found" });
-      res.json({ library });
-    } catch (error: any) {
-      console.error("[Dialogue] Get error:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Auto-generate (or regenerate) the library for a goal type from the user's
-  // goal + personal context + knowledge cards. Replaces any existing library for
-  // that goal type (upsert keyed on user+goalType).
+  // Auto-generate a library for ONE goal from the user's goal + personal context
+  // + knowledge cards. If `id` is supplied it regenerates (replaces) that goal's
+  // library; otherwise it creates a NEW goal library. Keyed per user + goal (by
+  // the library's own id), so several goals of the same goalType coexist.
   app.post("/api/dialogue-libraries/generate", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { goalType, goalText, language } = req.body ?? {};
+      const { id, goalType, goalText, language } = req.body ?? {};
       if (!GOAL_TYPES.includes(goalType as GoalType)) {
         return res.status(400).json({ error: "goalType is required and must be a valid goal type" });
       }
       const goalTextStr = typeof goalText === "string" ? goalText.trim() : "";
       const lang = typeof language === "string" && language ? language : "ru";
+      // Regeneration targets an existing goal owned by this user.
+      let existing: Awaited<ReturnType<typeof storage.getDialogueLibrary>> | undefined;
+      if (typeof id === "string" && id) {
+        existing = await storage.getDialogueLibrary(user.id, id);
+        if (!existing) return res.status(404).json({ error: "Library not found" });
+      }
       const [userContext, cards] = await Promise.all([
         storage.getUserContext(user.id),
         storage.listKnowledgeCards(user.id),
@@ -2168,9 +2159,11 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       if (!entries.length) {
         return res.status(502).json({ error: "Generation returned no entries, please try again" });
       }
-      const library = await storage.upsertDialogueLibrary(user.id, goalType, goalTextStr, entries);
+      const library = existing
+        ? await storage.updateDialogueLibrary(user.id, existing.id, { goalType, goalText: goalTextStr, entries })
+        : await storage.createDialogueLibrary(user.id, goalType, goalTextStr, entries);
       if (!library) return res.status(500).json({ error: "Failed to save library" });
-      console.log(`[Dialogue] User ${user.id} generated ${entries.length} entries for goal ${goalType}`);
+      console.log(`[Dialogue] User ${user.id} generated ${entries.length} entries for goal ${library.id} (${goalType})`);
       res.json({ success: true, library });
     } catch (error: any) {
       console.error("[Dialogue] Generate error:", error);
@@ -2178,25 +2171,61 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
-  // Replace the whole library for a goal type — the management UI sends the full
-  // edited entries array (edit/add/delete/reorder are all just array edits).
-  app.put("/api/dialogue-libraries/:goalType", authMiddleware, async (req, res) => {
+  // Create an empty library for a new goal (manual authoring path).
+  app.post("/api/dialogue-libraries", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { goalType } = req.params;
+      const { goalType, goalText, entries } = req.body ?? {};
       if (!GOAL_TYPES.includes(goalType as GoalType)) {
-        return res.status(400).json({ error: "Invalid goalType" });
+        return res.status(400).json({ error: "goalType is required and must be a valid goal type" });
       }
-      const { entries, goalText } = req.body ?? {};
+      const goalTextStr = typeof goalText === "string" ? goalText.trim() : "";
+      const clean = sanitizeDialogueEntries(entries);
+      const library = await storage.createDialogueLibrary(user.id, goalType, goalTextStr, clean);
+      if (!library) return res.status(500).json({ error: "Failed to create library" });
+      console.log(`[Dialogue] User ${user.id} created library ${library.id} (${goalType})`);
+      res.json({ success: true, library });
+    } catch (error: any) {
+      console.error("[Dialogue] Create error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/dialogue-libraries/:id", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const library = await storage.getDialogueLibrary(user.id, req.params.id);
+      if (!library) return res.status(404).json({ error: "Library not found" });
+      res.json({ library });
+    } catch (error: any) {
+      console.error("[Dialogue] Get error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Replace the whole library for one goal (by id) — the management UI sends the
+  // full edited entries array (edit/add/delete/reorder are all just array edits).
+  app.put("/api/dialogue-libraries/:id", authMiddleware, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const { id } = req.params;
+      const { entries, goalText, goalType } = req.body ?? {};
       if (!Array.isArray(entries)) {
         return res.status(400).json({ error: "entries array is required" });
       }
+      if (goalType !== undefined && !GOAL_TYPES.includes(goalType as GoalType)) {
+        return res.status(400).json({ error: "Invalid goalType" });
+      }
+      const existing = await storage.getDialogueLibrary(user.id, id);
+      if (!existing) return res.status(404).json({ error: "Library not found" });
       const clean = sanitizeDialogueEntries(entries);
-      const existing = await storage.getDialogueLibrary(user.id, goalType);
-      const goalTextStr = typeof goalText === "string" ? goalText.trim() : (existing?.goalText ?? "");
-      const library = await storage.upsertDialogueLibrary(user.id, goalType, goalTextStr, clean);
+      const library = await storage.updateDialogueLibrary(user.id, id, {
+        goalType: goalType !== undefined ? goalType : undefined,
+        goalText: typeof goalText === "string" ? goalText.trim() : undefined,
+        entries: clean,
+      });
       if (!library) return res.status(500).json({ error: "Failed to save library" });
-      console.log(`[Dialogue] User ${user.id} saved ${clean.length} entries for goal ${goalType}`);
+      console.log(`[Dialogue] User ${user.id} saved ${clean.length} entries for goal ${id}`);
       res.json({ success: true, library });
     } catch (error: any) {
       console.error("[Dialogue] Update error:", error);
@@ -2204,16 +2233,12 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
-  app.delete("/api/dialogue-libraries/:goalType", authMiddleware, async (req, res) => {
+  app.delete("/api/dialogue-libraries/:id", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { goalType } = req.params;
-      if (!GOAL_TYPES.includes(goalType as GoalType)) {
-        return res.status(400).json({ error: "Invalid goalType" });
-      }
-      const deleted = await storage.deleteDialogueLibrary(user.id, goalType);
+      const deleted = await storage.deleteDialogueLibrary(user.id, req.params.id);
       if (!deleted) return res.status(404).json({ error: "Library not found" });
-      console.log(`[Dialogue] User ${user.id} deleted library for goal ${goalType}`);
+      console.log(`[Dialogue] User ${user.id} deleted library ${req.params.id}`);
       res.json({ success: true });
     } catch (error: any) {
       console.error("[Dialogue] Delete error:", error);

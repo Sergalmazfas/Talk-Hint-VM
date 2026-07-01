@@ -345,11 +345,13 @@ export interface IStorage {
   }): Promise<KnowledgeCard | undefined>;
   deleteKnowledgeCardById(userId: string, id: string): Promise<boolean>;
 
-  // Dialogue libraries (per-user, per-goal auto-built call answer library)
+  // Dialogue libraries (per-user, per-goal auto-built call answer library).
+  // Each library is one goal, identified by its own `id`.
   listDialogueLibraries(userId: string): Promise<DialogueLibrary[]>;
-  getDialogueLibrary(userId: string, goalType: string): Promise<DialogueLibrary | undefined>;
-  upsertDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined>;
-  deleteDialogueLibrary(userId: string, goalType: string): Promise<boolean>;
+  getDialogueLibrary(userId: string, id: string): Promise<DialogueLibrary | undefined>;
+  createDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined>;
+  updateDialogueLibrary(userId: string, id: string, patch: { goalType?: string; goalText?: string; entries: DialogueEntry[] }): Promise<DialogueLibrary | undefined>;
+  deleteDialogueLibrary(userId: string, id: string): Promise<boolean>;
 
   // AirAtoma delivery queue (durable retry of the outbound CRM webhook)
   enqueueAirAtomaDelivery(payload: AirAtomaDeliveryPayload, targetUrl?: string | null): Promise<AiratomaDelivery | undefined>;
@@ -1034,19 +1036,19 @@ export class DatabaseStorage implements IStorage {
       return await db.select()
         .from(dialogueLibraries)
         .where(eq(dialogueLibraries.userId, userId))
-        .orderBy(dialogueLibraries.goalType);
+        .orderBy(dialogueLibraries.goalType, dialogueLibraries.createdAt);
     } catch (error) {
       console.error("[Storage] listDialogueLibraries error:", error);
       return [];
     }
   }
 
-  async getDialogueLibrary(userId: string, goalType: string): Promise<DialogueLibrary | undefined> {
+  async getDialogueLibrary(userId: string, id: string): Promise<DialogueLibrary | undefined> {
     if (!isDatabaseAvailable()) return undefined;
     try {
       const [row] = await db.select()
         .from(dialogueLibraries)
-        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.goalType, goalType)))
+        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.id, id)))
         .limit(1);
       return row;
     } catch (error) {
@@ -1055,32 +1057,48 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // Upsert the whole library for (userId, goalType) — regeneration and editing
-  // both replace the entire entries array in one write (keyed on the unique
-  // (user_id, goal_type) index), so there are never stale per-row leftovers.
-  async upsertDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined> {
+  // Create a NEW library (one goal). Its own `id` is the identity, so a user can
+  // have several goals of the same goalType without overwriting one another.
+  async createDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined> {
     if (!isDatabaseAvailable()) return undefined;
     try {
       const [row] = await db.insert(dialogueLibraries)
         .values({ userId, goalType, goalText, entries })
-        .onConflictDoUpdate({
-          target: [dialogueLibraries.userId, dialogueLibraries.goalType],
-          set: { goalText, entries, updatedAt: new Date() },
-        })
         .returning();
       recordWriteSuccess("dialogue_libraries");
       return row;
     } catch (error) {
-      recordWriteFailure("dialogue_libraries", "upsertDialogueLibrary", error);
+      recordWriteFailure("dialogue_libraries", "createDialogueLibrary", error);
       return undefined;
     }
   }
 
-  async deleteDialogueLibrary(userId: string, goalType: string): Promise<boolean> {
+  // Replace the whole library for one goal (by id) — regeneration and editing
+  // both swap the entire entries array in one write, so there are never stale
+  // per-row leftovers. Scoped by userId so a user can only touch their own rows.
+  async updateDialogueLibrary(userId: string, id: string, patch: { goalType?: string; goalText?: string; entries: DialogueEntry[] }): Promise<DialogueLibrary | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const set: Record<string, unknown> = { entries: patch.entries, updatedAt: new Date() };
+      if (patch.goalType !== undefined) set.goalType = patch.goalType;
+      if (patch.goalText !== undefined) set.goalText = patch.goalText;
+      const [row] = await db.update(dialogueLibraries)
+        .set(set)
+        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.id, id)))
+        .returning();
+      recordWriteSuccess("dialogue_libraries");
+      return row;
+    } catch (error) {
+      recordWriteFailure("dialogue_libraries", "updateDialogueLibrary", error);
+      return undefined;
+    }
+  }
+
+  async deleteDialogueLibrary(userId: string, id: string): Promise<boolean> {
     if (!isDatabaseAvailable()) return false;
     try {
       const rows = await db.delete(dialogueLibraries)
-        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.goalType, goalType)))
+        .where(and(eq(dialogueLibraries.userId, userId), eq(dialogueLibraries.id, id)))
         .returning();
       recordWriteSuccess("dialogue_libraries");
       return rows.length > 0;

@@ -1314,30 +1314,42 @@
         <button class="modal-close" id="dialogueModalClose" data-testid="button-dialogue-modal-close">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="form-hint" style="margin-bottom: 8px;">Ready-made lines the assistant serves instantly during a call — before asking GPT. Pick a goal, auto-build a library from your context &amp; cards, then edit as needed.</div>
-        <div class="form-group">
-          <label class="form-label">Goal type</label>
-          <select class="form-input" id="dialogueGoalType" data-testid="select-dialogue-goal-type" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
-            <option value="booking">Запись/Бронирование</option>
-            <option value="pricing">Узнать цены</option>
-            <option value="support">Техподдержка</option>
-            <option value="info">Информация</option>
-            <option value="negotiation">Переговоры</option>
-            <option value="other">Другое</option>
-          </select>
+        <div class="form-hint" style="margin-bottom: 8px;">Ready-made lines the assistant serves instantly during a call — before asking GPT. Each goal has its own library. Create a goal, auto-build a library from your context &amp; cards, then edit as needed.</div>
+
+        <!-- LIST VIEW: one row per goal library -->
+        <div id="dialogueListView">
+          <div id="dialogueLibrariesList" data-testid="list-dialogue-libraries"></div>
+          <button class="btn btn-primary btn-small" id="newDialogueGoalBtn" data-testid="button-new-dialogue-goal" style="margin-top:10px; width:100%;">➕ New goal</button>
         </div>
-        <div class="form-group">
-          <label class="form-label">Goal description (optional — guides generation)</label>
-          <textarea class="form-textarea" id="dialogueGoalText" placeholder="e.g. Book a massage appointment: get date, time, and the client's name." data-testid="input-dialogue-goal-text"></textarea>
+
+        <!-- EDIT VIEW: one goal's description + lines -->
+        <div id="dialogueEditView" style="display:none;">
+          <button class="btn btn-secondary btn-small" id="dialogueBackBtn" data-testid="button-dialogue-back" style="margin-bottom:10px;">← Back to goals</button>
+          <div class="form-group">
+            <label class="form-label">Goal type (domain)</label>
+            <select class="form-input" id="dialogueGoalType" data-testid="select-dialogue-goal-type" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
+              <option value="booking">Запись/Бронирование</option>
+              <option value="pricing">Узнать цены</option>
+              <option value="support">Техподдержка</option>
+              <option value="info">Информация</option>
+              <option value="negotiation">Переговоры</option>
+              <option value="other">Другое</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Goal description (guides generation &amp; picks this library on a call)</label>
+            <textarea class="form-textarea" id="dialogueGoalText" placeholder="e.g. Book a massage appointment: get date, time, and the client's name." data-testid="input-dialogue-goal-text"></textarea>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <button class="btn btn-primary btn-small" id="generateDialogueBtn" data-testid="button-generate-dialogue" style="flex:2;">✨ Auto-build</button>
+            <button class="btn btn-secondary btn-small" id="dialogueSaveGoalBtn" data-testid="button-save-dialogue-goal" style="flex:1;">💾 Save goal</button>
+            <button class="btn btn-secondary btn-small" id="addDialogueEntryBtn" data-testid="button-add-dialogue-entry" style="flex:1;">➕ Add line</button>
+          </div>
+          <div id="dialogueEntriesList" data-testid="list-dialogue-entries"></div>
         </div>
-        <div style="display:flex; gap:8px; margin-bottom:12px;">
-          <button class="btn btn-primary btn-small" id="generateDialogueBtn" data-testid="button-generate-dialogue" style="flex:2;">✨ Auto-build</button>
-          <button class="btn btn-secondary btn-small" id="addDialogueEntryBtn" data-testid="button-add-dialogue-entry" style="flex:1;">➕ Add line</button>
-        </div>
-        <div id="dialogueEntriesList" data-testid="list-dialogue-entries"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" id="dialogueDeleteBtn" data-testid="button-dialogue-delete" style="margin-right:auto;">🗑️ Delete library</button>
+        <button class="btn btn-secondary" id="dialogueDeleteBtn" data-testid="button-dialogue-delete" style="margin-right:auto; display:none;">🗑️ Delete goal</button>
         <button class="btn btn-secondary" id="dialogueModalCancel" data-testid="button-dialogue-close">Close</button>
       </div>
     </div>
@@ -1376,6 +1388,10 @@
         <div class="form-group">
           <label class="form-label">Translation</label>
           <textarea class="form-textarea" id="dialogueEntryTranslation" placeholder="Translation of the answer." data-testid="input-dialogue-entry-translation"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Slot (optional — goal field this line fills, e.g. date, time, phone)</label>
+          <input type="text" class="form-input" id="dialogueEntrySlot" placeholder="e.g. date" data-testid="input-dialogue-entry-slot" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #d1d5db;">
         </div>
         <div class="form-group">
           <label class="form-label">Priority (lower shows first)</label>

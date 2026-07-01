@@ -15,3 +15,4 @@
 - [Live-call feature toggles](live-call-feature-toggles.md) — per-user Live Hints / Translation booleans; Hints OFF = no model call; Translation OFF must gate EVERY suggestion path (closing, wait-ACK, fast_phrase), not just translateAndSuggest.
 - [AirAtoma delivery durability backstop](airatoma-delivery-durability.md) — crash-safe call delivery: persist transcript to calls.transcript (leading-edge) + /twilio/status recovers only when no delivery row exists.
 - [Twilio single-account consolidation](twilio-account-consolidation.md) — pool numbers MUST be on main account (subaccount nums fail signature + conference bridge); new buys go to main; configureVoiceWebhook falls back to main.
+- [Dialogue library per goal](dialogue-library-per-goal.md) — auto-built call dialogue libs keyed per-user-per-goal (own UUID id), NOT per goalType; runtime picks by goalText fuzzy match then goalType; always fall through to translateAndSuggest.

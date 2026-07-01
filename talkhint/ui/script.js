@@ -3298,7 +3298,7 @@ async function deleteCard(id) {
 
 // ===== Dialogue Library UI =====
 // Ready-made lines served instantly during a call before falling through to GPT.
-// Per goalType; the modal edits one goalType at a time.
+// Saved per GOAL: each library is one goal (its own id), with goalText + goalType.
 var DIALOGUE_GOAL_LABELS = {
   booking: 'Запись/Бронирование',
   pricing: 'Узнать цены',
@@ -3315,13 +3315,19 @@ var DIALOGUE_TYPE_LABELS = {
   clarifying: 'Clarifying',
   closing: 'Closing'
 };
-var dialogueLibrariesCache = {}; // goalType -> library {goalType, goalText, entries[]}
-var dialogueEntries = [];        // entries for the currently selected goalType
+var dialogueLibraries = [];              // list of libraries [{id, goalType, goalText, entries[]}]
+var currentDialogueLibraryId = null;     // id of the goal being edited (null = new, unsaved goal)
+var dialogueEntries = [];                // working copy of entries for the edited goal
 var editingDialogueEntryId = null;
 
 function currentDialogueGoalType() {
   var sel = document.getElementById('dialogueGoalType');
   return sel ? sel.value : 'booking';
+}
+
+function currentDialogueGoalText() {
+  var el = document.getElementById('dialogueGoalText');
+  return el ? el.value.trim() : '';
 }
 
 async function loadDialogueLibraries() {
@@ -3332,11 +3338,9 @@ async function loadDialogueLibraries() {
     });
     if (response.ok) {
       var data = await response.json();
-      dialogueLibrariesCache = {};
-      (data.libraries || []).forEach(function(lib) {
-        dialogueLibrariesCache[lib.goalType] = lib;
-      });
+      dialogueLibraries = (data.libraries || []).slice();
       updateDialogueStatus();
+      renderDialogueLibrariesList();
     }
   } catch (error) {
     log('Dialogue libraries load error: ' + error.message);
@@ -3346,15 +3350,64 @@ async function loadDialogueLibraries() {
 function updateDialogueStatus() {
   var statusEl = document.getElementById('dialogueStatus');
   if (!statusEl) return;
-  var n = Object.keys(dialogueLibrariesCache).length;
-  statusEl.textContent = n ? (n + (n === 1 ? ' library' : ' libraries')) : 'No libraries yet';
+  var n = dialogueLibraries.length;
+  statusEl.textContent = n ? (n + (n === 1 ? ' goal library' : ' goal libraries')) : 'No libraries yet';
 }
 
-function selectDialogueGoalType(goalType) {
-  var lib = dialogueLibrariesCache[goalType];
-  var goalTextEl = document.getElementById('dialogueGoalText');
+function showDialogueListView() {
+  currentDialogueLibraryId = null;
+  var listView = document.getElementById('dialogueListView');
+  var editView = document.getElementById('dialogueEditView');
+  var delBtn = document.getElementById('dialogueDeleteBtn');
+  if (listView) listView.style.display = '';
+  if (editView) editView.style.display = 'none';
+  if (delBtn) delBtn.style.display = 'none';
+  renderDialogueLibrariesList();
+}
+
+function showDialogueEditView() {
+  var listView = document.getElementById('dialogueListView');
+  var editView = document.getElementById('dialogueEditView');
+  var delBtn = document.getElementById('dialogueDeleteBtn');
+  if (listView) listView.style.display = 'none';
+  if (editView) editView.style.display = '';
+  // Delete only makes sense for a goal that already exists on the server.
+  if (delBtn) delBtn.style.display = currentDialogueLibraryId ? '' : 'none';
+}
+
+function renderDialogueLibrariesList() {
+  var listEl = document.getElementById('dialogueLibrariesList');
+  if (!listEl) return;
+  if (!dialogueLibraries.length) {
+    listEl.innerHTML = '<div style="color:#6b7280; padding:8px;">No goals yet. Click "New goal" to create one and auto-build its library.</div>';
+    return;
+  }
+  listEl.innerHTML = dialogueLibraries.map(function(lib) {
+    var count = Array.isArray(lib.entries) ? lib.entries.length : 0;
+    var label = DIALOGUE_GOAL_LABELS[lib.goalType] || lib.goalType;
+    var desc = lib.goalText ? escapeHtml(lib.goalText) : '<span style="color:#9ca3af;">(no description)</span>';
+    return '<div class="card-row" data-testid="row-dialogue-library-' + escapeHtml(lib.id) + '" style="border:1px solid #e5e7eb; border-radius:8px; padding:10px; margin-bottom:8px; cursor:pointer;" data-dialogue-open="' + escapeHtml(lib.id) + '">' +
+      '<div style="font-size:0.7rem; font-weight:700; text-transform:uppercase; color:#6366f1; margin-bottom:2px;">' + escapeHtml(label) + ' · ' + count + (count === 1 ? ' line' : ' lines') + '</div>' +
+      '<div style="font-weight:600;" data-testid="text-dialogue-library-goal-' + escapeHtml(lib.id) + '">' + desc + '</div>' +
+    '</div>';
+  }).join('');
+  listEl.querySelectorAll('[data-dialogue-open]').forEach(function(row) {
+    row.addEventListener('click', function() {
+      openDialogueEditor(row.getAttribute('data-dialogue-open'));
+    });
+  });
+}
+
+// Open the editor for an existing goal (by id) or a fresh new goal (id null).
+function openDialogueEditor(id) {
+  var lib = id ? dialogueLibraries.filter(function(l) { return l.id === id; })[0] : null;
+  currentDialogueLibraryId = lib ? lib.id : null;
   dialogueEntries = lib && Array.isArray(lib.entries) ? lib.entries.slice() : [];
+  var goalTypeEl = document.getElementById('dialogueGoalType');
+  var goalTextEl = document.getElementById('dialogueGoalText');
+  if (goalTypeEl) goalTypeEl.value = lib ? (lib.goalType || 'booking') : 'booking';
   if (goalTextEl) goalTextEl.value = lib ? (lib.goalText || '') : '';
+  showDialogueEditView();
   renderDialogueEntries();
 }
 
@@ -3402,7 +3455,7 @@ function openDialogueModal() {
   var modal = document.getElementById('dialogueModal');
   if (modal) modal.classList.add('active');
   loadDialogueLibraries().then(function() {
-    selectDialogueGoalType(currentDialogueGoalType());
+    showDialogueListView();
   });
 }
 
@@ -3411,26 +3464,38 @@ function closeDialogueModal() {
   if (modal) modal.classList.remove('active');
 }
 
+// Sync the currently edited library object in the in-memory list (or append it).
+function upsertDialogueLibraryCache(library) {
+  if (!library) return;
+  var idx = dialogueLibraries.map(function(l) { return l.id; }).indexOf(library.id);
+  if (idx >= 0) dialogueLibraries[idx] = library;
+  else dialogueLibraries.push(library);
+  currentDialogueLibraryId = library.id;
+  dialogueEntries = Array.isArray(library.entries) ? library.entries.slice() : [];
+  updateDialogueStatus();
+}
+
 async function generateDialogueLibrary() {
   var btn = document.getElementById('generateDialogueBtn');
   var goalType = currentDialogueGoalType();
-  var goalTextEl = document.getElementById('dialogueGoalText');
-  var goalText = goalTextEl ? goalTextEl.value.trim() : '';
-  if (dialogueEntries.length && !confirm('Auto-build will REPLACE the current lines for "' + (DIALOGUE_GOAL_LABELS[goalType] || goalType) + '". Continue?')) return;
+  var goalText = currentDialogueGoalText();
+  if (dialogueEntries.length && !confirm('Auto-build will REPLACE the current lines for this goal. Continue?')) return;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Building...'; }
   try {
+    var body = { goalType: goalType, goalText: goalText };
+    if (currentDialogueLibraryId) body.id = currentDialogueLibraryId;
     var response = await fetch('/api/dialogue-libraries/generate', {
       method: 'POST',
       credentials: 'include',
       headers: authHeaders(),
-      body: JSON.stringify({ goalType: goalType, goalText: goalText })
+      body: JSON.stringify(body)
     });
     if (response.ok) {
       var data = await response.json();
       if (data.library) {
-        dialogueLibrariesCache[goalType] = data.library;
-        selectDialogueGoalType(goalType);
-        updateDialogueStatus();
+        upsertDialogueLibraryCache(data.library);
+        showDialogueEditView();
+        renderDialogueEntries();
       }
     } else {
       var err = await response.json().catch(function() { return {}; });
@@ -3444,23 +3509,27 @@ async function generateDialogueLibrary() {
   }
 }
 
+// Persist the current goal: PUT if it already exists (by id), else POST create.
 async function saveDialogueLibrary() {
   var goalType = currentDialogueGoalType();
-  var goalTextEl = document.getElementById('dialogueGoalText');
-  var goalText = goalTextEl ? goalTextEl.value.trim() : '';
-  var response = await fetch('/api/dialogue-libraries/' + encodeURIComponent(goalType), {
-    method: 'PUT',
+  var goalText = currentDialogueGoalText();
+  var url, method;
+  if (currentDialogueLibraryId) {
+    url = '/api/dialogue-libraries/' + encodeURIComponent(currentDialogueLibraryId);
+    method = 'PUT';
+  } else {
+    url = '/api/dialogue-libraries';
+    method = 'POST';
+  }
+  var response = await fetch(url, {
+    method: method,
     credentials: 'include',
     headers: authHeaders(),
-    body: JSON.stringify({ goalText: goalText, entries: dialogueEntries })
+    body: JSON.stringify({ goalType: goalType, goalText: goalText, entries: dialogueEntries })
   });
   if (response.ok) {
     var data = await response.json();
-    if (data.library) {
-      dialogueLibrariesCache[goalType] = data.library;
-      dialogueEntries = Array.isArray(data.library.entries) ? data.library.entries.slice() : [];
-      updateDialogueStatus();
-    }
+    if (data.library) upsertDialogueLibraryCache(data.library);
     return true;
   }
   var err = await response.json().catch(function() { return {}; });
@@ -3468,21 +3537,32 @@ async function saveDialogueLibrary() {
   return false;
 }
 
-async function deleteDialogueLibrary() {
-  var goalType = currentDialogueGoalType();
-  if (!dialogueLibrariesCache[goalType]) { alert('No library to delete for this goal.'); return; }
-  if (!confirm('Delete the entire library for "' + (DIALOGUE_GOAL_LABELS[goalType] || goalType) + '"? This cannot be undone.')) return;
+async function saveDialogueGoal() {
+  var btn = document.getElementById('dialogueSaveGoalBtn');
+  if (btn) btn.disabled = true;
   try {
-    var response = await fetch('/api/dialogue-libraries/' + encodeURIComponent(goalType), {
+    var ok = await saveDialogueLibrary();
+    if (ok) renderDialogueEntries();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deleteDialogueLibrary() {
+  if (!currentDialogueLibraryId) { showDialogueListView(); return; }
+  if (!confirm('Delete this entire goal library? This cannot be undone.')) return;
+  try {
+    var response = await fetch('/api/dialogue-libraries/' + encodeURIComponent(currentDialogueLibraryId), {
       method: 'DELETE',
       credentials: 'include',
       headers: authHeaders()
     });
     if (response.ok) {
-      delete dialogueLibrariesCache[goalType];
+      var removedId = currentDialogueLibraryId;
+      dialogueLibraries = dialogueLibraries.filter(function(l) { return l.id !== removedId; });
       dialogueEntries = [];
-      renderDialogueEntries();
       updateDialogueStatus();
+      showDialogueListView();
     } else {
       var err = await response.json().catch(function() { return {}; });
       alert('Failed to delete: ' + (err.error || response.status));
@@ -3502,6 +3582,7 @@ function openDialogueEntryModal(id) {
   var variantsEl = document.getElementById('dialogueEntryVariants');
   var answerEl = document.getElementById('dialogueEntryAnswer');
   var translationEl = document.getElementById('dialogueEntryTranslation');
+  var slotEl = document.getElementById('dialogueEntrySlot');
   var sortEl = document.getElementById('dialogueEntrySortOrder');
   if (entry) {
     if (titleEl) titleEl.textContent = 'Edit line';
@@ -3510,6 +3591,7 @@ function openDialogueEntryModal(id) {
     if (variantsEl) variantsEl.value = (Array.isArray(entry.variants) ? entry.variants : []).join('\n');
     if (answerEl) answerEl.value = entry.answer || '';
     if (translationEl) translationEl.value = entry.translation || '';
+    if (slotEl) slotEl.value = entry.slot || '';
     if (sortEl) sortEl.value = (entry.sortOrder != null ? entry.sortOrder : 0);
   } else {
     if (titleEl) titleEl.textContent = 'New line';
@@ -3518,6 +3600,7 @@ function openDialogueEntryModal(id) {
     if (variantsEl) variantsEl.value = '';
     if (answerEl) answerEl.value = '';
     if (translationEl) translationEl.value = '';
+    if (slotEl) slotEl.value = '';
     if (sortEl) sortEl.value = dialogueEntries.length;
   }
   var modal = document.getElementById('dialogueEntryModal');
@@ -3538,12 +3621,14 @@ async function saveDialogueEntry() {
   var variantsEl = document.getElementById('dialogueEntryVariants');
   var answerEl = document.getElementById('dialogueEntryAnswer');
   var translationEl = document.getElementById('dialogueEntryTranslation');
+  var slotEl = document.getElementById('dialogueEntrySlot');
   var sortEl = document.getElementById('dialogueEntrySortOrder');
   var answer = answerEl ? answerEl.value.trim() : '';
   if (!answer) { alert('Answer is required'); if (saveBtn) saveBtn.disabled = false; return; }
   var variants = variantsEl
     ? variantsEl.value.split('\n').map(function(v) { return v.trim(); }).filter(function(v) { return v; })
     : [];
+  var slot = slotEl ? slotEl.value.trim() : '';
   var entry = {
     id: editingDialogueEntryId || ('e_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)),
     type: typeEl ? typeEl.value : 'typical',
@@ -3551,7 +3636,7 @@ async function saveDialogueEntry() {
     variants: variants,
     answer: answer,
     translation: translationEl ? translationEl.value.trim() : '',
-    slot: null,
+    slot: slot || null,
     sortOrder: sortEl && sortEl.value !== '' ? Number(sortEl.value) : dialogueEntries.length
   };
   if (editingDialogueEntryId) {
@@ -3590,11 +3675,15 @@ async function deleteDialogueEntry(id) {
     if (e.target === dialogueModal) closeDialogueModal();
   });
 
-  var goalTypeSel = document.getElementById('dialogueGoalType');
-  if (goalTypeSel) goalTypeSel.addEventListener('change', function() { selectDialogueGoalType(goalTypeSel.value); });
+  var newGoalBtn = document.getElementById('newDialogueGoalBtn');
+  if (newGoalBtn) newGoalBtn.addEventListener('click', function() { openDialogueEditor(null); });
+  var backBtn = document.getElementById('dialogueBackBtn');
+  if (backBtn) backBtn.addEventListener('click', showDialogueListView);
 
   var genBtn = document.getElementById('generateDialogueBtn');
   if (genBtn) genBtn.addEventListener('click', generateDialogueLibrary);
+  var saveGoalBtn = document.getElementById('dialogueSaveGoalBtn');
+  if (saveGoalBtn) saveGoalBtn.addEventListener('click', saveDialogueGoal);
   var addEntryBtn = document.getElementById('addDialogueEntryBtn');
   if (addEntryBtn) addEntryBtn.addEventListener('click', function() { openDialogueEntryModal(null); });
   var delLibBtn = document.getElementById('dialogueDeleteBtn');

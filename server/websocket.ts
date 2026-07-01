@@ -10,7 +10,7 @@ import { getSessionUserId } from "./auth";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
-import type { DialogueEntry } from "@shared/schema";
+import type { DialogueEntry, DialogueLibrary } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap, GoalType } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
@@ -971,10 +971,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Defaults ON so a load failure never silently disables hints for a paying user.
     let callSettings = { liveHintsEnabled: true, translationEnabled: true };
     let callSettingsReady: Promise<void> = Promise.resolve(); // resolves once callSettings is loaded
-    // Auto-built dialogue libraries for the owner, keyed by goalType. Consulted
-    // FIRST on each guest turn; a hit serves a ready-made line (no LLM call), a
-    // miss falls through to the existing translateAndSuggest hint path.
-    let dialogueLibraries: Record<string, DialogueEntry[]> = {};
+    // Auto-built dialogue libraries for the owner — one per GOAL (each row is a
+    // distinct goal, with its own goalText + goalType). Consulted FIRST on each
+    // guest turn: the active goal picks the library, then the utterance is matched
+    // within it. A hit serves a ready-made line (no LLM call); a miss falls
+    // through to the existing translateAndSuggest hint path.
+    let dialogueLibraries: DialogueLibrary[] = [];
     let dialogueLibrariesReady: Promise<void> = Promise.resolve(); // resolves once libraries are loaded
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
@@ -1110,9 +1112,38 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // returns the highest-scoring entry at/above threshold. Returns null on a
     // miss so the caller falls through to the existing translateAndSuggest path.
     const DIALOGUE_MATCH_THRESHOLD = 0.6;
-    function matchDialogueLibrary(text: string, goalType: string): DialogueEntry | null {
-      const entries = dialogueLibraries[goalType];
-      if (!entries || entries.length === 0) return null;
+    // Libraries are saved per GOAL, so first pick the ONE library that matches the
+    // active goal, then match the utterance inside it. Selection prefers the goal
+    // whose free-text goalText best matches the user's active goal (currentGoal);
+    // if nothing matches (or no goal was set), it falls back to the first library
+    // of the detected goalType. Returns null when the user has no matching goal.
+    const DIALOGUE_GOAL_SELECT_THRESHOLD = 0.35;
+    function selectActiveLibrary(goalText: string, goalType: string): DialogueLibrary | null {
+      if (!dialogueLibraries.length) return null;
+      const activeGoal = (goalText || "").trim();
+      if (activeGoal) {
+        let best: DialogueLibrary | null = null;
+        let bestScore = 0;
+        for (const lib of dialogueLibraries) {
+          if (!lib.goalText) continue;
+          const score = textSimilarity(activeGoal, lib.goalText);
+          if (score > bestScore) {
+            bestScore = score;
+            best = lib;
+          }
+        }
+        if (best && bestScore >= DIALOGUE_GOAL_SELECT_THRESHOLD) return best;
+      }
+      // Fall back to the detected domain (goalType). If the user has several goals
+      // of that type we take the first — without an active-goal match we cannot
+      // tell them apart, and any library of the right domain beats an LLM call.
+      return dialogueLibraries.find((lib) => lib.goalType === goalType) || null;
+    }
+
+    function matchDialogueLibrary(text: string, goalText: string, goalType: string): { entry: DialogueEntry; library: DialogueLibrary } | null {
+      const library = selectActiveLibrary(goalText, goalType);
+      const entries = library && Array.isArray(library.entries) ? (library.entries as DialogueEntry[]) : null;
+      if (!library || !entries || entries.length === 0) return null;
       let best: DialogueEntry | null = null;
       let bestScore = 0;
       for (const entry of entries) {
@@ -1127,7 +1158,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           }
         }
       }
-      return bestScore >= DIALOGUE_MATCH_THRESHOLD ? best : null;
+      return best && bestScore >= DIALOGUE_MATCH_THRESHOLD ? { entry: best, library } : null;
     }
     
     // Twilio WS keepalive ping every 15 seconds to prevent proxy/edge idle disconnect
@@ -1363,12 +1394,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
       // ===== LIBRARY-FIRST LOOKUP =====
       // Before spending an LLM call, look for a ready-made line in the owner's
-      // dialogue library for the CURRENT goal type. A hit is served through the
-      // exact same suggestion path/payload below (no UI change), skipping the
-      // model entirely. A miss falls through to translateAndSuggest, unchanged.
-      const libraryHit = wantSuggestion ? matchDialogueLibrary(text, detectedGoalType) : null;
+      // dialogue library for the ACTIVE goal (selected by the user's goal text,
+      // falling back to the detected goal type). A hit is served through the exact
+      // same suggestion path/payload below (no UI change), skipping the model
+      // entirely. A miss falls through to translateAndSuggest, unchanged.
+      const libraryHit = wantSuggestion ? matchDialogueLibrary(text, currentGoal, detectedGoalType) : null;
       if (libraryHit) {
-        log(`[Dialogue] HIT goal=${detectedGoalType} type=${libraryHit.type} trigger="${libraryHit.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
+        log(`[Dialogue] HIT goal="${libraryHit.library.goalText.substring(0, 30)}" (${libraryHit.library.goalType}) type=${libraryHit.entry.type} trigger="${libraryHit.entry.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
       }
 
       const suggestionStart = Date.now();
@@ -1500,8 +1532,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (libraryHit) {
         translated = {
           suggestion: {
-            en: libraryHit.answer,
-            translation: translationEnabled ? libraryHit.translation : "",
+            en: libraryHit.entry.answer,
+            translation: translationEnabled ? libraryHit.entry.translation : "",
           },
           providerUsed: "library",
         };
@@ -2015,23 +2047,19 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                 })
                 .catch((err) => log(`[StaticCards] Static cards load failed: ${err}`, "twilio"));
 
-              // Load the owner's auto-built dialogue libraries (keyed by goalType)
-              // once the owner is known. Best-effort: a load failure leaves the
-              // map empty, so every turn simply falls through to the existing
-              // live hint path — libraries only ever ADD a fast path, never block.
-              dialogueLibraries = {};
+              // Load the owner's auto-built dialogue libraries (one per goal) once
+              // the owner is known. Best-effort: a load failure leaves the list
+              // empty, so every turn simply falls through to the existing live hint
+              // path — libraries only ever ADD a fast path, never block.
+              dialogueLibraries = [];
               dialogueLibrariesReady = ownerContextReady
                 .then(async () => {
                   if (!streamUserId) return;
-                  const libs = await storage.listDialogueLibraries(streamUserId);
-                  const map: Record<string, DialogueEntry[]> = {};
-                  for (const lib of libs) {
-                    map[lib.goalType] = Array.isArray(lib.entries) ? (lib.entries as DialogueEntry[]) : [];
-                  }
-                  dialogueLibraries = map;
-                  const totalEntries = Object.values(map).reduce((n, e) => n + e.length, 0);
-                  if (libs.length) {
-                    log(`[Dialogue] Loaded ${libs.length} librar${libs.length === 1 ? "y" : "ies"} (${totalEntries} entries) for ${streamUserId}`, "twilio");
+                  dialogueLibraries = await storage.listDialogueLibraries(streamUserId);
+                  const totalEntries = dialogueLibraries.reduce(
+                    (n, lib) => n + (Array.isArray(lib.entries) ? lib.entries.length : 0), 0);
+                  if (dialogueLibraries.length) {
+                    log(`[Dialogue] Loaded ${dialogueLibraries.length} librar${dialogueLibraries.length === 1 ? "y" : "ies"} (${totalEntries} entries) for ${streamUserId}`, "twilio");
                   }
                 })
                 .catch((err) => log(`[Dialogue] Library load failed: ${err}`, "twilio"));

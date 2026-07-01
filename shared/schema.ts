@@ -170,8 +170,11 @@ export type KnowledgeCardType = (typeof KNOWLEDGE_CARD_TYPES)[number];
 // question→answer lines served as the PRIMARY hint source during a call (falls
 // through to the live LLM hint path on a miss — no UI change). The whole library
 // is one row with a jsonb `entries` array so regeneration/editing replaces the
-// array in one write instead of doing ~100 per-row inserts. Keyed unique per
-// (userId, goalType) — one library per goal type per user.
+// array in one write instead of doing ~100 per-row inserts. Saved separately
+// per user and per GOAL: each row is one goal (its own `id` is the identity),
+// with `goalText` the goal description and `goalType` the domain that drives
+// generation guidance + runtime selection. A user can have several goals of the
+// same type (e.g. two different booking goals), each with its own library.
 export const dialogueLibraries = pgTable("dialogue_libraries", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
@@ -181,7 +184,7 @@ export const dialogueLibraries = pgTable("dialogue_libraries", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => ({
-  userGoalIdx: uniqueIndex("dialogue_libraries_user_goal_idx").on(t.userId, t.goalType),
+  userIdx: index("dialogue_libraries_user_idx").on(t.userId),
 }));
 
 export const DIALOGUE_ENTRY_TYPES = [
