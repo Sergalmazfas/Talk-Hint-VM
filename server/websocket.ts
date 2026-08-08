@@ -22,6 +22,7 @@ import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
 import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
+import { SuggestionDedupGuard } from "./hintDedup";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -1010,10 +1011,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastSuggestionIntent = "";         // Last intent type (enthusiasm/ask_date/etc)
     let lastSuggestionText = "";           // Last suggestion text for duplicate check
     const recentSuggestions: string[] = []; // Last few suggestions for duplicate window
-    // Per-call cap on duplicate-suggestion exemptions, keyed by normalized
-    // guest question — a re-asked question may re-show a similar hint ONCE;
-    // further repeats (looping IVR) are suppressed as duplicates again.
-    const dupExemptionCounts = new Map<string, number>();
+    // Duplicate/self-overlap decision logic (incl. the bounded "guest re-asked
+    // a question" exemption) lives in SuggestionDedupGuard (server/hintDedup.ts)
+    // so it's a pure, testable unit — see server/__tests__/hintDedup.test.ts.
+    const dedupGuard = new SuggestionDedupGuard();
     const RECENT_SUGGESTIONS_MAX = 4;      // How many past suggestions to compare against
 
     // Dropped-question carryover: when a guest question's hint is lost (stale
@@ -1021,14 +1022,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // NEXT guest turn's hint folds the question in instead of losing it forever.
     // Robot callers speak in 3-5s bursts, which used to silently swallow questions.
     const hintCarryover = new HintCarryover();
-    const DUPLICATE_SIMILARITY = 0.8;      // Block if >=80% similar to any recent suggestion
 
     // Self-overlap guard - don't suggest something the owner (HON) already said.
     // The suggestion is what HON should say next; if HON already voiced essentially
     // the same thing recently, repeating it as a hint is pure noise.
     const recentOwnerUtterances: string[] = []; // Last few HON turns for self-overlap check
     const RECENT_OWNER_MAX = 3;            // How many past HON turns to compare against
-    const SELF_OVERLAP_SIMILARITY = 0.7;   // Block suggestion if >=70% similar to a recent HON turn
 
     // Anti-echo (cross-track) - same speech transcribed on BOTH tracks (mic/speaker bleed)
     const recentUtterances: { speaker: "GST" | "HON"; norm: string; ts: number }[] = [];
@@ -1608,46 +1607,30 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           return;
         }
         
-        // ===== ANTI-LOOP GUARD: Duplicate suggestion check (window of recent hints) =====
-        let maxSim = 0;
-        for (const prev of recentSuggestions) {
-          const sim = textSimilarity(suggestionText, prev);
-          if (sim > maxSim) maxSim = sim;
-        }
-        if (maxSim >= DUPLICATE_SIMILARITY) {
-          // EXEMPTION: if the guest's current utterance is itself a question,
-          // they are waiting for an answer RIGHT NOW — re-showing a similar
-          // hint is correct, suppressing it leaves the user with nothing.
-          // (Real call: bot re-asked "Mint phone number or home Internet?"
-          // twice; both answers were blocked as duplicates → 1 hint per call.)
-          // BOUNDED: at most one exempted re-show per normalized question —
-          // a looping IVR repeating the same prompt must not re-show forever.
-          const dupSig = normalizeText(text);
-          if (isQuestionOrActionRequest(text) && (dupExemptionCounts.get(dupSig) ?? 0) < 1) {
-            dupExemptionCounts.set(dupSig, (dupExemptionCounts.get(dupSig) ?? 0) + 1);
-            log(`[Suggestion] duplicate exemption: guest re-asked a question (similarity=${(maxSim * 100).toFixed(0)}%) utteranceId=${utteranceId}`, "websocket");
-          } else {
+        // ===== ANTI-LOOP GUARDS: duplicate suggestion + self-overlap =====
+        // Decision logic (incl. the bounded "guest re-asked a question"
+        // exemption for duplicates) lives in SuggestionDedupGuard
+        // (server/hintDedup.ts) — pure and unit-tested.
+        const dedup = dedupGuard.evaluate({
+          suggestionText,
+          guestText: text,
+          recentSuggestions,
+          recentOwnerUtterances,
+        });
+        if (dedup.action === "drop") {
+          if (dedup.reason === "duplicate_suggestion") {
             // The suppressed suggestion may have carried a consumed question —
             // keep it so the next turn's (different) hint can still address it.
-            dropHint("duplicate_suggestion", `similarity=${(maxSim * 100).toFixed(0)}% - too similar to a recent hint`, true);
-            return;
+            dropHint("duplicate_suggestion", `similarity=${(dedup.similarity * 100).toFixed(0)}% - too similar to a recent hint`, true);
+          } else {
+            // Preserve a consumed question: HON said something similar to the
+            // SUGGESTION, which doesn't mean the guest's question was answered.
+            dropHint("self_overlap", `similarity=${(dedup.similarity * 100).toFixed(0)}% - HON already said this`, true);
           }
-        }
-
-        // ===== SELF-OVERLAP GUARD: don't suggest what HON already said =====
-        // The suggestion is what HON should say next; if HON already voiced essentially
-        // the same thing in a recent turn, it's redundant noise. Drop it and do NOT arm
-        // the cooldown, so a genuinely new suggestion on the next turn isn't suppressed.
-        let maxOwnerSim = 0;
-        for (const prev of recentOwnerUtterances) {
-          const sim = textSimilarity(suggestionText, prev);
-          if (sim > maxOwnerSim) maxOwnerSim = sim;
-        }
-        if (maxOwnerSim >= SELF_OVERLAP_SIMILARITY) {
-          // Preserve a consumed question: HON said something similar to the
-          // SUGGESTION, which doesn't mean the guest's question was answered.
-          dropHint("self_overlap", `similarity=${(maxOwnerSim * 100).toFixed(0)}% - HON already said this`, true);
           return;
+        }
+        if (dedup.action === "show_exempt") {
+          log(`[Suggestion] duplicate exemption: guest re-asked a question (similarity=${(dedup.similarity * 100).toFixed(0)}%) utteranceId=${utteranceId}`, "websocket");
         }
 
         // Final re-check: goal may have been achieved while GPT was generating
@@ -2343,7 +2326,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       waitingForInfo = false;
       waitAckShown = false;
       waitingSlot = null;
-      dupExemptionCounts.clear();
+      dedupGuard.reset();
       log(`[Cleanup] Hint throttling, anti-loop guards, wait state reset`, "websocket");
     });
     
