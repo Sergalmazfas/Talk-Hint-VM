@@ -1004,7 +1004,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastHintTs = 0;                    // Timestamp of last hint shown
     let lastHintUtteranceId = -1;          // Utterance ID of last hint
     let latestGuestUtteranceId = -1;       // Newest Guest turn seen (freshness/stale guard)
-    let goalAchievedFlag = false;          // HARD STOP when goal is achieved
+    let goalAchievedFlag = false;          // informational only — goal achieved is announced (UI event + closing phrase) but NEVER blocks later hints
     const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
     
     // Anti-loop guards - prevents cycling on same emotions/suggestions
@@ -1265,7 +1265,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         if (goalUpdate.goalAchieved) {
           goalAchievedFlag = true;
           goalJustAchieved = true;
-          log(`[GoalAchieved] HARD STOP activated - no more hints after this`, "goal");
+          log(`[GoalAchieved] goal marked achieved (informational) — hints continue while the call goes on`, "goal");
           uiBroadcast({
             type: "goal_achieved",
             target: "HON",
@@ -1361,11 +1361,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const translationEnabled = callSettings.translationEnabled;
 
       // A suggestion is only generated for turns that can actually receive one.
-      // Reaction-only / farewell / goal-achieved / wait-state turns never emit a
-      // model suggestion (they're blocked below or answered with a static
-      // phrase), so we skip that call instead of generating and discarding it.
+      // Reaction-only / farewell / wait-state turns never emit a model
+      // suggestion (they're blocked below or answered with a static phrase),
+      // so we skip that call instead of generating and discarding it.
+      // NOTE (user requirement): goal-achieved is NOT a stop condition — the
+      // prompter keeps suggesting for as long as the conversation continues.
+      // The turn where the goal is achieved still gets the closing phrase
+      // instead of a model hint (goalJustAchieved), but later turns hint
+      // normally.
       const wantSuggestion =
-        !reactionOnly && !isFarewell && !goalJustAchieved && !goalAchievedFlag && !waitingForInfo;
+        !reactionOnly && !isFarewell && !goalJustAchieved && !waitingForInfo;
 
       const translationStart = Date.now();
       const translationPromise: Promise<{ translation: string; providerUsed: string }> =
@@ -1478,12 +1483,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         return;
       }
       
-      // Check 1: HARD STOP if goal was achieved earlier — no future hint can
-      // use a carried question, so nothing to preserve.
-      if (goalAchievedFlag) {
-        dropHint("goal_achieved", "- no hint", false);
-        return;
-      }
+      // (Removed) goal-achieved is no longer a hard stop: as long as the
+      // guest keeps talking, the prompter keeps suggesting (user requirement).
       
       // Check 2: 1 hint = 1 utterance (same utterance already got a hint).
       // A question merged into hintText was NOT part of that earlier hint, so
@@ -1633,12 +1634,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           log(`[Suggestion] duplicate exemption: guest re-asked a question (similarity=${(dedup.similarity * 100).toFixed(0)}%) utteranceId=${utteranceId}`, "websocket");
         }
 
-        // Final re-check: goal may have been achieved while GPT was generating
-        // (async race). Hard stop — no future hint exists to carry a question to.
-        if (goalAchievedFlag) {
-          dropHint("goal_achieved_post_generation", "- no hint", false);
-          return;
-        }
+        // (Removed) goal-achieved no longer suppresses hints, including the
+        // async race where it happened during generation — the prompter keeps
+        // suggesting while the conversation continues (user requirement).
         
         // Record hint shown for throttling
         lastHintTs = Date.now();
@@ -1712,7 +1710,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         
         if (goalUpdate.goalAchieved) {
-          goalAchievedFlag = true; // HARD STOP: goal can be achieved on the owner's reply too
+          goalAchievedFlag = true; // informational: UI event only, hints continue
           log(`[GoalAchieved] HARD STOP activated (on HON utterance) - no more hints`, "goal");
           uiBroadcast({
             type: "goal_achieved",

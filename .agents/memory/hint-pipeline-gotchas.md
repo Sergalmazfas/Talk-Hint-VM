@@ -70,3 +70,6 @@ Rule: a guest question whose hint is dropped must be captured EAGERLY at the nex
 ## Goal-achieved hard stop false positives
 - `goal_achieved` silences ALL remaining hints for the call, so its trigger must be conservative: an achieved-phrase ("fixed", "done", "resolved") inside a QUESTION clause or preceded by a negation is NOT a confirmation, and phrase matching must be whole-word + clause-aware, evaluating every occurrence. Slot-completion achievement must also skip question turns ("Would Friday at 3 work?" fills date+time but confirms nothing).
 - Real incident: owner asked "What should I do the next to the fixed call and text?" — substring "fixed" marked the goal achieved mid-troubleshooting and every later hint was blocked.
+
+## Goal-achieved is informational only (user requirement, 2026-08-08)
+The user explicitly requires: the system must never decide the call is "over" and stop hints — while the guest talks, hints continue like a prompter. goal_achieved now only fires the UI event + one closing phrase on the achieving turn; it never suppresses later suggestions (all hard-stop checks removed from the hint path). Do NOT reintroduce goal-based hint suppression.

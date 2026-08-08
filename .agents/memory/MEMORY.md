@@ -1,7 +1,7 @@
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct cert-based VoIP APNs from our Engine (not Twilio); bundle app.talkhint, topic app.talkhint.voip, reuses web call flow.
 - [drizzle-kit push interactive blocker](drizzle-push-interactive-blocker.md) — db:push can hang on a rename prompt (out-of-schema user_sessions); apply DDL via executeSql instead, never accept the rename.
 - [/ui WebSocket per-user routing](ui-ws-per-user-routing.md) — live call transcripts/hints must auth + be scoped to owning user (callOwners map); never global broadcast.
-- [Live hint pipeline gotchas](hint-pipeline-gotchas.md) — goal hard-stop on BOTH speaker paths + re-check after await; cross-track echo dedup; duplicate window not last-only; farewell filter must exempt questions.
+- [Live hint pipeline gotchas](hint-pipeline-gotchas.md) — goal-achieved NEVER blocks hints (user requirement: prompter suggests while call continues); cross-track echo dedup; duplicate window not last-only; farewell filter must exempt questions.
 - [Twilio track→speaker mapping](twilio-track-role-mapping.md) — inbound/outbound→Owner/Guest depends on which leg the <Stream> rides; caller-leg (callType=incoming_answered) is mirrored vs owner-leg (browser outbound).
 - [Twilio auth token vs SID mis-paste](twilio-auth-token-gotcha.md) — 401 code 20003 came from pasting the Account SID (34ch, "AC…") into TWILIO_AUTH_TOKEN; real token is 32ch, no "AC".
 - [Secrets audit findings](secrets-audit.md) — Twilio/VAPID ok; APNS PEMs stored single-line (normalize in code, never Buffer.from raw); Stripe secret=TEST vs publishable=LIVE mismatch + webhook secret missing.
