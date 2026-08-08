@@ -20,7 +20,7 @@ import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure } from "./dialogueMatch";
-import { isQuestionOrActionRequest, WAIT_PATTERNS, EXIT_WAIT_PATTERNS } from "./waitState";
+import { resolveWaitState } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1272,31 +1272,27 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       }
       
       // ===== WAIT STATE DETECTION =====
-      // Check if GST says "let me check" / "one moment" → enter wait state
-      if (WAIT_PATTERNS.test(text)) {
-        waitingForInfo = true;
-        log(`[WAIT_STATE] Entered - GST says "${text.substring(0, 40)}"`, "websocket");
-      }
-      
-      // Check if GST gives actual answer → exit wait state
-      if (waitingForInfo && EXIT_WAIT_PATTERNS.test(text)) {
-        waitingForInfo = false;
-        waitAckShown = false; // Reset ACK for next wait
-        waitingSlot = null;
-        log(`[WAIT_STATE] Exited - GST answered "${text.substring(0, 40)}"`, "websocket");
-      }
-
-      // GST asks a real question / requests an action while we're "waiting" →
-      // the user must answer it, so lift the wait state and let a hint through.
+      // Enter/exit/question-lift transitions all live in the shared
+      // resolveWaitState helper (server/waitState.ts) — the single source of
+      // truth shared with TRAINING mode so the two can never drift apart.
       // (Prod call 08.08: "Just to confirm, you're trying to activate your
-      // eSIM…" / "Are you using an iPhone…" were blocked with reason=wait_state.)
-      // Checked AFTER the entry check so "let me check — are you on an iPhone?"
-      // still gets a hint. Pure hold phrases don't match (see waitState.ts).
-      if (waitingForInfo && isQuestionOrActionRequest(text)) {
-        waitingForInfo = false;
-        waitAckShown = false;
-        waitingSlot = null;
-        log(`[WAIT_STATE] Exited - GST asked a question/request "${text.substring(0, 40)}"`, "websocket");
+      // eSIM…" / "Are you using an iPhone…" were blocked with reason=wait_state;
+      // the question check runs LAST so "let me check — are you on an iPhone?"
+      // still gets a hint. Pure hold phrases don't match — see waitState.ts.)
+      {
+        const { waiting: nowWaiting, event: waitEvent } = resolveWaitState(waitingForInfo, text);
+        waitingForInfo = nowWaiting;
+        if (waitEvent === "entered" || waitEvent === "still_waiting") {
+          log(`[WAIT_STATE] Entered - GST says "${text.substring(0, 40)}"`, "websocket");
+        } else if (waitEvent === "exited_answer") {
+          waitAckShown = false; // Reset ACK for next wait
+          waitingSlot = null;
+          log(`[WAIT_STATE] Exited - GST answered "${text.substring(0, 40)}"`, "websocket");
+        } else if (waitEvent === "exited_question") {
+          waitAckShown = false;
+          waitingSlot = null;
+          log(`[WAIT_STATE] Exited - GST asked a question/request "${text.substring(0, 40)}"`, "websocket");
+        }
       }
       
       // ===== ANTI-LOOP GUARD: Reaction-only filter =====
