@@ -36,8 +36,36 @@ export interface GoalUpdateResult {
   state: GoalState;
   goalChanged: boolean;
   goalAchieved: boolean;
+  /** The owner explicitly abandoned/replaced the original goal on this turn. */
+  goalCancelled: boolean;
   newSlots: Partial<SlotMap>;
 }
+
+// Owner phrases that explicitly abandon the current goal, e.g.
+// "Forget the phone issue, I only want to check my payment now",
+// "Never mind the appointment", "Don't worry about that anymore",
+// "I no longer need the repair". Deliberately conservative: only clear,
+// explicit abandonment counts — a mere topic drift must NOT cancel the goal
+// (that's what the compass/soft-return prompt rules handle).
+// Each pattern requires a topic OBJECT after the abandonment verb ("forget the
+// phone issue"), never a bare discourse marker: "forget it, let's continue" and
+// "never mind that, back to the phone" are normal conversational speech and
+// must NOT cancel. A resume marker anywhere in the turn also vetoes cancelling.
+const GOAL_CANCELLATION_PATTERNS: RegExp[] = [
+  /\bforget (about )?(the|that|this|my) [a-zа-яё]+/i,
+  /\bnever mind (about )?(the|that|this|my) [a-zа-яё]+/i,
+  /\bdon'?t worry about (the|that|this|my) [a-zа-яё]+/i,
+  /\bno longer (want|wanted|need|needed|necessary|important|care)\b/i,
+  /\b(don'?t|do not) (want|need) (the|that|this|it) anymore\b/i,
+  /\bnot (interested in|worried about) (the|that|this|it)\b.*\banymore\b/i,
+  /\blet'?s drop (the|that|this) [a-zа-яё]+/i,
+  /\bзабудь (про|о|об) /i,
+  /\bуже не (нужно|надо|важно)\b/i,
+];
+
+// Continuation/resume markers: the owner is steering BACK, not abandoning.
+const GOAL_RESUME_PATTERNS =
+  /\b(back to|let'?s continue|let'?s get back|as i was saying|anyway,? (so|back)|вернемся|вернёмся|продолжим)\b/i;
 
 export class GoalEngine {
   private state: GoalState;
@@ -73,6 +101,20 @@ export class GoalEngine {
     const prevGoalType = this.state.goalType;
     const prevStatus = this.state.status;
     
+    // Explicit goal cancellation — ONLY the owner can abandon their own goal.
+    // A cancelled goal stops driving anything (no achievement, no next-best-
+    // action steering); a new goal may still be detected on this same turn or
+    // any later turn ("Forget the phone issue, I only want to check my payment
+    // now" cancels support AND opens pricing in one utterance).
+    let goalCancelled = false;
+    if (speaker === "HON" && prevStatus !== "achieved" &&
+        !GOAL_RESUME_PATTERNS.test(text) &&
+        GOAL_CANCELLATION_PATTERNS.some((re) => re.test(text))) {
+      goalCancelled = true;
+      this.state.status = "cancelled";
+      console.log(`[GoalEngine] ${this.state.callId} Goal CANCELLED by owner: "${text.slice(0, 60)}"`);
+    }
+    
     const { goalType: detectedGoal, confidence } = this.detectGoalType(lowerText, prevGoalType);
     
     let goalChanged = false;
@@ -99,16 +141,26 @@ export class GoalEngine {
     }
     this.state.slots = mergeSlots(this.state.slots, extractedSlots);
     
-    this.state.missingSlots = this.computeMissingSlots(this.state.goalType, this.state.slots);
+    // A cancelled goal must not keep driving slot steering (fast layer reads
+    // missingSlots): with no active goal there is nothing to fill. If a new
+    // goal was detected on the same turn, status is "changed" and missing
+    // slots are computed normally for the NEW goal.
+    this.state.missingSlots = this.state.status === "cancelled"
+      ? []
+      : this.computeMissingSlots(this.state.goalType, this.state.slots);
     
     let goalAchieved = false;
-    if (prevStatus !== "achieved" && this.checkAchieved(this.state.goalType, this.state.slots, lowerText)) {
+    // A turn that cancels/replaces the goal can never also confirm achievement
+    // — "Forget the phone issue, I only want to know how much the plan costs"
+    // must not mark the fresh pricing goal achieved via the "costs" phrase.
+    if (prevStatus !== "achieved" && !goalCancelled && this.state.status !== "cancelled" &&
+        this.checkAchieved(this.state.goalType, this.state.slots, lowerText)) {
       this.state.status = "achieved";
       this.state.achievedAt = ts;
       this.state.achievedReason = this.getAchievedReason(this.state.goalType, this.state.slots, lowerText);
       goalAchieved = true;
       console.log(`[GoalEngine] ${this.state.callId} Goal ACHIEVED: ${this.state.goalType} - ${this.state.achievedReason}`);
-    } else if (this.state.status !== "achieved" && !goalChanged) {
+    } else if (this.state.status !== "achieved" && this.state.status !== "cancelled" && !goalChanged) {
       this.state.status = "in_progress";
     }
     
@@ -118,6 +170,7 @@ export class GoalEngine {
       state: this.getState(),
       goalChanged,
       goalAchieved,
+      goalCancelled,
       newSlots
     };
   }
@@ -272,7 +325,9 @@ export class GoalEngine {
   }
   
   computeNextBestAction(): NextBestAction | undefined {
-    if (this.state.status === "achieved") {
+    // A cancelled goal must stop steering entirely — no slot-filling nudges
+    // toward a goal the owner explicitly abandoned.
+    if (this.state.status === "achieved" || this.state.status === "cancelled") {
       return undefined;
     }
     

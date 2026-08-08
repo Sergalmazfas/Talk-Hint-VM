@@ -13,7 +13,7 @@ export type GoalType =
   | "negotiation"
   | "other";
 
-export type GoalStatus = "in_progress" | "achieved" | "changed" | "failed";
+export type GoalStatus = "in_progress" | "achieved" | "changed" | "failed" | "cancelled";
 
 export type Speaker = "HON" | "GST";
 

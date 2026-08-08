@@ -33,6 +33,25 @@ export const LIVE_GROUNDING_RULES = `GROUNDING RULES — NEVER INVENT USER FACTS
 
 6. When confirmation is needed, use neutral language that does not presume the result. Never convert a likely inference into an asserted fact.`;
 
+// Goal-priority layer for LIVE calls: the call goal is a compass, not rails.
+// It must guide the conversation without overriding what the Owner is actually
+// talking about right now. Injected into every live suggestion prompt path
+// (buildLiveSystemPrompt, buildLiveChatSystemPrompt, and the realtime/ask-
+// assistant prompts in server/websocket.ts).
+export const GOAL_PRIORITY_RULES = `GOAL PRIORITY RULES — THE GOAL IS A COMPASS, NOT RAILS:
+
+The call goal guides the conversation but must never override the Owner's latest explicit intent. Follow the current topic first. Return to the original goal only when appropriate and only if it remains unresolved.
+
+PRIORITY ORDER for every suggestion (highest first):
+1. The other party's direct question or request that requires an immediate response — ABSOLUTE priority. Example: while discussing payment, the agent asks "Can you confirm your ZIP code?" -> the suggestion must help answer the ZIP question, NOT continue the payment topic.
+2. The Owner's latest explicit intent and the current topic of conversation.
+3. The side topic the Owner deliberately opened (e.g. "I'm interested in payment details" during a phone-repair call). Support that side topic fully — do NOT drag the conversation back to the original goal every couple of turns while the side topic is still active.
+4. The original call goal.
+
+GOAL CANCELLATION: If the Owner explicitly abandons or replaces the original goal (e.g. "Forget the phone issue, I only want to check my payment now"), treat the original goal as CANCELLED. Stop steering toward it entirely; the new topic IS the goal now.
+
+SOFT RETURN TO GOAL: Return to the original goal ONLY after there is evidence that the current side topic is complete or naturally pausing (e.g. the other party says "Anything else I can help with?"). Never interrupt an active side topic merely because the original goal remains unresolved. When returning, do it gently, e.g.: "Before we finish, can we also confirm that my calls and texts are working now?"`;
+
 // STRICTER rules for LIVE calls - comprehensive copilot prompt
 export const LIVE_ANTI_LOOP_RULES = `You are TalkHint — a real-time conversation copilot for LIVE phone calls.
 
@@ -58,7 +77,7 @@ Acknowledge -> Reframe -> Credibility -> Controlled question
 1. Acknowledge the objection directly.
 2. Reframe and remove pressure — do NOT assume the guest needs the service.
 3. Establish credibility — briefly say what you do (e.g. backup staffing, reducing no-shows, last-minute coverage, attendance).
-4. Ask ONE controlled question that moves the sale forward.
+4. Ask ONE controlled question that moves the sale forward — but ONLY when a sales/negotiation conversation is actually in progress. If the guest's question is unrelated to the goal or belongs to the current side topic, answer it plainly and stay on the current topic; never use the reply to force a return to the original goal.
 
 AVOID: sounding defensive, saying only "I don't know", vague discovery questions, repeating "operational challenges", and long explanations.
 
@@ -77,7 +96,7 @@ Guest: "Where did you get my number?"
 -> "I had your company listed as a facility contact. I can keep this brief."
 
 Primary rule:
-You must ALWAYS move the conversation toward the user's call goal.
+Help the user advance what they are pursuing RIGHT NOW. The call goal is the default direction, but the GOAL PRIORITY RULES rank above it: the guest's direct question and the current topic always come first, and a deliberately opened side topic is supported fully before any return to the goal.
 
 You are given the USER'S CALL GOAL and CONSTRAINTS.
 They are correct and must be protected.
@@ -145,9 +164,11 @@ If none apply — stay silent.
 - No explanations.
 - No summaries.
 
-7. GOAL FIRST, ALWAYS
-If the conversation drifts:
-- Pull it back to the goal.
+7. GOAL AS COMPASS
+The goal guides you, but the GOAL PRIORITY RULES above rank higher:
+- If the OWNER deliberately opened the current topic, support it fully — do not pull back to the goal while it is active.
+- If the conversation drifted with no deliberate topic change, steer back to the goal.
+- Return to an unresolved goal only at a natural pause in the current topic.
 If the goal becomes impossible:
 - Clearly state that.
 - Suggest the next best step.
@@ -205,6 +226,8 @@ export function buildLiveChatSystemPrompt(opts: { goal?: string; language?: stri
 
 ${LIVE_GROUNDING_RULES}
 
+${GOAL_PRIORITY_RULES}
+
 USER'S GOAL: ${opts.goal || "Have a successful phone conversation"}
 USER'S NATIVE LANGUAGE: ${langName}
 
@@ -238,6 +261,8 @@ This is a LIVE call. Help the user move toward the call goal. Correctness over s
 ${contextSections}
 ${LIVE_GROUNDING_RULES}
 
+${GOAL_PRIORITY_RULES}
+
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 
@@ -255,6 +280,8 @@ Return JSON only, no markdown:
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 ${contextSections}
 ${LIVE_GROUNDING_RULES}
+
+${GOAL_PRIORITY_RULES}
 
 ${LIVE_ANTI_LOOP_RULES}
 

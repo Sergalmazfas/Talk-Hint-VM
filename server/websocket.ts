@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, buildLiveSystemPrompt } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, buildLiveSystemPrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
@@ -612,7 +612,7 @@ class GPTRealtimeHandler {
     // LIVE_GROUNDING_RULES: the realtime path bypasses buildLiveSystemPrompt,
     // so the grounding layer (never invent user facts / real-world state,
     // state precedence) must be injected here explicitly too.
-    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${getRealtimePrompt(this.mode)}`;
+    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${GOAL_PRIORITY_RULES}\n\n${getRealtimePrompt(this.mode)}`;
     
     this.send({
       type: "session.update",
@@ -800,15 +800,16 @@ export function setupWebSocket(server: Server) {
     try {
       const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
       const goalLockInstructions = goal ? `
-GOAL LOCK-IN MODE: The user has set a clear goal: "${goal}"
-- ONLY provide phrases and help that move toward this goal
-- IGNORE small-talk or off-topic requests from the caller
-- Keep steering toward: confirming time, place, details for the goal
-- If user asks for a phrase, give ONE clear phrase that advances the goal` : '';
+GOAL FOCUS: The user has set a clear goal: "${goal}"
+- Prefer phrases and help that move toward this goal
+- BUT the GOAL PRIORITY RULES above rank higher: the user's latest explicit intent and the current topic always come first — if the user deliberately shifted to another topic, help with THAT topic
+- If user asks for a phrase, give ONE clear phrase that advances the current topic (or the goal, when it is the current topic)` : '';
       
       const systemPrompt = `${TALKHINT_GOLDEN_PROMPT}
 
 ${LIVE_GROUNDING_RULES}
+
+${GOAL_PRIORITY_RULES}
 
 The user's goal for this call: ${goal || "Not specified"}
 The user's native language: ${langName}
@@ -1709,9 +1710,29 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           nextBestAction: state.nextBestAction
         });
         
+        // Owner explicitly abandoned the original goal ("Forget the phone
+        // issue, I only want to check my payment now") — stop injecting it
+        // into hint prompts as an active goal. The engine already stops all
+        // slot steering; clearing currentGoal stops the prompt-side pull.
+        if (goalUpdate.goalCancelled) {
+          // Cancel-and-replace ("Forget the phone issue, I only want to check
+          // my payment now"): keep the NEWLY detected goal in the prompt.
+          // Pure cancellation: clear the goal entirely so no prompt path
+          // keeps steering toward it.
+          currentGoal = goalUpdate.goalChanged ? state.currentGoal : "";
+          log(`[GoalEngine] Owner cancelled the original goal${goalUpdate.goalChanged ? ` — replaced by "${state.currentGoal}"` : " — no longer steering toward it"}`, "goal");
+          uiBroadcast({
+            type: "goal_cancelled",
+            target: "HON",
+            callId: state.callId,
+            goalType: state.goalType,
+            replacedBy: goalUpdate.goalChanged ? state.currentGoal : null
+          });
+        }
+        
         if (goalUpdate.goalAchieved) {
           goalAchievedFlag = true; // informational: UI event only, hints continue
-          log(`[GoalAchieved] HARD STOP activated (on HON utterance) - no more hints`, "goal");
+          log(`[GoalAchieved] goal marked achieved (informational, on HON utterance) — hints continue`, "goal");
           uiBroadcast({
             type: "goal_achieved",
             target: "HON",
