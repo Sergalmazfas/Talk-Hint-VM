@@ -20,6 +20,7 @@ import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure } from "./dialogueMatch";
+import { isQuestionOrActionRequest } from "./waitState";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -1255,6 +1256,19 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         waitAckShown = false; // Reset ACK for next wait
         waitingSlot = null;
         log(`[WAIT_STATE] Exited - GST answered "${text.substring(0, 40)}"`, "websocket");
+      }
+
+      // GST asks a real question / requests an action while we're "waiting" →
+      // the user must answer it, so lift the wait state and let a hint through.
+      // (Prod call 08.08: "Just to confirm, you're trying to activate your
+      // eSIM…" / "Are you using an iPhone…" were blocked with reason=wait_state.)
+      // Checked AFTER the entry check so "let me check — are you on an iPhone?"
+      // still gets a hint. Pure hold phrases don't match (see waitState.ts).
+      if (waitingForInfo && isQuestionOrActionRequest(text)) {
+        waitingForInfo = false;
+        waitAckShown = false;
+        waitingSlot = null;
+        log(`[WAIT_STATE] Exited - GST asked a question/request "${text.substring(0, 40)}"`, "websocket");
       }
       
       // ===== ANTI-LOOP GUARD: Reaction-only filter =====
