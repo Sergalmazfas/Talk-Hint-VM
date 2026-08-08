@@ -1005,7 +1005,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastHintTs = 0;                    // Timestamp of last hint shown
     let lastHintUtteranceId = -1;          // Utterance ID of last hint
     let latestGuestUtteranceId = -1;       // Newest Guest turn seen (freshness/stale guard)
-    let goalAchievedFlag = false;          // informational only — goal achieved is announced (UI event + closing phrase) but NEVER blocks later hints
+    let goalAchievedFlag = false;          // context/UI/analytics only — goal status NEVER gates hint delivery (no stop, no forced closing phrase)
     const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
     
     // Anti-loop guards - prevents cycling on same emotions/suggestions
@@ -1234,7 +1234,6 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       persistTranscriptSoon();
       
       // ALWAYS update GoalEngine (even if hints are blocked)
-      let goalJustAchieved = false;
       // The goal type the engine currently believes we're in — picks which
       // dialogue library (if any) to consult for this turn.
       let detectedGoalType: GoalType = "other";
@@ -1250,6 +1249,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         const missingSlot = state.missingSlots[0] || "none";
         fastLayer.setGoal(state.goalType, missingSlot);
         
+        // A new goal replaced the old one — the "original goal resolved"
+        // context note no longer applies to the NEW active goal.
+        if (goalUpdate.goalChanged) goalAchievedFlag = false;
+        
         uiBroadcast({
           type: "goal_state_update",
           target: "HON",
@@ -1264,8 +1267,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         
         if (goalUpdate.goalAchieved) {
-          goalAchievedFlag = true;
-          goalJustAchieved = true;
+          goalAchievedFlag = true; // context/UI/analytics only — NEVER gates hint delivery
           log(`[GoalAchieved] goal marked achieved (informational) — hints continue while the call goes on`, "goal");
           uiBroadcast({
             type: "goal_achieved",
@@ -1310,14 +1312,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // ===== ANTI-LOOP GUARD: Reaction-only filter =====
       // For reaction-only phrases: still get translation, but skip suggestion
       const reactionOnly = isReactionOnly(text);
-      if (reactionOnly && !goalJustAchieved) {
+      if (reactionOnly) {
         log(`[REACTION_ONLY] text="${text.substring(0, 30)}" - will translate but skip suggestion`, "websocket");
       }
       // Farewell / closing phrases: conversation is wrapping up, no steer needed.
       // Guard against false positives like "Thanks, what time works best?" - if the
       // utterance asks a question or has an actionable scheduling keyword, it's NOT a farewell.
       const isFarewell = isFarewellUtterance(text);
-      if (isFarewell && !goalJustAchieved) {
+      if (isFarewell) {
         log(`[FAREWELL] text="${text.substring(0, 30)}" - will translate but skip suggestion`, "websocket");
       }
       
@@ -1325,7 +1327,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       fastLayer.setLanguage(currentLanguage);
       // fastLayer.onGstUtteranceEnd(); // Fast Layer disabled — silence while GPT thinks is better than an irrelevant filler
       
-      const contextHistory = conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n");
+      // Goal status is context only: when the original goal appears resolved,
+      // the model just gets a neutral note — it must keep assisting the CURRENT
+      // conversation normally, with no delivery or steering change.
+      const contextHistory =
+        conversationLog.map(m => `${m.speaker}: ${m.text}`).join("\n") +
+        (goalAchievedFlag
+          ? "\n[NOTE: The original call goal appears resolved. Continue assisting with the current conversation normally — build suggestions from the latest utterances and current topic.]"
+          : "");
       // Ensure the owner's "My Context" has finished loading so EVERY hint —
       // including the first turn — is personalized (load is kicked off on "start").
       await ownerContextReady;
@@ -1365,13 +1374,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Reaction-only / farewell / wait-state turns never emit a model
       // suggestion (they're blocked below or answered with a static phrase),
       // so we skip that call instead of generating and discarding it.
-      // NOTE (user requirement): goal-achieved is NOT a stop condition — the
-      // prompter keeps suggesting for as long as the conversation continues.
-      // The turn where the goal is achieved still gets the closing phrase
-      // instead of a model hint (goalJustAchieved), but later turns hint
-      // normally.
+      // NOTE (user requirement): goal status is NEVER a stop condition — the
+      // prompter keeps suggesting for as long as the conversation continues,
+      // including the very turn the goal is achieved (a normal model hint,
+      // never a canned closing phrase).
       const wantSuggestion =
-        !reactionOnly && !isFarewell && !goalJustAchieved && !waitingForInfo;
+        !reactionOnly && !isFarewell && !waitingForInfo;
 
       const translationStart = Date.now();
       const translationPromise: Promise<{ translation: string; providerUsed: string }> =
@@ -1463,29 +1471,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       
       // ===== HINT THROTTLING CHECKS (only for suggestions, not transcripts) =====
       
-      // If goal just achieved on this utterance - send closing phrase, skip regular hint
-      if (goalJustAchieved) {
-        uiBroadcast({
-          type: "suggestion",
-          target: "HON",
-          eventType: "closing",
-          source: "system",
-          basedOnSpeaker: "GST",
-          en: "All set! Thanks for the call.",
-          translation: callSettings.translationEnabled
-            ? (currentLanguage === "ru" ? "Готово! Спасибо за звонок." : "¡Todo listo! Gracias por la llamada.")
-            : "",
-          utteranceId,
-          callSid
-        });
-        lastHintTs = Date.now();
-        lastHintUtteranceId = utteranceId;
-        log(`[Suggestion] Closing phrase sent, goal achieved`, "websocket");
-        return;
-      }
-      
-      // (Removed) goal-achieved is no longer a hard stop: as long as the
-      // guest keeps talking, the prompter keeps suggesting (user requirement).
+      // (Removed) goal status NEVER gates hint delivery: no hard stop, no
+      // forced closing phrase, no wait state. The achieving turn and every
+      // turn after it get normal model hints for as long as the call goes on
+      // (user requirement — TalkHint is a continuous prompter). A closing
+      // suggestion may only come from farewell detection of actual speech.
       
       // Check 2: 1 hint = 1 utterance (same utterance already got a hint).
       // A question merged into hintText was NOT part of that earlier hint, so
@@ -1507,7 +1497,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Check: reaction-only filter (skip suggestion, but translation was shown
       // above). wantSuggestion was false → no pending question was consumed on
       // this turn; it stays in the carryover for the next eligible turn.
-      if (reactionOnly && !goalJustAchieved) {
+      if (reactionOnly) {
         dropHint("reaction_only", `text="${text.substring(0, 30)}" - suggestion skipped`, false);
         return;
       }
@@ -1515,13 +1505,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Check: farewell filter (skip suggestion, but translation was shown
       // above). Same as reaction_only: pending question was not consumed and is
       // preserved automatically. (Questions are never classified as farewells.)
-      if (isFarewell && !goalJustAchieved) {
+      if (isFarewell) {
         dropHint("farewell", `text="${text.substring(0, 30)}" - suggestion skipped`, false);
         return;
       }
       
       // ===== WAIT STATE: Show 1 ACK, then block STEER =====
-      if (waitingForInfo && !goalJustAchieved) {
+      if (waitingForInfo) {
         if (!waitAckShown) {
           // Show 1 ACK response
           waitAckShown = true;
@@ -1709,6 +1699,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           missingSlots: state.missingSlots,
           nextBestAction: state.nextBestAction
         });
+        
+        // A new goal replaced the old one — the "original goal resolved"
+        // context note no longer applies to the NEW active goal.
+        if (goalUpdate.goalChanged) goalAchievedFlag = false;
         
         // Owner explicitly abandoned the original goal ("Forget the phone
         // issue, I only want to check my payment now") — stop injecting it

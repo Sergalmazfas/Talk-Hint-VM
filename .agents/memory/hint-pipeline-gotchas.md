@@ -5,10 +5,10 @@ description: Non-obvious failure modes of the live-call hint/throttle pipeline i
 
 # Live hint pipeline gotchas
 
-**Goal-achieved hard stop must hold on BOTH speaker paths.**
-The goal can be achieved on the OWNER's (HON) reply, not just the guest's (GST). If only the GST path sets the hard-stop flag, late hints leak after "цель достигнута".
-**Why:** a real call showed two extra "confirm appointment" hints after the goal was already achieved.
-**How to apply:** set the hard-stop flag wherever `goalUpdate.goalAchieved` is true (both utterance handlers), AND re-check it right before broadcasting the suggestion — `translateAndSuggest` is awaited (network ~hundreds ms), so a concurrent utterance can pass the early check before the flag is set.
+**Goal status must NEVER gate hint delivery (do not reintroduce the hard stop).**
+TalkHint is a continuous prompter for the whole call: goal achieved/cancelled/replaced are context/UI/analytics signals only. There is no hard stop, no forced canned closing phrase on the achieving turn, no wait state, and `wantSuggestion` must never reference goal status.
+**Why:** explicit user requirement — real conversations continue after the goal (payment questions, new topics); the earlier hard stop + canned "All set!" phrase left the user without hints mid-call.
+**How to apply:** `goalAchievedFlag` may be WRITTEN in both utterance handlers, but its only allowed READ is the neutral prompt-context note ("original goal appears resolved, continue normally"); reset it when `goalChanged`. A source-level guard test (`goalStatusNeverStops.test.ts`) enforces this — keep it passing. The golden prompt's stop rule was also rewritten ("Goal achieved is NOT a stop"); don't restore "STOP generating suggestions".
 
 **Speakerphone bleeds the same speech onto BOTH Deepgram tracks.**
 inbound=HON, outbound=GST is correct, but on a speaker the mic captures the remote audio (and vice versa), so identical text is transcribed on both tracks → role confusion ("the doctor's words shown as YOU").
