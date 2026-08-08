@@ -4,7 +4,7 @@ import { storage, getContactMemoryHealth, getWriteHealth, checkSchemaDrift } fro
 import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner, getHintFallbackStats } from "./websocket";
 import { getAlertChannelStatus, getWriteHealthAlertState } from "./writeHealthAlerter";
 import { HEALTH_STATUS_PAGE_HTML, HEALTH_TOKEN_PROMPT_HTML } from "./healthStatusPage";
-import { LIVE_ANTI_LOOP_RULES } from "@shared/prompts";
+import { LIVE_ANTI_LOOP_RULES, buildLiveChatSystemPrompt } from "@shared/prompts";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -1669,13 +1669,10 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // FROZEN: Always use base prompt (TALKHINT_GOLDEN_PROMPT)
       // Custom prompts (activePromptId from phone_numbers) are NOT used for Basic plan
       // This is intentional - all users get the same base AI assistant behavior
+      // LIVE branch bypasses buildLiveSystemPrompt, so the grounding layer is
+      // included via buildLiveChatSystemPrompt (assembled + tested in shared/prompts).
       const systemPrompt = isLiveCall 
-        ? `${TALKHINT_GOLDEN_PROMPT}
-
-USER'S GOAL: ${goal || "Have a successful phone conversation"}
-USER'S NATIVE LANGUAGE: ${langName}
-
-The user is in a LIVE call. Give them immediate, ready-to-say phrases.`
+        ? buildLiveChatSystemPrompt({ goal, language })
         : `${PREP_PROMPT}
 
 ${TALKHINT_GOLDEN_PROMPT}

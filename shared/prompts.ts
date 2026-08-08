@@ -8,6 +8,31 @@ export const ANTI_LOOP_RULES = `ANTI-LOOP RULES (CRITICAL):
 - If unsure: Default to a clarifying question that moves the goal forward.
 - ALLOWED ASSUMPTIONS: You can state common facts without "checking": "E-Class is usually cheaper" / "Most clients choose this option"`;
 
+// Grounding layer for LIVE calls: the model must never invent facts about the
+// user (Owner) or assert real-world state it cannot know. Injected into every
+// live suggestion prompt by buildLiveSystemPrompt, alongside LIVE_ANTI_LOOP_RULES.
+export const LIVE_GROUNDING_RULES = `GROUNDING RULES — NEVER INVENT USER FACTS OR REAL-WORLD STATE (HIGHEST PRIORITY):
+
+1. NEVER invent or assume a fact about the user that is not explicitly known from MY_CONTEXT, CONTACT_CONTEXT, the call goal, knowledge cards, or the current conversation. This includes: device type, account status, dates, numbers, documents, actions completed, symptoms, preferences, results.
+
+2. Plausible answers are ALSO forbidden. Suggesting "Yes, I'm using an iPhone" without a source is just as wrong as guessing "Android". Every factual claim about the user MUST have a source in the provided context or conversation.
+
+3. When the guest asks for information you don't have, do NOT answer the factual part on the user's behalf. Instead, prompt the user to answer from what they actually know:
+   Guest: "Are you using an iPhone or Android?" (device unknown)
+   -> WRONG: "I'm using an Android." / "Yes, I'm using an iPhone."
+   -> RIGHT: "Tell them whether you're using an iPhone or Android."
+   Guest: "Try making a call. Is it working now?" (user has not said)
+   -> WRONG: "No, it's still not working." / "Yes, everything works now."
+   -> RIGHT: "Check whether calls are working now and answer based on the result."
+
+4. NEVER claim an external action succeeded or failed unless the conversation establishes it. Do not assume a fix worked, a payment went through, or a problem persists.
+
+5. STATE PRECEDENCE — for facts that can change during a call, the most recent explicit user statement in the CURRENT conversation is authoritative and overrides everything else, in this order:
+   current explicit user statement > current call transcript > MY_CONTEXT / CONTACT_CONTEXT / knowledge cards > older call state.
+   Example: CONTACT_CONTEXT says "Mint number is not working", but the user just said "Yes, it's working now" -> current state is WORKING. Stop suggesting troubleshooting; do not be pulled back by stale context.
+
+6. When confirmation is needed, use neutral language that does not presume the result. Never convert a likely inference into an asserted fact.`;
+
 // STRICTER rules for LIVE calls - comprehensive copilot prompt
 export const LIVE_ANTI_LOOP_RULES = `You are TalkHint — a real-time conversation copilot for LIVE phone calls.
 
@@ -170,6 +195,22 @@ You are here to help the user achieve their goal in a live call.`;
 //   - contextSections: pre-assembled context provider chain (USER/CONTACT/cards)
 //   - translateEnabled: when false the model is told NOT to translate (English
 //     suggestion only) so no translation tokens are spent.
+// System prompt for the /api/chat "ask the assistant" endpoint during a LIVE
+// call. Lives here (not inline in routes.ts) so tests can assert the real
+// assembled string — the grounding layer must reach this path too, since it
+// bypasses buildLiveSystemPrompt.
+export function buildLiveChatSystemPrompt(opts: { goal?: string; language?: string }): string {
+  const langName = LANGUAGE_NAMES[opts.language || "ru"] || "Russian";
+  return `${TALKHINT_GOLDEN_PROMPT}
+
+${LIVE_GROUNDING_RULES}
+
+USER'S GOAL: ${opts.goal || "Have a successful phone conversation"}
+USER'S NATIVE LANGUAGE: ${langName}
+
+The user is in a LIVE call. Give them immediate, ready-to-say phrases.`;
+}
+
 export function buildLiveSystemPrompt(opts: {
   goal: string;
   language?: string;
@@ -195,6 +236,8 @@ export function buildLiveSystemPrompt(opts: {
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 ${contextSections}
+${LIVE_GROUNDING_RULES}
+
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. 
@@ -211,6 +254,8 @@ Return JSON only, no markdown:
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
 ${contextSections}
+${LIVE_GROUNDING_RULES}
+
 ${LIVE_ANTI_LOOP_RULES}
 
 Guest just spoke. Do NOT translate anything — leave translation fields empty.

@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, buildLiveSystemPrompt } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, buildLiveSystemPrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
@@ -19,7 +19,7 @@ import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
-import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure } from "./dialogueMatch";
+import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
 import { resolveWaitState, shouldResetWaitTracking } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
 
@@ -608,7 +608,10 @@ class GPTRealtimeHandler {
     // FROZEN: Always use base prompt (TALKHINT_GOLDEN_PROMPT)
     // Custom prompts (activePromptId from phone_numbers) are NOT used for Basic plan
     // This is intentional - all users get the same base AI assistant behavior
-    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${getRealtimePrompt(this.mode)}`;
+    // LIVE_GROUNDING_RULES: the realtime path bypasses buildLiveSystemPrompt,
+    // so the grounding layer (never invent user facts / real-world state,
+    // state precedence) must be injected here explicitly too.
+    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${getRealtimePrompt(this.mode)}`;
     
     this.send({
       type: "session.update",
@@ -803,6 +806,8 @@ GOAL LOCK-IN MODE: The user has set a clear goal: "${goal}"
 - If user asks for a phrase, give ONE clear phrase that advances the goal` : '';
       
       const systemPrompt = `${TALKHINT_GOLDEN_PROMPT}
+
+${LIVE_GROUNDING_RULES}
 
 The user's goal for this call: ${goal || "Not specified"}
 The user's native language: ${langName}
@@ -1405,7 +1410,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
       // Skip the library on a carryover turn — a canned line matched on the
       // current phrase alone would drop the carried question all over again.
-      const libraryHit = (wantSuggestion && !carried) ? matchDialogueLibrary(text, currentGoal, detectedGoalType) : null;
+      // Grounding gate: canned library lines bypass the LLM (and thus
+      // LIVE_GROUNDING_RULES), so questions only the Owner can answer from
+      // direct observation ("Is it working now?", "iPhone or Android?") must
+      // NOT be served a pre-authored answer — fall through to the grounded
+      // LLM path, which directs the owner to answer instead of asserting.
+      const ownerOnly = isOwnerOnlyQuestion(text);
+      if (ownerOnly && wantSuggestion && !carried) {
+        log(`[Dialogue] SKIP library for owner-only question utteranceId=${utteranceId}: "${text.substring(0, 50)}"`, "websocket");
+      }
+      const libraryHit = (wantSuggestion && !carried && !ownerOnly) ? matchDialogueLibrary(text, currentGoal, detectedGoalType) : null;
       if (libraryHit) {
         log(`[Dialogue] HIT goal="${libraryHit.library.goalText.substring(0, 30)}" (${libraryHit.library.goalType}) type=${libraryHit.entry.type} trigger="${libraryHit.entry.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
       }

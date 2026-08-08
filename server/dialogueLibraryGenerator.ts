@@ -29,7 +29,7 @@ const DOMAIN_GUIDANCE: Record<GoalType, string> = {
     "Domain: general business phone conversation. Cover greeting, discovering the guest's need, typical questions, common objections with rebuttals, clarifying details, and a polite closing.",
 };
 
-function buildSystemPrompt(goalType: GoalType, language: string): string {
+export function buildSystemPrompt(goalType: GoalType, language: string): string {
   const langName = LANGUAGE_NAMES[language] || "Russian";
   return `You build a "dialogue library" for a real-time phone-call assistant. The assistant helps an English-speaking agent (the USER) during live calls: when the guest says something, the assistant shows a ready-to-read reply the user can speak.
 
@@ -53,6 +53,7 @@ Each entry MUST be a JSON object with EXACTLY these fields:
 
 Rules:
 - Personalize answers with the user's real facts (services, prices, projects) when given. Do NOT invent specific prices or facts that aren't provided — keep those answers general.
+- NEVER put an invented personal fact or real-world state into an "answer": no guessed device types, account statuses, dates, numbers, or results ("it's still not working" / "everything works now"). If the guest's trigger asks about something only the user can observe or know and it is not in the provided facts, the "answer" must direct the user to answer from what they actually know (e.g. "Tell them which phone you use") instead of asserting a value.
 - Keep every answer something a person can actually say out loud on a call.
 - Output ONLY a JSON object of the form {"entries": [ ... ]} with no prose, no markdown, no code fences.`;
 }
