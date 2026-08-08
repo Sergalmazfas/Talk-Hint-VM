@@ -20,7 +20,7 @@ import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure } from "./dialogueMatch";
-import { resolveWaitState } from "./waitState";
+import { resolveWaitState, shouldResetWaitTracking } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1282,15 +1282,18 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       {
         const { waiting: nowWaiting, event: waitEvent } = resolveWaitState(waitingForInfo, text);
         waitingForInfo = nowWaiting;
+        // Live-only side effects: the exit-events → reset mapping lives in
+        // shouldResetWaitTracking (server/waitState.ts) so it's unit-tested —
+        // waitAckShown/waitingSlot reset ONLY on exit, never on enter/still.
+        if (shouldResetWaitTracking(waitEvent)) {
+          waitAckShown = false; // Reset ACK for next wait
+          waitingSlot = null;
+        }
         if (waitEvent === "entered" || waitEvent === "still_waiting") {
           log(`[WAIT_STATE] Entered - GST says "${text.substring(0, 40)}"`, "websocket");
         } else if (waitEvent === "exited_answer") {
-          waitAckShown = false; // Reset ACK for next wait
-          waitingSlot = null;
           log(`[WAIT_STATE] Exited - GST answered "${text.substring(0, 40)}"`, "websocket");
         } else if (waitEvent === "exited_question") {
-          waitAckShown = false;
-          waitingSlot = null;
           log(`[WAIT_STATE] Exited - GST asked a question/request "${text.substring(0, 40)}"`, "websocket");
         }
       }

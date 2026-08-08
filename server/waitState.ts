@@ -89,3 +89,21 @@ export function resolveWaitState(
 
   return { waiting: nowWaiting, event };
 }
+
+/**
+ * LIVE-mode side effects for a wait-state transition.
+ *
+ * Live mode (server/websocket.ts) tracks two extra pieces of per-call state
+ * that TRAINING mode doesn't have:
+ *   - waitAckShown: whether the single "Sure, I'll wait." ACK was shown
+ *   - waitingSlot:  which slot we're waiting on
+ * Both must reset when the wait state EXITS (either because the guest answered
+ * or asked a question) so the NEXT wait shows a fresh ACK — and must NOT reset
+ * on "entered"/"still_waiting" or the ACK could repeat mid-wait.
+ *
+ * Returns true when the live handler must reset waitAckShown and clear
+ * waitingSlot.
+ */
+export function shouldResetWaitTracking(event: WaitStateEvent): boolean {
+  return event === "exited_answer" || event === "exited_question";
+}

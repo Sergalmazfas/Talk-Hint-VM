@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isQuestionOrActionRequest,
   resolveWaitState,
+  shouldResetWaitTracking,
   WAIT_PATTERNS,
   EXIT_WAIT_PATTERNS,
 } from "../waitState";
@@ -130,6 +131,73 @@ describe("resolveWaitState (shared by LIVE and TRAINING modes)", () => {
     expect(resolveWaitState(true, "Hmm, mm-hmm.")).toEqual({ waiting: true, event: null });
   });
 
+  it("shared patterns match both modes' historical triggers", () => {
+    expect(WAIT_PATTERNS.test("just a minute")).toBe(true); // training-only before
+    expect(EXIT_WAIT_PATTERNS.test("starting at fifty per hour")).toBe(true); // live-only before
+    expect(EXIT_WAIT_PATTERNS.test("we can do Tuesday")).toBe(true); // training-only before
+  });
+});
+
+describe("shouldResetWaitTracking (LIVE-mode ACK + slot reset wiring)", () => {
+  it("resets on exited_answer", () => {
+    expect(shouldResetWaitTracking("exited_answer")).toBe(true);
+  });
+  it("resets on exited_question", () => {
+    expect(shouldResetWaitTracking("exited_question")).toBe(true);
+  });
+  it("does NOT reset on entered", () => {
+    expect(shouldResetWaitTracking("entered")).toBe(false);
+  });
+  it("does NOT reset on still_waiting", () => {
+    expect(shouldResetWaitTracking("still_waiting")).toBe(false);
+  });
+  it("does NOT reset on null (no transition)", () => {
+    expect(shouldResetWaitTracking(null)).toBe(false);
+  });
+
+  // Simulate the live handler's per-call state across a full wait cycle so a
+  // rewiring of the handler that drops the reset is caught by this mapping.
+  it("full cycle: ACK shown during wait, reset on exit, fresh ACK next wait", () => {
+    let waitAckShown = false;
+    let waitingSlot: string | null = null;
+    let waiting = false;
+
+    const step = (text: string) => {
+      const r = resolveWaitState(waiting, text);
+      waiting = r.waiting;
+      if (shouldResetWaitTracking(r.event)) {
+        waitAckShown = false;
+        waitingSlot = null;
+      }
+      return r.event;
+    };
+
+    // Guest holds → wait entered; live handler shows the ACK once.
+    expect(step("Let me check, one moment.")).toBe("entered");
+    waitAckShown = true;
+    waitingSlot = "price";
+
+    // Still waiting — ACK/slot must NOT reset.
+    expect(step("Bear with me while I look into this.")).toBe("still_waiting");
+    expect(waitAckShown).toBe(true);
+    expect(waitingSlot).toBe("price");
+
+    // Answer arrives — exit resets both.
+    expect(step("The price is fifty per hour.")).toBe("exited_answer");
+    expect(waitAckShown).toBe(false);
+    expect(waitingSlot).toBeNull();
+
+    // Second wait → ACK can be shown fresh; a question also lifts + resets.
+    expect(step("Hold on, checking availability.")).toBe("entered");
+    waitAckShown = true;
+    waitingSlot = "availability";
+    expect(step("Are you flexible on the day?")).toBe("exited_question");
+    expect(waitAckShown).toBe(false);
+    expect(waitingSlot).toBeNull();
+  });
+});
+
+describe("legacy shared-pattern checks", () => {
   it("shared patterns match both modes' historical triggers", () => {
     expect(WAIT_PATTERNS.test("just a minute")).toBe(true); // training-only before
     expect(EXIT_WAIT_PATTERNS.test("starting at fifty per hour")).toBe(true); // live-only before
