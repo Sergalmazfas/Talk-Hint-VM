@@ -18,6 +18,7 @@ import {
   NextBestAction,
   FastLayerMeta
 } from "../shared/goalTypes";
+import { isQuestionOrActionRequest } from "./waitState";
 
 import { extractAllSlots, mergeSlots } from "./slotExtractors";
 
@@ -175,18 +176,62 @@ export class GoalEngine {
     return missing;
   }
   
+  // A confirmation phrase inside a QUESTION is not a confirmation.
+  // Real call: owner asked "What should I do the next to the fixed call and
+  // text?" — substring "fixed" marked the support goal ACHIEVED and every
+  // later hint was hard-stopped. Questions ask for progress; they never
+  // confirm it. Negated phrases ("not fixed", "isn't resolved") and future
+  // intent ("to fix", "will be fixed" is fine — different phrase) also must
+  // not count.
+  // Clause-aware: the utterance is split into clauses ("It's fixed now,
+  // anything else?" → declarative "It's fixed now" + question "anything
+  // else?") and every whole-word occurrence of the phrase is evaluated —
+  // it confirms only when it sits in a non-question clause without a
+  // preceding negation. "It's not fixed, but it's fixed now" still confirms
+  // via the second occurrence.
+  private confirmsAchievement(text: string, phrase: string): boolean {
+    const escaped = phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Word boundaries only where the phrase starts/ends with a word char
+    // (phrases like "it's $" end with a symbol).
+    const lead = /^\w/.test(phrase) ? "\\b" : "";
+    const trail = /\w$/.test(phrase) ? "\\b" : "";
+    const phraseRe = new RegExp(`${lead}${escaped}${trail}`, "gi");
+
+    // Split into clauses on sentence/clause delimiters, keeping the
+    // terminator so a clause knows whether it is a question.
+    const clauses = text.match(/[^.!?;,]+[.!?;,]?/g) ?? [text];
+    for (const clause of clauses) {
+      const isQuestionClause = clause.includes("?") || isQuestionOrActionRequest(clause);
+      if (isQuestionClause) continue; // questions ask about the goal, never confirm it
+      phraseRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = phraseRe.exec(clause)) !== null) {
+        // Negation immediately before this occurrence: "not fixed",
+        // "isn't resolved", "hasn't been fixed", "never got it done".
+        const before = clause.slice(Math.max(0, m.index - 30), m.index);
+        const negated = /\b(not|isn't|isnt|wasn't|wasnt|hasn't|hasnt|haven't|havent|never|no)\s+(been\s+|yet\s+|really\s+|quite\s+|got\s+it\s+)?$/i.test(before);
+        if (!negated) return true;
+      }
+    }
+    return false;
+  }
+
   checkAchieved(goalType: GoalType, slots: SlotMap, text: string): boolean {
     const requirements = GOAL_REQUIREMENTS[goalType];
     
     for (const phrase of requirements.achievedPhrases) {
-      if (text.includes(phrase.toLowerCase())) {
+      if (this.confirmsAchievement(text, phrase)) {
         return true;
       }
     }
     
     if (requirements.requiredSlots.length > 0) {
       const allSlotsFilled = requirements.requiredSlots.every(slot => slots[slot] !== null);
-      if (allSlotsFilled) {
+      // Slot completion is also a hard stop, so a QUESTION turn must not be
+      // the one that triggers it ("Would 3 PM on Friday work?" fills date+time
+      // but confirms nothing). Slots persist — the next declarative turn will
+      // mark the goal achieved.
+      if (allSlotsFilled && !isQuestionOrActionRequest(text)) {
         return true;
       }
     }
@@ -198,7 +243,7 @@ export class GoalEngine {
     const requirements = GOAL_REQUIREMENTS[goalType];
     
     for (const phrase of requirements.achievedPhrases) {
-      if (text.includes(phrase.toLowerCase())) {
+      if (this.confirmsAchievement(text, phrase)) {
         return `Confirmation phrase detected: "${phrase}"`;
       }
     }
