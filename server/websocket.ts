@@ -20,7 +20,7 @@ import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
-import { resolveWaitState, shouldResetWaitTracking } from "./waitState";
+import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1010,6 +1010,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastSuggestionIntent = "";         // Last intent type (enthusiasm/ask_date/etc)
     let lastSuggestionText = "";           // Last suggestion text for duplicate check
     const recentSuggestions: string[] = []; // Last few suggestions for duplicate window
+    // Per-call cap on duplicate-suggestion exemptions, keyed by normalized
+    // guest question — a re-asked question may re-show a similar hint ONCE;
+    // further repeats (looping IVR) are suppressed as duplicates again.
+    const dupExemptionCounts = new Map<string, number>();
     const RECENT_SUGGESTIONS_MAX = 4;      // How many past suggestions to compare against
 
     // Dropped-question carryover: when a guest question's hint is lost (stale
@@ -1611,10 +1615,23 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           if (sim > maxSim) maxSim = sim;
         }
         if (maxSim >= DUPLICATE_SIMILARITY) {
-          // The suppressed suggestion may have carried a consumed question —
-          // keep it so the next turn's (different) hint can still address it.
-          dropHint("duplicate_suggestion", `similarity=${(maxSim * 100).toFixed(0)}% - too similar to a recent hint`, true);
-          return;
+          // EXEMPTION: if the guest's current utterance is itself a question,
+          // they are waiting for an answer RIGHT NOW — re-showing a similar
+          // hint is correct, suppressing it leaves the user with nothing.
+          // (Real call: bot re-asked "Mint phone number or home Internet?"
+          // twice; both answers were blocked as duplicates → 1 hint per call.)
+          // BOUNDED: at most one exempted re-show per normalized question —
+          // a looping IVR repeating the same prompt must not re-show forever.
+          const dupSig = normalizeText(text);
+          if (isQuestionOrActionRequest(text) && (dupExemptionCounts.get(dupSig) ?? 0) < 1) {
+            dupExemptionCounts.set(dupSig, (dupExemptionCounts.get(dupSig) ?? 0) + 1);
+            log(`[Suggestion] duplicate exemption: guest re-asked a question (similarity=${(maxSim * 100).toFixed(0)}%) utteranceId=${utteranceId}`, "websocket");
+          } else {
+            // The suppressed suggestion may have carried a consumed question —
+            // keep it so the next turn's (different) hint can still address it.
+            dropHint("duplicate_suggestion", `similarity=${(maxSim * 100).toFixed(0)}% - too similar to a recent hint`, true);
+            return;
+          }
         }
 
         // ===== SELF-OVERLAP GUARD: don't suggest what HON already said =====
@@ -2326,6 +2343,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       waitingForInfo = false;
       waitAckShown = false;
       waitingSlot = null;
+      dupExemptionCounts.clear();
       log(`[Cleanup] Hint throttling, anti-loop guards, wait state reset`, "websocket");
     });
     
