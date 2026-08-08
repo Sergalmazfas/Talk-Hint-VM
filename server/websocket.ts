@@ -20,7 +20,7 @@ import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure } from "./dialogueMatch";
-import { isQuestionOrActionRequest } from "./waitState";
+import { isQuestionOrActionRequest, WAIT_PATTERNS, EXIT_WAIT_PATTERNS } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -1031,11 +1031,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let waitAckShown = false;              // True after showing 1 ACK ("Sure, I'll wait")
     let waitingSlot: string | null = null; // Which slot we're waiting for
     
-    // Patterns that trigger Wait State
-    const WAIT_PATTERNS = /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up)\b/i;
-    
-    // Patterns that EXIT Wait State (GST has real answer)
-    const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|available|not available|yes we|no we|unfortunately|actually)\b/i;
+    // Wait-state enter/exit patterns are shared with TRAINING mode —
+    // see WAIT_PATTERNS / EXIT_WAIT_PATTERNS in server/waitState.ts.
     
     // Reaction-only phrases to filter (short emotional reactions with no info)
     const REACTION_ONLY_PATTERNS = [

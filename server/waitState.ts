@@ -39,3 +39,53 @@ export function isQuestionOrActionRequest(text: string): boolean {
   if (!t) return false;
   return QUESTION_PATTERNS.some((p) => p.test(t));
 }
+
+// Shared wait-state patterns — single source of truth for LIVE (websocket.ts)
+// and TRAINING (training.ts) modes so the two can never drift apart.
+// Union of the patterns both modes historically used.
+export const WAIT_PATTERNS =
+  /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up|one minute|just a minute)\b/i;
+
+export const EXIT_WAIT_PATTERNS =
+  /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|available|not available|unfortunately|actually|yes,? we|no,? we|the (only|next|first|earliest|available)|i can offer|we can offer|how about|at \d|am|pm|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+
+export type WaitStateEvent =
+  | "entered"
+  | "still_waiting"
+  | "exited_answer"
+  | "exited_question"
+  | null;
+
+/**
+ * Pure wait-state transition for a guest utterance.
+ *
+ * Order matters and mirrors LIVE mode:
+ * 1. If already waiting and the guest delivers real content → exit.
+ * 2. If the utterance is a hold phrase → enter (or stay in) wait state.
+ * 3. If (still) waiting and the utterance asks a question / requests an
+ *    action → exit, so a hint can be generated. Checked LAST so that
+ *    "let me check — are you on an iPhone?" still lifts the wait state.
+ */
+export function resolveWaitState(
+  waiting: boolean,
+  guestText: string,
+): { waiting: boolean; event: WaitStateEvent } {
+  const text = guestText || "";
+  let event: WaitStateEvent = null;
+  let nowWaiting = waiting;
+
+  if (nowWaiting && EXIT_WAIT_PATTERNS.test(text)) {
+    nowWaiting = false;
+    event = "exited_answer";
+  } else if (WAIT_PATTERNS.test(text)) {
+    event = nowWaiting ? "still_waiting" : "entered";
+    nowWaiting = true;
+  }
+
+  if (nowWaiting && isQuestionOrActionRequest(text)) {
+    nowWaiting = false;
+    event = "exited_question";
+  }
+
+  return { waiting: nowWaiting, event };
+}

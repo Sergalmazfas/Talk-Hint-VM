@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isQuestionOrActionRequest } from "../waitState";
+import {
+  isQuestionOrActionRequest,
+  resolveWaitState,
+  WAIT_PATTERNS,
+  EXIT_WAIT_PATTERNS,
+} from "../waitState";
 
 describe("isQuestionOrActionRequest", () => {
   describe("real questions from the 2026-08-08 prod call MUST lift the wait state", () => {
@@ -80,5 +85,54 @@ describe("isQuestionOrActionRequest", () => {
     it("plain status update", () => {
       expect(isQuestionOrActionRequest("Still checking the system, almost there.")).toBe(false);
     });
+  });
+});
+
+describe("resolveWaitState (shared by LIVE and TRAINING modes)", () => {
+  it("training scenario: 'let me check' enters, then a question lifts the wait state", () => {
+    // GST: "Let me check, one moment."
+    let s = resolveWaitState(false, "Let me check, one moment.");
+    expect(s.waiting).toBe(true);
+    expect(s.event).toBe("entered");
+
+    // GST comes back with a real question — hint MUST NOT be blocked.
+    s = resolveWaitState(s.waiting, "Are you using an iPhone or an Android device?");
+    expect(s.waiting).toBe(false);
+    expect(s.event).toBe("exited_question");
+  });
+
+  it("question without a question mark also lifts the wait state", () => {
+    const s = resolveWaitState(true, "Just to confirm, you're trying to activate your eSIM on your new phone");
+    expect(s.waiting).toBe(false);
+    expect(s.event).toBe("exited_question");
+  });
+
+  it("hold phrase with an embedded question exits, not stays waiting", () => {
+    const s = resolveWaitState(false, "Let me check — are you on an iPhone?");
+    expect(s.waiting).toBe(false);
+    expect(s.event).toBe("exited_question");
+  });
+
+  it("real answer exits the wait state", () => {
+    const s = resolveWaitState(true, "Unfortunately we have no openings tomorrow.");
+    expect(s.waiting).toBe(false);
+    expect(s.event).toBe("exited_answer");
+  });
+
+  it("pure hold phrase keeps waiting", () => {
+    const s = resolveWaitState(true, "Bear with me while I look into this.");
+    expect(s.waiting).toBe(true);
+    expect(s.event).toBe("still_waiting");
+  });
+
+  it("neutral chatter does not enter or exit", () => {
+    expect(resolveWaitState(false, "Alright.")).toEqual({ waiting: false, event: null });
+    expect(resolveWaitState(true, "Hmm, mm-hmm.")).toEqual({ waiting: true, event: null });
+  });
+
+  it("shared patterns match both modes' historical triggers", () => {
+    expect(WAIT_PATTERNS.test("just a minute")).toBe(true); // training-only before
+    expect(EXIT_WAIT_PATTERNS.test("starting at fifty per hour")).toBe(true); // live-only before
+    expect(EXIT_WAIT_PATTERNS.test("we can do Tuesday")).toBe(true); // training-only before
   });
 });

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { buildTrainingGstSystemPrompt, buildTrainingHintSystemPrompt } from "@shared/prompts";
+import { resolveWaitState } from "./waitState";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -119,10 +120,8 @@ If repeated context occurs, reframe the question.
 Return JSON only:
 {"suggestion": "short speakable reply", "translation": "same in {LANG}", "achieved": false}`;
 
-// Wait State patterns (mirrors LIVE mode in websocket.ts)
-const WAIT_PATTERNS = /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up|one minute|just a minute)\b/i;
-
-const EXIT_WAIT_PATTERNS = /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|we have|we offer|we can|available|not available|unfortunately|actually|yes,? we|no,? we|the (only|next|first|earliest|available)|i can offer|we can offer|how about|at \d|am|pm|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+// Wait State patterns are shared with LIVE mode — see server/waitState.ts
+// (WAIT_PATTERNS / EXIT_WAIT_PATTERNS / resolveWaitState).
 
 // Dialog state tracking - prevents HINT repetition
 interface DialogState {
@@ -781,21 +780,24 @@ export async function processTrainingTurn(
     // STEP 2: Update dialog state based on GST response (BEFORE calling HINT)
     session.dialogState = updateDialogState(session.dialogState, gstText, "gst");
 
-    // WAIT STATE detection (mirrors LIVE mode)
-    // Exit takes priority — if GST gives real answer, leave wait state first
-    if (session.dialogState.waitingForInfo && EXIT_WAIT_PATTERNS.test(gstText)) {
-      session.dialogState.waitingForInfo = false;
-      session.dialogState.waitAckShown = false;
-      console.log(`[Training] [WAIT_STATE] Exited — GST gave real content`);
-    } else if (WAIT_PATTERNS.test(gstText)) {
-      // Enter (or stay in) wait state
-      if (!session.dialogState.waitingForInfo) {
-        session.dialogState.waitingForInfo = true;
-        session.dialogState.waitAckShown = false;
+    // WAIT STATE detection (shared with LIVE mode — resolveWaitState also
+    // lifts the wait state when GST asks a real question / requests an action,
+    // e.g. "let me check → Are you using an iPhone?")
+    {
+      const { waiting, event } = resolveWaitState(session.dialogState.waitingForInfo, gstText);
+      if (event === "exited_answer") {
+        console.log(`[Training] [WAIT_STATE] Exited — GST gave real content`);
+      } else if (event === "exited_question") {
+        console.log(`[Training] [WAIT_STATE] Exited — GST asked a question/request`);
+      } else if (event === "entered") {
         console.log(`[Training] [WAIT_STATE] Entered — GST is checking`);
-      } else {
+      } else if (event === "still_waiting") {
         console.log(`[Training] [WAIT_STATE] Still active — GST still checking`);
       }
+      if (waiting !== session.dialogState.waitingForInfo || event === "entered") {
+        session.dialogState.waitAckShown = false;
+      }
+      session.dialogState.waitingForInfo = waiting;
     }
 
     console.log(`[Training] GST (${gstMs}ms): "${gstText}"`);
