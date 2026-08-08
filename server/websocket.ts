@@ -21,6 +21,7 @@ import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure } from "./dialogueMatch";
 import { isQuestionOrActionRequest } from "./waitState";
+import { HintCarryover } from "./hintCarryover";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -1005,6 +1006,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastSuggestionText = "";           // Last suggestion text for duplicate check
     const recentSuggestions: string[] = []; // Last few suggestions for duplicate window
     const RECENT_SUGGESTIONS_MAX = 4;      // How many past suggestions to compare against
+
+    // Dropped-question carryover: when a guest question's hint is lost (stale
+    // supersede, cooldown, or model returned no suggestion), remember it so the
+    // NEXT guest turn's hint folds the question in instead of losing it forever.
+    // Robot callers speak in 3-5s bursts, which used to silently swallow questions.
+    const hintCarryover = new HintCarryover();
     const DUPLICATE_SIMILARITY = 0.8;      // Block if >=80% similar to any recent suggestion
 
     // Self-overlap guard - don't suggest something the owner (HON) already said.
@@ -1179,6 +1186,30 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     
     // Handler for complete GST utterance (after debounce)
     async function handleGuestUtteranceComplete(text: string, utteranceId: number, confidence?: number) {
+      // EAGER supersede capture (synchronous, before any await): if the previous
+      // guest turn is still generating its hint, it is being superseded right
+      // now and its suggestion will be dropped as stale. Capture its question
+      // immediately so THIS turn folds it in — waiting for the old request to
+      // resolve would let this turn consume an empty carryover first (race).
+      const { turn: guestTurn, capturedFromUtteranceId } = hintCarryover.beginTurn(text, utteranceId);
+      if (capturedFromUtteranceId !== undefined) {
+        log(`[Carryover] remembered question from superseded utteranceId=${capturedFromUtteranceId} (hint still generating) for utteranceId=${utteranceId}`, "websocket");
+      }
+      try {
+        await runGuestUtterance(text, utteranceId, guestTurn, confidence);
+      } finally {
+        // Mark the turn finished (hint delivered OR deliberately blocked) so a
+        // later turn does not re-capture it as "superseded".
+        hintCarryover.finishTurn(guestTurn);
+      }
+    }
+
+    async function runGuestUtterance(
+      text: string,
+      utteranceId: number,
+      guestTurn: import("./hintCarryover").GuestTurn,
+      confidence?: number
+    ) {
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
       const now = Date.now();
@@ -1344,7 +1375,41 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // falling back to the detected goal type). A hit is served through the exact
       // same suggestion path/payload below (no UI change), skipping the model
       // entirely. A miss falls through to translateAndSuggest, unchanged.
-      const libraryHit = wantSuggestion ? matchDialogueLibrary(text, currentGoal, detectedGoalType) : null;
+      // ===== DROPPED-QUESTION CARRYOVER =====
+      // If a previous guest question's hint was dropped (superseded/cooldown/no
+      // suggestion), fold it into THIS turn so the hint answers both. Only
+      // consumed when this turn can actually produce a suggestion AND is still
+      // the newest guest turn — a turn already superseded during the context
+      // awaits must NOT consume the question (it stays for the newest turn,
+      // which is the one that will actually deliver a hint).
+      const { hintText, carried } = wantSuggestion
+        ? hintCarryover.buildHintText(guestTurn, utteranceId === latestGuestUtteranceId)
+        : { hintText: text, carried: null };
+      if (carried) {
+        log(`[Carryover] merging dropped question from utteranceId=${carried.utteranceId} (reason=${carried.reason}) into utteranceId=${utteranceId}: "${carried.text.substring(0, 50)}"`, "websocket");
+      }
+
+      // Every terminal hint-suppression path below goes through dropHint, so no
+      // hint is EVER skipped silently, and a question folded into hintText is
+      // never discarded without a decision. Policy per path:
+      //  - preserveQuestion=true  → remember the (possibly merged) question so
+      //    the next guest turn's hint folds it in (only fires if the text
+      //    actually contains a question / action request).
+      //  - preserveQuestion=false → deliberate loss-free drop: either the
+      //    pending question was never consumed on this turn (wantSuggestion was
+      //    false, so it still sits in the carryover for the next turn), it was
+      //    already captured eagerly by the superseding turn (stale), or no
+      //    future hint can ever use it (goal-achieved hard stop).
+      const dropHint = (reason: string, detail: string, preserveQuestion: boolean) => {
+        log(`[BLOCKED] reason=${reason} utteranceId=${utteranceId}${detail ? ` ${detail}` : ""}`, "websocket");
+        if (preserveQuestion && hintCarryover.remember(hintText, utteranceId, reason)) {
+          log(`[Carryover] remembered question from utteranceId=${utteranceId} (reason=${reason})`, "websocket");
+        }
+      };
+
+      // Skip the library on a carryover turn — a canned line matched on the
+      // current phrase alone would drop the carried question all over again.
+      const libraryHit = (wantSuggestion && !carried) ? matchDialogueLibrary(text, currentGoal, detectedGoalType) : null;
       if (libraryHit) {
         log(`[Dialogue] HIT goal="${libraryHit.library.goalText.substring(0, 30)}" (${libraryHit.library.goalType}) type=${libraryHit.entry.type} trigger="${libraryHit.entry.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
       }
@@ -1355,7 +1420,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(text, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled)
+        ? translateAndSuggest(hintText, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled)
         : null;
 
       // ----- Caption: broadcast as soon as the translation resolves -----
@@ -1400,36 +1465,43 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         return;
       }
       
-      // Check 1: HARD STOP if goal was achieved earlier
+      // Check 1: HARD STOP if goal was achieved earlier — no future hint can
+      // use a carried question, so nothing to preserve.
       if (goalAchievedFlag) {
-        log(`[BLOCKED] reason=goal_achieved utteranceId=${utteranceId} - no hint`, "websocket");
+        dropHint("goal_achieved", "- no hint", false);
         return;
       }
       
-      // Check 2: 1 hint = 1 utterance (same utterance already got a hint)
+      // Check 2: 1 hint = 1 utterance (same utterance already got a hint).
+      // A question merged into hintText was NOT part of that earlier hint, so
+      // preserve it for the next turn.
       if (utteranceId === lastHintUtteranceId) {
-        log(`[BLOCKED] reason=hint_shown utteranceId=${utteranceId} - already hinted`, "websocket");
+        dropHint("hint_shown", "- already hinted", true);
         return;
       }
       
-      // Check 3: Cooldown after previous hint
+      // Check 3: Cooldown after previous hint — preserve a merged/own question.
       const timeSinceLastHint = now - lastHintTs;
       if (lastHintTs > 0 && timeSinceLastHint < HINT_COOLDOWN_MS) {
-        log(`[BLOCKED] reason=cooldown utteranceId=${utteranceId} elapsed=${timeSinceLastHint}ms`, "websocket");
+        dropHint("cooldown", `elapsed=${timeSinceLastHint}ms`, true);
         return;
       }
       
       // ===== END THROTTLING CHECKS =====
       
-      // Check: reaction-only filter (skip suggestion, but translation was shown above)
+      // Check: reaction-only filter (skip suggestion, but translation was shown
+      // above). wantSuggestion was false → no pending question was consumed on
+      // this turn; it stays in the carryover for the next eligible turn.
       if (reactionOnly && !goalJustAchieved) {
-        log(`[BLOCKED] reason=reaction_only text="${text.substring(0, 30)}" - suggestion skipped`, "websocket");
+        dropHint("reaction_only", `text="${text.substring(0, 30)}" - suggestion skipped`, false);
         return;
       }
 
-      // Check: farewell filter (skip suggestion, but translation was shown above)
+      // Check: farewell filter (skip suggestion, but translation was shown
+      // above). Same as reaction_only: pending question was not consumed and is
+      // preserved automatically. (Questions are never classified as farewells.)
       if (isFarewell && !goalJustAchieved) {
-        log(`[BLOCKED] reason=farewell text="${text.substring(0, 30)}" - suggestion skipped`, "websocket");
+        dropHint("farewell", `text="${text.substring(0, 30)}" - suggestion skipped`, false);
         return;
       }
       
@@ -1460,8 +1532,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           log(`[WAIT_STATE] ACK shown - "Sure, I'll wait." - now blocking STEER`, "websocket");
           return;
         } else {
-          // ACK already shown, block all further STEER until exit
-          log(`[BLOCKED] reason=wait_state - GST is checking, waiting for answer`, "websocket");
+          // ACK already shown, block all further STEER until exit. wantSuggestion
+          // was false → the pending question was not consumed and stays queued.
+          dropHint("wait_state", "- GST is checking, waiting for answer", false);
           return;
         }
       }
@@ -1484,7 +1557,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           providerUsed: "library",
         };
       } else {
-        if (!suggestionPromise) return;
+        if (!suggestionPromise) {
+          // Should be unreachable (guards above cover every !wantSuggestion
+          // case); preserve a merged question just in case.
+          dropHint("no_suggestion_promise", "- suggestion generation was never started", true);
+          return;
+        }
         translated = await suggestionPromise;
       }
       const suggestionMs = Date.now() - suggestionStart;
@@ -1494,7 +1572,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // a newer turn. Drop the now-outdated suggestion and do NOT arm the cooldown, so
       // the newer turn's suggestion is not suppressed.
       if (utteranceId !== latestGuestUtteranceId) {
-        log(`[BLOCKED] reason=stale utteranceId=${utteranceId} latestGuestUtteranceId=${latestGuestUtteranceId}`, "websocket");
+        // No question preserved here: the superseding turn already captured this
+        // turn's question EAGERLY in beginTurn (before it built its own model
+        // input). Re-remembering now could resurrect a question that was already
+        // merged and answered by that newer turn.
+        dropHint("stale", `latestGuestUtteranceId=${latestGuestUtteranceId}`, false);
         return;
       }
 
@@ -1504,7 +1586,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         // ===== ANTI-LOOP GUARD: Repeat intent check =====
         const currentIntent = detectIntent(suggestionText);
         if (currentIntent === lastSuggestionIntent && currentIntent === "enthusiasm") {
-          log(`[BLOCKED] reason=repeat_intent intent=${currentIntent} - skipping enthusiasm loop`, "websocket");
+          // Preserve a question consumed into hintText — the suppressed
+          // suggestion never reached the user, so the question isn't answered.
+          dropHint("repeat_intent", `intent=${currentIntent} - skipping enthusiasm loop`, true);
           // Don't show repeated enthusiasm, but record that we tried
           lastSuggestionIntent = currentIntent;
           return;
@@ -1517,7 +1601,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           if (sim > maxSim) maxSim = sim;
         }
         if (maxSim >= DUPLICATE_SIMILARITY) {
-          log(`[BLOCKED] reason=duplicate_suggestion similarity=${(maxSim * 100).toFixed(0)}% - too similar to a recent hint`, "websocket");
+          // The suppressed suggestion may have carried a consumed question —
+          // keep it so the next turn's (different) hint can still address it.
+          dropHint("duplicate_suggestion", `similarity=${(maxSim * 100).toFixed(0)}% - too similar to a recent hint`, true);
           return;
         }
 
@@ -1531,13 +1617,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           if (sim > maxOwnerSim) maxOwnerSim = sim;
         }
         if (maxOwnerSim >= SELF_OVERLAP_SIMILARITY) {
-          log(`[BLOCKED] reason=self_overlap similarity=${(maxOwnerSim * 100).toFixed(0)}% - HON already said this`, "websocket");
+          // Preserve a consumed question: HON said something similar to the
+          // SUGGESTION, which doesn't mean the guest's question was answered.
+          dropHint("self_overlap", `similarity=${(maxOwnerSim * 100).toFixed(0)}% - HON already said this`, true);
           return;
         }
 
-        // Final re-check: goal may have been achieved while GPT was generating (async race)
+        // Final re-check: goal may have been achieved while GPT was generating
+        // (async race). Hard stop — no future hint exists to carry a question to.
         if (goalAchievedFlag) {
-          log(`[BLOCKED] reason=goal_achieved (post-generation) utteranceId=${utteranceId} - no hint`, "websocket");
+          dropHint("goal_achieved_post_generation", "- no hint", false);
           return;
         }
         
@@ -1563,6 +1652,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         // Full reaction time: from end of guest's turn to the suggestion leaving the server.
         log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms suggestion_latency_ms=${suggestionMs} utteranceId=${utteranceId}`, "websocket");
+      } else {
+        // Model produced no suggestion — this used to be a fully SILENT loss
+        // (no [BLOCKED] log at all). Log it, and if the (possibly merged) turn
+        // held a question, carry it into the next turn's hint.
+        dropHint("no_suggestion", `provider_used=${translated.providerUsed ?? "unknown"} - model returned no suggestion`, true);
       }
     }
     
