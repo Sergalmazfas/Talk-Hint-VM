@@ -348,6 +348,16 @@ app.use((req, res, next) => {
   
   await registerRoutes(httpServer, app);
 
+  // One-time (idempotent) cleanup of dialogue libraries generated before the
+  // grounding rules landed in the generator prompt: regenerate (or strip) any
+  // saved library whose canned answers assert unverifiable state. Runs in the
+  // background so startup is never blocked; clean libraries make it a no-op.
+  import("./dialogueLibraryRemediation")
+    .then(({ remediateDialogueLibraries }) => remediateDialogueLibraries())
+    .catch((e: any) =>
+      console.error("[Server] Dialogue library remediation failed:", e?.message || e),
+    );
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

@@ -348,6 +348,8 @@ export interface IStorage {
   // Dialogue libraries (per-user, per-goal auto-built call answer library).
   // Each library is one goal, identified by its own `id`.
   listDialogueLibraries(userId: string): Promise<DialogueLibrary[]>;
+  listAllDialogueLibraries(): Promise<DialogueLibrary[]>;
+  updateDialogueLibraryEntriesIfUnchanged(userId: string, id: string, entries: DialogueEntry[], expectedUpdatedAt: Date): Promise<DialogueLibrary | undefined>;
   getDialogueLibrary(userId: string, id: string): Promise<DialogueLibrary | undefined>;
   createDialogueLibrary(userId: string, goalType: string, goalText: string, entries: DialogueEntry[]): Promise<DialogueLibrary | undefined>;
   updateDialogueLibrary(userId: string, id: string, patch: { goalType?: string; goalText?: string; entries: DialogueEntry[] }): Promise<DialogueLibrary | undefined>;
@@ -1040,6 +1042,47 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("[Storage] listDialogueLibraries error:", error);
       return [];
+    }
+  }
+
+  // All libraries across ALL users — used only by the startup grounding
+  // remediation pass, never exposed through user-facing routes.
+  async listAllDialogueLibraries(): Promise<DialogueLibrary[]> {
+    if (!isDatabaseAvailable()) return [];
+    try {
+      return await db.select().from(dialogueLibraries).orderBy(dialogueLibraries.createdAt);
+    } catch (error) {
+      console.error("[Storage] listAllDialogueLibraries error:", error);
+      return [];
+    }
+  }
+
+  // Optimistic-concurrency variant used by the startup grounding remediation:
+  // replaces `entries` ONLY when the row's updatedAt still matches the value
+  // read at scan time. If the user edited/regenerated the library in the
+  // meantime, the WHERE clause misses, we return undefined, and the caller
+  // skips — the user's newer version is never overwritten by a stale snapshot.
+  async updateDialogueLibraryEntriesIfUnchanged(
+    userId: string,
+    id: string,
+    entries: DialogueEntry[],
+    expectedUpdatedAt: Date,
+  ): Promise<DialogueLibrary | undefined> {
+    if (!isDatabaseAvailable()) return undefined;
+    try {
+      const [row] = await db.update(dialogueLibraries)
+        .set({ entries, updatedAt: new Date() })
+        .where(and(
+          eq(dialogueLibraries.userId, userId),
+          eq(dialogueLibraries.id, id),
+          eq(dialogueLibraries.updatedAt, expectedUpdatedAt),
+        ))
+        .returning();
+      if (row) recordWriteSuccess("dialogue_libraries");
+      return row;
+    } catch (error) {
+      recordWriteFailure("dialogue_libraries", "updateDialogueLibraryEntriesIfUnchanged", error);
+      return undefined;
     }
   }
 
