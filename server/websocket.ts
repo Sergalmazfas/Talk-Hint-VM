@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "http";
 import { log } from "./index";
+import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, buildLiveSystemPrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
@@ -1041,8 +1042,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       /^understood(\.)?$/i,
     ];
     
-    // Farewell / closing phrases - conversation is wrapping up, no steer needed (translation still shown)
-    const FAREWELL_PATTERNS = /\b(see you|talk to you|speak (to|with) you|catch you|bye|goodbye|good bye|take care|have a (good|great|nice)|thanks?( so much| a lot)?|thank you|appreciate it|see ya|until (then|monday|tomorrow|next)|looking forward)\b/i;
+    // Farewell / closing phrases - conversation is wrapping up, no steer needed
+    // (translation still shown). Detection lives in server/farewellFilter.ts so
+    // it is unit-testable; "thanks"-prefixed working lines are NOT farewells.
 
     // Keywords that indicate meaningful content (don't block)
     const MEANINGFUL_KEYWORDS = /\b(yes|no|when|where|what|how|price|cost|time|date|day|week|month|hour|minute|dollar|euro|available|book|schedule|appointment|cancel|change|confirm|sure|alright|definitely|absolutely|of course|please|thank|sounds good|deal|agreed|perfect|let me|i need|i want|i would|i will|can i|could you)\b/i;
@@ -1264,10 +1266,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Farewell / closing phrases: conversation is wrapping up, no steer needed.
       // Guard against false positives like "Thanks, what time works best?" - if the
       // utterance asks a question or has an actionable scheduling keyword, it's NOT a farewell.
-      const isFarewell =
-        FAREWELL_PATTERNS.test(text) &&
-        !/\?/.test(text) &&
-        !/\b(when|what time|which|how|can you|could you|would you|book|schedule|reschedule|change|cancel|available|price|cost)\b/i.test(text);
+      const isFarewell = isFarewellUtterance(text);
       if (isFarewell && !goalJustAchieved) {
         log(`[FAREWELL] text="${text.substring(0, 30)}" - will translate but skip suggestion`, "websocket");
       }

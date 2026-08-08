@@ -19,8 +19,8 @@ Near-identical hints (e.g. "Please confirm … Monday at 5 PM" vs "I need to con
 **How to apply:** keep last ~4 suggestions, block at ≥0.5 similarity to any of them.
 
 **Farewell suppression must exempt questions/actionable lines.**
-Blocking hints on farewell phrases ("see you", "thanks") is right for closings, but a bare `thanks`/`thank you` match suppresses valid lines like "Thanks, what time works best?".
-**How to apply:** treat as farewell only if it matches the farewell regex AND has no "?" AND no actionable/scheduling keyword.
+Blocking hints on farewell phrases ("see you", "thanks") is right for closings, but a bare `thanks`/`thank you` match suppresses valid lines like "Thanks, what time works best?" or "Thanks. I'm just looking for your account" (real prod incident).
+**How to apply:** detection lives in `server/farewellFilter.ts` (unit-tested). Hard closers (bye/take care/see you) always count; soft politeness (thanks/appreciate it) counts only if stripping politeness+filler leaves nothing substantive; questions/actionable keywords never count. Beware regex alternation order — "thank" must not eat "thank you so much".
 
 **Hint model + mode + language are intentionally module-global, NOT per-user.**
 `currentModel` (set via `set_model`), `currentMode`, and `currentLanguage` are all module-level globals in server/websocket.ts; any /ui client mutates them for everyone.
