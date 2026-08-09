@@ -1,0 +1,102 @@
+import UIKit
+import WebKit
+
+/// AI Tutor "Emma" — full-screen WKWebView hosting the backend's /tutor page,
+/// which renders the 3D avatar (TalkingHead) and streams practice audio to the
+/// external Tutor Engine via our backend-issued short-lived realtime token.
+/// The native layer only supplies the session Bearer token and mic permission;
+/// all teaching logic lives in the engine, all key material stays server-side.
+final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUIDelegate {
+
+    private var webView: WKWebView!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = "Репетитор Emma"
+        view.backgroundColor = .systemBackground
+
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        // Native bridge: the page notifies us when the Call Memory is ready so
+        // we can route the user to the confirmation screen.
+        config.userContentController.add(self, name: "tutor")
+
+        webView = WKWebView(frame: .zero, configuration: config)
+        webView.uiDelegate = self
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        webView.accessibilityIdentifier = "webview-tutor"
+        view.addSubview(webView)
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        loadTutorPage()
+    }
+
+    private func loadTutorPage() {
+        // The page is loaded WITHOUT credentials — the session token never
+        // appears in the URL (it would persist in webview history/logs). The
+        // page asks for it via the "needAuth" bridge message and receives it
+        // through window.__setAuth(...).
+        guard let url = URL(string: "\(AppConfig.baseURL)/tutor") else { return }
+        webView.load(URLRequest(url: url))
+    }
+
+    private func injectAuthToken() {
+        guard let token = SessionStore.shared.token else { return }
+        let escaped = token
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+        webView.evaluateJavaScript("window.__setAuth('\(escaped)')", completionHandler: nil)
+    }
+
+    // MARK: - WKUIDelegate (mic permission)
+
+    @available(iOS 15.0, *)
+    func webView(_ webView: WKWebView,
+                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo,
+                 type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // Grant only for our own backend origin; anything else is denied.
+        let expectedHost = URL(string: AppConfig.baseURL)?.host
+        if let expectedHost, origin.host == expectedHost {
+            decisionHandler(.grant)
+        } else {
+            decisionHandler(.deny)
+        }
+    }
+
+    // MARK: - WKScriptMessageHandler (page → native)
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "tutor", let body = message.body as? [String: Any],
+              let event = body["event"] as? String else { return }
+        switch event {
+        case "needAuth":
+            // Only hand the token to our own backend page.
+            if let host = message.frameInfo.securityOrigin.host as String?,
+               host == URL(string: AppConfig.baseURL)?.host {
+                injectAuthToken()
+            }
+        case "callMemoryConfirmed":
+            let alert = UIAlertController(
+                title: "Подготовка подтверждена",
+                message: "Память тренировки будет использована в вашем следующем реальном звонке.",
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        default:
+            break
+        }
+    }
+
+    deinit {
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: "tutor")
+    }
+}

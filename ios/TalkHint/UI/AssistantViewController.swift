@@ -7,6 +7,7 @@ import UIKit
 final class AssistantViewController: UITableViewController {
 
     private enum Section: Int, CaseIterable {
+        case tutor
         case mode
         case language
         case goal
@@ -57,6 +58,7 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
+        case .tutor: return 1
         case .mode: return modes.count
         case .language: return languages.count
         case .goal: return 1
@@ -69,6 +71,7 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
+        case .tutor: return "Тренировка"
         case .mode: return "Mode"
         case .language: return "Language"
         case .goal: return "Call goal"
@@ -81,6 +84,7 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
+        case .tutor: return "Потренируйте разговор с ИИ-репетитором Emma. После тренировки подтвердите память разговора — она поможет в реальном звонке."
         case .goal: return "Applied to your next call to keep the assistant on track."
         case .context: return "Tell the assistant about you (job, business, tone). Added to every call's hints."
         case .contacts: return "View, fix or delete what the assistant remembers about each caller."
@@ -96,6 +100,11 @@ final class AssistantViewController: UITableViewController {
         var config = cell.defaultContentConfiguration()
 
         switch Section(rawValue: indexPath.section)! {
+        case .tutor:
+            config.text = "Репетитор Emma"
+            config.secondaryText = "Тренировка звонка на английском"
+            cell.accessoryType = .disclosureIndicator
+            cell.accessibilityIdentifier = "cell-tutor"
         case .mode:
             let mode = modes[indexPath.row]
             config.text = mode.name
@@ -147,6 +156,8 @@ final class AssistantViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         switch Section(rawValue: indexPath.section)! {
+        case .tutor:
+            navigationController?.pushViewController(TutorViewController(), animated: true)
         case .mode:
             SessionStore.shared.activeMode = modes[indexPath.row].id
             tableView.reloadSections(IndexSet(integer: Section.mode.rawValue), with: .none)

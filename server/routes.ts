@@ -28,6 +28,7 @@ import { validateUserWebhookUrl, parseTranscriptText } from "./airatomaWebhook";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
+import { registerTutorRoutes } from "./tutorRoutes";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -244,6 +245,9 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   setupWebSocket(httpServer);
+
+  // AI Tutor (external Tutor Engine) — practice sessions + Call Memory.
+  registerTutorRoutes(app);
 
   // TalkHint UI - serve from dist/talkhint/ui (where bundled SDK is)
   // In production, use cwd-relative path; in dev, use __dirname-relative

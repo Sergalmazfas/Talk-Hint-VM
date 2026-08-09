@@ -15,6 +15,7 @@ import type { DialogueEntry, DialogueLibrary } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import type { GoalState, SlotMap, GoalType } from "../shared/goalTypes";
 import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, buildContextProviderChain, formatStaticCards, summarizeAndSaveContactMemory as runSummarizeAndSaveContactMemory } from "./contactMemory";
+import { claimActiveCallMemory, formatCallMemoryBlock } from "./tutorStorage";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
@@ -260,7 +261,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true, tutorMemory: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
@@ -270,7 +271,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
   // Don't wait for sentiment - return it separately via callback
   // This makes suggestions appear FASTER
   try {
-    const contextSections = buildContextProviderChain({ userContext, contactContext, staticCards });
+    const contextSections = buildContextProviderChain({ userContext, contactContext, staticCards, tutorMemory });
 
     // Translation can be disabled per-user: when off we ask the model NOT to
     // translate (no guest translation, English-only suggestion) so no extra
@@ -989,6 +990,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // through to the existing translateAndSuggest hint path.
     let dialogueLibraries: DialogueLibrary[] = [];
     let dialogueLibrariesReady: Promise<void> = Promise.resolve(); // resolves once libraries are loaded
+    // TUTOR_MEMORY: user-CONFIRMED Call Memory from a tutor practice session,
+    // atomically CLAIMED (REAL_CALL_READY → COMPLETED in one conditional
+    // update) on "start" so concurrent calls can never share one memory and a
+    // crash can never make it reusable. Best-effort: failures leave it empty.
+    let tutorMemoryBlock = "";
+    let tutorMemoryReady: Promise<void> = Promise.resolve();
     let audioFrameCount = 0;
     let isPstnForwarding = false; // PSTN forwarding mode - roles are inverted
     // True when the media stream rides the CALLER's leg (incoming answered call /
@@ -1342,6 +1349,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       await staticCardsReady;
       await callSettingsReady;
       await dialogueLibrariesReady;
+      await tutorMemoryReady;
 
       // Live Hints OFF: skip the model entirely (no GPT/Gemini call), so no
       // translation and no suggestion are produced. The raw transcript is still
@@ -1447,7 +1455,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(hintText, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled)
+        ? translateAndSuggest(hintText, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock)
         : null;
 
       // ----- Caption: broadcast as soon as the translation resolves -----
@@ -2126,6 +2134,23 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                   }
                 })
                 .catch((err) => log(`[Dialogue] Library load failed: ${err}`, "twilio"));
+
+              // Claim the owner's confirmed tutor Call Memory (if any) once the
+              // owner is known. Only REAL_CALL_READY memories qualify — nothing
+              // unconfirmed can ever reach a real call — and the claim itself
+              // consumes the row atomically (used_at + COMPLETED). Best-effort.
+              tutorMemoryBlock = "";
+              const sidForTutorMemory = callSid;
+              tutorMemoryReady = ownerContextReady
+                .then(async () => {
+                  if (!streamUserId) return;
+                  const mem = await claimActiveCallMemory(streamUserId, sidForTutorMemory ?? undefined);
+                  if (mem) {
+                    tutorMemoryBlock = formatCallMemoryBlock(mem);
+                    log(`[TutorMemory] Claimed confirmed call memory ${mem.id} for ${streamUserId} (${tutorMemoryBlock.length} chars)`, "twilio");
+                  }
+                })
+                .catch((err) => log(`[TutorMemory] Claim failed: ${err}`, "twilio"));
 
               // Load the owner's live-call feature toggles (Live Hints + Translation)
               // once the owner is known. Defaults stay ON if the load fails so a

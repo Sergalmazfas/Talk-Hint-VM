@@ -326,3 +326,65 @@ export const insertAiratomaDeliverySchema = createInsertSchema(airatomaDeliverie
 
 export type InsertAiratomaDelivery = z.infer<typeof insertAiratomaDeliverySchema>;
 export type AiratomaDelivery = typeof airatomaDeliveries.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// AI Tutor (external Tutor Engine) — practice sessions and Call Memory.
+//
+// TalkHint is a CLIENT of the external Tutor Engine: sessions are created by
+// our backend against the engine's /v1/sessions, and after practice the engine
+// returns a structured Call Memory. The memory must be reviewed and CONFIRMED
+// by the user before it can ever reach a real call's live hints (approved
+// lifecycle: PREPARE → PRACTICE → MEMORY_CONFIRMATION → REAL_CALL_READY →
+// COMPLETED). Practice history rows are never deleted — "use in a call" only
+// stamps used_at and moves the lifecycle to COMPLETED.
+// ---------------------------------------------------------------------------
+
+export const TUTOR_MEMORY_STATUSES = [
+  "MEMORY_CONFIRMATION", // engine returned the memory; awaiting user review
+  "REAL_CALL_READY",     // user confirmed — eligible for injection into a call
+  "COMPLETED",           // consumed by a real call (used_at set)
+] as const;
+export type TutorMemoryStatus = (typeof TUTOR_MEMORY_STATUSES)[number];
+
+export const tutorSessions = pgTable("tutor_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  engineSessionId: text("engine_session_id").notNull(),
+  tutorId: text("tutor_id").notNull(),
+  scenarioId: text("scenario_id").notNull(),
+  mode: text("mode").notNull().default("practice"),
+  status: text("status").notNull().default("PRACTICE"), // PRACTICE | ENDED
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  endedAt: timestamp("ended_at"),
+}, (t) => ({
+  userIdx: index("tutor_sessions_user_idx").on(t.userId),
+}));
+
+export type TutorSession = typeof tutorSessions.$inferSelect;
+
+// Structured Call Memory returned by the Tutor Engine after practice.
+// Shape mirrors the engine contract:
+// { objective, facts[], questions[], rehearsed_answers[], vocabulary[], uncertain_facts[] }
+export const tutorCallMemories = pgTable("tutor_call_memories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  engineSessionId: text("engine_session_id").notNull(),
+  objective: text("objective").notNull().default(""),
+  facts: jsonb("facts").notNull().default(sql`'[]'::jsonb`),
+  questions: jsonb("questions").notNull().default(sql`'[]'::jsonb`),
+  rehearsedAnswers: jsonb("rehearsed_answers").notNull().default(sql`'[]'::jsonb`),
+  vocabulary: jsonb("vocabulary").notNull().default(sql`'[]'::jsonb`),
+  uncertainFacts: jsonb("uncertain_facts").notNull().default(sql`'[]'::jsonb`),
+  status: text("status").notNull().default("MEMORY_CONFIRMATION"),
+  confirmedAt: timestamp("confirmed_at"),
+  usedAt: timestamp("used_at"),
+  usedCallSid: text("used_call_sid"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => ({
+  userStatusIdx: index("tutor_call_memories_user_status_idx").on(t.userId, t.status),
+  // One memory per practice session per user — makes /end idempotent.
+  userSessionUniq: uniqueIndex("tutor_call_memories_user_session_uniq").on(t.userId, t.engineSessionId),
+}));
+
+export type TutorCallMemory = typeof tutorCallMemories.$inferSelect;

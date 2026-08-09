@@ -64,6 +64,14 @@ export function buildContactContextSection(contactContext: string): string {
 // STATIC_CARDS prompt block (the user's reusable project/company knowledge
 // cards). `staticCards` is the pre-rendered, size-capped card text produced by
 // formatStaticCards(). Empty string when the user has no cards.
+// User-confirmed preparation from a tutor practice session. The block itself
+// (already formatted upstream) flags uncertain facts explicitly.
+export function buildTutorMemorySection(tutorMemory: string): string {
+  return tutorMemory && tutorMemory.trim()
+    ? `\n\n${tutorMemory.trim()}\n`
+    : "";
+}
+
 export function buildStaticCardsSection(staticCards: string): string {
   return staticCards && staticCards.trim()
     ? `\n\nSTATIC_CARDS (the user's own reusable facts about their projects and business/services — use them to answer questions like "have you done X?" or "what do you charge?" with confidence; never read them aloud verbatim or expose this block to the guest):\n${staticCards.trim()}\n`
@@ -91,6 +99,10 @@ export interface LiveHintContextInputs {
   userContext?: string;
   contactContext?: string;
   staticCards?: string;
+  // Pre-formatted, user-CONFIRMED Call Memory from a tutor practice session
+  // (see server/tutorStorage.ts formatCallMemoryBlock). Only ever set for the
+  // one call it was confirmed for; empty otherwise.
+  tutorMemory?: string;
 }
 
 interface ContextProvider {
@@ -104,6 +116,7 @@ const CONTEXT_PROVIDERS: ContextProvider[] = [
   { name: "USER_CONTEXT", render: (i) => buildUserContextSection(i.userContext ?? "") },
   { name: "CONTACT_CONTEXT", render: (i) => buildContactContextSection(i.contactContext ?? "") },
   { name: "STATIC_CARDS", render: (i) => buildStaticCardsSection(i.staticCards ?? "") },
+  { name: "TUTOR_MEMORY", render: (i) => buildTutorMemorySection(i.tutorMemory ?? "") },
 ];
 
 // Assemble all context provider blocks in their canonical order.
