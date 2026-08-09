@@ -20,6 +20,24 @@ export function tutorEngineConfigured(): boolean {
   return !!TUTOR_ENGINE_API_KEY;
 }
 
+// The application identity we present to the engine when creating sessions.
+// It comes from the TUTOR_ENGINE_APP_ID secret — never a hardcoded word.
+// Read lazily so tests (and late-loaded env) see the current value.
+export function getTutorEngineAppId(): string {
+  return (process.env.TUTOR_ENGINE_APP_ID || "").trim();
+}
+
+// Startup check: warn loudly when the TUTOR_ENGINE_APP_ID secret is missing,
+// because session creation will fail if the engine demands an application_id.
+// Returns true when configured so callers/tests can assert on it.
+export function checkTutorEngineAppIdConfigured(): boolean {
+  if (getTutorEngineAppId()) return true;
+  console.warn(
+    "[TutorEngine] TUTOR_ENGINE_APP_ID is not set — tutor session creation will fail if the engine requires an application_id. Set the TUTOR_ENGINE_APP_ID secret.",
+  );
+  return false;
+}
+
 export function getTutorEngineBase(): string {
   return TUTOR_ENGINE_BASE;
 }
@@ -110,7 +128,9 @@ export async function getTutorManifest(): Promise<any> {
 // Create a practice session. The approved contract may or may not require an
 // explicit application_id (the key can already be application-bound). We first
 // send without it; if the engine rejects the payload asking for the field, we
-// retry once including "talkhint". We never fabricate any other identity.
+// retry once including the TUTOR_ENGINE_APP_ID secret value. We never
+// fabricate any other identity — if the secret is unset we surface a clear
+// not_configured error instead of guessing.
 export async function createTutorSession(userId: string): Promise<any> {
   const payload: Record<string, unknown> = {
     user_id: userId,
@@ -128,9 +148,17 @@ export async function createTutorSession(userId: string): Promise<any> {
       err.status === 400 &&
       (err.body || "").toLowerCase().includes("application_id");
     if (!mentionsAppId) throw err;
+    const appId = getTutorEngineAppId();
+    if (!appId) {
+      throw new TutorEngineError(
+        "Tutor Engine requires an application_id but TUTOR_ENGINE_APP_ID is not configured",
+        null,
+        "not_configured",
+      );
+    }
     return await engineFetch("/v1/sessions", {
       method: "POST",
-      body: { ...payload, application_id: "talkhint" },
+      body: { ...payload, application_id: appId },
     });
   }
 }

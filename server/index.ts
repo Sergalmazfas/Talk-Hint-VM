@@ -10,6 +10,7 @@ import { startWriteHealthAlerter, stopWriteHealthAlerter, getAlertChannelStatus 
 import { startAirAtomaRetryWorker, stopAirAtomaRetryWorker } from "./airatomaRetryWorker";
 import { bootstrapAdminPasswordOnStartup } from "./bootstrapAdminPassword";
 import { provisionUserOnStartup } from "./provisionUser";
+import { checkTutorEngineAppIdConfigured } from "./tutorEngine";
 
 const app = express();
 app.set('trust proxy', true);
@@ -324,6 +325,10 @@ app.use((req, res, next) => {
   // /name) is set, create the account, ensure a plan that allows a phone number,
   // and assign a free pool number on startup. No-op when the secret is absent.
   await provisionUserOnStartup();
+
+  // Warn loudly at startup when TUTOR_ENGINE_APP_ID is missing — tutor session
+  // creation will fail if the engine requires an application_id. Silent when set.
+  checkTutorEngineAppIdConfigured();
 
   // The save-health page (/health + /api/health) is gated in production: access
   // is denied unless a valid HEALTH_STATUS_TOKEN or an authenticated app session
