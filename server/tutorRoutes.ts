@@ -29,6 +29,7 @@ import {
   confirmCallMemory,
 } from "./tutorStorage";
 import { TUTOR_AVATAR_PAGE_HTML } from "./tutorAvatarPage";
+import { translateTutorText, validateTranslateInput } from "./tutorTranslate";
 
 // Users only ever see a safe connection error; full detail goes to the log.
 function safeEngineError(res: any, err: any) {
@@ -186,6 +187,21 @@ export function registerTutorRoutes(app: Express) {
       }
     } catch (err) {
       safeEngineError(res, err);
+    }
+  });
+
+  // Translate a tutor card's text into Russian (the engine sends no card
+  // translations). Auth-scoped; cached by normalized text so repeat taps are
+  // instant. Fails loudly (502) instead of returning fallback text.
+  app.post("/api/tutor/translate", authMiddleware, async (req, res) => {
+    const invalid = validateTranslateInput(req.body);
+    if (invalid) return res.status(400).json({ error: invalid });
+    try {
+      const result = await translateTutorText(String(req.body.text));
+      res.json(result);
+    } catch (err: any) {
+      console.error("[Tutor] Translate failed:", err?.message || err);
+      res.status(502).json({ error: "translate_failed", message: "Не удалось перевести. Попробуйте ещё раз." });
     }
   });
 

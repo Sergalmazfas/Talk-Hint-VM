@@ -34,6 +34,8 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   .card .acts{display:flex;gap:14px;margin-top:8px}
   .card .acts button{border:0;background:none;font-size:13px;color:#6b6f85;padding:2px 0;font-family:inherit}
   .card.tutor .acts button:active{color:#4f46e5}
+  .card .translation{margin-top:8px;padding-top:8px;border-top:1px solid #e6e8f2;font-size:15px;color:#4b4f66;display:none}
+  .card .translation.show{display:block}
   /* Bottom hold-to-talk area */
   #bottom{flex:0 0 auto;padding:6px 16px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:6px;background:linear-gradient(#f4f5f900,#f4f5f9 30%)}
   #stateLabel{font-size:14px;color:#6b6f85;min-height:18px;text-align:center}
@@ -97,6 +99,7 @@ const L = RU ? {
   micDenied: "Нет доступа к микрофону", notConfigured: "Репетитор не настроен.",
   engineDown: "Движок репетитора недоступен.",
   replay: "▶ Ещё раз", copy: "Копировать", copied: "Скопировано",
+  translate: "Перевод", translating: "Переводим…", translateFailed: "Не удалось перевести",
   reviewTitle: "Память разговора",
   reviewHint: "Проверьте подготовку. Она попадёт в подсказки только после подтверждения и будет использована один раз — в следующем реальном звонке.",
   objective: "Цель", facts: "Факты (по одному в строке)", questions: "Вопросы, которые вы хотите задать",
@@ -113,6 +116,7 @@ const L = RU ? {
   micDenied: "Microphone access denied", notConfigured: "Tutor is not configured.",
   engineDown: "Tutor engine is unavailable.",
   replay: "▶ Play again", copy: "Copy", copied: "Copied",
+  translate: "Перевод", translating: "Переводим…", translateFailed: "Не удалось перевести",
   reviewTitle: "Call memory",
   reviewHint: "Review your preparation. It reaches live hints only after you confirm it, and is used once — in your next real call.",
   objective: "Objective", facts: "Facts (one per line)", questions: "Questions you want to ask",
@@ -192,7 +196,37 @@ function finishTutorCard(el, text, audioBufs) {
   copy.textContent = L.copy;
   copy.onclick = async () => { try { await navigator.clipboard.writeText(text); copy.textContent = L.copied; setTimeout(()=>copy.textContent=L.copy, 1200); } catch(_){} };
   acts.appendChild(copy);
+  // "Перевод": on-demand RU translation of THIS card's exact text via our
+  // backend (auth-scoped, cached). Toggles visibility; never blocks lip-sync
+  // or the realtime stream — it is a plain fetch on tap.
+  const tr = document.createElement("button");
+  tr.className = "translateBtn";
+  tr.textContent = L.translate;
+  const trBox = document.createElement("div");
+  trBox.className = "translation";
+  let trLoaded = false, trLoading = false;
+  tr.onclick = async () => {
+    if (trBox.classList.contains("show")) { trBox.classList.remove("show"); return; }
+    if (trLoaded) { trBox.classList.add("show"); return; }
+    if (trLoading) return;
+    trLoading = true;
+    tr.textContent = L.translating;
+    try {
+      const r = await api("/api/tutor/translate", { method: "POST", body: JSON.stringify({ text }) });
+      trBox.textContent = r.translation || "";
+      trLoaded = true;
+      trBox.classList.add("show");
+    } catch (e) {
+      trBox.textContent = L.translateFailed;
+      trBox.classList.add("show");
+    }
+    trLoading = false;
+    tr.textContent = L.translate;
+    feed.scrollTop = feed.scrollHeight;
+  };
+  acts.appendChild(tr);
   el.appendChild(acts);
+  el.appendChild(trBox);
   feed.scrollTop = feed.scrollHeight;
 }
 
