@@ -25,3 +25,10 @@ uri = "file://docs/emma-tutor-ui-baseline.md"
 type = "text"
 title = "Emma Tutor — дизайн-снимок (as-built baseline)"
 description = "Полное описание текущего дизайна Emma: 16 экранов, визуальные параметры, таблицы компонентов и состояний."
+
+[[outputs]]
+id = "wc4Mhg8_flvYRa1zuxlJ_"
+uri = "file://docs/emma-tutor-v4-design-spec.md"
+type = "text"
+title = "Emma Tutor v4 — дизайн-пакет (спецификация)"
+description = "Спецификация нового дизайна: сравнение, размеры/цвета, инвентарь компонентов, что сохранено, что потребует разработки. Продакшен-код не менялся."
