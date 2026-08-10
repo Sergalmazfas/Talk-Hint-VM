@@ -84,6 +84,10 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
                                didReceive message: WKScriptMessage) {
         guard message.name == "tutor", let body = message.body as? [String: Any],
               let event = body["event"] as? String else { return }
+        // Diagnostics (spec §8): surface every bridge event in the Xcode
+        // console so lipsyncDiag / latency can be verified on a real device.
+        // The body never contains the auth token (needAuth carries no payload).
+        NSLog("[TutorBridge] %@ %@", event, body.description)
         switch event {
         case "needAuth":
             // Only hand the token to our own backend page.

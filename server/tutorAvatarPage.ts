@@ -218,7 +218,9 @@ function deriveTimings(text, durationMs) {
   return { words, wtimes, wdurations };
 }
 
-async function speakBuffer(buf, subtitleText, engineTimings) {
+// latencyMark: { t0: DOMHighResTimeStamp, firstTextMs: number } — present only
+// for the FIRST audio chunk of a turn; cleared after one emission per turn.
+async function speakBuffer(buf, subtitleText, engineTimings, latencyMark) {
   const actx = head.audioCtx || new AudioContext();
   const audio = await actx.decodeAudioData(buf.slice(0));
   let timing = null;
@@ -228,6 +230,12 @@ async function speakBuffer(buf, subtitleText, engineTimings) {
   head.speakAudio(timing ? { audio, ...timing } : { audio, words: [], wtimes: [], wdurations: [] });
   lipDiag.playbackStarted = true;
   reportLipDiag();
+  // Emit latency AFTER decode + speakAudio so firstPlaybackMs = release → playback start.
+  if (latencyMark?.t0) {
+    notifyNative({ event: "latency",
+      firstTextMs: Math.round(latencyMark.firstTextMs),
+      firstPlaybackMs: Math.round(performance.now() - latencyMark.t0) });
+  }
   return audio.duration;
 }
 async function replayAudio(bufs, text) {
@@ -262,6 +270,8 @@ function stopMic() {
 
 // ---- Realtime session (tutor-realtime/1.0, verified in production) --------
 let ws = null, sessionId = null;
+let latencyT0 = 0;                // set at audio.end; cleared on first tutor audio
+let latencyFirstText = 0;         // release → first tutor.text.delta (ms)
 let pendingTtsMeta = null;
 let userCard = null;              // pending user transcript card
 let tutorText = "";               // accumulated tutor.text.delta for this turn
@@ -305,11 +315,15 @@ function onWsMessage(e) {
     if (pendingTtsMeta) {
       const meta = pendingTtsMeta; pendingTtsMeta = null;
       lipDiag.audioArrived = true;
+      // Capture latency mark for this chunk (only the first chunk per turn has t0 set).
+      const lmark = latencyT0 ? { t0: latencyT0, firstTextMs: latencyFirstText } : null;
+      latencyT0 = 0; latencyFirstText = 0;
       tutorAudio.push({ buf: e.data, subtitle: meta.subtitle || meta.text || "", timings: meta.words ? { words: meta.words, wtimes: meta.wtimes, wdurations: meta.wdurations } : null });
       if (meta.subtitle && !tutorText) tutorText = meta.subtitle;
       turnOpen = false; // engine moved on to its reply — our user turn is over
       dispatch("tutorSpeaking"); // force-stops mic even if still RECORDING
-      speakBuffer(e.data, meta.subtitle || tutorText, tutorAudio[tutorAudio.length-1].timings).catch(err => console.error("TTS play failed", err));
+      // lmark passed so latency is emitted AFTER decode + speakAudio (playback start).
+      speakBuffer(e.data, meta.subtitle || tutorText, tutorAudio[tutorAudio.length-1].timings, lmark).catch(err => console.error("TTS play failed", err));
       if (!tutorCard) tutorCard = addCard("tutor");
       tutorCard.textContent = tutorText || meta.subtitle || "…";
     }
@@ -331,7 +345,7 @@ function onWsMessage(e) {
     userCard.textContent = msg.text || "";
     userCard = null;
   }
-  else if (msg.type === "tutor.text.delta") { tutorText += msg.text || msg.delta || ""; if (tutorCard) tutorCard.textContent = tutorText; }
+  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; tutorText += msg.text || msg.delta || ""; if (tutorCard) tutorCard.textContent = tutorText; }
   else if (msg.type === "tutor.audio.chunk") pendingTtsMeta = msg;
   else if (msg.type === "turn.completed") {
     if (tutorCard) { finishTutorCard(tutorCard, tutorText || tutorCard.textContent, tutorAudio.slice()); }
@@ -370,6 +384,7 @@ function release(ev) {
   stopMic();
   if (ws?.readyState === 1 && turnOpen && sentAudio) {
     ws.send(JSON.stringify({ type: "audio.end" }));
+    latencyT0 = performance.now(); // measure release → first tutor audio
     turnOpen = false;
   } else {
     // Nothing captured (tap-release too fast, mic denied, socket gone):
