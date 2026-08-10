@@ -1,0 +1,2 @@
+import { TutorScreen } from "./_shared/TutorScreen";
+export function HintReady(){return <TutorScreen hintState="card" status="Удерживайте и говорите" messages={[{who:"emma",text:"Let's talk about travel.",actions:true}]}/>};export default HintReady;

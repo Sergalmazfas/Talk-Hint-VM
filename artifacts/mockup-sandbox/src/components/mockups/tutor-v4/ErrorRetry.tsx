@@ -1,0 +1,2 @@
+import { TutorScreen } from "./_shared/TutorScreen";
+export function ErrorRetry(){return <TutorScreen error status="Удерживайте и говорите" messages={[{who:"emma",text:"Can you tell me more about your weekend?",actions:true},{who:"user",text:"I went to the beach with my family."}]}/>};export default ErrorRetry;

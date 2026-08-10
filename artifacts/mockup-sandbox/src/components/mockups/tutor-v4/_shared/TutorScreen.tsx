@@ -1,71 +1,18 @@
 import { useState, type ReactNode } from "react";
-import { Copy, Keyboard, Languages, Lightbulb, Mic, Paperclip, Settings, Volume2, X } from "lucide-react";
+import { ArrowDown, Copy, Keyboard, Languages, Lightbulb, LoaderCircle, Mic, Paperclip, RotateCcw, Send, Settings, Volume2, X } from "lucide-react";
 import "../_group.css";
-
-type Message = { who:"emma"|"user"; text:string; translation?:string; actions?:boolean };
-type Props = { image?:string; messages?:Message[]; status?:string; mode?:"ready"|"recording"|"thinking"|"speaking"; translate?:boolean; long?:boolean };
-
+type Message={who:"emma"|"user";text:string;translation?:string;actions?:boolean};
+type Props={image?:string;messages?:Message[];status?:string;mode?:"ready"|"recording"|"thinking"|"speaking";translate?:boolean;long?:boolean;hintState?:"off"|"loading"|"card";textInput?:boolean;error?:boolean;showLatest?:boolean;translateLoading?:boolean;committed?:boolean};
 const imgBase="/__mockup/images/";
-function IconButton({children, label, className=""}:{children:ReactNode;label:string;className?:string}) {
-  return <button aria-label={label} className={`grid place-items-center rounded-full transition-transform active:scale-90 ${className}`}>{children}</button>;
-}
-function ActionRow({active=false}:{active?:boolean}) {
-  return <div className="mt-2 flex items-center gap-3 text-[11px] font-semibold text-[#8a8792]">
-    <button className={`flex items-center gap-1.5 ${active?"text-[#7c3aed]":"hover:text-[#7c3aed]"}`}><Volume2 size={14}/>Повторить</button>
-    <button className={`flex items-center gap-1.5 ${active?"text-[#7c3aed]":"hover:text-[#7c3aed]"}`}><Languages size={14}/>Перевод</button>
-    <button className="flex items-center gap-1 opacity-55"><Copy size={13}/>Копировать</button>
-  </div>
-}
-
-export function TutorScreen({image="emma-half.png", messages=[{who:"emma",text:"Hi, Sergey! 👋 Ready for another conversation practice?",actions:true}], status="Удерживайте и говорите", mode="ready", translate=false, long=false}:Props){
-  const [hint,setHint]=useState(true);
-  const recording=mode==="recording";
-  const disabled=mode==="thinking"||mode==="speaking";
-  return <main className="min-h-[100dvh] w-full overflow-hidden bg-[#fbfafc] text-[#29252f]" style={{fontFamily:"ui-rounded, 'Avenir Next', system-ui, sans-serif"}}>
-    <div className="mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col px-5 pb-4 pt-[calc(env(safe-area-inset-top)+14px)]">
-      <header className="flex h-10 shrink-0 items-center justify-between">
-        <IconButton label="Закрыть" className="h-9 w-9 border border-[#e8e5eb] bg-white text-[#554f5c]"><X size={18}/></IconButton>
-        <h1 className="text-[17px] font-bold tracking-[-.02em]">Emma</h1>
-        <IconButton label="Настройки" className="h-9 w-9 border border-[#e8e5eb] bg-white text-[#554f5c]"><Settings size={17}/></IconButton>
-      </header>
-      <section className={`relative mt-3 shrink-0 overflow-hidden rounded-[28px] bg-[#dfd8d2] shadow-[0_12px_32px_rgba(72,55,44,.13)] ${long?"h-[190px]":"h-[260px]"}`}>
-        <img src={`${imgBase}${image}`} alt="Emma" className="h-full w-full object-cover" style={{objectPosition:image.includes("close")?"center 18%":image.includes("wide")?"center 38%":"center 24%"}}/>
-        <div className="absolute inset-0 bg-gradient-to-t from-black/25 via-transparent to-transparent"/>
-        {mode==="speaking"&&<div className="absolute bottom-4 left-4 flex items-end gap-[3px] rounded-full bg-white/70 px-3 py-2 backdrop-blur-md">
-          {[1,2,3,4].map((_,i)=><i key={i} className="tutor-eq block h-3 w-[3px] rounded-full bg-[#7c3aed]" />)}
-        </div>}
-        <div className="absolute bottom-4 right-4 flex gap-2">
-          <IconButton label="Громкость" className="h-9 w-9 border border-white/30 bg-black/20 text-white backdrop-blur-md"><Volume2 size={16}/></IconButton>
-        </div>
-      </section>
-      <section className={`mt-4 min-h-0 flex-1 overflow-y-auto pr-1 ${long?"[mask-image:linear-gradient(to_bottom,transparent,black_9%,black_100%)]":""}`}>
-        <div className="space-y-4 pb-3">
-          {messages.map((m,i)=><div key={i} className={`flex ${m.who==="user"?"justify-end":"justify-start"}`}>
-            <div className={`max-w-[86%] ${m.who==="user"?"items-end":"items-start"} flex flex-col`}>
-              <div className={`rounded-[20px] px-4 py-3 text-[14px] leading-[1.38] ${m.who==="user"?"rounded-br-[6px] bg-[#7c3aed] text-white shadow-[0_5px_14px_rgba(124,58,237,.18)]":"rounded-bl-[6px] bg-[#efedf0] text-[#39343e]"}`}>
-                {m.text}
-                {m.translation&&<><div className="my-2 h-px bg-[#d9d5db]"/><p className="text-[12px] leading-[1.35] text-[#77717d]">{m.translation}</p></>}
-              </div>
-              {m.who==="emma"&&m.actions&&<ActionRow active={!!m.translation||translate}/>}
-            </div>
-          </div>)}
-          {mode==="thinking"&&<div className="flex"><div className="flex items-center gap-1 rounded-[18px] rounded-bl-[6px] bg-[#efedf0] px-4 py-3"><i className="tutor-dot h-1.5 w-1.5 rounded-full bg-[#7c3aed]"/><i className="tutor-dot h-1.5 w-1.5 rounded-full bg-[#7c3aed]"/><i className="tutor-dot h-1.5 w-1.5 rounded-full bg-[#7c3aed]"/></div></div>}
-          {recording&&<div className="flex justify-end"><div className="rounded-[20px] rounded-br-[6px] bg-[#7c3aed]/55 px-4 py-3 text-[14px] italic text-white/90">{messages[messages.length-1]?.text||"I think I would like to…"}</div></div>}
-        </div>
-      </section>
-      <div className="flex shrink-0 items-center justify-between pt-2">
-        <button onClick={()=>setHint(!hint)} className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12px] font-bold transition-colors ${hint?"border-[#ddd0f8] bg-[#f5efff] text-[#7131d6]":"border-transparent text-[#9b96a3]"}`}><Lightbulb size={15}/>{hint?"Что сказать?":"Подсказка"}</button>
-        <span className="mr-1 text-[9px] font-bold uppercase tracking-[.14em] text-[#aaa5af]">{status}</span>
-      </div>
-      <footer className="relative flex shrink-0 items-center justify-between pt-3 pb-[calc(env(safe-area-inset-bottom)+4px)]">
-        <IconButton label="Клавиатура" className="h-12 w-12 bg-[#f0edf2] text-[#6f6875]"><Keyboard size={20}/></IconButton>
-        <div className="relative">
-          {recording&&<><span className="tutor-pulse absolute -inset-3 rounded-full border-2 border-[#ef5361]/35"/><span className="tutor-pulse absolute -inset-6 rounded-full border border-[#ef5361]/20" style={{animationDelay:".3s"}}/></>}
-          <IconButton label={recording?"Остановить запись":"Говорить"} className={`relative h-[70px] w-[70px] shadow-[0_9px_24px_rgba(124,58,237,.3)] ${recording?"bg-[#e64d5a]":"bg-[#7c3aed]"} ${disabled?"!bg-[#d8d5dc] text-[#aaa6ae] shadow-none":""}`}><Mic size={27} fill="currentColor"/></IconButton>
-        </div>
-        <IconButton label="Прикрепить" className="h-12 w-12 bg-[#f0edf2] text-[#6f6875]"><Paperclip size={20}/></IconButton>
-      </footer>
-      <div className="mx-auto mt-1 h-1 w-28 shrink-0 rounded-full bg-[#d8d4da]"/>
-    </div>
-  </main>
-}
+function IconButton({children,label,className=""}:{children:ReactNode;label:string;className?:string}){return <button aria-label={label} className={`grid place-items-center rounded-full transition-transform active:scale-90 ${className}`}>{children}</button>}
+function ActionRow({active=false}:{active?:boolean}){return <div className="mt-2 flex items-center gap-3 text-[11px] font-semibold text-[#8a8792]"><button className={`flex items-center gap-1.5 ${active?"text-[#7c3aed]":""}`}><Volume2 size={14}/>Повторить</button><button className={`flex items-center gap-1.5 ${active?"text-[#7c3aed]":""}`}><Languages size={14}/>Перевод</button><button className="flex items-center gap-1 opacity-55"><Copy size={13}/>Копировать</button></div>}
+export function TutorScreen({image="emma-half.png",messages=[{who:"emma",text:"Hi, Sergey! 👋 Ready for another conversation practice?",actions:true}],status="Удерживайте и говорите",mode="ready",translate=false,long=false,hintState="off",textInput=false,error=false,showLatest=false,translateLoading=false,committed=false}:Props){
+ const[hint,setHint]=useState(true);const recording=mode==="recording";const disabled=mode==="thinking"||mode==="speaking";
+ return <main className="min-h-[100dvh] w-full overflow-hidden bg-[#fbfafc] text-[#29252f]" style={{fontFamily:"ui-rounded, 'Avenir Next', system-ui, sans-serif"}}><div className="relative mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col px-5 pb-4 pt-[calc(env(safe-area-inset-top)+14px)]">
+ <header className="flex h-10 shrink-0 items-center justify-between"><IconButton label="Закрыть" className="h-9 w-9 border border-[#e8e5eb] bg-white text-[#554f5c]"><X size={18}/></IconButton><h1 className="text-[17px] font-bold">Emma</h1><IconButton label="Настройки" className="h-9 w-9 border border-[#e8e5eb] bg-white text-[#554f5c]"><Settings size={17}/></IconButton></header>
+ <section className={`relative mt-3 shrink-0 overflow-hidden rounded-[28px] bg-[#dfd8d2] shadow-[0_12px_32px_rgba(72,55,44,.13)] ${long?"h-[190px]":"h-[260px]"}`}><img src={`${imgBase}${image}`} alt="Emma" className="h-full w-full object-cover"/><div className="absolute inset-0 bg-gradient-to-t from-black/25 via-transparent to-transparent"/>{mode==="speaking"&&<div className="absolute bottom-4 left-4 flex items-end gap-[3px] rounded-full bg-white/70 px-3 py-2">{[1,2,3,4].map(i=><i key={i} className="tutor-eq block h-3 w-[3px] rounded-full bg-[#7c3aed]"/>)}</div>}<IconButton label="Громкость" className="absolute bottom-4 right-4 h-9 w-9 border border-white/30 bg-black/20 text-white"><Volume2 size={16}/></IconButton></section>
+ <section className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1"><div className="space-y-4 pb-3">{messages.map((m,i)=><div key={i} className={`flex ${m.who==="user"?"justify-end":"justify-start"}`}><div className="flex max-w-[86%] flex-col"><div className={`rounded-[20px] px-4 py-3 text-[14px] leading-[1.38] ${m.who==="user"?"rounded-br-[6px] bg-[#7c3aed] text-white":"rounded-bl-[6px] bg-[#efedf0] text-[#39343e]"}`}>{m.text}{m.translation&&<><div className="my-2 h-px bg-[#d9d5db]"/><p className="text-[12px] text-[#77717d]">{m.translation}</p></>}</div>{m.who==="emma"&&m.actions&&<ActionRow active={!!m.translation||translate||translateLoading}/>} {translateLoading&&i===messages.length-1&&<div className="mt-2 flex gap-2 border-t border-[#d9d5db] pt-2"><span className="tutor-shimmer h-1.5 w-16 rounded-full bg-[#c8b5ee]"/><i className="tutor-dot h-1.5 w-1.5 rounded-full bg-[#7c3aed]"/></div>}</div></div>)}{recording&&<div className="flex justify-end"><div className="rounded-[20px] bg-[#7c3aed]/55 px-4 py-3 italic text-white/90">I think I would like to…</div></div>}{committed&&<div className="flex justify-end"><div className="rounded-[20px] rounded-br-[6px] bg-[#7c3aed] px-4 py-3 text-[14px] text-white">I went to Miami yesterday.</div></div>}{hintState==="card"&&<div className="relative rounded-[22px] border border-dashed border-[#cdb9ef] bg-[#f5efff] p-4"><button aria-label="Скрыть подсказку" className="absolute right-3 top-3"><X size={16}/></button><div className="flex items-center gap-2 text-[11px] font-bold uppercase text-[#7131d6]"><Lightbulb size={15}/>Подсказка</div><p className="mt-3 text-[14px]">Hi! I would like to talk about travel. Where have you traveled recently?</p><div className="my-2 h-px bg-[#ded2ef]"/><p className="text-[12px] text-[#81718f]">Привет! Я бы хотел поговорить о путешествиях. Куда вы недавно путешествовали?</p></div>}{error&&<div className="flex items-center gap-3 rounded-[18px] border border-[#f1cfd2] bg-[#fff3f3] px-3.5 py-3 text-[12px] text-[#a5424b]">Что-то пошло не так. Повторите попытку.<button aria-label="Повторить"><RotateCcw size={14}/></button></div>}</div></section>
+ {showLatest&&<button aria-label="К последнему сообщению" className="absolute bottom-[104px] right-6 z-10 grid h-10 w-10 place-items-center rounded-full bg-[#7c3aed] text-white"><ArrowDown size={18}/></button>}{!textInput&&<div className="flex shrink-0 items-center justify-between pt-2"><button onClick={()=>setHint(!hint)} className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-[12px] font-bold ${hintState==="loading"?"tutor-chip-pulse border-[#ddd0f8] bg-[#f5efff] text-[#7131d6]":hint?"border-[#ddd0f8] bg-[#f5efff] text-[#7131d6]":"border-transparent text-[#9b96a3]"}`}>{hintState==="loading"?<LoaderCircle className="animate-spin" size={15}/>:<Lightbulb size={15}/>} {hintState==="loading"?"Подбираю…":hintState==="card"?"Подсказка":hint?"Что сказать?":"Подсказка"}</button><span className="text-[9px] font-bold uppercase tracking-[.14em] text-[#aaa5af]">{status}</span></div>}
+ {!textInput&&<footer className="relative flex shrink-0 items-center justify-between pt-3 pb-[calc(env(safe-area-inset-bottom)+4px)]"><IconButton label="Клавиатура" className="h-12 w-12 bg-[#f0edf2] text-[#6f6875]"><Keyboard size={20}/></IconButton><div className="relative">{recording&&<><span className="tutor-pulse absolute -inset-3 rounded-full border-2 border-[#ef5361]/35"/><span className="tutor-pulse absolute -inset-6 rounded-full border border-[#ef5361]/20" style={{animationDelay:".3s"}}/></>}<IconButton label={recording?"Остановить запись":"Говорить"} className={`relative h-[70px] w-[70px] text-white shadow-[0_9px_24px_rgba(124,58,237,.3)] ${recording?"bg-[#e64d5a]":"bg-[#7c3aed]"} ${disabled?"!bg-[#d8d5dc] text-[#aaa6ae] shadow-none":""}`}><Mic size={27}/></IconButton></div><IconButton label="Прикрепить" className="h-12 w-12 bg-[#f0edf2] text-[#6f6875]"><Paperclip size={20}/></IconButton></footer>}
+ {textInput&&<div className="shrink-0"><div className="flex items-center gap-2 pt-2 pb-3"><IconButton label="Голосовой ввод" className="h-11 w-11 bg-[#f0edf2] text-[#6f6875]"><Mic size={19}/></IconButton><div className="flex flex-1 items-center gap-2 rounded-[22px] border border-[#e5e0e9] bg-white p-2 shadow-[0_4px_14px_rgba(40,30,60,.06)]"><div className="flex-1 px-2 text-[14px] text-[#aaa5af]">Новое сообщение…</div><button aria-label="Отправить" className="grid h-9 w-9 place-items-center rounded-full bg-[#7c3aed] text-white"><Send size={16}/></button></div><IconButton label="Прикрепить" className="h-11 w-11 bg-[#f0edf2] text-[#6f6875]"><Paperclip size={19}/></IconButton></div><div className="-mx-5 grid grid-cols-10 gap-[5px] bg-[#d3d5db] px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+16px)]">{Array.from({length:30}).map((_,i)=><span key={i} className="h-9 rounded-[6px] bg-white shadow-[0_1px_0_rgba(0,0,0,.18)]"/>)}</div></div>}
+ {!textInput&&<div className="mx-auto mt-1 h-1 w-28 rounded-full bg-[#d8d4da]"/>}</div></main>}

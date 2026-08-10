@@ -1,0 +1,2 @@
+import { TutorScreen } from "./_shared/TutorScreen";
+export function TextInput(){return <TutorScreen textInput status="Введите сообщение" messages={[{who:"emma",text:"What would you like to talk about today?",actions:true},{who:"user",text:"I want to practise travel vocabulary."}]}/>};export default TextInput;

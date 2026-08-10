@@ -1,0 +1,2 @@
+import { TutorScreen } from "./_shared/TutorScreen";
+export function TranslateLoading(){return <TutorScreen translateLoading status="Удерживайте и говорите" messages={[{who:"emma",text:"That sounds like a lovely way to spend the afternoon. Did you enjoy it?",actions:true}]}/>};export default TranslateLoading;

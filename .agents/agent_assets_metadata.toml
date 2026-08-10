@@ -37,5 +37,5 @@ description = "Спецификация нового дизайна: сравн�
 id = "2WufFvJXc6AqHsXqwn7Os"
 uri = "file://docs/emma-tutor-v4-design-freeze.md"
 type = "text"
-title = "Emma Tutor v4 — Final Design Freeze Report"
-description = "Финальная фиксация дизайна: геометрия avatar card, кадрирование, фон/blur, чат, контролы, иконки, анимации и список изменений для production-реализации. Production-код не менялся."
+title = "Emma Tutor v4 — FINAL Design Package"
+description = "Полный финальный дизайн-пакет: каталог 19 состояний, матрица состояний, инвентарь компонентов, потоки взаимодействия, локализация, скролл/перевод/подсказки/вложения, допущения по анимации 3D Emma, дельта реализации и отложенные фичи. Production-код не менялся."

@@ -1,0 +1,2 @@
+import { TutorScreen } from "./_shared/TutorScreen";
+export function UserCommitted(){return <TutorScreen committed status="Распознано" messages={[{who:"emma",text:"What did you do yesterday?",actions:true}]}/>};export default UserCommitted;

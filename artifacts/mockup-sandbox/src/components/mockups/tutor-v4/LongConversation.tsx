@@ -1,5 +1,5 @@
 import { TutorScreen } from "./_shared/TutorScreen";
-export function LongConversation(){return <TutorScreen long status="Удерживайте и говорите" messages={[
+export function LongConversation(){return <TutorScreen long showLatest status="Удерживайте и говорите" messages={[
  {who:"user",text:"I usually cook dinner at home."},
  {who:"emma",text:"What is your favourite thing to cook?",actions:true},
  {who:"user",text:"Паста с овощами. Это быстро."},

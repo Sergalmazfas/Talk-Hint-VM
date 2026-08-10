@@ -1,0 +1,2 @@
+import { TutorScreen } from "./_shared/TutorScreen";
+export function HintLoading(){return <TutorScreen hintState="loading" status="Удерживайте и говорите" messages={[{who:"emma",text:"Tell me about a place you would like to visit.",actions:true}]}/>};export default HintLoading;
