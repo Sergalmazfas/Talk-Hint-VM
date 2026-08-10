@@ -63,7 +63,7 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         // Grant only for our own backend origin; anything else is denied.
-        let expectedHost = URL(string: AppConfig.baseURL)?.host
+        let expectedHost = AppConfig.baseURL.host
         if let expectedHost, origin.host == expectedHost {
             decisionHandler(.grant)
         } else {
@@ -81,7 +81,7 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
         case "needAuth":
             // Only hand the token to our own backend page.
             if let host = message.frameInfo.securityOrigin.host as String?,
-               host == URL(string: AppConfig.baseURL)?.host {
+               host == AppConfig.baseURL.host {
                 injectAuthToken()
             }
         case "callMemoryConfirmed":
