@@ -18,3 +18,10 @@ id = "bYjmkFJ0fZJzg9eD92oHt"
 uri = "file://docs/TalkHint-AirAtom-Status-Audit.md"
 type = "text"
 title = "TalkHint + AirAtom — Status Audit"
+
+[[outputs]]
+id = "WRFcdI-BzcwNX6gxT7Alw"
+uri = "file://docs/emma-tutor-ui-baseline.md"
+type = "text"
+title = "Emma Tutor — дизайн-снимок (as-built baseline)"
+description = "Полное описание текущего дизайна Emma: 16 экранов, визуальные параметры, таблицы компонентов и состояний."
