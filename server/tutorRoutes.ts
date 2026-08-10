@@ -29,6 +29,7 @@ import {
   confirmCallMemory,
 } from "./tutorStorage";
 import { TUTOR_AVATAR_PAGE_HTML } from "./tutorAvatarPage";
+import { buildTutorPreviewHtml } from "./tutorPreviewPage";
 import { translateTutorText, validateTranslateInput } from "./tutorTranslate";
 import { storage } from "./storage";
 
@@ -64,6 +65,14 @@ export function registerTutorRoutes(app: Express) {
   // normal Bearer session token which the page passes to our /api/tutor calls.
   app.get("/tutor", (_req, res) => {
     res.type("html").send(TUTOR_AVATAR_PAGE_HTML);
+  });
+
+  // DEV-ONLY visual review of the real tutor page states (task 144). Serves
+  // the same page with a client-side driver that stubs engine/backend — no
+  // real sessions, no secrets. Never available in production.
+  app.get("/tutor/preview", (req, res) => {
+    if (process.env.NODE_ENV === "production") return res.status(404).end();
+    res.type("html").send(buildTutorPreviewHtml());
   });
 
   // Client-safe status: capabilities + avatar assets. No API key material.
