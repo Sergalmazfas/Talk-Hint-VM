@@ -173,16 +173,45 @@ function stopMic() {
   micNode = micCtx = micStream = null;
 }
 
-// Play a TTS chunk with word-timestamp lip-sync through TalkingHead.
-async function playTts(msg) {
+// Play a tutor TTS chunk (mp3 binary frame) with lip-sync via TalkingHead.
+let pendingTtsMeta = null; // descriptor JSON that precedes each binary frame
+async function playTtsBinary(buf, meta) {
   try {
-    const bin = atob(msg.audio);
-    const bytes = new Uint8Array(bin.length);
-    for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
     const actx = head.audioCtx || new AudioContext();
-    const audio = await actx.decodeAudioData(bytes.buffer);
-    head.speakAudio({ audio, words: msg.words || [], wtimes: msg.wtimes || [], wdurations: msg.wdurations || [] });
+    const audio = await actx.decodeAudioData(buf.slice(0));
+    head.speakAudio({ audio, words: [], wtimes: [], wdurations: [] });
+    if (meta?.subtitle) subtitle.textContent = meta.subtitle;
   } catch (e) { console.error("TTS play failed", e); }
+}
+
+// Realtime protocol (tutor-realtime/1.0, verified in production):
+//   client → auth {token, session_id} → server session.ready
+//   client → turn.start → stream (audio.chunk descriptor + binary pcm16@24k)
+//   client → audio.end when the user stops speaking (silence-detected)
+//   server → speech.partial/final, tutor.text.delta,
+//            tutor.audio.chunk (mp3 descriptor) + binary frame, turn.completed
+let turnOpen = false, speaking = false, lastVoiceAt = 0, silenceTimer = null;
+const SILENCE_MS = 1300;
+
+function rms(int16) {
+  let s = 0; for (let i = 0; i < int16.length; i++) { const v = int16[i] / 32768; s += v * v; }
+  return Math.sqrt(s / (int16.length || 1));
+}
+
+function beginTurn() {
+  if (ws?.readyState === 1 && !turnOpen) {
+    turnOpen = true; speaking = false;
+    ws.send(JSON.stringify({ type: "turn.start" }));
+    setStatus("Говорите (можно по-русски или по-английски)…");
+  }
+}
+
+function endTurnAudio() {
+  if (ws?.readyState === 1 && turnOpen && speaking) {
+    ws.send(JSON.stringify({ type: "audio.end" }));
+    turnOpen = false; speaking = false;
+    setStatus("Emma слушает и отвечает…");
+  }
 }
 
 startBtn.onclick = async () => {
@@ -194,20 +223,45 @@ startBtn.onclick = async () => {
   sessionId = session.sessionId;
   ws = new WebSocket(session.realtime.wsUrl);
   ws.binaryType = "arraybuffer";
-  ws.onopen = async () => {
-    setStatus("Идёт тренировка — говорите (можно по-русски).");
-    startBtn.style.display = "none"; endBtn.style.display = "";
-    try { await startMic((buf) => { if (ws?.readyState === 1) ws.send(buf); }); }
-    catch (e) { setStatus("Нет доступа к микрофону: " + e.message); }
-  };
+  // Token goes in the FIRST WS MESSAGE, never in the URL.
+  ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token: session.realtime.token, session_id: sessionId }));
   ws.onmessage = (e) => {
-    if (typeof e.data !== "string") return;
+    if (typeof e.data !== "string") {
+      if (pendingTtsMeta) { const meta = pendingTtsMeta; pendingTtsMeta = null; playTtsBinary(e.data, meta); }
+      return;
+    }
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
-    if (msg.type === "tts_audio" || msg.audio) playTts(msg);
-    if (msg.type === "subtitle" || msg.text) subtitle.textContent = msg.text || "";
+    if (msg.type === "session.ready") {
+      startBtn.style.display = "none"; endBtn.style.display = "";
+      notifyNative({ event: "wsReady" });
+      (async () => {
+        try {
+          await startMic((buf) => {
+            if (ws?.readyState !== 1 || !turnOpen) return;
+            const int16 = new Int16Array(buf);
+            const level = rms(int16);
+            if (level > 0.012) {
+              speaking = true; lastVoiceAt = Date.now();
+              if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+            } else if (speaking && !silenceTimer) {
+              silenceTimer = setTimeout(() => { silenceTimer = null; if (Date.now() - lastVoiceAt >= SILENCE_MS) endTurnAudio(); }, SILENCE_MS);
+            }
+            ws.send(JSON.stringify({ type: "audio.chunk", format: "pcm16", sample_rate: 24000, size: buf.byteLength }));
+            ws.send(buf);
+          });
+          beginTurn();
+        } catch (err) { setStatus("Нет доступа к микрофону: " + err.message); }
+      })();
+    }
+    else if (msg.type === "speech.partial") subtitle.textContent = "Вы: " + (msg.text || "");
+    else if (msg.type === "speech.final") subtitle.textContent = "Вы: " + (msg.text || "");
+    else if (msg.type === "tutor.text.delta") { /* full text arrives as subtitles with audio */ }
+    else if (msg.type === "tutor.audio.chunk") pendingTtsMeta = msg;
+    else if (msg.type === "turn.completed") { beginTurn(); }
+    else if (msg.type === "error") { console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code }); }
   };
-  ws.onclose = () => { stopMic(); if (sessionId) setStatus("Соединение закрыто."); };
-  ws.onerror = () => setStatus("Ошибка соединения с репетитором.");
+  ws.onclose = (e) => { stopMic(); turnOpen = false; notifyNative({ event: "wsClosed", code: e.code, reason: e.reason || "" }); if (sessionId) setStatus("Соединение закрыто."); };
+  ws.onerror = () => { setStatus("Ошибка соединения с репетитором."); notifyNative({ event: "wsError" }); };
 };
 
 endBtn.onclick = async () => {

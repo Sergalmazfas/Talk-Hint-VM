@@ -57,6 +57,9 @@ export async function saveCallMemory(
   mem: EngineCallMemory,
 ): Promise<TutorCallMemory | undefined> {
   if (!isDatabaseAvailable()) return undefined;
+  // Concurrency-safe: two racing /end requests both reach the insert; the
+  // unique (user, session) index makes one a no-op, and both return the
+  // single stored row instead of one of them erroring out.
   const [row] = await db
     .insert(tutorCallMemories)
     .values({
@@ -69,8 +72,10 @@ export async function saveCallMemory(
       vocabulary: mem.vocabulary,
       uncertainFacts: mem.uncertain_facts,
     })
+    .onConflictDoNothing()
     .returning();
-  return row;
+  if (row) return row;
+  return getCallMemoryByEngineSession(userId, engineSessionId);
 }
 
 export async function listCallMemories(userId: string): Promise<TutorCallMemory[]> {

@@ -20,22 +20,20 @@ export function tutorEngineConfigured(): boolean {
   return !!TUTOR_ENGINE_API_KEY;
 }
 
-// The application identity we present to the engine when creating sessions.
-// It comes from the TUTOR_ENGINE_APP_ID secret — never a hardcoded word.
-// Read lazily so tests (and late-loaded env) see the current value.
+// VERIFIED production contract (2026-08-10): the REST namespace is /api/v1 and
+// tenancy is derived EXCLUSIVELY from the API key. The engine explicitly
+// rejects application_id/organization_id in requests ("are not accepted;
+// tenancy is derived from the API key"), so TUTOR_ENGINE_APP_ID is kept only
+// as stored reference and MUST NOT be sent.
+const API_PREFIX = "/api/v1";
+
 export function getTutorEngineAppId(): string {
   return (process.env.TUTOR_ENGINE_APP_ID || "").trim();
 }
 
-// Startup check: warn loudly when the TUTOR_ENGINE_APP_ID secret is missing,
-// because session creation will fail if the engine demands an application_id.
-// Returns true when configured so callers/tests can assert on it.
+// Kept for reference/tests: the app id secret may exist but is never sent.
 export function checkTutorEngineAppIdConfigured(): boolean {
-  if (getTutorEngineAppId()) return true;
-  console.warn(
-    "[TutorEngine] TUTOR_ENGINE_APP_ID is not set — tutor session creation will fail if the engine requires an application_id. Set the TUTOR_ENGINE_APP_ID secret.",
-  );
-  return false;
+  return !!getTutorEngineAppId();
 }
 
 export function getTutorEngineBase(): string {
@@ -114,52 +112,55 @@ export interface TutorCapabilities {
 }
 
 export async function getCapabilities(): Promise<TutorCapabilities> {
-  return engineFetch("/v1/capabilities");
+  return engineFetch(`${API_PREFIX}/capabilities`);
 }
 
 export async function getTutorManifest(): Promise<any> {
-  const data = await engineFetch("/v1/tutors");
+  const data = await engineFetch(`${API_PREFIX}/tutors`);
   const list = Array.isArray(data) ? data : Array.isArray(data?.tutors) ? data.tutors : [];
   const tutor = list.find((t: any) => t?.tutor_id === TUTOR_ID);
   if (!tutor) throw new TutorEngineError(`Tutor ${TUTOR_ID} not found in engine manifest`, 200, "http");
   return tutor;
 }
 
-// Create a practice session. The approved contract may or may not require an
-// explicit application_id (the key can already be application-bound). We first
-// send without it; if the engine rejects the payload asking for the field, we
-// retry once including the TUTOR_ENGINE_APP_ID secret value. We never
-// fabricate any other identity — if the secret is unset we surface a clear
-// not_configured error instead of guessing.
+// Create a practice session with the VERIFIED production schema. Tenancy is
+// derived from the API key — application_id/organization_id are rejected by
+// the engine and must never be sent.
 export async function createTutorSession(userId: string): Promise<any> {
   const payload: Record<string, unknown> = {
     user_id: userId,
     scenario_id: SCENARIO_ID,
     tutor_id: TUTOR_ID,
     mode: "practice",
-    language: { target: "en", native: "ru" },
+    target_language: "en",
+    native_language: "ru",
   };
+  return engineFetch(`${API_PREFIX}/sessions`, { method: "POST", body: payload });
+}
+
+// Complete a practice session — the ONLY documented completion endpoint.
+export async function completeTutorSession(engineSessionId: string): Promise<any> {
+  return engineFetch(`${API_PREFIX}/sessions/${encodeURIComponent(engineSessionId)}/complete`, { method: "POST" });
+}
+
+// Explicitly start Call Memory generation (POST); GET never triggers it.
+// 409 NO_COMPLETED_TURNS means the practice had no finished turns — surfaced
+// as "no memory available", not an internal error.
+export async function startCallMemoryGeneration(
+  engineSessionId: string,
+): Promise<{ started: boolean; noTurns: boolean }> {
   try {
-    return await engineFetch("/v1/sessions", { method: "POST", body: payload });
+    await engineFetch(`${API_PREFIX}/sessions/${encodeURIComponent(engineSessionId)}/call-memory`, { method: "POST" });
+    return { started: true, noTurns: false };
   } catch (err: any) {
-    const mentionsAppId =
-      err instanceof TutorEngineError &&
-      err.kind === "http" &&
-      err.status === 400 &&
-      (err.body || "").toLowerCase().includes("application_id");
-    if (!mentionsAppId) throw err;
-    const appId = getTutorEngineAppId();
-    if (!appId) {
-      throw new TutorEngineError(
-        "Tutor Engine requires an application_id but TUTOR_ENGINE_APP_ID is not configured",
-        null,
-        "not_configured",
-      );
+    if (err instanceof TutorEngineError && err.status === 409) {
+      const body = err.body || "";
+      if (body.includes("NO_COMPLETED_TURNS")) return { started: false, noTurns: true };
+      // "already generating/generated" conflicts mean generation exists → poll.
+      if (/ALREADY|IN_PROGRESS|EXISTS/i.test(body)) return { started: true, noTurns: false };
+      throw err; // unrelated conflict — surface, don't pretend it started
     }
-    return await engineFetch("/v1/sessions", {
-      method: "POST",
-      body: { ...payload, application_id: appId },
-    });
+    throw err;
   }
 }
 
@@ -172,16 +173,30 @@ export interface EngineCallMemory {
   uncertain_facts: string[];
 }
 
+// Engine content items are objects like {id, text, status, provenance}; older
+// shapes may be plain strings. Normalize both to plain strings.
+// NOTE on item status: engine drafts mark EVERY item "unconfirmed" — that
+// means "awaiting user confirmation in TalkHint", which our mandatory
+// review/edit/confirm step provides for the memory as a whole. Genuinely
+// dubious content arrives in the separate uncertain_facts category, which we
+// keep separate and render as "never assert" in the live-hint block.
+function itemTexts(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x: any) => (typeof x === "string" ? x : typeof x?.text === "string" ? x.text : ""))
+    .filter((s) => s.trim().length > 0);
+}
+
 function normalizeMemory(raw: any): EngineCallMemory | null {
   if (!raw || typeof raw !== "object") return null;
-  const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x)) : []);
   const mem: EngineCallMemory = {
     objective: typeof raw.objective === "string" ? raw.objective : "",
-    facts: arr(raw.facts),
-    questions: arr(raw.questions),
-    rehearsed_answers: arr(raw.rehearsed_answers),
-    vocabulary: arr(raw.vocabulary),
-    uncertain_facts: arr(raw.uncertain_facts),
+    // dates_times are facts for the purposes of the live-hint context.
+    facts: [...itemTexts(raw.facts), ...itemTexts(raw.dates_times)],
+    questions: itemTexts(raw.questions),
+    rehearsed_answers: itemTexts(raw.rehearsed_answers),
+    vocabulary: itemTexts(raw.vocabulary),
+    uncertain_facts: itemTexts(raw.uncertain_facts),
   };
   const hasContent =
     mem.objective.trim().length > 0 ||
@@ -189,34 +204,31 @@ function normalizeMemory(raw: any): EngineCallMemory | null {
   return hasContent ? mem : null;
 }
 
-// Fetch the structured Call Memory for a finished session. The engine's exact
-// endpoint is not yet published, so we probe the natural candidates and treat
-// "none answered with a Call Memory" as capability-unavailable (surfaced as
-// integration incomplete) — we NEVER summarize the transcript ourselves.
-export async function fetchCallMemory(engineSessionId: string): Promise<EngineCallMemory | null> {
-  const candidates = [
-    `/v1/sessions/${encodeURIComponent(engineSessionId)}/call-memory`,
-    `/v1/sessions/${encodeURIComponent(engineSessionId)}/call_memory`,
-  ];
-  for (const path of candidates) {
-    try {
-      const data = await engineFetch(path);
-      const mem = normalizeMemory(data?.call_memory ?? data);
-      if (mem) return mem;
-    } catch (err: any) {
-      if (err instanceof TutorEngineError && (err.kind === "auth" || err.kind === "not_configured")) throw err;
-      // 404 / HTML / other → try the next candidate
-    }
-  }
-  // Last: the session object itself may carry the memory.
+export type CallMemoryPoll =
+  | { status: "pending" }
+  | { status: "ready"; memory: EngineCallMemory | null }
+  | { status: "failed"; retriable: boolean }
+  | { status: "not_started" };
+
+// Fetch the Call Memory state for a completed session (documented endpoint:
+// GET /api/v1/sessions/:id/call-memory). GET is read-only — generation is
+// started separately via startCallMemoryGeneration(). We NEVER summarize the
+// transcript ourselves.
+export async function fetchCallMemory(engineSessionId: string): Promise<CallMemoryPoll> {
+  let data: any;
   try {
-    const session = await engineFetch(`/v1/sessions/${encodeURIComponent(engineSessionId)}`);
-    const mem = normalizeMemory(session?.call_memory);
-    if (mem) return mem;
+    data = await engineFetch(`${API_PREFIX}/sessions/${encodeURIComponent(engineSessionId)}/call-memory`);
   } catch (err: any) {
-    if (err instanceof TutorEngineError && (err.kind === "auth" || err.kind === "not_configured")) throw err;
+    if (err instanceof TutorEngineError && err.status === 404 && (err.body || "").includes("CALL_MEMORY_NOT_GENERATED")) {
+      return { status: "not_started" };
+    }
+    throw err;
   }
-  return null;
+  const status = data?.status;
+  if (status === "pending") return { status: "pending" };
+  if (status === "failed") return { status: "failed", retriable: data?.retriable !== false };
+  if (status === "ready") return { status: "ready", memory: normalizeMemory(data?.latest?.content ?? data?.content) };
+  return { status: "pending" };
 }
 
 export interface SmokeCheckResult {
@@ -270,7 +282,16 @@ export async function runTutorSmokeChecks(userId: string): Promise<{ ok: boolean
   try {
     const session = await createTutorSession(userId);
     const token = session?.realtime?.token;
-    push("session create", !!(session?.session_id && token), `session_id=${session?.session_id ? "present" : "missing"}, realtime.token=${token ? "present" : "missing"}`);
+    const connUrl = session?.realtime?.connection_url;
+    push(
+      "session create",
+      !!(session?.session_id && token && connUrl),
+      `session_id=${session?.session_id ? "present" : "missing"}, realtime.token=${token ? "present" : "missing"}, connection_url=${connUrl ?? "missing"}`,
+    );
+    // Clean up: complete the throwaway smoke session right away.
+    if (session?.session_id) {
+      try { await completeTutorSession(session.session_id); } catch { /* best effort */ }
+    }
   } catch (err: any) {
     push("session create", false, err?.message ?? String(err));
   }

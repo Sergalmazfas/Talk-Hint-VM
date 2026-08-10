@@ -70,11 +70,15 @@ describe.skipIf(!DB_UP)("tutor storage (real Postgres)", () => {
     expect(await storage.getTutorSessionRow(userB, engineSid)).toBeUndefined();
   });
 
-  it("saves one memory per (user, engine session) and rejects duplicates", async () => {
+  it("saves one memory per (user, engine session); duplicate save returns the existing row", async () => {
     const saved = await storage.saveCallMemory(userA, engineSid, MEM);
     expect(saved?.status).toBe("MEMORY_CONFIRMATION");
     expect(await storage.getCallMemoryByEngineSession(userA, engineSid)).toBeTruthy();
-    await expect(storage.saveCallMemory(userA, engineSid, MEM)).rejects.toThrow();
+    // Concurrency-safe idempotency: a racing duplicate resolves to the SAME
+    // stored row (no second row, no thrown unique-violation).
+    const dup = await storage.saveCallMemory(userA, engineSid, MEM);
+    expect(dup?.id).toBe(saved?.id);
+    expect(await storage.listCallMemories(userA)).toHaveLength(1);
     // Other users see nothing.
     expect(await storage.getCallMemoryByEngineSession(userB, engineSid)).toBeUndefined();
     expect(await storage.listCallMemories(userB)).toHaveLength(0);

@@ -11,6 +11,8 @@ import {
   getCapabilities,
   getTutorManifest,
   createTutorSession,
+  completeTutorSession,
+  startCallMemoryGeneration,
   fetchCallMemory,
   runTutorSmokeChecks,
 } from "./tutorEngine";
@@ -98,17 +100,28 @@ export function registerTutorRoutes(app: Express) {
       const engineSessionId = session?.session_id;
       const realtime = session?.realtime;
       if (!engineSessionId || !realtime?.connection_url || !realtime?.token) {
-        console.error("[Tutor] Unexpected session payload from engine:", JSON.stringify(session).slice(0, 300));
+        // Redacted log: never record the realtime token.
+        console.error(
+          "[Tutor] Unexpected session payload from engine:",
+          JSON.stringify({
+            session_id: session?.session_id ?? null,
+            has_realtime: !!session?.realtime,
+            has_connection_url: !!session?.realtime?.connection_url,
+            has_token: !!session?.realtime?.token,
+          }),
+        );
         return res.status(502).json({ error: "tutor_connection", message: "Репетитор вернул неожиданный ответ." });
       }
       await createTutorSessionRow(user.id, engineSessionId, getTutorId(), "english_free_talk");
       const wsBase = getTutorEngineBase().replace(/^http/, "ws");
+      // Auth happens via the first WS message ({type:"auth", token, session_id}),
+      // NOT via query string — the token never travels in a URL.
       res.status(201).json({
         sessionId: engineSessionId,
         realtime: {
           connectionUrl: realtime.connection_url,
           token: realtime.token,
-          wsUrl: `${wsBase}${realtime.connection_url}?token=${encodeURIComponent(realtime.token)}`,
+          wsUrl: `${wsBase}${realtime.connection_url}`,
         },
       });
     } catch (err) {
@@ -133,21 +146,44 @@ export function registerTutorRoutes(app: Express) {
       const existing = await getCallMemoryByEngineSession(user.id, engineSessionId);
       if (existing) return res.json({ callMemory: existing });
       await endTutorSessionRow(user.id, engineSessionId);
-      let mem = null;
       try {
-        mem = await fetchCallMemory(engineSessionId);
+        // 1) Complete the engine session (documented endpoint).
+        await completeTutorSession(engineSessionId);
+        // 2) Start Call Memory generation explicitly (GET never triggers it).
+        const gen = await startCallMemoryGeneration(engineSessionId);
+        if (gen.noTurns) {
+          return res.json({
+            callMemory: null,
+            reason: "no_completed_turns",
+            message: "В тренировке не было завершённых реплик — память разговора не создана.",
+          });
+        }
+        // 3) Bounded poll: pending → retry with backoff, up to ~20 s.
+        let mem = null;
+        let failedRetriable = false;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const poll = await fetchCallMemory(engineSessionId);
+          if (poll.status === "ready") { mem = poll.memory; break; }
+          if (poll.status === "failed") {
+            if (!poll.retriable) break;
+            failedRetriable = true;
+          }
+          await new Promise((r) => setTimeout(r, 1500 + attempt * 500));
+        }
+        if (!mem) {
+          return res.json({
+            callMemory: null,
+            reason: failedRetriable ? "call_memory_retriable" : "call_memory_pending",
+            message: failedRetriable
+              ? "Не удалось подготовить память разговора — попробуйте ещё раз."
+              : "Память разговора ещё готовится — попробуйте ещё раз через минуту.",
+          });
+        }
+        const saved = await saveCallMemory(user.id, engineSessionId, mem);
+        return res.json({ callMemory: saved ?? null });
       } catch (err) {
         return safeEngineError(res, err);
       }
-      if (!mem) {
-        return res.json({
-          callMemory: null,
-          reason: "call_memory_unavailable",
-          message: "Движок репетитора пока не отдаёт память разговора — переход в реальный звонок недоступен.",
-        });
-      }
-      const saved = await saveCallMemory(user.id, engineSessionId, mem);
-      res.json({ callMemory: saved ?? null });
     } catch (err) {
       safeEngineError(res, err);
     }
