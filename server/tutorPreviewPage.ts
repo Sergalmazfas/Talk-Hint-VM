@@ -136,8 +136,22 @@ const DRIVER = `<script>
     }
     if (STATE === "pending" || STATE === "review" || STATE === "confirmed") {
       await fullTurn("I want ask my lawyer.", CORRECTION);
+      // Traverse the REAL user path: X → quit sheet → «Завершить».
+      document.getElementById("xBtn").click();
+      await sleep(400);
       document.getElementById("endBtn").click();
       if (STATE === "confirmed") { await sleep(1200); document.getElementById("confirmBtn").click(); }
+      return;
+    }
+    if (STATE === "fullscreen") {
+      await fullTurn("I want ask my lawyer.", CORRECTION);
+      document.getElementById("expandBtn").click();
+      return;
+    }
+    if (STATE === "menu") { document.getElementById("gearBtn").click(); return; }
+    if (STATE === "quit") {
+      await fullTurn("I want ask my lawyer.", CORRECTION);
+      document.getElementById("xBtn").click();
       return;
     }
   });

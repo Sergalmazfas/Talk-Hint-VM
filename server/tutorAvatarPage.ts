@@ -1,7 +1,13 @@
 // Standalone tutor page served at /tutor, loaded by the iOS WKWebView.
-// Tutor UI v2 (hold-to-talk): light shell, avatar viewport on top, scrollable
-// teaching-card feed, large push-to-talk mic. This page is ONLY render +
-// realtime transport:
+// Tutor UI v3 (Praktika-style, per user reference screens):
+//   - top bar: ✕ (quit w/ confirmation sheet) · tutor name · ⚙ settings popover
+//   - compact mode: rounded avatar video card + chat-bubble feed + big purple
+//     hold-to-talk mic, keyboard/attach side buttons ("soon" — engine support
+//     needed), "What to say?" hint chip
+//   - fullscreen mode: avatar fills the screen, large white subtitles overlay,
+//     status label + mic at the bottom, collapse button
+//   - quit confirmation bottom sheet (Continue / End) → call-memory flow
+// This page is ONLY render + realtime transport:
 //   - fetches client-safe status/session data from our backend (Bearer token
 //     injected by the native app via window.__setAuth, never in the URL)
 //   - renders the tutor with @met4citizen/talkinghead (Three.js, client-side)
@@ -19,57 +25,131 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
 <title>TalkHint — Tutor</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-  html,body{height:100%;background:#f4f5f9;color:#1c1d26;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden}
+  html,body{height:100%;background:#f6f6f8;color:#111;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;overflow:hidden}
+  button{font-family:inherit}
   #app{display:flex;flex-direction:column;height:100%}
-  /* Avatar viewport: rounded card, head/upper body, never the whole screen */
-  #avatarWrap{flex:0 0 34vh;margin:10px 12px 6px;border-radius:20px;overflow:hidden;position:relative;background:#dfe3ee;box-shadow:0 2px 10px rgba(20,20,40,.08)}
+  /* --- Top bar ------------------------------------------------------------ */
+  #topbar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:calc(8px + env(safe-area-inset-top)) 14px 6px}
+  .roundBtn{width:46px;height:46px;border-radius:50%;border:0;background:#fff;box-shadow:0 1px 6px rgba(20,20,40,.10);font-size:19px;display:flex;align-items:center;justify-content:center;color:#111}
+  #title{font-size:19px;font-weight:800}
+  /* --- Avatar card (compact) --------------------------------------------- */
+  #avatarWrap{flex:0 0 36vh;margin:6px 14px;border-radius:24px;overflow:hidden;position:relative;background:#dfe3ee;box-shadow:0 2px 12px rgba(20,20,40,.10);transition:border-radius .2s}
   #avatar{position:absolute;inset:0}
-  #endBtn{position:absolute;top:10px;right:10px;z-index:5;border:0;border-radius:12px;padding:8px 12px;font-size:13px;font-weight:600;color:#fff;background:rgba(28,29,38,.55);backdrop-filter:blur(6px)}
-  /* Conversation feed */
-  #feed{flex:1;overflow-y:auto;padding:8px 12px 12px;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
-  .card{max-width:88%;border-radius:16px;padding:11px 14px;font-size:16px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
-  .card.tutor{align-self:flex-start;background:#fff;box-shadow:0 1px 4px rgba(20,20,40,.07)}
-  .card.user{align-self:flex-end;background:#4f46e5;color:#fff}
+  .ovlBtn{position:absolute;bottom:10px;z-index:5;width:38px;height:38px;border-radius:50%;border:0;background:rgba(20,20,30,.35);backdrop-filter:blur(6px);color:#fff;font-size:17px;display:flex;align-items:center;justify-content:center}
+  #muteBtn{right:58px}
+  #expandBtn{right:12px}
+  /* --- Feed (chat bubbles) ------------------------------------------------ */
+  #feed{flex:1;overflow-y:auto;padding:8px 14px 12px;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
+  .card{max-width:86%;border-radius:20px;padding:12px 15px;font-size:17px;line-height:1.4;font-weight:600;white-space:pre-wrap;word-break:break-word}
+  .card.tutor{align-self:flex-start;background:#efeff3;color:#111;border-bottom-left-radius:6px}
+  .card.user{align-self:flex-end;background:#7c3aed;color:#fff;border-bottom-right-radius:6px}
   .card.user.pending{opacity:.65}
-  .card .acts{display:flex;gap:14px;margin-top:8px}
-  .card .acts button{border:0;background:none;font-size:13px;color:#6b6f85;padding:2px 0;font-family:inherit}
-  .card.tutor .acts button:active{color:#4f46e5}
-  .card .translation{margin-top:8px;padding-top:8px;border-top:1px solid #e6e8f2;font-size:15px;color:#4b4f66;display:none}
+  .card .acts{display:flex;gap:18px;margin-top:10px}
+  .card .acts button{border:0;background:none;font-size:17px;color:#55586e;padding:2px 0}
+  .card.tutor .acts button:active{color:#7c3aed}
+  .card .translation{margin-top:8px;padding-top:8px;border-top:1px solid #dcdde6;font-size:15px;font-weight:400;color:#3f4257;display:none}
   .card .translation.show{display:block}
-  /* Local greeting card: rendered by THIS page (not engine content), so it is
-     visually marked with a small label to keep the engine contract honest. */
-  .card.local .localTag{display:block;margin-top:6px;font-size:11px;color:#8a8ea2}
-  /* Bottom hold-to-talk area */
-  #bottom{flex:0 0 auto;padding:6px 16px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:6px;background:linear-gradient(#f4f5f900,#f4f5f9 30%)}
-  #stateLabel{font-size:14px;color:#6b6f85;min-height:18px;text-align:center}
-  #micBtn{width:84px;height:84px;border-radius:50%;border:0;background:#4f46e5;color:#fff;font-size:34px;box-shadow:0 6px 18px rgba(79,70,229,.35);display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;touch-action:none;transition:transform .12s,background .12s}
-  #micBtn:disabled{background:#c2c5d4;box-shadow:none}
-  #micBtn.rec{background:#ef4444;transform:scale(1.12);box-shadow:0 0 0 10px rgba(239,68,68,.18)}
-  #micBtn.think{background:#8b8fa8}
-  #retryBtn{display:none;border:0;border-radius:14px;padding:12px 22px;font-size:16px;font-weight:600;color:#fff;background:#4f46e5}
-  /* Memory review */
-  #review{position:absolute;inset:0;background:#f4f5f9;overflow-y:auto;padding:16px;padding-bottom:calc(24px + env(safe-area-inset-bottom));display:none;z-index:20}
-  #review h2{font-size:18px;margin-bottom:10px}
+  .card.local .localTag{display:block;margin-top:6px;font-size:11px;font-weight:400;color:#8a8ea2}
+  /* --- Hint chip ----------------------------------------------------------- */
+  #hintChip{align-self:flex-end;margin:0 14px;border:0;border-radius:22px;padding:12px 18px;font-size:16px;font-weight:700;color:#7c3aed;background:#ece6fb;display:none}
+  /* --- Bottom controls ----------------------------------------------------- */
+  #bottom{flex:0 0 auto;padding:8px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:8px}
+  #stateLabel{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b6f85;min-height:17px;text-align:center}
+  #controls{width:100%;display:flex;align-items:center;justify-content:space-between}
+  .sideBtn{width:52px;height:52px;border-radius:50%;border:0;background:#fff;box-shadow:0 1px 6px rgba(20,20,40,.10);font-size:20px;color:#111}
+  #micBtn{width:92px;height:92px;border-radius:50%;border:0;background:#7c3aed;color:#fff;font-size:36px;box-shadow:0 8px 22px rgba(124,58,237,.35);display:flex;align-items:center;justify-content:center;user-select:none;-webkit-user-select:none;touch-action:none;transition:transform .12s,background .12s}
+  #micBtn:disabled{background:#c9cbd8;box-shadow:none}
+  #micBtn.rec{background:#ef4444;transform:scale(1.1);box-shadow:0 0 0 12px rgba(239,68,68,.16)}
+  #micBtn.think{background:#9b9db2}
+  #retryBtn{display:none;border:0;border-radius:16px;padding:13px 24px;font-size:16px;font-weight:700;color:#fff;background:#7c3aed}
+  /* --- Fullscreen mode ------------------------------------------------------ */
+  body.fs #avatarWrap{position:fixed;inset:0;margin:0;border-radius:0;flex:none;z-index:10}
+  body.fs #feed,body.fs #hintChip{display:none!important}
+  body.fs #topbar{position:fixed;top:0;left:0;right:0;z-index:30;background:none}
+  body.fs #title{display:none}
+  body.fs .roundBtn{background:rgba(255,255,255,.28);backdrop-filter:blur(8px);color:#fff}
+  body.fs .ovlBtn{display:none}
+  body.fs #bottom{position:fixed;left:0;right:0;bottom:0;z-index:20}
+  body.fs #stateLabel{color:#fff;text-shadow:0 1px 6px rgba(0,0,0,.5)}
+  body.fs #micBtn{background:rgba(255,255,255,.22);backdrop-filter:blur(8px);box-shadow:none;width:78px;height:78px}
+  body.fs #micBtn.rec{background:#ef4444}
+  body.fs .sideBtn{visibility:hidden}
+  #subs{display:none;position:fixed;left:20px;right:20px;bottom:26vh;z-index:15;color:#fff;font-size:26px;line-height:1.3;font-weight:800;text-shadow:0 2px 10px rgba(0,0,0,.55);pointer-events:none}
+  body.fs #subs.on{display:block}
+  /* --- Settings popover ------------------------------------------------------ */
+  #menu{position:fixed;top:calc(60px + env(safe-area-inset-top));right:14px;z-index:60;background:rgba(248,248,250,.96);backdrop-filter:blur(14px);border-radius:22px;box-shadow:0 8px 30px rgba(20,20,40,.22);padding:8px;min-width:250px;display:none}
+  #menu.show{display:block}
+  #menu .mrow{display:flex;align-items:center;gap:12px;width:100%;border:0;background:none;padding:13px 12px;font-size:17px;font-weight:600;color:#111;border-radius:14px;text-align:left}
+  #menu .mrow:active{background:rgba(20,20,40,.06)}
+  #menu .mrow .ic{width:26px;text-align:center;font-size:18px}
+  #menu .mrow .val{margin-left:auto;font-size:14px;color:#7c3aed;font-weight:700}
+  #menuBackdrop{position:fixed;inset:0;z-index:55;display:none}
+  #menuBackdrop.show{display:block}
+  /* --- Quit sheet ------------------------------------------------------------ */
+  #sheetBackdrop{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.35);display:none}
+  #quitSheet{position:fixed;left:0;right:0;bottom:0;z-index:71;background:#fff;border-radius:26px 26px 0 0;padding:20px 22px calc(22px + env(safe-area-inset-bottom));display:none;text-align:center}
+  #quitSheet .grab{width:44px;height:4px;border-radius:2px;background:#d9dbe4;margin:0 auto 16px}
+  #quitSheet .bang{width:58px;height:58px;border-radius:50%;background:#111;color:#fff;font-size:26px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+  #quitSheet h3{font-size:23px;font-weight:800;margin-bottom:10px}
+  #quitSheet p{font-size:17px;line-height:1.35;color:#333;margin-bottom:18px}
+  #quitSheet .primary{width:100%;border:0;border-radius:28px;padding:16px;font-size:18px;font-weight:800;color:#fff;background:#7c3aed;margin-bottom:10px}
+  #quitSheet .secondary{width:100%;border:0;border-radius:28px;padding:16px;font-size:18px;font-weight:800;color:#111;background:#f1f1f5}
+  body.sheet #sheetBackdrop,body.sheet #quitSheet{display:block}
+  /* --- Toast ------------------------------------------------------------------ */
+  #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(130px + env(safe-area-inset-bottom));z-index:80;background:rgba(20,20,30,.85);color:#fff;font-size:14px;font-weight:600;padding:10px 16px;border-radius:14px;opacity:0;transition:opacity .25s;pointer-events:none}
+  #toast.show{opacity:1}
+  /* --- Memory review ----------------------------------------------------------- */
+  #review{position:absolute;inset:0;background:#f6f6f8;overflow-y:auto;padding:16px;padding-bottom:calc(24px + env(safe-area-inset-bottom));display:none;z-index:90}
+  #review h2{font-size:19px;font-weight:800;margin-bottom:10px}
   #review label{display:block;font-size:12px;color:#6b6f85;margin:12px 0 4px}
-  #review input,#review textarea{width:100%;background:#fff;border:1px solid #d9dce8;border-radius:10px;color:#1c1d26;padding:10px;font-size:15px;font-family:inherit}
+  #review input,#review textarea{width:100%;background:#fff;border:1px solid #d9dce8;border-radius:12px;color:#111;padding:10px;font-size:15px;font-family:inherit}
   #review textarea{min-height:80px;resize:vertical}
   #review .hint{font-size:11px;color:#8a8ea2;margin-top:2px}
-  #confirmBtn{width:100%;margin-top:16px;background:#22c55e;border:0;border-radius:14px;padding:14px;font-size:16px;font-weight:700;color:#fff}
+  #confirmBtn{width:100%;margin-top:16px;background:#22c55e;border:0;border-radius:28px;padding:15px;font-size:16px;font-weight:800;color:#fff}
 </style>
 </head>
 <body>
 <div id="app">
+  <div id="topbar">
+    <button id="xBtn" class="roundBtn" aria-label="close">✕</button>
+    <div id="title">Emma</div>
+    <button id="gearBtn" class="roundBtn" aria-label="settings">⚙︎</button>
+  </div>
   <div id="avatarWrap">
     <div id="avatar"></div>
-    <button id="endBtn" style="display:none"></button>
+    <button id="muteBtn" class="ovlBtn" aria-label="mute">🔊</button>
+    <button id="expandBtn" class="ovlBtn" aria-label="fullscreen">⛶</button>
   </div>
   <div id="feed"></div>
+  <button id="hintChip">💡 </button>
   <div id="bottom">
     <div id="stateLabel"></div>
-    <button id="micBtn" disabled aria-label="mic">🎤</button>
+    <div id="controls">
+      <button id="kbBtn" class="sideBtn" aria-label="keyboard">⌨︎</button>
+      <button id="micBtn" disabled aria-label="mic">🎤</button>
+      <button id="attachBtn" class="sideBtn" aria-label="attach">📎</button>
+    </div>
     <button id="retryBtn"></button>
   </div>
 </div>
+<div id="subs"></div>
+<div id="menuBackdrop"></div>
+<div id="menu">
+  <button class="mrow" id="mSubs"><span class="ic">💬</span><span></span><span class="val"></span></button>
+  <button class="mrow" id="mMute"><span class="ic">🔊</span><span></span><span class="val"></span></button>
+  <button class="mrow" id="mTutor"><span class="ic">👤</span><span></span></button>
+  <button class="mrow" id="mEnd"><span class="ic">🏁</span><span></span></button>
+</div>
+<div id="sheetBackdrop"></div>
+<div id="quitSheet">
+  <div class="grab"></div>
+  <div class="bang">!</div>
+  <h3></h3>
+  <p></p>
+  <button class="primary" id="continueBtn"></button>
+  <button class="secondary" id="endBtn"></button>
+</div>
+<div id="toast"></div>
 <div id="review">
   <h2></h2>
   <div class="hint" id="reviewHint"></div>
@@ -96,13 +176,13 @@ const RU = navigator.language?.toLowerCase().startsWith("ru");
 const L = RU ? {
   loading: "Загружаем Emma…", connecting: "Подключаемся…", ready: "Удерживайте и говорите",
   recording: "Слушаю…", processing: "Emma думает…", speaking: "Emma говорит…",
-  speakingLocked: "Emma говорит — микрофон появится после ответа",
-  error: "Ошибка соединения", retry: "Повторить", end: "Завершить",
+  speakingLocked: "Emma говорит…",
+  error: "Ошибка соединения", retry: "Повторить",
   ending: "Завершаем тренировку…", memPending: "Готовим память разговора…",
   micDenied: "Нет доступа к микрофону", notConfigured: "Репетитор не настроен.",
   engineDown: "Движок репетитора недоступен.",
-  replay: "▶ Ещё раз", copy: "Копировать", copied: "Скопировано",
-  translate: "Перевод", translating: "Переводим…", translateFailed: "Не удалось перевести",
+  replay: "🔊", copy: "⧉", copied: "✓",
+  translate: "文А", translating: "…", translateFailed: "Не удалось перевести",
   reviewTitle: "Память разговора",
   reviewHint: "Проверьте подготовку. Она попадёт в подсказки только после подтверждения и будет использована один раз — в следующем реальном звонке.",
   objective: "Цель", facts: "Факты (по одному в строке)", questions: "Вопросы, которые вы хотите задать",
@@ -112,16 +192,23 @@ const L = RU ? {
   memUnavailable: "Память разговора недоступна.", closed: "Соединение закрыто.",
   greet: (n) => n ? ("Привет, " + n + "! 👋") : "Привет! 👋",
   greetTag: "Приветствие TalkHint — не реплика Emma",
+  hintChip: "Что сказать?", soon: "Скоро — нужна поддержка движка",
+  quitTitle: "Завершить тренировку?",
+  quitBody: "Из ваших реплик будет создана память разговора — проверьте и подтвердите её, чтобы использовать в реальном звонке.",
+  quitBodyEmpty: "Вы ещё ничего не сказали. Память разговора не будет создана.",
+  continueBtn: "Продолжить", endBtn: "Завершить",
+  mSubs: "Субтитры", mMute: "Звук Emma", mTutor: "Сменить репетитора", mEnd: "Завершить тренировку",
+  on: "Вкл", off: "Выкл",
 } : {
   loading: "Loading Emma…", connecting: "Connecting…", ready: "Hold to talk",
   recording: "Listening…", processing: "Emma is thinking…", speaking: "Emma is speaking…",
-  speakingLocked: "Emma is speaking — mic returns after her reply",
-  error: "Connection error", retry: "Retry", end: "End practice",
+  speakingLocked: "Emma is speaking…",
+  error: "Connection error", retry: "Retry",
   ending: "Finishing practice…", memPending: "Preparing your call notes…",
   micDenied: "Microphone access denied", notConfigured: "Tutor is not configured.",
   engineDown: "Tutor engine is unavailable.",
-  replay: "▶ Play again", copy: "Copy", copied: "Copied",
-  translate: "Перевод", translating: "Переводим…", translateFailed: "Не удалось перевести",
+  replay: "🔊", copy: "⧉", copied: "✓",
+  translate: "文А", translating: "…", translateFailed: "Не удалось перевести",
   reviewTitle: "Call memory",
   reviewHint: "Review your preparation. It reaches live hints only after you confirm it, and is used once — in your next real call.",
   objective: "Objective", facts: "Facts (one per line)", questions: "Questions you want to ask",
@@ -131,6 +218,13 @@ const L = RU ? {
   memUnavailable: "Call memory is unavailable.", closed: "Connection closed.",
   greet: (n) => n ? ("Hi, " + n + "! 👋") : "Hi! 👋",
   greetTag: "TalkHint greeting — not an Emma reply",
+  hintChip: "What to say?", soon: "Coming soon — needs engine support",
+  quitTitle: "End the practice?",
+  quitBody: "We'll build call memory from what you said — review and confirm it to use in a real call.",
+  quitBodyEmpty: "You haven't said anything yet. No call memory will be created.",
+  continueBtn: "Continue", endBtn: "End",
+  mSubs: "Subtitles", mMute: "Emma's voice", mTutor: "Change tutor", mEnd: "End practice",
+  on: "On", off: "Off",
 };
 
 // ---- Auth: token NEVER travels in the page URL. ---------------------------
@@ -155,8 +249,7 @@ let state = "LOADING";
 const micBtn = document.getElementById("micBtn");
 const stateLabel = document.getElementById("stateLabel");
 const retryBtn = document.getElementById("retryBtn");
-const endBtn = document.getElementById("endBtn");
-endBtn.textContent = L.end; retryBtn.textContent = L.retry;
+retryBtn.textContent = L.retry;
 
 function render() {
   const labels = { LOADING: L.loading, READY: L.ready, RECORDING: L.recording,
@@ -168,6 +261,7 @@ function render() {
   micBtn.classList.toggle("think", state === "PROCESSING" || state === "SPEAKING");
   retryBtn.style.display = state === "ERROR" ? "" : "none";
   micBtn.style.display = state === "ERROR" ? "none" : "";
+  hintChip.style.display = state === "READY" ? "" : "none";
 }
 function dispatch(ev) {
   const next = pttNext(state, ev);
@@ -177,6 +271,19 @@ function dispatch(ev) {
   render();
   return true;
 }
+
+// ---- Chrome: hint chip, side buttons, toast --------------------------------
+const hintChip = document.getElementById("hintChip");
+hintChip.textContent = "💡 " + L.hintChip;
+const toast = document.getElementById("toast");
+let toastT = null;
+function showToast(t) { toast.textContent = t; toast.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(()=>toast.classList.remove("show"), 1800); }
+// Keyboard / attach / hint / change-tutor need engine-side support (text turns,
+// files, suggestions) — honest "soon" toast, no fake behavior.
+hintChip.onclick = () => showToast(L.soon);
+document.getElementById("kbBtn").onclick = () => showToast(L.soon);
+document.getElementById("attachBtn").onclick = () => showToast(L.soon);
+
 render();
 
 // ---- Conversation feed -----------------------------------------------------
@@ -196,11 +303,13 @@ function finishTutorCard(el, text, audioBufs) {
   if (audioBufs.length) {
     const play = document.createElement("button");
     play.textContent = L.replay;
+    play.setAttribute("aria-label", "replay");
     play.onclick = () => replayAudio(audioBufs, text);
     acts.appendChild(play);
   }
   const copy = document.createElement("button");
   copy.textContent = L.copy;
+  copy.setAttribute("aria-label", "copy");
   copy.onclick = async () => { try { await navigator.clipboard.writeText(text); copy.textContent = L.copied; setTimeout(()=>copy.textContent=L.copy, 1200); } catch(_){} };
   acts.appendChild(copy);
   // "Перевод": on-demand RU translation of THIS card's exact text via our
@@ -209,6 +318,7 @@ function finishTutorCard(el, text, audioBufs) {
   const tr = document.createElement("button");
   tr.className = "translateBtn";
   tr.textContent = L.translate;
+  tr.setAttribute("aria-label", "translate");
   const trBox = document.createElement("div");
   trBox.className = "translation";
   let trLoaded = false, trLoading = false;
@@ -236,6 +346,59 @@ function finishTutorCard(el, text, audioBufs) {
   el.appendChild(trBox);
   feed.scrollTop = feed.scrollHeight;
 }
+
+// ---- Fullscreen + subtitles + mute -----------------------------------------
+const subs = document.getElementById("subs");
+let subsOn = true, mutedFlag = false;
+function setFs(on) { document.body.classList.toggle("fs", on); subs.classList.toggle("on", on && subsOn); }
+document.getElementById("expandBtn").onclick = () => setFs(true);
+function updateSubs(text) { subs.textContent = text || ""; }
+
+// ---- Settings popover --------------------------------------------------------
+const menu = document.getElementById("menu");
+const menuBackdrop = document.getElementById("menuBackdrop");
+const mSubs = document.getElementById("mSubs");
+const mMute = document.getElementById("mMute");
+const mTutor = document.getElementById("mTutor");
+const mEnd = document.getElementById("mEnd");
+mSubs.children[1].textContent = L.mSubs;
+mMute.children[1].textContent = L.mMute;
+mTutor.children[1].textContent = L.mTutor;
+mEnd.children[1].textContent = L.mEnd;
+function renderMenu() {
+  mSubs.querySelector(".val").textContent = subsOn ? L.on : L.off;
+  mMute.querySelector(".val").textContent = mutedFlag ? L.off : L.on;
+  mMute.querySelector(".ic").textContent = mutedFlag ? "🔇" : "🔊";
+  document.getElementById("muteBtn").textContent = mutedFlag ? "🔇" : "🔊";
+}
+function toggleMenu(show) { menu.classList.toggle("show", show); menuBackdrop.classList.toggle("show", show); if (show) renderMenu(); }
+document.getElementById("gearBtn").onclick = () => toggleMenu(!menu.classList.contains("show"));
+menuBackdrop.onclick = () => toggleMenu(false);
+mSubs.onclick = () => { subsOn = !subsOn; subs.classList.toggle("on", document.body.classList.contains("fs") && subsOn); renderMenu(); };
+mMute.onclick = () => { mutedFlag = !mutedFlag; renderMenu(); };
+mTutor.onclick = () => showToast(L.soon);
+mEnd.onclick = () => { toggleMenu(false); openQuitSheet(); };
+document.getElementById("muteBtn").onclick = () => { mutedFlag = !mutedFlag; renderMenu(); };
+
+// ---- Quit confirmation sheet ---------------------------------------------------
+const quitSheet = document.getElementById("quitSheet");
+quitSheet.querySelector("h3").textContent = L.quitTitle;
+document.getElementById("continueBtn").textContent = L.continueBtn;
+const endBtn = document.getElementById("endBtn");
+endBtn.textContent = L.endBtn;
+let saidAnything = false;
+function openQuitSheet() {
+  quitSheet.querySelector("p").textContent = saidAnything ? L.quitBody : L.quitBodyEmpty;
+  document.body.classList.add("sheet");
+}
+function closeQuitSheet() { document.body.classList.remove("sheet"); }
+document.getElementById("continueBtn").onclick = closeQuitSheet;
+document.getElementById("sheetBackdrop").onclick = closeQuitSheet;
+document.getElementById("xBtn").onclick = () => {
+  if (document.body.classList.contains("fs")) { setFs(false); return; }
+  if (!sessionId) { notifyNative({ event: "closeRequested" }); return; }
+  openQuitSheet();
+};
 
 // ---- Avatar + lip-sync -----------------------------------------------------
 let head = null;
@@ -269,6 +432,10 @@ async function speakBuffer(buf, subtitleText, engineTimings, latencyMark) {
   if (engineTimings?.words?.length) { timing = engineTimings; lipDiag.timingsFromEngine = true; }
   else { timing = deriveTimings(subtitleText, audio.duration * 1000); if (timing) lipDiag.timingsDerived = true; }
   lipDiag.speakAudioCalled = true;
+  // Mute = user chose silence: still lip-sync/subtitle, but zero the samples.
+  if (mutedFlag) {
+    for (let c = 0; c < audio.numberOfChannels; c++) audio.getChannelData(c).fill(0);
+  }
   head.speakAudio(timing ? { audio, ...timing } : { audio, words: [], wtimes: [], wdurations: [] });
   lipDiag.playbackStarted = true;
   reportLipDiag();
@@ -327,6 +494,7 @@ async function connect() {
   catch (e) { stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return; }
   if (!status.configured) { stateLabel.textContent = L.notConfigured; return; }
   if (!status.ready) { stateLabel.textContent = L.engineDown; return; }
+  if (status.tutor?.name) document.getElementById("title").textContent = status.tutor.name;
 
   if (!head) {
     try {
@@ -382,12 +550,12 @@ function onWsMessage(e) {
       speakBuffer(e.data, meta.subtitle || tutorText, tutorAudio[tutorAudio.length-1].timings, lmark).catch(err => console.error("TTS play failed", err));
       if (!tutorCard) tutorCard = addCard("tutor");
       tutorCard.textContent = tutorText || meta.subtitle || "…";
+      updateSubs(tutorText || meta.subtitle || "");
     }
     return;
   }
   let msg; try { msg = JSON.parse(e.data); } catch { return; }
   if (msg.type === "session.ready") {
-    endBtn.style.display = "";
     notifyNative({ event: "wsReady" });
     dispatch("ready");
   }
@@ -399,9 +567,10 @@ function onWsMessage(e) {
     if (!userCard) userCard = addCard("user");
     userCard.classList.remove("pending");
     userCard.textContent = msg.text || "";
+    if ((msg.text || "").trim()) saidAnything = true;
     userCard = null;
   }
-  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; tutorText += msg.text || msg.delta || ""; if (tutorCard) tutorCard.textContent = tutorText; }
+  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; tutorText += msg.text || msg.delta || ""; if (tutorCard) tutorCard.textContent = tutorText; updateSubs(tutorText); }
   else if (msg.type === "tutor.audio.chunk") pendingTtsMeta = msg;
   else if (msg.type === "turn.completed") {
     if (tutorCard) { finishTutorCard(tutorCard, tutorText || tutorCard.textContent, tutorAudio.slice()); }
@@ -456,8 +625,12 @@ micBtn.addEventListener("pointerleave", (e) => { if (state === "RECORDING") rele
 retryBtn.onclick = () => { dispatch("retry"); connect(); };
 
 // ---- End practice + Call Memory -------------------------------------------
+let endInFlight = false; // one-shot guard: two rapid taps must never fire two /end calls
 endBtn.onclick = async () => {
-  if (!sessionId) return;
+  if (!sessionId || endInFlight) return;
+  endInFlight = true;
+  closeQuitSheet();
+  setFs(false);
   endBtn.disabled = true;
   dispatch("end");
   stopMic();

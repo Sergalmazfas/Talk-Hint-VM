@@ -32,7 +32,8 @@ describe("tutor card translation", () => {
   it("the /tutor page renders a translate button under tutor cards", () => {
     expect(TUTOR_AVATAR_PAGE_HTML).toContain('tr.className = "translateBtn"');
     expect(TUTOR_AVATAR_PAGE_HTML).toContain("L.translate");
-    expect(TUTOR_AVATAR_PAGE_HTML).toContain('translate: "Перевод"');
+    // v3 design (Praktika-style): the translate action is an icon button.
+    expect(TUTOR_AVATAR_PAGE_HTML).toContain('translate: "文А"');
     // Toggling: repeated tap hides the translation box.
     expect(TUTOR_AVATAR_PAGE_HTML).toContain('trBox.classList.remove("show")');
     // The button calls our backend, not the engine.
