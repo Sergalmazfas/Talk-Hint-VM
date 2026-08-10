@@ -2,9 +2,7 @@
 type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
 export const modules: ModuleMap = {
   "./components/mockups/tutor-v4/Dialog.tsx": () => import("../components/mockups/tutor-v4/Dialog.tsx"),
-  "./components/mockups/tutor-v4/FramingClose.tsx": () => import("../components/mockups/tutor-v4/FramingClose.tsx"),
   "./components/mockups/tutor-v4/FramingHalf.tsx": () => import("../components/mockups/tutor-v4/FramingHalf.tsx"),
-  "./components/mockups/tutor-v4/FramingWide.tsx": () => import("../components/mockups/tutor-v4/FramingWide.tsx"),
   "./components/mockups/tutor-v4/LongConversation.tsx": () => import("../components/mockups/tutor-v4/LongConversation.tsx"),
   "./components/mockups/tutor-v4/Ready.tsx": () => import("../components/mockups/tutor-v4/Ready.tsx"),
   "./components/mockups/tutor-v4/Recording.tsx": () => import("../components/mockups/tutor-v4/Recording.tsx"),

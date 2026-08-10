@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Copy, Expand, Keyboard, Languages, Lightbulb, Mic, Paperclip, Settings, Volume2, X } from "lucide-react";
+import { Copy, Keyboard, Languages, Lightbulb, Mic, Paperclip, Settings, Volume2, X } from "lucide-react";
 import "../_group.css";
 
 type Message = { who:"emma"|"user"; text:string; translation?:string; actions?:boolean };
@@ -36,7 +36,6 @@ export function TutorScreen({image="emma-half.png", messages=[{who:"emma",text:"
         </div>}
         <div className="absolute bottom-4 right-4 flex gap-2">
           <IconButton label="Громкость" className="h-9 w-9 border border-white/30 bg-black/20 text-white backdrop-blur-md"><Volume2 size={16}/></IconButton>
-          <IconButton label="Развернуть" className="h-9 w-9 border border-white/30 bg-black/20 text-white backdrop-blur-md"><Expand size={16}/></IconButton>
         </div>
       </section>
       <section className={`mt-4 min-h-0 flex-1 overflow-y-auto pr-1 ${long?"[mask-image:linear-gradient(to_bottom,transparent,black_9%,black_100%)]":""}`}>
