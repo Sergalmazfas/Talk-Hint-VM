@@ -17,8 +17,9 @@ const SILENT_MP3_B64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAA
 const DRIVER = `<script>
 (() => {
   const STATE = new URLSearchParams(location.search).get("state") || "ready";
-  // RU UI like the user's phone.
-  try { Object.defineProperty(navigator, "language", { get: () => "ru-RU" }); } catch(_){}
+  // RU UI like the user's phone (?lang=en previews the English chrome).
+  const LANG = new URLSearchParams(location.search).get("lang") === "en" ? "en-US" : "ru-RU";
+  try { Object.defineProperty(navigator, "language", { get: () => LANG }); } catch(_){}
   location.hash = "#auth=preview";
 
   const b64 = "${SILENT_MP3_B64}";
@@ -74,7 +75,7 @@ const DRIVER = `<script>
       if (typeof d !== "string") return; // pcm frames swallowed
       let m; try { m = JSON.parse(d); } catch { return; }
       if (m.type === "auth") setTimeout(() => emit({ type: "session.ready" }), 80);
-      if (m.type === "audio.end") setTimeout(() => onUtterance(), 250);
+      if (m.type === "audio.end") setTimeout(() => onUtterance(), 120);
     }
     close() { this.readyState = 3; this.onclose?.({ code: 1000, reason: "" }); }
   }
@@ -88,7 +89,7 @@ const DRIVER = `<script>
   const pev = (t) => new PointerEvent(t, { bubbles: true, cancelable: true });
   async function waitReady(timeout = 40000) {
     const t0 = Date.now();
-    while (Date.now() - t0 < timeout) { if (mic() && !mic().disabled) return true; await sleep(200); }
+    while (Date.now() - t0 < timeout) { if (mic() && !mic().disabled) return true; await sleep(100); }
     return false;
   }
   function tutorReply(userText, tutorText) {
@@ -97,12 +98,13 @@ const DRIVER = `<script>
     emit({ type: "tutor.audio.chunk", format: "mp3", subtitle: tutorText });
     emitBin();
   }
+  // Headless screenshots race the scenario: emit the realtime turn directly
+  // (same tutor-realtime/1.0 shapes) instead of holding the mic in real time.
   async function fullTurn(userText, tutorText) {
-    mic().dispatchEvent(pev("pointerdown"));
-    await sleep(900);
-    onUtterance = () => { tutorReply(userText, tutorText); setTimeout(() => emit({ type: "turn.completed" }), 700); };
-    mic().dispatchEvent(pev("pointerup"));
-    await sleep(2200);
+    tutorReply(userText, tutorText);
+    await sleep(60);
+    emit({ type: "turn.completed" });
+    await sleep(60);
   }
   const CORRECTION = 'Better: "I want to ask my lawyer."\\nAfter \\'want\\' we use \\'to + verb\\'.';
   const REPLY2 = "Great! You can say: \\'I\\'m calling about my documents.\\' What do you need from them?";
@@ -110,20 +112,20 @@ const DRIVER = `<script>
   // ---- scenarios ------------------------------------------------------------
   window.addEventListener("load", async () => {
     if (!(await waitReady())) return;
-    await sleep(300);
+    await sleep(60);
     if (STATE === "ready") return;
     if (STATE === "error") { sock.readyState = 3; sock.onclose?.({ code: 4400, reason: "preview" }); return; }
     if (STATE === "recording") { mic().dispatchEvent(pev("pointerdown")); return; }
-    if (STATE === "processing") { mic().dispatchEvent(pev("pointerdown")); await sleep(900); onUtterance = () => {}; mic().dispatchEvent(pev("pointerup")); return; }
+    if (STATE === "processing") { mic().dispatchEvent(pev("pointerdown")); await sleep(350); onUtterance = () => {}; mic().dispatchEvent(pev("pointerup")); return; }
     if (STATE === "speaking") {
-      mic().dispatchEvent(pev("pointerdown")); await sleep(900);
+      mic().dispatchEvent(pev("pointerdown")); await sleep(350);
       onUtterance = () => tutorReply("I want ask my lawyer.", CORRECTION); // no turn.completed → stays SPEAKING
       mic().dispatchEvent(pev("pointerup")); return;
     }
     if (STATE === "dialog" || STATE === "translate") {
       await fullTurn("I want ask my lawyer.", CORRECTION);
       await fullTurn("Tomorrow I call the office about my documents.", REPLY2);
-      if (STATE === "translate") { await sleep(400); const btns = document.querySelectorAll(".card.tutor .translateBtn"); btns[btns.length-1]?.click(); }
+      if (STATE === "translate") { await sleep(120); const btns = document.querySelectorAll(".card.tutor .translateBtn"); btns[btns.length-1]?.click(); }
       return;
     }
     if (STATE === "long") {
@@ -138,14 +140,21 @@ const DRIVER = `<script>
       await fullTurn("I want ask my lawyer.", CORRECTION);
       // Traverse the REAL user path: X → quit sheet → «Завершить».
       document.getElementById("xBtn").click();
-      await sleep(400);
+      await sleep(60);
       document.getElementById("endBtn").click();
-      if (STATE === "confirmed") { await sleep(1200); document.getElementById("confirmBtn").click(); }
+      if (STATE === "confirmed") { await sleep(60); document.getElementById("confirmBtn").click(); }
       return;
     }
-    if (STATE === "fullscreen") {
+    if (STATE === "text") {
       await fullTurn("I want ask my lawyer.", CORRECTION);
-      document.getElementById("expandBtn").click();
+      document.getElementById("kbBtn").click();
+      const inp = document.getElementById("composerInput");
+      inp.value = "Can I ask about my documents?"; inp.blur();
+      return;
+    }
+    if (STATE === "attach") {
+      await fullTurn("I want ask my lawyer.", CORRECTION);
+      document.getElementById("attachBtn").click();
       return;
     }
     if (STATE === "menu") { document.getElementById("gearBtn").click(); return; }

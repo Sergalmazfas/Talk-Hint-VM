@@ -73,3 +73,5 @@ Rule: a guest question whose hint is dropped must be captured EAGERLY at the nex
 
 ## Goal-achieved is informational only (user requirement, 2026-08-08)
 The user explicitly requires: the system must never decide the call is "over" and stop hints — while the guest talks, hints continue like a prompter. goal_achieved now only fires the UI event + one closing phrase on the achieving turn; it never suppresses later suggestions (all hard-stop checks removed from the hint path). Do NOT reintroduce goal-based hint suppression.
+
+**Tutor page late-audio guard:** a tutor audio frame arriving after turn.completed must NOT dispatch tutorSpeaking from READY (no later completion would release the mic); play audio, keep state. Also fallback (no-avatar) BufferSources are tracked and stopped on end/retry/ws-close.

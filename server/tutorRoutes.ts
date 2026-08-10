@@ -1,6 +1,7 @@
 // API routes for the AI Tutor (external Tutor Engine) integration.
 // The engine API key never leaves the backend: these routes proxy capabilities,
 // manifest, and session creation, and return only client-safe data.
+import path from "path";
 import type { Express } from "express";
 import { authMiddleware } from "./auth";
 import {
@@ -65,6 +66,14 @@ export function registerTutorRoutes(app: Express) {
   // normal Bearer session token which the page passes to our /api/tutor calls.
   app.get("/tutor", (_req, res) => {
     res.type("html").send(TUTOR_AVATAR_PAGE_HTML);
+  });
+
+  // Static blurred-scene background for the avatar card (freeze §2). No auth
+  // needed: it is a decorative image with no user data.
+  app.get("/tutor/bg.png", (_req, res) => {
+    res.sendFile(path.resolve(import.meta.dirname, "assets", "tutor-bg.png"), {
+      maxAge: "1d",
+    } as any);
   });
 
   // DEV-ONLY visual review of the real tutor page states (task 144). Serves
