@@ -10,6 +10,13 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
 
     private var webView: WKWebView!
 
+    // Dedicated session feel (spec §11): the normal TalkHint tab bar is hidden
+    // for the whole practice session; Back returns to the prior screen.
+    override var hidesBottomBarWhenPushed: Bool {
+        get { true }
+        set { }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Репетитор Emma"
