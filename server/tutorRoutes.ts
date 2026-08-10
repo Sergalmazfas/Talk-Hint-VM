@@ -30,6 +30,7 @@ import {
 } from "./tutorStorage";
 import { TUTOR_AVATAR_PAGE_HTML } from "./tutorAvatarPage";
 import { translateTutorText, validateTranslateInput } from "./tutorTranslate";
+import { storage } from "./storage";
 
 // Users only ever see a safe connection error; full detail goes to the log.
 function safeEngineError(res: any, err: any) {
@@ -44,6 +45,20 @@ function safeEngineError(res: any, err: any) {
   return res.status(500).json({ error: "tutor_internal", message: "Внутренняя ошибка." });
 }
 
+// Greeting name for the avatar page's LOCAL welcome card. Priority:
+// 1) the display name of the user's first phone number (set at provisioning,
+//    e.g. "Leo"), 2) the email local part. Never invented, never engine-side.
+async function getTutorDisplayName(user: { id: string; email: string }): Promise<string> {
+  try {
+    const numbers = await storage.getUserPhoneNumbers(user.id);
+    const named = numbers.find((n) => n.name && n.name.trim());
+    if (named) return named.name.trim();
+  } catch (err) {
+    console.error("[Tutor] displayName lookup failed (falling back to email):", err);
+  }
+  return (user.email.split("@")[0] || "").trim();
+}
+
 export function registerTutorRoutes(app: Express) {
   // The avatar page rendered inside the iOS WKWebView. Auth happens via the
   // normal Bearer session token which the page passes to our /api/tutor calls.
@@ -52,12 +67,17 @@ export function registerTutorRoutes(app: Express) {
   });
 
   // Client-safe status: capabilities + avatar assets. No API key material.
-  app.get("/api/tutor/status", authMiddleware, async (_req, res) => {
+  app.get("/api/tutor/status", authMiddleware, async (req, res) => {
+    const user = (req as any).user;
     if (!tutorEngineConfigured()) {
       return res.json({ configured: false, ready: false, callMemoryReady: false });
     }
     try {
-      const [caps, tutor] = await Promise.all([getCapabilities(), getTutorManifest()]);
+      const [caps, tutor, displayName] = await Promise.all([
+        getCapabilities(),
+        getTutorManifest(),
+        getTutorDisplayName(user),
+      ]);
       const cs = Array.isArray(caps.code_switching) ? caps.code_switching : [];
       const practiceReady = caps.realtime_audio === true && caps.avatar === true;
       res.json({
@@ -76,6 +96,10 @@ export function registerTutorRoutes(app: Express) {
           assetVersion: tutor.asset_version ?? tutor.avatar?.asset_version ?? null,
         },
         engineBase: getTutorEngineBase(),
+        // Client-safe greeting name for the local welcome card ("Привет, Имя").
+        // Derived from the user's own profile (phone display name, else the
+        // email local part) — never from engine content.
+        displayName,
       });
     } catch (err) {
       safeEngineError(res, err);

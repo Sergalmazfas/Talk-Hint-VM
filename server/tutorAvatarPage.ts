@@ -36,6 +36,9 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   .card.tutor .acts button:active{color:#4f46e5}
   .card .translation{margin-top:8px;padding-top:8px;border-top:1px solid #e6e8f2;font-size:15px;color:#4b4f66;display:none}
   .card .translation.show{display:block}
+  /* Local greeting card: rendered by THIS page (not engine content), so it is
+     visually marked with a small label to keep the engine contract honest. */
+  .card.local .localTag{display:block;margin-top:6px;font-size:11px;color:#8a8ea2}
   /* Bottom hold-to-talk area */
   #bottom{flex:0 0 auto;padding:6px 16px calc(14px + env(safe-area-inset-bottom));display:flex;flex-direction:column;align-items:center;gap:6px;background:linear-gradient(#f4f5f900,#f4f5f9 30%)}
   #stateLabel{font-size:14px;color:#6b6f85;min-height:18px;text-align:center}
@@ -107,6 +110,8 @@ const L = RU ? {
   confirm: "Сохранить и подтвердить", saving: "Сохраняем…",
   confirmed: "Готово! Подготовка будет использована в вашем следующем реальном звонке.",
   memUnavailable: "Память разговора недоступна.", closed: "Соединение закрыто.",
+  greet: (n) => n ? ("Привет, " + n + "! 👋") : "Привет! 👋",
+  greetTag: "Приветствие TalkHint — не реплика Emma",
 } : {
   loading: "Loading Emma…", connecting: "Connecting…", ready: "Hold to talk",
   recording: "Listening…", processing: "Emma is thinking…", speaking: "Emma is speaking…",
@@ -124,6 +129,8 @@ const L = RU ? {
   confirm: "Save and confirm", saving: "Saving…",
   confirmed: "Done! Your preparation will be used in your next real call.",
   memUnavailable: "Call memory is unavailable.", closed: "Connection closed.",
+  greet: (n) => n ? ("Hi, " + n + "! 👋") : "Hi! 👋",
+  greetTag: "TalkHint greeting — not an Emma reply",
 };
 
 // ---- Auth: token NEVER travels in the page URL. ---------------------------
@@ -232,6 +239,7 @@ function finishTutorCard(el, text, audioBufs) {
 
 // ---- Avatar + lip-sync -----------------------------------------------------
 let head = null;
+let greeted = false; // local wave+greeting shown at most once per page load
 // Lip-sync diagnostics (spec §8): report what actually happened, never fake.
 const lipDiag = { audioArrived: false, timingsFromEngine: false, timingsDerived: false, speakAudioCalled: false, playbackStarted: false };
 function reportLipDiag() { notifyNative({ event: "lipsyncDiag", ...lipDiag }); }
@@ -327,6 +335,20 @@ async function connect() {
       const url = status.tutor.glbUrl + (status.tutor.assetVersion ? "?v=" + encodeURIComponent(status.tutor.assetVersion) : "");
       await head.showAvatar({ url, body: status.tutor.body || "F" });
     } catch (e) { stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return; }
+  }
+
+  // Local welcome (once per page load, NOT engine content): Emma waves and a
+  // clearly-labelled local card greets the user by name. No TTS is invented —
+  // TalkHint only ever voices audio actually received from the engine.
+  if (!greeted) {
+    greeted = true;
+    try { head.playGesture("handup", 3, false, 800); } catch(e) { console.warn("wave gesture failed", e); }
+    const g = addCard("tutor local");
+    g.textContent = L.greet(status.displayName || "");
+    const tag = document.createElement("div");
+    tag.className = "localTag";
+    tag.textContent = L.greetTag;
+    g.appendChild(tag);
   }
 
   stateLabel.textContent = L.connecting;
