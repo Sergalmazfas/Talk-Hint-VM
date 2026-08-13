@@ -171,6 +171,12 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   #startSheet{text-align:center}
   #startSheet h3{font-size:21px;font-weight:800;margin-bottom:8px}
   #startSheet p{font-size:13px;line-height:1.4;color:#77717d;margin-bottom:16px}
+  /* Tutor catalog picker (dynamic from the engine — never hardcoded ids) */
+  #tutorRow{display:flex;gap:10px;justify-content:center;margin:0 0 14px;flex-wrap:wrap}
+  .tutorChip{border:2px solid transparent;border-radius:16px;background:#f7f6f9;padding:8px 10px;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:76px;font-family:inherit}
+  .tutorChip img{width:56px;height:56px;border-radius:50%;object-fit:cover;background:#e8e4ee}
+  .tutorChip .tName{font-size:12px;font-weight:700;color:#29252f}
+  .tutorChip.sel{border-color:#7c3aed;background:#f3ecfd}
   #simSheet h3{font-size:19px;font-weight:800;margin-bottom:10px;text-align:center}
   #simSheet label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a8792;margin:12px 0 5px}
   #simSheet input,#simSheet textarea,#simSheet select{width:100%;background:#fff;border:1px solid #e5e0e9;border-radius:14px;color:#29252f;padding:11px 12px;font-size:14px;font-family:inherit}
@@ -277,6 +283,7 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   <div class="grab"></div>
   <h3></h3>
   <p></p>
+  <div id="tutorRow"></div>
   <button class="primary" id="freeBtn"></button>
   <button class="secondary" id="simBtn"></button>
 </div>
@@ -468,7 +475,7 @@ function render() {
   // turn.completed arrives the mic stays disabled and the label says so —
   // the PTT machine itself is NOT driven by this flag.
   if (openingPending && (state === "READY" || state === "PROCESSING")) label = L.openingWait;
-  stateLabel.textContent = label;
+  stateLabel.textContent = tn(label);
   micBtn.disabled = openingPending || !(state === "READY" || state === "RECORDING");
   micBtn.classList.toggle("rec", state === "RECORDING");
   document.body.classList.toggle("recording", state === "RECORDING");
@@ -662,7 +669,19 @@ document.getElementById("xBtn").onclick = () => {
 
 // ---- Avatar + lip-sync -----------------------------------------------------
 let head = null;
-let avatarFailed = false; // WebGL/CDN failure → practice continues w/o 3D
+let avatarFailedKey = null; // tutorKey whose avatar init failed — a DIFFERENT tutor may still retry
+let lastGlbObjectUrl = null; // blob: URL of the currently shown model (revoked on replace)
+// Tutor display name substitution: UI strings were written for Emma; the name
+// now comes from the live catalog. Single substitution point, no string dupes.
+let tutorName = "Emma";
+const tn = (s) => String(s).split("Emma").join(tutorName);
+function applyTutorName() {
+  document.getElementById("title").textContent = tutorName;
+  startSheet.querySelector("p").textContent = tn(L.startSub);
+  document.getElementById("lSimEmma").textContent = tn(L.simEmmaL);
+  mMute.children[1].textContent = tn(L.mMute);
+  document.getElementById("reviewHint").textContent = tn(L.reviewHint);
+}
 let fallbackCtx = null;   // audio playback path when the avatar is absent
 const fallbackSources = new Set(); // live BufferSources so we can stop them on end/retry/close
 function stopFallbackAudio() {
@@ -771,6 +790,9 @@ let engineTurnLabel = null;       // engine turn.state → truthful waiting labe
 let currentHint = null;           // latest engine hint {text, translation} — spec §§1-3
 let hintCardEl = null;            // rendered hint card (dismissible)
 let simulation = null;            // active simulation config {goal, learnerRole, tutorRole, memoryId} or null
+let selectedTutorId = null;       // tutor chosen from the dynamic engine catalog (never hardcoded)
+let loadedTutorKey = null;        // tutorId@assetVersion currently shown by TalkingHead
+const glbPrefetch = {};           // tutorKey -> Promise<local GLB url> (prefetch on selection)
 let openingPending = false;       // simulation opening turn in flight — mic gated until turn.completed
 
 // Shared PURE classifier for engine events beyond the PTT machine — the same
@@ -829,28 +851,77 @@ function showCorrectionCard(c) {
   scrollFeed();
 }
 
+// Persistent GLB cache (Cache API), key = tutor_id + asset_version. Cache hit
+// = zero network; version change = download once + evict older versions of the
+// SAME tutor. Falls back to a direct URL when Cache API is unavailable.
+async function loadGlbUrl(t) {
+  const version = t.assetVersion != null ? String(t.assetVersion) : "0";
+  const cachePath = "/glb-cache/" + encodeURIComponent(t.tutorId) + "/" + encodeURIComponent(version);
+  try {
+    const cache = await caches.open("tutor-glb-v1");
+    let res = await cache.match(cachePath);
+    if (!res) {
+      const net = await fetch(t.glbUrl);
+      if (!net.ok) throw new Error("glb http " + net.status);
+      await cache.put(cachePath, net.clone());
+      const prefix = "/glb-cache/" + encodeURIComponent(t.tutorId) + "/";
+      for (const k of await cache.keys()) {
+        const p = new URL(k.url).pathname;
+        if (p.startsWith(prefix) && p !== cachePath) cache.delete(k); // evict old versions
+      }
+      res = await cache.match(cachePath);
+    }
+    return URL.createObjectURL(await res.blob());
+  } catch (e) {
+    console.warn("GLB cache unavailable — loading directly", e);
+    return t.glbUrl + (t.assetVersion ? "?v=" + encodeURIComponent(t.assetVersion) : "");
+  }
+}
+function prefetchTutorGlb(t) {
+  if (!t || !t.glbUrl) return;
+  const key = t.tutorId + "@" + (t.assetVersion ?? "0");
+  if (!glbPrefetch[key]) glbPrefetch[key] = loadGlbUrl(t);
+}
+
 async function connect(simCfg) {
   if (simCfg !== undefined) simulation = simCfg; // retry re-uses the stored config (deliberate user action)
   state = "LOADING"; render();
   let status;
-  try { status = await api("/api/tutor/status"); }
+  try { status = await api("/api/tutor/status" + (selectedTutorId ? "?tutorId=" + encodeURIComponent(selectedTutorId) : "")); }
   catch (e) { stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return; }
   if (!status.configured) { stateLabel.textContent = L.notConfigured; return; }
   if (!status.ready) { stateLabel.textContent = L.engineDown; return; }
-  if (status.tutor?.name) document.getElementById("title").textContent = status.tutor.name;
+  if (status.tutor?.name) { tutorName = status.tutor.name; applyTutorName(); }
 
-  if (!head && !avatarFailed) {
+  const tutorKey = status.tutor ? status.tutor.tutorId + "@" + (status.tutor.assetVersion ?? "0") : null;
+  // A failure only blocks retries of the SAME tutorKey — picking a different
+  // tutor (or a new asset version) gets a fresh attempt.
+  if (status.tutor?.glbUrl && (!head || loadedTutorKey !== tutorKey) && avatarFailedKey !== tutorKey) {
     try {
-      const { TalkingHead } = await import("talkinghead");
-      // Half-body framing per freeze §2: face in the upper third of the card.
-      head = new TalkingHead(document.getElementById("avatar"), { cameraView: "upper", ttsEndpoint: "none" });
-      const url = status.tutor.glbUrl + (status.tutor.assetVersion ? "?v=" + encodeURIComponent(status.tutor.assetVersion) : "");
+      if (!head) {
+        const { TalkingHead } = await import("talkinghead");
+        // Half-body framing per freeze §2: face in the upper third of the card.
+        head = new TalkingHead(document.getElementById("avatar"), { cameraView: "upper", ttsEndpoint: "none" });
+      }
+      // Persistent GLB cache keyed by tutor_id + asset_version: repeated
+      // launches load the model locally with zero network (catalog policy).
+      const url = await (glbPrefetch[tutorKey] || (glbPrefetch[tutorKey] = loadGlbUrl(status.tutor)));
       await head.showAvatar({ url, body: status.tutor.body || "F" });
+      loadedTutorKey = tutorKey; avatarFailedKey = null;
+      // Blob lifecycle: revoke the replaced model's URL and any unused
+      // prefetches only AFTER the new model is fully shown.
+      if (lastGlbObjectUrl && lastGlbObjectUrl !== url) URL.revokeObjectURL(lastGlbObjectUrl);
+      lastGlbObjectUrl = url.startsWith("blob:") ? url : null;
+      for (const k of Object.keys(glbPrefetch)) {
+        if (k === tutorKey) continue;
+        glbPrefetch[k].then((u) => { if (u && u.startsWith("blob:") && u !== lastGlbObjectUrl) URL.revokeObjectURL(u); }).catch(() => {});
+        delete glbPrefetch[k];
+      }
     } catch (e) {
       // Honest degradation: no WebGL / CDN failure must not kill practice.
       // The card keeps its scene background; audio plays without lip-sync.
       console.error("avatar init failed", e);
-      avatarFailed = true; head = null;
+      avatarFailedKey = tutorKey; head = null;
       notifyNative({ event: "avatarInitFailed", message: String(e?.message || e) });
     }
   }
@@ -866,16 +937,21 @@ async function connect(simCfg) {
     g.textContent = L.greet(status.displayName || "");
     const tag = document.createElement("div");
     tag.className = "localTag";
-    tag.textContent = L.greetTag;
+    tag.textContent = tn(L.greetTag);
     g.appendChild(tag);
   }
 
   stateLabel.textContent = L.connecting;
   let session;
   try {
+    // Only the selected tutor_id travels — avatar/voice/persona are frozen by
+    // the engine at creation; internal profile ids are never sent.
+    const createBody = {};
+    if (simulation) createBody.simulation = simulation;
+    if (selectedTutorId) createBody.tutorId = selectedTutorId;
     session = await api("/api/tutor/sessions", {
       method: "POST",
-      body: simulation ? JSON.stringify({ simulation: simulation }) : undefined,
+      body: Object.keys(createBody).length ? JSON.stringify(createBody) : undefined,
     });
   } catch (e) {
     // Fail-closed (contract §1): a simulation create failure is surfaced and
@@ -898,9 +974,9 @@ async function connect(simCfg) {
     if (inj) {
       // Show the echoed injection counts so the user sees what Emma knows.
       const c = addCard("tutor local");
-      c.textContent = L.simKnows(inj.facts ?? 0, inj.questions ?? 0, inj.vocabulary ?? 0);
+      c.textContent = tn(L.simKnows(inj.facts ?? 0, inj.questions ?? 0, inj.vocabulary ?? 0));
       const tag = document.createElement("div");
-      tag.className = "localTag"; tag.textContent = L.simTag;
+      tag.className = "localTag"; tag.textContent = tn(L.simTag);
       c.appendChild(tag);
     }
   }
@@ -987,7 +1063,7 @@ function onWsMessage(e) {
       stopMic();
       turnOpen = false; sentAudio = false; openingPending = true;
       if (state === "RECORDING") state = "PROCESSING";
-      render(); showToast(L.openingWait); return;
+      render(); showToast(tn(L.openingWait)); return;
     }
     console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code });
   }
@@ -1029,7 +1105,7 @@ function onWsMessage(e) {
 // ---- Hold-to-talk gestures -------------------------------------------------
 async function pressDown(ev) {
   ev.preventDefault();
-  if (openingPending) { showToast(L.openingWait); return; } // mic gated until Emma's opening turn completes
+  if (openingPending) { showToast(tn(L.openingWait)); return; } // mic gated until the tutor's opening turn completes
   if (!dispatch("pressDown")) return; // only from READY — no double start
   engineTurnLabel = null; // stale turn.state must not color the new turn
   try { navigator.vibrate?.(10); } catch(_){}
@@ -1210,6 +1286,43 @@ async function openSimSheet(statusText) {
     } catch (e) { console.error("memories load failed", e); }
   }
 }
+// Tutor picker — rendered ONLY from the live catalog; removing a tutor from
+// the engine allow-list makes it disappear here without a client deploy.
+const tutorRow = document.getElementById("tutorRow");
+let tutorList = [];
+try { selectedTutorId = localStorage.getItem("tutorId") || null; } catch (e) {}
+function renderTutorRow() {
+  tutorRow.innerHTML = "";
+  for (const t of tutorList) {
+    const b = document.createElement("button");
+    b.className = "tutorChip" + (t.tutorId === selectedTutorId ? " sel" : "");
+    if (t.previewUrl) { const img = document.createElement("img"); img.src = t.previewUrl; img.alt = ""; b.appendChild(img); }
+    const n = document.createElement("div"); n.className = "tName"; n.textContent = t.name;
+    b.appendChild(n);
+    b.onclick = () => {
+      selectedTutorId = t.tutorId;
+      try { localStorage.setItem("tutorId", t.tutorId); } catch (e) {}
+      tutorName = t.name; applyTutorName(); // header + strings switch immediately
+      renderTutorRow();
+      prefetchTutorGlb(t); // download the GLB before Live so start never waits
+    };
+    tutorRow.appendChild(b);
+  }
+}
+(async () => {
+  try {
+    const d = await api("/api/tutor/tutors");
+    tutorList = Array.isArray(d.tutors) ? d.tutors : [];
+    if (!tutorList.length) { tutorRow.style.display = "none"; return; }
+    if (!selectedTutorId || !tutorList.some((t) => t.tutorId === selectedTutorId)) {
+      selectedTutorId = tutorList.some((t) => t.tutorId === d.defaultTutorId) ? d.defaultTutorId : tutorList[0].tutorId;
+    }
+    renderTutorRow();
+    const cur = tutorList.find((t) => t.tutorId === selectedTutorId);
+    if (cur) { tutorName = cur.name; applyTutorName(); prefetchTutorGlb(cur); }
+  } catch (e) { console.error("tutor catalog load failed", e); tutorRow.style.display = "none"; }
+})();
+
 freeBtn.onclick = () => { document.body.classList.remove("sheet-start"); connect(null); };
 simBtn.onclick = () => openSimSheet("");
 document.getElementById("simBackBtn").onclick = openStartChoice;
@@ -1218,7 +1331,7 @@ document.getElementById("simStartBtn").onclick = () => {
   const tutorRole = document.getElementById("simEmma").value.trim();
   const learnerRole = document.getElementById("simYou").value.trim();
   if (!goal) { simStatus.textContent = L.simGoalReq; return; }
-  if (!tutorRole) { simStatus.textContent = L.simEmmaReq; return; }
+  if (!tutorRole) { simStatus.textContent = tn(L.simEmmaReq); return; }
   const cfg = { goal: goal, tutorRole: tutorRole };
   if (learnerRole) cfg.learnerRole = learnerRole;
   if (simMemSel.value) cfg.memoryId = simMemSel.value;

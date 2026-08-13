@@ -11,6 +11,8 @@ import {
   getTutorId,
   getCapabilities,
   getTutorManifest,
+  getTutorCatalog,
+  normalizeTutorEntry,
   createTutorSession,
   completeTutorSession,
   startCallMemoryGeneration,
@@ -87,16 +89,33 @@ export function registerTutorRoutes(app: Express) {
     res.type("html").send(buildTutorPreviewHtml());
   });
 
+  // Dynamic tutor catalog from the engine (allow-list driven — never
+  // hardcode ids). Client-safe: names, previews, asset versions only.
+  app.get("/api/tutor/tutors", authMiddleware, async (_req, res) => {
+    if (!tutorEngineConfigured()) return res.json({ tutors: [] });
+    try {
+      const list = (await getTutorCatalog())
+        .map(normalizeTutorEntry)
+        .filter((t): t is NonNullable<typeof t> => t !== null);
+      res.json({ tutors: list, defaultTutorId: getTutorId() });
+    } catch (err) {
+      safeEngineError(res, err);
+    }
+  });
+
   // Client-safe status: capabilities + avatar assets. No API key material.
   app.get("/api/tutor/status", authMiddleware, async (req, res) => {
     const user = (req as any).user;
     if (!tutorEngineConfigured()) {
       return res.json({ configured: false, ready: false, callMemoryReady: false });
     }
+    // Optional ?tutorId= — must exist in the engine catalog; unknown ids are
+    // rejected (the catalog is the source of truth, not the client).
+    const reqTutorId = typeof req.query.tutorId === "string" && req.query.tutorId ? req.query.tutorId : undefined;
     try {
       const [caps, tutor, displayName] = await Promise.all([
         getCapabilities(),
-        getTutorManifest(),
+        getTutorManifest(reqTutorId),
         getTutorDisplayName(user),
       ]);
       const cs = Array.isArray(caps.code_switching) ? caps.code_switching : [];
@@ -108,14 +127,9 @@ export function registerTutorRoutes(app: Express) {
         // NOT ready — surfaced explicitly, never silently degraded.
         callMemoryReady: caps.call_memory === true,
         codeSwitchingRuEn: cs.includes("ru-en"),
-        tutor: {
-          tutorId: tutor.tutor_id,
-          name: tutor.name ?? "Emma",
-          previewUrl: tutor.preview_url ?? tutor.avatar?.preview_url ?? null,
-          glbUrl: tutor.avatar?.glb_url ?? null,
-          body: tutor.avatar?.body ?? null,
-          assetVersion: tutor.asset_version ?? tutor.avatar?.asset_version ?? null,
-        },
+        // Normalized (absolute asset URLs, display name) — same shape the
+        // catalog endpoint returns, so the client treats both uniformly.
+        tutor: normalizeTutorEntry(tutor),
         engineBase: getTutorEngineBase(),
         // Client-safe greeting name for the local welcome card ("Привет, Имя").
         // Derived from the user's own profile (phone display name, else the
@@ -145,6 +159,23 @@ export function registerTutorRoutes(app: Express) {
   // never auto-retries the non-idempotent POST /sessions.
   app.post("/api/tutor/sessions", authMiddleware, async (req, res) => {
     const user = (req as any).user;
+    // Optional tutor selection — only the id travels to the engine; it must
+    // exist in the live catalog (allow-list driven, never trusted blindly).
+    let tutorId: string | undefined;
+    if (req.body && typeof req.body === "object" && req.body.tutorId !== undefined) {
+      if (typeof req.body.tutorId !== "string" || !req.body.tutorId || req.body.tutorId.length > 64) {
+        return res.status(400).json({ error: "tutor_invalid", message: "Некорректный идентификатор репетитора." });
+      }
+      try {
+        const catalog = await getTutorCatalog();
+        if (!catalog.some((t: any) => t?.tutor_id === req.body.tutorId)) {
+          return res.status(404).json({ error: "tutor_not_found", message: "Такой репетитор недоступен." });
+        }
+      } catch (err) {
+        return safeEngineError(res, err);
+      }
+      tutorId = req.body.tutorId;
+    }
     let sim: TutorSimulationParams | undefined;
     if (req.body && typeof req.body === "object" && req.body.simulation !== undefined) {
       const v = validateSimulationRequest(req.body.simulation);
@@ -167,7 +198,7 @@ export function registerTutorRoutes(app: Express) {
       sim = buildSimulationParams(v, memoryRef);
     }
     try {
-      const session = await createTutorSession(user.id, sim);
+      const session = await createTutorSession(user.id, sim, tutorId);
       const engineSessionId = session?.session_id;
       const realtime = session?.realtime;
       if (!engineSessionId || !realtime?.connection_url || !realtime?.token) {
@@ -190,7 +221,7 @@ export function registerTutorRoutes(app: Express) {
         try { await completeTutorSession(engineSessionId); } catch { /* best effort */ }
         return res.status(502).json({ error: "simulation_echo_missing", message: "Движок не подтвердил параметры симуляции. Попробуйте ещё раз." });
       }
-      await createTutorSessionRow(user.id, engineSessionId, getTutorId(), "english_free_talk");
+      await createTutorSessionRow(user.id, engineSessionId, tutorId || getTutorId(), "english_free_talk");
       const wsBase = getTutorEngineBase().replace(/^http/, "ws");
       // Auth happens via the first WS message ({type:"auth", token, session_id}),
       // NOT via query string — the token never travels in a URL.

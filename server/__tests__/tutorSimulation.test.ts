@@ -153,7 +153,7 @@ describe("opening turn (contract §3) — engine-initiated, mic gated, no PTT dr
     expect(m![1]).toContain("openingPending = true");
     expect(m![1]).not.toContain("dispatch(");
     expect(TUTOR_AVATAR_PAGE_HTML).toContain("micBtn.disabled = openingPending ||");
-    expect(TUTOR_AVATAR_PAGE_HTML).toMatch(/if \(openingPending\) \{ showToast\(L\.openingWait\); return; \}/);
+    expect(TUTOR_AVATAR_PAGE_HTML).toMatch(/if \(openingPending\) \{ showToast\(tn\(L\.openingWait\)\); return; \}/);
   });
   it("the opening gate is released by turn.completed", () => {
     expect(TUTOR_AVATAR_PAGE_HTML).toMatch(/turn\.completed[\s\S]{0,500}openingPending = false/);
@@ -179,6 +179,6 @@ describe("opening turn (contract §3) — engine-initiated, mic gated, no PTT dr
   it("simulation is a deliberate user choice — practice stays the default flow", () => {
     // Start chooser exists; practice payload path posts no simulation body.
     expect(TUTOR_AVATAR_PAGE_HTML).toContain('id="startSheet"');
-    expect(TUTOR_AVATAR_PAGE_HTML).toContain("simulation ? JSON.stringify({ simulation: simulation }) : undefined");
+    expect(TUTOR_AVATAR_PAGE_HTML).toContain("if (simulation) createBody.simulation = simulation;");
   });
 });

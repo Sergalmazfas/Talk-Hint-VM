@@ -115,11 +115,49 @@ export async function getCapabilities(): Promise<TutorCapabilities> {
   return engineFetch(`${API_PREFIX}/capabilities`);
 }
 
-export async function getTutorManifest(): Promise<any> {
+// Raw tutor catalog from the engine — the DYNAMIC source of truth for tutor
+// availability (allow-list driven; ids must never be hardcoded client-side).
+export async function getTutorCatalog(): Promise<any[]> {
   const data = await engineFetch(`${API_PREFIX}/tutors`);
-  const list = Array.isArray(data) ? data : Array.isArray(data?.tutors) ? data.tutors : [];
-  const tutor = list.find((t: any) => t?.tutor_id === TUTOR_ID);
-  if (!tutor) throw new TutorEngineError(`Tutor ${TUTOR_ID} not found in engine manifest`, 200, "http");
+  return Array.isArray(data) ? data : Array.isArray(data?.tutors) ? data.tutors : [];
+}
+
+// Client-safe normalized catalog entry (no engine internals leak through).
+export interface TutorCatalogEntry {
+  tutorId: string;
+  name: string;
+  description: string | null;
+  previewUrl: string | null;
+  glbUrl: string | null;
+  body: string | null;
+  assetVersion: string | null;
+}
+
+// Asset URLs may arrive as absolute-path ("/api/tutor-assets/…") or fully
+// qualified — normalize to a full URL against the engine base.
+function absoluteAssetUrl(u: unknown): string | null {
+  if (typeof u !== "string" || !u) return null;
+  return u.startsWith("/") ? `${TUTOR_ENGINE_BASE}${u}` : u;
+}
+
+export function normalizeTutorEntry(t: any): TutorCatalogEntry | null {
+  if (!t || typeof t.tutor_id !== "string" || !t.tutor_id) return null;
+  return {
+    tutorId: t.tutor_id,
+    name: t.display_name ?? t.name ?? t.tutor_id,
+    description: typeof t.description === "string" ? t.description : null,
+    previewUrl: absoluteAssetUrl(t.preview_url ?? t.avatar?.preview_url),
+    glbUrl: absoluteAssetUrl(t.avatar?.glb_url ?? t.glb_url),
+    body: t.avatar?.body ?? null,
+    assetVersion: t.asset_version != null ? String(t.asset_version) : t.avatar?.asset_version != null ? String(t.avatar.asset_version) : null,
+  };
+}
+
+export async function getTutorManifest(tutorId?: string): Promise<any> {
+  const id = tutorId || TUTOR_ID;
+  const list = await getTutorCatalog();
+  const tutor = list.find((t: any) => t?.tutor_id === id);
+  if (!tutor) throw new TutorEngineError(`Tutor ${id} not found in engine manifest`, 200, "http");
   return tutor;
 }
 
@@ -140,12 +178,15 @@ export interface TutorSimulationParams {
 // payload keeps the VERIFIED production schema and must NEVER carry a
 // `simulation` field (engine hard-422s it for non-simulation modes). The
 // simulation payload follows the contract doc exactly (language object).
-export function buildSessionPayload(userId: string, sim?: TutorSimulationParams): Record<string, unknown> {
+export function buildSessionPayload(userId: string, sim?: TutorSimulationParams, tutorId?: string): Record<string, unknown> {
+  // Only the selected tutor_id is sent — avatar/voice/persona internals are
+  // frozen by the engine at creation and must never be passed by the client.
+  const tid = tutorId || TUTOR_ID;
   if (!sim) {
     return {
       user_id: userId,
       scenario_id: SCENARIO_ID,
-      tutor_id: TUTOR_ID,
+      tutor_id: tid,
       mode: "practice",
       target_language: "en",
       native_language: "ru",
@@ -154,7 +195,7 @@ export function buildSessionPayload(userId: string, sim?: TutorSimulationParams)
   return {
     user_id: userId,
     scenario_id: SCENARIO_ID,
-    tutor_id: TUTOR_ID,
+    tutor_id: tid,
     mode: "simulation",
     language: { target: "en", native: "ru" },
     simulation: {
@@ -189,8 +230,8 @@ export function simulationErrorCode(err: unknown): SimulationErrorCode | null {
 // is derived from the API key — application_id/organization_id are rejected
 // by the engine and must never be sent. POST /sessions is non-idempotent:
 // never auto-retry on timeout (contract §1).
-export async function createTutorSession(userId: string, sim?: TutorSimulationParams): Promise<any> {
-  return engineFetch(`${API_PREFIX}/sessions`, { method: "POST", body: buildSessionPayload(userId, sim) });
+export async function createTutorSession(userId: string, sim?: TutorSimulationParams, tutorId?: string): Promise<any> {
+  return engineFetch(`${API_PREFIX}/sessions`, { method: "POST", body: buildSessionPayload(userId, sim, tutorId) });
 }
 
 // Complete a practice session — the ONLY documented completion endpoint.
