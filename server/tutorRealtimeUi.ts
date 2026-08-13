@@ -29,6 +29,10 @@ export type TutorUiAction =
       category: string;
     }
   | { kind: "finalText"; text: string }
+  // turn.started: consumed ONLY for the simulation opening turn (contract §3
+  // — engine-initiated turn right after WS auth, opening:true). It never
+  // drives the PTT machine; the page only uses it to gate the mic button.
+  | { kind: "turnStarted"; opening: boolean }
   | { kind: "turnState"; state: "listening" | "transcribing" | "thinking" | "speaking" | null }
   | { kind: "normalized"; text: string };
 
@@ -56,6 +60,9 @@ export function classifyEngineEvent(msg: any): TutorUiAction | null {
   }
   if (msg.type === "tutor.text.final") {
     return typeof msg.text === "string" && msg.text.trim() ? { kind: "finalText", text: msg.text } : null;
+  }
+  if (msg.type === "turn.started") {
+    return { kind: "turnStarted", opening: msg.opening === true };
   }
   if (msg.type === "turn.state") {
     const map: any = { LISTENING: "listening", TRANSCRIBING: "transcribing", THINKING: "thinking", SPEAKING: "speaking" };

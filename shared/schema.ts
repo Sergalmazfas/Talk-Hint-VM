@@ -376,6 +376,13 @@ export const tutorCallMemories = pgTable("tutor_call_memories", {
   vocabulary: jsonb("vocabulary").notNull().default(sql`'[]'::jsonb`),
   uncertainFacts: jsonb("uncertain_facts").notNull().default(sql`'[]'::jsonb`),
   status: text("status").notNull().default("MEMORY_CONFIRMATION"),
+  // Engine-side reference for simulation sessions (contract v1): the memory
+  // group id + version echoed by the engine's call-memory endpoint. Sent BY
+  // REFERENCE ONLY when starting a goal-driven simulation — inline facts are
+  // rejected by the engine by design. Nullable: memories saved before this
+  // column existed have no reference and cannot seed a simulation.
+  engineGroupId: text("engine_group_id"),
+  engineVersion: integer("engine_version"),
   confirmedAt: timestamp("confirmed_at"),
   usedAt: timestamp("used_at"),
   usedCallSid: text("used_call_sid"),

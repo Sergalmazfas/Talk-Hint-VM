@@ -123,19 +123,74 @@ export async function getTutorManifest(): Promise<any> {
   return tutor;
 }
 
-// Create a practice session with the VERIFIED production schema. Tenancy is
-// derived from the API key — application_id/organization_id are rejected by
-// the engine and must never be sent.
-export async function createTutorSession(userId: string): Promise<any> {
-  const payload: Record<string, unknown> = {
+// --- Goal-Driven Simulation (Engine contract v1, 2026-08-13) ----------------
+// Simulation sessions carry a `simulation` block and mode:"simulation". The
+// contract is fail-closed: a simulation create that fails is surfaced to the
+// user — TalkHint NEVER silently falls back to a practice session.
+export interface TutorSimulationParams {
+  goal: string; // literal user-entered goal text, ≤500 chars — no keywords/slots/flags
+  learnerRole: string; // ≤120 chars
+  tutorRole: string; // ≤120 chars — who Emma plays from turn 0
+  context:
+    | { source: "none" }
+    | { source: "call_memory"; callMemoryGroupId: string; version: number };
+}
+
+// Exported for tests: exact payload shapes for both modes. The practice
+// payload keeps the VERIFIED production schema and must NEVER carry a
+// `simulation` field (engine hard-422s it for non-simulation modes). The
+// simulation payload follows the contract doc exactly (language object).
+export function buildSessionPayload(userId: string, sim?: TutorSimulationParams): Record<string, unknown> {
+  if (!sim) {
+    return {
+      user_id: userId,
+      scenario_id: SCENARIO_ID,
+      tutor_id: TUTOR_ID,
+      mode: "practice",
+      target_language: "en",
+      native_language: "ru",
+    };
+  }
+  return {
     user_id: userId,
     scenario_id: SCENARIO_ID,
     tutor_id: TUTOR_ID,
-    mode: "practice",
-    target_language: "en",
-    native_language: "ru",
+    mode: "simulation",
+    language: { target: "en", native: "ru" },
+    simulation: {
+      goal: sim.goal,
+      roles: { learner: sim.learnerRole, tutor: sim.tutorRole },
+      context:
+        sim.context.source === "call_memory"
+          ? { source: "call_memory", call_memory_group_id: sim.context.callMemoryGroupId, version: sim.context.version }
+          : { source: "none" },
+    },
   };
-  return engineFetch(`${API_PREFIX}/sessions`, { method: "POST", body: payload });
+}
+
+// Simulation-create error codes from the engine contract (fail-closed table).
+export const SIMULATION_ERROR_CODES = [
+  "SIMULATION_NOT_ALLOWED_FOR_MODE",
+  "SIMULATION_REQUIRED",
+  "SIMULATION_INVALID",
+  "CALL_MEMORY_DISABLED",
+  "CALL_MEMORY_NOT_FOUND",
+  "CALL_MEMORY_NOT_CONFIRMED",
+] as const;
+export type SimulationErrorCode = (typeof SIMULATION_ERROR_CODES)[number];
+
+export function simulationErrorCode(err: unknown): SimulationErrorCode | null {
+  if (!(err instanceof TutorEngineError) || !err.body) return null;
+  return SIMULATION_ERROR_CODES.find((c) => err.body!.includes(c)) ?? null;
+}
+
+// Create a practice session with the VERIFIED production schema, or — when
+// `sim` is provided — a goal-driven simulation session (contract v1). Tenancy
+// is derived from the API key — application_id/organization_id are rejected
+// by the engine and must never be sent. POST /sessions is non-idempotent:
+// never auto-retry on timeout (contract §1).
+export async function createTutorSession(userId: string, sim?: TutorSimulationParams): Promise<any> {
+  return engineFetch(`${API_PREFIX}/sessions`, { method: "POST", body: buildSessionPayload(userId, sim) });
 }
 
 // Complete a practice session — the ONLY documented completion endpoint.
@@ -206,7 +261,7 @@ function normalizeMemory(raw: any): EngineCallMemory | null {
 
 export type CallMemoryPoll =
   | { status: "pending" }
-  | { status: "ready"; memory: EngineCallMemory | null }
+  | { status: "ready"; memory: EngineCallMemory | null; groupId: string | null; version: number | null }
   | { status: "failed"; retriable: boolean }
   | { status: "not_started" };
 
@@ -227,7 +282,19 @@ export async function fetchCallMemory(engineSessionId: string): Promise<CallMemo
   const status = data?.status;
   if (status === "pending") return { status: "pending" };
   if (status === "failed") return { status: "failed", retriable: data?.retriable !== false };
-  if (status === "ready") return { status: "ready", memory: normalizeMemory(data?.latest?.content ?? data?.content) };
+  if (status === "ready") {
+    // Capture the engine-side reference (group id + version) when present —
+    // it is the ONLY way to seed a goal-driven simulation with this memory
+    // (contract v1: context by reference, never inline facts).
+    const groupId =
+      typeof data?.group_id === "string" ? data.group_id
+      : typeof data?.call_memory_group_id === "string" ? data.call_memory_group_id
+      : typeof data?.latest?.group_id === "string" ? data.latest.group_id
+      : null;
+    const versionRaw = data?.latest?.version ?? data?.version;
+    const version = typeof versionRaw === "number" && Number.isFinite(versionRaw) ? versionRaw : null;
+    return { status: "ready", memory: normalizeMemory(data?.latest?.content ?? data?.content), groupId, version };
+  }
   return { status: "pending" };
 }
 

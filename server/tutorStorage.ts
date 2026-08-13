@@ -55,6 +55,11 @@ export async function saveCallMemory(
   userId: string,
   engineSessionId: string,
   mem: EngineCallMemory,
+  // Engine-side reference (group id + version) — required later to seed a
+  // goal-driven simulation by reference. Nullable when the engine's
+  // call-memory response carries no reference fields.
+  engineGroupId: string | null = null,
+  engineVersion: number | null = null,
 ): Promise<TutorCallMemory | undefined> {
   if (!isDatabaseAvailable()) return undefined;
   // Concurrency-safe: two racing /end requests both reach the insert; the
@@ -71,6 +76,8 @@ export async function saveCallMemory(
       rehearsedAnswers: mem.rehearsed_answers,
       vocabulary: mem.vocabulary,
       uncertainFacts: mem.uncertain_facts,
+      engineGroupId,
+      engineVersion,
     })
     .onConflictDoNothing()
     .returning();

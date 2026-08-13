@@ -163,8 +163,20 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   #quitSheet{text-align:center}
   #quitSheet h3{font-size:21px;font-weight:800;margin-bottom:8px}
   #quitSheet p{font-size:14px;line-height:1.4;color:#5c5663;margin-bottom:16px}
-  #quitSheet .primary{width:100%;border:0;border-radius:24px;padding:15px;font-size:16px;font-weight:800;color:#fff;background:#7c3aed;margin-bottom:8px}
-  #quitSheet .secondary{width:100%;border:0;border-radius:24px;padding:15px;font-size:16px;font-weight:800;color:#29252f;background:#f1f1f5}
+  #quitSheet .primary,#startSheet .primary,#simSheet .primary{width:100%;border:0;border-radius:24px;padding:15px;font-size:16px;font-weight:800;color:#fff;background:#7c3aed;margin-bottom:8px}
+  #quitSheet .secondary,#startSheet .secondary,#simSheet .secondary{width:100%;border:0;border-radius:24px;padding:15px;font-size:16px;font-weight:800;color:#29252f;background:#f1f1f5}
+  /* --- Start chooser + simulation form (Goal-Driven Simulation, contract v1) -- */
+  body.sheet-start #sheetBackdrop,body.sheet-start #startSheet{display:block}
+  body.sheet-sim #sheetBackdrop,body.sheet-sim #simSheet{display:block}
+  #startSheet{text-align:center}
+  #startSheet h3{font-size:21px;font-weight:800;margin-bottom:8px}
+  #startSheet p{font-size:13px;line-height:1.4;color:#77717d;margin-bottom:16px}
+  #simSheet h3{font-size:19px;font-weight:800;margin-bottom:10px;text-align:center}
+  #simSheet label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a8792;margin:12px 0 5px}
+  #simSheet input,#simSheet textarea,#simSheet select{width:100%;background:#fff;border:1px solid #e5e0e9;border-radius:14px;color:#29252f;padding:11px 12px;font-size:14px;font-family:inherit}
+  #simSheet textarea{min-height:64px;resize:vertical}
+  #simStatus{font-size:12px;color:#a5424b;margin-top:8px;min-height:16px;text-align:center}
+  #simSheet .primary{margin-top:14px}
   /* --- Settings popover --------------------------------------------------------- */
   #menu{position:fixed;top:calc(62px + env(safe-area-inset-top));right:20px;z-index:60;background:rgba(251,250,252,.96);backdrop-filter:blur(14px);border-radius:20px;box-shadow:0 8px 30px rgba(20,20,40,.22);padding:6px;min-width:230px;display:none}
   #menu.show{display:block}
@@ -261,6 +273,24 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   <button class="arow" id="aFile"><span class="aic">${svg("fileText", 19)}</span><span></span></button>
   <button id="attachCancel"></button>
 </div>
+<div id="startSheet" class="sheet">
+  <div class="grab"></div>
+  <h3></h3>
+  <p></p>
+  <button class="primary" id="freeBtn"></button>
+  <button class="secondary" id="simBtn"></button>
+</div>
+<div id="simSheet" class="sheet">
+  <div class="grab"></div>
+  <h3></h3>
+  <label id="lSimGoal"></label><textarea id="simGoal" maxlength="500"></textarea>
+  <label id="lSimEmma"></label><input id="simEmma" maxlength="120"/>
+  <label id="lSimYou"></label><input id="simYou" maxlength="120"/>
+  <label id="lSimMem"></label><select id="simMem"></select>
+  <div id="simStatus"></div>
+  <button class="primary" id="simStartBtn"></button>
+  <button class="secondary" id="simBackBtn"></button>
+</div>
 <div id="quitSheet" class="sheet">
   <div class="grab"></div>
   <h3></h3>
@@ -335,6 +365,19 @@ const L = RU ? {
   on: "Вкл", off: "Выкл",
   composerPh: "Новое сообщение…",
   aPhoto: "Сделать фото", aLibrary: "Медиатека", aFile: "Прикрепить файл", aCancel: "Отмена",
+  startTitle: "Как хотите практиковаться?",
+  startSub: "Свободный разговор с Emma — или репетиция реального звонка по вашей цели.",
+  freeTalk: "Свободная практика", simTalk: "Симуляция звонка",
+  simTitle: "Симуляция звонка",
+  simGoalL: "Цель разговора", simGoalPh: "Например: записаться к врачу на пятницу",
+  simEmmaL: "Кем будет Emma (собеседник)", simEmmaPh: "например: администратор клиники",
+  simYouL: "Ваша роль", simYouPh: "по умолчанию: звонящий",
+  simMemL: "Память разговора (контекст)", simMemNone: "Без контекста",
+  simStart: "Начать симуляцию", simBack: "Назад",
+  simGoalReq: "Укажите цель разговора.", simEmmaReq: "Укажите, кем будет Emma.",
+  openingWait: "Emma начинает разговор…",
+  simKnows: (f,q,v) => "Emma знает контекст: факты — " + f + ", вопросы — " + q + ", словарь — " + v,
+  simTag: "Симуляция — параметры TalkHint, реплики Emma из движка",
 } : {
   loading: "Loading…", connecting: "Connecting…", ready: "Hold to talk",
   recording: "Listening…", processing: "Emma is thinking…", speaking: "Emma is speaking…",
@@ -368,6 +411,19 @@ const L = RU ? {
   on: "On", off: "Off",
   composerPh: "New message…",
   aPhoto: "Take photo", aLibrary: "Photo library", aFile: "Attach file", aCancel: "Cancel",
+  startTitle: "How do you want to practice?",
+  startSub: "Free talk with Emma — or rehearse a real call around your goal.",
+  freeTalk: "Free practice", simTalk: "Call simulation",
+  simTitle: "Call simulation",
+  simGoalL: "Goal of the call", simGoalPh: "e.g.: book a doctor appointment for Friday",
+  simEmmaL: "Who Emma plays (the other side)", simEmmaPh: "e.g.: clinic receptionist",
+  simYouL: "Your role", simYouPh: "default: caller",
+  simMemL: "Call memory (context)", simMemNone: "No context",
+  simStart: "Start simulation", simBack: "Back",
+  simGoalReq: "Enter the goal of the call.", simEmmaReq: "Enter who Emma plays.",
+  openingWait: "Emma is starting the conversation…",
+  simKnows: (f,q,v) => "Emma knows the context: facts " + f + ", questions " + q + ", vocabulary " + v,
+  simTag: "Simulation — parameters by TalkHint, Emma's lines from the engine",
 };
 
 // ---- Auth: token NEVER travels in the page URL. ---------------------------
@@ -379,7 +435,12 @@ if (location.hash.startsWith("#auth=")) window.__setAuth(decodeURIComponent(loca
 const api = async (path, opts={}) => {
   await authReady;
   const r = await fetch(path, { ...opts, headers: { "Authorization": "Bearer " + AUTH, "Content-Type": "application/json", ...(opts.headers||{}) } });
-  if (!r.ok) throw new Error((await r.json().catch(()=>({}))).message || ("HTTP "+r.status));
+  if (!r.ok) {
+    const body = await r.json().catch(()=>({}));
+    const err = new Error(body.message || ("HTTP "+r.status));
+    err.code = body.error || null; // backend error code (e.g. simulation fail-closed table)
+    throw err;
+  }
   return r.json();
 };
 const notifyNative = (msg) => { try { window.webkit?.messageHandlers?.tutor?.postMessage(msg); } catch(_){} };
@@ -403,8 +464,12 @@ function render() {
   // thinking. It never drives the PTT machine — labels only, no noise.
   let label = labels[state] ?? "";
   if (state === "PROCESSING" && engineTurnLabel === "transcribing") label = L.transcribing;
+  // Simulation opening turn (contract §3): the engine speaks FIRST. Until its
+  // turn.completed arrives the mic stays disabled and the label says so —
+  // the PTT machine itself is NOT driven by this flag.
+  if (openingPending && (state === "READY" || state === "PROCESSING")) label = L.openingWait;
   stateLabel.textContent = label;
-  micBtn.disabled = !(state === "READY" || state === "RECORDING");
+  micBtn.disabled = openingPending || !(state === "READY" || state === "RECORDING");
   micBtn.classList.toggle("rec", state === "RECORDING");
   document.body.classList.toggle("recording", state === "RECORDING");
   document.body.classList.toggle("thinking", state === "PROCESSING");
@@ -690,6 +755,7 @@ function stopMic() {
 
 // ---- Realtime session (tutor-realtime/1.0, verified in production) --------
 let ws = null, sessionId = null;
+let wsGen = 0;                    // connection generation — stale socket callbacks are ignored
 let latencyT0 = 0;                // set at audio.end; cleared on first tutor audio
 let latencyFirstText = 0;         // release → first tutor.text.delta (ms)
 let pendingTtsMeta = null;
@@ -704,6 +770,8 @@ let tutorTextFinal = false;       // tutor.text.final received — deltas must n
 let engineTurnLabel = null;       // engine turn.state → truthful waiting label (spec §7)
 let currentHint = null;           // latest engine hint {text, translation} — spec §§1-3
 let hintCardEl = null;            // rendered hint card (dismissible)
+let simulation = null;            // active simulation config {goal, learnerRole, tutorRole, memoryId} or null
+let openingPending = false;       // simulation opening turn in flight — mic gated until turn.completed
 
 // Shared PURE classifier for engine events beyond the PTT machine — the same
 // source is unit-tested server-side (tutorRealtimeUi.test.ts, spec §14).
@@ -761,7 +829,8 @@ function showCorrectionCard(c) {
   scrollFeed();
 }
 
-async function connect() {
+async function connect(simCfg) {
+  if (simCfg !== undefined) simulation = simCfg; // retry re-uses the stored config (deliberate user action)
   state = "LOADING"; render();
   let status;
   try { status = await api("/api/tutor/status"); }
@@ -803,17 +872,51 @@ async function connect() {
 
   stateLabel.textContent = L.connecting;
   let session;
-  try { session = await api("/api/tutor/sessions", { method: "POST" }); }
-  catch (e) { stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return; }
+  try {
+    session = await api("/api/tutor/sessions", {
+      method: "POST",
+      body: simulation ? JSON.stringify({ simulation: simulation }) : undefined,
+    });
+  } catch (e) {
+    // Fail-closed (contract §1): a simulation create failure is surfaced and
+    // the form reopens — NEVER a silent fallback to free talk, no auto-retry.
+    if (simulation) {
+      simulation = null;
+      openSimSheet(e.message);
+      state = "LOADING"; render();
+      return;
+    }
+    stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return;
+  }
   sessionId = session.sessionId;
   turnOpen = false; sentAudio = false; // fresh session — reset turn bookkeeping
-  ws = new WebSocket(session.realtime.wsUrl);
-  ws.binaryType = "arraybuffer";
+  // Simulation: the engine auto-starts a tutor-first opening turn right after
+  // WS auth (contract §3) — gate the mic until its turn.completed.
+  openingPending = !!simulation;
+  if (simulation && session.simulation) {
+    const inj = session.simulation.context && session.simulation.context.items_injected;
+    if (inj) {
+      // Show the echoed injection counts so the user sees what Emma knows.
+      const c = addCard("tutor local");
+      c.textContent = L.simKnows(inj.facts ?? 0, inj.questions ?? 0, inj.vocabulary ?? 0);
+      const tag = document.createElement("div");
+      tag.className = "localTag"; tag.textContent = L.simTag;
+      c.appendChild(tag);
+    }
+  }
+  // Generation guard: callbacks from a superseded socket (old session after a
+  // deliberate retry) must never touch the new session's state — an old
+  // turn.completed could otherwise clear the new opening gate, and an old
+  // close could push the fresh session into ERROR.
+  const gen = ++wsGen;
+  const sock = new WebSocket(session.realtime.wsUrl);
+  ws = sock;
+  sock.binaryType = "arraybuffer";
   // Token goes in the FIRST WS MESSAGE, never in the URL.
-  ws.onopen = () => ws.send(JSON.stringify({ type: "auth", token: session.realtime.token, session_id: sessionId }));
-  ws.onmessage = onWsMessage;
-  ws.onclose = (e) => { stopMic(); stopFallbackAudio(); turnOpen = false; notifyNative({ event: "wsClosed", code: e.code, reason: e.reason || "" }); if (sessionId && state !== "ENDING" && state !== "MEMORY") { stateLabel.textContent = L.closed; dispatch("error"); } };
-  ws.onerror = () => { notifyNative({ event: "wsError" }); dispatch("error"); };
+  sock.onopen = () => { if (gen === wsGen) sock.send(JSON.stringify({ type: "auth", token: session.realtime.token, session_id: sessionId })); };
+  sock.onmessage = (e) => { if (gen === wsGen) onWsMessage(e); };
+  sock.onclose = (e) => { if (gen !== wsGen) return; stopMic(); stopFallbackAudio(); turnOpen = false; notifyNative({ event: "wsClosed", code: e.code, reason: e.reason || "" }); if (sessionId && state !== "ENDING" && state !== "MEMORY") { stateLabel.textContent = L.closed; dispatch("error"); } };
+  sock.onerror = () => { if (gen !== wsGen) return; notifyNative({ event: "wsError" }); dispatch("error"); };
 }
 
 function onWsMessage(e) {
@@ -863,23 +966,43 @@ function onWsMessage(e) {
     userCard = null;
     scrollFeed();
   }
-  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; if (tutorTextFinal) return; tutorText += msg.text || msg.delta || ""; if (tutorCard) { tutorCard.textContent = tutorText; scrollFeed(); } }
+  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; if (tutorTextFinal) return; tutorText += msg.text || msg.delta || ""; if (!tutorCard) tutorCard = addCard("tutor streaming"); tutorCard.textContent = tutorText; scrollFeed(); }
   else if (msg.type === "tutor.audio.chunk") pendingTtsMeta = msg;
   else if (msg.type === "turn.completed") {
     if (tutorCard) { finishTutorCard(tutorCard, tutorText || tutorCard.textContent, tutorAudio.slice()); }
     tutorCard = null; tutorText = ""; tutorAudio = []; userCard = null;
     pendingTtsMeta = null; // a binary frame after completion belongs to a closed turn
     engineTurnLabel = null; tutorTextFinal = false;
+    openingPending = false; // opening turn (if any) is over — mic is released
     dispatch("turnCompleted");
+    render();
   }
-  else if (msg.type === "error") { console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code }); }
+  else if (msg.type === "error") {
+    // OPENING_IN_PROGRESS is benign & retriable (contract §3): the user tried
+    // to talk while Emma's opening turn was in flight — keep gating, no error state.
+    if (msg.code === "OPENING_IN_PROGRESS") {
+      // Recover the full capture state: stop the mic immediately and move a
+      // stuck RECORDING to PROCESSING so the opening's turn.completed can
+      // return us to READY (turnCompleted is a no-op from RECORDING).
+      stopMic();
+      turnOpen = false; sentAudio = false; openingPending = true;
+      if (state === "RECORDING") state = "PROCESSING";
+      render(); showToast(L.openingWait); return;
+    }
+    console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code });
+  }
   else {
     // Engine events beyond the PTT machine (task 154) — classified by the
     // shared pure function; unknown/malformed types return null and are
     // ignored safely (spec §8). No event here ever reaches TTS or the mic.
     const act = classifyEngineEvent(msg);
     if (!act) return;
-    if (act.kind === "hint") { currentHint = act; showHintCard(act); } // auto-display, no button needed (spec §2)
+    if (act.kind === "turnStarted") {
+      // Simulation opening turn announced by the engine (contract §3):
+      // consume the opening flag ONLY — never drives the PTT machine.
+      if (act.opening) { openingPending = true; render(); }
+    }
+    else if (act.kind === "hint") { currentHint = act; showHintCard(act); } // auto-display, no button needed (spec §2)
     else if (act.kind === "correction") showCorrectionCard(act);
     else if (act.kind === "finalText") {
       // Authoritative Emma text: reconcile the SAME streaming bubble — never
@@ -906,6 +1029,7 @@ function onWsMessage(e) {
 // ---- Hold-to-talk gestures -------------------------------------------------
 async function pressDown(ev) {
   ev.preventDefault();
+  if (openingPending) { showToast(L.openingWait); return; } // mic gated until Emma's opening turn completes
   if (!dispatch("pressDown")) return; // only from READY — no double start
   engineTurnLabel = null; // stale turn.state must not color the new turn
   try { navigator.vibrate?.(10); } catch(_){}
@@ -1038,7 +1162,71 @@ document.getElementById("confirmBtn").onclick = async () => {
   }
 };
 
-connect();
+// ---- Start chooser: free practice vs goal-driven call simulation -----------
+const startSheet = document.getElementById("startSheet");
+startSheet.querySelector("h3").textContent = L.startTitle;
+startSheet.querySelector("p").textContent = L.startSub;
+const freeBtn = document.getElementById("freeBtn");
+freeBtn.textContent = L.freeTalk;
+const simBtn = document.getElementById("simBtn");
+simBtn.textContent = L.simTalk;
+const simSheet = document.getElementById("simSheet");
+simSheet.querySelector("h3").textContent = L.simTitle;
+document.getElementById("lSimGoal").textContent = L.simGoalL;
+document.getElementById("simGoal").placeholder = L.simGoalPh;
+document.getElementById("lSimEmma").textContent = L.simEmmaL;
+document.getElementById("simEmma").placeholder = L.simEmmaPh;
+document.getElementById("lSimYou").textContent = L.simYouL;
+document.getElementById("simYou").placeholder = L.simYouPh;
+document.getElementById("lSimMem").textContent = L.simMemL;
+document.getElementById("simStartBtn").textContent = L.simStart;
+document.getElementById("simBackBtn").textContent = L.simBack;
+const simStatus = document.getElementById("simStatus");
+const simMemSel = document.getElementById("simMem");
+
+function openStartChoice() {
+  document.body.classList.remove("sheet-sim");
+  document.body.classList.add("sheet-start");
+}
+let memsLoaded = false;
+async function openSimSheet(statusText) {
+  document.body.classList.remove("sheet-start");
+  document.body.classList.add("sheet-sim");
+  simStatus.textContent = statusText || "";
+  if (!memsLoaded) {
+    memsLoaded = true;
+    simMemSel.innerHTML = '<option value="">' + L.simMemNone + "</option>";
+    try {
+      const mems = await api("/api/tutor/memories");
+      // Only confirmed memories WITH an engine-side reference can seed a
+      // simulation (context goes by reference only — contract §1).
+      for (const m of (Array.isArray(mems) ? mems : [])) {
+        if (m.status !== "REAL_CALL_READY" || !m.engineGroupId || m.engineVersion == null) continue;
+        const o = document.createElement("option");
+        o.value = m.id;
+        o.textContent = (m.objective || "").slice(0, 60) || m.id.slice(0, 8);
+        simMemSel.appendChild(o);
+      }
+    } catch (e) { console.error("memories load failed", e); }
+  }
+}
+freeBtn.onclick = () => { document.body.classList.remove("sheet-start"); connect(null); };
+simBtn.onclick = () => openSimSheet("");
+document.getElementById("simBackBtn").onclick = openStartChoice;
+document.getElementById("simStartBtn").onclick = () => {
+  const goal = document.getElementById("simGoal").value.trim();
+  const tutorRole = document.getElementById("simEmma").value.trim();
+  const learnerRole = document.getElementById("simYou").value.trim();
+  if (!goal) { simStatus.textContent = L.simGoalReq; return; }
+  if (!tutorRole) { simStatus.textContent = L.simEmmaReq; return; }
+  const cfg = { goal: goal, tutorRole: tutorRole };
+  if (learnerRole) cfg.learnerRole = learnerRole;
+  if (simMemSel.value) cfg.memoryId = simMemSel.value;
+  document.body.classList.remove("sheet-sim");
+  connect(cfg);
+};
+
+openStartChoice();
 </script>
 </body>
 </html>`;

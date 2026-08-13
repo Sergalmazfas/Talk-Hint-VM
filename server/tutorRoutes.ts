@@ -16,7 +16,10 @@ import {
   startCallMemoryGeneration,
   fetchCallMemory,
   runTutorSmokeChecks,
+  simulationErrorCode,
+  type TutorSimulationParams,
 } from "./tutorEngine";
+import { validateSimulationRequest, buildSimulationParams, mapSimulationEngineError, simulationEchoMatches } from "./tutorSimulation";
 import {
   createTutorSessionRow,
   endTutorSessionRow,
@@ -134,12 +137,37 @@ export function registerTutorRoutes(app: Express) {
     }
   });
 
-  // Start a practice session. Returns session id + short-lived realtime
-  // credentials only (the engine key stays server-side).
+  // Start a practice session — or a goal-driven SIMULATION session when the
+  // body carries a `simulation` block (Engine contract v1). Returns session
+  // id + short-lived realtime credentials only (the engine key stays
+  // server-side). FAIL-CLOSED: a failed simulation create is surfaced with an
+  // explicit error — TalkHint never silently falls back to free talk, and
+  // never auto-retries the non-idempotent POST /sessions.
   app.post("/api/tutor/sessions", authMiddleware, async (req, res) => {
     const user = (req as any).user;
+    let sim: TutorSimulationParams | undefined;
+    if (req.body && typeof req.body === "object" && req.body.simulation !== undefined) {
+      const v = validateSimulationRequest(req.body.simulation);
+      if (!v.ok) return res.status(400).json({ error: v.error, message: v.message });
+      let memoryRef: { groupId: string; version: number } | null = null;
+      if (v.memoryId) {
+        // Context by reference only: the memory must be this user's, confirmed
+        // in TalkHint, AND carry the engine-side group id + version.
+        const row = await getCallMemory(user.id, v.memoryId);
+        if (!row) return res.status(404).json({ error: "memory_not_found", message: "Память разговора не найдена." });
+        if (row.status !== "REAL_CALL_READY")
+          return res.status(409).json({ error: "memory_not_confirmed", message: "Сначала подтвердите память разговора." });
+        if (!row.engineGroupId || row.engineVersion == null)
+          return res.status(409).json({
+            error: "memory_no_engine_reference",
+            message: "У этой памяти нет ссылки движка (создана до обновления). Начните без контекста или создайте память заново.",
+          });
+        memoryRef = { groupId: row.engineGroupId, version: row.engineVersion };
+      }
+      sim = buildSimulationParams(v, memoryRef);
+    }
     try {
-      const session = await createTutorSession(user.id);
+      const session = await createTutorSession(user.id, sim);
       const engineSessionId = session?.session_id;
       const realtime = session?.realtime;
       if (!engineSessionId || !realtime?.connection_url || !realtime?.token) {
@@ -155,12 +183,22 @@ export function registerTutorRoutes(app: Express) {
         );
         return res.status(502).json({ error: "tutor_connection", message: "Репетитор вернул неожиданный ответ." });
       }
+      // Verify the engine echoed the simulation block back (contract §1) —
+      // a missing echo means the request was NOT honored; fail loudly.
+      if (sim && !simulationEchoMatches(sim, session?.simulation)) {
+        console.error("[Tutor] Simulation echo missing or mismatched — refusing the session (no silent practice fallback).");
+        try { await completeTutorSession(engineSessionId); } catch { /* best effort */ }
+        return res.status(502).json({ error: "simulation_echo_missing", message: "Движок не подтвердил параметры симуляции. Попробуйте ещё раз." });
+      }
       await createTutorSessionRow(user.id, engineSessionId, getTutorId(), "english_free_talk");
       const wsBase = getTutorEngineBase().replace(/^http/, "ws");
       // Auth happens via the first WS message ({type:"auth", token, session_id}),
       // NOT via query string — the token never travels in a URL.
       res.status(201).json({
         sessionId: engineSessionId,
+        // Echoed by the engine for simulation sessions (incl. items_injected
+        // for call-memory context) — client-safe, shown to the user.
+        simulation: session?.simulation ?? null,
         realtime: {
           connectionUrl: realtime.connection_url,
           token: realtime.token,
@@ -168,6 +206,13 @@ export function registerTutorRoutes(app: Express) {
         },
       });
     } catch (err) {
+      // Explicit fail-closed mapping of the engine's simulation error table.
+      const code = simulationErrorCode(err);
+      if (code) {
+        const m = mapSimulationEngineError(code);
+        console.error(`[Tutor] Simulation create rejected by engine: ${code}`);
+        return res.status(m.status).json({ error: m.error, message: m.message });
+      }
       safeEngineError(res, err);
     }
   });
@@ -203,10 +248,11 @@ export function registerTutorRoutes(app: Express) {
         }
         // 3) Bounded poll: pending → retry with backoff, up to ~20 s.
         let mem = null;
+        let memRef: { groupId: string | null; version: number | null } = { groupId: null, version: null };
         let failedRetriable = false;
         for (let attempt = 0; attempt < 8; attempt++) {
           const poll = await fetchCallMemory(engineSessionId);
-          if (poll.status === "ready") { mem = poll.memory; break; }
+          if (poll.status === "ready") { mem = poll.memory; memRef = { groupId: poll.groupId, version: poll.version }; break; }
           if (poll.status === "failed") {
             if (!poll.retriable) break;
             failedRetriable = true;
@@ -222,7 +268,7 @@ export function registerTutorRoutes(app: Express) {
               : "Память разговора ещё готовится — попробуйте ещё раз через минуту.",
           });
         }
-        const saved = await saveCallMemory(user.id, engineSessionId, mem);
+        const saved = await saveCallMemory(user.id, engineSessionId, mem, memRef.groupId, memRef.version);
         return res.json({ callMemory: saved ?? null });
       } catch (err) {
         return safeEngineError(res, err);
