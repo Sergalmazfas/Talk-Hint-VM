@@ -176,5 +176,12 @@ WS command to request a hint).
    Call Memory endpoints (deterministic 404/409 paths + bounded ready poll) —
    cleans up, and prints a
    structured MISSING / RENAMED-UNEXPECTED / TYPE MISMATCH report.
-   **Required manual pre-publish check** for TalkHint (v1: manual run; CI
-   scheduling deferred).
+   **ENFORCED pre-publish gate** for TalkHint: the production build
+   (`npm run build` → `script/build.ts`, which Publish executes) runs the
+   probe first and aborts with a non-zero exit on any mismatch, so an
+   incompatible client cannot be deployed (escape hatch:
+   `SKIP_TUTOR_ENGINE_CONTRACT_PROBE=true`, audited emergencies only). Also
+   registered as the named validation step `tutor-engine-contract` for
+   on-demand runs/status. Every run prints the Engine-reported contract
+   version it validated against. See the Pre-Publish Checklist in
+   `replit.md`.

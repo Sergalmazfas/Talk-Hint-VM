@@ -21,4 +21,5 @@
 - [Tutor catalog is dynamic](tutor-catalog-dynamic.md) — tutors come from engine GET /tutors at runtime, never hardcode ids; GLB Cache API per tutor_id+asset_version; tn() name substitution.
 - [Goal-driven simulation contract](tutor-simulation-contract.md) — fail-closed create (no practice fallback, echo verified), opening-turn mic gate; v1 not yet deployed at engine base; group_id/version source unconfirmed.
 - [Tutor Engine contract testing](tutor-engine-contract-testing.md) — consumer contract doc + frozen fixtures + live probe; canonical tutor.suggested_reply, no silent alias success; probe must be bounded + status-exact.
+- [Publish gating via build script](publish-gating.md) — no publish hook exists; mandatory pre-publish checks must run inside script/build.ts and exit non-zero to block deploy.
 - [Dialogue library per goal](dialogue-library-per-goal.md) — auto-built call dialogue libs keyed per-user-per-goal (own UUID id), NOT per goalType; runtime picks by goalText fuzzy match then goalType; always fall through to translateAndSuggest.

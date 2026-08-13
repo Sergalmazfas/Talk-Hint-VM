@@ -3,7 +3,10 @@
 // v1 — tutor-engine 1.0.0, tutor-realtime/1.0; consumer copy:
 // docs/tutor-engine-public-contract-v1.md).
 //
-// Run manually (REQUIRED pre-publish check for TalkHint):
+// ENFORCED pre-publish gate for TalkHint: script/build.ts (the Publish build)
+// runs this probe FIRST and aborts the build on any mismatch. Also registered
+// as the named validation step "tutor-engine-contract" (see replit.md
+// Pre-Publish Checklist). Manual run:
 //   npm run test:tutor-engine-contract
 //
 // Verifies PROTOCOL COMPATIBILITY ONLY against the real Engine:
