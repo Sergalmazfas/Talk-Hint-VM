@@ -111,6 +111,12 @@ const DRIVER = `<script>
 
   // ---- scenarios ------------------------------------------------------------
   window.addEventListener("load", async () => {
+    // The page now opens the start sheet first ("How do you want to practice?").
+    // "start" previews that sheet itself; all other states traverse the REAL
+    // user path by pressing the Free-practice button before waiting for the mic.
+    if (STATE === "start") return;
+    for (let i = 0; i < 100 && !document.getElementById("freeBtn"); i++) await sleep(50);
+    if (document.body.classList.contains("sheet-start")) document.getElementById("freeBtn")?.click();
     if (!(await waitReady())) return;
     await sleep(60);
     if (STATE === "ready") return;

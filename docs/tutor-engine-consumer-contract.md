@@ -155,7 +155,7 @@ WS command to request a hint).
 | `tutor.text.delta` | `text`/delta chunk (R string) | yes | streaming tutor text |
 | `tutor.text.final` | `text` (R string) | yes | authoritative tutor text; arrives after `turn.state: TURN_COMPLETE`, before `turn.completed` |
 | `tutor.audio.chunk` | binary follows | yes | tutor speech audio |
-| `avatar.lipsync` | viseme payload | yes (avatar only) | lip-sync frames for the 3D avatar |
+| `avatar.lipsync` | `turn_id`, `chunk_seq`, `timeline` | NO (not handled) | contract-defined lip-sync timing; the page instead derives approximate word timings from the audio chunk's `subtitle` (`deriveTimings` in tutorAvatarPage.ts) |
 | **`tutor.suggested_reply`** | `text` (R string), `translation` (R string\|null), `carryover` (R boolean), `turn_id` (O), `seq` (envelope) | yes | **suggested USER reply** — rendered as a dismissible card; NEVER TTS'd, never treated as user speech. Engine-initiated; no request command exists |
 | **`tutor.hint`** | `hint` (R string), `mode` (R string), `turn_id` (O) | yes | **teaching hint** — DISTINCT event (§2); own card, no translation, never stored as the suggested reply |
 | `tutor.correction` | `correction` (R object): `user_said`, `better` (R), `explanation`, `translation` (O), `category` | yes | correction card |
