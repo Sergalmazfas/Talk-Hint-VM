@@ -5,7 +5,8 @@
 // source is unit-tested server-side and executed in the browser.
 //
 // CONTRACT (verified live against tutor-realtime/1.0, 2026-08-13):
-//   tutor.hint            {hint: string}                        — suggested USER reply.
+//   tutor.suggested_reply {text, translation}                   — suggested USER reply (CANONICAL).
+//   tutor.hint            {hint: string}                        — same, LEGACY name only.
 //   tutor.correction      {correction:{user_said,better,explanation,translation,category}}
 //   tutor.text.final      {text: string}                        — authoritative Emma text.
 //   turn.state            {state: LISTENING|TRANSCRIBING|THINKING|SPEAKING|TURN_COMPLETE}
@@ -39,13 +40,23 @@ export type TutorUiAction =
 // NOTE: plain-JS body (no TS-only syntax) — it is stringified into the page.
 export function classifyEngineEvent(msg: any): TutorUiAction | null {
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return null;
-  // The engine renamed tutor.hint → tutor.suggested_reply (payload
-  // {text, translation}); we accept both so older engine builds keep working.
-  if (msg.type === "tutor.hint" || msg.type === "tutor.suggested_reply") {
-    const text = typeof msg.hint === "string" ? msg.hint : typeof msg.text === "string" ? msg.text : "";
+  // CANONICAL: tutor.suggested_reply {text, translation} — the Engine's
+  // current public contract name (verified live 2026-08-13).
+  // LEGACY / COMPATIBILITY ONLY: tutor.hint {hint} — the previous name,
+  // rendered during the migration window but NOT part of the canonical
+  // contract (see docs/tutor-engine-consumer-contract.md). Field validation
+  // is name-specific — no silent cross-shape acceptance: the canonical event
+  // requires its canonical {text} field, the legacy event only its {hint}.
+  if (msg.type === "tutor.suggested_reply") {
+    const text = typeof msg.text === "string" ? msg.text : "";
     if (!text.trim()) return null;
     const translation = typeof msg.translation === "string" && msg.translation.trim() ? msg.translation : null;
     return { kind: "hint", text: text, translation: translation };
+  }
+  if (msg.type === "tutor.hint") {
+    const hint = typeof msg.hint === "string" ? msg.hint : "";
+    if (!hint.trim()) return null;
+    return { kind: "hint", text: hint, translation: null };
   }
   if (msg.type === "tutor.correction") {
     const c = msg.correction && typeof msg.correction === "object" ? msg.correction : {};

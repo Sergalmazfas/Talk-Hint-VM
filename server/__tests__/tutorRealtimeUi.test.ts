@@ -26,9 +26,11 @@ describe("14A/B — tutor.hint renders automatically as a hint card", () => {
     const a = classifyEngineEvent(REAL_HINT);
     expect(a).toEqual({ kind: "hint", text: "Could you please help me with my documents?", translation: null });
   });
-  it("keeps an engine-provided translation when present", () => {
+  it("legacy tutor.hint never yields a translation (its documented shape is {hint} only)", () => {
+    // Strict name-specific validation: translation belongs to the canonical
+    // tutor.suggested_reply event; on the legacy event it is ignored.
     const a = classifyEngineEvent({ ...REAL_HINT, translation: "Не могли бы вы помочь мне с документами?" });
-    expect(a).toMatchObject({ kind: "hint", translation: "Не могли бы вы помочь мне с документами?" });
+    expect(a).toEqual({ kind: "hint", text: REAL_HINT.hint, translation: null });
   });
   it("classifies tutor.suggested_reply (current engine event name) into a hint action", () => {
     // Real payload captured live 2026-08-13 (simulation session, fiona_us_01).

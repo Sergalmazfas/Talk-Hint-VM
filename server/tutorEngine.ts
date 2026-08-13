@@ -286,7 +286,9 @@ function itemTexts(v: unknown): string[] {
 function normalizeMemory(raw: any): EngineCallMemory | null {
   if (!raw || typeof raw !== "object") return null;
   const mem: EngineCallMemory = {
-    objective: typeof raw.objective === "string" ? raw.objective : "",
+    // objective arrives either as a plain string or as an item array like the
+    // other categories — accept both (consumer contract doc, call-memory §).
+    objective: typeof raw.objective === "string" ? raw.objective : itemTexts(raw.objective).join(" "),
     // dates_times are facts for the purposes of the live-hint context.
     facts: [...itemTexts(raw.facts), ...itemTexts(raw.dates_times)],
     questions: itemTexts(raw.questions),

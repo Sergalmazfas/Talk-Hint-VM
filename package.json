@@ -10,6 +10,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "test": "vitest run",
+    "test:tutor-engine-contract": "tsx scripts/tutor-engine-contract-probe.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
