@@ -30,6 +30,12 @@ import {
   buildSessionPayload,
   SIMULATION_ERROR_CODES,
   getCapabilities,
+  evaluateEngineCompatibility,
+  ensureEngineCompatible,
+  resetCompatibilityCache,
+  EXPECTED_CONTRACT_MAJOR,
+  EXPECTED_REALTIME_PROTOCOL,
+  TutorEngineError,
   completeTutorSession,
   startCallMemoryGeneration,
   fetchCallMemory,
@@ -182,6 +188,109 @@ describe("mocked client wire behavior — the real client against frozen respons
     await expect(fetchCallMemory("s")).resolves.toEqual({ status: "failed", retriable: false });
     stubFetch(404, { error: { code: "CALL_MEMORY_NOT_GENERATED" } });
     await expect(fetchCallMemory("s")).resolves.toEqual({ status: "not_started" });
+  });
+});
+
+describe("runtime compatibility handshake — fail-closed before session create (contract §1)", () => {
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; vi.restoreAllMocks(); resetCompatibilityCache(); });
+
+  function stubFetch(status: number, body: unknown) {
+    const spy = vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
+    global.fetch = spy as any;
+    return spy;
+  }
+
+  it("pins are the contract identity TalkHint was aligned to", () => {
+    expect(EXPECTED_CONTRACT_MAJOR).toBe(FIXTURE_CONTRACT_META.contract.major);
+    expect(EXPECTED_REALTIME_PROTOCOL).toBe(FIXTURE_CONTRACT_META.realtime.protocol_version);
+  });
+
+  it("the frozen capabilities fixture (compatible engine) passes", () => {
+    const r = evaluateEngineCompatibility(FIXTURE_CAPABILITIES as any);
+    expect(r.compatible).toBe(true);
+    expect(r.mismatches).toEqual([]);
+  });
+
+  it("a MAJOR bump is incompatible, with the exact divergence recorded", () => {
+    const caps = { ...FIXTURE_CAPABILITIES, contract: { ...FIXTURE_CONTRACT_META.contract, major: 2, version: "2.0.0" } };
+    const r = evaluateEngineCompatibility(caps as any);
+    expect(r.compatible).toBe(false);
+    expect(r.mismatches.join(" ")).toContain("contract.major=2");
+  });
+
+  it("a different realtime protocol is incompatible", () => {
+    const caps = { ...FIXTURE_CAPABILITIES, realtime: { protocol: "tutor-realtime", version: "2.0", protocol_version: "tutor-realtime/2.0" } };
+    const r = evaluateEngineCompatibility(caps as any);
+    expect(r.compatible).toBe(false);
+    expect(r.mismatches.join(" ")).toContain("tutor-realtime/2.0");
+  });
+
+  it("ABSENT/malformed discovery metadata is INCOMPATIBLE — an unverifiable engine never hosts a lesson", () => {
+    const missing = evaluateEngineCompatibility({ realtime_audio: true, avatar: true } as any);
+    expect(missing.compatible).toBe(false);
+    expect(missing.mismatches).toHaveLength(2);
+    const malformed = evaluateEngineCompatibility({ contract: { major: "1" }, realtime: { protocol_version: 1 } } as any);
+    expect(malformed.compatible).toBe(false);
+    expect(malformed.mismatches).toHaveLength(2);
+  });
+
+  it("ensureEngineCompatible: compatible engine resolves and the verdict is CACHED (one capabilities call)", async () => {
+    const spy = stubFetch(200, FIXTURE_CAPABILITIES);
+    await expect(ensureEngineCompatible()).resolves.toMatchObject({ compatible: true });
+    await expect(ensureEngineCompatible()).resolves.toMatchObject({ compatible: true });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ensureEngineCompatible: incompatible engine throws kind=incompatible — fail-closed, also from cache", async () => {
+    const spy = stubFetch(200, { ...FIXTURE_CAPABILITIES, contract: { ...FIXTURE_CONTRACT_META.contract, major: 2 } });
+    for (let i = 0; i < 2; i++) {
+      await expect(ensureEngineCompatible()).rejects.toSatisfy(
+        (e: any) => e instanceof TutorEngineError && e.kind === "incompatible" && /contract\.major=2/.test(e.message),
+      );
+    }
+    expect(spy).toHaveBeenCalledTimes(1); // negative verdict cached too
+  });
+
+  it("ensureEngineCompatible: MISSING metadata throws kind=incompatible (fail-closed)", async () => {
+    stubFetch(200, { realtime_audio: true, avatar: true });
+    await expect(ensureEngineCompatible()).rejects.toSatisfy(
+      (e: any) => e instanceof TutorEngineError && e.kind === "incompatible",
+    );
+  });
+
+  it("createTutorSession is the shared fail-closed boundary: incompatible engine → NO POST /sessions (covers smoke checks and any direct caller)", async () => {
+    const calls: { url: string; method: string }[] = [];
+    const bad = { ...FIXTURE_CAPABILITIES, contract: { ...FIXTURE_CONTRACT_META.contract, major: 2 } };
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      calls.push({ url: String(url), method: init?.method || "GET" });
+      return new Response(JSON.stringify(bad), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as any;
+    const { createTutorSession } = await import("../tutorEngine");
+    await expect(createTutorSession("u1")).rejects.toSatisfy(
+      (e: any) => e instanceof TutorEngineError && e.kind === "incompatible",
+    );
+    expect(calls.filter((c) => c.url.endsWith("/api/v1/sessions"))).toHaveLength(0);
+  });
+
+  it("createTutorSession: capabilities OUTAGE also blocks — NO POST /sessions", async () => {
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (url: any) => {
+      calls.push(String(url));
+      throw new Error("ECONNREFUSED");
+    }) as any;
+    const { createTutorSession } = await import("../tutorEngine");
+    await expect(createTutorSession("u1")).rejects.toBeInstanceOf(TutorEngineError);
+    expect(calls.some((u) => u.endsWith("/api/v1/sessions"))).toBe(false);
+  });
+
+  it("ensureEngineCompatible: a capabilities OUTAGE blocks too (throws, nothing cached)", async () => {
+    global.fetch = vi.fn(async () => { throw new Error("ECONNREFUSED"); }) as any;
+    await expect(ensureEngineCompatible()).rejects.toBeInstanceOf(TutorEngineError);
+    // Nothing cached: once the engine is reachable again, sessions resume.
+    const spy = stubFetch(200, FIXTURE_CAPABILITIES);
+    await expect(ensureEngineCompatible()).resolves.toMatchObject({ compatible: true });
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 

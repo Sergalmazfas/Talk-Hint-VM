@@ -48,7 +48,7 @@ export class TutorEngineError extends Error {
   constructor(
     message: string,
     public status: number | null,
-    public kind: "auth" | "not_json" | "http" | "network" | "not_configured",
+    public kind: "auth" | "not_json" | "http" | "network" | "not_configured" | "incompatible",
     public body?: string,
   ) {
     super(message);
@@ -113,6 +113,92 @@ export interface TutorCapabilities {
 
 export async function getCapabilities(): Promise<TutorCapabilities> {
   return engineFetch(`${API_PREFIX}/capabilities`);
+}
+
+// --- Runtime compatibility handshake (contract §1, Engine Task #16) ---------
+// GET /v1/capabilities publishes contract {name, version, major, hash} and
+// realtime {protocol_version}. TalkHint was aligned to tutor-engine major 1
+// and tutor-realtime/1.0 — before creating any session we verify the deployed
+// engine still speaks that contract, and FAIL CLOSED on a mismatch (the user
+// sees an honest "incompatible version" error instead of a broken lesson).
+export const EXPECTED_CONTRACT_MAJOR = 1;
+export const EXPECTED_REALTIME_PROTOCOL = "tutor-realtime/1.0";
+
+export interface CompatibilityResult {
+  compatible: boolean;
+  // FAIL-CLOSED: metadata that MISMATCHES *or is ABSENT/malformed* is fatal —
+  // an engine whose contract cannot be verified must not host lessons.
+  mismatches: string[];
+}
+
+// Pure evaluation of a capabilities payload against the pinned contract.
+// Exported for tests.
+export function evaluateEngineCompatibility(caps: TutorCapabilities): CompatibilityResult {
+  const mismatches: string[] = [];
+  const contract = (caps as any)?.contract;
+  if (contract == null || typeof contract.major !== "number") {
+    mismatches.push(`contract.major is ${JSON.stringify(contract?.major ?? null)} — missing/malformed discovery metadata (expected number ${EXPECTED_CONTRACT_MAJOR}); cannot verify compatibility`);
+  } else if (contract.major !== EXPECTED_CONTRACT_MAJOR) {
+    mismatches.push(`contract.major=${contract.major} (TalkHint is aligned to major ${EXPECTED_CONTRACT_MAJOR}; contract ${contract.name ?? "?"}@${contract.version ?? "?"})`);
+  }
+  const realtime = (caps as any)?.realtime;
+  if (realtime == null || typeof realtime.protocol_version !== "string") {
+    mismatches.push(`realtime.protocol_version is missing/malformed (expected ${JSON.stringify(EXPECTED_REALTIME_PROTOCOL)}); cannot verify compatibility`);
+  } else if (realtime.protocol_version !== EXPECTED_REALTIME_PROTOCOL) {
+    mismatches.push(`realtime.protocol_version=${JSON.stringify(realtime.protocol_version)} (expected ${JSON.stringify(EXPECTED_REALTIME_PROTOCOL)})`);
+  }
+  return { compatible: mismatches.length === 0, mismatches };
+}
+
+// Cache so the handshake never adds a round-trip to every session create.
+// A compatible verdict is trusted for 5 minutes; an INCOMPATIBLE one only for
+// 60 seconds, so recovery after an engine fix is fast.
+const COMPAT_TTL_OK_MS = 5 * 60 * 1000;
+const COMPAT_TTL_BAD_MS = 60 * 1000;
+let compatCache: { result: CompatibilityResult; expiresAt: number } | null = null;
+
+// Test hook: reset the handshake cache between test cases.
+export function resetCompatibilityCache(): void {
+  compatCache = null;
+}
+
+// Verify the deployed engine's contract before a session is created —
+// STRICTLY FAIL-CLOSED. Throws TutorEngineError on ANY unverified state:
+//   - kind:"incompatible" for a mismatch or missing/malformed discovery
+//     metadata (safe 503 to the user);
+//   - the original TutorEngineError when the capabilities fetch itself fails
+//     (network/HTTP/non-JSON → the existing safe 502 mapping). A fetch
+//     failure is never cached, so recovery is immediate.
+// Callers must NOT create a session unless this resolves.
+export async function ensureEngineCompatible(): Promise<CompatibilityResult> {
+  const now = Date.now();
+  if (compatCache && compatCache.expiresAt > now) {
+    if (!compatCache.result.compatible) {
+      throw new TutorEngineError(
+        `Tutor Engine contract incompatible (cached): ${compatCache.result.mismatches.join("; ")}`,
+        null,
+        "incompatible",
+      );
+    }
+    return compatCache.result;
+  }
+  let caps: TutorCapabilities;
+  try {
+    caps = await getCapabilities();
+  } catch (err: any) {
+    // Fail closed: an unreachable/broken discovery endpoint blocks the lesson
+    // with its own honest connection error; nothing is cached.
+    console.error(`[TutorEngine] Compatibility handshake failed — capabilities unavailable, refusing session: ${err?.message ?? err}`);
+    throw err;
+  }
+  const result = evaluateEngineCompatibility(caps);
+  compatCache = { result, expiresAt: Date.now() + (result.compatible ? COMPAT_TTL_OK_MS : COMPAT_TTL_BAD_MS) };
+  if (!result.compatible) {
+    // The exact divergence goes to the backend log; users get a safe message.
+    console.error(`[TutorEngine] INCOMPATIBLE engine contract — refusing sessions: ${result.mismatches.join("; ")}`);
+    throw new TutorEngineError(`Tutor Engine contract incompatible: ${result.mismatches.join("; ")}`, null, "incompatible");
+  }
+  return result;
 }
 
 // Raw tutor catalog from the engine — the DYNAMIC source of truth for tutor
@@ -231,6 +317,10 @@ export function simulationErrorCode(err: unknown): SimulationErrorCode | null {
 // by the engine and must never be sent. POST /sessions is non-idempotent:
 // never auto-retry on timeout (contract §1).
 export async function createTutorSession(userId: string, sim?: TutorSimulationParams, tutorId?: string): Promise<any> {
+  // Shared fail-closed boundary: EVERY session create (lesson route, smoke
+  // checks, any future caller) runs the compatibility handshake first — an
+  // incompatible or unverifiable engine never receives POST /sessions.
+  await ensureEngineCompatible();
   return engineFetch(`${API_PREFIX}/sessions`, { method: "POST", body: buildSessionPayload(userId, sim, tutorId) });
 }
 

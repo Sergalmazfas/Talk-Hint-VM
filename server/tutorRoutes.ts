@@ -14,6 +14,7 @@ import {
   getTutorCatalog,
   normalizeTutorEntry,
   createTutorSession,
+  ensureEngineCompatible,
   completeTutorSession,
   startCallMemoryGeneration,
   fetchCallMemory,
@@ -45,6 +46,11 @@ function safeEngineError(res: any, err: any) {
     console.error(`[Tutor] Engine error (${err.kind}, status=${err.status}): ${err.message}${err.body ? ` body=${err.body}` : ""}`);
     if (err.kind === "not_configured") {
       return res.status(503).json({ error: "tutor_not_configured", message: "Репетитор ещё не настроен." });
+    }
+    if (err.kind === "incompatible") {
+      // Fail-closed contract handshake: the exact divergence is already in the
+      // backend log; the user gets an honest, safe message.
+      return res.status(503).json({ error: "tutor_incompatible", message: "Репетитор временно недоступен: несовместимая версия движка." });
     }
     return res.status(502).json({ error: "tutor_connection", message: "Не удалось связаться с репетитором. Попробуйте позже." });
   }
@@ -198,6 +204,12 @@ export function registerTutorRoutes(app: Express) {
       sim = buildSimulationParams(v, memoryRef);
     }
     try {
+      // Runtime compatibility handshake (contract §1): verify the deployed
+      // engine still speaks tutor-engine major 1 / tutor-realtime/1.0 BEFORE
+      // creating a session. Cached — no extra round-trip per request. Throws
+      // kind:"incompatible" on a verified mismatch → 503 with an honest
+      // message, session NOT created.
+      await ensureEngineCompatible();
       const session = await createTutorSession(user.id, sim, tutorId);
       const engineSessionId = session?.session_id;
       const realtime = session?.realtime;
