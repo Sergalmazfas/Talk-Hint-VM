@@ -46,3 +46,10 @@ uri = "file://docs/talkhint-status-report.md"
 type = "text"
 title = "TalkHint Status Report для Engine"
 description = "Полный отчёт о текущем состоянии TalkHint (10 разделов, VERIFIED/UNKNOWN, без секретов) — для передачи агенту движка."
+
+[[outputs]]
+id = "WkQrJo1VJWASUEQZ3wFZP"
+uri = "file://docs/tutor-current-ux-reference.md"
+type = "text"
+title = "Tutor UX — справочный документ"
+description = "Полное описание текущего Tutor UX (выбор репетитора, живой урок, Call Memory) для Engine Workbench."
