@@ -17,4 +17,5 @@
 - [Twilio single-account consolidation](twilio-account-consolidation.md) — pool numbers MUST be on main account (subaccount nums fail signature + conference bridge); new buys go to main; configureVoiceWebhook falls back to main.
 - [Live hint grounding](live-hint-grounding.md) — LIVE_GROUNDING_RULES must reach EVERY suggestion path: buildLiveSystemPrompt, realtime/ask-assistant (golden-prompt paths), and library fast path via owner-only-question gate.
 - [Tutor visual-preview harness](tutor-preview-harness.md) — dev-only /tutor/preview drives real page states via stubbed engine; headless Screenshot has no WebGL, avatar only renders in user's browser.
+- [Tutor Engine realtime protocol](tutor-engine-realtime-protocol.md) — verified event catalog; hints are engine-initiated USER-reply suggestions (never TTS); goal fields silently ignored at session create.
 - [Dialogue library per goal](dialogue-library-per-goal.md) — auto-built call dialogue libs keyed per-user-per-goal (own UUID id), NOT per goalType; runtime picks by goalText fuzzy match then goalType; always fall through to translateAndSuggest.

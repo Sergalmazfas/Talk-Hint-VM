@@ -122,6 +122,24 @@ const DRIVER = `<script>
       onUtterance = () => tutorReply("I want ask my lawyer.", CORRECTION); // no turn.completed → stays SPEAKING
       mic().dispatchEvent(pev("pointerup")); return;
     }
+    if (STATE === "hint") {
+      // Real engine shapes captured live (tutor-realtime/1.0): correction +
+      // final text on turn 1, an automatic tutor.hint after turn 2.
+      emit({ type: "turn.state", state: "THINKING" });
+      tutorReply("I want ask my lawyer.", CORRECTION);
+      emit({ type: "tutor.correction", correction: { user_said: "I want ask my lawyer.", better: "I want to ask my lawyer.", explanation: "После 'want' используется 'to + глагол'.", translation: "Я хочу спросить своего юриста.", category: "grammar" } });
+      emit({ type: "tutor.text.final", text: CORRECTION });
+      await sleep(60);
+      emit({ type: "turn.completed" });
+      await sleep(60);
+      tutorReply("Помоги, подскажи что сказать.", "Sure! Let's keep it simple.");
+      emit({ type: "tutor.hint", hint: "Could you please help me with my documents?", mode: "assisted" });
+      emit({ type: "unknown.future.event", payload: { x: 1 } }); // must be ignored safely
+      await sleep(60);
+      emit({ type: "turn.completed" });
+      await sleep(60);
+      return;
+    }
     if (STATE === "dialog" || STATE === "translate") {
       await fullTurn("I want ask my lawyer.", CORRECTION);
       await fullTurn("Tomorrow I call the office about my documents.", REPLY2);

@@ -22,6 +22,7 @@
 // No teaching logic, no engine API key, nothing engine-side lives here.
 // TalkHint renders only text actually received from the Tutor Engine.
 import { pttNext, micAllowed } from "./tutorPttMachine";
+import { classifyEngineEvent } from "./tutorRealtimeUi";
 
 // Inline lucide icons (MIT) — consistent 24x24 stroke set, no emoji.
 const LUCIDE: Record<string, string> = {
@@ -96,6 +97,19 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   .card .trLoading{display:none;margin-top:8px;padding-top:8px;border-top:1px solid #d9d5db}
   .card .trLoading.show{display:flex;gap:4px;align-items:center}
   .card.local .localTag{display:block;margin-top:6px;font-size:11px;font-weight:400;color:#8a8ea2}
+  /* Hint card (freeze §H): suggested USER reply from the engine — lilac dashed,
+     visually distinct from messages, dismissible, never blocks the mic. */
+  .card.hintCard{align-self:stretch;max-width:100%;background:#faf7ff;border:1.5px dashed #c9b6f2;color:#4a3c63;border-radius:18px}
+  .card.hintCard .hHead{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#8a63d2;margin-bottom:6px}
+  .card.hintCard .hHead .hx{margin-left:auto;border:0;background:none;color:#b0a6c4;display:flex;padding:2px}
+  .card.hintCard .hText{font-size:14px;font-weight:600;color:#3f3355}
+  .card.hintCard .hTr{margin-top:6px;font-size:12px;color:#77717d}
+  /* Correction card (spec §5): visually secondary, never interrupts LIVE. */
+  .card.corr{align-self:flex-start;background:#f7f4fb;border:1px solid #e8e1f4;color:#4a4453;border-radius:18px;font-size:12.5px}
+  .card.corr .cHead{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#8a63d2;margin-bottom:5px}
+  .card.corr .cBetter{font-size:13.5px;font-weight:700;color:#3f3355}
+  .card.corr .cSaid{margin-top:4px;color:#8a8792;text-decoration:line-through;text-decoration-color:#cdb9ee}
+  .card.corr .cWhy{margin-top:4px;color:#77717d}
   .dot{width:6px;height:6px;border-radius:50%;background:#7c3aed;animation:dots 1s ease-in-out infinite}
   .dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
   @keyframes dots{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-2px)}}
@@ -311,6 +325,8 @@ const L = RU ? {
   greet: (n) => n ? ("Привет, " + n + "! 👋") : "Привет! 👋",
   greetTag: "Приветствие TalkHint — не реплика Emma",
   hintChip: "Что сказать?", soon: "Скоро — нужна поддержка движка",
+  hintTitle: "Подсказка — можно сказать", noHintYet: "Подсказка появится по ходу разговора",
+  corrTitle: "Как сказать лучше", transcribing: "Распознаём…",
   quitTitle: "Завершить практику?",
   quitBody: "Из ваших реплик будет создана память разговора — проверьте и подтвердите её, чтобы использовать в реальном звонке.",
   quitBodyEmpty: "Вы ещё ничего не сказали. Память разговора не будет создана.",
@@ -342,6 +358,8 @@ const L = RU ? {
   greet: (n) => n ? ("Hi, " + n + "! 👋") : "Hi! 👋",
   greetTag: "TalkHint greeting — not an Emma reply",
   hintChip: "What to say?", soon: "Coming soon — needs engine support",
+  hintTitle: "Hint — you could say", noHintYet: "A hint will appear as you talk",
+  corrTitle: "Better way to say it", transcribing: "Transcribing…",
   quitTitle: "End the practice?",
   quitBody: "We'll build call memory from what you said — review and confirm it to use in a real call.",
   quitBodyEmpty: "You haven't said anything yet. No call memory will be created.",
@@ -380,7 +398,12 @@ function render() {
   const labels = { LOADING: L.loading, READY: L.ready, RECORDING: L.recording,
     PROCESSING: L.processing, SPEAKING: L.speakingLocked, ERROR: L.error,
     ENDING: L.ending, MEMORY: "" };
-  stateLabel.textContent = labels[state] ?? "";
+  // Engine turn.state refines the waiting label truthfully (spec §7): while we
+  // are locally PROCESSING, the engine knows whether it is transcribing or
+  // thinking. It never drives the PTT machine — labels only, no noise.
+  let label = labels[state] ?? "";
+  if (state === "PROCESSING" && engineTurnLabel === "transcribing") label = L.transcribing;
+  stateLabel.textContent = label;
   micBtn.disabled = !(state === "READY" || state === "RECORDING");
   micBtn.classList.toggle("rec", state === "RECORDING");
   document.body.classList.toggle("recording", state === "RECORDING");
@@ -407,9 +430,14 @@ hintChip.querySelector("span").textContent = L.hintChip;
 const toast = document.getElementById("toast");
 let toastT = null;
 function showToast(t) { toast.textContent = t; toast.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(()=>toast.classList.remove("show"), 1800); }
-// Hint suggestions / text turns / attachments need engine-side support —
-// honest "soon" toast, no fake behavior (freeze §L: deferred backends).
-hintChip.onclick = () => showToast(L.soon);
+// «Что сказать?» reveals the CURRENT engine hint (spec §3). It never calls
+// the backend, never invents an engine command, never generates locally:
+// if the engine hasn't sent a hint yet, we honestly say so.
+hintChip.onclick = () => {
+  if (hintCardEl) { hintCardEl.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+  if (currentHint) { showHintCard(currentHint); return; }
+  showToast(L.noHintYet);
+};
 
 // ---- Conversation feed: pinned auto-scroll + return-to-latest (freeze §F) --
 const feed = document.getElementById("feed");
@@ -669,6 +697,69 @@ let userCard = null;              // pending user transcript card
 let tutorText = "";               // accumulated tutor.text.delta for this turn
 let tutorAudio = [];              // engine mp3 buffers for replay
 let tutorCard = null;
+let lastUserCard = null;          // last committed user bubble (for transcript.normalized)
+let lastUserTurnId = null;        // turn_id of that bubble — normalized text binds by turn
+let pendingNormalized = null;     // normalized text that arrived before its speech.final
+let tutorTextFinal = false;       // tutor.text.final received — deltas must not append
+let engineTurnLabel = null;       // engine turn.state → truthful waiting label (spec §7)
+let currentHint = null;           // latest engine hint {text, translation} — spec §§1-3
+let hintCardEl = null;            // rendered hint card (dismissible)
+
+// Shared PURE classifier for engine events beyond the PTT machine — the same
+// source is unit-tested server-side (tutorRealtimeUi.test.ts, spec §14).
+const classifyEngineEvent = ${classifyEngineEvent.toString()};
+
+// Hint = suggested USER reply (spec §1). Rendered as a dismissible card ONLY:
+// never sent to TTS, never added as a user bubble, never sent to the engine.
+function showHintCard(hint) {
+  if (hintCardEl) { hintCardEl.remove(); hintCardEl = null; }
+  const el = addCard("hintCard");
+  const head = document.createElement("div");
+  head.className = "hHead";
+  head.innerHTML = '${svg("lightbulb", 13)}<span>' + L.hintTitle + "</span>";
+  const x = document.createElement("button");
+  x.className = "hx"; x.setAttribute("aria-label", "dismiss hint");
+  x.innerHTML = '${svg("x", 14)}';
+  x.onclick = () => { el.remove(); if (hintCardEl === el) hintCardEl = null; }; // hint stays in currentHint — chip re-reveals it
+  head.appendChild(x);
+  el.appendChild(head);
+  const t = document.createElement("div");
+  t.className = "hText"; t.textContent = hint.text;
+  el.appendChild(t);
+  if (hint.translation) {
+    const tr = document.createElement("div");
+    tr.className = "hTr"; tr.textContent = hint.translation;
+    el.appendChild(tr);
+  }
+  hintCardEl = el;
+  scrollFeed();
+}
+
+// Correction (spec §5): visually secondary, appended to the feed — the
+// conversation continues, nothing is interrupted, no extra LLM call.
+function showCorrectionCard(c) {
+  const el = addCard("corr");
+  const head = document.createElement("div");
+  head.className = "cHead";
+  head.innerHTML = '${svg("check", 12)}<span>' + L.corrTitle + "</span>";
+  el.appendChild(head);
+  const better = document.createElement("div");
+  better.className = "cBetter"; better.textContent = c.better;
+  el.appendChild(better);
+  if (c.userSaid) {
+    const said = document.createElement("div");
+    said.className = "cSaid"; said.textContent = c.userSaid;
+    el.appendChild(said);
+  }
+  const why = c.explanation || "";
+  const tr = c.translation || "";
+  if (why || tr) {
+    const w = document.createElement("div");
+    w.className = "cWhy"; w.textContent = why + (why && tr ? " — " : "") + tr;
+    el.appendChild(w);
+  }
+  scrollFeed();
+}
 
 async function connect() {
   state = "LOADING"; render();
@@ -763,24 +854,60 @@ function onWsMessage(e) {
     userCard.classList.remove("pending");
     userCard.textContent = msg.text || "";
     if ((msg.text || "").trim()) saidAnything = true;
+    lastUserCard = userCard; // transcript.normalized may follow (spec §7)
+    lastUserTurnId = msg.turn_id || null;
+    if (pendingNormalized && pendingNormalized.turnId && pendingNormalized.turnId === lastUserTurnId) {
+      lastUserCard.dataset.normalized = pendingNormalized.text; // arrived early — bind now
+      pendingNormalized = null;
+    }
     userCard = null;
     scrollFeed();
   }
-  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; tutorText += msg.text || msg.delta || ""; if (tutorCard) { tutorCard.textContent = tutorText; scrollFeed(); } }
+  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; if (tutorTextFinal) return; tutorText += msg.text || msg.delta || ""; if (tutorCard) { tutorCard.textContent = tutorText; scrollFeed(); } }
   else if (msg.type === "tutor.audio.chunk") pendingTtsMeta = msg;
   else if (msg.type === "turn.completed") {
     if (tutorCard) { finishTutorCard(tutorCard, tutorText || tutorCard.textContent, tutorAudio.slice()); }
     tutorCard = null; tutorText = ""; tutorAudio = []; userCard = null;
     pendingTtsMeta = null; // a binary frame after completion belongs to a closed turn
+    engineTurnLabel = null; tutorTextFinal = false;
     dispatch("turnCompleted");
   }
   else if (msg.type === "error") { console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code }); }
+  else {
+    // Engine events beyond the PTT machine (task 154) — classified by the
+    // shared pure function; unknown/malformed types return null and are
+    // ignored safely (spec §8). No event here ever reaches TTS or the mic.
+    const act = classifyEngineEvent(msg);
+    if (!act) return;
+    if (act.kind === "hint") { currentHint = act; showHintCard(act); } // auto-display, no button needed (spec §2)
+    else if (act.kind === "correction") showCorrectionCard(act);
+    else if (act.kind === "finalText") {
+      // Authoritative Emma text: reconcile the SAME streaming bubble — never
+      // a duplicate card (spec §6). A text-only turn (no audio yet) must
+      // still show Emma's reply, so create the streaming card if missing.
+      tutorText = act.text;
+      tutorTextFinal = true; // later deltas of this turn must not append stale text
+      if (!tutorCard) tutorCard = addCard("tutor streaming");
+      tutorCard.textContent = act.text;
+      scrollFeed();
+    }
+    else if (act.kind === "turnState") { engineTurnLabel = act.state; render(); }
+    else if (act.kind === "normalized") {
+      // Conservative (spec §7): keep the RAW transcript visible; store the
+      // normalized form on the bubble without rewriting what the user saw.
+      // Bind by turn_id — never blindly to the previous turn's bubble.
+      const tid = msg.turn_id || null;
+      if (lastUserCard && (!tid || tid === lastUserTurnId)) lastUserCard.dataset.normalized = act.text;
+      else pendingNormalized = { turnId: tid, text: act.text };
+    }
+  }
 }
 
 // ---- Hold-to-talk gestures -------------------------------------------------
 async function pressDown(ev) {
   ev.preventDefault();
   if (!dispatch("pressDown")) return; // only from READY — no double start
+  engineTurnLabel = null; // stale turn.state must not color the new turn
   try { navigator.vibrate?.(10); } catch(_){}
   sentAudio = false;
   try {
