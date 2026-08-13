@@ -1,10 +1,12 @@
 // Standalone tutor page served at /tutor, loaded by the iOS WKWebView.
 // Emma Tutor v4 — implemented exactly per docs/emma-tutor-v4-design-freeze.md:
 //   - single Main Conversation Screen (fullscreen mode REMOVED from v1)
-//   - header: X (quit w/ confirmation sheet) · tutor name · settings popover
-//   - 260px avatar card: blurred cozy-study background + live 3D Emma,
-//     bottom gradient, mute overlay button, speaking equalizer pill
-//   - chat feed below (tutor grey / user violet bubbles, inline translation,
+//   - compact header (task 163): X (quit w/ confirmation sheet) · centered
+//     circular LIVE avatar (same TalkingHead renderer — camera framing +
+//     container clipping only, the GLB itself is NEVER scaled or mutated) with
+//     tutor name + compact status underneath · settings popover
+//   - chat feed gets nearly all remaining space (tutor grey / user violet
+//     bubbles, inline translation,
 //     Replay/Translate/Copy action row), streaming bubble pinned to bottom
 //     with natural auto-scroll + "return to latest" FAB when scrolled away
 //   - hint chip «Что сказать?», bottom dock: keyboard · 70px hold-to-talk
@@ -62,21 +64,23 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   button{font-family:inherit;color:inherit}
   #app{display:flex;flex-direction:column;height:100%;padding:0 20px}
   /* --- Header ------------------------------------------------------------- */
-  #topbar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top)) 0 0;height:calc(54px + env(safe-area-inset-top))}
-  .roundBtn{width:36px;height:36px;border-radius:50%;border:1px solid #e8e5eb;background:#fff;color:#554f5c;display:flex;align-items:center;justify-content:center;transition:transform .12s}
+  #topbar{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top)) 0 0}
+  .roundBtn{width:36px;height:36px;flex:0 0 36px;border-radius:50%;border:1px solid #e8e5eb;background:#fff;color:#554f5c;display:flex;align-items:center;justify-content:center;transition:transform .12s}
   .roundBtn:active{transform:scale(.9)}
-  #title{font-size:17px;font-weight:700;letter-spacing:-.02em}
-  /* --- Avatar card (single main screen; NO fullscreen in v1) --------------- */
-  #avatarWrap{flex:0 0 260px;margin-top:12px;border-radius:28px;overflow:hidden;position:relative;background:#dfd8d2 url(/tutor/bg.png) center 30%/cover no-repeat;box-shadow:0 12px 32px rgba(72,55,44,.13)}
+  /* --- Compact circular LIVE avatar (task 163) ------------------------------
+     The SAME TalkingHead renderer, just clipped into a FIXED-size circle:
+     compactness comes from viewport size + camera framing + border-radius
+     clipping ONLY — the GLB model is never scaled or mutated. Fixed px size
+     + fixed-height name/status rows = the circle stays visually stable
+     across LISTENING/THINKING/SPEAKING and chat scroll (no reflow inputs). */
+  #tutorHead{display:flex;flex-direction:column;align-items:center;min-width:0;padding-bottom:2px}
+  #avatarWrap{width:80px;height:80px;flex:0 0 auto;border-radius:50%;overflow:hidden;position:relative;background:#efe9f8;box-shadow:0 0 0 3px #fff,0 0 0 4.5px #e2d6f6,0 6px 18px rgba(124,58,237,.16)}
   #avatar{position:absolute;inset:0}
-  #avatarWrap::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(to top,rgba(0,0,0,.25),transparent 45%)}
-  .ovlBtn{position:absolute;bottom:14px;z-index:5;width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(0,0,0,.2);backdrop-filter:blur(6px);color:#fff;display:flex;align-items:center;justify-content:center}
-  #muteBtn{right:14px}
-  #eqPill{position:absolute;left:14px;bottom:14px;z-index:5;display:none;align-items:flex-end;gap:3px;border-radius:999px;background:rgba(255,255,255,.7);backdrop-filter:blur(6px);padding:8px 12px}
-  #eqPill i{display:block;width:3px;height:12px;border-radius:2px;background:#7c3aed;animation:eq 1s ease-in-out infinite}
-  #eqPill i:nth-child(2){animation-delay:.15s}#eqPill i:nth-child(3){animation-delay:.3s}#eqPill i:nth-child(4){animation-delay:.45s}
-  @keyframes eq{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
-  body.speaking #eqPill{display:flex}
+  #title{font-size:15px;font-weight:700;letter-spacing:-.01em;margin-top:8px;line-height:18px;height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60vw}
+  #livePill{display:flex;align-items:center;gap:5px;height:16px;margin-top:2px;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8a63d2;visibility:hidden}
+  #livePill i{width:6px;height:6px;border-radius:50%;background:#22c55e;flex:0 0 auto}
+  body.recording #livePill i{background:#e64d5a}
+  body.thinking #livePill i{background:#f59e0b}
   /* --- Feed (chat bubbles) -------------------------------------------------- */
   #feedWrap{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
   #feed{flex:1;overflow-y:auto;padding:16px 4px 12px 0;display:flex;flex-direction:column;gap:16px;-webkit-overflow-scrolling:touch}
@@ -227,13 +231,12 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
 <div id="app">
   <div id="topbar">
     <button id="xBtn" class="roundBtn" aria-label="close">${svg("x", 18)}</button>
-    <div id="title">Emma</div>
+    <div id="tutorHead">
+      <div id="avatarWrap"><div id="avatar"></div></div>
+      <div id="title">Emma</div>
+      <div id="livePill"><i></i><span></span></div>
+    </div>
     <button id="gearBtn" class="roundBtn" aria-label="settings">${svg("settings", 17)}</button>
-  </div>
-  <div id="avatarWrap">
-    <div id="avatar"></div>
-    <div id="eqPill"><i></i><i></i><i></i><i></i></div>
-    <button id="muteBtn" class="ovlBtn" aria-label="mute">${svg("volume2", 16)}</button>
   </div>
   <div id="feedWrap">
     <div id="feed">
@@ -370,6 +373,8 @@ const L = RU ? {
   continueBtn: "Продолжить практику", endBtn: "Завершить",
   mMute: "Звук Emma", mEnd: "Завершить практику",
   on: "Вкл", off: "Выкл",
+  tutorPrefix: "Репетитор ",
+  stLive: "Live", stListen: "Слушаю", stThink: "Думает", stSpeak: "Говорит",
   composerPh: "Новое сообщение…",
   aPhoto: "Сделать фото", aLibrary: "Медиатека", aFile: "Прикрепить файл", aCancel: "Отмена",
   startTitle: "Как хотите практиковаться?",
@@ -416,6 +421,8 @@ const L = RU ? {
   continueBtn: "Continue practice", endBtn: "End",
   mMute: "Emma's voice", mEnd: "End practice",
   on: "On", off: "Off",
+  tutorPrefix: "Tutor ",
+  stLive: "Live", stListen: "Listening", stThink: "Thinking", stSpeak: "Speaking",
   composerPh: "New message…",
   aPhoto: "Take photo", aLibrary: "Photo library", aFile: "Attach file", aCancel: "Cancel",
   startTitle: "How do you want to practice?",
@@ -460,6 +467,7 @@ let state = "LOADING";
 const micBtn = document.getElementById("micBtn");
 const stateLabel = document.getElementById("stateLabel");
 const retryBtn = document.getElementById("retryBtn");
+const livePill = document.getElementById("livePill");
 retryBtn.querySelector("span").textContent = L.retry;
 
 function render() {
@@ -482,6 +490,12 @@ function render() {
   document.body.classList.toggle("thinking", state === "PROCESSING");
   document.body.classList.toggle("speaking", state === "SPEAKING");
   document.body.classList.toggle("mem-pending", state === "ENDING");
+  // Compact header status (task 163): LIVE / Listening / Thinking / Speaking.
+  // Fixed-height pill — text changes never move the avatar circle above it.
+  const lpMap = { READY: L.stLive, RECORDING: L.stListen, PROCESSING: L.stThink, SPEAKING: L.stSpeak };
+  const lpText = lpMap[state] || "";
+  livePill.style.visibility = lpText ? "visible" : "hidden";
+  livePill.querySelector("span").textContent = lpText;
   retryBtn.style.display = state === "ERROR" ? "flex" : "none";
   document.getElementById("controls").style.visibility = state === "ERROR" ? "hidden" : "";
   hintChip.disabled = state !== "READY";
@@ -601,9 +615,8 @@ function finishTutorCard(el, text, audioBufs) {
   scrollFeed();
 }
 
-// ---- Mute --------------------------------------------------------------------
+// ---- Mute (settings menu only — the compact avatar has no overlay button) ---
 let mutedFlag = false;
-const MUTE_ON = '${svg("volume2", 16)}', MUTE_OFF = '${svg("volumeX", 16)}';
 const MUTE_ON_M = '${svg("volume2", 18)}', MUTE_OFF_M = '${svg("volumeX", 18)}';
 
 // ---- Settings popover ----------------------------------------------------------
@@ -616,14 +629,12 @@ mEnd.children[1].textContent = L.mEnd;
 function renderMenu() {
   mMute.querySelector(".val").textContent = mutedFlag ? L.off : L.on;
   mMute.querySelector(".ic").innerHTML = mutedFlag ? MUTE_OFF_M : MUTE_ON_M;
-  document.getElementById("muteBtn").innerHTML = mutedFlag ? MUTE_OFF : MUTE_ON;
 }
 function toggleMenu(show) { menu.classList.toggle("show", show); menuBackdrop.classList.toggle("show", show); if (show) renderMenu(); }
 document.getElementById("gearBtn").onclick = () => toggleMenu(!menu.classList.contains("show"));
 menuBackdrop.onclick = () => toggleMenu(false);
 mMute.onclick = () => { mutedFlag = !mutedFlag; renderMenu(); };
 mEnd.onclick = () => { toggleMenu(false); openQuitSheet(); };
-document.getElementById("muteBtn").onclick = () => { mutedFlag = !mutedFlag; renderMenu(); };
 
 // ---- Text composer (UI per freeze §10; engine text turns deferred §L) --------
 const composerInput = document.getElementById("composerInput");
@@ -676,7 +687,7 @@ let lastGlbObjectUrl = null; // blob: URL of the currently shown model (revoked 
 let tutorName = "Emma";
 const tn = (s) => String(s).split("Emma").join(tutorName);
 function applyTutorName() {
-  document.getElementById("title").textContent = tutorName;
+  document.getElementById("title").textContent = L.tutorPrefix + tutorName;
   startSheet.querySelector("p").textContent = tn(L.startSub);
   document.getElementById("lSimEmma").textContent = tn(L.simEmmaL);
   mMute.children[1].textContent = tn(L.mMute);
@@ -900,8 +911,9 @@ async function connect(simCfg) {
     try {
       if (!head) {
         const { TalkingHead } = await import("talkinghead");
-        // Half-body framing per freeze §2: face in the upper third of the card.
-        head = new TalkingHead(document.getElementById("avatar"), { cameraView: "upper", ttsEndpoint: "none" });
+        // Compact circle (task 163): frontal close-up framing — face + lips
+        // fill the circle. Camera view only; the GLB is never scaled/mutated.
+        head = new TalkingHead(document.getElementById("avatar"), { cameraView: "head", ttsEndpoint: "none" });
       }
       // Persistent GLB cache keyed by tutor_id + asset_version: repeated
       // launches load the model locally with zero network (catalog policy).
