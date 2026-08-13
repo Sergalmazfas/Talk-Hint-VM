@@ -39,7 +39,9 @@ export type TutorUiAction =
 // NOTE: plain-JS body (no TS-only syntax) — it is stringified into the page.
 export function classifyEngineEvent(msg: any): TutorUiAction | null {
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return null;
-  if (msg.type === "tutor.hint") {
+  // The engine renamed tutor.hint → tutor.suggested_reply (payload
+  // {text, translation}); we accept both so older engine builds keep working.
+  if (msg.type === "tutor.hint" || msg.type === "tutor.suggested_reply") {
     const text = typeof msg.hint === "string" ? msg.hint : typeof msg.text === "string" ? msg.text : "";
     if (!text.trim()) return null;
     const translation = typeof msg.translation === "string" && msg.translation.trim() ? msg.translation : null;

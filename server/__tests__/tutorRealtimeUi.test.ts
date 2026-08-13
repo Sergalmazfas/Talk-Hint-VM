@@ -30,6 +30,18 @@ describe("14A/B — tutor.hint renders automatically as a hint card", () => {
     const a = classifyEngineEvent({ ...REAL_HINT, translation: "Не могли бы вы помочь мне с документами?" });
     expect(a).toMatchObject({ kind: "hint", translation: "Не могли бы вы помочь мне с документами?" });
   });
+  it("classifies tutor.suggested_reply (current engine event name) into a hint action", () => {
+    // Real payload captured live 2026-08-13 (simulation session, fiona_us_01).
+    const a = classifyEngineEvent({
+      type: "tutor.suggested_reply",
+      turn_id: "23b9f3bf-ab05-44ef-8844-e7da8a78083b",
+      text: "I want to know the status of my case.",
+      translation: "Я хочу узнать статус моего дела.",
+      carryover: false,
+      seq: 20,
+    });
+    expect(a).toEqual({ kind: "hint", text: "I want to know the status of my case.", translation: "Я хочу узнать статус моего дела." });
+  });
   it("drops empty/malformed hints instead of rendering blanks", () => {
     expect(classifyEngineEvent({ type: "tutor.hint", hint: "  " })).toBeNull();
     expect(classifyEngineEvent({ type: "tutor.hint" })).toBeNull();
