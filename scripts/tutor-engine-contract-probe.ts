@@ -1,5 +1,7 @@
 // ---------------------------------------------------------------------------
-// Task #160 — LIVE Tutor Engine contract probe.
+// LIVE Tutor Engine contract probe (aligned to Tutor Engine Public Contract
+// v1 — tutor-engine 1.0.0, tutor-realtime/1.0; consumer copy:
+// docs/tutor-engine-public-contract-v1.md).
 //
 // Run manually (REQUIRED pre-publish check for TalkHint):
 //   npm run test:tutor-engine-contract
@@ -21,10 +23,15 @@
 // It NEVER checks teaching quality or exact wording — a model or phrasing
 // change must not fail this probe; a renamed event or changed field type must.
 //
-// No silent alias success: if the Engine sends only the LEGACY tutor.hint and
-// not the canonical tutor.suggested_reply, this probe FAILS with an explicit
-// RENAMED/UNEXPECTED entry (the client may still render the alias, but the
-// canonical mismatch is reported loudly).
+// VERSION REPORTING: the probe reads the Engine's own contract metadata from
+// GET /v1/capabilities (the authoritative pre-session compatibility handshake
+// per contract §1) and reports exactly which Engine contract/protocol version
+// it validated against. A missing/major-incompatible version is a failure.
+//
+// tutor.hint vs tutor.suggested_reply (contract §2): TWO DISTINCT stable
+// events — tutor.hint {hint, mode} is a teaching hint; tutor.suggested_reply
+// {text, translation, carryover} is the suggested USER reply. Neither is an
+// alias: a tutor.hint frame never satisfies the suggested-reply expectation.
 //
 // The probe talks to the Engine DIRECTLY (own fetch with AbortController):
 // every network phase is bounded, HTTP status codes are asserted exactly,
@@ -38,7 +45,11 @@
 import WebSocket from "ws";
 import { buildSessionPayload, getTutorEngineBase, type TutorSimulationParams } from "../server/tutorEngine";
 
-const CONTRACT_VERSION = "consumer contract 2026-08-13 (Goal-Driven Simulation v1; canonical hint event: tutor.suggested_reply)";
+// What THIS probe was written against (the published contract document).
+const EXPECTED_CONTRACT = { name: "tutor-engine", major: 1, realtimeProtocol: "tutor-realtime/1.0" } as const;
+const CONSUMER_SNAPSHOT = "docs/tutor-engine-public-contract-v1.md (tutor-engine 1.0.0, tutor-realtime/1.0, snapshot 2026-08-13)";
+// Filled at runtime from GET /v1/capabilities — reported in the final output.
+let engineReportedVersion = "UNKNOWN (capabilities did not report contract metadata)";
 const API_KEY = process.env.TUTOR_ENGINE_API_KEY || process.env.API_KEY || "";
 const BASE = getTutorEngineBase();
 const HTTP_TIMEOUT_MS = 20_000;
@@ -50,7 +61,7 @@ const missing: string[] = [];
 const renamed: string[] = [];
 const typeMismatch: string[] = [];
 const verified: string[] = [];
-const aliasesSeen: string[] = [];
+const notes: string[] = []; // non-asserting diagnostics for the report
 
 function requireField(where: string, obj: any, field: string, type: string) {
   const v = obj?.[field];
@@ -110,6 +121,30 @@ async function checkCapabilities() {
   if (!Array.isArray(r.json?.code_switching)) typeMismatch.push(`capabilities.code_switching expected string[], got ${typeof r.json?.code_switching}`);
   else if (!r.json.code_switching.includes("ru-en")) missing.push('capabilities.code_switching → "ru-en"');
   verified.push("GET /v1/capabilities (200, realtime_audio/avatar/code_switching/call_memory)");
+
+  // Compatibility handshake (contract §1): the Engine reports its contract
+  // identity here — record it and assert MAJOR + realtime protocol.
+  const c = r.json?.contract;
+  const rt = r.json?.realtime;
+  // ALL discovery metadata fields of contract §1 are REQUIRED — a missing or
+  // mistyped one is a contract failure, not a note.
+  let handshakeOk = requireField("capabilities", r.json, "engine_version", "string");
+  handshakeOk = requireField("capabilities.contract", c, "name", "string") && handshakeOk;
+  handshakeOk = requireField("capabilities.contract", c, "version", "string") && handshakeOk;
+  handshakeOk = requireField("capabilities.contract", c, "major", "number") && handshakeOk;
+  handshakeOk = requireField("capabilities.contract", c, "hash", "string") && handshakeOk;
+  handshakeOk = requireField("capabilities.realtime", rt, "protocol", "string") && handshakeOk;
+  handshakeOk = requireField("capabilities.realtime", rt, "version", "string") && handshakeOk;
+  handshakeOk = requireField("capabilities.realtime", rt, "protocol_version", "string") && handshakeOk;
+  if (c && typeof c.version === "string") {
+    engineReportedVersion =
+      `contract ${c.name ?? "?"} ${c.version} (major ${c.major ?? "?"}${typeof c.hash === "string" ? `, hash ${String(c.hash).slice(0, 12)}…` : ""})` +
+      `; engine ${r.json?.engine_version ?? "?"}; realtime ${rt?.protocol_version ?? "?"}`;
+  }
+  if (c?.name !== undefined && c.name !== EXPECTED_CONTRACT.name) { renamed.push(`capabilities.contract.name expected "${EXPECTED_CONTRACT.name}", got ${JSON.stringify(c?.name)}`); handshakeOk = false; }
+  if (c?.major !== undefined && c.major !== EXPECTED_CONTRACT.major) { typeMismatch.push(`capabilities.contract.major expected ${EXPECTED_CONTRACT.major} (this client is aligned to v1), got ${JSON.stringify(c?.major)}`); handshakeOk = false; }
+  if (rt?.protocol_version !== undefined && rt.protocol_version !== EXPECTED_CONTRACT.realtimeProtocol) { typeMismatch.push(`capabilities.realtime.protocol_version expected "${EXPECTED_CONTRACT.realtimeProtocol}", got ${JSON.stringify(rt?.protocol_version)}`); handshakeOk = false; }
+  if (handshakeOk) verified.push(`compatibility handshake: contract major ${c.major}, ${rt.protocol_version}, hash + engine_version present`);
 }
 
 async function checkCatalog() {
@@ -228,12 +263,12 @@ async function checkCallMemory(sessionId: string) {
 
   // 3) Failure already recorded — run a bounded NON-ASSERTING diagnostic poll
   // so the mismatch report shows what the engine actually did. Adds context
-  // to aliasesSeen only; never verified, never a pass.
+  // to notes only; never verified, never a pass.
   if (post.status !== 409 && (post.status < 200 || post.status >= 300)) return; // nothing to poll
   for (let attempt = 1; attempt <= CALL_MEMORY_POLL_ATTEMPTS; attempt++) {
     const r = await engineRequest("GET", path);
     if ("error" in r || r.status !== 200) {
-      aliasesSeen.push(`call-memory diagnostic poll: ${"error" in r ? r.error : `HTTP ${r.status}`}`);
+      notes.push(`call-memory diagnostic poll: ${"error" in r ? r.error : `HTTP ${r.status}`}`);
       return;
     }
     const status = r.json?.status;
@@ -242,9 +277,9 @@ async function checkCallMemory(sessionId: string) {
       continue;
     }
     if (status === "ready") {
-      aliasesSeen.push(`call-memory diagnostic: status "ready" — ${describeCallMemoryReady(r.json)}`);
+      notes.push(`call-memory diagnostic: status "ready" — ${describeCallMemoryReady(r.json)}`);
     } else {
-      aliasesSeen.push(`call-memory diagnostic: status ${JSON.stringify(status)} after unexpected generation`);
+      notes.push(`call-memory diagnostic: status ${JSON.stringify(status)} after unexpected generation`);
     }
     return;
   }
@@ -278,7 +313,7 @@ async function checkSimulationOpening() {
     const seenTypes = new Set<string>();
     let openingTrue = false;
     let suggested: any = null;
-    let legacyHintSeen = false;
+    let teachingHint: any = null;
     let sawText = false;
     let completed = false;
     let wsError: string | null = null;
@@ -307,7 +342,7 @@ async function checkSimulationOpening() {
           typeMismatch.push(`turn.started.opening expected boolean, got ${typeof m.opening}`);
         if (m.type === "tutor.text.delta" || m.type === "tutor.text.final") sawText = true;
         if (m.type === "tutor.suggested_reply" && !suggested) suggested = m;
-        if (m.type === "tutor.hint") legacyHintSeen = true;
+        if (m.type === "tutor.hint" && !teachingHint) teachingHint = m;
         if (m.type === "turn.completed") { completed = true; done(); }
       });
     });
@@ -318,16 +353,26 @@ async function checkSimulationOpening() {
     if (!sawText) missing.push("tutor.text.delta / tutor.text.final in the opening turn"); else verified.push("tutor text (delta/final)");
     if (!completed) missing.push(`turn.completed closing the opening turn (waited ${OPENING_TIMEOUT_MS / 1000}s)`); else verified.push("turn.completed");
 
-    // Canonical hint event — no silent alias success.
-    if (legacyHintSeen) aliasesSeen.push("tutor.hint (LEGACY)");
+    // tutor.suggested_reply — suggested USER reply (contract §2/§4.1):
+    // {text: string, translation: string|null, carryover: boolean}. A
+    // tutor.hint frame is a DIFFERENT event and never satisfies this check.
     if (suggested) {
       requireField("tutor.suggested_reply", suggested, "text", "string");
-      requireField("tutor.suggested_reply", suggested, "translation", "string");
-      verified.push("tutor.suggested_reply (canonical, with translation)");
-    } else if (legacyHintSeen) {
-      renamed.push("expected tutor.suggested_reply — received only legacy tutor.hint");
+      if (suggested.translation !== null && typeof suggested.translation !== "string")
+        typeMismatch.push(`tutor.suggested_reply.translation expected string|null, got ${typeof suggested.translation}`);
+      else if (suggested.translation === null)
+        notes.push("tutor.suggested_reply.translation was null in the opening turn (contract allows string|null)");
+      requireField("tutor.suggested_reply", suggested, "carryover", "boolean");
+      verified.push("tutor.suggested_reply (suggested USER reply: text/translation/carryover)");
     } else {
       missing.push("tutor.suggested_reply in the opening turn");
+    }
+    // tutor.hint — teaching hint {hint, mode}: OPTIONAL in the opening turn,
+    // but if present its shape must match the contract.
+    if (teachingHint) {
+      requireField("tutor.hint", teachingHint, "hint", "string");
+      requireField("tutor.hint", teachingHint, "mode", "string");
+      verified.push("tutor.hint (teaching hint — distinct event, shape validated)");
     }
   } finally {
     await completeSession("simulation", sessionId);
@@ -339,18 +384,23 @@ async function main() {
     console.error("TUTOR_ENGINE_API_KEY is not configured — cannot probe the Engine.");
     process.exit(2);
   }
-  console.log(`Tutor Engine contract probe\n  contract: ${CONTRACT_VERSION}\n  engine:   ${BASE}\n`);
+  console.log(`Tutor Engine contract probe\n  consumer snapshot: ${CONSUMER_SNAPSHOT}\n  engine:            ${BASE}\n`);
 
   await checkCapabilities();
   await checkCatalog();
   await checkPractice();
   await checkSimulationOpening();
 
+  // The version the Engine ITSELF reported at run time (contract §1
+  // compatibility handshake) — recorded so every probe run states exactly
+  // which contract version it validated against.
+  console.log(`Engine-reported contract (validated against): ${engineReportedVersion}\n`);
+
   console.log("Verified:");
   for (const v of verified) console.log(`  ✓ ${v}`);
-  if (aliasesSeen.length) {
-    console.log("Compatibility aliases still present:");
-    for (const a of aliasesSeen) console.log(`  ~ ${a}`);
+  if (notes.length) {
+    console.log("Diagnostics (non-asserting):");
+    for (const a of notes) console.log(`  ~ ${a}`);
   }
 
   const failed = missing.length + renamed.length + typeMismatch.length > 0;

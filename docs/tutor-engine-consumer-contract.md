@@ -10,27 +10,47 @@
 > hints/corrections logic, memory logic, Scenario Packages, provider or
 > avatar logic) — protocol only.
 
+- **Published contract:** Tutor Engine Public Contract v1 — `tutor-engine`
+  **1.0.0** (major 1), engine `tutor-engine/0.9.0`, realtime
+  `tutor-realtime/1.0`. Consumer copy of the published document:
+  `docs/tutor-engine-public-contract-v1.md` (snapshot 2026-08-13).
 - Engine base: `TUTOR_ENGINE_BASE` (default `https://ai-tutor-engine.replit.app`)
 - REST namespace: `/api/v1`; auth: `Authorization: Bearer <TUTOR_ENGINE_API_KEY>`
+  on every endpoint **except `GET /v1/capabilities`** (unauthenticated).
 - Tenancy comes from the API key ONLY — `application_id` / `organization_id`
   are rejected by the Engine and must never be sent.
 - Realtime protocol: `tutor-realtime/1.0` over WebSocket; auth via the FIRST
-  WS message `{type:"auth", token, session_id}` (token never travels in URLs).
-- Contract snapshot verified live: **2026-08-13** (production Engine).
+  WS message `{type:"auth", token, …}` (token never travels in URLs; TalkHint
+  additionally sends `session_id`, tolerated by the Engine).
+- **Version discovery:** `GET /v1/capabilities` is the authoritative
+  pre-session compatibility handshake — it returns `engine_version`,
+  `contract {name, version, major, hash}` and
+  `realtime {protocol, version, protocol_version}`. The live probe reports
+  the Engine-reported version it validated against on every run.
 
-## Compatibility rules
+## Compatibility rules (contract §1)
 
-- The Engine may **ADD** optional fields and new event types at any time —
-  TalkHint must tolerate them (unknown events are ignored, unknown fields
-  are not read).
-- **Removing or renaming** an endpoint/event, or changing the **type or
-  semantics of a required field**, is a **breaking contract change** — the
-  compatibility tests must fail.
-- **Canonical vs legacy names.** Every public event has exactly ONE canonical
-  name from the Engine contract. A legacy alias may be accepted by the client
-  during a migration window, but it is marked **LEGACY / COMPATIBILITY ONLY**
-  and does NOT satisfy the canonical contract test (see "No silent alias
-  success" in `scripts/tutor-engine-contract-probe.ts`).
+- The Engine may **ADD** new server events, optional fields, endpoints and
+  capability flags at any time — TalkHint must tolerate them (unknown events
+  are ignored, unknown fields are not read).
+- **Removing or renaming** an endpoint/event, changing the **type or
+  semantics of a required field**, demoting a required server field to
+  optional, or adding a REQUIRED client-message field is a **MAJOR contract
+  change** — the compatibility tests must fail.
+- **No legacy aliases.** The Engine emits none today (contract §1). If a
+  migration window is ever declared, the alias will appear in the published
+  contract explicitly marked `LEGACY / COMPATIBILITY ONLY`.
+
+## `tutor.hint` vs `tutor.suggested_reply` (contract §2 — binding)
+
+TWO DISTINCT stable events — **neither is an alias of the other**:
+
+| | `tutor.hint` | `tutor.suggested_reply` |
+|---|---|---|
+| Semantics | **teaching hint** — guidance ABOUT the learner's language | **suggested USER reply** — the literal next phrase the student may say |
+| Payload | `hint: string`, `mode: string` | `text: string`, `translation: string\|null`, `carryover: boolean` |
+| TalkHint rendering | own "teaching hint" card (no translation, never stored as the suggested reply) | dismissible suggested-reply card (re-revealed by the «Что сказать?» chip) |
+| Spoken by tutor? | never | never (never reaches TTS) |
 
 ## REST endpoints consumed by TalkHint
 
@@ -112,6 +132,13 @@ simulation with `source:"call_memory"`.
 
 ## Realtime events consumed by TalkHint (tutor-realtime/1.0)
 
+The published contract defines **20 canonical server→client events** and
+**7 canonical client→server messages** (`auth`, `turn.start`, `audio.chunk`,
+`audio.end`, `playback.started`, `turn.cancel`, `session.end`) — frozen in
+`server/__tests__/fixtures/tutorEngineContractFixtures.ts`. TalkHint sends
+only `auth`, `turn.start`, `audio.chunk`, `audio.end` (a subset), and
+consumes the events below; everything else is safely ignored.
+
 Legend: **R** = required field, O = optional. TalkHint ignores any event type
 not listed here (never fatal) and never sends invented commands (there is no
 WS command to request a hint).
@@ -129,16 +156,11 @@ WS command to request a hint).
 | `tutor.text.final` | `text` (R string) | yes | authoritative tutor text; arrives after `turn.state: TURN_COMPLETE`, before `turn.completed` |
 | `tutor.audio.chunk` | binary follows | yes | tutor speech audio |
 | `avatar.lipsync` | viseme payload | yes (avatar only) | lip-sync frames for the 3D avatar |
-| **`tutor.suggested_reply`** | `text` (R string), `translation` (R string for ru-en sessions), `turn_id` (O), `carryover` (O boolean), `seq` (O number) | yes | **suggested USER reply (hint)** — rendered as a dismissible card; NEVER TTS'd, never treated as user speech. Engine-initiated; no request command exists |
+| **`tutor.suggested_reply`** | `text` (R string), `translation` (R string\|null), `carryover` (R boolean), `turn_id` (O), `seq` (envelope) | yes | **suggested USER reply** — rendered as a dismissible card; NEVER TTS'd, never treated as user speech. Engine-initiated; no request command exists |
+| **`tutor.hint`** | `hint` (R string), `mode` (R string), `turn_id` (O) | yes | **teaching hint** — DISTINCT event (§2); own card, no translation, never stored as the suggested reply |
 | `tutor.correction` | `correction` (R object): `user_said`, `better` (R), `explanation`, `translation` (O), `category` | yes | correction card |
 | `turn.completed` | — | yes | closes the turn; releases the opening mic gate |
-| `error` | `code` (R string) | yes | e.g. `OPENING_IN_PROGRESS` (benign/retriable — client waits for the opening turn to finish) |
-
-### Legacy aliases — COMPATIBILITY ONLY
-
-| legacy name | canonical name | status |
-|---|---|---|
-| `tutor.hint` (payload `{hint}`) | `tutor.suggested_reply` (payload `{text, translation}`) | LEGACY / COMPATIBILITY ONLY. The client still renders it during the migration window, but it does **not** satisfy the canonical contract test. Renamed by the Engine, verified live 2026-08-13 |
+| `error` | `code` (R string) | yes | codes: `OPENING_IN_PROGRESS` (benign/retriable — client waits for the opening turn to finish), `TURN_FAILED` (retriable), `BAD_MESSAGE`, `UNKNOWN_TYPE` |
 
 ## Verification layers in TalkHint
 

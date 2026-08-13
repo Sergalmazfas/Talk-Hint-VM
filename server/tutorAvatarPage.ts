@@ -366,6 +366,7 @@ const L = RU ? {
   greetTag: "Приветствие TalkHint — не реплика Emma",
   hintChip: "Что сказать?", soon: "Скоро — нужна поддержка движка",
   hintTitle: "Подсказка — можно сказать", noHintYet: "Подсказка появится по ходу разговора",
+  teachHintTitle: "Подсказка учителя",
   corrTitle: "Как сказать лучше", transcribing: "Распознаём…",
   quitTitle: "Завершить практику?",
   quitBody: "Из ваших реплик будет создана память разговора — проверьте и подтвердите её, чтобы использовать в реальном звонке.",
@@ -414,6 +415,7 @@ const L = RU ? {
   greetTag: "TalkHint greeting — not an Emma reply",
   hintChip: "What to say?", soon: "Coming soon — needs engine support",
   hintTitle: "Hint — you could say", noHintYet: "A hint will appear as you talk",
+  teachHintTitle: "Teaching hint",
   corrTitle: "Better way to say it", transcribing: "Transcribing…",
   quitTitle: "End the practice?",
   quitBody: "We'll build call memory from what you said — review and confirm it to use in a real call.",
@@ -836,6 +838,27 @@ function showHintCard(hint) {
   scrollFeed();
 }
 
+// Teaching hint (contract v1 §2): tutor.hint {hint, mode} — guidance ABOUT
+// the learner's language. A DISTINCT event from tutor.suggested_reply: it is
+// NOT the phrase to say next, so it never touches currentHint / the hint
+// chip, has no translation, and — like every hint — never reaches TTS.
+function showTeachingHintCard(h) {
+  const el = addCard("hintCard");
+  const head = document.createElement("div");
+  head.className = "hHead";
+  head.innerHTML = '${svg("lightbulb", 13)}<span>' + L.teachHintTitle + "</span>";
+  const x = document.createElement("button");
+  x.className = "hx"; x.setAttribute("aria-label", "dismiss teaching hint");
+  x.innerHTML = '${svg("x", 14)}';
+  x.onclick = () => el.remove();
+  head.appendChild(x);
+  el.appendChild(head);
+  const t = document.createElement("div");
+  t.className = "hText"; t.textContent = h.text;
+  el.appendChild(t);
+  scrollFeed();
+}
+
 // Correction (spec §5): visually secondary, appended to the feed — the
 // conversation continues, nothing is interrupted, no extra LLM call.
 function showCorrectionCard(c) {
@@ -1091,6 +1114,7 @@ function onWsMessage(e) {
       if (act.opening) { openingPending = true; render(); }
     }
     else if (act.kind === "hint") { currentHint = act; showHintCard(act); } // auto-display, no button needed (spec §2)
+    else if (act.kind === "teachingHint") showTeachingHintCard(act); // DISTINCT event (contract v1 §2) — own card, never stored as the suggested reply
     else if (act.kind === "correction") showCorrectionCard(act);
     else if (act.kind === "finalText") {
       // Authoritative Emma text: reconcile the SAME streaming bubble — never

@@ -1,11 +1,63 @@
 // ---------------------------------------------------------------------------
 // FROZEN representative payloads of the Tutor Engine PUBLIC contract, as
-// consumed by TalkHint. Captured live from the production Engine 2026-08-13.
+// consumed by TalkHint.
 //
-// SOURCE OF TRUTH: the Engine's published contract. These fixtures are a
-// consumer copy for compatibility tests (docs/tutor-engine-consumer-contract.md).
-// Update them FROM the Engine contract — never invent shapes here.
+// SOURCE OF TRUTH: Tutor Engine Public Contract v1 (tutor-engine 1.0.0,
+// tutor-realtime/1.0) — consumer copy of the published document:
+// docs/tutor-engine-public-contract-v1.md; TalkHint consumer notes:
+// docs/tutor-engine-consumer-contract.md.
+// Fixtures updated FROM the published contract 2026-08-13 — never invent
+// shapes here.
 // ---------------------------------------------------------------------------
+
+// --- Contract / discovery metadata (contract §"Compatibility rule") ---------
+// GET /v1/capabilities (unauthenticated) is the authoritative pre-session
+// compatibility handshake. TalkHint pins the MAJOR + realtime protocol.
+export const FIXTURE_CONTRACT_META = {
+  engine_version: "tutor-engine/0.9.0",
+  contract: {
+    name: "tutor-engine",
+    version: "1.0.0",
+    major: 1,
+    hash: "d1f639cc8f5d2c86b492d2e76643164f8526cf8f1eb2de96f2d7d5bc0719dfd6",
+  },
+  realtime: { protocol: "tutor-realtime", version: "1.0", protocol_version: "tutor-realtime/1.0" },
+} as const;
+
+// The 20 canonical server→client events of tutor-realtime/1.0 (contract §4.1).
+export const CANONICAL_SERVER_EVENTS = [
+  "session.ready",
+  "turn.started",
+  "turn.state",
+  "speech.started",
+  "speech.partial",
+  "speech.final",
+  "transcript.raw",
+  "transcript.normalized",
+  "tutor.text.delta",
+  "tutor.text.final",
+  "avatar.lipsync",
+  "tutor.audio.chunk",
+  "tutor.correction",
+  "tutor.hint",
+  "tutor.suggested_reply",
+  "teaching.mode_changed",
+  "teaching.preference_changed",
+  "turn.completed",
+  "error",
+  "session.ended",
+] as const;
+
+// The 7 canonical client→server messages (contract §4.2).
+export const CANONICAL_CLIENT_MESSAGES = [
+  "auth",
+  "turn.start",
+  "audio.chunk",
+  "audio.end",
+  "playback.started",
+  "turn.cancel",
+  "session.end",
+] as const;
 
 // --- REST -------------------------------------------------------------------
 
@@ -14,6 +66,9 @@ export const FIXTURE_CAPABILITIES = {
   avatar: true,
   code_switching: ["ru-en"],
   call_memory: true,
+  engine_version: FIXTURE_CONTRACT_META.engine_version,
+  contract: FIXTURE_CONTRACT_META.contract,
+  realtime: FIXTURE_CONTRACT_META.realtime,
 };
 
 export const FIXTURE_TUTOR_CATALOG_ENTRY = {
@@ -40,7 +95,7 @@ export const FIXTURE_SIMULATION_INVALID_422 = {
   error: { code: "SIMULATION_INVALID", message: "simulation.roles.learner is required and must be a non-empty string" },
 };
 
-// Fail-closed error-code table for POST /sessions (contract doc §sessions).
+// Fail-closed error-code table for POST /sessions (contract §3).
 export const FIXTURE_SESSION_ERROR_CODES = [
   "SIMULATION_NOT_ALLOWED_FOR_MODE",
   "SIMULATION_REQUIRED",
@@ -72,8 +127,9 @@ export const FIXTURE_CALL_MEMORY_STATUSES = ["pending", "ready", "failed"] as co
 
 // --- Realtime events (tutor-realtime/1.0) -----------------------------------
 
-// CANONICAL hint event — a suggested USER reply. Captured live 2026-08-13
-// (simulation session). translation is required for ru-en sessions.
+// tutor.suggested_reply — suggested USER reply (contract §2/§4.1): the literal
+// next phrase the STUDENT may say. Payload: text (string), translation
+// (string|null), carryover (boolean). Never reaches TTS.
 export const FIXTURE_SUGGESTED_REPLY = {
   type: "tutor.suggested_reply",
   turn_id: "23b9f3bf-ab05-44ef-8844-e7da8a78083b",
@@ -83,11 +139,13 @@ export const FIXTURE_SUGGESTED_REPLY = {
   seq: 20,
 };
 
-// LEGACY / COMPATIBILITY ONLY — the Engine's previous hint event name.
-// Renders during the migration window; must NOT satisfy canonical tests.
-export const FIXTURE_LEGACY_HINT = {
+// tutor.hint — TEACHING hint (contract §2/§4.1): guidance ABOUT the learner's
+// language from the lesson pipeline. A DISTINCT stable event — NOT an alias
+// of tutor.suggested_reply. Payload: hint (string), mode (string).
+export const FIXTURE_TEACHING_HINT = {
   type: "tutor.hint",
-  hint: "Could you please help me with my documents?",
+  turn_id: "23b9f3bf-ab05-44ef-8844-e7da8a78083b",
+  hint: "Try using the past tense: 'I called' instead of 'I call'.",
   mode: "assisted",
 };
 
@@ -114,8 +172,8 @@ export const FIXTURE_TRANSCRIPT_NORMALIZED = {
 export const FIXTURE_OPENING_IN_PROGRESS_ERROR = { type: "error", code: "OPENING_IN_PROGRESS" };
 
 // The realtime event flow of a simulation opening turn, in observed order
-// (captured live 2026-08-13). Used to assert TalkHint tolerates the full
-// stream and that all canonical names are present in the frozen contract.
+// (verified against contract §4.1). Used to assert TalkHint tolerates the
+// full stream and that all names are canonical.
 export const FIXTURE_OPENING_FLOW_EVENT_TYPES = [
   "session.ready",
   "turn.started",

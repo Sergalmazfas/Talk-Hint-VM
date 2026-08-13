@@ -7,8 +7,10 @@ import { describe, it, expect } from "vitest";
 import { classifyEngineEvent } from "../tutorRealtimeUi";
 import { TUTOR_AVATAR_PAGE_HTML } from "../tutorAvatarPage";
 
-// Real payloads captured live from the engine (tutor-realtime/1.0, 2026-08-13).
-const REAL_HINT = { type: "tutor.hint", hint: "Could you please help me with my documents?", mode: "assisted" };
+// Payloads per Tutor Engine Public Contract v1 (tutor-realtime/1.0):
+// tutor.hint = TEACHING hint {hint, mode}; tutor.suggested_reply = suggested
+// USER reply {text, translation, carryover}. TWO DISTINCT stable events (§2).
+const REAL_TEACHING_HINT = { type: "tutor.hint", hint: "Could you please help me with my documents?", mode: "assisted" };
 const REAL_CORRECTION = {
   type: "tutor.correction",
   mode: "teacher",
@@ -21,18 +23,18 @@ const REAL_CORRECTION = {
   },
 };
 
-describe("14A/B — tutor.hint renders automatically as a hint card", () => {
-  it("classifies a real hint payload into a hint action", () => {
-    const a = classifyEngineEvent(REAL_HINT);
-    expect(a).toEqual({ kind: "hint", text: "Could you please help me with my documents?", translation: null });
+describe("14A/B — hints and suggested replies render automatically as cards", () => {
+  it("classifies tutor.hint (teaching hint) into its OWN teachingHint action (contract v1 §2)", () => {
+    const a = classifyEngineEvent(REAL_TEACHING_HINT);
+    expect(a).toEqual({ kind: "teachingHint", text: "Could you please help me with my documents?" });
   });
-  it("legacy tutor.hint never yields a translation (its documented shape is {hint} only)", () => {
-    // Strict name-specific validation: translation belongs to the canonical
-    // tutor.suggested_reply event; on the legacy event it is ignored.
-    const a = classifyEngineEvent({ ...REAL_HINT, translation: "Не могли бы вы помочь мне с документами?" });
-    expect(a).toEqual({ kind: "hint", text: REAL_HINT.hint, translation: null });
+  it("tutor.hint never yields a translation (its documented shape is {hint, mode})", () => {
+    // Strict name-specific validation: translation belongs to the
+    // tutor.suggested_reply event; on tutor.hint it is ignored.
+    const a = classifyEngineEvent({ ...REAL_TEACHING_HINT, translation: "Не могли бы вы помочь мне с документами?" });
+    expect(a).toEqual({ kind: "teachingHint", text: REAL_TEACHING_HINT.hint });
   });
-  it("classifies tutor.suggested_reply (current engine event name) into a hint action", () => {
+  it("classifies tutor.suggested_reply (suggested USER reply) into the hint-card action", () => {
     // Real payload captured live 2026-08-13 (simulation session, fiona_us_01).
     const a = classifyEngineEvent({
       type: "tutor.suggested_reply",
@@ -45,13 +47,16 @@ describe("14A/B — tutor.hint renders automatically as a hint card", () => {
     expect(a).toEqual({ kind: "hint", text: "I want to know the status of my case.", translation: "Я хочу узнать статус моего дела." });
   });
   it("drops empty/malformed hints instead of rendering blanks", () => {
-    expect(classifyEngineEvent({ type: "tutor.hint", hint: "  " })).toBeNull();
+    expect(classifyEngineEvent({ type: "tutor.hint", hint: "  ", mode: "assisted" })).toBeNull();
     expect(classifyEngineEvent({ type: "tutor.hint" })).toBeNull();
+    expect(classifyEngineEvent({ type: "tutor.hint", hint: "h" })).toBeNull(); // mode is REQUIRED (contract §4.1)
   });
   it("page auto-displays hints from the ws handler (no button required)", () => {
     // The ws message path routes through classifyEngineEvent and calls
     // showHintCard immediately on kind === "hint".
     expect(TUTOR_AVATAR_PAGE_HTML).toMatch(/act\.kind === "hint"[\s\S]{0,120}showHintCard\(act\)/);
+    // …and teaching hints get their OWN card, never the suggested-reply store.
+    expect(TUTOR_AVATAR_PAGE_HTML).toMatch(/act\.kind === "teachingHint"\) showTeachingHintCard\(act\)/);
   });
 });
 
@@ -74,9 +79,16 @@ describe("14C/D — a hint is NEVER learner speech and NEVER spoken", () => {
     expect(body).not.toContain("replayAudio");
     expect(body).not.toContain("ws.send");
   });
-  it("classifier can only map tutor.hint to the render-only 'hint' kind", () => {
-    const a = classifyEngineEvent(REAL_HINT)!;
-    expect(a.kind).toBe("hint");
+  it("classifier can only map tutor.hint to the render-only 'teachingHint' kind", () => {
+    const a = classifyEngineEvent(REAL_TEACHING_HINT)!;
+    expect(a.kind).toBe("teachingHint");
+  });
+  it("showTeachingHintCard is render-only too — no TTS, no socket, no user bubble", () => {
+    const m = TUTOR_AVATAR_PAGE_HTML.match(/function showTeachingHintCard\(h\) \{([\s\S]*?)\n\}/);
+    expect(m, "showTeachingHintCard must exist in the page").toBeTruthy();
+    for (const banned of ['addCard("user', "userCard", "speakBuffer", "speakAudio", "replayAudio", "ws.send", "currentHint"]) {
+      expect(m![1]).not.toContain(banned);
+    }
   });
 });
 

@@ -4,9 +4,11 @@
 // via ${fn.toString()} interpolation — exactly like pttNext — so the same
 // source is unit-tested server-side and executed in the browser.
 //
-// CONTRACT (verified live against tutor-realtime/1.0, 2026-08-13):
-//   tutor.suggested_reply {text, translation}                   — suggested USER reply (CANONICAL).
-//   tutor.hint            {hint: string}                        — same, LEGACY name only.
+// CONTRACT (Tutor Engine Public Contract v1 — tutor-engine 1.0.0,
+// tutor-realtime/1.0; docs/tutor-engine-public-contract-v1.md §2/§4.1):
+//   tutor.suggested_reply {text, translation, carryover}        — suggested USER reply.
+//   tutor.hint            {hint: string, mode: string}          — TEACHING hint — a DISTINCT
+//                                                                 stable event, NOT an alias.
 //   tutor.correction      {correction:{user_said,better,explanation,translation,category}}
 //   tutor.text.final      {text: string}                        — authoritative Emma text.
 //   turn.state            {state: LISTENING|TRANSCRIBING|THINKING|SPEAKING|TURN_COMPLETE}
@@ -21,6 +23,10 @@
 
 export type TutorUiAction =
   | { kind: "hint"; text: string; translation: string | null }
+  // tutor.hint — teaching hint (guidance ABOUT the learner's language).
+  // A DISTINCT event from tutor.suggested_reply per contract v1 §2 —
+  // rendered as its own card, never mixed with the suggested-reply shape.
+  | { kind: "teachingHint"; text: string }
   | {
       kind: "correction";
       userSaid: string;
@@ -40,23 +46,28 @@ export type TutorUiAction =
 // NOTE: plain-JS body (no TS-only syntax) — it is stringified into the page.
 export function classifyEngineEvent(msg: any): TutorUiAction | null {
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return null;
-  // CANONICAL: tutor.suggested_reply {text, translation} — the Engine's
-  // current public contract name (verified live 2026-08-13).
-  // LEGACY / COMPATIBILITY ONLY: tutor.hint {hint} — the previous name,
-  // rendered during the migration window but NOT part of the canonical
-  // contract (see docs/tutor-engine-consumer-contract.md). Field validation
-  // is name-specific — no silent cross-shape acceptance: the canonical event
-  // requires its canonical {text} field, the legacy event only its {hint}.
+  // Contract v1 §2: tutor.suggested_reply {text, translation} (suggested USER
+  // reply) and tutor.hint {hint, mode} (teaching hint) are TWO DISTINCT stable
+  // events — neither is an alias of the other, and they are rendered
+  // differently. Field validation is name-specific — no silent cross-shape
+  // acceptance: each event requires its own documented payload field.
   if (msg.type === "tutor.suggested_reply") {
+    // Required by contract §4.1: text (string), translation (string|null),
+    // carryover (boolean). Fail closed: a frame missing/mistyping a REQUIRED
+    // field is malformed → ignored, never partially rendered.
     const text = typeof msg.text === "string" ? msg.text : "";
     if (!text.trim()) return null;
+    if (msg.translation !== null && typeof msg.translation !== "string") return null;
+    if (typeof msg.carryover !== "boolean") return null;
     const translation = typeof msg.translation === "string" && msg.translation.trim() ? msg.translation : null;
     return { kind: "hint", text: text, translation: translation };
   }
   if (msg.type === "tutor.hint") {
+    // Required by contract §4.1: hint (string), mode (string). Fail closed.
     const hint = typeof msg.hint === "string" ? msg.hint : "";
     if (!hint.trim()) return null;
-    return { kind: "hint", text: hint, translation: null };
+    if (typeof msg.mode !== "string") return null;
+    return { kind: "teachingHint", text: hint };
   }
   if (msg.type === "tutor.correction") {
     const c = msg.correction && typeof msg.correction === "object" ? msg.correction : {};

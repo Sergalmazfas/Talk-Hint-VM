@@ -1,12 +1,16 @@
-// Task #160 — offline compatibility tests against FROZEN payload fixtures of
-// the Tutor Engine public contract (docs/tutor-engine-consumer-contract.md).
+// Offline compatibility tests against FROZEN payload fixtures of the Tutor
+// Engine Public Contract v1 (docs/tutor-engine-public-contract-v1.md;
+// consumer notes: docs/tutor-engine-consumer-contract.md).
 //
 // Rules under test:
 //   - required fields + types of each consumed payload;
 //   - classifier routing (the same source the page executes);
 //   - the Engine may ADD unknown fields/events without breaking the client;
-//   - canonical vs legacy naming: tutor.suggested_reply is canonical, the
-//     legacy tutor.hint renders during migration but is marked LEGACY.
+//   - tutor.hint (teaching hint {hint, mode}) and tutor.suggested_reply
+//     (suggested USER reply {text, translation, carryover}) are TWO DISTINCT
+//     stable events (contract §2) — never aliases, payloads never mixed;
+//   - everything TalkHint consumes/sends is within the canonical 20 server
+//     events / 7 client messages of tutor-realtime/1.0 (contract §4).
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 // The offline contract suite must run WITHOUT real credentials: tutorEngine
@@ -40,7 +44,10 @@ import {
   FIXTURE_SESSION_CREATE_201,
   FIXTURE_SIMULATION_ECHO,
   FIXTURE_SUGGESTED_REPLY,
-  FIXTURE_LEGACY_HINT,
+  FIXTURE_TEACHING_HINT,
+  FIXTURE_CONTRACT_META,
+  CANONICAL_SERVER_EVENTS,
+  CANONICAL_CLIENT_MESSAGES,
   FIXTURE_CORRECTION,
   FIXTURE_TURN_STARTED_OPENING,
   FIXTURE_TURN_STATE_THINKING,
@@ -239,20 +246,83 @@ describe("forward compatibility — additions never break the client", () => {
   });
 });
 
-describe("canonical vs legacy — tutor.hint is LEGACY / COMPATIBILITY ONLY", () => {
-  it("the legacy alias still renders during the migration window", () => {
-    expect(classifyEngineEvent(FIXTURE_LEGACY_HINT)).toEqual({
-      kind: "hint",
-      text: FIXTURE_LEGACY_HINT.hint,
-      translation: null,
+describe("contract §2 — tutor.hint and tutor.suggested_reply are TWO DISTINCT events", () => {
+  it("tutor.hint (teaching hint {hint, mode}) routes to its OWN action kind, not the suggested-reply card", () => {
+    expect(typeof FIXTURE_TEACHING_HINT.hint).toBe("string");
+    expect(typeof FIXTURE_TEACHING_HINT.mode).toBe("string");
+    expect(classifyEngineEvent(FIXTURE_TEACHING_HINT)).toEqual({
+      kind: "teachingHint",
+      text: FIXTURE_TEACHING_HINT.hint,
     });
   });
+  it("the two actions differ in kind AND shape — semantics are never merged", () => {
+    const teach = classifyEngineEvent(FIXTURE_TEACHING_HINT)!;
+    const reply = classifyEngineEvent(FIXTURE_SUGGESTED_REPLY)!;
+    expect(teach.kind).not.toBe(reply.kind);
+    expect(teach).not.toHaveProperty("translation"); // teaching hint carries no translation
+    expect(reply).toHaveProperty("translation");
+  });
   it("field validation is name-specific — no silent cross-shape acceptance", () => {
-    // Canonical event with only the legacy field is malformed → rejected:
-    expect(classifyEngineEvent({ type: "tutor.suggested_reply", hint: "text via legacy field" })).toBeNull();
-    // Legacy event with only the canonical field is malformed → rejected:
-    expect(classifyEngineEvent({ type: "tutor.hint", text: "text via canonical field" })).toBeNull();
-    // Legacy event never yields a translation (its documented shape is {hint} only):
-    expect(classifyEngineEvent({ type: "tutor.hint", hint: "h", translation: "т" })).toEqual({ kind: "hint", text: "h", translation: null });
+    // suggested_reply with only the teaching-hint field is malformed → rejected:
+    expect(classifyEngineEvent({ type: "tutor.suggested_reply", hint: "text via wrong field" })).toBeNull();
+    // tutor.hint with only the suggested-reply field is malformed → rejected:
+    expect(classifyEngineEvent({ type: "tutor.hint", text: "text via wrong field" })).toBeNull();
+    // tutor.hint never yields a translation (its documented shape is {hint, mode}):
+    expect(classifyEngineEvent({ type: "tutor.hint", hint: "h", mode: "assisted", translation: "т" })).toEqual({ kind: "teachingHint", text: "h" });
+  });
+  it("fail-closed: frames missing a REQUIRED contract field are ignored, never partially rendered", () => {
+    // tutor.hint requires mode: string (contract §4.1)
+    expect(classifyEngineEvent({ type: "tutor.hint", hint: "h" })).toBeNull();
+    expect(classifyEngineEvent({ type: "tutor.hint", hint: "h", mode: 7 })).toBeNull();
+    // tutor.suggested_reply requires translation: string|null and carryover: boolean
+    const { type, turn_id, text } = FIXTURE_SUGGESTED_REPLY;
+    expect(classifyEngineEvent({ type, turn_id, text, carryover: false })).toBeNull(); // translation absent
+    expect(classifyEngineEvent({ type, turn_id, text, translation: 5, carryover: false })).toBeNull();
+    expect(classifyEngineEvent({ type, turn_id, text, translation: "т" })).toBeNull(); // carryover absent
+    expect(classifyEngineEvent({ type, turn_id, text, translation: "т", carryover: "yes" })).toBeNull();
+    // translation: null is a VALID contract value
+    expect(classifyEngineEvent({ type, turn_id, text, translation: null, carryover: true })).toEqual({ kind: "hint", text, translation: null });
+  });
+});
+
+describe("contract §4 — canonical event/message inventory (tutor-realtime/1.0)", () => {
+  it("freezes exactly 20 canonical server events and 7 client messages", () => {
+    expect(CANONICAL_SERVER_EVENTS).toHaveLength(20);
+    expect(new Set(CANONICAL_SERVER_EVENTS).size).toBe(20);
+    expect(CANONICAL_CLIENT_MESSAGES).toHaveLength(7);
+    expect(new Set(CANONICAL_CLIENT_MESSAGES).size).toBe(7);
+  });
+  it("every server event TalkHint consumes (classifier routes non-null) is canonical", () => {
+    const consumed = [
+      FIXTURE_SUGGESTED_REPLY, FIXTURE_TEACHING_HINT, FIXTURE_CORRECTION,
+      FIXTURE_TEXT_FINAL, FIXTURE_TURN_STARTED_OPENING,
+      FIXTURE_TURN_STATE_THINKING, FIXTURE_TRANSCRIPT_NORMALIZED,
+    ];
+    for (const ev of consumed) {
+      expect(classifyEngineEvent(ev)).not.toBeNull();
+      expect(CANONICAL_SERVER_EVENTS).toContain(ev.type);
+    }
+  });
+  it("every opening-flow event type is canonical", () => {
+    for (const type of FIXTURE_OPENING_FLOW_EVENT_TYPES) {
+      expect(CANONICAL_SERVER_EVENTS).toContain(type);
+    }
+  });
+  it("every client→server message the /tutor page sends is canonical", async () => {
+    const { TUTOR_AVATAR_PAGE_HTML } = await import("../tutorAvatarPage");
+    // All JSON envelopes sent over the tutor WS in the embedded page source:
+    const sent = new Set<string>();
+    for (const m of TUTOR_AVATAR_PAGE_HTML.matchAll(/JSON\.stringify\(\{\s*type:\s*"([^"]+)"/g)) sent.add(m[1]);
+    expect(sent.size).toBeGreaterThan(0);
+    for (const type of sent) expect(CANONICAL_CLIENT_MESSAGES).toContain(type);
+  });
+  it("pins the contract identity TalkHint was aligned to: tutor-engine major 1, tutor-realtime/1.0", () => {
+    expect(FIXTURE_CONTRACT_META.contract.name).toBe("tutor-engine");
+    expect(FIXTURE_CONTRACT_META.contract.major).toBe(1);
+    expect(FIXTURE_CONTRACT_META.realtime.protocol_version).toBe("tutor-realtime/1.0");
+    // The capabilities fixture carries the same discovery metadata (the
+    // authoritative pre-session compatibility handshake).
+    expect(FIXTURE_CAPABILITIES.contract).toEqual(FIXTURE_CONTRACT_META.contract);
+    expect(FIXTURE_CAPABILITIES.realtime).toEqual(FIXTURE_CONTRACT_META.realtime);
   });
 });
