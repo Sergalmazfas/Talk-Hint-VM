@@ -97,8 +97,60 @@ final class CallDetailViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section) {
         case .details: return "Details"
-        case .transcript: return "Transcript"
+        case .transcript: return nil // custom header with a copy button
         case .none: return nil
+        }
+    }
+
+    override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+        guard Section(rawValue: section) == .transcript else { return nil }
+        let container = UIView()
+
+        let label = UILabel()
+        label.text = "TRANSCRIPT"
+        label.font = .preferredFont(forTextStyle: .footnote)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let copyButton = UIButton(type: .system)
+        copyButton.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
+        copyButton.accessibilityIdentifier = "button-copy-transcript"
+        copyButton.accessibilityLabel = "Copy transcript"
+        copyButton.addTarget(self, action: #selector(copyTranscriptTapped(_:)), for: .touchUpInside)
+        copyButton.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(label)
+        container.addSubview(copyButton)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.layoutMarginsGuide.leadingAnchor),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -6),
+            copyButton.trailingAnchor.constraint(equalTo: container.layoutMarginsGuide.trailingAnchor),
+            copyButton.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            copyButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            copyButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
+            container.heightAnchor.constraint(greaterThanOrEqualToConstant: 40)
+        ])
+        return container
+    }
+
+    override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
+        Section(rawValue: section) == .transcript ? 44 : UITableView.automaticDimension
+    }
+
+    private var copyableTranscript: String? {
+        guard !loadingTranscript else { return nil }
+        let text = call.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return text.isEmpty ? nil : text
+    }
+
+    @objc private func copyTranscriptTapped(_ sender: UIButton) {
+        guard let text = copyableTranscript else { return }
+        UIPasteboard.general.string = text
+        // Brief visual confirmation: swap to a checkmark, then back.
+        sender.setImage(UIImage(systemName: "checkmark"), for: .normal)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak sender] in
+            sender?.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
         }
     }
 
@@ -143,6 +195,22 @@ final class CallDetailViewController: UITableViewController {
             break
         }
         return cell
+    }
+
+    // MARK: - Long-press copy on the transcript cell
+
+    override func tableView(_ tableView: UITableView, shouldShowMenuForRowAt indexPath: IndexPath) -> Bool {
+        Section(rawValue: indexPath.section) == .transcript && copyableTranscript != nil
+    }
+
+    override func tableView(_ tableView: UITableView, canPerformAction action: Selector, forRowAt indexPath: IndexPath, withSender sender: Any?) -> Bool {
+        Section(rawValue: indexPath.section) == .transcript && action == #selector(copy(_:))
+    }
+
+    override func tableView(_ tableView: UITableView, performAction action: Selector, forRowAt indexPath: IndexPath, withSender sender: Any?) {
+        if action == #selector(copy(_:)), let text = copyableTranscript {
+            UIPasteboard.general.string = text
+        }
     }
 }
 
