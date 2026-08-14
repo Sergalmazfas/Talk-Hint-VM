@@ -1,0 +1,1383 @@
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth";
+import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+} from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+
+// ---------------------------------------------------------------------------
+// Types (mirrors of server/benchmark shapes; scorecard fields are defensive)
+// ---------------------------------------------------------------------------
+
+interface EarsCandidate {
+  id: string;
+  label: string;
+  provider: "deepgram" | "openai" | "azure";
+  kind: "realtime" | "batch";
+  referenceOnly?: boolean;
+  optional?: boolean;
+  config: Record<string, string | number | boolean>;
+}
+interface BrainCandidate {
+  id: string;
+  label: string;
+  model: string;
+  reasoningEffort: "none" | "low" | "n/a";
+  baseline?: boolean;
+}
+interface AvailabilityResult {
+  candidateId: string;
+  status: "AVAILABLE" | "UNAVAILABLE" | "NOT_CHECKED";
+  checkedAt: string;
+  detail: string;
+  latencyMs?: number;
+}
+interface Fixture {
+  id: string;
+  title: string;
+  kind: string;
+  goal: string;
+  referenceTurns: { idx: number; role: string; text: string }[];
+  criticalEntities: Record<string, string[]>;
+  confirmedFacts: string[];
+  audioBase64: string | null;
+  audioFormat: string | null;
+  audioChannels: string | null;
+  tags: string[];
+}
+
+interface EarsScorecardRow {
+  candidateId: string;
+  label: string;
+  semantic: number | null;
+  semanticIsProxy?: boolean;
+  wer: number | null;
+  numbersMoney: number | null;
+  roleSplit: number | null;
+  prematureEot: number | null;
+  falseWait: number | null;
+  eotP50: number | null;
+  finalP50: number | null;
+  costEstimate: number | null;
+  turnsScored?: number;
+}
+type JudgeDim =
+  | "goal_awareness" | "current_turn_relevance" | "conversation_intelligence"
+  | "usefulness" | "language_naturalness" | "non_repetition"
+  | "strategy_progression" | "restraint" | "multi_turn_coherence"
+  | "overall_live_copilot_quality";
+
+interface DeadlineBucket { count: number; pct: number }
+
+interface BrainScorecardEntry {
+  candidateId: string;
+  model: string;
+  turns: number;
+  successfulHints: number;
+  errors: number;
+  schemaInvalid: number;
+  avgFirstTokenMs: number | null;
+  avgFullOutputMs: number | null;
+  avgReadyMs: number | null;
+  deadlineBuckets: Record<"<=500" | "<=1000" | "<=1500" | "<=2000", DeadlineBucket>;
+  clientRenderEstimateMs: number | null;
+  clientRenderEstimated: boolean;
+  avgTokensIn: number | null;
+  avgTokensOut: number | null;
+  estCostPer10MinCall: number | null;
+  costNote: string | null;
+  judgeAverages: Record<JudgeDim, number> | null;
+}
+interface BrainScorecard { candidates: BrainScorecardEntry[] }
+
+interface ContinuityMetrics {
+  eligibleGuestTurns: number;
+  hintsRequested: number;
+  hintsGenerated: number;
+  hintsWsSent: number;
+  hintsClientRendered: number;
+  hintsMissed: number;
+  maxConsecutiveMissedHints: number;
+  misses: { turnIdx: number; stage: string; reason: string }[];
+}
+interface BrainTurnResult {
+  turnIdx: number;
+  candidateId: string;
+  output: {
+    should_suggest?: boolean;
+    suggested_reply?: string;
+    current_topic?: string;
+    goal_status?: string;
+    strategy?: string;
+  } | null;
+  schemaValid?: boolean;
+  error?: string;
+  firstTokenMs?: number | null;
+  suggestionReadyAfterGuestEndMs: number | null;
+  judge?: { judgeModel: string; selfJudged: boolean; scores: Record<JudgeDim, number> } | null;
+}
+interface EarsTurnResult {
+  turnIdx: number;
+  candidateId: string;
+  hypothesisText: string;
+  role: string | null;
+}
+
+interface BenchmarkRun {
+  id: string;
+  runType: "ears" | "brain" | "availability" | "replay";
+  status: "running" | "completed" | "failed";
+  corpusHash: string;
+  fixtureIds?: string[];
+  config?: any;
+  promptVersion?: string;
+  availability?: { ears?: AvailabilityResult[]; brain?: AvailabilityResult[] };
+  scorecard?: any;
+  results?: {
+    turnResults?: (BrainTurnResult | EarsTurnResult)[];
+    continuity?: Record<string, ContinuityMetrics>;
+    judgeModel?: string;
+    notes?: string[];
+  };
+  error?: string | null;
+  startedAt?: string;
+  finishedAt?: string | null;
+}
+
+interface ReplayTurn {
+  turnIdx: number;
+  role: string;
+  said: string;
+  aiState: string | null;
+  strategy: string | null;
+  suggestedReply: string | null;
+  timestamps: Partial<Record<
+    "audioEnd" | "sttFinal" | "hintTrigger" | "llmFirstToken"
+    | "suggestionReady" | "wsSent" | "clientRendered", number>>;
+  latencyMs: number | null;
+  judgeScore: number | null;
+}
+interface ReplayData {
+  candidateId: string;
+  estimatedStages: string[];
+  turns: ReplayTurn[];
+}
+
+const BASE = "/api/admin/benchmark";
+const DEADLINE_KEYS = ["<=500", "<=1000", "<=1500", "<=2000"] as const;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function pct(v: number | null | undefined): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+function ms(v: number | null | undefined): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return `${Math.round(v)}ms`;
+}
+function usd(v: number | null | undefined): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return `$${v.toFixed(4)}`;
+}
+function num(v: number | null | undefined, d = 2): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  return v.toFixed(d);
+}
+function fmtTime(iso?: string | null): string {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+interface ParsedTurn { idx: number; role: "owner" | "guest"; text: string }
+
+/**
+ * Parse a transcript textarea into reference turns. Accepts either:
+ *  - a JSON array of { idx?, role, text }
+ *  - simple lines "guest: Hello" / "owner: Hi" (idx auto-numbered).
+ * Throws on empty / unparseable input.
+ */
+function parseTranscript(raw: string): ParsedTurn[] {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("Транскрипт обязателен для аудио-фикстуры (пусто).");
+
+  // Try JSON array first.
+  if (trimmed.startsWith("[")) {
+    let arr: any;
+    try { arr = JSON.parse(trimmed); }
+    catch { throw new Error("Не удалось распарсить JSON транскрипта."); }
+    if (!Array.isArray(arr) || arr.length === 0) throw new Error("JSON транскрипт должен быть непустым массивом.");
+    return arr.map((t: any, i: number) => {
+      const role = String(t?.role ?? "").toLowerCase();
+      if (role !== "owner" && role !== "guest") throw new Error(`Turn ${i}: role должен быть 'owner' или 'guest'.`);
+      const text = String(t?.text ?? "").trim();
+      if (!text) throw new Error(`Turn ${i}: text пустой.`);
+      return { idx: typeof t?.idx === "number" ? t.idx : i, role: role as "owner" | "guest", text };
+    });
+  }
+
+  // Otherwise parse "role: text" lines.
+  const turns: ParsedTurn[] = [];
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const m = line.match(/^(owner|guest)\s*:\s*(.+)$/i);
+    if (!m) throw new Error(`Строка не распознана (нужно "guest: ..." или "owner: ..."): "${line}"`);
+    turns.push({ idx: turns.length, role: m[1].toLowerCase() as "owner" | "guest", text: m[2].trim() });
+  }
+  if (turns.length === 0) throw new Error("Транскрипт пуст после разбора.");
+  return turns;
+}
+
+function useAuthedQuery<T>(key: (string | undefined)[], enabled = true, refetchInterval: number | false = false) {
+  const { token } = useAuth();
+  return useQuery<T>({
+    queryKey: key,
+    enabled: enabled && !!token,
+    refetchInterval,
+    queryFn: async () => {
+      const res = await fetch(key.join("/"), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 403) {
+        const err: any = new Error("403");
+        err.status = 403;
+        throw err;
+      }
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Badges
+// ---------------------------------------------------------------------------
+
+function AvailabilityBadge({ status }: { status?: AvailabilityResult["status"] }) {
+  if (!status || status === "NOT_CHECKED")
+    return <Badge variant="outline" className="text-gray-400 border-gray-600" data-testid="badge-availability">NOT_CHECKED</Badge>;
+  if (status === "AVAILABLE")
+    return <Badge className="bg-green-600 hover:bg-green-600" data-testid="badge-availability">AVAILABLE</Badge>;
+  return <Badge variant="destructive" data-testid="badge-availability">UNAVAILABLE</Badge>;
+}
+
+function StatusBadge({ status }: { status: BenchmarkRun["status"] }) {
+  if (status === "running")
+    return <Badge className="bg-amber-500 hover:bg-amber-500">running</Badge>;
+  if (status === "completed")
+    return <Badge className="bg-green-600 hover:bg-green-600">completed</Badge>;
+  return <Badge variant="destructive">failed</Badge>;
+}
+
+// ===========================================================================
+// Main page
+// ===========================================================================
+
+export default function AdminDiagnostics() {
+  const [, setLocation] = useLocation();
+  const { token, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && !token) setLocation("/");
+  }, [isLoading, token, setLocation]);
+
+  const candidatesQ = useAuthedQuery<{ ears: EarsCandidate[]; brain: BrainCandidate[] }>(
+    [BASE, "candidates"], !!token,
+  );
+
+  if (isLoading || !token) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="animate-spin w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  const is403 = (candidatesQ.error as any)?.status === 403;
+  if (is403) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4">
+        <Card className="bg-gray-800/60 border-red-700 max-w-md w-full" data-testid="state-403">
+          <CardContent className="py-12 text-center">
+            <h1 className="text-2xl font-bold text-red-400 mb-2">403 — admin only</h1>
+            <p className="text-gray-400 mb-6">
+              Диагностика доступна только администраторам бенчмарка.
+            </p>
+            <Button onClick={() => setLocation("/")} variant="outline">На главную</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      <header className="border-b border-gray-800 bg-gray-900/50 backdrop-blur sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+          <h1 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
+            TalkHint Diagnostics — LIVE Ears &amp; Brain Benchmark
+          </h1>
+          <Button variant="ghost" size="sm" onClick={() => setLocation("/dashboard")} className="text-gray-400">
+            ← Dashboard
+          </Button>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        <Tabs defaultValue="ears" className="w-full">
+          <TabsList className="mb-4 flex-wrap h-auto">
+            <TabsTrigger value="ears" data-testid="tab-ears">LIVE Ears Benchmark</TabsTrigger>
+            <TabsTrigger value="brain" data-testid="tab-brain">LIVE Brain Benchmark</TabsTrigger>
+            <TabsTrigger value="replay" data-testid="tab-replay">LIVE End-to-End Replay</TabsTrigger>
+            <TabsTrigger value="history" data-testid="tab-history">Benchmark History</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="ears"><EarsTab candidates={candidatesQ.data?.ears ?? []} /></TabsContent>
+          <TabsContent value="brain"><BrainTab candidates={candidatesQ.data?.brain ?? []} /></TabsContent>
+          <TabsContent value="replay"><ReplayTab /></TabsContent>
+          <TabsContent value="history"><HistoryTab /></TabsContent>
+        </Tabs>
+      </main>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared: pull latest completed run by type + latest availability map
+// ---------------------------------------------------------------------------
+
+function useRuns(refetch = true) {
+  const runsQ = useAuthedQuery<BenchmarkRun[]>([BASE, "runs"], true, false);
+  const anyRunning = (runsQ.data ?? []).some((r) => r.status === "running");
+  // Re-arm poll while something is running.
+  const runsPollQ = useAuthedQuery<BenchmarkRun[]>([BASE, "runs"], refetch, anyRunning ? 3000 : false);
+  return runsPollQ.data ? runsPollQ : runsQ;
+}
+
+function latestByType(runs: BenchmarkRun[], type: BenchmarkRun["runType"], completedOnly = false): BenchmarkRun | undefined {
+  return runs.find((r) => r.runType === type && (!completedOnly || r.status === "completed"));
+}
+
+function availabilityMap(runs: BenchmarkRun[], side: "ears" | "brain"): Record<string, AvailabilityResult> {
+  const map: Record<string, AvailabilityResult> = {};
+  // Find newest run (any type) that carries availability for this side.
+  for (const r of runs) {
+    const arr = r.availability?.[side];
+    if (arr && arr.length) {
+      for (const a of arr) if (!map[a.candidateId]) map[a.candidateId] = a;
+      break;
+    }
+  }
+  return map;
+}
+
+// ===========================================================================
+// EARS TAB
+// ===========================================================================
+
+function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const runsQ = useRuns();
+  const runs = runsQ.data ?? [];
+  const availQ = useAuthedQuery<Fixture[]>([BASE, "fixtures"], !!token);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  const availMap = availabilityMap(runs, "ears");
+  const latestEarsMeta = latestByType(runs, "ears", true);
+  const earsFullQ = useAuthedQuery<BenchmarkRun>([BASE, "runs", latestEarsMeta?.id], !!latestEarsMeta?.id);
+  const latestEars = earsFullQ.data ?? latestEarsMeta;
+  const scorecardRows: EarsScorecardRow[] =
+    Array.isArray(latestEars?.scorecard) ? (latestEars!.scorecard as EarsScorecardRow[]) : [];
+  const notes: string[] = latestEars?.results?.notes ?? [];
+
+  const fixtures = availQ.data ?? [];
+  const withAudio = fixtures.filter((f) => !!f.audioBase64);
+
+  const post = useMutation({
+    mutationFn: async (url: string) => {
+      const res = await fetch(`${BASE}${url}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [BASE, "runs"] });
+      toast({ title: "Запущено", description: "Проверьте статус в History / обновится автоматически." });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={() => post.mutate("/availability")} disabled={post.isPending}
+          className="bg-cyan-600 hover:bg-cyan-700" data-testid="button-run-availability">
+          Run availability check
+        </Button>
+        <Button onClick={() => post.mutate("/ears/run")} disabled={post.isPending}
+          className="bg-purple-600 hover:bg-purple-700" data-testid="button-run-ears">
+          Run EARS benchmark
+        </Button>
+        <Button onClick={() => setUploadOpen(true)} variant="outline" data-testid="button-open-upload">
+          Upload fixture
+        </Button>
+        <Button onClick={() => setImportOpen(true)} variant="outline" data-testid="button-open-import">
+          Импортировать запись звонка
+        </Button>
+      </div>
+
+      {/* Candidate matrix */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader><CardTitle className="text-base">Candidate matrix (EARS)</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-800">
+                <TableHead>Candidate</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Flags</TableHead>
+                <TableHead>Availability</TableHead>
+                <TableHead>Detail</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {candidates.map((c) => {
+                const a = availMap[c.id];
+                return (
+                  <TableRow key={c.id} className="border-gray-800" data-testid={`row-ears-candidate-${c.id}`}>
+                    <TableCell className="font-medium max-w-xs">{c.label}<div className="text-xs text-gray-500 font-mono">{c.id}</div></TableCell>
+                    <TableCell>{c.provider}</TableCell>
+                    <TableCell>{c.kind}</TableCell>
+                    <TableCell className="space-x-1">
+                      {c.referenceOnly && <Badge variant="outline" className="text-amber-400 border-amber-600">reference-only</Badge>}
+                      {c.optional && <Badge variant="outline" className="text-gray-400 border-gray-600">optional</Badge>}
+                    </TableCell>
+                    <TableCell><AvailabilityBadge status={a?.status} /></TableCell>
+                    <TableCell className="text-xs text-gray-400 max-w-md truncate" title={a?.detail}>{a?.detail ?? "—"}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Fixtures */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader><CardTitle className="text-base">Fixtures (corpus)</CardTitle></CardHeader>
+        <CardContent>
+          {withAudio.length === 0 && (
+            <div className="mb-4 rounded border border-amber-700 bg-amber-950/30 px-4 py-3 text-amber-300 text-sm" data-testid="callout-no-audio">
+              ⚠ No real audio fixtures yet — EARS benchmark needs an audio fixture. Upload one above.
+            </div>
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-800">
+                <TableHead>Title</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Turns</TableHead>
+                <TableHead>Audio</TableHead>
+                <TableHead>Format</TableHead>
+                <TableHead>Tags</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {fixtures.map((f) => (
+                <TableRow key={f.id} className="border-gray-800" data-testid={`row-fixture-${f.id}`}>
+                  <TableCell className="font-medium">{f.title}</TableCell>
+                  <TableCell>{f.kind}</TableCell>
+                  <TableCell>{f.referenceTurns?.length ?? 0}</TableCell>
+                  <TableCell>
+                    {f.audioBase64
+                      ? <Badge className="bg-green-600 hover:bg-green-600">{String(f.audioBase64)}</Badge>
+                      : <Badge variant="outline" className="text-gray-500 border-gray-700">no audio</Badge>}
+                  </TableCell>
+                  <TableCell className="text-xs">{f.audioFormat ?? "—"}{f.audioChannels ? ` / ${f.audioChannels}` : ""}</TableCell>
+                  <TableCell className="text-xs text-gray-400">{(f.tags ?? []).join(", ") || "—"}</TableCell>
+                </TableRow>
+              ))}
+              {fixtures.length === 0 && (
+                <TableRow><TableCell colSpan={6} className="text-center text-gray-500 py-6">No fixtures.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Scorecard */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader>
+          <CardTitle className="text-base">
+            Latest completed EARS scorecard
+            {latestEars && <span className="text-xs text-gray-500 ml-2 font-normal">{fmtTime(latestEars.finishedAt)} · {latestEars.corpusHash}</span>}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {scorecardRows.length === 0 ? (
+            <p className="text-gray-500 text-sm">No completed EARS run yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-gray-800">
+                    <TableHead>STT</TableHead>
+                    <TableHead>Semantic</TableHead>
+                    <TableHead>WER</TableHead>
+                    <TableHead>Numbers/Money</TableHead>
+                    <TableHead>Role split</TableHead>
+                    <TableHead>Premature EOT</TableHead>
+                    <TableHead>False wait</TableHead>
+                    <TableHead>EOT p50</TableHead>
+                    <TableHead>Final p50</TableHead>
+                    <TableHead>Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {scorecardRows.map((r) => (
+                    <TableRow key={r.candidateId} className="border-gray-800" data-testid={`row-ears-score-${r.candidateId}`}>
+                      <TableCell className="font-medium max-w-xs">{r.label ?? r.candidateId}</TableCell>
+                      <TableCell>{pct(r.semantic)}{r.semanticIsProxy && <span className="text-xs text-gray-500"> (proxy)</span>}</TableCell>
+                      <TableCell>{pct(r.wer)}</TableCell>
+                      <TableCell>{pct(r.numbersMoney)}</TableCell>
+                      <TableCell>{pct(r.roleSplit)}</TableCell>
+                      <TableCell>{pct(r.prematureEot)}</TableCell>
+                      <TableCell>{pct(r.falseWait)}</TableCell>
+                      <TableCell>{ms(r.eotP50)}</TableCell>
+                      <TableCell>{ms(r.finalP50)}</TableCell>
+                      <TableCell>{usd(r.costEstimate)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {notes.length > 0 && (
+            <div className="mt-4">
+              <p className="text-sm font-medium text-gray-300 mb-1">Notes</p>
+              <ul className="list-disc list-inside text-xs text-gray-400 space-y-1">
+                {notes.map((n, i) => <li key={i}>{n}</li>)}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <UploadFixtureDialog open={uploadOpen} onOpenChange={setUploadOpen} />
+      <ImportRecordingDialog open={importOpen} onOpenChange={setImportOpen} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Upload fixture dialog
+// ---------------------------------------------------------------------------
+
+function UploadFixtureDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState("bank_dispute");
+  const [goal, setGoal] = useState("");
+  const [format, setFormat] = useState<"mulaw8k" | "wav" | "mp3">("wav");
+  const [channels, setChannels] = useState<"mono" | "dual">("mono");
+  const [file, setFile] = useState<File | null>(null);
+  const [transcript, setTranscript] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function readAsBase64(f: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(f);
+    });
+  }
+
+  async function submit() {
+    if (!title.trim()) {
+      toast({ title: "title required", variant: "destructive" });
+      return;
+    }
+    let referenceTurns: ParsedTurn[] = [];
+    if (file) {
+      try {
+        referenceTurns = parseTranscript(transcript);
+      } catch (e: any) {
+        toast({ title: "Проверьте транскрипт", description: String(e?.message ?? e), variant: "destructive" });
+        return;
+      }
+    } else if (transcript.trim()) {
+      try { referenceTurns = parseTranscript(transcript); }
+      catch (e: any) {
+        toast({ title: "Проверьте транскрипт", description: String(e?.message ?? e), variant: "destructive" });
+        return;
+      }
+    }
+    setSubmitting(true);
+    try {
+      const body: any = {
+        title: title.trim(),
+        kind,
+        goal: goal.trim(),
+        referenceTurns,
+        criticalEntities: {},
+        confirmedFacts: [],
+        tags: [],
+      };
+      if (file) {
+        body.audioBase64 = await readAsBase64(file);
+        body.audioFormat = format;
+        body.audioChannels = channels;
+      }
+      const res = await fetch(`${BASE}/fixtures`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      toast({ title: "Fixture создан" });
+      qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
+      onOpenChange(false);
+      setTitle(""); setGoal(""); setFile(null); setTranscript("");
+    } catch (e: any) {
+      toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Upload fixture</DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Добавить запись в корпус. Audio (optional) для EARS.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <Label>Title</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)}
+              className="bg-gray-950 border-gray-700" data-testid="input-fixture-title" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Kind</Label>
+              <Select value={kind} onValueChange={setKind}>
+                <SelectTrigger className="bg-gray-950 border-gray-700" data-testid="select-fixture-kind"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["bank_dispute", "doctor", "insurance", "ivr_heavy", "accent", "overlap", "other"].map((k) => (
+                    <SelectItem key={k} value={k}>{k}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Goal</Label>
+              <Input value={goal} onChange={(e) => setGoal(e.target.value)}
+                className="bg-gray-950 border-gray-700" data-testid="input-fixture-goal" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Audio file (optional)</Label>
+            <Input type="file" accept="audio/*,.ulaw,.raw"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="bg-gray-950 border-gray-700" data-testid="input-fixture-audio" />
+          </div>
+          {file && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Format</Label>
+                <Select value={format} onValueChange={(v) => setFormat(v as any)}>
+                  <SelectTrigger className="bg-gray-950 border-gray-700" data-testid="select-fixture-format"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mulaw8k">mulaw8k</SelectItem>
+                    <SelectItem value="wav">wav</SelectItem>
+                    <SelectItem value="mp3">mp3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Channels</Label>
+                <Select value={channels} onValueChange={(v) => setChannels(v as any)}>
+                  <SelectTrigger className="bg-gray-950 border-gray-700" data-testid="select-fixture-channels"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mono">mono</SelectItem>
+                    <SelectItem value="dual">dual</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label>
+              Transcript {file ? <span className="text-red-400">*</span> : <span className="text-gray-500 text-xs">(optional без аудио)</span>}
+            </Label>
+            <p className="text-xs text-gray-500">
+              JSON-массив {`{idx, role, text}`} или строки «guest: Hello» / «owner: Hi». Обязателен для аудио-фикстуры (EARS сверяет точность по нему).
+            </p>
+            <Textarea value={transcript} onChange={(e) => setTranscript(e.target.value)}
+              rows={6} placeholder={"guest: Hello, I'd like to dispute a charge\nowner: Sure, what's the amount?"}
+              className="bg-gray-950 border-gray-700 font-mono text-xs" data-testid="input-fixture-transcript" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={submitting} className="bg-cyan-600 hover:bg-cyan-700" data-testid="button-submit-fixture">
+            {submitting ? "Uploading…" : "Create fixture"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Import recording dialog (Twilio benchmark recording -> wav fixture)
+// ---------------------------------------------------------------------------
+
+function ImportRecordingDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [callSid, setCallSid] = useState("");
+  const [title, setTitle] = useState("");
+  const [goal, setGoal] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    if (!callSid.trim()) {
+      toast({ title: "callSid required", variant: "destructive" });
+      return;
+    }
+    let referenceTurns: ParsedTurn[];
+    try {
+      referenceTurns = parseTranscript(transcript);
+    } catch (e: any) {
+      toast({ title: "Проверьте транскрипт", description: String(e?.message ?? e), variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${BASE}/fixtures/import-recording`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callSid: callSid.trim(),
+          title: title.trim() || undefined,
+          goal: goal.trim() || undefined,
+          referenceTurns,
+        }),
+      });
+      if (res.status === 404) {
+        toast({
+          title: "Запись не найдена",
+          description: "Для этого звонка нет benchmark-записи. Убедитесь, что звонок был сделан с BENCHMARK_CALL_RECORDING=1.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      toast({ title: "Запись импортирована", description: "Fixture создан из записи звонка." });
+      qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
+      onOpenChange(false);
+      setCallSid(""); setTitle(""); setGoal(""); setTranscript("");
+    } catch (e: any) {
+      toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Импортировать запись звонка</DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Скачивает dual-channel запись из Twilio (звонок с BENCHMARK_CALL_RECORDING=1) и сохраняет как wav-фикстуру.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <Label>Call SID <span className="text-red-400">*</span></Label>
+            <Input value={callSid} onChange={(e) => setCallSid(e.target.value)}
+              placeholder="CAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              className="bg-gray-950 border-gray-700 font-mono" data-testid="input-import-callsid" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Title <span className="text-gray-500 text-xs">(optional)</span></Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)}
+                className="bg-gray-950 border-gray-700" data-testid="input-import-title" />
+            </div>
+            <div className="space-y-1">
+              <Label>Goal <span className="text-gray-500 text-xs">(optional)</span></Label>
+              <Input value={goal} onChange={(e) => setGoal(e.target.value)}
+                className="bg-gray-950 border-gray-700" data-testid="input-import-goal" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Transcript <span className="text-red-400">*</span></Label>
+            <p className="text-xs text-gray-500">
+              JSON-массив {`{idx, role, text}`} или строки «guest: Hello» / «owner: Hi». Обязателен (EARS сверяет точность по нему).
+            </p>
+            <Textarea value={transcript} onChange={(e) => setTranscript(e.target.value)}
+              rows={6} placeholder={"guest: Hello, I'd like to dispute a charge\nowner: Sure, what's the amount?"}
+              className="bg-gray-950 border-gray-700 font-mono text-xs" data-testid="input-import-transcript" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={submitting} className="bg-cyan-600 hover:bg-cyan-700" data-testid="button-submit-import">
+            {submitting ? "Импорт…" : "Импортировать"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ===========================================================================
+// BRAIN TAB
+// ===========================================================================
+
+function BrainTab({ candidates }: { candidates: BrainCandidate[] }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const runsQ = useRuns();
+  const runs = runsQ.data ?? [];
+  const [judgeEnabled, setJudgeEnabled] = useState(true);
+
+  const latestBrainMeta = latestByType(runs, "brain", true);
+  // fetch full run for details (turnResults, continuity)
+  const fullQ = useAuthedQuery<BenchmarkRun>([BASE, "runs", latestBrainMeta?.id], !!latestBrainMeta?.id);
+  const run = fullQ.data;
+
+  const labelById = useMemo(() => {
+    const m: Record<string, string> = {};
+    candidates.forEach((c) => { m[c.id] = c.label; });
+    return m;
+  }, [candidates]);
+
+  const scorecard = run?.scorecard as BrainScorecard | undefined;
+  const scorecardRows: BrainScorecardEntry[] = scorecard?.candidates ?? [];
+  const notes: string[] = run?.results?.notes ?? [];
+  const judgeModel = run?.results?.judgeModel;
+
+  const continuityEntries: [string, ContinuityMetrics][] = useMemo(() => {
+    const c = run?.results?.continuity;
+    if (!c) return [];
+    return Object.entries(c);
+  }, [run]);
+
+  const turnResults = (run?.results?.turnResults ?? []) as BrainTurnResult[];
+
+  const post = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${BASE}/brain/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ judgeEnabled }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [BASE, "runs"] });
+      toast({ title: "BRAIN benchmark запущен" });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-4">
+        <Button onClick={() => post.mutate()} disabled={post.isPending}
+          className="bg-purple-600 hover:bg-purple-700" data-testid="button-run-brain">
+          Запустить BRAIN benchmark (Gold Call)
+        </Button>
+        <label className="flex items-center gap-2 text-sm">
+          <Switch checked={judgeEnabled} onCheckedChange={setJudgeEnabled} data-testid="switch-judge" />
+          Judge enabled
+        </label>
+      </div>
+
+      {/* Scorecard */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader>
+          <CardTitle className="text-base">
+            Latest completed BRAIN scorecard
+            {latestBrainMeta && <span className="text-xs text-gray-500 ml-2 font-normal">{fmtTime(latestBrainMeta.finishedAt)} · prompt {latestBrainMeta.promptVersion}</span>}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {scorecardRows.length === 0 ? (
+            <p className="text-gray-500 text-sm">No completed BRAIN run yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-gray-800">
+                    <TableHead>LLM</TableHead>
+                    <TableHead>Goal</TableHead>
+                    <TableHead>Current turn</TableHead>
+                    <TableHead>Next reply</TableHead>
+                    <TableHead>Coherence</TableHead>
+                    <TableHead>Strategy</TableHead>
+                    <TableHead>Non-repeat</TableHead>
+                    <TableHead>Natural EN</TableHead>
+                    <TableHead>First token avg</TableHead>
+                    <TableHead>Ready avg</TableHead>
+                    <TableHead>Cost/call</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {scorecardRows.map((r) => {
+                    const selfJudged = !!judgeModel && r.model === judgeModel;
+                    const j = r.judgeAverages;
+                    return (
+                      <TableRow key={r.candidateId} className="border-gray-800" data-testid={`row-brain-score-${r.candidateId}`}>
+                        <TableCell className="font-medium max-w-xs">
+                          {labelById[r.candidateId] ?? r.model ?? r.candidateId}
+                          {selfJudged && <Badge variant="outline" className="ml-2 text-amber-400 border-amber-600">self-judged</Badge>}
+                        </TableCell>
+                        <TableCell>{num(j?.goal_awareness ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.current_turn_relevance ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.usefulness ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.multi_turn_coherence ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.strategy_progression ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.non_repetition ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.language_naturalness ?? null, 1)}</TableCell>
+                        <TableCell>{ms(r.avgFirstTokenMs)}</TableCell>
+                        <TableCell>{ms(r.avgReadyMs)}</TableCell>
+                        <TableCell>
+                          {r.estCostPer10MinCall !== null
+                            ? usd(r.estCostPer10MinCall)
+                            : <span className="text-gray-500 text-xs" title={r.costNote ?? undefined}>{r.costNote ?? "—"}</span>}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Deadline buckets */}
+      {scorecardRows.length > 0 && (
+        <Card className="bg-gray-900/50 border-gray-800">
+          <CardHeader><CardTitle className="text-base">Hint deadline buckets (% rendered within)</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-800">
+                  <TableHead>Candidate</TableHead>
+                  {DEADLINE_KEYS.map((k) => <TableHead key={k}>{k.replace("<=", "≤")}ms</TableHead>)}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {scorecardRows.map((r) => (
+                  <TableRow key={r.candidateId} className="border-gray-800" data-testid={`row-deadline-${r.candidateId}`}>
+                    <TableCell className="font-medium">{labelById[r.candidateId] ?? r.model ?? r.candidateId}</TableCell>
+                    {DEADLINE_KEYS.map((k) => {
+                      const b = r.deadlineBuckets?.[k];
+                      return (
+                        <TableCell key={k}>
+                          {b ? `${b.pct.toFixed(1)}%` : "—"}
+                          {b && <span className="text-xs text-gray-500"> ({b.count})</span>}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Continuity */}
+      {continuityEntries.length > 0 && (
+        <Card className="bg-gray-900/50 border-gray-800">
+          <CardHeader><CardTitle className="text-base">Hint chain continuity</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-800">
+                  <TableHead>Candidate</TableHead>
+                  <TableHead>Eligible turns</TableHead>
+                  <TableHead>Requested</TableHead>
+                  <TableHead>Generated</TableHead>
+                  <TableHead>WS sent</TableHead>
+                  <TableHead>Rendered</TableHead>
+                  <TableHead>Missed</TableHead>
+                  <TableHead>Max consec. missed</TableHead>
+                  <TableHead>Miss stages</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {continuityEntries.map(([cid, c]) => (
+                  <ContinuityRow key={cid} candidateId={labelById[cid] ?? cid} c={c} />
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Per-turn */}
+      {turnResults.length > 0 && (
+        <Card className="bg-gray-900/50 border-gray-800">
+          <CardHeader><CardTitle className="text-base">Per-turn detail</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-800">
+                  <TableHead>#</TableHead>
+                  <TableHead>Candidate</TableHead>
+                  <TableHead>AI understood</TableHead>
+                  <TableHead>Suggested reply</TableHead>
+                  <TableHead>Strategy</TableHead>
+                  <TableHead>Latency</TableHead>
+                  <TableHead>Judge</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {turnResults.map((t, i) => {
+                  const overall = t.judge?.scores?.overall_live_copilot_quality ?? null;
+                  return (
+                    <TableRow key={`${t.candidateId}-${t.turnIdx}-${i}`} className="border-gray-800" data-testid={`row-turn-${t.candidateId}-${t.turnIdx}`}>
+                      <TableCell>{t.turnIdx}</TableCell>
+                      <TableCell className="text-xs font-mono">{t.candidateId}</TableCell>
+                      <TableCell className="max-w-xs text-xs text-gray-300">
+                        {t.output?.current_topic ?? "—"}
+                        {t.output?.goal_status && <span className="text-gray-500"> · {t.output.goal_status}</span>}
+                      </TableCell>
+                      <TableCell className="max-w-sm text-xs">{t.output?.should_suggest ? (t.output?.suggested_reply ?? "—") : <span className="text-gray-500">(no suggest)</span>}</TableCell>
+                      <TableCell>{t.output?.strategy ? <Badge variant="outline" className="border-cyan-700 text-cyan-300">{t.output.strategy}</Badge> : "—"}</TableCell>
+                      <TableCell>{ms(t.suggestionReadyAfterGuestEndMs)}</TableCell>
+                      <TableCell>
+                        {overall !== null ? num(overall, 1) : "—"}
+                        {t.judge?.selfJudged && <Badge variant="outline" className="ml-1 text-amber-400 border-amber-600">self</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {notes.length > 0 && (
+        <Card className="bg-gray-900/50 border-gray-800">
+          <CardHeader><CardTitle className="text-base">Notes</CardTitle></CardHeader>
+          <CardContent>
+            <ul className="list-disc list-inside text-xs text-gray-400 space-y-1">
+              {notes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ContinuityRow({ candidateId, c }: { candidateId: string; c: ContinuityMetrics }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <TableRow className="border-gray-800" data-testid={`row-continuity-${candidateId}`}>
+        <TableCell className="font-medium">{candidateId}</TableCell>
+        <TableCell>{c.eligibleGuestTurns}</TableCell>
+        <TableCell>{c.hintsRequested}</TableCell>
+        <TableCell>{c.hintsGenerated}</TableCell>
+        <TableCell>{c.hintsWsSent}</TableCell>
+        <TableCell>{c.hintsClientRendered}</TableCell>
+        <TableCell className={c.hintsMissed > 0 ? "text-red-400" : ""}>{c.hintsMissed}</TableCell>
+        <TableCell>{c.maxConsecutiveMissedHints}</TableCell>
+        <TableCell>
+          {c.misses?.length > 0 ? (
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setOpen((v) => !v)} data-testid={`button-toggle-misses-${candidateId}`}>
+              {open ? "hide" : `${c.misses.length} misses`}
+            </Button>
+          ) : "—"}
+        </TableCell>
+      </TableRow>
+      {open && c.misses?.map((m, i) => (
+        <TableRow key={i} className="border-gray-800 bg-gray-950/50">
+          <TableCell colSpan={9} className="text-xs text-gray-400">
+            turn {m.turnIdx} · stage <span className="text-amber-400">{m.stage}</span> · {m.reason}
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
+  );
+}
+
+// ===========================================================================
+// REPLAY TAB
+// ===========================================================================
+
+function ReplayTab() {
+  const { token } = useAuth();
+  const runsQ = useRuns();
+  const runs = runsQ.data ?? [];
+  const brainRuns = runs.filter((r) => r.runType === "brain" && r.status === "completed");
+  const [runId, setRunId] = useState<string>("");
+  const [candidateId, setCandidateId] = useState<string>("");
+
+  const candidatesQ = useAuthedQuery<{ brain: BrainCandidate[] }>([BASE, "candidates"], !!token);
+  const brainCandidates = candidatesQ.data?.brain ?? [];
+
+  const replayQ = useAuthedQuery<ReplayData>(
+    [BASE, "runs", runId, "replay", candidateId],
+    !!runId && !!candidateId,
+  );
+  const replay = replayQ.data;
+
+  const STAGES: [keyof ReplayTurn["timestamps"], string][] = [
+    ["audioEnd", "audio end"],
+    ["sttFinal", "STT final"],
+    ["hintTrigger", "hint trigger"],
+    ["llmFirstToken", "LLM first token"],
+    ["suggestionReady", "suggestion ready"],
+    ["wsSent", "WS sent"],
+    ["clientRendered", "client rendered"],
+  ];
+
+  return (
+    <div className="space-y-6">
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardContent className="py-4 flex flex-wrap gap-4 items-end">
+          <div className="space-y-1">
+            <Label>Completed BRAIN run</Label>
+            <Select value={runId} onValueChange={setRunId}>
+              <SelectTrigger className="bg-gray-950 border-gray-700 w-72" data-testid="select-replay-run"><SelectValue placeholder="Pick a run" /></SelectTrigger>
+              <SelectContent>
+                {brainRuns.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{fmtTime(r.finishedAt)} · {r.corpusHash?.slice(0, 8)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Candidate</Label>
+            <Select value={candidateId} onValueChange={setCandidateId}>
+              <SelectTrigger className="bg-gray-950 border-gray-700 w-72" data-testid="select-replay-candidate"><SelectValue placeholder="Pick a candidate" /></SelectTrigger>
+              <SelectContent>
+                {brainCandidates.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {brainRuns.length === 0 && <p className="text-gray-500 text-sm">No completed BRAIN runs to replay.</p>}
+
+      {replay && (
+        <>
+          <div className="text-xs text-gray-500">
+            Estimated stages: {replay.estimatedStages.join(" · ")}
+          </div>
+          <div className="space-y-3">
+            {replay.turns.map((t) => (
+              <Card key={t.turnIdx} className="bg-gray-900/50 border-gray-800" data-testid={`card-replay-turn-${t.turnIdx}`}>
+                <CardContent className="py-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={t.role === "guest" ? "secondary" : "outline"}>{t.role}</Badge>
+                      <span className="text-xs text-gray-500">turn {t.turnIdx}</span>
+                      {t.strategy && <Badge variant="outline" className="border-cyan-700 text-cyan-300">{t.strategy}</Badge>}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      {t.latencyMs !== null && <span className="text-gray-400">latency {ms(t.latencyMs)}</span>}
+                      {t.judgeScore !== null && <span className="text-amber-300">judge {num(t.judgeScore, 1)}</span>}
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-200"><span className="text-gray-500">said:</span> {t.said}</p>
+                  {t.aiState && <p className="text-xs text-gray-400"><span className="text-gray-500">AI state:</span> {t.aiState}</p>}
+                  {t.suggestedReply && <p className="text-sm text-cyan-200"><span className="text-gray-500">suggested:</span> {t.suggestedReply}</p>}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {STAGES.map(([key, label]) => {
+                      const v = t.timestamps[key];
+                      return (
+                        <span key={key} className={`text-[10px] px-2 py-0.5 rounded border ${v !== undefined ? "border-gray-700 text-gray-300" : "border-gray-800 text-gray-600"}`}>
+                          {label}: {v !== undefined ? `+${Math.round(v)}ms` : "—"}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            {replay.turns.length === 0 && <p className="text-gray-500 text-sm">No turns for this candidate.</p>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===========================================================================
+// HISTORY TAB
+// ===========================================================================
+
+function winnerSummary(run: BenchmarkRun): string {
+  const sc = run.scorecard;
+  if (!sc) return "—";
+  if (run.runType === "ears") {
+    const rows: EarsScorecardRow[] = Array.isArray(sc) ? sc : [];
+    const best = [...rows].filter((r) => r.wer != null).sort((a, b) => (a.wer as number) - (b.wer as number))[0];
+    return best ? `best WER: ${best.label ?? best.candidateId}` : "—";
+  }
+  if (run.runType === "brain") {
+    const rows: BrainScorecardEntry[] = (sc as BrainScorecard)?.candidates ?? [];
+    const scored = rows.filter((r) => r.judgeAverages?.overall_live_copilot_quality != null);
+    const best = [...scored].sort((a, b) =>
+      (b.judgeAverages!.overall_live_copilot_quality) - (a.judgeAverages!.overall_live_copilot_quality))[0];
+    return best ? `top: ${best.model ?? best.candidateId}` : "—";
+  }
+  return "—";
+}
+
+function HistoryTab() {
+  const runsQ = useRuns();
+  const runs = runsQ.data ?? [];
+  const [selected, setSelected] = useState<string | null>(null);
+  const { token } = useAuth();
+  const detailQ = useAuthedQuery<BenchmarkRun>([BASE, "runs", selected ?? undefined], !!selected && !!token);
+  const detail = detailQ.data;
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader><CardTitle className="text-base">All runs</CardTitle></CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-800">
+                <TableHead>Time</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Corpus hash</TableHead>
+                <TableHead>Prompt</TableHead>
+                <TableHead>Winner</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {runs.map((r) => (
+                <TableRow key={r.id} className="border-gray-800 cursor-pointer hover:bg-gray-800/30"
+                  onClick={() => setSelected(r.id)} data-testid={`row-run-${r.id}`}>
+                  <TableCell className="text-xs">{fmtTime(r.startedAt)}</TableCell>
+                  <TableCell>{r.runType}</TableCell>
+                  <TableCell><StatusBadge status={r.status} /></TableCell>
+                  <TableCell className="text-xs font-mono">{r.corpusHash?.slice(0, 12) || "—"}</TableCell>
+                  <TableCell className="text-xs">{r.promptVersion ?? "—"}</TableCell>
+                  <TableCell className="text-xs text-gray-400">{winnerSummary(r)}</TableCell>
+                  <TableCell><Button variant="ghost" size="sm" className="h-6 px-2 text-xs">details</Button></TableCell>
+                </TableRow>
+              ))}
+              {runs.length === 0 && (
+                <TableRow><TableCell colSpan={7} className="text-center text-gray-500 py-6">No runs yet.</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!selected} onOpenChange={(v) => { if (!v) setSelected(null); }}>
+        <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Run details</DialogTitle>
+            <DialogDescription className="text-gray-400">
+              {detail ? `${detail.runType} · ${fmtTime(detail.startedAt)} · ${detail.status}` : "Loading…"}
+            </DialogDescription>
+          </DialogHeader>
+          {detail && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div><span className="text-gray-500">Corpus:</span> {detail.corpusHash || "—"}</div>
+                <div><span className="text-gray-500">Prompt:</span> {detail.promptVersion || "—"}</div>
+                <div><span className="text-gray-500">Finished:</span> {fmtTime(detail.finishedAt)}</div>
+                <div><span className="text-gray-500">Judge:</span> {detail.results?.judgeModel ?? "—"}</div>
+              </div>
+
+              {detail.error && (
+                <div className="rounded border border-red-700 bg-red-950/30 px-3 py-2 text-red-300 text-xs whitespace-pre-wrap" data-testid="detail-error">
+                  {detail.error}
+                </div>
+              )}
+
+              <div>
+                <p className="font-medium text-gray-300 mb-1">Scorecard (raw)</p>
+                <pre className="bg-gray-950 border border-gray-800 rounded p-3 text-[11px] overflow-x-auto max-h-64" data-testid="detail-scorecard">
+                  {JSON.stringify(detail.scorecard ?? {}, null, 2)}
+                </pre>
+              </div>
+
+              <div>
+                <p className="font-medium text-gray-300 mb-1">Availability</p>
+                <div className="space-y-1">
+                  {[...(detail.availability?.ears ?? []), ...(detail.availability?.brain ?? [])].map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      <AvailabilityBadge status={a.status} />
+                      <span className="font-mono">{a.candidateId}</span>
+                      <span className="text-gray-500 truncate">{a.detail}</span>
+                    </div>
+                  ))}
+                  {![...(detail.availability?.ears ?? []), ...(detail.availability?.brain ?? [])].length && (
+                    <p className="text-gray-500 text-xs">No availability data.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setSelected(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

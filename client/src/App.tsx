@@ -9,6 +9,7 @@ import Landing from "@/pages/landing";
 import Onboarding from "@/pages/onboarding";
 import Dashboard from "@/pages/dashboard";
 import SelectNumber from "@/pages/select-number";
+import AdminDiagnostics from "@/pages/admin-diagnostics";
 
 function Router() {
   return (
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/select-number" component={SelectNumber} />
+      <Route path="/admin/diagnostics" component={AdminDiagnostics} />
       <Route component={NotFound} />
     </Switch>
   );

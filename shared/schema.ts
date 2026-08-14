@@ -395,3 +395,65 @@ export const tutorCallMemories = pgTable("tutor_call_memories", {
 }));
 
 export type TutorCallMemory = typeof tutorCallMemories.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// LIVE Ears & Brain Benchmark (admin-only measurement bench, NOT production
+// call path). Fixtures = the benchmark corpus (frozen reference transcripts,
+// optionally audio for EARS). Runs = every benchmark execution with its full
+// config, availability results and scorecards, kept for before/after history.
+// ---------------------------------------------------------------------------
+
+export const benchmarkFixtures = pgTable("benchmark_fixtures", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  // e.g. bank_dispute, doctor, insurance, ivr_heavy, accent, overlap...
+  kind: text("kind").notNull().default("other"),
+  // Original user goal for BRAIN runs (natural language).
+  goal: text("goal").notNull().default(""),
+  // Frozen reference transcript: array of turns
+  // { idx, role: "owner"|"guest", text, tStartMs?, tEndMs? }
+  referenceTurns: jsonb("reference_turns").notNull().default(sql`'[]'::jsonb`),
+  // Critical entities weighted above generic WER for banking calls:
+  // { money: string[], dates: string[], digits: string[], names: string[], decisions: string[] }
+  criticalEntities: jsonb("critical_entities").notNull().default(sql`'{}'::jsonb`),
+  // Confirmed facts / context handed to BRAIN in the frozen envelope.
+  confirmedFacts: jsonb("confirmed_facts").notNull().default(sql`'[]'::jsonb`),
+  // EARS audio fixture (base64 payload kept in DB so it survives redeploys).
+  // null => no real audio exists for this call (EARS impossible, BRAIN fine).
+  audioBase64: text("audio_base64"),
+  audioFormat: text("audio_format"), // e.g. "mulaw8k" | "wav" | "mp3"
+  audioChannels: text("audio_channels"), // "mono" | "dual"
+  sourceCallSid: text("source_call_sid"),
+  tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const benchmarkRuns = pgTable("benchmark_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // "ears" | "brain" | "replay" | "availability"
+  runType: text("run_type").notNull(),
+  status: text("status").notNull().default("running"), // running|completed|failed
+  // Hash over the fixture corpus used, for before/after comparability.
+  corpusHash: text("corpus_hash").notNull().default(""),
+  fixtureIds: jsonb("fixture_ids").notNull().default(sql`'[]'::jsonb`),
+  // Full candidate/provider/model/prompt config incl. reasoning.effort.
+  config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+  promptVersion: text("prompt_version").notNull().default("v1"),
+  // Availability-check outcomes per candidate: AVAILABLE | UNAVAILABLE + detail.
+  availability: jsonb("availability").notNull().default(sql`'{}'::jsonb`),
+  // Per-turn, per-candidate raw results + computed metrics.
+  results: jsonb("results").notNull().default(sql`'{}'::jsonb`),
+  // Aggregated scorecards (EARS/BRAIN tables, latency distributions, cost).
+  scorecard: jsonb("scorecard").notNull().default(sql`'{}'::jsonb`),
+  // Human-readable final report (markdown) — winners/bottleneck/recommendation.
+  report: text("report"),
+  error: text("error"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  finishedAt: timestamp("finished_at"),
+});
+
+export type BenchmarkFixture = typeof benchmarkFixtures.$inferSelect;
+export type InsertBenchmarkFixture = typeof benchmarkFixtures.$inferInsert;
+export type BenchmarkRun = typeof benchmarkRuns.$inferSelect;
+export type InsertBenchmarkRun = typeof benchmarkRuns.$inferInsert;

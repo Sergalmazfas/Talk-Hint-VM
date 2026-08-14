@@ -249,6 +249,11 @@ export async function registerRoutes(
   // AI Tutor (external Tutor Engine) — practice sessions + Call Memory.
   registerTutorRoutes(app);
 
+  // LIVE Ears & Brain Benchmark — admin-only measurement bench (separate
+  // layer; never touches the production call path).
+  const { registerBenchmarkRoutes } = await import("./benchmark/routes");
+  registerBenchmarkRoutes(app);
+
   // TalkHint UI - serve from dist/talkhint/ui (where bundled SDK is)
   // In production, use cwd-relative path; in dev, use __dirname-relative
   const talkhintUiPath = process.env.NODE_ENV === "production"
@@ -1426,13 +1431,24 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // outcome. The phone-number-level statusCallback does NOT fire for these
       // TwiML-app-originated outbound legs, so this is how we capture call end.
       const dialStatusUrl = `https://${host}/twilio/dial-status`;
+      // BENCHMARK fixture collection toggle (default OFF): when the env var
+      // BENCHMARK_CALL_RECORDING=1 is set, record the call dual-channel so
+      // future calls can become EARS audio fixtures. This is the ONLY
+      // production-path change made for the benchmark, it is opt-in, and it
+      // does not alter call routing, streaming, or hints in any way.
+      const benchmarkRecording = process.env.BENCHMARK_CALL_RECORDING === "1";
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
         answerOnBridge: true,
         timeout: CALL_TIMEOUT,
         timeLimit: CALL_TIME_LIMIT,
         action: dialStatusUrl,
-        method: "POST"
+        method: "POST",
+        ...(benchmarkRecording ? {
+          record: "record-from-answer-dual" as const,
+          recordingStatusCallback: `https://${host}/twilio/recording-status`,
+          recordingStatusCallbackMethod: "POST" as const,
+        } : {}),
       });
       dial.number(toNumber);
       console.log("[TwiML Voice] Dialing:", toNumber, "with stream:", streamUrl);
@@ -1444,6 +1460,28 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     const twimlXml = twimlResponse.toString();
     console.log("[TwiML Voice] Generated TwiML:", twimlXml);
     res.type("text/xml").send(twimlXml);
+  });
+
+  // Benchmark-only: stores the dual-channel recording URL in call metadata so
+  // an admin can later download it and attach it as an EARS audio fixture.
+  // Only ever hit when BENCHMARK_CALL_RECORDING=1 was set when the call began.
+  app.post("/twilio/recording-status", validateTwilioSignature, async (req, res) => {
+    try {
+      const callSid = req.body.CallSid;
+      const recordingUrl = req.body.RecordingUrl;
+      const recordingStatus = req.body.RecordingStatus;
+      if (callSid && recordingUrl && recordingStatus === "completed") {
+        const call = await storage.getCallByCallSid(callSid);
+        if (call) {
+          const metadata = { ...(call.metadata as any ?? {}), benchmarkRecordingUrl: recordingUrl, benchmarkRecordingChannels: req.body.RecordingChannels };
+          await storage.updateCall(call.id, { metadata });
+          console.log(`[Benchmark Recording] Stored recording URL for ${callSid}`);
+        }
+      }
+    } catch (e: any) {
+      console.error("[Benchmark Recording] Failed to store recording URL:", e.message);
+    }
+    res.status(200).send("OK");
   });
 
   // Twilio status callback endpoint - receives call status updates
