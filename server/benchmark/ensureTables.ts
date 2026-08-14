@@ -9,6 +9,9 @@ import { pool, dbReady } from "../db";
 let ensured: Promise<void> | null = null;
 
 const DDL = `
+ALTER TABLE users ADD COLUMN IF NOT EXISTS diagnostic_recording_enabled boolean NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS benchmark_fixtures_source_call_sid_uq
+  ON benchmark_fixtures (source_call_sid) WHERE source_call_sid IS NOT NULL;
 CREATE TABLE IF NOT EXISTS benchmark_fixtures (
   id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
   title text NOT NULL,

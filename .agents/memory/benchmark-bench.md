@@ -10,3 +10,5 @@ description: Durable rules for benchmark work — isolation from production tele
 - Streaming LLM timeouts must cover the entire SSE body read, not just headers; every per-turn interaction is try/caught so one failed turn never blocks the next (continuity invariant).
 - Benchmark tables are self-provisioned with idempotent CREATE TABLE IF NOT EXISTS at request time because the Reserved-VM deploy runs no drizzle migrations.
 - API reality (Aug 2026): OpenAI realtime transcription is provisioned via POST /v1/realtime/client_secrets (older transcription_sessions endpoint 404s); semantic_vad accepted.
+- Diagnostic recording (per-user capability, not admin role): capability check in the Twilio webhook path is hard-deadlined + cached and fails closed to "don't record"; never let recording bookkeeping block TwiML.
+- Twilio recording fetch/delete must go only to a canonical api.twilio.com Recordings URL for OUR account (built from a validated RecordingSid, redirects rejected) — a stored URL fetched blindly with Basic auth is an SSRF/credential-exfil hole.

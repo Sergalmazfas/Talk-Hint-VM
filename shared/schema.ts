@@ -20,6 +20,10 @@ export const users = pgTable("users", {
   airatomaWebhookUrl: text("airatoma_webhook_url"),
   liveHintsEnabled: boolean("live_hints_enabled").notNull().default(true),
   translationEnabled: boolean("translation_enabled").notNull().default(true),
+  // Diagnostic call recording capability (Task #173): OFF for everyone by
+  // default; enabled explicitly per-user (admin/test accounts only). NOT tied
+  // to admin role — it is a separate backend policy flag.
+  diagnosticRecordingEnabled: boolean("diagnostic_recording_enabled").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

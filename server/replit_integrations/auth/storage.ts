@@ -48,6 +48,7 @@ class AuthStorage implements IAuthStorage {
       airatomaWebhookUrl: null,
       liveHintsEnabled: true,
       translationEnabled: true,
+      diagnosticRecordingEnabled: false,
       createdAt: new Date(),
     };
 

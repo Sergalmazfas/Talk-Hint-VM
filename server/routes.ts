@@ -29,6 +29,8 @@ import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
+import { isBenchmarkAdmin } from "./benchmark/adminGate";
+import { isDiagnosticRecordingUser, stampRecordingPolicy, scheduleAutoBenchmark, RECORDING_NOTICE_TEXT } from "./benchmark/diagnosticRecording";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -977,6 +979,18 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
           track: "both_tracks"
         }).parameter({ name: "callType", value: "incoming_answered" });
         
+        // Diagnostic recording (Task #173): incoming calls answered by a
+        // diagnostic-flagged owner are recorded via native Twilio recording.
+        // Fail-closed helper — any error means "don't record"; a recording
+        // failure can never stop or degrade the call.
+        const diagRecording = await isDiagnosticRecordingUser(pendingCall.userId);
+        if (diagRecording) {
+          // Configurable consent notice, played to the caller before bridging.
+          twimlResponse.say({ voice: "alice" }, RECORDING_NOTICE_TEXT);
+          void stampRecordingPolicy(callSid);
+        }
+        const recordingCallbackUrl = `https://${host}/twilio/recording-status`;
+
         twimlResponse.say({ voice: "alice" }, "Connecting you now.");
         
         if (pendingCall.clientType === "ios") {
@@ -994,6 +1008,13 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
             startConferenceOnEnter: false, // caller waits until the iOS agent joins
             endConferenceOnExit: true,     // end the call when the caller hangs up
             beep: "false",
+            // Conference recording is mixed (dual-channel is not supported for
+            // conferences) — still captured for diagnostic users.
+            ...(diagRecording ? {
+              record: "record-from-start" as const,
+              recordingStatusCallback: recordingCallbackUrl,
+              recordingStatusCallbackMethod: "POST" as const,
+            } : {}),
           }, conferenceRoom);
           
           console.log(`[Hold] ${callSid} CONFERENCE bridge ready: ${conferenceRoom} | streamUrl: ${streamUrl}`);
@@ -1008,7 +1029,12 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
             callerId: pendingCall.fromNumber || "",
             answerOnBridge: true,
             timeout: CALL_TIMEOUT,
-            timeLimit: CALL_TIME_LIMIT
+            timeLimit: CALL_TIME_LIMIT,
+            ...(diagRecording ? {
+              record: "record-from-answer-dual" as const,
+              recordingStatusCallback: recordingCallbackUrl,
+              recordingStatusCallbackMethod: "POST" as const,
+            } : {}),
           });
           dial.client(clientIdentity);
           
@@ -1431,12 +1457,19 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // outcome. The phone-number-level statusCallback does NOT fire for these
       // TwiML-app-originated outbound legs, so this is how we capture call end.
       const dialStatusUrl = `https://${host}/twilio/dial-status`;
-      // BENCHMARK fixture collection toggle (default OFF): when the env var
-      // BENCHMARK_CALL_RECORDING=1 is set, record the call dual-channel so
-      // future calls can become EARS audio fixtures. This is the ONLY
-      // production-path change made for the benchmark, it is opt-in, and it
-      // does not alter call routing, streaming, or hints in any way.
-      const benchmarkRecording = process.env.BENCHMARK_CALL_RECORDING === "1";
+      // Diagnostic/benchmark recording (default OFF): record dual-channel when
+      // either the global BENCHMARK_CALL_RECORDING=1 toggle is set, or the
+      // placing user is explicitly flagged diagnostic_recording_enabled
+      // (Task #173). Fail-closed: any error means "don't record"; recording
+      // never alters call routing, streaming, or hints in any way.
+      let shouldRecord = process.env.BENCHMARK_CALL_RECORDING === "1";
+      if (!shouldRecord && fromNumber && fromNumber.startsWith("client:user-")) {
+        shouldRecord = await isDiagnosticRecordingUser(fromNumber.replace("client:user-", ""));
+      }
+      if (shouldRecord) {
+        // Persist which consent/notice policy version applies (fire-and-forget).
+        void stampRecordingPolicy(callSid);
+      }
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
         answerOnBridge: true,
@@ -1444,13 +1477,18 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         timeLimit: CALL_TIME_LIMIT,
         action: dialStatusUrl,
         method: "POST",
-        ...(benchmarkRecording ? {
+        ...(shouldRecord ? {
           record: "record-from-answer-dual" as const,
           recordingStatusCallback: `https://${host}/twilio/recording-status`,
           recordingStatusCallbackMethod: "POST" as const,
         } : {}),
       });
-      dial.number(toNumber);
+      // Recording notice: whisper the configurable consent notice to the called
+      // party before bridging (Twilio does not announce recording by itself).
+      dial.number(
+        shouldRecord ? { url: `https://${host}/twilio/recording-notice`, method: "POST" as const } : {},
+        toNumber,
+      );
       console.log("[TwiML Voice] Dialing:", toNumber, "with stream:", streamUrl);
     } else {
       twimlResponse.say("Sorry, this call cannot be connected.");
@@ -1462,9 +1500,20 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     res.type("text/xml").send(twimlXml);
   });
 
-  // Benchmark-only: stores the dual-channel recording URL in call metadata so
-  // an admin can later download it and attach it as an EARS audio fixture.
-  // Only ever hit when BENCHMARK_CALL_RECORDING=1 was set when the call began.
+  // Recording notice whisper: played to the joining party before the bridge
+  // when diagnostic/benchmark recording is active. Text + policy version are
+  // backend-configured (see server/benchmark/diagnosticRecording.ts).
+  app.post("/twilio/recording-notice", validateTwilioSignature, (_req, res) => {
+    const VoiceResponse = twilio.twiml.VoiceResponse;
+    const notice = new VoiceResponse();
+    notice.say({ voice: "alice" }, RECORDING_NOTICE_TEXT);
+    res.type("text/xml").send(notice.toString());
+  });
+
+  // Stores the native Twilio recording (URL/SID/duration/channels) in call
+  // metadata when a diagnostic or benchmark recording completes, then queues
+  // the automatic benchmark intake for diagnostic users. Never fails the
+  // callback — recording bookkeeping must not affect telephony.
   app.post("/twilio/recording-status", validateTwilioSignature, async (req, res) => {
     try {
       const callSid = req.body.CallSid;
@@ -1473,13 +1522,25 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       if (callSid && recordingUrl && recordingStatus === "completed") {
         const call = await storage.getCallByCallSid(callSid);
         if (call) {
-          const metadata = { ...(call.metadata as any ?? {}), benchmarkRecordingUrl: recordingUrl, benchmarkRecordingChannels: req.body.RecordingChannels };
+          const metadata = {
+            ...(call.metadata as any ?? {}),
+            benchmarkRecordingUrl: recordingUrl,
+            benchmarkRecordingChannels: req.body.RecordingChannels,
+            recordingSid: req.body.RecordingSid,
+            recordingStatus,
+            recordingDurationSecs: Number(req.body.RecordingDuration) || undefined,
+            recordingCompletedAt: new Date().toISOString(),
+          };
           await storage.updateCall(call.id, { metadata });
-          console.log(`[Benchmark Recording] Stored recording URL for ${callSid}`);
+          console.log(`[Recording] Stored recording metadata for ${callSid}`);
+          // Every diagnostic user's call is a test: auto-send to the benchmark.
+          if (call.userId && await isDiagnosticRecordingUser(call.userId)) {
+            scheduleAutoBenchmark(callSid);
+          }
         }
       }
     } catch (e: any) {
-      console.error("[Benchmark Recording] Failed to store recording URL:", e.message);
+      console.error("[Recording] Failed to store recording metadata:", e.message);
     }
     res.status(200).send("OK");
   });
@@ -1813,7 +1874,10 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   });
 
   app.get("/api/auth/me", authMiddleware, (req, res) => {
-    res.json({ user: req.user });
+    // isAdmin lets the web client show the "Админ" button; actual access to
+    // admin APIs is still enforced server-side by requireBenchmarkAdmin.
+    const user = req.user as any;
+    res.json({ user: { ...user, isAdmin: isBenchmarkAdmin(user?.email) } });
   });
 
   // Forwarding settings endpoints

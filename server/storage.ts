@@ -437,6 +437,7 @@ export class DatabaseStorage implements IStorage {
         airatomaWebhookUrl: null,
         liveHintsEnabled: true,
         translationEnabled: true,
+        diagnosticRecordingEnabled: false,
         createdAt: new Date(),
       };
       memoryUsers.set(newUser.id, newUser);
@@ -467,6 +468,7 @@ export class DatabaseStorage implements IStorage {
         airatomaWebhookUrl: null,
         liveHintsEnabled: true,
         translationEnabled: true,
+        diagnosticRecordingEnabled: false,
         createdAt: new Date(),
       };
       memoryUsers.set(fallbackUser.id, fallbackUser);

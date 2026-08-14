@@ -5,6 +5,7 @@ interface User {
   email: string;
   language: string;
   plan: string | null;
+  isAdmin?: boolean;
 }
 
 interface AuthContextType {

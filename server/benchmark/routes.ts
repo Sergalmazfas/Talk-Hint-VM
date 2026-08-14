@@ -15,6 +15,7 @@ import { db } from "../db";
 import { benchmarkFixtures, calls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { ensureBenchmarkTables } from "./ensureTables";
+import { registerRecordedCallRoutes, downloadRecordingWav } from "./recordedCalls";
 
 export function registerBenchmarkRoutes(app: Express) {
   const base = "/api/admin/benchmark";
@@ -25,6 +26,14 @@ export function registerBenchmarkRoutes(app: Express) {
     ensureBenchmarkTables().then(() => next()).catch((e) =>
       res.status(500).json({ error: `benchmark tables unavailable: ${String(e?.message ?? e)}` }));
   });
+
+  // Also provision eagerly (fire-and-forget) so the diagnostic-recording
+  // capability column exists in production before the admin panel is opened.
+  void ensureBenchmarkTables().catch((e) =>
+    console.error("[Benchmark] eager table provisioning failed:", e?.message ?? e));
+
+  // Recorded diagnostic calls (list / play / transcript / gold / delete)
+  registerRecordedCallRoutes(app, base);
 
   // Candidate matrix (static)
   app.get(`${base}/candidates`, requireBenchmarkAdmin, (_req, res) => {
@@ -86,23 +95,16 @@ export function registerBenchmarkRoutes(app: Express) {
         return res.status(400).json({ error: "referenceTurns transcript required — EARS accuracy is measured against it" });
       }
       const [call] = await db.select().from(calls).where(eq(calls.callSid, callSid));
-      const recordingUrl = (call?.metadata as any)?.benchmarkRecordingUrl as string | undefined;
-      if (!recordingUrl) return res.status(404).json({ error: "no benchmark recording stored for this call (was BENCHMARK_CALL_RECORDING=1 set during the call?)" });
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      if (!accountSid || !authToken) return res.status(500).json({ error: "Twilio credentials not configured" });
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30_000);
+      const meta = (call?.metadata as any) ?? {};
+      const recordingUrl = meta.benchmarkRecordingUrl as string | undefined;
+      const recordingSid = meta.recordingSid as string | undefined;
+      if (!recordingUrl && !recordingSid) return res.status(404).json({ error: "no benchmark recording stored for this call (was recording enabled during the call?)" });
       let audioBuf: Buffer;
       try {
-        const resp = await fetch(`${recordingUrl}.wav?RequestedChannels=2`, {
-          headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}` },
-          signal: controller.signal,
-        });
-        if (!resp.ok) return res.status(502).json({ error: `Twilio recording download failed: HTTP ${resp.status}` });
-        audioBuf = Buffer.from(await resp.arrayBuffer());
-      } finally {
-        clearTimeout(timer);
+        // SSRF-guarded: only canonical Twilio recording URLs for our account.
+        audioBuf = await downloadRecordingWav(recordingUrl, recordingSid);
+      } catch (e: any) {
+        return res.status(502).json({ error: String(e?.message ?? e) });
       }
       const [row] = await db.insert(benchmarkFixtures).values({
         title: title || `Imported recording ${callSid}`,

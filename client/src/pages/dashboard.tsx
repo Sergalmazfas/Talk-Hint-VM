@@ -145,6 +145,17 @@ export default function Dashboard() {
                 Subscribe
               </Button>
             )}
+            {user?.isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLocation("/admin/diagnostics")}
+                className="border-cyan-600 text-cyan-400 hover:text-cyan-300"
+                data-testid="button-admin"
+              >
+                Админ
+              </Button>
+            )}
             <span className="text-gray-400 text-sm hidden sm:inline">{user?.email}</span>
             <Button
               variant="ghost"

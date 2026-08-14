@@ -294,6 +294,7 @@ function StatusBadge({ status }: { status: BenchmarkRun["status"] }) {
 export default function AdminDiagnostics() {
   const [, setLocation] = useLocation();
   const { token, isLoading } = useAuth();
+  const [tab, setTab] = useState("ears");
 
   useEffect(() => {
     if (!isLoading && !token) setLocation("/");
@@ -342,18 +343,20 @@ export default function AdminDiagnostics() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        <Tabs defaultValue="ears" className="w-full">
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList className="mb-4 flex-wrap h-auto">
             <TabsTrigger value="ears" data-testid="tab-ears">LIVE Ears Benchmark</TabsTrigger>
             <TabsTrigger value="brain" data-testid="tab-brain">LIVE Brain Benchmark</TabsTrigger>
             <TabsTrigger value="replay" data-testid="tab-replay">LIVE End-to-End Replay</TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-history">Benchmark History</TabsTrigger>
+            <TabsTrigger value="recorded" data-testid="tab-recorded">Записанные звонки</TabsTrigger>
           </TabsList>
 
           <TabsContent value="ears"><EarsTab candidates={candidatesQ.data?.ears ?? []} /></TabsContent>
           <TabsContent value="brain"><BrainTab candidates={candidatesQ.data?.brain ?? []} /></TabsContent>
           <TabsContent value="replay"><ReplayTab /></TabsContent>
           <TabsContent value="history"><HistoryTab /></TabsContent>
+          <TabsContent value="recorded"><RecordedCallsTab active={tab === "recorded"} onOpenReplay={() => setTab("replay")} /></TabsContent>
         </Tabs>
       </main>
     </div>
@@ -1379,5 +1382,434 @@ function HistoryTab() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ===========================================================================
+// RECORDED CALLS TAB
+// ===========================================================================
+
+interface RecordedCall {
+  id: string;
+  callSid: string;
+  userEmail: string | null;
+  fromNumber: string | null;
+  toNumber: string | null;
+  direction: string | null;
+  status: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  hasTranscript: boolean;
+  recordingUrl?: string | null;
+  recordingSid?: string | null;
+  recordingStatus?: string | null;
+  recordingChannels?: number | string | null;
+  recordingDurationSecs?: number | null;
+  recordingCompletedAt?: string | null;
+  recordingPolicyVersion?: string | null;
+  diagnosticRecording: boolean;
+  fixtureId: string | null;
+  isGoldCall: boolean;
+  benchmarkStatus: string | null;
+}
+
+function fmtDuration(secs?: number | null): string {
+  if (secs === null || secs === undefined || Number.isNaN(secs)) return "—";
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function RecordedCallsTab({ active, onOpenReplay }: { active: boolean; onOpenReplay: () => void }) {
+  const listQ = useAuthedQuery<RecordedCall[]>([BASE, "recorded-calls"], true, active ? 10000 : false);
+  const calls = listQ.data ?? [];
+
+  const [transcriptFor, setTranscriptFor] = useState<RecordedCall | null>(null);
+  const [goldFor, setGoldFor] = useState<RecordedCall | null>(null);
+  const [deleteFor, setDeleteFor] = useState<RecordedCall | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader><CardTitle className="text-base">Записанные звонки</CardTitle></CardHeader>
+        <CardContent className="overflow-x-auto">
+          {calls.length === 0 ? (
+            <div className="text-sm text-gray-400 py-8 text-center" data-testid="recorded-empty">
+              Звонки пользователей с включённой диагностикой записываются автоматически и появляются здесь
+              после завершения звонка. Пока записей нет.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-800">
+                  <TableHead>Date/time</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Call SID</TableHead>
+                  <TableHead>Direction</TableHead>
+                  <TableHead>Recording</TableHead>
+                  <TableHead>Channels</TableHead>
+                  <TableHead>Transcript</TableHead>
+                  <TableHead>Gold</TableHead>
+                  <TableHead>Benchmark</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {calls.map((c) => (
+                  <RecordedCallRow
+                    key={c.id}
+                    call={c}
+                    playing={playingId === c.id}
+                    onPlayToggle={() => setPlayingId((p) => (p === c.id ? null : c.id))}
+                    onTranscript={() => setTranscriptFor(c)}
+                    onGold={() => setGoldFor(c)}
+                    onDelete={() => setDeleteFor(c)}
+                    onOpenReplay={onOpenReplay}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {transcriptFor && (
+        <TranscriptDialog call={transcriptFor} onClose={() => setTranscriptFor(null)} />
+      )}
+      {goldFor && (
+        <GoldCallDialog call={goldFor} onClose={() => setGoldFor(null)} />
+      )}
+      {deleteFor && (
+        <DeleteRecordingDialog call={deleteFor} onClose={() => setDeleteFor(null)} />
+      )}
+    </div>
+  );
+}
+
+function RecordedCallRow({
+  call, playing, onPlayToggle, onTranscript, onGold, onDelete, onOpenReplay,
+}: {
+  call: RecordedCall;
+  playing: boolean;
+  onPlayToggle: () => void;
+  onTranscript: () => void;
+  onGold: () => void;
+  onDelete: () => void;
+  onOpenReplay: () => void;
+}) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const runBench = useMutation({
+    mutationFn: async (kind: "ears" | "brain") => {
+      const url = kind === "ears" ? "/ears/run" : "/brain/run";
+      const body = kind === "ears" ? { fixtureIds: [call.fixtureId] } : { fixtureId: call.fixtureId };
+      const res = await fetch(`${BASE}${url}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onSuccess: (_d, kind) => {
+      qc.invalidateQueries({ queryKey: [BASE, "runs"] });
+      toast({ title: `${kind.toUpperCase()} benchmark запущен` });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+
+  const hasFixture = !!call.fixtureId;
+  const hasRecording = !!call.recordingSid || !!call.recordingUrl || call.recordingStatus === "completed";
+
+  return (
+    <>
+      <TableRow className="border-gray-800" data-testid={`row-recorded-${call.id}`}>
+        <TableCell className="text-xs">{fmtTime(call.startedAt)}</TableCell>
+        <TableCell className="text-xs">{fmtDuration(call.recordingDurationSecs)}</TableCell>
+        <TableCell className="text-xs font-mono" title={call.callSid}>{call.callSid?.slice(0, 10) ?? "—"}…</TableCell>
+        <TableCell className="text-xs">{call.direction ?? "—"}</TableCell>
+        <TableCell className="text-xs">{call.recordingStatus ?? "—"}</TableCell>
+        <TableCell className="text-xs">{call.recordingChannels ?? "—"}</TableCell>
+        <TableCell>
+          {call.hasTranscript
+            ? <Badge className="bg-green-600 hover:bg-green-600">yes</Badge>
+            : <Badge variant="outline" className="text-gray-500 border-gray-700">no</Badge>}
+        </TableCell>
+        <TableCell>
+          {call.isGoldCall && <Badge className="bg-amber-500 hover:bg-amber-500">Gold</Badge>}
+        </TableCell>
+        <TableCell className="text-xs">{call.benchmarkStatus ?? "—"}</TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1">
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={!hasRecording}
+              onClick={onPlayToggle} data-testid={`button-play-${call.id}`}>
+              {playing ? "Стоп" : "Играть"}
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={!call.hasTranscript}
+              onClick={onTranscript} data-testid={`button-transcript-${call.id}`}>
+              Транскрипт
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs"
+              onClick={onGold} data-testid={`button-gold-${call.id}`}>
+              Сделать Gold Call
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={!hasFixture || runBench.isPending}
+              onClick={() => runBench.mutate("ears")} data-testid={`button-ears-${call.id}`}>
+              EARS
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" disabled={!hasFixture || runBench.isPending}
+              onClick={() => runBench.mutate("brain")} data-testid={`button-brain-${call.id}`}>
+              BRAIN
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs"
+              onClick={onOpenReplay} data-testid={`button-replay-${call.id}`}>
+              Replay
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-red-400 hover:text-red-300" disabled={!hasRecording}
+              onClick={onDelete} data-testid={`button-delete-${call.id}`}>
+              Удалить
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+      {playing && (
+        <TableRow className="border-gray-800 bg-gray-950/50">
+          <TableCell colSpan={10}>
+            <InlineAudioPlayer callId={call.id} />
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+function InlineAudioPlayer({ callId }: { callId: string }) {
+  const { token } = useAuth();
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/recorded-calls/${callId}/audio`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) setUrl(objectUrl);
+      } catch (e: any) {
+        if (!cancelled) setError(String(e?.message ?? e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [callId, token]);
+
+  if (loading) return <span className="text-xs text-gray-500">Загрузка аудио…</span>;
+  if (error) return <span className="text-xs text-red-400">Не удалось загрузить аудио: {error}</span>;
+  if (!url) return null;
+  return <audio controls src={url} className="w-full max-w-xl" data-testid={`audio-${callId}`} />;
+}
+
+function TranscriptDialog({ call, onClose }: { call: RecordedCall; onClose: () => void }) {
+  const { token } = useAuth();
+  const q = useAuthedQuery<{ callSid: string; transcript: string; turns: { idx?: number; role?: string; text?: string }[] }>(
+    [BASE, "recorded-calls", call.id, "transcript"], !!token,
+  );
+  const data = q.data;
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Транскрипт</DialogTitle>
+          <DialogDescription className="text-gray-400 font-mono text-xs">{call.callSid}</DialogDescription>
+        </DialogHeader>
+        {q.isLoading ? (
+          <p className="text-gray-500 text-sm">Загрузка…</p>
+        ) : q.error ? (
+          <p className="text-red-400 text-sm">{String((q.error as any)?.message ?? q.error)}</p>
+        ) : data?.turns?.length ? (
+          <div className="space-y-2">
+            {data.turns.map((t, i) => (
+              <div key={i} className="text-sm">
+                <Badge variant={t.role === "guest" ? "secondary" : "outline"} className="mr-2">{t.role ?? "?"}</Badge>
+                <span className="text-gray-200">{t.text}</span>
+              </div>
+            ))}
+          </div>
+        ) : data?.transcript ? (
+          <pre className="text-xs text-gray-300 whitespace-pre-wrap">{data.transcript}</pre>
+        ) : (
+          <p className="text-gray-500 text-sm">Транскрипт пуст.</p>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GoldCallDialog({ call, onClose }: { call: RecordedCall; onClose: () => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [title, setTitle] = useState("");
+  const [goal, setGoal] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [needTurns, setNeedTurns] = useState(false);
+
+  async function submit() {
+    setSubmitting(true);
+    try {
+      const body: any = {
+        title: title.trim() || undefined,
+        goal: goal.trim() || undefined,
+      };
+      if (transcript.trim()) {
+        try {
+          body.referenceTurns = parseTranscript(transcript);
+        } catch (e: any) {
+          toast({ title: "Проверьте транскрипт", description: String(e?.message ?? e), variant: "destructive" });
+          setSubmitting(false);
+          return;
+        }
+      }
+      const res = await fetch(`${BASE}/recorded-calls/${call.id}/gold`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.status === 400) {
+        const txt = await res.text();
+        if (/transcript/i.test(txt)) {
+          setNeedTurns(true);
+          toast({
+            title: "Нужен транскрипт",
+            description: "У звонка нет транскрипта — укажите turns вручную в поле ниже.",
+            variant: "destructive",
+          });
+          setSubmitting(false);
+          return;
+        }
+        throw new Error(txt);
+      }
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      toast({ title: "Gold Call создан", description: "Fixture зафиксирован." });
+      qc.invalidateQueries({ queryKey: [BASE, "recorded-calls"] });
+      qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
+      onClose();
+    } catch (e: any) {
+      toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Сделать Gold Call</DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Замораживает фикстуру из этого звонка для повторяемых бенчмарков.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Title <span className="text-gray-500 text-xs">(optional)</span></Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)}
+                className="bg-gray-950 border-gray-700" data-testid="input-gold-title" />
+            </div>
+            <div className="space-y-1">
+              <Label>Goal <span className="text-gray-500 text-xs">(optional)</span></Label>
+              <Input value={goal} onChange={(e) => setGoal(e.target.value)}
+                className="bg-gray-950 border-gray-700" data-testid="input-gold-goal" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>
+              Transcript override {needTurns ? <span className="text-red-400">*</span> : <span className="text-gray-500 text-xs">(optional)</span>}
+            </Label>
+            <p className="text-xs text-gray-500">
+              JSON-массив {`{idx, role, text}`} или строки «guest: …» / «owner: …». Нужен, если у звонка нет транскрипта.
+            </p>
+            <Textarea value={transcript} onChange={(e) => setTranscript(e.target.value)}
+              rows={5} className="bg-gray-950 border-gray-700 font-mono text-xs" data-testid="input-gold-transcript" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={submitting} className="bg-amber-600 hover:bg-amber-700" data-testid="button-submit-gold">
+            {submitting ? "…" : "Сделать Gold Call"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteRecordingDialog({ call, onClose }: { call: RecordedCall; onClose: () => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [includeFixture, setIncludeFixture] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    setSubmitting(true);
+    try {
+      const url = `${BASE}/recorded-calls/${call.id}/recording${includeFixture ? "?includeFixture=1" : ""}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      toast({ title: "Запись удалена" });
+      qc.invalidateQueries({ queryKey: [BASE, "recorded-calls"] });
+      qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
+      onClose();
+    } catch (e: any) {
+      toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-md">
+        <DialogHeader>
+          <DialogTitle>Удалить запись</DialogTitle>
+          <DialogDescription className="text-gray-400">
+            Запись будет удалена из Twilio <span className="text-red-400 font-medium">навсегда</span>. Это действие необратимо.
+          </DialogDescription>
+        </DialogHeader>
+        <label className="flex items-center gap-2 text-sm">
+          <Switch checked={includeFixture} onCheckedChange={setIncludeFixture} data-testid="switch-include-fixture" />
+          Также удалить связанную фикстуру
+        </label>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={submitting} variant="destructive" data-testid="button-confirm-delete">
+            {submitting ? "Удаление…" : "Удалить навсегда"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
