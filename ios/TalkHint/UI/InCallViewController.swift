@@ -45,6 +45,11 @@ final class InCallViewController: UIViewController {
     // would just fail again. Reset once a connect/retry path takes over.
     private var needsSignIn = false
 
+    // Last goal text rendered in the feed. The server echoes goal_set on every
+    // (re)connect (persisted selections are re-sent), so without this a mid-call
+    // reconnect would duplicate the "GOAL" card in the conversation history.
+    private var lastGoalShownInFeed: String?
+
     init(callerName: String) {
         self.callerName = callerName
         super.init(nibName: nil, bundle: nil)
@@ -71,6 +76,12 @@ final class InCallViewController: UIViewController {
 
     /// Called by CallManager when the call ends — closes the stream and dismisses.
     func teardown() {
+        // A new call always starts without the previous call's goal — the goal is
+        // part of one conversation's history, not a sticky app-level setting.
+        // Clear it server-side too (covers calls that never opened a media
+        // stream, where the server-side end-of-call cleanup never runs).
+        stream.setGoal("")
+        SessionStore.shared.callGoal = ""
         stream.disconnect()
         if presentingViewController != nil {
             dismiss(animated: true)
@@ -498,7 +509,8 @@ final class InCallViewController: UIViewController {
         guard !goal.isEmpty else { return }
         stream.setGoal(goal)
         SessionStore.shared.callGoal = goal
-        statusLabel.text = "Goal set: \(goal)"
+        // The goal shows up as a compact event in the conversation feed (via the
+        // server's goal_set echo) — never as a persistent banner/status line.
         goalField.resignFirstResponder()
     }
 
@@ -740,6 +752,26 @@ extension InCallViewController: CallHintStreamDelegate {
                        background: (isError ? UIColor.systemRed : UIColor.systemPurple)
                         .withAlphaComponent(0.12),
                        testIdSuffix: "ai-response")
+        case .goalSet(let text):
+            // Compact one-time feed event; scrolls away with history. Skip the
+            // duplicate echo the server sends after a mid-call reconnect.
+            guard text != lastGoalShownInFeed else { return }
+            lastGoalShownInFeed = text
+            appendCard(title: "GOAL", titleColor: .systemGreen,
+                       primary: text, secondary: nil,
+                       background: .systemGreen.withAlphaComponent(0.10),
+                       testIdSuffix: "goal")
+        case .goalUpdated(let text):
+            guard text != lastGoalShownInFeed else { return }
+            lastGoalShownInFeed = text
+            // Keep local state in sync so reconnects and Ask-AI requests carry
+            // the new goal, and the goal field reflects what Brain now targets.
+            SessionStore.shared.callGoal = text
+            goalField.text = text
+            appendCard(title: "GOAL UPDATED", titleColor: .systemGreen,
+                       primary: text, secondary: nil,
+                       background: .systemGreen.withAlphaComponent(0.10),
+                       testIdSuffix: "goal-updated")
         }
     }
 

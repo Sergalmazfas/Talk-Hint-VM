@@ -857,7 +857,16 @@ function clearChat() {
   hideGoalBadge();
 }
 
-// Goal badge in header
+// Goal as a compact conversation-feed event (never a persistent banner).
+// Deduped: the server re-echoes goal_set on reconnect / repeated set_goal.
+var lastGoalFeedText = null;
+function addGoalFeedEvent(text) {
+  if (text === lastGoalFeedText) return;
+  lastGoalFeedText = text;
+  addMessage('ai', text);
+}
+
+// Goal badge in header (legacy — no longer shown during calls; kept for safety)
 function showGoalBadge(goalText) {
   var existing = document.getElementById('goalBadge');
   if (existing) existing.remove();
@@ -1281,14 +1290,33 @@ function handleMessage(data) {
       break;
 
     case 'goal_state_update':
-      // Auto-detect goal from conversation
+      // Auto-detect goal from conversation. Goal is a compact event in the
+      // conversation feed (scrolls away with history), not a persistent banner.
       if (data.goalType && data.goalType !== 'other') {
         var goalLabel = getGoalLabel(data.goalType);
-        showGoalBadge(goalLabel);
         if (!callGoal) {
           callGoal = goalLabel;
           setGoalActive(true);
+          addGoalFeedEvent('🎯 Цель: ' + goalLabel);
         }
+      }
+      break;
+
+    case 'goal_set':
+      if (data.goal) {
+        callGoal = data.goal;
+        setGoalActive(true);
+        addGoalFeedEvent('🎯 Цель: ' + data.goal);
+      }
+      break;
+
+    case 'goal_updated':
+      // The user redefined the goal mid-call via the assistant input; Brain now
+      // uses the new goal. Old goal stays in history, new one joins the feed.
+      if (data.goal) {
+        callGoal = data.goal;
+        setGoalActive(true);
+        addGoalFeedEvent('🎯 Цель обновлена: ' + data.goal);
       }
       break;
 
@@ -1399,8 +1427,7 @@ async function makeCall() {
       }
       
       if (callGoal) {
-        addMessage('ai', '🎯 Цель: ' + callGoal);
-        showGoalBadge(callGoal);
+        addGoalFeedEvent('🎯 Цель: ' + callGoal);
       } else {
         // Safe Start: no goal set, AI will help discover it
         addMessage('ai', '👋 Звонок начался! Я слушаю и буду подсказывать.');
@@ -1447,6 +1474,12 @@ function resetCallUI() {
   activeCall = null;
   isInCall = false;
   callGoal = '';  // Reset goal for next call
+  lastGoalFeedText = null;  // Next call may legitimately reuse the same goal text
+  // Clear the goal server-side too, so a rejected/failed call can't leave a
+  // stale goal grounding the next call's hints.
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'set_goal', goal: '' }));
+  }
   hideDtmfKeypad();  // Hide DTMF keypad
   
   // Reset Safe Start fallback tracking
@@ -1716,7 +1749,8 @@ function sendTextToAI() {
   if (!isInCall && !isTrainingActive) {
     callGoal = text;
     setGoalActive(true);
-    showGoalBadge(text);
+    // No persistent banner — the goal will appear as a compact feed event via
+    // the server's goal_set echo (addGoalFeedEvent dedupes it).
     addMessage('honor', text);
     
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -2254,7 +2288,7 @@ async function applyNewGoal(newGoal) {
   log('[Training] Applying new goal: ' + newGoal);
   
   callGoal = newGoal;
-  showGoalBadge(newGoal);
+  addGoalFeedEvent('🎯 Цель обновлена: ' + newGoal);
   
   // Update goal on server
   if (trainingSessionId) {

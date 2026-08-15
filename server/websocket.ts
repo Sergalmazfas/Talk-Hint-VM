@@ -789,8 +789,63 @@ export function setupWebSocket(server: Server) {
     }
   });
 
-  let currentGoal = "";
-  
+  // Per-user active call goal. Keyed by authenticated user id so one user's
+  // goal can never ground another user's live-call hints (the old single
+  // closure-scoped variable leaked goals across users/calls). Cleared when the
+  // user's Twilio stream ends — a new call always starts without the old goal.
+  const goalsByUser = new Map<string, string>();
+  function getUserGoal(userId?: string): string {
+    return (userId && goalsByUser.get(userId)) || "";
+  }
+  function setUserGoal(userId: string | undefined, goal: string) {
+    if (!userId) return;
+    if (goal) goalsByUser.set(userId, goal);
+    else goalsByUser.delete(userId);
+  }
+
+  /// Classifies a message the user typed into the live-call assistant input:
+  /// is it a NEW/CHANGED goal for the call (an outcome the user wants), or a
+  /// regular question/request for a phrase? Returns the concise new goal text
+  /// when it is a goal update, otherwise null. Fail-safe: any error or timeout
+  /// means "not a goal update" so the normal ask-AI path always still works.
+  async function detectGoalUpdate(question: string, existingGoal: string): Promise<string | null> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey || !question.trim()) return null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content: `You classify a message the user typed to their live phone-call assistant.
+Current call goal: ${existingGoal ? `"${existingGoal}"` : "(none)"}
+Decide: is the user declaring a NEW or CHANGED goal for this call (an outcome they now want from the call, e.g. "Теперь хочу попросить вернуть эти $350"), or is it a regular question / request for a phrase / clarification?
+Reply ONLY with JSON: {"goal_update": true|false, "goal": "<the new goal, concise, in the user's own language, empty string if not a goal update>"}`,
+            },
+            { role: "user", content: question },
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 120,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      const data = await response.json() as any;
+      const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+      if (parsed.goal_update === true && typeof parsed.goal === "string" && parsed.goal.trim()) {
+        return parsed.goal.trim();
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   async function handleAIQuestion(ws: WebSocket, question: string, goal: string) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -856,7 +911,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     uiClients.add(ws);
     if (userId) uiClientUsers.set(ws, userId);
 
-    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), goal: currentGoal, model: currentModel }));
+    ws.send(JSON.stringify({ type: "connected", timestamp: Date.now(), goal: getUserGoal(userId), model: currentModel }));
 
     ws.on("message", (data: Buffer) => {
       try {
@@ -866,9 +921,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           log(`Mode changed to: ${currentMode}`, "server");
           ws.send(JSON.stringify({ type: "mode_changed", mode: currentMode }));
         } else if (message.type === "update_goal" || message.type === "set_goal") {
-          currentGoal = message.goal || "";
-          log(`Goal set: ${currentGoal.substring(0, 50)}...`, "server");
-          ws.send(JSON.stringify({ type: "goal_set", goal: currentGoal }));
+          const newGoal = message.goal || "";
+          setUserGoal(userId, newGoal);
+          log(`Goal set (user ${userId}): ${newGoal.substring(0, 50)}...`, "server");
+          // Broadcast to ALL of this user's sockets (web + iOS may mirror the
+          // same call) so every feed renders the same compact goal event.
+          if (userId) sendToUser(userId, { type: "goal_set", goal: newGoal });
+          else ws.send(JSON.stringify({ type: "goal_set", goal: newGoal }));
         } else if (message.type === "set_language") {
           const lang = message.language;
           if (lang === "ru" || lang === "es") {
@@ -888,9 +947,29 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           }
         } else if (message.type === "ask_ai") {
           const question = message.question || "";
-          const goal = message.goal || currentGoal;
+          const goal = message.goal || getUserGoal(userId);
           log(`AI question: ${question.substring(0, 50)}...`, "server");
-          handleAIQuestion(ws, question, goal);
+          // The assistant input doubles as a mid-call goal editor: if the user's
+          // message declares a new/changed goal, adopt it as the active goal
+          // (Brain uses it from now on) and tell the client so it can render a
+          // compact "Goal updated" event in the conversation feed. The regular
+          // AI answer still follows, grounded in the updated goal.
+          (async () => {
+            const goalSnapshot = getUserGoal(userId);
+            const updatedGoal = await detectGoalUpdate(question, goal);
+            // Compare-and-set: if the user explicitly set/changed the goal while
+            // classification was in flight, the newer explicit value wins — a
+            // late classifier result must never overwrite it.
+            if (updatedGoal && getUserGoal(userId) === goalSnapshot) {
+              setUserGoal(userId, updatedGoal);
+              log(`Goal updated via assistant input (user ${userId}): ${updatedGoal.substring(0, 50)}...`, "server");
+              if (userId) sendToUser(userId, { type: "goal_updated", goal: updatedGoal });
+              else ws.send(JSON.stringify({ type: "goal_updated", goal: updatedGoal }));
+              await handleAIQuestion(ws, question, updatedGoal);
+            } else {
+              await handleAIQuestion(ws, question, goal);
+            }
+          })().catch((err) => log(`ask_ai handling error: ${err?.message}`, "server"));
         }
       } catch (err) {}
     });
@@ -1444,7 +1523,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (ownerOnly && wantSuggestion && !carried) {
         log(`[Dialogue] SKIP library for owner-only question utteranceId=${utteranceId}: "${text.substring(0, 50)}"`, "websocket");
       }
-      const libraryHit = (wantSuggestion && !carried && !ownerOnly) ? matchDialogueLibrary(text, currentGoal, detectedGoalType) : null;
+      const ownerGoal = getUserGoal(streamUserId);
+      const libraryHit = (wantSuggestion && !carried && !ownerOnly) ? matchDialogueLibrary(text, ownerGoal, detectedGoalType) : null;
       if (libraryHit) {
         log(`[Dialogue] HIT goal="${libraryHit.library.goalText.substring(0, 30)}" (${libraryHit.library.goalType}) type=${libraryHit.entry.type} trigger="${libraryHit.entry.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
       }
@@ -1455,7 +1535,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(hintText, currentGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock)
+        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock)
         : null;
 
       // ----- Caption: broadcast as soon as the translation resolves -----
@@ -1721,7 +1801,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           // my payment now"): keep the NEWLY detected goal in the prompt.
           // Pure cancellation: clear the goal entirely so no prompt path
           // keeps steering toward it.
-          currentGoal = goalUpdate.goalChanged ? state.currentGoal : "";
+          setUserGoal(streamUserId, goalUpdate.goalChanged ? state.currentGoal : "");
           log(`[GoalEngine] Owner cancelled the original goal${goalUpdate.goalChanged ? ` — replaced by "${state.currentGoal}"` : " — no longer steering toward it"}`, "goal");
           uiBroadcast({
             type: "goal_cancelled",
@@ -2244,6 +2324,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             if (callSid) {
               removeEngine(callSid);
             }
+            // The goal belongs to THIS call's history — the next call must start
+            // without it (clients also clear their local copy on call end).
+            setUserGoal(streamUserId, "");
             break;
         }
       } catch (err: any) {
@@ -2260,6 +2343,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const reasonStr = reason.toString() || "no reason";
       const duration = ((Date.now() - new Date(startTime).getTime()) / 1000).toFixed(1);
       log(`[Twilio] WS closed code=${code} reason="${reasonStr}" duration=${duration}s callSid=${callSid}`, "twilio");
+
+      // Backstop for the "stop" handler: some teardown paths close the socket
+      // without a clean stop event — the goal must still die with the call.
+      setUserGoal(streamUserId, "");
 
       // Contact memory: summarize this call and upsert it for (owner, other party).
       // Detached on purpose — summarization makes a model call, so it must NEVER

@@ -15,6 +15,12 @@ enum CallHintEvent: Equatable {
     case fastPhrase(text: String, translation: String?)
     /// A reply to a question the user typed via "Ask AI".
     case aiResponse(text: String, isError: Bool)
+    /// The server confirmed the call goal (set before/at call start). Rendered
+    /// as a compact event in the conversation feed, not a persistent banner.
+    case goalSet(text: String)
+    /// The active goal changed mid-call (e.g. the user redefined it via the
+    /// assistant input). Rendered as a compact "Goal updated" feed event.
+    case goalUpdated(text: String)
 }
 
 protocol CallHintStreamDelegate: AnyObject {
@@ -414,6 +420,12 @@ final class CallHintStream: NSObject {
         case "ai_response":
             guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
             return .aiResponse(text: body, isError: (obj["error"] as? Bool) ?? false)
+        case "goal_set":
+            guard let body = obj["goal"] as? String, !body.isEmpty else { return nil }
+            return .goalSet(text: body)
+        case "goal_updated":
+            guard let body = obj["goal"] as? String, !body.isEmpty else { return nil }
+            return .goalUpdated(text: body)
         default:
             return nil
         }
