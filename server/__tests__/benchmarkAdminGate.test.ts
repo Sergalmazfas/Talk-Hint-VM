@@ -4,11 +4,13 @@ import request from "supertest";
 
 // ---------------------------------------------------------------------------
 // Integration tests for the benchmark admin gate (/api/admin/benchmark).
-// Admin identity is derived from the ADMIN_PROVISION_USER secret (fail-closed):
+// Admin identity comes SOLELY from BENCHMARK_ADMIN_EMAILS (comma-separated
+// email list, fail-closed). ADMIN_PROVISION_USER is intentionally ignored —
+// provisioned service accounts must never gain admin automatically:
 //   - no auth            -> 401 (real authMiddleware path)
 //   - authed non-admin   -> 403
-//   - authed admin email -> 200 with data
-//   - missing/broken secret -> nobody is admin (403 even for prior admins)
+//   - authed allowlisted -> 200 with data
+//   - missing env var    -> nobody is admin (403 even for prior admins)
 // We run the REAL authMiddleware (Bearer-token path) against a faked storage
 // layer, and mount the real benchmark routes with the heavy orchestrator /
 // seed / db modules stubbed out.
@@ -66,6 +68,7 @@ const { registerBenchmarkRoutes } = await import("../benchmark/routes");
 const { isBenchmarkAdmin, requireBenchmarkAdmin } = await import("../benchmark/adminGate");
 
 const ADMIN_EMAIL = "owner@example.com";
+const ORIGINAL_ALLOWLIST = process.env.BENCHMARK_ADMIN_EMAILS;
 const ORIGINAL_SECRET = process.env.ADMIN_PROVISION_USER;
 
 function makeApp() {
@@ -82,10 +85,13 @@ beforeEach(() => {
   h.users.set("user-2", { id: "user-2", email: "regular@example.com", language: "ru", plan: "free" });
   h.sessions.set("admin-token", "admin-1");
   h.sessions.set("user-token", "user-2");
-  process.env.ADMIN_PROVISION_USER = JSON.stringify({ email: ADMIN_EMAIL, password: "x" });
+  process.env.BENCHMARK_ADMIN_EMAILS = ADMIN_EMAIL;
+  delete process.env.ADMIN_PROVISION_USER;
 });
 
 afterEach(() => {
+  if (ORIGINAL_ALLOWLIST === undefined) delete process.env.BENCHMARK_ADMIN_EMAILS;
+  else process.env.BENCHMARK_ADMIN_EMAILS = ORIGINAL_ALLOWLIST;
   if (ORIGINAL_SECRET === undefined) delete process.env.ADMIN_PROVISION_USER;
   else process.env.ADMIN_PROVISION_USER = ORIGINAL_SECRET;
 });
@@ -111,7 +117,7 @@ describe("requireBenchmarkAdmin via /api/admin/benchmark", () => {
     expect(res.body.error).toMatch(/admin/i);
   });
 
-  it("200 with data for the admin from ADMIN_PROVISION_USER", async () => {
+  it("200 with data for an email in BENCHMARK_ADMIN_EMAILS", async () => {
     const res = await request(makeApp())
       .get("/api/admin/benchmark/candidates")
       .set("Authorization", "Bearer admin-token");
@@ -130,24 +136,17 @@ describe("requireBenchmarkAdmin via /api/admin/benchmark", () => {
     expect(res.body[0].report).toBe(true);
   });
 
-  it("fail-closed: missing secret means nobody is admin (403)", async () => {
-    delete process.env.ADMIN_PROVISION_USER;
+  it("fail-closed: missing allowlist means nobody is admin (403)", async () => {
+    delete process.env.BENCHMARK_ADMIN_EMAILS;
     const res = await request(makeApp())
       .get("/api/admin/benchmark/candidates")
       .set("Authorization", "Bearer admin-token");
     expect(res.status).toBe(403);
   });
 
-  it("fail-closed: malformed secret JSON means nobody is admin (403)", async () => {
-    process.env.ADMIN_PROVISION_USER = "{not json";
-    const res = await request(makeApp())
-      .get("/api/admin/benchmark/candidates")
-      .set("Authorization", "Bearer admin-token");
-    expect(res.status).toBe(403);
-  });
-
-  it("secret entries without an email string grant nobody admin", async () => {
-    process.env.ADMIN_PROVISION_USER = JSON.stringify([{ password: "x" }, { email: 42 }]);
+  it("ADMIN_PROVISION_USER alone grants NOBODY admin (provisioned service account is not admin)", async () => {
+    delete process.env.BENCHMARK_ADMIN_EMAILS;
+    process.env.ADMIN_PROVISION_USER = JSON.stringify({ email: ADMIN_EMAIL, password: "x" });
     const res = await request(makeApp())
       .get("/api/admin/benchmark/candidates")
       .set("Authorization", "Bearer admin-token");
@@ -164,19 +163,22 @@ describe("requireBenchmarkAdmin via /api/admin/benchmark", () => {
 
 describe("isBenchmarkAdmin unit behavior", () => {
   it("matches case-insensitively and trims whitespace", () => {
-    process.env.ADMIN_PROVISION_USER = JSON.stringify({ email: " Owner@Example.COM " });
+    process.env.BENCHMARK_ADMIN_EMAILS = " Owner@Example.COM ";
     expect(isBenchmarkAdmin("owner@example.com")).toBe(true);
     expect(isBenchmarkAdmin("  OWNER@EXAMPLE.COM  ")).toBe(true);
     expect(isBenchmarkAdmin("other@example.com")).toBe(false);
   });
 
-  it("supports an array of provisioned users", () => {
-    process.env.ADMIN_PROVISION_USER = JSON.stringify([
-      { email: "a@x.com" },
-      { email: "b@x.com" },
-    ]);
+  it("supports a comma-separated list of admins", () => {
+    process.env.BENCHMARK_ADMIN_EMAILS = "a@x.com, b@x.com";
     expect(isBenchmarkAdmin("b@x.com")).toBe(true);
     expect(isBenchmarkAdmin("c@x.com")).toBe(false);
+  });
+
+  it("empty entries in the list grant nobody admin", () => {
+    process.env.BENCHMARK_ADMIN_EMAILS = " , ,";
+    expect(isBenchmarkAdmin("")).toBe(false);
+    expect(isBenchmarkAdmin("a@x.com")).toBe(false);
   });
 
   it("rejects empty/undefined emails", () => {
