@@ -83,7 +83,10 @@ export function registerRecordedCallRoutes(app: Express, base: string) {
 
   app.post(`${base}/diagnostic-users/:id`, requireBenchmarkAdmin, express.json(), async (req, res) => {
     try {
-      const enabled = req.body?.enabled === true;
+      if (typeof req.body?.enabled !== "boolean") {
+        return res.status(400).json({ error: "body must be { enabled: boolean }" });
+      }
+      const enabled = req.body.enabled;
       const [row] = await db.update(users)
         .set({ diagnosticRecordingEnabled: enabled })
         .where(eq(users.id, req.params.id))

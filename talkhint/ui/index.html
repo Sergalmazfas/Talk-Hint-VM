@@ -846,6 +846,10 @@
         bottom: 0;
         z-index: 100;
         transform: translateX(0);
+        /* iPhone notch / browser sheet: keep the first section readable */
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        box-shadow: 4px 0 16px rgba(0,0,0,0.12);
       }
       .sidebar.collapsed {
         transform: translateX(-100%);
@@ -964,7 +968,6 @@
           <div class="folders-empty" id="foldersEmpty">No prompts yet</div>
         </div>
       </div>
-    </div>
     <div class="sidebar-section">
       <div class="section-label">📞 Call Mode</div>
       <div class="call-mode-toggle" id="callModeToggle">
@@ -1080,6 +1083,7 @@
         </div>
       </div>
     </div>
+    </div>
     <div class="sidebar-footer">
       <button class="new-folder-btn" id="enableNotificationsBtn" data-testid="button-enable-notifications" style="background: #6366f1; color: white;">
         <span>🔔</span>
@@ -1091,6 +1095,11 @@
         <span>New prompt</span>
       </button>
       <!-- On-call shortcut: opens the DB save-health status page (infra only, no user data) -->
+      <!-- Admin panel shortcut: only revealed for benchmark admins (see script.js) -->
+      <a class="health-status-link" href="/admin/diagnostics" id="adminPanelLink" data-testid="link-admin-panel" style="display: none;">
+        <span>🛠️</span>
+        <span>Админка</span>
+      </a>
       <a class="health-status-link" href="/health" target="_blank" rel="noopener" data-testid="link-system-status">
         <span>🩺</span>
         <span>System status</span>

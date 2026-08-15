@@ -2769,6 +2769,19 @@ initTwilioDevice();
 loadUserNumbers();
 loadUserPrompts();
 loadSubscription();
+
+// Reveal the sidebar admin-panel shortcut only for benchmark admins.
+(async function initAdminLink() {
+  try {
+    const res = await fetch('/api/auth/me', { credentials: 'include' });
+    if (!res.ok) return;
+    const me = await res.json();
+    if (me && ((me.user && me.user.isAdmin) || me.isAdmin)) {
+      const link = document.getElementById('adminPanelLink');
+      if (link) link.style.display = '';
+    }
+  } catch (e) { /* not logged in / offline — keep hidden */ }
+})();
 loadStripeProducts();
 checkPendingCalls();  // Check for pending calls from push notifications
 loadForwardingPhone();  // Load forwarding phone setting

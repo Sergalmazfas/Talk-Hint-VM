@@ -36,11 +36,17 @@ export const RECORDING_POLICY_VERSION =
 const CAPABILITY_DEADLINE_MS = 800;
 const CAPABILITY_CACHE_MS = 60_000;
 const capabilityCache = new Map<string, { enabled: boolean; at: number }>();
+// Per-user generation counter: an admin toggle bumps it, and any in-flight DB
+// read started before the bump is forbidden from repopulating the cache —
+// otherwise a slow pre-toggle read could restore the OLD answer for up to
+// CAPABILITY_CACHE_MS after the admin change.
+const capabilityGeneration = new Map<string, number>();
 
 /// Drop the cached capability for one user so an admin toggle takes effect on
 /// the very next call instead of after the cache TTL.
 export function invalidateDiagnosticRecordingCache(userId: string) {
   capabilityCache.delete(userId);
+  capabilityGeneration.set(userId, (capabilityGeneration.get(userId) ?? 0) + 1);
 }
 
 export async function isDiagnosticRecordingUser(userId: string | null | undefined): Promise<boolean> {
@@ -48,6 +54,7 @@ export async function isDiagnosticRecordingUser(userId: string | null | undefine
   const cached = capabilityCache.get(userId);
   if (cached && Date.now() - cached.at < CAPABILITY_CACHE_MS) return cached.enabled;
   try {
+    const gen = capabilityGeneration.get(userId) ?? 0;
     const query = db.select({ enabled: users.diagnosticRecordingEnabled })
       .from(users).where(eq(users.id, userId)).limit(1)
       .then(([u]) => !!u?.enabled);
@@ -58,7 +65,13 @@ export async function isDiagnosticRecordingUser(userId: string | null | undefine
     // Only cache real answers; a deadline miss stays uncached so the next
     // call retries once the DB recovers. (A racing slow query that later
     // resolves true simply populates the cache for subsequent calls.)
-    void query.then((real) => capabilityCache.set(userId, { enabled: real, at: Date.now() })).catch(() => {});
+    void query.then((real) => {
+      // Stale-read guard: skip caching if an admin toggled the flag while
+      // this query was in flight (generation bumped by invalidate).
+      if ((capabilityGeneration.get(userId) ?? 0) === gen) {
+        capabilityCache.set(userId, { enabled: real, at: Date.now() });
+      }
+    }).catch(() => {});
     return enabled;
   } catch (e: any) {
     console.error("[DiagRecording] capability check failed (not recording):", e?.message ?? e);
