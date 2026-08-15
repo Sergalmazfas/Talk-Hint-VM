@@ -129,15 +129,28 @@ final class CallHintStream: NSObject {
 
     /// Sends one PREPARE turn (typed or transcribed). The reply arrives as a
     /// `prepareReply` event (or `prepareError` on an honest failure).
-    func sendPrepareMessage(_ text: String) {
-        send(CallHintStream.prepareMessagePayload(text: text))
+    ///
+    /// `clientMessageId` makes retries idempotent: resending the SAME text with
+    /// the SAME id after a reconnect returns the original server reply instead
+    /// of creating a duplicate user turn (server-side dedup in prepare.ts).
+    /// Returns `false` when there is no open socket — the caller must keep the
+    /// text pending and resend after reconnect instead of losing it.
+    @discardableResult
+    func sendPrepareMessage(_ text: String, clientMessageId: String? = nil) -> Bool {
+        send(CallHintStream.prepareMessagePayload(text: text, clientMessageId: clientMessageId))
     }
 
     /// Confirms the proposed call goal. The server activates it via the existing
     /// goal mechanism (a `goal_set` event echoes back) and then delivers the
     /// opening phrase as a `prepareOpening` event.
-    func confirmPrepareGoal(_ goal: String) {
-        send(CallHintStream.prepareConfirmGoalPayload(goal: goal))
+    ///
+    /// `clientMessageId` makes confirmation retries idempotent: a reconnect
+    /// resend with the same id replays the original opening phrase instead of
+    /// re-firing goal side effects or generating a second opening.
+    /// Returns `false` when there is no open socket.
+    @discardableResult
+    func confirmPrepareGoal(_ goal: String, clientMessageId: String? = nil) -> Bool {
+        send(CallHintStream.prepareConfirmGoalPayload(goal: goal, clientMessageId: clientMessageId))
     }
 
     /// Resets the server-side PREPARE conversation so the next preparation
@@ -177,14 +190,20 @@ final class CallHintStream: NSObject {
         ["type": "set_mode", "mode": mode]
     }
 
-    /// Builds the `prepare_message` control message (one PREPARE turn).
-    static func prepareMessagePayload(text: String) -> [String: Any] {
-        ["type": "prepare_message", "text": text]
+    /// Builds the `prepare_message` control message (one PREPARE turn). The
+    /// optional `clientMessageId` is the idempotency key for reconnect resends.
+    static func prepareMessagePayload(text: String, clientMessageId: String? = nil) -> [String: Any] {
+        var payload: [String: Any] = ["type": "prepare_message", "text": text]
+        if let id = clientMessageId, !id.isEmpty { payload["clientMessageId"] = id }
+        return payload
     }
 
-    /// Builds the `prepare_confirm_goal` control message.
-    static func prepareConfirmGoalPayload(goal: String) -> [String: Any] {
-        ["type": "prepare_confirm_goal", "goal": goal]
+    /// Builds the `prepare_confirm_goal` control message. The optional
+    /// `clientMessageId` is the idempotency key for reconnect resends.
+    static func prepareConfirmGoalPayload(goal: String, clientMessageId: String? = nil) -> [String: Any] {
+        var payload: [String: Any] = ["type": "prepare_confirm_goal", "goal": goal]
+        if let id = clientMessageId, !id.isEmpty { payload["clientMessageId"] = id }
+        return payload
     }
 
     /// Builds the `prepare_reset` control message.
@@ -205,11 +224,16 @@ final class CallHintStream: NSObject {
         }
     }
 
-    private func send(_ payload: [String: Any]) {
+    /// Serializes and sends a control payload. Returns `false` (instead of
+    /// silently dropping the message) when there is no open socket, so callers
+    /// with user-typed content can preserve it for a retry.
+    @discardableResult
+    private func send(_ payload: [String: Any]) -> Bool {
         guard let task = task,
               let data = try? JSONSerialization.data(withJSONObject: payload),
-              let text = String(data: data, encoding: .utf8) else { return }
+              let text = String(data: data, encoding: .utf8) else { return false }
         task.send(.string(text)) { _ in }
+        return true
     }
 
     private func openSocket() {

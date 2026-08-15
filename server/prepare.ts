@@ -80,6 +80,93 @@ const prepareEpochs = new Map<string, number>();
 // Per-user serialization: PREPARE turns must commit in order (double-send,
 // second tab). Each op chains onto the previous one.
 const prepareQueues = new Map<string, Promise<unknown>>();
+// Idempotent retry (Task #197): a client may resend the same PREPARE message
+// after a reconnect ("server got it, client missed the ack"). Each message can
+// carry a clientMessageId; a duplicate id returns the ORIGINAL turn's result
+// instead of creating a second user turn / second Sol call. Failures are NOT
+// cached — a genuine failure left history untouched, so a retry must re-run.
+interface DedupEntry<T> { promise: Promise<T>; settled: boolean }
+const prepareDedup = new Map<string, Map<string, DedupEntry<PrepareReply>>>();
+// Goal-confirmation dedup: a duplicate prepare_confirm_goal resend replays the
+// ORIGINAL opening phrase instead of running a second opening generation.
+// Kept separate from prepareDedup because the success path of the opening
+// itself clears the conversation state — the replay cache must survive that.
+const openingDedup = new Map<string, Map<string, DedupEntry<OpeningPhrase>>>();
+const MAX_DEDUP_IDS = 20;
+// Replay entries live long enough to cover a reconnect window, then expire —
+// otherwise every user who ever finished PREPARE would retain a per-user map
+// for the lifetime of the process.
+export const DEDUP_TTL_MS = 10 * 60_000;
+
+function normalizeDedupKey(id: unknown): string {
+  return typeof id === "string" ? id.trim().slice(0, 64) : "";
+}
+
+/// Runs `fn` once per (user, key): a duplicate key returns the original
+/// promise. Failures are evicted (a retry re-runs); successes are kept for
+/// replay. Pruning only ever removes SETTLED entries — an in-flight promise is
+/// never evicted, no matter how many other ids arrive meanwhile.
+function dedupRun<T>(
+  store: Map<string, Map<string, DedupEntry<T>>>,
+  userId: string,
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!key) return fn();
+  let userMap = store.get(userId);
+  if (!userMap) { userMap = new Map(); store.set(userId, userMap); }
+  const existing = userMap.get(key);
+  if (existing) return existing.promise;
+  const entry: DedupEntry<T> = { promise: fn(), settled: false };
+  userMap.set(key, entry);
+  const dropEntry = () => {
+    const m = store.get(userId);
+    if (!m) return;
+    if (m.get(key) === entry) m.delete(key);
+    if (m.size === 0) store.delete(userId); // never retain empty per-user maps
+  };
+  entry.promise.then(
+    () => {
+      entry.settled = true;
+      // Prune oldest SETTLED entries beyond the cap (Map preserves order).
+      let excess = userMap!.size - MAX_DEDUP_IDS;
+      if (excess > 0) {
+        userMap!.forEach((e, k) => {
+          if (excess > 0 && e.settled) { userMap!.delete(k); excess--; }
+        });
+      }
+      // Bounded lifetime: replay stays available for the reconnect window,
+      // then the entry (and an emptied user map) is released.
+      const timer = setTimeout(dropEntry, DEDUP_TTL_MS);
+      (timer as any).unref?.();
+    },
+    () => {
+      // Failure: never committed — the same id must genuinely re-run.
+      dropEntry();
+    },
+  );
+  return entry.promise;
+}
+
+/// Test-only visibility: number of users currently holding dedup state.
+export function dedupUserCounts(): { prepare: number; opening: number } {
+  return { prepare: prepareDedup.size, opening: openingDedup.size };
+}
+
+/// True when this confirmation id was already accepted (in flight or done) —
+/// the caller must not re-broadcast goal_set side effects for a duplicate.
+export function hasOpeningEntry(userId: string, clientMessageId: unknown): boolean {
+  const key = normalizeDedupKey(clientMessageId);
+  return !!key && !!openingDedup.get(userId)?.has(key);
+}
+
+/// Explicit reset (prepare_reset): forget the confirmation replay cache too.
+/// NOT called from the opening success path — that is exactly the moment the
+/// replay cache must survive so a late duplicate confirm gets the same result.
+export function clearOpeningDedup(userId: string | undefined) {
+  if (!userId) return;
+  openingDedup.delete(userId);
+}
 
 export function getPrepareHistory(userId: string): PrepareTurn[] {
   let s = prepareStates.get(userId);
@@ -90,6 +177,7 @@ export function getPrepareHistory(userId: string): PrepareTurn[] {
 export function clearPrepareState(userId: string | undefined) {
   if (!userId) return;
   prepareStates.delete(userId);
+  prepareDedup.delete(userId);
   prepareEpochs.set(userId, (prepareEpochs.get(userId) ?? 0) + 1);
 }
 
@@ -159,8 +247,10 @@ function parseJsonLoose(text: string): any {
 /// One PREPARE turn: user's message in, Sol's reply (+ optional proposed goal) out.
 /// Serialized per user; commits history atomically only after Sol succeeds and
 /// only if the conversation wasn't reset (epoch check) while awaiting.
-export function prepareMessage(userId: string, text: string): Promise<PrepareReply> {
-  return runSerialized(userId, async () => {
+/// `clientMessageId` (optional) makes retries idempotent: a resend with the same
+/// id returns the original result instead of committing a duplicate user turn.
+export function prepareMessage(userId: string, text: string, clientMessageId?: string): Promise<PrepareReply> {
+  return dedupRun(prepareDedup, userId, normalizeDedupKey(clientMessageId), () => runSerialized(userId, async () => {
     const epoch = prepareEpochs.get(userId) ?? 0;
     const history = getPrepareHistory(userId);
     const request = [...history, { role: "user", content: text } as PrepareTurn];
@@ -191,12 +281,15 @@ export function prepareMessage(userId: string, text: string): Promise<PrepareRep
     live.push({ role: "user", content: text }, { role: "assistant", content: storedRaw });
     if (live.length > MAX_TURNS) live.splice(0, live.length - MAX_TURNS);
     return { reply, proposedGoal };
-  });
+  }));
 }
 
 /// After the user confirms the goal: same Sol, same conversation -> opening phrase.
-export function prepareOpeningPhrase(userId: string, confirmedGoal: string): Promise<OpeningPhrase> {
-  return runSerialized(userId, async () => {
+/// `clientMessageId` makes confirmation retries idempotent: a duplicate confirm
+/// replays the ORIGINAL opening phrase instead of generating a second one
+/// (the replay cache survives the state clearing done on success).
+export function prepareOpeningPhrase(userId: string, confirmedGoal: string, clientMessageId?: string): Promise<OpeningPhrase> {
+  return dedupRun(openingDedup, userId, normalizeDedupKey(clientMessageId), () => runSerialized(userId, async () => {
     const history = getPrepareHistory(userId);
     const request = [...history, { role: "user", content: `I confirm this call goal: "${confirmedGoal}"` } as PrepareTurn];
     const raw = await callSol(PREPARE_SYSTEM_PROMPT + OPENING_FORMAT_RULES, request);
@@ -212,5 +305,5 @@ export function prepareOpeningPhrase(userId: string, confirmedGoal: string): Pro
       phraseEn: parsed.opening_phrase_en.trim(),
       translation: typeof parsed.translation === "string" ? parsed.translation.trim() : "",
     };
-  });
+  }));
 }

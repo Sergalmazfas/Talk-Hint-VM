@@ -104,11 +104,40 @@ final class CallHintStreamPrepareTests: XCTestCase {
         XCTAssertEqual(obj.count, 2)
     }
 
+    func testPrepareMessagePayloadWithClientMessageId() {
+        // Idempotent retry (Task #197): a reconnect resend carries the SAME
+        // clientMessageId so the server dedups instead of committing a
+        // duplicate user turn. Key name must match websocket.ts exactly.
+        let obj = roundTrip(CallHintStream.prepareMessagePayload(
+            text: "Мне нужно позвонить в клинику", clientMessageId: "ABC-123"))
+        XCTAssertEqual(obj["type"] as? String, "prepare_message")
+        XCTAssertEqual(obj["text"] as? String, "Мне нужно позвонить в клинику")
+        XCTAssertEqual(obj["clientMessageId"] as? String, "ABC-123")
+        XCTAssertEqual(obj.count, 3)
+    }
+
+    func testPrepareMessagePayloadEmptyIdOmitted() {
+        let obj = roundTrip(CallHintStream.prepareMessagePayload(text: "привет", clientMessageId: ""))
+        XCTAssertNil(obj["clientMessageId"])
+        XCTAssertEqual(obj.count, 2)
+    }
+
     func testPrepareConfirmGoalPayload() {
         let obj = roundTrip(CallHintStream.prepareConfirmGoalPayload(goal: "Записаться на приём."))
         XCTAssertEqual(obj["type"] as? String, "prepare_confirm_goal")
         XCTAssertEqual(obj["goal"] as? String, "Записаться на приём.")
         XCTAssertEqual(obj.count, 2)
+    }
+
+    func testPrepareConfirmGoalPayloadWithClientMessageId() {
+        // Idempotent confirmation (Task #197): a reconnect resend of the same
+        // confirmation replays the original opening phrase server-side.
+        let obj = roundTrip(CallHintStream.prepareConfirmGoalPayload(
+            goal: "Записаться на приём.", clientMessageId: "C-1"))
+        XCTAssertEqual(obj["type"] as? String, "prepare_confirm_goal")
+        XCTAssertEqual(obj["goal"] as? String, "Записаться на приём.")
+        XCTAssertEqual(obj["clientMessageId"] as? String, "C-1")
+        XCTAssertEqual(obj.count, 3)
     }
 
     func testPrepareResetPayload() {

@@ -37,6 +37,28 @@ final class PrepareViewController: UIViewController {
     /// the user confirms or asks for changes, like the web card).
     private weak var pendingGoalButtons: UIStackView?
 
+    // MARK: - Pending retry state (parity with the web outbox, Task #197)
+
+    /// The last PREPARE message sent to the server, kept until the server
+    /// acknowledges it (prepare_reply / prepare_opening / prepare_error). If the
+    /// socket drops before the ack, the message is resent ONCE per reconnect
+    /// with the SAME `id` — the server dedups by clientMessageId, so a
+    /// "server got it, client missed the ack" resend can never create a
+    /// duplicate user turn.
+    private var pendingMessage: (text: String, id: String)?
+
+    /// The last recorded utterance, kept until STT succeeds so the user can
+    /// retry a failed upload without re-recording. The `utteranceId` doubles as
+    /// the clientMessageId of the eventual prepare_message, tying one recording
+    /// to exactly one user turn even across retries.
+    private var pendingAudio: (data: Data, mime: String, utteranceId: String)?
+
+    /// The goal confirmation awaiting the server's opening phrase. If the
+    /// socket drops before `prepare_opening` arrives, the confirmation is
+    /// resent with the SAME id — the server replays the original opening
+    /// instead of re-firing goal side effects or generating a second one.
+    private var pendingConfirm: (goal: String, id: String)?
+
     // MARK: - Recording
 
     private var recorder: AVAudioRecorder?
@@ -272,8 +294,7 @@ final class PrepareViewController: UIViewController {
         confirmButton.addAction(UIAction { [weak self, weak buttons] _ in
             guard let self = self else { return }
             buttons?.removeFromSuperview()
-            self.showThinking()
-            self.stream.confirmPrepareGoal(goal)
+            self.confirmGoal(goal)
         }, for: .touchUpInside)
 
         editButton.addAction(UIAction { [weak self, weak buttons] _ in
@@ -347,13 +368,53 @@ final class PrepareViewController: UIViewController {
         textField.text = ""
         textField.placeholder = "Опишите ситуацию…"
         addUserMessage(text)
+        sendPrepareText(text, clientMessageId: UUID().uuidString)
+    }
+
+    /// Sends one PREPARE turn with an idempotency key, keeping it pending until
+    /// the server acknowledges it. If the socket is down the text goes straight
+    /// back into the input field (web parity: nothing is lost, the user resends
+    /// once the connection is back).
+    private func sendPrepareText(_ text: String, clientMessageId: String) {
+        // One in-flight turn at a time: the outbox holds a single message, and
+        // the server serializes per-user anyway. A second send while the first
+        // is unacknowledged would make ack-to-message correlation ambiguous.
+        if pendingMessage != nil || pendingConfirm != nil {
+            textField.text = text
+            addAIMessage("⚠️ Дождитесь ответа на предыдущее сообщение — ваш текст сохранён в поле ввода.")
+            return
+        }
+        pendingMessage = (text: text, id: clientMessageId)
         showThinking()
-        stream.sendPrepareMessage(text)
+        if !stream.sendPrepareMessage(text, clientMessageId: clientMessageId) {
+            hideThinking()
+            pendingMessage = nil
+            textField.text = text
+            addAIMessage("⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — нажмите «Отправить» ещё раз, когда связь восстановится.")
+        }
+    }
+
+    /// Sends the goal confirmation with an idempotency key and keeps it pending
+    /// until the opening phrase arrives. If the socket is down (or drops before
+    /// the ack) the confirmation is resent with the same id, or the proposal
+    /// card is re-shown so the user keeps an explicit retry control.
+    private func confirmGoal(_ goal: String) {
+        pendingConfirm = (goal: goal, id: UUID().uuidString)
+        showThinking()
+        if !stream.confirmPrepareGoal(goal, clientMessageId: pendingConfirm!.id) {
+            hideThinking()
+            pendingConfirm = nil
+            addAIMessage("⚠️ Нет соединения с сервером. Подтвердите цель ещё раз, когда связь восстановится.")
+            addGoalProposal(goal)
+        }
     }
 
     @objc private func resetTapped() {
         stream.resetPrepare()
         hideThinking()
+        pendingMessage = nil
+        pendingAudio = nil
+        pendingConfirm = nil
         pendingGoalButtons?.removeFromSuperview()
         feedStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         addAIMessage("Начнём заново. Расскажите, что за звонок вам предстоит.")
@@ -421,20 +482,98 @@ final class PrepareViewController: UIViewController {
                 self.addAIMessage("⚠️ Запись слишком короткая — попробуйте ещё раз.")
                 return
             }
-            do {
-                let text = try await APIClient.shared.prepareTranscribe(audio: data, mimeType: "audio/m4a")
-                guard !text.isEmpty else {
-                    self.addAIMessage("⚠️ Речь не распознана — попробуйте ещё раз, чуть ближе к микрофону.")
-                    return
-                }
-                // Straight into the preparation chat, same as a typed message.
-                self.addUserMessage(text)
-                self.showThinking()
-                self.stream.sendPrepareMessage(text)
-            } catch {
-                self.addAIMessage("⚠️ " + error.localizedDescription)
-            }
+            // Retain the recording BEFORE the STT attempt so a network failure
+            // never costs the user their 30-60 seconds of speech. The utterance
+            // id is minted once per recording and reused across STT retries.
+            self.pendingAudio = (data: data, mime: "audio/m4a", utteranceId: UUID().uuidString)
+            await self.submitPendingAudio()
         }
+    }
+
+    /// Submits the retained recording to server STT. On success the recognized
+    /// text goes into the PREPARE chat (with the utterance id as the message's
+    /// idempotency key); on failure the recording stays retained and a
+    /// "Повторить" card lets the user retry without re-recording.
+    @MainActor
+    private func submitPendingAudio() async {
+        guard let audio = pendingAudio else { return }
+        statusLabel.text = "Распознаю речь…"
+        micButton.isEnabled = false
+        defer {
+            micButton.isEnabled = true
+            statusLabel.text = ""
+        }
+        do {
+            let text = try await APIClient.shared.prepareTranscribe(audio: audio.data, mimeType: audio.mime)
+            guard !text.isEmpty else {
+                pendingAudio = nil
+                addAIMessage("⚠️ Речь не распознана — попробуйте ещё раз, чуть ближе к микрофону.")
+                return
+            }
+            // STT succeeded — release the recording and send the text as one
+            // idempotent PREPARE turn (same id even if resent after reconnect).
+            pendingAudio = nil
+            addUserMessage(text)
+            sendPrepareText(text, clientMessageId: audio.utteranceId)
+        } catch {
+            addRetryMessage("⚠️ " + error.localizedDescription + " Запись сохранена — нажмите «Повторить» или наберите сообщение текстом.")
+        }
+    }
+
+    /// AI error card with a "Повторить" button that re-submits the retained
+    /// recording (web parity: addPrepareRetryMessage). Without a retained
+    /// recording it degrades to a plain error bubble.
+    private func addRetryMessage(_ text: String) {
+        guard pendingAudio != nil else {
+            addAIMessage(text)
+            return
+        }
+        let card = UIView()
+        card.backgroundColor = .secondarySystemBackground
+        card.layer.cornerRadius = 14
+        card.accessibilityIdentifier = "card-prepare-stt-retry"
+
+        let label = UILabel()
+        label.text = text
+        label.numberOfLines = 0
+        label.font = .preferredFont(forTextStyle: .body)
+
+        let retryButton = UIButton(type: .system)
+        retryButton.setTitle("🔄 Повторить", for: .normal)
+        retryButton.setTitleColor(.white, for: .normal)
+        retryButton.backgroundColor = .systemIndigo
+        retryButton.layer.cornerRadius = 8
+        retryButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        retryButton.accessibilityIdentifier = "button-prepare-stt-retry"
+
+        let stack = UIStackView(arrangedSubviews: [label, retryButton])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.alignment = .leading
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+        ])
+
+        let container = UIView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: container.topAnchor),
+            card.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            card.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, multiplier: 0.85),
+        ])
+
+        retryButton.addAction(UIAction { [weak self, weak container] _ in
+            container?.removeFromSuperview()
+            Task { @MainActor in await self?.submitPendingAudio() }
+        }, for: .touchUpInside)
+        appendToFeed(container)
     }
 }
 
@@ -453,16 +592,32 @@ extension PrepareViewController: CallHintStreamDelegate {
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent) {
         switch event {
         case .prepareReply(let text, let proposedGoal):
+            // Server acknowledged the turn — the outbox can be released.
+            pendingMessage = nil
             hideThinking()
             addAIMessage(text)
             if let goal = proposedGoal { addGoalProposal(goal) }
         case .prepareOpening(let phraseEn, let translation):
+            pendingMessage = nil
+            pendingConfirm = nil
             hideThinking()
             addOpeningPhrase(en: phraseEn, translation: translation)
             addAIMessage("📞 Цель подтверждена. Начинайте звонок с этой фразы — я буду подсказывать дальше.")
         case .prepareError(let text):
+            // The server processed (and honestly failed) the turn — restore the
+            // text to the input so the user can resend without retyping.
+            if let pending = pendingMessage, (textField.text ?? "").isEmpty {
+                textField.text = pending.text
+            }
+            pendingMessage = nil
             hideThinking()
             addAIMessage("⚠️ " + text)
+            // A failed confirmation gets its card back — an explicit retry
+            // control instead of a dead end (the buttons were already removed).
+            if let confirm = pendingConfirm {
+                pendingConfirm = nil
+                addGoalProposal(confirm.goal)
+            }
         case .goalSet(let goal):
             // Confirmation activated the goal through the existing mechanism —
             // mirror it locally so the next call is grounded in it.
@@ -475,6 +630,27 @@ extension PrepareViewController: CallHintStreamDelegate {
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
         statusLabel.text = ""
+        // The socket dropped before the last message was acknowledged — resend
+        // it ONCE with the SAME clientMessageId. The server dedups by that id,
+        // so "server already got it" resends return the original reply instead
+        // of creating a duplicate user turn.
+        if let pending = pendingMessage {
+            showThinking()
+            if !stream.sendPrepareMessage(pending.text, clientMessageId: pending.id) {
+                hideThinking()
+                pendingMessage = nil
+                textField.text = pending.text
+                addAIMessage("⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — нажмите «Отправить» ещё раз, когда связь восстановится.")
+            }
+        }
+        if let confirm = pendingConfirm {
+            showThinking()
+            if !stream.confirmPrepareGoal(confirm.goal, clientMessageId: confirm.id) {
+                hideThinking()
+                pendingConfirm = nil
+                addGoalProposal(confirm.goal)
+            }
+        }
     }
 
     func callHintStream(_ stream: CallHintStream, didDisconnectWillRetryAttempt attempt: Int, of maxAttempts: Int) {
@@ -483,7 +659,18 @@ extension PrepareViewController: CallHintStreamDelegate {
 
     func callHintStreamDidFailTerminally(_ stream: CallHintStream) {
         statusLabel.text = "Нет соединения с сервером"
-        addAIMessage("⚠️ Нет соединения с сервером. Вернитесь на экран позже или попробуйте снова.")
+        hideThinking()
+        // Reconnects are over — hand the unacknowledged text back to the user
+        // so nothing typed or dictated is lost.
+        if let pending = pendingMessage {
+            pendingMessage = nil
+            textField.text = pending.text
+        }
+        if let confirm = pendingConfirm {
+            pendingConfirm = nil
+            addGoalProposal(confirm.goal)
+        }
+        addAIMessage("⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — попробуйте отправить позже.")
     }
 
     func callHintStreamDidRequireSignIn(_ stream: CallHintStream) {
