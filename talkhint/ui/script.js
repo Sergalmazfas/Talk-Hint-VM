@@ -1152,6 +1152,13 @@ function connectWebSocket() {
       model: savedModel
     }));
     log('Sent initial model: ' + savedModel);
+    // If a prepare_message was lost while the socket was down (onclose already
+    // restored it to the input field), notify the user that they can resend.
+    // At this point pendingPrepareText is null (cleared by onclose), and the
+    // text is already in the input — just surface a prompt to send it.
+    if (UI.textInput && UI.textInput.value.trim() && isPrepareContext()) {
+      addMessage('ai', '🔄 Соединение восстановлено. Нажмите «Отправить», чтобы отправить сохранённое сообщение.');
+    }
   };
 
   socket.onmessage = function(event) {
@@ -1165,6 +1172,16 @@ function connectWebSocket() {
 
   socket.onclose = function() {
     log('WebSocket disconnected');
+    // If we sent a prepare_message that the server has not yet acknowledged,
+    // restore the text to the input field so the user can resend once the
+    // connection is re-established — the long dictation must never be silently lost.
+    if (pendingPrepareText) {
+      var savedText = pendingPrepareText;
+      pendingPrepareText = null;
+      hidePrepareThinking();
+      if (UI.textInput) UI.textInput.value = savedText;
+      addMessage('ai', '⚠️ Связь прервана. Ваше сообщение сохранено в поле ввода — нажмите «Отправить» после восстановления соединения.');
+    }
     reconnectTimeout = setTimeout(connectWebSocket, 3000);
   };
 
@@ -1307,12 +1324,14 @@ function handleMessage(data) {
       break;
 
     case 'prepare_reply':
+      pendingPrepareText = null; // server acknowledged the prepare_message
       hidePrepareThinking();
       if (data.text) addMessage('ai', data.text);
       if (data.proposedGoal) addGoalProposal(data.proposedGoal);
       break;
 
     case 'prepare_opening':
+      pendingPrepareText = null; // server acknowledged (goal-confirm flow)
       hidePrepareThinking();
       if (data.phraseEn) {
         addHint(data.phraseEn, data.translation || '');
@@ -1321,6 +1340,7 @@ function handleMessage(data) {
       break;
 
     case 'prepare_error':
+      pendingPrepareText = null; // server acknowledged (error path)
       hidePrepareThinking();
       addMessage('ai', '⚠️ ' + (data.text || 'Ошибка подготовки.'));
       break;
@@ -1508,6 +1528,9 @@ function resetCallUI() {
     socket.send(JSON.stringify({ type: 'set_goal', goal: '' }));
     socket.send(JSON.stringify({ type: 'prepare_reset' }));
   }
+  // Call started — any unacknowledged PREPARE message is now stale.
+  pendingPrepareText = null;
+  pendingPrepareAudio = null;
   hideDtmfKeypad();  // Hide DTMF keypad
   
   // Reset Safe Start fallback tracking
@@ -1770,10 +1793,21 @@ function getNextStepHintLocal(goal) {
 
 function sendPrepareMessage(text) {
   if (socket && socket.readyState === WebSocket.OPEN) {
+    // Store in the outbox BEFORE calling send() so that if the socket closes
+    // between the send() call and the server ack the text is not lost.
+    pendingPrepareText = text;
     socket.send(JSON.stringify({ type: 'prepare_message', text: text }));
     showPrepareThinking();
+    return true;
   } else {
-    addMessage('ai', '⚠️ Нет соединения с сервером. Обновите страницу и попробуйте снова.');
+    // Always overwrite the input field with the pending text — regardless of
+    // any existing draft — so the user can click Send once the connection
+    // is restored without retyping or re-recording.
+    if (UI.textInput) {
+      UI.textInput.value = text;
+    }
+    addMessage('ai', '⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — нажмите «Отправить» ещё раз, когда связь восстановится.');
+    return false;
   }
 }
 
@@ -1868,7 +1902,13 @@ function sendTextToAI() {
       // with GPT-5.6 Sol. The goal appears ONLY after Sol proposes it and the
       // user presses "✓ Всё верно" (prepare_confirm_goal -> goal_set echo).
       addMessage('honor', text);
-      sendPrepareMessage(text);
+      if (sendPrepareMessage(text)) {
+        // WS was open — message queued; clear the input.
+        UI.textInput.value = '';
+      }
+      // If WS was down, sendPrepareMessage already restored text to the input;
+      // we must not clear it here — the user needs it for the retry.
+      return;
     }
   } else {
     addMessage('honor', text);
@@ -4078,9 +4118,83 @@ let isRecording = false;
 let prepareRecorder = null;
 let prepareChunks = [];
 let isPrepareRecording = false;
+// Last captured audio payload, kept until STT succeeds so the user can retry
+// on network failure without re-recording.
+let pendingPrepareAudio = null; // { b64: string, mime: string } | null
+// Text of the last prepare_message sent to the server, kept until the server
+// acknowledges it with prepare_reply / prepare_error / prepare_opening.
+// Used to recover the message when the socket closes before the ack arrives.
+var pendingPrepareText = null; // string | null
 
 function isPrepareContext() {
   return callMode === 'live' && !isInCall && !isTrainingActive;
+}
+
+// Show an AI error bubble with a "Retry" button that re-submits the retained audio.
+function addPrepareRetryMessage(msg) {
+  var wrap = document.createElement('div');
+  wrap.className = 'message ai';
+  var label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = 'AI';
+  var bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+  bubble.textContent = msg;
+  if (pendingPrepareAudio) {
+    var retryBtn = document.createElement('button');
+    retryBtn.textContent = '🔄 Повторить';
+    retryBtn.style.cssText = 'margin-top:8px;padding:6px 14px;border:none;border-radius:8px;background:#6366f1;color:#fff;font-size:0.85rem;font-weight:600;cursor:pointer;display:block;';
+    retryBtn.addEventListener('click', function() {
+      wrap.remove();
+      UI.micBtn.classList.add('processing');
+      submitPrepareAudio(pendingPrepareAudio).finally(function() {
+        UI.micBtn.classList.remove('processing');
+      });
+    });
+    bubble.appendChild(retryBtn);
+  }
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  UI.chatContainer.appendChild(wrap);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
+// Submit a retained audio payload to STT and, on success, send the recognized
+// text to the PREPARE chat. Keeps pendingPrepareAudio set until STT succeeds
+// so the retry button can re-use the same payload.
+async function submitPrepareAudio(payload) {
+  if (!payload) return;
+  let res;
+  try {
+    res = await fetch('/api/prepare/stt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken() },
+      credentials: 'include',
+      body: JSON.stringify({ audio: payload.b64, mimeType: payload.mime })
+    });
+  } catch (networkErr) {
+    log('[PrepareMic] STT upload failed (network): ' + networkErr.message);
+    addPrepareRetryMessage('⚠️ Ошибка сети при загрузке записи. Нажмите «Повторить» или наберите сообщение текстом.');
+    return;
+  }
+  if (!res.ok) {
+    var errBody = await res.json().catch(function() { return {}; });
+    addPrepareRetryMessage('⚠️ ' + (errBody.error || 'Не удалось распознать речь.'));
+    return;
+  }
+  var data = await res.json();
+  var text = (data.text || '').trim();
+  if (!text) {
+    addMessage('ai', '⚠️ Речь не распознана — попробуйте ещё раз, чуть ближе к микрофону.');
+    return;
+  }
+  // STT succeeded — clear the retained payload so retry is no longer offered.
+  pendingPrepareAudio = null;
+  // Show the recognized text in the chat feed.
+  addMessage('honor', text);
+  // Send to PREPARE chat; if WS is down the text is preserved in the input
+  // field by sendPrepareMessage so the user can retry once reconnected.
+  sendPrepareMessage(text);
 }
 
 async function togglePrepareRecording() {
@@ -4110,26 +4224,13 @@ async function togglePrepareRecording() {
         const blob = new Blob(prepareChunks, { type: mimeType || 'audio/webm' });
         if (blob.size < 2000) { log('[PrepareMic] Blob too small, skipping'); return; }
         const base64Audio = await blobToBase64(blob);
-        const res = await fetch('/api/prepare/stt', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken() },
-          credentials: 'include',
-          body: JSON.stringify({ audio: base64Audio, mimeType: mimeType || 'audio/webm' })
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(function() { return {}; });
-          addMessage('ai', '⚠️ ' + (err.error || 'Не удалось распознать речь. Попробуйте ещё раз.'));
-          return;
-        }
-        const data = await res.json();
-        const text = (data.text || '').trim();
-        if (!text) { addMessage('ai', '⚠️ Речь не распознана — попробуйте ещё раз, чуть ближе к микрофону.'); return; }
-        // Straight into the preparation chat, same as a typed message.
-        addMessage('honor', text);
-        sendPrepareMessage(text);
+        // Retain the audio payload before we attempt STT so the user can retry
+        // without re-recording if the network request fails.
+        pendingPrepareAudio = { b64: base64Audio, mime: mimeType || 'audio/webm' };
+        await submitPrepareAudio(pendingPrepareAudio);
       } catch (e) {
         log('[PrepareMic] transcription error: ' + e.message);
-        addMessage('ai', '⚠️ Ошибка распознавания речи. Попробуйте ещё раз.');
+        addPrepareRetryMessage('⚠️ Ошибка при отправке записи. Нажмите «Повторить» или наберите сообщение текстом.');
       } finally {
         UI.micBtn.classList.remove('processing');
       }
