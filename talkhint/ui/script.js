@@ -655,7 +655,9 @@ function updateLastInterim(type, text) {
   if (!text) return;
   UI.emptyState.style.display = 'none';
   
-  if ((type === 'you' || type === 'honor') && !hasGoal) {
+  // PREPARE context: user messages are preparation chat, NOT a goal — the
+  // indicator activates only on the server's goal_set after confirmation.
+  if ((type === 'you' || type === 'honor') && !hasGoal && !isPrepareContext()) {
     setGoalActive(true);
   }
   
@@ -768,7 +770,9 @@ function addMessage(type, text, translation, sentiment) {
   
   UI.emptyState.style.display = 'none';
   
-  if ((type === 'you' || type === 'honor') && !hasGoal) {
+  // PREPARE context: user messages are preparation chat, NOT a goal — the
+  // indicator activates only on the server's goal_set after confirmation.
+  if ((type === 'you' || type === 'honor') && !hasGoal && !isPrepareContext()) {
     setGoalActive(true);
   }
   
@@ -1302,6 +1306,25 @@ function handleMessage(data) {
       }
       break;
 
+    case 'prepare_reply':
+      hidePrepareThinking();
+      if (data.text) addMessage('ai', data.text);
+      if (data.proposedGoal) addGoalProposal(data.proposedGoal);
+      break;
+
+    case 'prepare_opening':
+      hidePrepareThinking();
+      if (data.phraseEn) {
+        addHint(data.phraseEn, data.translation || '');
+        addMessage('ai', '📞 Цель подтверждена. Начинайте звонок с этой фразы — я буду подсказывать дальше.');
+      }
+      break;
+
+    case 'prepare_error':
+      hidePrepareThinking();
+      addMessage('ai', '⚠️ ' + (data.text || 'Ошибка подготовки.'));
+      break;
+
     case 'goal_set':
       if (data.goal) {
         callGoal = data.goal;
@@ -1388,6 +1411,9 @@ async function makeCall() {
     activeCall.on('accept', function() {
       log('Call connected');
       isInCall = true;
+      // Leaving PREPARE context: stop any active prepare recording and hide the mic.
+      if (isPrepareRecording && prepareRecorder && prepareRecorder.state !== 'inactive') { prepareRecorder.stop(); isPrepareRecording = false; }
+      updateMicButtonVisibility();
       UI.statusDot.classList.remove('calling');
       UI.statusDot.classList.add('active');
       UI.statusText.textContent = 'In Call';
@@ -1476,9 +1502,11 @@ function resetCallUI() {
   callGoal = '';  // Reset goal for next call
   lastGoalFeedText = null;  // Next call may legitimately reuse the same goal text
   // Clear the goal server-side too, so a rejected/failed call can't leave a
-  // stale goal grounding the next call's hints.
+  // stale goal grounding the next call's hints. Also reset any abandoned
+  // PREPARE conversation — the next call starts from a clean slate.
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'set_goal', goal: '' }));
+    socket.send(JSON.stringify({ type: 'prepare_reset' }));
   }
   hideDtmfKeypad();  // Hide DTMF keypad
   
@@ -1504,6 +1532,9 @@ function resetCallUI() {
     clearInterval(qualityMonitorInterval);
     qualityMonitorInterval = null;
   }
+
+  // Back in PREPARE context — the mic reappears for the next preparation.
+  updateMicButtonVisibility();
 }
 
 var qualityMonitorInterval = null;
@@ -1735,6 +1766,82 @@ function getNextStepHintLocal(goal) {
   return { en: 'Hello, I am calling about...', ru: 'Здравствуйте, я звоню по поводу...' };
 }
 
+// --- PREPARE stage (Task #183): pre-call preparation chat with GPT-5.6 Sol ---
+
+function sendPrepareMessage(text) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'prepare_message', text: text }));
+    showPrepareThinking();
+  } else {
+    addMessage('ai', '⚠️ Нет соединения с сервером. Обновите страницу и попробуйте снова.');
+  }
+}
+
+var prepareThinkingEl = null;
+function showPrepareThinking() {
+  hidePrepareThinking();
+  prepareThinkingEl = document.createElement('div');
+  prepareThinkingEl.className = 'message ai';
+  prepareThinkingEl.innerHTML = '<div class="message-label">AI</div><div class="message-bubble" style="color:#9ca3af;">…</div>';
+  UI.chatContainer.appendChild(prepareThinkingEl);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+function hidePrepareThinking() {
+  if (prepareThinkingEl && prepareThinkingEl.parentNode) prepareThinkingEl.parentNode.removeChild(prepareThinkingEl);
+  prepareThinkingEl = null;
+}
+
+// Proposed-goal card: compact goal + "✓ Всё верно / Изменить". The goal is
+// NOT active until the user confirms; "Изменить" just continues the dialog.
+function addGoalProposal(goal) {
+  var wrap = document.createElement('div');
+  wrap.className = 'message ai';
+  wrap.setAttribute('data-testid', 'goal-proposal');
+  var bubble = document.createElement('div');
+  bubble.className = 'message-bubble';
+  bubble.style.border = '1px solid #f59e0b';
+  bubble.style.background = 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)';
+  var label = document.createElement('div');
+  label.style.cssText = 'font-size:0.7rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;';
+  label.textContent = '🎯 Цель звонка';
+  var goalText = document.createElement('div');
+  goalText.textContent = goal;
+  var btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
+  var okBtn = document.createElement('button');
+  okBtn.textContent = '✓ Всё верно';
+  okBtn.setAttribute('data-testid', 'button-goal-confirm');
+  okBtn.style.cssText = 'flex:1;padding:8px 12px;border:none;border-radius:8px;background:#10a37f;color:#fff;font-weight:600;cursor:pointer;font-size:0.9rem;';
+  var editBtn = document.createElement('button');
+  editBtn.textContent = 'Изменить';
+  editBtn.setAttribute('data-testid', 'button-goal-edit');
+  editBtn.style.cssText = 'flex:1;padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;cursor:pointer;font-size:0.9rem;';
+  okBtn.addEventListener('click', function() {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'prepare_confirm_goal', goal: goal }));
+      btnRow.remove();
+      showPrepareThinking();
+    }
+  });
+  editBtn.addEventListener('click', function() {
+    btnRow.remove();
+    UI.textInput.placeholder = 'Что изменить в цели?';
+    UI.textInput.focus();
+  });
+  btnRow.appendChild(okBtn);
+  btnRow.appendChild(editBtn);
+  bubble.appendChild(label);
+  bubble.appendChild(goalText);
+  bubble.appendChild(btnRow);
+  var msgLabel = document.createElement('div');
+  msgLabel.className = 'message-label';
+  msgLabel.textContent = 'AI';
+  wrap.appendChild(msgLabel);
+  wrap.appendChild(bubble);
+  UI.chatContainer.appendChild(wrap);
+  UI.chatContainer.scrollTop = UI.chatContainer.scrollHeight;
+}
+
 function sendTextToAI() {
   const text = UI.textInput.value.trim();
   if (!text) return;
@@ -1747,28 +1854,21 @@ function sendTextToAI() {
   }
   
   if (!isInCall && !isTrainingActive) {
-    callGoal = text;
-    setGoalActive(true);
-    // No persistent banner — the goal will appear as a compact feed event via
-    // the server's goal_set echo (addGoalFeedEvent dedupes it).
-    addMessage('honor', text);
-    
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        type: 'set_goal',
-        goal: text
-      }));
-    }
-    
     if (callMode === 'training') {
+      // Training keeps the legacy behavior: first message becomes the goal.
+      callGoal = text;
+      setGoalActive(true);
+      addMessage('honor', text);
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'set_goal', goal: text }));
+      }
       addMessage('ai', '🎯 Goal set! Click the phone button to start training.');
-      // In training mode, don't show hint here - it will be generated by AI when session starts
     } else {
-      addMessage('ai', '🎯 Цель установлена! Теперь позвоните.');
-      // In live mode, generate goal-specific initial hint
-      generateInitialHint(text).then(function(nextStep) {
-        addHint(nextStep.en, nextStep.ru);
-      });
+      // PREPARE stage (live mode): the message goes to the preparation chat
+      // with GPT-5.6 Sol. The goal appears ONLY after Sol proposes it and the
+      // user presses "✓ Всё верно" (prepare_confirm_goal -> goal_set echo).
+      addMessage('honor', text);
+      sendPrepareMessage(text);
     }
   } else {
     addMessage('honor', text);
@@ -3973,6 +4073,77 @@ let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
 
+// --- PREPARE voice input: tap-to-record, OpenAI gpt-4o-transcribe (accuracy-
+// first, any language). Deepgram is NOT used here (provider policy v1). ---
+let prepareRecorder = null;
+let prepareChunks = [];
+let isPrepareRecording = false;
+
+function isPrepareContext() {
+  return callMode === 'live' && !isInCall && !isTrainingActive;
+}
+
+async function togglePrepareRecording() {
+  if (isPrepareRecording) {
+    if (prepareRecorder && prepareRecorder.state !== 'inactive') prepareRecorder.stop();
+    isPrepareRecording = false;
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+    let mimeType = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+        : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+    }
+    prepareRecorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+    prepareChunks = [];
+    prepareRecorder.ondataavailable = function(e) { if (e.data.size > 0) prepareChunks.push(e.data); };
+    prepareRecorder.onstop = async function() {
+      UI.micBtn.classList.remove('recording');
+      UI.micBtn.classList.add('processing');
+      stream.getTracks().forEach(function(t) { t.stop(); });
+      try {
+        if (prepareChunks.length === 0) return;
+        const blob = new Blob(prepareChunks, { type: mimeType || 'audio/webm' });
+        if (blob.size < 2000) { log('[PrepareMic] Blob too small, skipping'); return; }
+        const base64Audio = await blobToBase64(blob);
+        const res = await fetch('/api/prepare/stt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getAuthToken() },
+          credentials: 'include',
+          body: JSON.stringify({ audio: base64Audio, mimeType: mimeType || 'audio/webm' })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(function() { return {}; });
+          addMessage('ai', '⚠️ ' + (err.error || 'Не удалось распознать речь. Попробуйте ещё раз.'));
+          return;
+        }
+        const data = await res.json();
+        const text = (data.text || '').trim();
+        if (!text) { addMessage('ai', '⚠️ Речь не распознана — попробуйте ещё раз, чуть ближе к микрофону.'); return; }
+        // Straight into the preparation chat, same as a typed message.
+        addMessage('honor', text);
+        sendPrepareMessage(text);
+      } catch (e) {
+        log('[PrepareMic] transcription error: ' + e.message);
+        addMessage('ai', '⚠️ Ошибка распознавания речи. Попробуйте ещё раз.');
+      } finally {
+        UI.micBtn.classList.remove('processing');
+      }
+    };
+    prepareRecorder.start();
+    isPrepareRecording = true;
+    UI.micBtn.classList.add('recording');
+    log('[PrepareMic] Recording started (tap again to stop)');
+  } catch (e) {
+    log('[PrepareMic] getUserMedia failed: ' + e.message);
+    addMessage('ai', '⚠️ Нет доступа к микрофону. Разрешите доступ в настройках браузера.');
+  }
+}
+
 function initMicButton() {
   if (!UI.micBtn) {
     log('[Mic] Mic button not found');
@@ -3982,17 +4153,22 @@ function initMicButton() {
   // Show/hide mic button based on training mode
   updateMicButtonVisibility();
   
-  // Push-to-talk: mousedown to start, mouseup to stop
-  UI.micBtn.addEventListener('mousedown', startRecording);
-  UI.micBtn.addEventListener('mouseup', stopRecording);
-  UI.micBtn.addEventListener('mouseleave', stopRecording);
+  // Push-to-talk (training): mousedown to start, mouseup to stop.
+  // In PREPARE context (live mode, no call) the same button is TAP-to-start /
+  // TAP-to-stop instead — 30-60 seconds of speech is too long to hold.
+  UI.micBtn.addEventListener('mousedown', function() { if (!isPrepareContext()) startRecording(); });
+  UI.micBtn.addEventListener('mouseup', function() { if (!isPrepareContext()) stopRecording(); });
+  UI.micBtn.addEventListener('mouseleave', function() { if (!isPrepareContext()) stopRecording(); });
+  UI.micBtn.addEventListener('click', function() { if (isPrepareContext()) togglePrepareRecording(); });
   
   // Touch events for mobile
   UI.micBtn.addEventListener('touchstart', function(e) {
+    if (isPrepareContext()) return; // tap handled by click
     e.preventDefault();
     startRecording();
   });
   UI.micBtn.addEventListener('touchend', function(e) {
+    if (isPrepareContext()) return;
     e.preventDefault();
     stopRecording();
   });
@@ -4007,8 +4183,9 @@ function updateMicButtonVisibility() {
     return;
   }
   
-  // Show mic button only in training mode when session is active
-  if (callMode === 'training' && isTrainingActive) {
+  // Show mic in training sessions AND in the PREPARE context (live mode,
+  // before a call): there the user speaks the problem instead of typing.
+  if ((callMode === 'training' && isTrainingActive) || isPrepareContext()) {
     UI.micBtn.style.display = 'flex';
     log('[Mic] Showing mic button');
   } else {

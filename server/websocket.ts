@@ -23,6 +23,7 @@ import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
 import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
+import { prepareMessage, prepareOpeningPhrase, clearPrepareState, PrepareUnavailableError } from "./prepare";
 import { SuggestionDedupGuard } from "./hintDedup";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
@@ -945,6 +946,45 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             log(`Rejected unknown hint model: ${model}`, "server");
             ws.send(JSON.stringify({ type: "model_changed", model: currentModel }));
           }
+        } else if (message.type === "prepare_message") {
+          // PREPARE stage (pre-call): one Sol conversation per user. Honest
+          // errors, never a silent model substitution (provider policy v1).
+          const text = String(message.text || "").trim();
+          if (!text) return;
+          if (!userId) {
+            ws.send(JSON.stringify({ type: "prepare_error", text: "Войдите в аккаунт, чтобы готовить звонок." }));
+            return;
+          }
+          (async () => {
+            try {
+              const { reply, proposedGoal } = await prepareMessage(userId, text);
+              ws.send(JSON.stringify({ type: "prepare_reply", text: reply, proposedGoal }));
+            } catch (err: any) {
+              const msg = err instanceof PrepareUnavailableError ? err.message : "Ошибка подготовки. Попробуйте ещё раз.";
+              log(`prepare_message error: ${err?.message}`, "server");
+              ws.send(JSON.stringify({ type: "prepare_error", text: msg }));
+            }
+          })();
+        } else if (message.type === "prepare_confirm_goal") {
+          const goal = String(message.goal || "").trim();
+          if (!goal || !userId) return;
+          // Confirmation activates the goal via the EXISTING goal mechanism —
+          // same compact feed event, same Brain visibility during the call.
+          setUserGoal(userId, goal);
+          log(`Goal confirmed via PREPARE (user ${userId}): ${goal.substring(0, 50)}...`, "server");
+          sendToUser(userId, { type: "goal_set", goal });
+          (async () => {
+            try {
+              const opening = await prepareOpeningPhrase(userId, goal);
+              ws.send(JSON.stringify({ type: "prepare_opening", phraseEn: opening.phraseEn, translation: opening.translation }));
+            } catch (err: any) {
+              const msg = err instanceof PrepareUnavailableError ? err.message : "Не удалось получить первую фразу.";
+              log(`prepare_opening error: ${err?.message}`, "server");
+              ws.send(JSON.stringify({ type: "prepare_error", text: msg }));
+            }
+          })();
+        } else if (message.type === "prepare_reset") {
+          clearPrepareState(userId);
         } else if (message.type === "ask_ai") {
           const question = message.question || "";
           const goal = message.goal || getUserGoal(userId);

@@ -2914,6 +2914,50 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // STT for the PREPARE stage (Task #183): accuracy-first OpenAI
+  // gpt-4o-transcribe on a complete utterance. Deepgram is NOT used here
+  // (provider policy v1) — it stays live-call/training only. Auto language
+  // (Russian/English/Spanish/mixed). Honest errors, no silent fallback.
+  app.post("/api/prepare/stt", authMiddleware, async (req, res) => {
+    try {
+      const { audio, mimeType } = req.body;
+      if (!audio) return res.status(400).json({ error: "No audio data provided" });
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "OpenAI API key not configured" });
+
+      const audioBuffer = Buffer.from(audio, "base64");
+      if (audioBuffer.length > 24 * 1024 * 1024) {
+        return res.status(413).json({ error: "Audio too long — keep it under a couple of minutes" });
+      }
+      const contentType = typeof mimeType === "string" && mimeType ? mimeType : "audio/webm";
+      const ext = contentType.includes("mp4") || contentType.includes("m4a") ? "m4a"
+        : contentType.includes("ogg") ? "ogg"
+        : contentType.includes("wav") ? "wav" : "webm";
+
+      const form = new FormData();
+      form.append("model", "gpt-4o-transcribe");
+      form.append("file", new Blob([audioBuffer], { type: contentType }), `utterance.${ext}`);
+
+      const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}` },
+        body: form,
+      });
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        console.error("[PrepareSTT] OpenAI error:", response.status, errorText.slice(0, 300));
+        return res.status(502).json({ error: `Распознавание речи недоступно (HTTP ${response.status})` });
+      }
+      const result = await response.json() as any;
+      const text = (result.text || "").trim();
+      console.log("[PrepareSTT] Transcribed:", text.substring(0, 60) + (text.length > 60 ? "..." : ""));
+      res.json({ text });
+    } catch (error: any) {
+      console.error("[PrepareSTT] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // STT endpoint for training mode - accepts audio and returns transcribed text
   app.post("/training/stt", authMiddleware, async (req, res) => {
     try {
