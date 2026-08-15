@@ -168,6 +168,7 @@ export async function startBrainRun(fixtureId: string, opts?: { judgeEnabled?: b
           brainTurnResults: result.turnResults,
           brainContinuity: result.continuity,
           judgeModel: result.judgeModel,
+          secondJudgeModel: result.secondJudgeModel,
           promptVersion: PROMPT_VERSION,
           fixtureTitle: fixture.title,
         });
@@ -177,7 +178,7 @@ export async function startBrainRun(fixtureId: string, opts?: { judgeEnabled?: b
       await finishRun(run.id, {
         status: "completed",
         availability: { brain: availability },
-        results: { turnResults: result.turnResults, continuity: result.continuity, judgeModel: result.judgeModel, notes: result.notes },
+        results: { turnResults: result.turnResults, continuity: result.continuity, judgeModel: result.judgeModel, secondJudgeModel: result.secondJudgeModel, notes: result.notes },
         scorecard: result.scorecard,
         report,
       });

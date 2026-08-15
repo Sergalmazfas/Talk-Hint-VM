@@ -132,6 +132,7 @@ export interface ReportInput {
   brainTurnResults: BrainTurnResult[];
   brainContinuity: Record<string, ContinuityMetrics>;
   judgeModel: string | null;
+  secondJudgeModel?: string | null;
   promptVersion: string;
   fixtureTitle: string;
 }
@@ -154,7 +155,7 @@ function detPassRate(turns: BrainTurnResult[], candidateId: string): number | nu
 export function generateReport(inp: ReportInput): string {
   const lines: string[] = [];
   lines.push(`# LIVE Ears & Brain Benchmark — Run Report`);
-  lines.push(`Fixture: ${inp.fixtureTitle} · Prompt: ${inp.promptVersion} · Judge: ${inp.judgeModel ?? "none"} · ${new Date().toISOString()}`);
+  lines.push(`Fixture: ${inp.fixtureTitle} · Prompt: ${inp.promptVersion} · Judge: ${inp.judgeModel ?? "none"} · 2nd judge: ${inp.secondJudgeModel ?? "none (fail-closed: self-judged marks stay honest)"} · ${new Date().toISOString()}`);
   lines.push("");
 
   lines.push(`## Candidate availability (real API checks)`);
@@ -177,10 +178,12 @@ export function generateReport(inp: ReportInput): string {
   lines.push(`## BRAIN WINNER`);
   const entries = inp.brainScorecard?.candidates ?? [];
   const usable = entries.filter((e) => e.successfulHints > 0);
-  type Ranked = BrainScorecardEntry & { judgeOverall: number | null; detRate: number | null; selfJudged: boolean };
+  type Ranked = BrainScorecardEntry & { judgeOverall: number | null; judgeOverallStd: number | null; crossOverall: number | null; detRate: number | null; selfJudged: boolean };
   const ranked: Ranked[] = usable.map((e) => ({
     ...e,
     judgeOverall: e.judgeAverages?.overall_live_copilot_quality ?? null,
+    judgeOverallStd: e.judgeStds?.overall_live_copilot_quality ?? null,
+    crossOverall: e.crossJudgeAverages?.overall_live_copilot_quality ?? null,
     detRate: detPassRate(inp.brainTurnResults, e.candidateId),
     selfJudged: inp.judgeModel != null && e.model === inp.judgeModel,
   })).sort((a, b) =>
@@ -192,16 +195,25 @@ export function generateReport(inp: ReportInput): string {
     lines.push(`No BRAIN candidate produced usable results.`);
   } else {
     const w = ranked[0];
-    lines.push(`**${w.candidateId}** (${w.model}) — judge overall ${w.judgeOverall ?? "—"}/10${w.selfJudged ? " (self-judged!)" : ""}, ` +
+    const wStd = w.judgeOverallStd != null ? ` (σ ${w.judgeOverallStd})` : "";
+    const wCross = w.selfJudged
+      ? (w.crossOverall != null
+          ? ` — cross-checked by 2nd judge ${w.crossJudgeModel}: ${w.crossOverall}/10`
+          : " — no second judge cross-check (fail-closed, honest mark stays)")
+      : "";
+    lines.push(`**${w.candidateId}** (${w.model}) — judge overall ${w.judgeOverall ?? "—"}/10${wStd}${w.selfJudged ? ` (self-judged!${wCross})` : ""}, ` +
       `deterministic pass rate ${w.detRate != null ? Math.round(w.detRate * 100) + "%" : "—"}, ` +
       `avg ready ${fmtMs(w.avgReadyMs)}, cost/10-min call ${w.estCostPer10MinCall != null ? "$" + w.estCostPer10MinCall.toFixed(4) : `unknown (${w.costNote})`}.`);
     lines.push("");
-    lines.push(`| Candidate | Judge avg | Det. pass | First token | Ready avg | ≤1000ms | Missed hints | Cost/10min |`);
-    lines.push(`|---|---|---|---|---|---|---|---|`);
+    lines.push(`| Candidate | Judge avg | Judge σ | 2nd judge | Det. pass | First token | Ready avg | ≤1000ms | Missed hints | Cost/10min |`);
+    lines.push(`|---|---|---|---|---|---|---|---|---|---|`);
     for (const r of ranked) {
       const cont = inp.brainContinuity[r.candidateId];
       const b1000 = r.deadlineBuckets?.["<=1000"];
-      lines.push(`| ${r.candidateId}${r.selfJudged ? " (self-judged)" : ""} | ${r.judgeOverall ?? "—"} | ${r.detRate != null ? Math.round(r.detRate * 100) + "%" : "—"} | ${fmtMs(r.avgFirstTokenMs)} | ${fmtMs(r.avgReadyMs)} | ${b1000 ? b1000.pct + "%" : "—"} | ${cont ? `${cont.hintsMissed} (max ${cont.maxConsecutiveMissedHints} in a row)` : "—"} | ${r.estCostPer10MinCall != null ? "$" + r.estCostPer10MinCall.toFixed(4) : "unknown"} |`);
+      const cross = r.selfJudged
+        ? (r.crossOverall != null ? `${r.crossOverall} (${r.crossJudgeModel})` : "none (fail-closed)")
+        : "—";
+      lines.push(`| ${r.candidateId}${r.selfJudged ? " (self-judged)" : ""} | ${r.judgeOverall ?? "—"} | ${r.judgeOverallStd ?? "—"} | ${cross} | ${r.detRate != null ? Math.round(r.detRate * 100) + "%" : "—"} | ${fmtMs(r.avgFirstTokenMs)} | ${fmtMs(r.avgReadyMs)} | ${b1000 ? b1000.pct + "%" : "—"} | ${cont ? `${cont.hintsMissed} (max ${cont.maxConsecutiveMissedHints} in a row)` : "—"} | ${r.estCostPer10MinCall != null ? "$" + r.estCostPer10MinCall.toFixed(4) : "unknown"} |`);
     }
   }
   lines.push("");
@@ -213,11 +225,11 @@ export function generateReport(inp: ReportInput): string {
   if (ranked.length === 0) {
     lines.push(`No usable candidates to compare.`);
   } else {
-    lines.push(`| Candidate | Judge overall | Avg ready | ≤1000ms hints | Cost/10min |`);
-    lines.push(`|---|---|---|---|---|`);
+    lines.push(`| Candidate | Judge overall | Judge σ | Avg ready | ≤1000ms hints | Cost/10min |`);
+    lines.push(`|---|---|---|---|---|---|`);
     for (const r of ranked) {
       const b1000 = r.deadlineBuckets?.["<=1000"];
-      lines.push(`| ${r.candidateId}${r.selfJudged ? " (self-judged)" : ""} | ${r.judgeOverall ?? "—"}/10 | ${fmtMs(r.avgReadyMs)} | ${b1000 ? b1000.pct + "%" : "—"} | ${r.estCostPer10MinCall != null ? "$" + r.estCostPer10MinCall.toFixed(4) : "unknown"} |`);
+      lines.push(`| ${r.candidateId}${r.selfJudged ? " (self-judged)" : ""} | ${r.judgeOverall ?? "—"}/10 | ${r.judgeOverallStd ?? "—"} | ${fmtMs(r.avgReadyMs)} | ${b1000 ? b1000.pct + "%" : "—"} | ${r.estCostPer10MinCall != null ? "$" + r.estCostPer10MinCall.toFixed(4) : "unknown"} |`);
     }
     const bestQ = ranked[0].judgeOverall ?? 0;
     // Golden pick: within 1.0 judge point of the best AND fastest avg ready.

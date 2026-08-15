@@ -28,7 +28,7 @@ import {
   type FetchLike,
 } from "./openaiClient";
 import { runDeterministicChecks, hintRejectedByNextOwnerTurn } from "./brainChecks";
-import { judgeTurn, pickJudgeModel } from "./judge";
+import { judgeTurnAggregated, pickJudgeModel, pickSecondJudgeModel } from "./judge";
 
 const TURN_TIMEOUT_MS = 15_000;
 // Constant estimate for WS delivery + client render overhead when real delivery
@@ -80,6 +80,13 @@ export interface BrainScorecardEntry {
   estCostPer10MinCall: number | null;
   costNote: string | null;
   judgeAverages: Record<string, number> | null;
+  // Per-dimension mean of the per-turn multi-sample stds — how much the judge
+  // "плавает" on this candidate. null when no judged turns / no sample stds.
+  judgeStds: Record<string, number> | null;
+  // Second-judge cross-check averages for a self-judged candidate. null when
+  // not applicable or the second judge failed (fail-closed, never substituted).
+  crossJudgeModel: string | null;
+  crossJudgeAverages: Record<string, number> | null;
 }
 
 export interface RunBrainResult {
@@ -87,6 +94,7 @@ export interface RunBrainResult {
   continuity: Record<string, ContinuityMetrics>;
   scorecard: { candidates: BrainScorecardEntry[] };
   judgeModel: string | null;
+  secondJudgeModel: string | null;
   notes: string[];
 }
 
@@ -126,6 +134,17 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
     : null;
   if (opts.judgeEnabled && !judgeModel) {
     notes.push("judge enabled but no available candidate model to serve as judge; judge disabled");
+  }
+  // Second judge for cross-checking self-judged candidates. Fail-closed: when
+  // no distinct second judge is available, the honest self-judged mark stays —
+  // never substituted.
+  const secondJudgeModel = judgeModel
+    ? pickSecondJudgeModel(opts.candidates, opts.availability, judgeModel)
+    : null;
+  if (judgeModel && !secondJudgeModel) {
+    notes.push(
+      `no second judge available to cross-check self-judged candidates (primary judge: ${judgeModel}); honest self-judged marks stay`,
+    );
   }
 
   const turnResults: BrainTurnResult[] = [];
@@ -297,7 +316,7 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
         // Judge failure (bounded timeout OR any thrown error) => judge:null and
         // a note; it must NEVER abort the turn loop.
         try {
-          const js = await judgeTurn(
+          const js = await judgeTurnAggregated(
             judgeModel,
             candidate.model,
             env,
@@ -305,8 +324,34 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
             opts.fixture,
             { fetchImpl: opts.fetchImpl, nowMs },
           );
-          if (js) tr.judge = js;
-          else {
+          if (js) {
+            // Self-judged cross-check by the second judge (when one exists).
+            if (js.selfJudged && secondJudgeModel) {
+              const cross = await judgeTurnAggregated(
+                secondJudgeModel,
+                candidate.model,
+                env,
+                tr.output,
+                opts.fixture,
+                { fetchImpl: opts.fetchImpl, nowMs },
+              );
+              if (cross) {
+                js.crossJudge = {
+                  judgeModel: secondJudgeModel,
+                  samples: cross.samples ?? 0,
+                  scores: cross.scores,
+                  scoreStds: cross.scoreStds ?? {},
+                };
+              } else {
+                // Fail-closed: second judge failed — record null, never substitute.
+                js.crossJudge = null;
+                notes.push(
+                  `second judge (${secondJudgeModel}) failed for self-judged ${candidate.id} turn ${tr.turnIdx}; honest self-judged mark stays`,
+                );
+              }
+            }
+            tr.judge = js;
+          } else {
             tr.judge = null;
             notes.push(`judge failed for ${candidate.id} turn ${tr.turnIdx}`);
           }
@@ -327,6 +372,7 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
     continuity,
     scorecard: { candidates: scorecardEntries },
     judgeModel,
+    secondJudgeModel,
     notes,
   };
 }
@@ -399,6 +445,9 @@ function buildScorecardEntry(
 
   // Judge averages across successful judged turns.
   let judgeAverages: Record<string, number> | null = null;
+  let judgeStds: Record<string, number> | null = null;
+  let crossJudgeModel: string | null = null;
+  let crossJudgeAverages: Record<string, number> | null = null;
   const judged = successful.filter((r) => r.judge);
   if (judged.length > 0) {
     const dims = Object.keys(judged[0].judge!.scores);
@@ -406,6 +455,27 @@ function buildScorecardEntry(
     for (const dim of dims) {
       const vals = judged.map((r) => (r.judge!.scores as any)[dim] as number);
       judgeAverages[dim] = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+    }
+    // Mean of per-turn multi-sample stds (judge spread / "плавание").
+    const withStds = judged.filter((r) => r.judge!.scoreStds);
+    if (withStds.length > 0) {
+      judgeStds = {};
+      for (const dim of dims) {
+        const vals = withStds.map((r) => r.judge!.scoreStds![dim]).filter((v): v is number => typeof v === "number");
+        if (vals.length > 0) {
+          judgeStds[dim] = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+        }
+      }
+    }
+    // Second-judge cross-check averages (self-judged candidates only).
+    const crossed = judged.filter((r) => r.judge!.crossJudge);
+    if (crossed.length > 0) {
+      crossJudgeModel = crossed[0].judge!.crossJudge!.judgeModel;
+      crossJudgeAverages = {};
+      for (const dim of dims) {
+        const vals = crossed.map((r) => (r.judge!.crossJudge!.scores as any)[dim] as number);
+        crossJudgeAverages[dim] = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+      }
     }
   }
 
@@ -427,5 +497,8 @@ function buildScorecardEntry(
     estCostPer10MinCall,
     costNote,
     judgeAverages,
+    judgeStds,
+    crossJudgeModel,
+    crossJudgeAverages,
   };
 }

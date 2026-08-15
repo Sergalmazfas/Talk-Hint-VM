@@ -95,6 +95,29 @@ export function pickJudgeModel(
   return null;
 }
 
+/**
+ * Pick a SECOND judge model for cross-checking a self-judged candidate: the
+ * first JUDGE_PREFERENCE entry that is available AND differs from the primary
+ * judge. Returns null when no distinct second judge exists (fail-closed: the
+ * honest self-judged mark then stays — never substituted).
+ */
+export function pickSecondJudgeModel(
+  candidates: BrainCandidate[],
+  availability: AvailabilityResult[],
+  primaryJudgeModel: string,
+): string | null {
+  const availableIds = new Set(
+    availability.filter((a) => a.status === "AVAILABLE").map((a) => a.candidateId),
+  );
+  const availableModels = new Set(
+    candidates.filter((c) => availableIds.has(c.id)).map((c) => c.model),
+  );
+  for (const pref of JUDGE_PREFERENCE) {
+    if (pref !== primaryJudgeModel && availableModels.has(pref)) return pref;
+  }
+  return null;
+}
+
 function clampScore(v: any): number {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return 1;
@@ -104,6 +127,65 @@ function clampScore(v: any): number {
 export interface JudgeDeps {
   fetchImpl?: FetchLike;
   nowMs?: () => number;
+}
+
+// Number of independent judge samples per turn. Per-dimension MEDIAN of the
+// samples is the reported score; the spread (std) is reported alongside so
+// noisy judgments are visible instead of hidden.
+export const JUDGE_SAMPLES = 3;
+
+function median(vals: number[]): number {
+  const s = [...vals].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function sampleStd(vals: number[]): number {
+  if (vals.length <= 1) return 0;
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (vals.length - 1);
+  return Math.round(Math.sqrt(variance) * 100) / 100;
+}
+
+/**
+ * Multi-sample judge: runs `samples` independent judgeTurn calls and
+ * aggregates per-dimension MEDIAN scores + per-dimension sample std.
+ * Fail-closed: returns null only when EVERY sample fails; partial samples are
+ * used honestly (`samples` records how many succeeded).
+ */
+export async function judgeTurnAggregated(
+  judgeModel: string,
+  candidateModel: string,
+  envelopeInput: BrainEnvelopeInput,
+  output: BrainEnvelopeOutput,
+  fixture: FixtureLike,
+  deps: JudgeDeps = {},
+  samples: number = JUDGE_SAMPLES,
+): Promise<JudgeScores | null> {
+  const ok: JudgeScores[] = [];
+  for (let i = 0; i < samples; i++) {
+    const r = await judgeTurn(judgeModel, candidateModel, envelopeInput, output, fixture, deps);
+    if (r) ok.push(r);
+  }
+  if (ok.length === 0) return null;
+
+  const scores = {} as JudgeScores["scores"];
+  const scoreStds: Record<string, number> = {};
+  for (const d of JUDGE_DIMENSIONS) {
+    const vals = ok.map((r) => (r.scores as any)[d] as number);
+    (scores as any)[d] = median(vals);
+    scoreStds[d] = sampleStd(vals);
+  }
+
+  return {
+    judgeModel,
+    selfJudged: judgeModel === candidateModel,
+    scores,
+    explanations: ok[0].explanations,
+    rationale: ok[0].rationale,
+    samples: ok.length,
+    scoreStds,
+  };
 }
 
 export async function judgeTurn(

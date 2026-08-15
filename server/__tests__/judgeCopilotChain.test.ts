@@ -1,6 +1,12 @@
 // Copilot-chain judge: per-dimension {score, explanation} parsing + fail-safe.
 import { describe, it, expect } from "vitest";
-import { judgeTurn, JUDGE_DIMENSIONS } from "../benchmark/judge";
+import {
+  judgeTurn,
+  judgeTurnAggregated,
+  pickSecondJudgeModel,
+  JUDGE_DIMENSIONS,
+  JUDGE_SAMPLES,
+} from "../benchmark/judge";
 import type { BrainEnvelopeInput, BrainEnvelopeOutput } from "../benchmark/types";
 
 const ENV: BrainEnvelopeInput = {
@@ -96,6 +102,66 @@ describe("fail-closed judge validation (no fabricated scores)", () => {
   });
 });
 
+describe("multi-sample judge aggregation (stable scores)", () => {
+  it("defaults to N>=3 samples", () => {
+    expect(JUDGE_SAMPLES).toBeGreaterThanOrEqual(3);
+  });
+
+  it("aggregates per-dimension MEDIAN over samples and reports std", async () => {
+    // Samples return scores 4, 8, 9 → median 8, std > 0.
+    const seq = [4, 8, 9];
+    let i = 0;
+    const fetchImpl: any = async () => {
+      const body = chainBody(seq[i++ % seq.length]);
+      return {
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(body) } }] }),
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(body) } }] }),
+      };
+    };
+    const js = await judgeTurnAggregated("gpt-5.6-sol", "x", ENV, OUT, FIXTURE as any, { fetchImpl });
+    expect(js).not.toBeNull();
+    expect(js!.samples).toBe(3);
+    expect(js!.scores.overall_live_copilot_quality).toBe(8);
+    expect(js!.scoreStds!.overall_live_copilot_quality).toBeGreaterThan(0);
+  });
+
+  it("uses partial samples honestly and returns null only when ALL samples fail", async () => {
+    let call = 0;
+    const flaky: any = async () => {
+      call++;
+      if (call !== 2) return { ok: false, status: 500, text: async () => "boom", json: async () => ({}) };
+      const body = chainBody(6);
+      return {
+        ok: true, status: 200,
+        text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(body) } }] }),
+        json: async () => ({ choices: [{ message: { content: JSON.stringify(body) } }] }),
+      };
+    };
+    const js = await judgeTurnAggregated("gpt-5.6-sol", "x", ENV, OUT, FIXTURE as any, { fetchImpl: flaky });
+    expect(js!.samples).toBe(1);
+    expect(js!.scores.overall_live_copilot_quality).toBe(6);
+
+    const allFail: any = async () => ({ ok: false, status: 500, text: async () => "boom", json: async () => ({}) });
+    expect(await judgeTurnAggregated("gpt-5.6-sol", "x", ENV, OUT, FIXTURE as any, { fetchImpl: allFail })).toBeNull();
+  });
+});
+
+describe("pickSecondJudgeModel (cross-check for self-judged)", () => {
+  const av = (id: string): any => ({ candidateId: id, status: "AVAILABLE", checkedAt: "x", detail: "ok" });
+  it("returns the first available preference distinct from the primary judge", () => {
+    const cands: any = [
+      { id: "a", model: "gpt-5.6-sol" },
+      { id: "b", model: "gpt-5.2" },
+    ];
+    expect(pickSecondJudgeModel(cands, [av("a"), av("b")], "gpt-5.6-sol")).toBe("gpt-5.2");
+  });
+  it("fail-closed: returns null when only the primary judge model is available", () => {
+    const cands: any = [{ id: "a", model: "gpt-5.6-sol" }];
+    expect(pickSecondJudgeModel(cands, [av("a")], "gpt-5.6-sol")).toBeNull();
+  });
+});
+
 describe("judge receives candidate-specific causal history", () => {
   it("later-turn judge request contains the candidate's own previousHintsShown", async () => {
     const { runBrainBenchmark } = await import("../benchmark/brainHarness");
@@ -149,5 +215,111 @@ describe("judge receives candidate-specific causal history", () => {
     expect(last).toContain("Unique hint number 1.");
     expect(last).not.toContain("PREVIOUS HINTS SHOWN: (none)");
     expect(res.turnResults.filter((t: any) => t.judge).length).toBeGreaterThan(1);
+  });
+});
+
+describe("self-judged cross-check by a second judge (harness)", () => {
+  async function runHarness(secondJudgeFails: boolean, includeSecondCandidate: boolean) {
+    const { runBrainBenchmark } = await import("../benchmark/brainHarness");
+    const gc = await import("../benchmark/goldCall");
+    const goldFixture = {
+      goal: gc.GOLD_CALL_GOAL,
+      confirmedFacts: gc.GOLD_CALL_CONFIRMED_FACTS,
+      criticalEntities: gc.GOLD_CALL_CRITICAL_ENTITIES,
+      referenceTurns: gc.GOLD_CALL_TURNS,
+    };
+    const encoder = new TextEncoder();
+    const sse = (obj: any) => {
+      const json = JSON.stringify(obj);
+      const body = `data: ${JSON.stringify({ choices: [{ delta: { content: json } }] })}\ndata: [DONE]\n`;
+      return {
+        ok: true, status: 200,
+        body: new ReadableStream({ start(c) { c.enqueue(encoder.encode(body)); c.close(); } }),
+        text: async () => body, json: async () => ({}),
+      };
+    };
+    const judgeModelsUsed: string[] = [];
+    const fetchImpl = async (_url: string, init: any) => {
+      const req = JSON.parse(init.body);
+      const isJudge = req.response_format?.json_schema?.name === "judge_scores";
+      if (isJudge) {
+        judgeModelsUsed.push(req.model);
+        // Primary judge = gpt-5.6-sol scores 9; second judge = gpt-5.2 scores 5.
+        if (req.model === "gpt-5.2" && secondJudgeFails) {
+          return { ok: false, status: 500, text: async () => "boom", json: async () => ({}) };
+        }
+        const body = chainBody(req.model === "gpt-5.2" ? 5 : 9);
+        return {
+          ok: true, status: 200,
+          text: async () => "",
+          json: async () => ({ choices: [{ message: { content: JSON.stringify(body) } }] }),
+        };
+      }
+      return sse({ should_suggest: true, suggested_reply: "Hi there.", strategy: "answer" });
+    };
+    const clock = { t: 0 };
+    const candidates: any[] = [
+      { id: "sol-cand", label: "Sol", model: "gpt-5.6-sol", reasoningEffort: "none" },
+    ];
+    const availability: any[] = [
+      { candidateId: "sol-cand", status: "AVAILABLE", checkedAt: "x", detail: "ok" },
+    ];
+    if (includeSecondCandidate) {
+      candidates.push({ id: "52-cand", label: "5.2", model: "gpt-5.2", reasoningEffort: "none" });
+      availability.push({ candidateId: "52-cand", status: "AVAILABLE", checkedAt: "x", detail: "ok" });
+    }
+    const res = await runBrainBenchmark({
+      fixture: goldFixture as any,
+      candidates,
+      availability,
+      judgeEnabled: true,
+      fetchImpl: fetchImpl as any,
+      nowMs: () => (clock.t += 10),
+    } as any);
+    return { res, judgeModelsUsed };
+  }
+
+  it("self-judged turns get an additional second-judge cross-check", async () => {
+    const { res, judgeModelsUsed } = await runHarness(false, true);
+    expect(res.judgeModel).toBe("gpt-5.6-sol");
+    expect(res.secondJudgeModel).toBe("gpt-5.2");
+    // Self-judged candidate: every judged turn has crossJudge from gpt-5.2.
+    const selfTurns = res.turnResults.filter((t: any) => t.candidateId === "sol-cand" && t.judge);
+    expect(selfTurns.length).toBeGreaterThan(0);
+    for (const t of selfTurns as any[]) {
+      expect(t.judge.selfJudged).toBe(true);
+      expect(t.judge.crossJudge).toBeTruthy();
+      expect(t.judge.crossJudge.judgeModel).toBe("gpt-5.2");
+      expect(t.judge.crossJudge.scores.overall_live_copilot_quality).toBe(5);
+    }
+    // Non-self-judged candidate gets NO crossJudge.
+    const otherTurns = res.turnResults.filter((t: any) => t.candidateId === "52-cand" && t.judge);
+    for (const t of otherTurns as any[]) expect(t.judge.crossJudge).toBeUndefined();
+    expect(judgeModelsUsed).toContain("gpt-5.2");
+    // Scorecard exposes std + cross-judge averages for the self-judged entry.
+    const solEntry = res.scorecard.candidates.find((c: any) => c.candidateId === "sol-cand")!;
+    expect(solEntry.judgeStds).toBeTruthy();
+    expect(solEntry.crossJudgeModel).toBe("gpt-5.2");
+    expect(solEntry.crossJudgeAverages!.overall_live_copilot_quality).toBe(5);
+  });
+
+  it("fail-closed: second judge failure => crossJudge null + note, never substituted", async () => {
+    const { res } = await runHarness(true, true);
+    const selfTurns = res.turnResults.filter((t: any) => t.candidateId === "sol-cand" && t.judge);
+    expect(selfTurns.length).toBeGreaterThan(0);
+    for (const t of selfTurns as any[]) {
+      expect(t.judge.crossJudge).toBeNull();
+      // Primary score is untouched.
+      expect(t.judge.scores.overall_live_copilot_quality).toBe(9);
+    }
+    expect(res.notes.some((n: string) => n.includes("second judge") && n.includes("honest self-judged mark stays"))).toBe(true);
+  });
+
+  it("fail-closed: no distinct second judge available => honest mark stays + note", async () => {
+    const { res } = await runHarness(false, false);
+    expect(res.secondJudgeModel).toBeNull();
+    const selfTurns = res.turnResults.filter((t: any) => t.judge);
+    for (const t of selfTurns as any[]) expect(t.judge.crossJudge).toBeUndefined();
+    expect(res.notes.some((n: string) => n.includes("no second judge available"))).toBe(true);
   });
 });

@@ -143,6 +143,21 @@ export interface JudgeScores {
     overall_live_copilot_quality: string;
   };
   rationale: string;
+  // Multi-sample aggregation (Task: stable judge). When present, `scores` are
+  // per-dimension MEDIANS over `samples` independent judge calls and
+  // `scoreStds` is the per-dimension sample standard deviation (spread).
+  samples?: number;
+  scoreStds?: Record<string, number>;
+  // Cross-check by a SECOND judge model when the primary judge judged its own
+  // candidate (selfJudged). null = second judge was available but failed
+  // (fail-closed: never substituted). undefined = not applicable / no second
+  // judge available (honest self-judged mark stays).
+  crossJudge?: {
+    judgeModel: string;
+    samples: number;
+    scores: JudgeScores["scores"];
+    scoreStds: Record<string, number>;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
