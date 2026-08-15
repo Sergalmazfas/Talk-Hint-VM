@@ -18,15 +18,20 @@ The user may speak in Russian, English, Spanish, or mix languages in the same me
 
 Respond primarily in the user's native/current language. Use English when proposing phrases the user may say during the call.
 
-Do not turn the user's first message immediately into a final goal unless the situation is already completely clear.
+STATE MACHINE — follow strictly:
+USER_PROBLEM -> AI_ALIGNMENT -> USER_CONFIRMATION/CLARIFICATION -> PROPOSED_GOAL -> (user confirms) -> OPENING_PHRASE.
 
-Ask at most 1-2 short clarifying questions, and only when the missing information materially changes the desired outcome.
+After the user's first substantive description you MUST NOT propose a goal yet, even if the situation seems completely clear. Your first reply is ALWAYS an alignment turn: a short, natural message in the user's language where you restate in your own words how you understood the situation, and either ask the ONE most useful question or offer a priority between options. This is not a questionnaire: at most 1-2 alignment/clarification turns in the entire preparation.
+
+Starting from the user's second message, proposing the goal is allowed but not required: if the user's answer created a new substantial uncertainty, you may make one second (and final) alignment turn before proposing the goal.
 
 Never invent facts.
 
 Internally distinguish: confirmed facts, problem, desired outcome, constraints, fallback options, unknowns.
 
 When enough information is available, propose a concise call goal in 2-4 sentences.
+
+The goal must state the concrete desired OUTCOME the user is trying to achieve (what should happen with the money / the case), never a vague topic or process like "find out the status of the request" or "clarify the timeline". Good example: "Get the payments already made counted toward the mandatory August payment; if that is impossible, find out why and secure a refund or another solution that keeps the payment plan intact."
 
 The goal is not active until the user explicitly confirms it.
 
@@ -165,11 +170,25 @@ export function prepareMessage(userId: string, text: string): Promise<PrepareRep
     }
     const parsed = parseJsonLoose(raw);
     const reply = typeof parsed?.reply === "string" && parsed.reply.trim() ? parsed.reply.trim() : raw;
-    const proposedGoal = typeof parsed?.proposed_goal === "string" && parsed.proposed_goal.trim()
+    let proposedGoal = typeof parsed?.proposed_goal === "string" && parsed.proposed_goal.trim()
       ? parsed.proposed_goal.trim() : null;
+    // DETERMINISTIC GATE (183.1): on the FIRST user turn a goal proposal is
+    // forbidden no matter what the model decided — the model's "I already
+    // understood everything" cannot be trusted. The first reply must be an
+    // alignment exchange; a goal is allowed from the second user turn on
+    // (allowed, not required — a second and final alignment turn is fine).
+    const isFirstUserTurn = history.filter((t) => t.role === "user").length === 0;
+    let storedRaw = raw;
+    if (isFirstUserTurn && proposedGoal) {
+      console.warn("[Prepare] Suppressed premature goal on first user turn");
+      proposedGoal = null;
+      // Sanitize what we store so the model doesn't believe it already
+      // proposed this goal in a later turn.
+      storedRaw = JSON.stringify({ reply, proposed_goal: "" });
+    }
     // Atomic commit of both turns; failure above leaves history untouched.
     const live = getPrepareHistory(userId);
-    live.push({ role: "user", content: text }, { role: "assistant", content: raw });
+    live.push({ role: "user", content: text }, { role: "assistant", content: storedRaw });
     if (live.length > MAX_TURNS) live.splice(0, live.length - MAX_TURNS);
     return { reply, proposedGoal };
   });

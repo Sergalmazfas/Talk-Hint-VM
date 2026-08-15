@@ -71,12 +71,48 @@ describe("prepareMessage", () => {
     expect(seenInput[2].content).toBe("второе сообщение");
   });
 
-  it("surfaces a proposed goal from the JSON contract", async () => {
+  it("surfaces a proposed goal from the JSON contract (second user turn)", async () => {
     global.fetch = vi.fn(async () =>
       solResponse(JSON.stringify({ reply: "Вот цель:", proposed_goal: "Зачесть $317.80 из внесённых $350 как августовский платёж." })),
     ) as any;
-    const r = await prepareMessage("u1", "всё рассказал");
+    // First turn already happened — goal proposals are legal from turn 2.
+    getPrepareHistory("u1").push(
+      { role: "user", content: "рассказ о проблеме" },
+      { role: "assistant", content: JSON.stringify({ reply: "правильно понимаю ...?", proposed_goal: "" }) },
+    );
+    const r = await prepareMessage("u1", "да, именно так");
     expect(r.proposedGoal).toContain("$317.80");
+  });
+
+  // 183.1 deterministic gate: the model's "I already understood everything"
+  // is NOT trusted — the server suppresses a goal on the first user turn.
+  it("first user turn: proposed goal is suppressed even if the model sends one", async () => {
+    global.fetch = vi.fn(async () =>
+      solResponse(JSON.stringify({
+        reply: "Правильно понимаю: главное — зачесть внесённые $350 как августовский платёж?",
+        proposed_goal: "Добиться зачёта $350 как августовского платежа.",
+      })),
+    ) as any;
+    const r = await prepareMessage("u1", "Полный рассказ банковской истории одним сообщением...");
+    expect(r.proposedGoal).toBeNull(); // gate wins over the model
+    expect(r.reply).toContain("Правильно понимаю");
+    // Stored history is sanitized so the model won't think it already proposed.
+    const stored = getPrepareHistory("u1")[1].content;
+    expect(JSON.parse(stored).proposed_goal).toBe("");
+  });
+
+  it("second user turn: a goal is allowed but NOT required (second alignment is fine)", async () => {
+    global.fetch = vi.fn(async () =>
+      solResponse(JSON.stringify({ reply: "Ещё один уточняющий вопрос: возврат — запасной вариант?", proposed_goal: "" })),
+    ) as any;
+    getPrepareHistory("u1").push(
+      { role: "user", content: "рассказ" },
+      { role: "assistant", content: JSON.stringify({ reply: "alignment", proposed_goal: "" }) },
+    );
+    const r = await prepareMessage("u1", "ответ, создающий новую неопределённость");
+    // No goal — and that's valid: the server must not force one.
+    expect(r.proposedGoal).toBeNull();
+    expect(r.reply).toContain("уточняющий вопрос");
   });
 
   it("honest error on HTTP failure — PrepareUnavailableError, no fallback call", async () => {
