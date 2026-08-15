@@ -27,6 +27,12 @@ import {
   LiveLatencyRecorder,
   type CandidatePipelineConfig,
 } from "./candidatePipeline";
+import {
+  registerLatencyRecorder,
+  unregisterLatencyRecorder,
+  recordSuggestionAck,
+  SUGGESTION_ACK_GRACE_MS,
+} from "./latencyAck";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
 import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
@@ -505,6 +511,10 @@ export function setCallOwner(callSid: string, userId: string) {
 export function clearCallOwner(callSid: string) {
   callOwners.delete(callSid);
 }
+
+// Suggestion delivery-ack routing lives in server/latencyAck.ts: it keeps its
+// OWN ownership snapshot so acks keep landing through the post-close grace
+// window even after clearCallOwner() wipes the callOwners entry.
 
 // Filter JSON from text - never show raw JSON to users
 function filterJsonFromText(text: string): string {
@@ -998,6 +1008,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             },
             log: (msg) => log(msg, "server"),
           });
+        } else if (message.type === "suggestion_ack") {
+          // Device confirmed rendering a suggestion — final stage of the
+          // speech→hint latency chain. Silent no-op when stale/unowned.
+          recordSuggestionAck(userId, message.callSid, message.utteranceId);
         } else if (message.type === "prepare_reset") {
           clearPrepareState(userId);
           clearOpeningDedup(userId);
@@ -1693,6 +1707,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           };
           const ack = ackPhrases[currentLanguage as "ru" | "es"] || ackPhrases.ru;
           
+          // Latency: this static phrase IS a delivered hint — time it honestly.
+          // No trigger/ready model stages (no Brain call): brain and stt→trigger
+          // percentiles skip it by construction; total + delivery still count.
+          latencyRecorder.ready(utteranceId, "wait_state");
           uiBroadcast({
             type: "suggestion",
             target: "HON",
@@ -1704,6 +1722,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             utteranceId,
             callSid
           });
+          latencyRecorder.sent(utteranceId);
           lastHintTs = Date.now();
           lastHintUtteranceId = utteranceId;
           log(`[WAIT_STATE] ACK shown - "Sure, I'll wait." - now blocking STEER`, "websocket");
@@ -2287,6 +2306,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
               streamUserId = callOwners.get(callSid);
               if (streamUserId) {
+                // Expose this call's latency recorder for suggestion_ack routing
+                // (device-delivery stage of the speech→hint chain). Registered
+                // with an ownership snapshot so acks keep working through the
+                // post-close grace window; no owner => no registration (acks
+                // fail closed, matching uiBroadcast's fail-closed routing).
+                registerLatencyRecorder(callSid, streamUserId, latencyRecorder);
                 ownerContextReady = loadOwnerContext(streamUserId);
               } else {
                 const sidForLookup = callSid;
@@ -2299,6 +2324,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                     if (uid) {
                       streamUserId = uid;
                       callOwners.set(sidForLookup, uid);
+                      registerLatencyRecorder(sidForLookup, uid, latencyRecorder);
                       log(`[TwilioStream] Resolved owner ${uid} for ${sidForLookup} via DB`, "twilio");
                       return loadOwnerContext(uid);
                     } else {
@@ -2562,19 +2588,26 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         }
       }
 
-      // Candidate Pipeline v1 (Task #207): flush the per-hint latency stages +
-      // pipeline label into calls.metadata so the admin verdict endpoint can
-      // compare this call against baseline calls. Detached + non-throwing.
-      if (callSid && latencyRecorder.count > 0) {
-        void storage
-          .mergeCallMetadataByCallSid(
-            callSid,
-            latencyRecorder.toMetadata(candidatePipeline, {
-              effective: sttSwapState === "none" ? null : sttSwapState,
-              swapDelayMs: sttSwapDelayMs,
-            })
-          )
-          .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));
+      // Latency flush with a bounded ACK grace window: a device may render the
+      // final hint right as the call ends, so its suggestion_ack can arrive
+      // AFTER this close event. Keep the recorder registered for a short grace
+      // period, then unregister (later acks are honestly "not delivered") and
+      // snapshot the metadata. Detached + non-throwing — never blocks teardown.
+      if (callSid) {
+        const flushSid = callSid;
+        const flushPipeline = candidatePipeline;
+        const flushSttInfo = {
+          effective: sttSwapState === "none" ? null : (sttSwapState as "swapped" | "failed"),
+          swapDelayMs: sttSwapDelayMs,
+        };
+        setTimeout(() => {
+          unregisterLatencyRecorder(flushSid);
+          if (latencyRecorder.count > 0) {
+            void storage
+              .mergeCallMetadataByCallSid(flushSid, latencyRecorder.toMetadata(flushPipeline, flushSttInfo))
+              .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));
+          }
+        }, SUGGESTION_ACK_GRACE_MS);
       }
 
       // AirAtoma CRM: push the finished call to the external webhook

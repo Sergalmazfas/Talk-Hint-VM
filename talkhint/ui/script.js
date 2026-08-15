@@ -1291,6 +1291,11 @@ function handleMessage(data) {
     case 'hint':
       if (data.en || data.english) {
         addHint(data.en || data.english, data.translation || data.ru || data.russian);
+        // Delivery ack: confirms the device rendered the hint (final stage of
+        // the speech→hint latency chain measured server-side).
+        if (typeof data.utteranceId === 'number' && data.callSid && socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'suggestion_ack', utteranceId: data.utteranceId, callSid: data.callSid }));
+        }
       }
       break;
 

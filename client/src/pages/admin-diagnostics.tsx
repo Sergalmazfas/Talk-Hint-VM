@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
@@ -2273,8 +2273,30 @@ interface VerdictCall {
     brainP50Ms: number | null;
     brainP95Ms: number | null;
     withinSlaPct: number | null;
+    // Per-stage breakdown (Task #206). Absent on calls recorded before it shipped.
+    sttToTriggerP50Ms?: number | null;
+    sttToTriggerP95Ms?: number | null;
+    readyToSentP50Ms?: number | null;
+    readyToSentP95Ms?: number | null;
+    deliveryP50Ms?: number | null;
+    deliveryP95Ms?: number | null;
+    deliveredCount?: number;
+    e2eP50Ms?: number | null;
+    e2eP95Ms?: number | null;
+    stageNotes?: string[];
   } | null;
   slaMs: number | null;
+  entries?: {
+    utteranceId: number;
+    sttFinalAt: number;
+    triggerAt?: number;
+    readyAt?: number;
+    sentAt?: number;
+    deliveredAt?: number;
+    source?: string;
+    outcome: "sent" | "dropped";
+    dropReason?: string;
+  }[] | null;
 }
 
 const PROD_SENTINEL = "__production__";
@@ -2325,6 +2347,7 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
   });
 
   const fmt = (v: number | null | undefined) => (v == null ? "—" : `${v} мс`);
+  const [expandedCall, setExpandedCall] = useState<string | null>(null);
   const callsList = verdictQ.data?.calls ?? [];
   const withLatency = callsList.filter((c) => c.latencySummary && c.latencySummary.hintsSent + c.latencySummary.hintsDropped > 0);
 
@@ -2385,9 +2408,10 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
         <CardHeader><CardTitle className="text-base">Вердикт: latency подсказок по последним звонкам</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-gray-400 mb-3">
-            Каждый звонок пишет этапы задержки подсказок (конец реплики гостя → триггер Brain → готовый текст → отправка в UI)
-            в метаданные. SLA цель: ≤ 1000 мс end-to-end. Candidate-звонки помечены; сравнивайте с baseline вручную —
-            автоматический победитель не объявляется.
+            Каждый звонок пишет этапы задержки подсказок (usable final STT → триггер Brain → готовый текст → отправка в UI →
+            подтверждение устройства, вкл. iPhone) в метаданные. SLA цель: ≤ 1000 мс end-to-end. Отсутствующие этапы показаны
+            честно как «—»: момент конца речи гостя STT не отдаёт (usable final уже включает задержку end-of-turn детекции),
+            а «доставлено» есть только если клиент прислал подтверждение. Кликните строку — раскроется разбивка по каждой подсказке.
           </p>
           {verdictQ.isLoading ? (
             <p className="text-gray-500 text-sm">Загрузка...</p>
@@ -2405,12 +2429,19 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
                   <TableHead>p50 total</TableHead>
                   <TableHead>p95 total</TableHead>
                   <TableHead>p50 brain</TableHead>
-                  <TableHead>≤ SLA</TableHead>
+                  <TableHead>p50 доставка</TableHead>
+                  <TableHead>p50 / p95 e2e (устройство)</TableHead>
+                  <TableHead>≤ SLA (до отправки)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {withLatency.map((c) => (
-                  <TableRow key={c.callSid} data-testid={`row-pipeline-call-${c.callSid}`}>
+                  <React.Fragment key={c.callSid}>
+                  <TableRow
+                    data-testid={`row-pipeline-call-${c.callSid}`}
+                    className="cursor-pointer"
+                    onClick={() => setExpandedCall(expandedCall === c.callSid ? null : c.callSid)}
+                  >
                     <TableCell className="text-xs">
                       <div>{new Date(c.startedAt).toLocaleString()}</div>
                       <div className="text-gray-500">{c.direction} → {c.toNumber}</div>
@@ -2446,9 +2477,82 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
                     <TableCell>{fmt(c.latencySummary!.totalP95Ms)}</TableCell>
                     <TableCell>{fmt(c.latencySummary!.brainP50Ms)}</TableCell>
                     <TableCell>
+                      {fmt(c.latencySummary!.deliveryP50Ms)}
+                      {c.latencySummary!.deliveredCount != null && c.latencySummary!.hintsSent > 0 && (
+                        <div className="text-xs text-gray-500">{c.latencySummary!.deliveredCount}/{c.latencySummary!.hintsSent} подтв.</div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {c.latencySummary!.e2eP50Ms == null ? "—" : `${c.latencySummary!.e2eP50Ms} / ${fmt(c.latencySummary!.e2eP95Ms)}`}
+                    </TableCell>
+                    <TableCell>
                       {c.latencySummary!.withinSlaPct == null ? "—" : `${c.latencySummary!.withinSlaPct}%`}
                     </TableCell>
                   </TableRow>
+                  {expandedCall === c.callSid && (
+                    <TableRow data-testid={`row-pipeline-detail-${c.callSid}`}>
+                      <TableCell colSpan={9} className="bg-gray-950">
+                        {c.latencySummary && (
+                          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs text-gray-300 mb-2" data-testid={`stage-summary-${c.callSid}`}>
+                            {([
+                              ["STT→триггер", c.latencySummary.sttToTriggerP50Ms, c.latencySummary.sttToTriggerP95Ms],
+                              ["Brain", c.latencySummary.brainP50Ms, c.latencySummary.brainP95Ms],
+                              ["текст→отправка", c.latencySummary.readyToSentP50Ms, c.latencySummary.readyToSentP95Ms],
+                              ["total (до отправки)", c.latencySummary.totalP50Ms, c.latencySummary.totalP95Ms],
+                              ["доставка", c.latencySummary.deliveryP50Ms, c.latencySummary.deliveryP95Ms],
+                              ["e2e (устройство)", c.latencySummary.e2eP50Ms, c.latencySummary.e2eP95Ms],
+                            ] as const).map(([label, p50, p95]) => (
+                              <div key={label} className="bg-gray-900 rounded p-2">
+                                <div className="text-gray-500">{label}</div>
+                                <div>p50 {p50 == null ? "—" : `${p50} мс`} / p95 {p95 == null ? "—" : `${p95} мс`}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(c.latencySummary?.stageNotes?.length ?? 0) > 0 && (
+                          <ul className="text-xs text-amber-400/80 list-disc ml-4 mb-2">
+                            {c.latencySummary!.stageNotes!.map((n, i) => <li key={i}>{n}</li>)}
+                          </ul>
+                        )}
+                        {!c.entries || c.entries.length === 0 ? (
+                          <p className="text-xs text-gray-500">Разбивка по подсказкам недоступна для этого звонка.</p>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="text-xs">#</TableHead>
+                                <TableHead className="text-xs">STT→триггер</TableHead>
+                                <TableHead className="text-xs">Brain (триггер→текст)</TableHead>
+                                <TableHead className="text-xs">текст→отправка</TableHead>
+                                <TableHead className="text-xs">отправка→устройство</TableHead>
+                                <TableHead className="text-xs">e2e</TableHead>
+                                <TableHead className="text-xs">Источник / исход</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {c.entries.map((e) => {
+                                const d = (a?: number, b?: number) => (a != null && b != null ? `${b - a} мс` : "—");
+                                return (
+                                  <TableRow key={e.utteranceId} className="text-xs">
+                                    <TableCell>{e.utteranceId}</TableCell>
+                                    <TableCell>{d(e.sttFinalAt, e.triggerAt)}</TableCell>
+                                    <TableCell>{d(e.triggerAt, e.readyAt)}</TableCell>
+                                    <TableCell>{d(e.readyAt, e.sentAt)}</TableCell>
+                                    <TableCell>{d(e.sentAt, e.deliveredAt)}</TableCell>
+                                    <TableCell>{d(e.sttFinalAt, e.deliveredAt)}</TableCell>
+                                    <TableCell className="text-gray-400">
+                                      {e.outcome === "sent" ? (e.source ?? "—") : `drop: ${e.dropReason ?? "?"}`}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </React.Fragment>
                 ))}
               </TableBody>
             </Table>

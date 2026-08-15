@@ -190,6 +190,20 @@ final class CallHintStream: NSObject {
         ["type": "set_mode", "mode": mode]
     }
 
+    /// Builds the `suggestion_ack` delivery confirmation for an inbound
+    /// `suggestion` frame, or `nil` when the frame is not a suggestion or lacks
+    /// the identifiers (`utteranceId` + `callSid`) the server needs to attribute
+    /// the ack. Pure (no networking) so the ack contract is unit-testable —
+    /// a dropped field here would silently zero out device-delivery latency data.
+    static func suggestionAckPayload(forFrame text: String) -> [String: Any]? {
+        guard let data = text.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (obj["type"] as? String) == "suggestion",
+              let utteranceId = obj["utteranceId"] as? NSNumber,
+              let callSid = obj["callSid"] as? String, !callSid.isEmpty else { return nil }
+        return ["type": "suggestion_ack", "utteranceId": utteranceId, "callSid": callSid]
+    }
+
     /// Builds the `prepare_message` control message (one PREPARE turn). The
     /// optional `clientMessageId` is the idempotency key for reconnect resends.
     static func prepareMessagePayload(text: String, clientMessageId: String? = nil) -> [String: Any] {
@@ -452,6 +466,12 @@ final class CallHintStream: NSObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.delegate?.callHintStream(self, didReceive: event)
+            // Delivery ack: sent AFTER the delegate has rendered the suggestion
+            // on the main queue, so the server-side "delivered" stage measures
+            // the hint actually reaching the screen — not just socket arrival.
+            if let ack = CallHintStream.suggestionAckPayload(forFrame: text) {
+                self.send(ack)
+            }
         }
     }
 

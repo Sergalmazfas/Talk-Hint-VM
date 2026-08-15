@@ -270,12 +270,20 @@ export function classifyPipelineCall(pipelineMeta: {
 }
 
 // ---------------------------------------------------------------------------
-// Hint latency recorder (per call).
+// Hint latency recorder (per call) — the LIVE speech→hint SLA chain.
 // Stages, all epoch ms:
-//   sttFinalAt — guest end-of-turn committed by STT (handler entry)
-//   triggerAt  — Brain (suggestion) request fired
-//   readyAt    — first usable hint text available server-side
-//   sentAt     — suggestion pushed to the /ui websocket
+//   speechEndAt — guest actually stopped speaking. NOT measurable today:
+//                 neither Flux TurnInfo nor the OpenAI realtime STT gives a
+//                 wall-clock speech-end; sttFinalAt includes the STT's own
+//                 end-of-turn detection delay. Recorded honestly as absent.
+//   sttFinalAt  — guest end-of-turn committed by STT (usable final)
+//   triggerAt   — Brain (suggestion) request fired
+//   readyAt     — first usable hint text available server-side. The live
+//                 model call is non-streaming, so "first usable text" and
+//                 "full output" coincide (honest note in stageNotes).
+//   sentAt      — suggestion pushed to the /ui websocket
+//   deliveredAt — client (web UI or iPhone) acked rendering the suggestion
+//                 (suggestion_ack frame). Absent when no client acked.
 // ---------------------------------------------------------------------------
 
 export interface HintLatencyEntry {
@@ -284,6 +292,7 @@ export interface HintLatencyEntry {
   triggerAt?: number;
   readyAt?: number;
   sentAt?: number;
+  deliveredAt?: number;
   source?: string; // library | gpt | ...
   outcome: "sent" | "dropped";
   dropReason?: string;
@@ -303,6 +312,18 @@ export interface HintLatencySummary {
   brainP50Ms: number | null; // trigger -> ready
   brainP95Ms: number | null;
   withinSlaPct: number | null; // <= 1000ms end-to-end (LIVE SLA target ceiling)
+  // Per-stage breakdown (speech→hint SLA chain). All computed from SENT hints.
+  sttToTriggerP50Ms: number | null; // sttFinal -> trigger (guards/translation gate)
+  sttToTriggerP95Ms: number | null;
+  readyToSentP50Ms: number | null; // ready -> ws send
+  readyToSentP95Ms: number | null;
+  deliveryP50Ms: number | null; // sent -> device ack (web/iPhone)
+  deliveryP95Ms: number | null;
+  deliveredCount: number; // how many sent hints were acked by a device
+  e2eP50Ms: number | null; // sttFinal -> device ack (only acked hints)
+  e2eP95Ms: number | null;
+  // Honest stage caveats — stages we CANNOT measure are named, never faked.
+  stageNotes: string[];
 }
 
 export const HINT_SLA_MS = 1000;
@@ -314,6 +335,26 @@ export function summarizeHintLatencies(entries: HintLatencyEntry[]): HintLatency
     .filter((e) => e.triggerAt && e.readyAt)
     .map((e) => e.readyAt! - e.triggerAt!)
     .sort((a, b) => a - b);
+  const sttToTrigger = sent
+    .filter((e) => e.triggerAt)
+    .map((e) => e.triggerAt! - e.sttFinalAt)
+    .sort((a, b) => a - b);
+  const readyToSent = sent
+    .filter((e) => e.readyAt)
+    .map((e) => e.sentAt! - e.readyAt!)
+    .sort((a, b) => a - b);
+  const delivered = sent.filter((e) => e.deliveredAt);
+  const deliveries = delivered.map((e) => e.deliveredAt! - e.sentAt!).sort((a, b) => a - b);
+  const e2es = delivered.map((e) => e.deliveredAt! - e.sttFinalAt).sort((a, b) => a - b);
+  const stageNotes: string[] = [
+    "speech-end не измеряется: STT (Flux/OpenAI realtime) не отдаёт wall-clock конец речи — sttFinal уже включает задержку end-of-turn детекции",
+    "first-text = ready: live-модель вызывается без стриминга, первый пригодный текст совпадает с полным ответом",
+  ];
+  if (sent.length > 0 && delivered.length === 0) {
+    stageNotes.push("доставка на устройство не подтверждена ни для одной подсказки (клиент не прислал suggestion_ack — старая версия UI/приложения?)");
+  } else if (delivered.length < sent.length) {
+    stageNotes.push(`доставка подтверждена только для ${delivered.length} из ${sent.length} подсказок`);
+  }
   return {
     hintsSent: sent.length,
     hintsDropped: entries.length - sent.length,
@@ -322,6 +363,16 @@ export function summarizeHintLatencies(entries: HintLatencyEntry[]): HintLatency
     brainP50Ms: percentile(brains, 50),
     brainP95Ms: percentile(brains, 95),
     withinSlaPct: totals.length ? Math.round((totals.filter((t) => t <= HINT_SLA_MS).length / totals.length) * 100) : null,
+    sttToTriggerP50Ms: percentile(sttToTrigger, 50),
+    sttToTriggerP95Ms: percentile(sttToTrigger, 95),
+    readyToSentP50Ms: percentile(readyToSent, 50),
+    readyToSentP95Ms: percentile(readyToSent, 95),
+    deliveryP50Ms: percentile(deliveries, 50),
+    deliveryP95Ms: percentile(deliveries, 95),
+    deliveredCount: delivered.length,
+    e2eP50Ms: percentile(e2es, 50),
+    e2eP95Ms: percentile(e2es, 95),
+    stageNotes,
   };
 }
 
@@ -351,6 +402,11 @@ export class LiveLatencyRecorder {
       e.sentAt = Date.now();
       e.outcome = "sent";
     }
+  }
+  /** Device (web UI / iPhone) confirmed rendering the suggestion. First ack wins. */
+  delivered(utteranceId: number): void {
+    const e = this.byUtterance.get(utteranceId);
+    if (e && e.outcome === "sent" && !e.deliveredAt) e.deliveredAt = Date.now();
   }
   dropped(utteranceId: number, reason: string): void {
     const e = this.byUtterance.get(utteranceId);

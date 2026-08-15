@@ -92,6 +92,31 @@ describe("LiveLatencyRecorder", () => {
     expect(meta.candidatePipeline).toEqual({ enabled: false, stt: null, brainModel: null, sttEffective: null, sttSwapDelayMs: null });
   });
 
+  it("delivered() records the device ack once, only for sent entries", () => {
+    const r = new LiveLatencyRecorder();
+    r.start(1, Date.now());
+    r.trigger(1);
+    r.ready(1, "gpt");
+    r.sent(1);
+    r.delivered(1);
+    const firstMeta = r.toMetadata({ enabled: false, stt: null, brainModel: null }) as any;
+    const deliveredAt = firstMeta.hintLatency.entries[0].deliveredAt;
+    expect(deliveredAt).toBeGreaterThanOrEqual(firstMeta.hintLatency.entries[0].sentAt);
+    r.delivered(1); // duplicate ack (web + iOS mirror the same call) must not overwrite
+    const secondMeta = r.toMetadata({ enabled: false, stt: null, brainModel: null }) as any;
+    expect(secondMeta.hintLatency.entries[0].deliveredAt).toBe(deliveredAt);
+  });
+
+  it("delivered() on a dropped or unknown utterance is a no-op (never fabricates a stage)", () => {
+    const r = new LiveLatencyRecorder();
+    r.start(2, Date.now());
+    r.dropped(2, "cooldown");
+    r.delivered(2); // dropped hint never reached a device
+    r.delivered(99); // unknown utterance
+    const meta = r.toMetadata({ enabled: false, stt: null, brainModel: null }) as any;
+    expect(meta.hintLatency.entries[0].deliveredAt).toBeUndefined();
+  });
+
   it("dropped() after sent() does not un-send an entry", () => {
     const r = new LiveLatencyRecorder();
     r.start(2, Date.now());
@@ -143,6 +168,152 @@ describe("summarizeHintLatencies", () => {
     expect(s.totalP95Ms).toBeNull();
     expect(s.brainP50Ms).toBeNull();
     expect(s.withinSlaPct).toBeNull();
+    expect(s.deliveryP50Ms).toBeNull();
+    expect(s.e2eP50Ms).toBeNull();
+    expect(s.deliveredCount).toBe(0);
+  });
+
+  it("computes per-stage percentiles (stt→trigger, ready→sent, delivery, e2e) from acked entries", () => {
+    const t0 = 1_000_000;
+    const acked = (id: number, deliveryMs: number): HintLatencyEntry => ({
+      utteranceId: id,
+      sttFinalAt: t0,
+      triggerAt: t0 + 40,
+      readyAt: t0 + 440,
+      sentAt: t0 + 450,
+      deliveredAt: t0 + 450 + deliveryMs,
+      outcome: "sent",
+    });
+    const s = summarizeHintLatencies([
+      acked(1, 100),
+      acked(2, 300),
+      // sent but never acked — must not enter delivery/e2e percentiles
+      { utteranceId: 3, sttFinalAt: t0, triggerAt: t0 + 40, readyAt: t0 + 440, sentAt: t0 + 450, outcome: "sent" },
+    ]);
+    expect(s.sttToTriggerP50Ms).toBe(40);
+    expect(s.sttToTriggerP95Ms).toBe(40);
+    expect(s.readyToSentP50Ms).toBe(10);
+    expect(s.readyToSentP95Ms).toBe(10);
+    expect(s.deliveredCount).toBe(2);
+    expect(s.deliveryP50Ms).toBe(100);
+    expect(s.deliveryP95Ms).toBe(300);
+    expect(s.e2eP50Ms).toBe(550);
+    expect(s.e2eP95Ms).toBe(750);
+    // Partial delivery is called out honestly.
+    expect(s.stageNotes.join(" ")).toContain("2 из 3");
+  });
+
+  it("no acks at all => delivery/e2e are null with an honest stage note (never faked from sentAt)", () => {
+    const t0 = 1_000_000;
+    const s = summarizeHintLatencies([
+      { utteranceId: 1, sttFinalAt: t0, triggerAt: t0 + 40, readyAt: t0 + 400, sentAt: t0 + 410, outcome: "sent" },
+    ]);
+    expect(s.deliveredCount).toBe(0);
+    expect(s.deliveryP50Ms).toBeNull();
+    expect(s.e2eP50Ms).toBeNull();
+    expect(s.stageNotes.some((n) => n.includes("suggestion_ack"))).toBe(true);
+  });
+
+  it("always names the unmeasurable stages (speech-end, first-text) in stageNotes", () => {
+    const s = summarizeHintLatencies([]);
+    expect(s.stageNotes.some((n) => n.includes("speech-end"))).toBe(true);
+    expect(s.stageNotes.some((n) => n.includes("first-text"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suggestion_ack lifecycle (server/latencyAck.ts) — REAL registry, not source
+// guards: registration snapshot, ownership fail-closed, grace-window behavior
+// (acks land after close-handler cleanup, until unregistration).
+// ---------------------------------------------------------------------------
+
+import {
+  registerLatencyRecorder,
+  unregisterLatencyRecorder,
+  recordSuggestionAck,
+  SUGGESTION_ACK_GRACE_MS,
+} from "../latencyAck";
+
+describe("suggestion_ack lifecycle (latencyAck registry)", () => {
+  const sentHint = (r: LiveLatencyRecorder, id: number) => {
+    r.start(id, Date.now());
+    r.trigger(id);
+    r.ready(id, "gpt");
+    r.sent(id);
+  };
+  const entriesOf = (r: LiveLatencyRecorder) =>
+    (r.toMetadata({ enabled: false, stt: null, brainModel: null }) as any).hintLatency.entries;
+
+  it("applies an ack from the owning user to the registered recorder", () => {
+    const r = new LiveLatencyRecorder();
+    sentHint(r, 1);
+    registerLatencyRecorder("CA-life-1", "user-a", r);
+    expect(recordSuggestionAck("user-a", "CA-life-1", 1)).toBe(true);
+    expect(entriesOf(r)[0].deliveredAt).toBeGreaterThanOrEqual(entriesOf(r)[0].sentAt);
+    unregisterLatencyRecorder("CA-life-1");
+  });
+
+  it("fails closed: wrong user, unknown call, malformed ids", () => {
+    const r = new LiveLatencyRecorder();
+    sentHint(r, 1);
+    registerLatencyRecorder("CA-life-2", "user-a", r);
+    expect(recordSuggestionAck("user-b", "CA-life-2", 1)).toBe(false); // forged/cross-user
+    expect(recordSuggestionAck(undefined, "CA-life-2", 1)).toBe(false);
+    expect(recordSuggestionAck("user-a", "CA-unknown", 1)).toBe(false);
+    expect(recordSuggestionAck("user-a", "CA-life-2", "1" as any)).toBe(false);
+    expect(recordSuggestionAck("user-a", "CA-life-2", NaN)).toBe(false);
+    expect(entriesOf(r)[0].deliveredAt).toBeUndefined();
+    unregisterLatencyRecorder("CA-life-2");
+  });
+
+  it("grace window: acks still land while registered (independent of callOwners cleanup), never after unregistration", () => {
+    const r = new LiveLatencyRecorder();
+    sentHint(r, 7);
+    registerLatencyRecorder("CA-life-3", "user-a", r);
+    // Simulates the post-close window: the ws close handler has already run
+    // (and cleared websocket.ts's callOwners), but unregistration only happens
+    // after SUGGESTION_ACK_GRACE_MS — the registry's own ownership snapshot
+    // keeps the ack working.
+    expect(recordSuggestionAck("user-a", "CA-life-3", 7)).toBe(true);
+    unregisterLatencyRecorder("CA-life-3");
+    const r2 = new LiveLatencyRecorder();
+    sentHint(r2, 8);
+    expect(recordSuggestionAck("user-a", "CA-life-3", 8)).toBe(false); // after cutoff: honest "not delivered"
+    expect(SUGGESTION_ACK_GRACE_MS).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// websocket.ts wiring source guards for the parts that live inside the stream
+// closure and cannot be imported in isolation.
+// ---------------------------------------------------------------------------
+
+describe("websocket.ts suggestion_ack wiring (source guards)", () => {
+  const wsSrc = fs.readFileSync(path.join(__dirname, "..", "websocket.ts"), "utf8");
+
+  it("/ui message handler routes suggestion_ack through recordSuggestionAck", () => {
+    expect(wsSrc).toContain('message.type === "suggestion_ack"');
+    expect(wsSrc).toContain("recordSuggestionAck(userId, message.callSid, message.utteranceId)");
+  });
+
+  it("recorder is registered WITH the owner snapshot on both owner-resolution paths", () => {
+    expect(wsSrc).toContain("registerLatencyRecorder(callSid, streamUserId, latencyRecorder)");
+    expect(wsSrc).toContain("registerLatencyRecorder(sidForLookup, uid, latencyRecorder)");
+  });
+
+  it("close flush waits the ACK grace period, then unregisters BEFORE snapshotting", () => {
+    expect(wsSrc).toContain("}, SUGGESTION_ACK_GRACE_MS);");
+    const unregIdx = wsSrc.indexOf("unregisterLatencyRecorder(flushSid)");
+    const flushIdx = wsSrc.indexOf("latencyRecorder.toMetadata(flushPipeline");
+    expect(unregIdx).toBeGreaterThan(-1);
+    expect(flushIdx).toBeGreaterThan(unregIdx);
+  });
+
+  it("the wait-state static ACK phrase is timed as a real sent hint", () => {
+    const idx = wsSrc.indexOf('latencyRecorder.ready(utteranceId, "wait_state")');
+    expect(idx).toBeGreaterThan(-1);
+    // sent() follows the wait-state uiBroadcast
+    expect(wsSrc.slice(idx, idx + 800)).toContain("latencyRecorder.sent(utteranceId)");
   });
 });
 
