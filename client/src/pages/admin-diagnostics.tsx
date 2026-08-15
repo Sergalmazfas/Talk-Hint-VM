@@ -443,6 +443,25 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
     onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
   });
 
+  // Realtime shortlist control run: only realtime candidates (no batch
+  // ceiling, no optional externals) on one fixture; saved to history.
+  const runRealtime = useMutation({
+    mutationFn: async (fixtureId: string) => {
+      const res = await fetch(`${BASE}/ears/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ fixtureIds: [fixtureId], realtimeOnly: true }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [BASE, "runs"] });
+      toast({ title: "Realtime-прогон запущен", description: "Только realtime-кандидаты; результат появится в History и в отчёте." });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-3">
@@ -533,11 +552,18 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
                   </TableCell>
                   <TableCell className="text-xs">{f.audioFormat ?? "—"}{f.audioChannels ? ` / ${f.audioChannels}` : ""}</TableCell>
                   <TableCell className="text-xs text-gray-400">{(f.tags ?? []).join(", ") || "—"}</TableCell>
-                  <TableCell>
+                  <TableCell className="space-x-1 whitespace-nowrap">
                     <Button variant="ghost" size="sm" className="h-6 px-2 text-xs"
                       onClick={() => setEditFixtureId(f.id)} data-testid={`button-edit-reference-${f.id}`}>
                       Edit reference
                     </Button>
+                    {f.audioBase64 && (
+                      <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-purple-300"
+                        onClick={() => runRealtime.mutate(f.id)} disabled={runRealtime.isPending}
+                        data-testid={`button-run-realtime-${f.id}`}>
+                        Run realtime EARS
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -649,20 +675,46 @@ function EditReferenceDialog({ fixtureId, onClose }: { fixtureId: string | null;
   const [transcript, setTranscript] = useState("");
   const [terms, setTerms] = useState("");
   const [swapChannels, setSwapChannels] = useState(false);
-  const [loaded, setLoaded] = useState<{ title: string; channelRoles: string[] } | null>(null);
+  const [loaded, setLoaded] = useState<{ title: string; channelRoles: string[]; hasAudio: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Per-turn verification state
+  interface RefTurn { idx: number; role: "owner" | "guest"; text: string; verified?: boolean; tEndMs?: number; tStartMs?: number }
+  const [turns, setTurns] = useState<RefTurn[]>([]);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [confirmDestructive, setConfirmDestructive] = useState(false);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [savingIdx, setSavingIdx] = useState<number | null>(null);
+  const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+  const [divergence, setDivergence] = useState<Record<number, { disagreement: number; maxWerVsRef: number | null }>>({});
+
+  async function reload() {
+    if (!fixtureId || !token) return;
+    const res = await fetch(`${BASE}/fixtures/${fixtureId}/reference`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    setTurns((data.referenceTurns ?? []) as RefTurn[]);
+    setDrafts({});
+    setTranscript((data.referenceTurns ?? []).map((t: ParsedTurn) => `${t.role}: ${t.text}`).join("\n"));
+    setTerms(((data.criticalEntities?.terms ?? []) as string[]).join(", "));
+    setSwapChannels(Array.isArray(data.channelRoles) && data.channelRoles[0] === "guest");
+    setLoaded({ title: data.title, channelRoles: data.channelRoles ?? ["owner", "guest"], hasAudio: !!data.hasAudio });
+  }
 
   useEffect(() => {
-    if (!fixtureId || !token) { setLoaded(null); return; }
+    if (!fixtureId || !token) { setLoaded(null); setTurns([]); setDivergence({}); return; }
     (async () => {
       try {
-        const res = await fetch(`${BASE}/fixtures/${fixtureId}/reference`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-        const data = await res.json();
-        setTranscript((data.referenceTurns ?? []).map((t: ParsedTurn) => `${t.role}: ${t.text}`).join("\n"));
-        setTerms(((data.criticalEntities?.terms ?? []) as string[]).join(", "));
-        setSwapChannels(Array.isArray(data.channelRoles) && data.channelRoles[0] === "guest");
-        setLoaded({ title: data.title, channelRoles: data.channelRoles ?? ["owner", "guest"] });
+        await reload();
+        // Disputed-turn highlighting from the latest completed EARS run (best-effort).
+        try {
+          const res = await fetch(`${BASE}/fixtures/${fixtureId}/turn-divergence`, { headers: { Authorization: `Bearer ${token}` } });
+          if (res.ok) {
+            const d = await res.json();
+            const map: Record<number, { disagreement: number; maxWerVsRef: number | null }> = {};
+            for (const t of d.turns ?? []) map[t.idx] = { disagreement: t.disagreement, maxWerVsRef: t.maxWerVsRef };
+            setDivergence(map);
+          }
+        } catch { /* highlighting is optional */ }
       } catch (e: any) {
         toast({ title: "Не удалось загрузить reference", description: String(e?.message ?? e), variant: "destructive" });
         onClose();
@@ -670,6 +722,50 @@ function EditReferenceDialog({ fixtureId, onClose }: { fixtureId: string | null;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixtureId, token]);
+
+  async function playTurn(idx: number) {
+    if (!fixtureId) return;
+    try {
+      setPlayingIdx(idx);
+      const res = await fetch(`${BASE}/fixtures/${fixtureId}/turn-audio/${idx}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => { URL.revokeObjectURL(url); setPlayingIdx((v) => (v === idx ? null : v)); };
+      audio.onerror = () => { URL.revokeObjectURL(url); setPlayingIdx((v) => (v === idx ? null : v)); };
+      await audio.play();
+    } catch (e: any) {
+      setPlayingIdx(null);
+      toast({ title: "Не удалось проиграть реплику", description: String(e?.message ?? e), variant: "destructive" });
+    }
+  }
+
+  async function saveTurn(idx: number, patch: { text?: string; verified?: boolean }) {
+    if (!fixtureId) return;
+    setSavingIdx(idx);
+    try {
+      const res = await fetch(`${BASE}/fixtures/${fixtureId}/reference/turns/${idx}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      setTurns((prev) => prev.map((t) => (t.idx === idx ? { ...t, ...data.turn } : t)));
+      setDrafts((d) => { const n = { ...d }; delete n[idx]; return n; });
+      qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
+    } catch (e: any) {
+      toast({ title: "Не сохранилось", description: String(e?.message ?? e), variant: "destructive" });
+    } finally {
+      setSavingIdx(null);
+    }
+  }
+
+  const ownerTurns = turns.filter((t) => t.role === "owner");
+  const ownerVerified = ownerTurns.filter((t) => t.verified === true).length;
+  // "Disputed": top divergence among owner turns — listen to these first.
+  const disputedCut = 0.15;
 
   async function submit() {
     if (!fixtureId) return;
@@ -693,8 +789,17 @@ function EditReferenceDialog({ fixtureId, onClose }: { fixtureId: string | null;
           referenceTurns,
           terms: terms.split(",").map((t) => t.trim()).filter(Boolean),
           channelRoles: swapChannels ? ["guest", "owner"] : ["owner", "guest"],
+          confirmDestructive,
         }),
       });
+      if (res.status === 409) {
+        toast({
+          title: "Структура реплик изменилась",
+          description: "Bulk-сохранение уничтожит тайминги и verified-флаги. Отметьте «подтверждаю сброс», если это намеренно, или правьте реплики по одной.",
+          variant: "destructive",
+        });
+        return;
+      }
       if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       toast({ title: "Reference сохранён", description: "Новая версия reference transcript зафиксирована." });
       qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
@@ -708,16 +813,91 @@ function EditReferenceDialog({ fixtureId, onClose }: { fixtureId: string | null;
 
   return (
     <Dialog open={!!fixtureId} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-2xl">
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit reference transcript{loaded ? ` — ${loaded.title}` : ""}</DialogTitle>
+          {ownerTurns.length > 0 && (
+            <DialogDescription className="text-gray-400" data-testid="text-owner-verify-progress">
+              Human-verify прогресс: <span className={ownerVerified === ownerTurns.length ? "text-green-400" : "text-amber-300"}>
+                {ownerVerified}/{ownerTurns.length} owner turns verified
+              </span>
+              {Object.keys(divergence).length > 0 && " · оранжевым — «спорные» реплики (кандидаты сильнее всего расходятся): слушать в первую очередь"}
+            </DialogDescription>
+          )}
         </DialogHeader>
         <div className="space-y-4">
+          <label className="flex items-center gap-2 text-sm text-gray-300">
+            <input type="checkbox" checked={bulkMode} onChange={(e) => setBulkMode(e.target.checked)} data-testid="checkbox-bulk-mode" />
+            Bulk-режим (весь транскрипт одним текстом; сбрасывает тайминги и verified — только для полного перепечатывания)
+          </label>
+
+          {!bulkMode && (
+            <div className="space-y-2" data-testid="list-reference-turns">
+              {turns.map((t) => {
+                const div = divergence[t.idx];
+                const disputed = t.role === "owner" && !!div && (div.disagreement >= disputedCut || (div.maxWerVsRef ?? 0) >= disputedCut);
+                const draft = drafts[t.idx];
+                const dirty = draft !== undefined && draft !== t.text;
+                return (
+                  <div key={t.idx}
+                    className={`rounded border px-3 py-2 ${disputed ? "border-amber-600 bg-amber-950/20" : "border-gray-800 bg-gray-950/40"} ${t.role === "guest" ? "opacity-70" : ""}`}
+                    data-testid={`row-turn-${t.idx}`}>
+                    <div className="flex items-center gap-2 mb-1 text-xs">
+                      <Badge variant="outline" className={t.role === "owner" ? "text-cyan-300 border-cyan-700" : "text-gray-400 border-gray-700"}>
+                        #{t.idx} {t.role}
+                      </Badge>
+                      {disputed && <Badge className="bg-amber-600 hover:bg-amber-600">спорная · max WER {div ? (Math.max(div.disagreement, div.maxWerVsRef ?? 0) * 100).toFixed(0) : "?"}%</Badge>}
+                      {t.role === "owner" && (t.verified
+                        ? <Badge className="bg-green-700 hover:bg-green-700" data-testid={`badge-verified-${t.idx}`}>verified</Badge>
+                        : <Badge variant="outline" className="text-gray-500 border-gray-700">не проверено</Badge>)}
+                      <div className="flex-1" />
+                      {loaded?.hasAudio && typeof t.tEndMs === "number" && (
+                        <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
+                          onClick={() => playTurn(t.idx)} disabled={playingIdx === t.idx}
+                          data-testid={`button-play-turn-${t.idx}`}>
+                          {playingIdx === t.idx ? "▶ играет…" : "▶ слушать"}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Textarea rows={2} value={draft ?? t.text}
+                        onChange={(e) => setDrafts((d) => ({ ...d, [t.idx]: e.target.value }))}
+                        className="bg-gray-950 border-gray-700 font-mono text-xs flex-1"
+                        data-testid={`input-turn-text-${t.idx}`} />
+                      <div className="flex flex-col gap-1 shrink-0">
+                        {dirty && (
+                          <Button size="sm" className="h-6 px-2 text-xs bg-cyan-600 hover:bg-cyan-700"
+                            onClick={() => saveTurn(t.idx, { text: draft })} disabled={savingIdx === t.idx}
+                            data-testid={`button-save-turn-${t.idx}`}>
+                            Сохранить
+                          </Button>
+                        )}
+                        {t.role === "owner" && !dirty && (
+                          <Button size="sm" variant={t.verified ? "outline" : "default"}
+                            className={`h-6 px-2 text-xs ${t.verified ? "" : "bg-green-700 hover:bg-green-800"}`}
+                            onClick={() => saveTurn(t.idx, { verified: !t.verified })} disabled={savingIdx === t.idx}
+                            data-testid={`button-verify-turn-${t.idx}`}>
+                            {t.verified ? "снять verified" : "✓ verified"}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {turns.length === 0 && <p className="text-gray-500 text-sm">Нет реплик.</p>}
+            </div>
+          )}
+
+          {bulkMode && (
           <div>
             <Label className="text-gray-300">Reference transcript (одна строка = один ход, «owner: …» / «guest: …»)</Label>
             <Textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} rows={14}
               className="bg-gray-950 border-gray-700 font-mono text-xs" data-testid="input-edit-reference-transcript" />
           </div>
+          )}
+          {bulkMode && (
+          <>
           <div>
             <Label className="text-gray-300">Domain terms (через запятую: eSIM, SMS code, port-in …)</Label>
             <Input value={terms} onChange={(e) => setTerms(e.target.value)}
@@ -728,11 +908,22 @@ function EditReferenceDialog({ fixtureId, onClose }: { fixtureId: string | null;
               data-testid="checkbox-swap-channels" />
             Поменять каналы местами (канал 0 = Guest, канал 1 = Owner)
           </label>
+          <label className="flex items-center gap-2 text-sm text-red-300">
+            <input type="checkbox" checked={confirmDestructive} onChange={(e) => setConfirmDestructive(e.target.checked)}
+              data-testid="checkbox-confirm-destructive" />
+            Подтверждаю сброс таймингов и verified-флагов (только при изменении структуры реплик)
+          </label>
+          </>
+          )}
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={submitting || !loaded} className="bg-cyan-600 hover:bg-cyan-700" data-testid="button-save-reference">
-            {submitting ? "Saving…" : "Save reference"}
-          </Button>
+          {bulkMode ? (
+            <Button onClick={submit} disabled={submitting || !loaded} className="bg-cyan-600 hover:bg-cyan-700" data-testid="button-save-reference">
+              {submitting ? "Saving…" : "Save reference (bulk)"}
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={onClose} data-testid="button-close-reference">Готово</Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

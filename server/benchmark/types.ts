@@ -10,6 +10,8 @@ export interface ReferenceTurn {
   text: string;
   tStartMs?: number;
   tEndMs?: number;
+  /** Human-verified: an admin listened to this turn's audio and confirmed/fixed the text. */
+  verified?: boolean;
 }
 
 export interface CriticalEntities {

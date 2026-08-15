@@ -185,6 +185,8 @@ export function registerBenchmarkRoutes(app: Express) {
         if (typeof t.tEndMs === "number" && Number.isFinite(t.tEndMs) && t.tEndMs >= 0) {
           turn.tEndMs = Math.round(t.tEndMs);
         }
+        // Preserve the human-verified flag across full-transcript saves.
+        if (t.verified === true) turn.verified = true;
         return turn;
       });
 
@@ -204,10 +206,19 @@ export function registerBenchmarkRoutes(app: Express) {
         critical.terms = terms.map((t: string) => t.trim()).filter(Boolean);
       }
 
+      // NEVER silently destroy per-turn timings / verified flags on bulk save.
+      const { mergeReferenceTurns } = await import("./referenceTurns");
+      const merged = mergeReferenceTurns(
+        ((row.referenceTurns as any[]) ?? []) as any,
+        cleanTurns as any,
+        req.body?.confirmDestructive === true
+      );
+      if (!merged.ok) return res.status(409).json({ error: merged.error });
+
       const refVersion = `ref-v${Date.now()}`;
       const tags = Array.isArray(row.tags) ? [...(row.tags as string[]), refVersion] : [refVersion];
       const [updated] = await db.update(benchmarkFixtures).set({
-        referenceTurns: cleanTurns,
+        referenceTurns: merged.turns,
         criticalEntities: critical,
         ...(roles ? { channelRoles: roles } : {}),
         ...(typeof title === "string" && title.trim() ? { title: title.trim() } : {}),
@@ -215,6 +226,118 @@ export function registerBenchmarkRoutes(app: Express) {
         updatedAt: new Date(),
       }).where(eq(benchmarkFixtures.id, row.id)).returning();
       res.json({ ...updated, audioBase64: updated.audioBase64 ? "<attached>" : null, refVersion });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // -------------------------------------------------------------------------
+  // Per-turn human verification (Task: EARS Fixture #2 owner-turn verify).
+  // -------------------------------------------------------------------------
+
+  // Audio clip of one reference turn — sliced from that role's channel of the
+  // dual-channel recording using the turn's audio-timeline boundaries.
+  app.get(`${base}/fixtures/:id/turn-audio/:idx`, requireBenchmarkAdmin, async (req, res) => {
+    try {
+      const [row] = await db.select().from(benchmarkFixtures).where(eq(benchmarkFixtures.id, req.params.id));
+      if (!row) return res.status(404).json({ error: "fixture not found" });
+      if (!row.audioBase64 || row.audioFormat !== "wav") return res.status(400).json({ error: "fixture has no WAV audio" });
+      const idx = Number(req.params.idx);
+      const turns = (row.referenceTurns as any[]) ?? [];
+      const turn = turns.find((t) => t?.idx === idx);
+      if (!turn) return res.status(404).json({ error: `turn ${idx} not found` });
+      if (typeof turn.tEndMs !== "number") return res.status(400).json({ error: `turn ${idx} has no tEndMs boundary — cannot slice audio` });
+      const roles = ((row as any).channelRoles as string[]) ?? ["owner", "guest"];
+      const ch = roles.indexOf(turn.role);
+      if (ch < 0) return res.status(400).json({ error: `no channel mapped to role ${turn.role}` });
+      const { splitWavChannels, sliceMonoWav } = await import("./audioChannels");
+      const { channels } = splitWavChannels(Buffer.from(row.audioBase64, "base64"));
+      if (!channels[ch]) return res.status(400).json({ error: `recording has no channel ${ch} (mono?)` });
+      const PAD_MS = 300;
+      const startMs = Math.max(0, (typeof turn.tStartMs === "number" ? turn.tStartMs : 0) - PAD_MS);
+      const clip = sliceMonoWav(channels[ch].wav, startMs, turn.tEndMs + PAD_MS);
+      res.setHeader("Content-Type", "audio/wav");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(clip);
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // Edit/verify a SINGLE reference turn. Text change appends a ref-v tag
+  // (versioned history) and resets verified unless explicitly set; a pure
+  // verified toggle does not create a new reference version.
+  app.patch(`${base}/fixtures/:id/reference/turns/:idx`, requireBenchmarkAdmin, express.json({ limit: "64kb" }), async (req, res) => {
+    try {
+      const [row] = await db.select().from(benchmarkFixtures).where(eq(benchmarkFixtures.id, req.params.id));
+      if (!row) return res.status(404).json({ error: "fixture not found" });
+      const idx = Number(req.params.idx);
+      const turns = ((row.referenceTurns as any[]) ?? []).map((t) => ({ ...t }));
+      const turn = turns.find((t) => t?.idx === idx);
+      if (!turn) return res.status(404).json({ error: `turn ${idx} not found` });
+      const { text, verified } = req.body ?? {};
+      let textChanged = false;
+      if (text !== undefined) {
+        if (typeof text !== "string" || !text.trim()) return res.status(400).json({ error: "text must be a non-empty string" });
+        textChanged = text.trim() !== turn.text;
+        turn.text = text.trim();
+      }
+      if (verified !== undefined) {
+        if (typeof verified !== "boolean") return res.status(400).json({ error: "verified must be boolean" });
+        turn.verified = verified;
+      } else if (textChanged) {
+        // Text edited while listening counts as verification by the human.
+        turn.verified = true;
+      }
+      const tags = Array.isArray(row.tags) ? [...(row.tags as string[])] : [];
+      if (textChanged) tags.push(`ref-v${Date.now()}`);
+      const [updated] = await db.update(benchmarkFixtures)
+        .set({ referenceTurns: turns, tags, updatedAt: new Date() })
+        .where(eq(benchmarkFixtures.id, row.id)).returning();
+      const owners = ((updated.referenceTurns as any[]) ?? []).filter((t) => t.role === "owner");
+      res.json({
+        turn: ((updated.referenceTurns as any[]) ?? []).find((t) => t.idx === idx),
+        ownerVerified: owners.filter((t) => t.verified === true).length,
+        ownerTotal: owners.length,
+      });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // Per-turn divergence between candidates from the latest completed EARS run
+  // covering this fixture — highlights turns a human should listen to first.
+  // Divergence per turn = max pairwise WER between candidate hypotheses; also
+  // reports max WER vs the current reference. Turn-level hypotheses exist only
+  // where the provable (timestamps) alignment was available.
+  app.get(`${base}/fixtures/:id/turn-divergence`, requireBenchmarkAdmin, async (req, res) => {
+    try {
+      const runs = await listRuns();
+      const run = runs.find((r: any) => r.runType === "ears" && r.status === "completed" && (r.fixtureIds as string[])?.includes(req.params.id));
+      if (!run) return res.json({ runId: null, turns: [] });
+      const full = await getRun(run.id);
+      const turnResults: any[] = (full?.results as any)?.turnResults ?? [];
+      const [row] = await db.select().from(benchmarkFixtures).where(eq(benchmarkFixtures.id, req.params.id));
+      const refByIdx = new Map<number, string>(((row?.referenceTurns as any[]) ?? []).map((t) => [t.idx, t.text]));
+      const { wordErrorRate } = await import("./earsMetrics");
+      const byTurn = new Map<number, { candidateId: string; text: string }[]>();
+      for (const tr of turnResults) {
+        if (typeof tr.turnIdx !== "number" || tr.turnIdx < 0) continue;
+        if (typeof tr.hypothesisText !== "string") continue;
+        const arr = byTurn.get(tr.turnIdx) ?? [];
+        arr.push({ candidateId: tr.candidateId, text: tr.hypothesisText });
+        byTurn.set(tr.turnIdx, arr);
+      }
+      const turns = Array.from(byTurn.entries()).map(([idx, hyps]) => {
+        let disagreement = 0;
+        for (let i = 0; i < hyps.length; i++) {
+          for (let j = i + 1; j < hyps.length; j++) {
+            if (!hyps[i].text && !hyps[j].text) continue;
+            disagreement = Math.max(disagreement, wordErrorRate(hyps[i].text || " ", hyps[j].text || " "));
+          }
+        }
+        const ref = refByIdx.get(idx);
+        let maxWerVsRef: number | null = null;
+        if (ref) {
+          for (const h of hyps) maxWerVsRef = Math.max(maxWerVsRef ?? 0, wordErrorRate(ref, h.text || " "));
+        }
+        return { idx, candidates: hyps, disagreement, maxWerVsRef };
+      }).sort((a, b) => a.idx - b.idx);
+      res.json({ runId: run.id, turns });
     } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
   });
 
@@ -232,7 +355,13 @@ export function registerBenchmarkRoutes(app: Express) {
         const gold = await ensureGoldCallFixture();
         fixtureIds.push(gold.id);
       }
-      res.json(await startEarsRun(fixtureIds));
+      // realtimeOnly => the realtime shortlist control run (no batch ceiling,
+      // no optional externals). Explicit candidateIds take precedence.
+      let candidateIds: string[] | undefined = Array.isArray(req.body?.candidateIds) ? req.body.candidateIds : undefined;
+      if (!candidateIds && req.body?.realtimeOnly === true) {
+        candidateIds = EARS_CANDIDATES.filter((c) => c.kind === "realtime" && !c.referenceOnly && !c.optional).map((c) => c.id);
+      }
+      res.json(await startEarsRun(fixtureIds, { candidateIds }));
     } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
   });
 

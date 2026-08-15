@@ -129,3 +129,21 @@ export function splitWavChannels(wavBuf: Buffer): { sampleRate: number; channels
   }
   return { sampleRate: wav.sampleRate, channels: out };
 }
+
+/**
+ * Slice a MONO WAV (as produced by splitWavChannels) to [startMs, endMs].
+ * Bounds are clamped; throws on multi-channel input (honest failure).
+ */
+export function sliceMonoWav(monoWavBuf: Buffer, startMs: number, endMs: number): Buffer {
+  const wav = parseWav(monoWavBuf);
+  if (wav.channels !== 1) throw new Error(`sliceMonoWav needs mono WAV, got ${wav.channels} channels`);
+  const bytesPerSample = wav.bitsPerSample / 8;
+  const toOff = (ms: number) => {
+    const sample = Math.max(0, Math.round((ms / 1000) * wav.sampleRate));
+    return Math.min(wav.data.length, sample * bytesPerSample);
+  };
+  const a = toOff(startMs);
+  const b = toOff(endMs);
+  if (b <= a) throw new Error(`empty slice: ${startMs}..${endMs}ms`);
+  return buildMonoWav(wav.data.subarray(a, b), wav.sampleRate, wav.bitsPerSample, wav.audioFormat);
+}

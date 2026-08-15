@@ -29,11 +29,21 @@ export function generateEarsReport(inp: {
   scorecard: EarsScorecardRow[];
   notes: string[];
   fixtureTitles: string[];
+  /** ids of realtime (non-reference) candidates in THIS run — basis of the shortlist section */
+  realtimeIds?: string[];
+  /** per-fixture human-verification status lines (owner turns) */
+  humanVerification?: string[];
 }): string {
   const lines: string[] = [];
   lines.push(`# LIVE EARS Benchmark — Run Report`);
   lines.push(`Fixtures: ${inp.fixtureTitles.join("; ") || "—"} · ${new Date().toISOString()}`);
   lines.push("");
+  if (inp.humanVerification && inp.humanVerification.length > 0) {
+    lines.push(`## Reference verification status`);
+    for (const l of inp.humanVerification) lines.push(`- ${l}`);
+    lines.push(`Turns not human-verified were STT-assisted (OpenAI-built reference) — WER flatters OpenAI candidates on those turns.`);
+    lines.push("");
+  }
 
   lines.push(`## Candidate availability (real API checks — unavailable is shown, never substituted)`);
   for (const a of inp.availability) lines.push(`- ${a.candidateId}: **${a.status}** — ${a.detail}`);
@@ -53,6 +63,23 @@ export function generateEarsReport(inp: {
       `Owner accuracy matters most: the Owner speaks with an accent, short phrases and mistakes — that is why TalkHint exists.`
     : `No LIVE candidate produced scoreable Owner turns — no conclusion can be drawn.`);
   lines.push("");
+
+  // Realtime shortlist — the concrete outcome the Candidate Pipeline needs.
+  if (inp.realtimeIds && inp.realtimeIds.length > 0) {
+    const rt = live
+      .filter((r) => inp.realtimeIds!.includes(r.candidateId) && r.ownerWer != null)
+      .sort((a, b) => (a.ownerWer as number) - (b.ownerWer as number));
+    lines.push(`## Realtime shortlist (кандидаты для Candidate Pipeline v1)`);
+    if (rt.length === 0) {
+      lines.push(`No scoreable realtime candidates in this run — no shortlist.`);
+    } else {
+      rt.slice(0, 2).forEach((r, i) => {
+        lines.push(`${i + 1}. **${r.candidateId}** — Owner WER ${fmtPct(r.ownerWer)}, overall WER ${fmtPct(r.wer)}, Guest WER ${fmtPct(r.guestWer)}.`);
+      });
+      lines.push(`Оговорки (честность измерения): один-единственный звонок (Fixture-level, не population-level вывод); reference исторически строился с участием OpenAI STT — на не-верифицированных turn'ах WER льстит OpenAI-кандидатам; production Flux этим прогоном НЕ меняется.`);
+    }
+    lines.push("");
+  }
 
   lines.push(`## Best STT for Guest speech / overall call (LIVE candidates only)`);
   const bestGuest = bestBy(live, "guestWer");

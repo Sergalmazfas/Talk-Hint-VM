@@ -78,15 +78,36 @@ export async function runAvailabilityCheck(): Promise<{ runId: string }> {
 // EARS run
 // ---------------------------------------------------------------------------
 
-export async function startEarsRun(fixtureIds: string[]): Promise<{ runId: string }> {
+/** Honest human-verification status per fixture for the report header. */
+function summarizeVerification(fixtures: BenchmarkFixture[]): string[] {
+  return fixtures.map((f) => {
+    const turns = (f.referenceTurns as any[]) ?? [];
+    const owners = turns.filter((t) => t?.role === "owner");
+    const verified = owners.filter((t) => t?.verified === true).length;
+    return `${f.title}: ${verified}/${owners.length} owner turns human-verified`;
+  });
+}
+
+export async function startEarsRun(
+  fixtureIds: string[],
+  opts?: { candidateIds?: string[] }
+): Promise<{ runId: string }> {
   const fixtures = (await Promise.all(fixtureIds.map(getFixture))).filter((f): f is BenchmarkFixture => !!f);
-  const run = await createRun("ears", fixtures, { candidates: EARS_CANDIDATES });
+  // Optional candidate subset (e.g. realtime-only shortlist runs). Unknown ids
+  // are rejected loudly — a silent no-op subset would fake an empty run.
+  let candidates = EARS_CANDIDATES;
+  if (opts?.candidateIds && opts.candidateIds.length > 0) {
+    const unknown = opts.candidateIds.filter((id) => !EARS_CANDIDATES.some((c) => c.id === id));
+    if (unknown.length > 0) throw new Error(`unknown EARS candidate ids: ${unknown.join(", ")}`);
+    candidates = EARS_CANDIDATES.filter((c) => opts.candidateIds!.includes(c.id));
+  }
+  const run = await createRun("ears", fixtures, { candidates });
   void (async () => {
     try {
       const { checkEarsAvailability } = await import("./earsAvailability");
       const { runEarsBenchmark } = await import("./earsHarness");
       const availability = await checkEarsAvailability();
-      const result = await runEarsBenchmark({ fixtures, candidates: EARS_CANDIDATES, availability });
+      const result = await runEarsBenchmark({ fixtures, candidates, availability });
       let report: string | null = null;
       try {
         const { generateEarsReport } = await import("./report");
@@ -95,6 +116,8 @@ export async function startEarsRun(fixtureIds: string[]): Promise<{ runId: strin
           scorecard: result.scorecard,
           notes: result.notes,
           fixtureTitles: fixtures.map((f) => f.title),
+          realtimeIds: candidates.filter((c) => c.kind === "realtime" && !c.referenceOnly).map((c) => c.id),
+          humanVerification: summarizeVerification(fixtures),
         });
       } catch (e: any) {
         report = `EARS report generation failed: ${String(e?.message ?? e)}`;

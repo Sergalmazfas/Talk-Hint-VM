@@ -14,3 +14,7 @@ description: How to run EARS/BRAIN benchmark runs and imports as the agent — e
 
 ## Fixture #2 reference is STT-verified, not human-verified
 Fixture #2 (09e6bcce…) reference_turns were rebuilt with user approval from whisper-1 segment boundaries (gives tEndMs → per-turn basis "timestamps") reconciled with gpt-4o-transcribe text; tags `ref-v-stt`/`reference-stt-verified`. **Why:** user chose STT self-verification knowing the bias — WER is systematically flattering to OpenAI candidates; never present these numbers as engine-neutral ground truth or use them alone to demote Flux in production.
+
+## Per-turn reference verification (2026-08-15)
+- Admin Edit Reference is now per-turn: turn-audio clips are sliced from the ROLE's channel using tStartMs/tEndMs (per-channel timeline, +300ms pad); PATCH one turn; bulk PUT is gated — structural change without `confirmDestructive:true` returns 409 (mergeReferenceTurns preserves timings/verified positionally). Never bulk-save an annotated fixture casually.
+- Realtime-only EARS run: POST /ears/run {realtimeOnly:true} → shortlist section in report. First shortlist run on Fixture #2 (~20 min wall): OpenAI realtime WER ~7-9% vs Deepgram ~74% — a gap that large on the same audio smells like a measurement artifact (reference built by OpenAI STT + normalization), not real quality; do not act on it without human-verified turns.
