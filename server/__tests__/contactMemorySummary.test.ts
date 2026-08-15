@@ -25,6 +25,63 @@ const TRANSCRIPT = [
 const USER_ID = "user-a";
 const PHONE = "+15559998888";
 
+describe("parseContactSummary (robust JSON extraction)", () => {
+  const OBJ = { name: "John", summary: "Bank support call", notes: "case #1", importance: "high" };
+
+  it("parses JSON wrapped in a markdown code fence", () => {
+    const parsed = parseContactSummary("```json\n" + JSON.stringify(OBJ) + "\n```");
+    expect(parsed?.summary).toBe(OBJ.summary);
+  });
+
+  it("parses JSON surrounded by prose — even prose containing extra braces", () => {
+    const raw = `Here is the memory:\n${JSON.stringify(OBJ)}\nHope this helps { extra } trailing.`;
+    // The old greedy first-{…last-} regex captured through the trailing brace
+    // and returned null here.
+    const parsed = parseContactSummary(raw);
+    expect(parsed?.notes).toBe(OBJ.notes);
+  });
+
+  it("skips a broken brace block and parses the next valid object", () => {
+    const raw = `{oops not json} ${JSON.stringify(OBJ)}`;
+    expect(parseContactSummary(raw)?.summary).toBe(OBJ.summary);
+  });
+
+  it("handles braces inside JSON string values", () => {
+    const withBraces = { ...OBJ, notes: 'said "{account} blocked"' };
+    expect(parseContactSummary(JSON.stringify(withBraces))?.notes).toBe(withBraces.notes);
+  });
+
+  it("classifies parse failures without exposing content", async () => {
+    const { classifySummaryParseFailure, summarizeAndSaveContactMemory } = await import("../contactMemory");
+    expect(classifySummaryParseFailure("")).toBe("empty_output");
+    expect(classifySummaryParseFailure("I cannot summarize this call.")).toBe("no_json_object");
+    expect(classifySummaryParseFailure("{broken")).toBe("unparseable_json");
+    expect(classifySummaryParseFailure('{"summary":"","notes":""}')).toBe("empty_summary_fields");
+
+    // PII guard: the failure log must never contain transcript-derived model
+    // output — only safe metadata (length + reason category).
+    const secret = "SSN 123-45-6789 John Doe account 4242";
+    const log = vi.fn();
+    await summarizeAndSaveContactMemory(
+      "u1",
+      "+15550000000",
+      [{ speaker: "Guest", text: "hello" }],
+      { generate: async () => `refusal mentioning ${secret}`, save: vi.fn(), log },
+    );
+    const logged = log.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("no usable summary");
+    expect(logged).toContain("reason=no_json_object");
+    expect(logged).not.toContain("123-45-6789");
+    expect(logged).not.toContain("John Doe");
+  });
+
+  it("still returns null for refusals / plain text / empty output", () => {
+    expect(parseContactSummary("I cannot summarize this call.")).toBeNull();
+    expect(parseContactSummary("")).toBeNull();
+    expect(parseContactSummary('{"summary":"","notes":""}')).toBeNull();
+  });
+});
+
 describe("parseContactSummary", () => {
   it("parses valid JSON and trims summary/notes", () => {
     const parsed = parseContactSummary(

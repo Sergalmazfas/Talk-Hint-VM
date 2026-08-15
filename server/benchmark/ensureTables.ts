@@ -13,8 +13,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS diagnostic_recording_enabled boolean 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_pipeline_enabled boolean NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_stt text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_brain_model text;
-CREATE UNIQUE INDEX IF NOT EXISTS benchmark_fixtures_source_call_sid_uq
-  ON benchmark_fixtures (source_call_sid) WHERE source_call_sid IS NOT NULL;
 CREATE TABLE IF NOT EXISTS benchmark_fixtures (
   id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
   title text NOT NULL,
@@ -32,6 +30,15 @@ CREATE TABLE IF NOT EXISTS benchmark_fixtures (
   updated_at timestamp NOT NULL DEFAULT now()
 );
 ALTER TABLE benchmark_fixtures ADD COLUMN IF NOT EXISTS channel_roles jsonb NOT NULL DEFAULT '["owner","guest"]'::jsonb;
+-- The idempotency index for ON CONFLICT (source_call_sid) must NOT be partial:
+-- drizzle's onConflictDoNothing({ target }) emits no index predicate, and
+-- Postgres refuses to match a partial unique index without it ("no unique or
+-- exclusion constraint matching the ON CONFLICT specification"). A full unique
+-- index is safe here — Postgres treats NULLs as distinct, so rows without a
+-- source call are unaffected. The old partial index is dropped by name.
+DROP INDEX IF EXISTS benchmark_fixtures_source_call_sid_uq;
+CREATE UNIQUE INDEX IF NOT EXISTS benchmark_fixtures_source_call_sid_key
+  ON benchmark_fixtures (source_call_sid);
 CREATE TABLE IF NOT EXISTS benchmark_runs (
   id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
   run_type text NOT NULL,

@@ -249,16 +249,55 @@ export interface ParsedContactSummary {
 // summary nor notes. `name` is the contact's own name when the model extracted
 // one (empty string otherwise). `importance` is lower-cased/trimmed and
 // constrained to low|medium|high, defaulting to "medium" for anything else.
-export function parseContactSummary(raw: string): ParsedContactSummary | null {
-  const match = raw?.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(match[0]);
-  } catch {
-    return null;
+// Extracts the first balanced, parseable JSON object from model output.
+// Handles markdown code fences, prose before/after the JSON, and multiple
+// brace blocks (the old greedy first-{ … last-} regex broke whenever the model
+// added any trailing text containing a brace, or wrapped output in prose).
+export function extractJsonObject(raw: string): any | null {
+  if (!raw) return null;
+  const text = raw.replace(/```(?:json)?/gi, "");
+  for (let start = text.indexOf("{"); start !== -1; start = text.indexOf("{", start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(text.slice(start, i + 1));
+          } catch {
+            break; // this candidate is not valid JSON; try the next "{"
+          }
+        }
+      }
+    }
   }
+  return null;
+}
+
+// PII-safe categorization of WHY parseContactSummary returned null. Returns a
+// short enum-like string and never any content from the model output itself.
+export function classifySummaryParseFailure(raw: string): string {
+  if (!raw || !raw.trim()) return "empty_output";
+  if (!raw.includes("{")) return "no_json_object"; // prose/refusal, no JSON at all
+  const obj = extractJsonObject(raw);
+  if (obj === null || typeof obj !== "object") return "unparseable_json";
+  return "empty_summary_fields"; // valid JSON but neither summary nor notes
+}
+
+export function parseContactSummary(raw: string): ParsedContactSummary | null {
+  const parsed = extractJsonObject(raw);
+  if (parsed === null || typeof parsed !== "object") return null;
 
   const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
   const summary = typeof parsed.summary === "string" ? parsed.summary.trim() : "";
@@ -321,7 +360,11 @@ export async function summarizeAndSaveContactMemory(
 
   const parsed = parseContactSummary(raw);
   if (!parsed) {
-    deps.log?.(`[ContactMemory] no usable summary in model output for ${phoneNumber}`);
+    // Keep the failure diagnosable WITHOUT leaking transcript-derived content
+    // into logs: only safe metadata — output length and a failure category.
+    deps.log?.(
+      `[ContactMemory] no usable summary in model output for ${phoneNumber} (raw ${raw?.length ?? 0} chars, reason=${classifySummaryParseFailure(raw)})`,
+    );
     return;
   }
 
