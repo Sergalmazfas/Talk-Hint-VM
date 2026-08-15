@@ -55,8 +55,9 @@ if (SIGNATURE_CHECK_DISABLE_REQUESTED && IS_PRODUCTION) {
 // Call timeout in seconds - prevents early disconnect during silence/pauses
 const CALL_TIMEOUT = parseInt(process.env.TALKHINT_CALL_TIMEOUT || "90", 10);
 // Maximum call duration in seconds - safety limit to prevent runaway charges
-// Default: 10 minutes (600 seconds) - can be overridden with env var
-const CALL_TIME_LIMIT = parseInt(process.env.TALKHINT_CALL_TIME_LIMIT || "600", 10);
+// Default: 30 minutes (1800 seconds) - can be overridden with env var
+// (raised from 10 min after real conversations were getting cut off)
+const CALL_TIME_LIMIT = parseInt(process.env.TALKHINT_CALL_TIME_LIMIT || "1800", 10);
 
 // Log Twilio config at startup for debugging
 console.log("[Twilio Config] Startup diagnostics:");
