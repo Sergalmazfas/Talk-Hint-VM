@@ -1,0 +1,48 @@
+report
+"# LIVE EARS Benchmark — Run Report
+Fixtures: Real Call Fixture #2 — iOS real call · 2026-08-15T07:28:08.810Z
+
+## Candidate availability (real API checks — unavailable is shown, never substituted)
+- dg-flux-general-en: **AVAILABLE** — WS open @ wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=mulaw&sample_rate=8000&eot_threshold=0.7&eot_timeout_ms=3000; sent 20ms mulaw silence ok
+- dg-flux-general-multi: **AVAILABLE** — WS open @ wss://api.deepgram.com/v2/listen?model=flux-general-multi&encoding=mulaw&sample_rate=8000&eot_threshold=0.7&eot_timeout_ms=3000; sent 20ms mulaw silence ok
+- dg-nova-3-multi: **AVAILABLE** — WS open @ wss://api.deepgram.com/v1/listen?model=nova-3&language=multi&encoding=mulaw&sample_rate=8000&interim_results=true&punctuate=true; sent 20ms mulaw silence ok
+- oai-realtime-server-vad: **AVAILABLE** — client_secret issued; model=gpt-4o-transcribe, turn_detection=server_vad
+- oai-realtime-semantic-vad: **AVAILABLE** — client_secret issued; model=gpt-4o-transcribe, turn_detection=semantic_vad
+- oai-batch-gpt-4o-transcribe: **AVAILABLE** — transcription accepted (model=gpt-4o-transcribe)
+- azure-speech-realtime: **UNAVAILABLE** — no credentials configured (Azure Speech key not present); skipped without network call
+
+## Best STT for Owner speech (LIVE candidates only — headline metric)
+**oai-realtime-semantic-vad** — Owner WER 39.5% (overall WER 49.1%). Owner accuracy matters most: the Owner speaks with an accent, short phrases and mistakes — that is why TalkHint exists.
+
+## Best STT for Guest speech / overall call (LIVE candidates only)
+Guest: **oai-realtime-semantic-vad** — Guest WER 54.0%.
+Overall call: **oai-realtime-semantic-vad** — WER 49.1%.
+
+## Accuracy ceiling (batch reference — NOT a LIVE candidate)
+- oai-batch-gpt-4o-transcribe: WER 14.2% (Owner 23.9%, Guest 4.5%). Higher-latency batch transcription; shows how much accuracy is theoretically available, but cannot win a LIVE comparison.
+
+## Scorecard
+| STT | LIVE? | WER | Owner WER | Guest WER | Semantic* | Numbers | Terms | Final p50 | Turns |
+|---|---|---|---|---|---|---|---|---|---|
+| dg-flux-general-en | LIVE | 70.2% | 65.8% | 74.5% | 30.6% | — | — | — | 2 |
+| dg-flux-general-multi | LIVE | 70.9% | 66.5% | 75.2% | 29.4% | — | — | — | 2 |
+| dg-nova-3-multi | LIVE | 90.4% | 94.7% | 88.2% | 9.3% | — | — | — | 53 |
+| oai-realtime-server-vad | LIVE | 87.0% | 48.5% | 106.8% | 30.8% | — | — | 2256ms | 53 |
+| oai-realtime-semantic-vad | LIVE | 49.1% | 39.5% | 54.0% | 50.5% | — | — | — | 53 |
+| oai-batch-gpt-4o-transcribe | ceiling | 14.2% | 23.9% | 4.5% | 84.4% | — | — | — | 2 |
+*Semantic is a content-word proxy, not an embedding score. EOT/premature-EOT metrics are null until per-turn boundary ground truth exists — they are never fabricated.
+
+## Decision
+No candidate is auto-assigned as production winner. Production STT stays unchanged (Deepgram Flux flux-general-en) until a human decides otherwise.
+
+## Notes
+- Realtime streaming accelerated 4x to bound runtime; latency figures scaled back to real time.
+- Candidate azure-speech-realtime skipped: UNAVAILABLE — no credentials configured (Azure Speech key not present); skipped without network call
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c: dual-channel recording split into 2 per-role streams (owner/guest); original 8kHz telephone audio, no enhancement.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-en / channel 0 (owner): turn detection produced 7 final(s) for 18 reference turns — scored as document-level WER instead of per-turn alignment.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-en / channel 1 (guest): turn detection produced 10 final(s) for 35 reference turns — scored as document-level WER instead of per-turn alignment.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-multi / channel 0 (owner): turn detection produced 7 final(s) for 18 reference turns — scored as document-level WER instead of per-turn alignment.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-multi / channel 1 (guest): turn detection produced 10 final(s) for 35 reference turns — scored as document-level WER instead of per-turn alignment.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-batch-gpt-4o-transcribe / channel 0 (owner): turn detection produced 1 final(s) for 18 reference turns — scored as document-level WER instead of per-turn alignment.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-batch-gpt-4o-transcribe / channel 1 (guest): turn detection produced 1 final(s) for 35 reference turns — scored as document-level WER instead of per-turn alignment.
+- Candidate oai-batch-gpt-4o-transcribe is reference-only (accuracy ceiling); excluded from LIVE winner selection."

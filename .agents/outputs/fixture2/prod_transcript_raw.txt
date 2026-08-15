@@ -1,0 +1,54 @@
+transcript
+"Guest: or recorded for training purposes.
+Guest: You've reached Mint Mobile. I'm Mint Fox. Your Mint Mobile AI assistant, here to help with all things Minty. How can I help you today?
+Owner: I want to transfer my existing mind... mobile number to the SIM on my new iPhone and activate service.
+Guest: Okay. Let's take a look at that. Just to confirm, are you bringing your existing Mint mobile number to your new iPhone, or do you want a brand new number with your new SIM?
+Owner: I want to transfer my existing Mint model number to the SIM on my new iPhone and activate service.
+Guest: Thanks for confirming. Are you using a physical SIM card or an e SIM on your new iPhone?
+Guest: Let me know so I can guide you through the right steps.
+Owner: I'm using his SIM on my new iPhone.
+Guest: First, download and install the Mint mobile app on your new iPhone. Have you done that yet?
+Guest: Or would you like help with that step?
+Owner: Yes. I have installed the Mint mobile app on my new iPhone.
+Guest: Awesome. Next, open the Mint mobile app and tap activate a SIM in the top left corner. Have you found that option in your app yet?
+Owner: Yes. I see that to it seem optional. What should I do the next to the transfer my number?
+Guest: Great. Next, enter the eleven digit eSIM activation code from your confirmation email. If you can't find that email, check your junk or spam folder for your Mint mobile order has been received. Are you able to locate that code?
+Owner: I haven't found the situation code yet. Can you help me get a new resume or guide me step by step to transfer my number?
+Guest: No problem. To get a replacement eSIM, open the Mint mobile app on your new iPhone, tap the menu in the bottom right, scroll down to SIM card, and select order replacement SIM. Would you like to try that now?
+Owner: Yes. I was trying to order in the replacement issue now.
+Owner: Please stay on the line for future assistance.
+Guest: Sounds good.
+Guest: Just let me know if you run into any snags during the process, and I'll walk you through the next step.
+Guest: Are you able to find the order replacement SIM option in the apps menu?
+Owner: Yes. I found the order replacement SIM options and started the process.
+Guest: Great. Next, select eSIM as your replacement option, then tap checkout and follow the prompts. Once you receive your new eSIM activation code, let me know, and I'll guide you through the next steps.
+Guest: Are you able to select eSIM and continue?
+Owner: I have completed the order and received the new SIM situation quota. What's next?
+Guest: Awesome. Next, go back to the Mint mobile app and tap activate a SIM in the top left corner. Enter your new eleven digit e SIM activation code. Did you get that entered?
+Owner: Yes. I entered the situation quarter. Uh, what should I do the next to complete the situation?
+Guest: Great. Next, choose keep your current one to transfer your existing Mint mobile number. The app will prompt you to enter your current carrier, account number, and transfer PIN.
+Guest: you ready to enter that info?
+Owner: Yes. I'm ready. Please guide me the through entering the carrier account number and transfer PIN.
+Guest: Perfect. In the app, select your current carrier, then enter your account number and transfer PIN from your previous carrier. After entering those, tap continue.
+Guest: you entered both numbers
+Guest: and tap continue.
+Guest: Just checking in to see if you're still working on something.
+Guest: I'll be here.
+Owner: Two zero eight.
+Guest: Thanks for sharing. But for your security, please enter your account number and transfer PIN directly into the Mint mobile app. Don't share them here. Once you've entered both and tapped continue, let me know if you see a confirmation or any message. Did you get a confirmation?
+Owner: Yes. I didn't get the info, and they paid continuum. I see a message for today to the next.
+Guest: Nice work. The next step is to wait for a confirmation email or text that your number transfer is complete. This can take a few hours, but sometimes up to forty eight hours. Once you get that confirmation, you can finish installing your eSIM. Does that make sense?
+Owner: Yeah. That makes sense. If the transfer doesn't complete, can you help me and get a new ECM or guide me the step by step?
+Guest: Absolutely. If the transfer doesn't complete or you run into any issues, just reach out, and I'll walk you through getting a new eSIM or help troubleshoot step by step.
+Guest: there anything else I can help you with right now?
+Owner: Thank you. I will contact you if the transfer falls, or I need help with the new SIM. I really appreciate it. Thank you so much.
+Guest: You're welcome. I'm glad I could help.
+Guest: If anything goes unfoxed with your transfer, just contact me, and I'll assist with your new SIM. Is there anything else I can help you with today?
+Guest: or are we all set?
+Owner: bill set. One questions. What is your name?
+Guest: I'm Mint Fox. You're saving savvy Mint mobile AI assistant. If you need anything, Minty, just ask for me. Anything else I can help with today?
+Owner: No. I haven't get think. I really appreciate it for your help. Thank you, miss Bob.
+Guest: If you do have any questions in the future, head online to our help center on the Mint mobile website. It's a treasure mine for knowledge. Thanks for chatting to us today. Have a minty fresh day.
+Guest: Thanks for sticking around to take our three question survey. Be sure to use your touch pad to enter all responses. Sound good?
+Guest: Let's get started.
+Guest: question one is all about our team member. On a scale from zero to ten where zero means not at all satisfied and ten equals extremely satisfied, how satisfied are you with the assistance you received from that team member?"
