@@ -772,6 +772,11 @@ extension InCallViewController: CallHintStreamDelegate {
                        primary: text, secondary: nil,
                        background: .systemGreen.withAlphaComponent(0.10),
                        testIdSuffix: "goal-updated")
+        case .prepareReply, .prepareOpening, .prepareError:
+            // PREPARE-stage events belong to PrepareViewController; the in-call
+            // screen never shows them (the prepare session ends with the call
+            // starting), so they are deliberately ignored here.
+            break
         }
     }
 
