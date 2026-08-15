@@ -88,6 +88,7 @@ mockupState = "FULLSTACK"
 VAPID_PUBLIC_KEY = "BKG5nJon2zwG1nRd0TnryWcRDNa5htAQsHlJPoa_U9c20g0KTvGB87IOon1iMc5l7lNnxT30wXMsx60VQgzecKs"
 VAPID_SUBJECT = "mailto:support@talkhint.me"
 APNS_BUNDLE_ID = "app.talkhint"
+BENCHMARK_ADMIN_EMAILS = "sergalmazfas@gmail.com"
 
 [userenv.development]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"
