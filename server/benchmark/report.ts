@@ -4,6 +4,92 @@
 
 import type { AvailabilityResult, BrainTurnResult, ContinuityMetrics } from "./types";
 import type { BrainScorecardEntry } from "./brainHarness";
+import type { EarsScorecardRow } from "./earsMetrics";
+
+// ---------------------------------------------------------------------------
+// EARS-only report: who actually HEARS the real phone call best.
+// Owner accuracy is the headline metric — TalkHint exists because the Owner
+// may speak with an accent, in short phrases, with mistakes; the Guest is
+// usually a clear operator/IVR. Batch candidates are an accuracy ceiling and
+// are never declared a LIVE winner. Nothing here auto-changes production.
+// ---------------------------------------------------------------------------
+
+function fmtPct(v: number | null | undefined): string {
+  return v == null ? "—" : `${(v * 100).toFixed(1)}%`;
+}
+
+function bestBy(rows: EarsScorecardRow[], key: "ownerWer" | "guestWer" | "wer"): EarsScorecardRow | null {
+  const usable = rows.filter((r) => r[key] != null);
+  if (usable.length === 0) return null;
+  return usable.reduce((a, b) => ((a[key] as number) <= (b[key] as number) ? a : b));
+}
+
+export function generateEarsReport(inp: {
+  availability: AvailabilityResult[];
+  scorecard: EarsScorecardRow[];
+  notes: string[];
+  fixtureTitles: string[];
+}): string {
+  const lines: string[] = [];
+  lines.push(`# LIVE EARS Benchmark — Run Report`);
+  lines.push(`Fixtures: ${inp.fixtureTitles.join("; ") || "—"} · ${new Date().toISOString()}`);
+  lines.push("");
+
+  lines.push(`## Candidate availability (real API checks — unavailable is shown, never substituted)`);
+  for (const a of inp.availability) lines.push(`- ${a.candidateId}: **${a.status}** — ${a.detail}`);
+  lines.push("");
+
+  const live = inp.scorecard.filter((r) => !r.referenceOnly && r.turnsScored > 0);
+  const ceiling = inp.scorecard.filter((r) => r.referenceOnly && r.turnsScored > 0);
+
+  lines.push(`## Best STT for Owner speech (LIVE candidates only — headline metric)`);
+  const bestOwner = bestBy(live, "ownerWer");
+  lines.push(bestOwner
+    ? `**${bestOwner.candidateId}** — Owner WER ${fmtPct(bestOwner.ownerWer)} (overall WER ${fmtPct(bestOwner.wer)}). ` +
+      `Owner accuracy matters most: the Owner speaks with an accent, short phrases and mistakes — that is why TalkHint exists.`
+    : `No LIVE candidate produced scoreable Owner turns — no conclusion can be drawn.`);
+  lines.push("");
+
+  lines.push(`## Best STT for Guest speech / overall call (LIVE candidates only)`);
+  const bestGuest = bestBy(live, "guestWer");
+  const bestOverall = bestBy(live, "wer");
+  lines.push(bestGuest
+    ? `Guest: **${bestGuest.candidateId}** — Guest WER ${fmtPct(bestGuest.guestWer)}.`
+    : `Guest: no scoreable Guest turns.`);
+  lines.push(bestOverall
+    ? `Overall call: **${bestOverall.candidateId}** — WER ${fmtPct(bestOverall.wer)}.`
+    : `Overall: no scoreable turns.`);
+  lines.push("");
+
+  lines.push(`## Accuracy ceiling (batch reference — NOT a LIVE candidate)`);
+  if (ceiling.length === 0) {
+    lines.push(`No batch reference results in this run.`);
+  } else {
+    for (const r of ceiling) {
+      lines.push(`- ${r.candidateId}: WER ${fmtPct(r.wer)} (Owner ${fmtPct(r.ownerWer)}, Guest ${fmtPct(r.guestWer)}). ` +
+        `Higher-latency batch transcription; shows how much accuracy is theoretically available, but cannot win a LIVE comparison.`);
+    }
+  }
+  lines.push("");
+
+  lines.push(`## Scorecard`);
+  lines.push(`| STT | LIVE? | WER | Owner WER | Guest WER | Semantic* | Numbers | Terms | Final p50 | Turns |`);
+  lines.push(`|---|---|---|---|---|---|---|---|---|---|`);
+  for (const r of inp.scorecard) {
+    lines.push(`| ${r.candidateId} | ${r.referenceOnly ? "ceiling" : "LIVE"} | ${fmtPct(r.wer)} | ${fmtPct(r.ownerWer)} | ${fmtPct(r.guestWer)} | ${fmtPct(r.semantic)} | ${fmtPct(r.numbersMoney)} | ${fmtPct(r.terms)} | ${r.finalP50 != null ? Math.round(r.finalP50) + "ms" : "—"} | ${r.turnsScored} |`);
+  }
+  lines.push(`*Semantic is a content-word proxy, not an embedding score. EOT/premature-EOT metrics are null until per-turn boundary ground truth exists — they are never fabricated.`);
+  lines.push("");
+
+  lines.push(`## Decision`);
+  lines.push(`No candidate is auto-assigned as production winner. Production STT stays unchanged (Deepgram Flux flux-general-en) until a human decides otherwise.`);
+  if (inp.notes.length) {
+    lines.push("");
+    lines.push(`## Notes`);
+    for (const n of inp.notes) lines.push(`- ${n}`);
+  }
+  return lines.join("\n");
+}
 
 export interface ReportInput {
   earsAvailability: AvailabilityResult[];

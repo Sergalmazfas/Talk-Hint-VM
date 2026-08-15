@@ -59,6 +59,7 @@ interface Fixture {
   audioBase64: string | null;
   audioFormat: string | null;
   audioChannels: string | null;
+  channelRoles?: ("owner" | "guest")[];
   tags: string[];
 }
 
@@ -68,6 +69,10 @@ interface EarsScorecardRow {
   semantic: number | null;
   semanticIsProxy?: boolean;
   wer: number | null;
+  ownerWer?: number | null;
+  guestWer?: number | null;
+  terms?: number | null;
+  referenceOnly?: boolean;
   numbersMoney: number | null;
   roleSplit: number | null;
   prematureEot: number | null;
@@ -155,6 +160,7 @@ interface BenchmarkRun {
     judgeModel?: string;
     notes?: string[];
   };
+  report?: string | boolean | null;
   error?: string | null;
   startedAt?: string;
   finishedAt?: string | null;
@@ -405,6 +411,7 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
   const availQ = useAuthedQuery<Fixture[]>([BASE, "fixtures"], !!token);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [editFixtureId, setEditFixtureId] = useState<string | null>(null);
 
   const availMap = availabilityMap(runs, "ears");
   const latestEarsMeta = latestByType(runs, "ears", true);
@@ -508,6 +515,7 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
                 <TableHead>Audio</TableHead>
                 <TableHead>Format</TableHead>
                 <TableHead>Tags</TableHead>
+                <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -523,6 +531,12 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
                   </TableCell>
                   <TableCell className="text-xs">{f.audioFormat ?? "—"}{f.audioChannels ? ` / ${f.audioChannels}` : ""}</TableCell>
                   <TableCell className="text-xs text-gray-400">{(f.tags ?? []).join(", ") || "—"}</TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-xs"
+                      onClick={() => setEditFixtureId(f.id)} data-testid={`button-edit-reference-${f.id}`}>
+                      Edit reference
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {fixtures.length === 0 && (
@@ -550,9 +564,13 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
                 <TableHeader>
                   <TableRow className="border-gray-800">
                     <TableHead>STT</TableHead>
+                    <TableHead>LIVE?</TableHead>
                     <TableHead>Semantic</TableHead>
                     <TableHead>WER</TableHead>
+                    <TableHead className="text-cyan-400">Owner WER</TableHead>
+                    <TableHead>Guest WER</TableHead>
                     <TableHead>Numbers/Money</TableHead>
+                    <TableHead>Terms</TableHead>
                     <TableHead>Role split</TableHead>
                     <TableHead>Premature EOT</TableHead>
                     <TableHead>False wait</TableHead>
@@ -565,9 +583,17 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
                   {scorecardRows.map((r) => (
                     <TableRow key={r.candidateId} className="border-gray-800" data-testid={`row-ears-score-${r.candidateId}`}>
                       <TableCell className="font-medium max-w-xs">{r.label ?? r.candidateId}</TableCell>
+                      <TableCell>
+                        {r.referenceOnly
+                          ? <Badge variant="outline" className="text-amber-400 border-amber-700">ceiling</Badge>
+                          : <Badge className="bg-green-700 hover:bg-green-700">LIVE</Badge>}
+                      </TableCell>
                       <TableCell>{pct(r.semantic)}{r.semanticIsProxy && <span className="text-xs text-gray-500"> (proxy)</span>}</TableCell>
                       <TableCell>{pct(r.wer)}</TableCell>
+                      <TableCell className="text-cyan-300">{pct(r.ownerWer ?? null)}</TableCell>
+                      <TableCell>{pct(r.guestWer ?? null)}</TableCell>
                       <TableCell>{pct(r.numbersMoney)}</TableCell>
+                      <TableCell>{pct(r.terms ?? null)}</TableCell>
                       <TableCell>{pct(r.roleSplit)}</TableCell>
                       <TableCell>{pct(r.prematureEot)}</TableCell>
                       <TableCell>{pct(r.falseWait)}</TableCell>
@@ -591,9 +617,123 @@ function EarsTab({ candidates }: { candidates: EarsCandidate[] }) {
         </CardContent>
       </Card>
 
+      {/* EARS run report (Best STT for Owner / Guest, accuracy ceiling) */}
+      {typeof latestEars?.report === "string" && latestEars.report && (
+        <Card className="bg-gray-900/50 border-gray-800">
+          <CardHeader><CardTitle className="text-base">EARS run report</CardTitle></CardHeader>
+          <CardContent>
+            <pre className="whitespace-pre-wrap text-xs text-gray-300 font-mono" data-testid="text-ears-report">{latestEars.report}</pre>
+          </CardContent>
+        </Card>
+      )}
+
       <UploadFixtureDialog open={uploadOpen} onOpenChange={setUploadOpen} />
       <ImportRecordingDialog open={importOpen} onOpenChange={setImportOpen} />
+      <EditReferenceDialog fixtureId={editFixtureId} onClose={() => setEditFixtureId(null)} />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit reference transcript of an existing fixture (Owner/Guest, terms,
+// channel-role mapping). The production transcript is never ground truth —
+// the admin listens to the recording and fixes the reference by hand.
+// ---------------------------------------------------------------------------
+
+function EditReferenceDialog({ fixtureId, onClose }: { fixtureId: string | null; onClose: () => void }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [transcript, setTranscript] = useState("");
+  const [terms, setTerms] = useState("");
+  const [swapChannels, setSwapChannels] = useState(false);
+  const [loaded, setLoaded] = useState<{ title: string; channelRoles: string[] } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!fixtureId || !token) { setLoaded(null); return; }
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/fixtures/${fixtureId}/reference`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+        const data = await res.json();
+        setTranscript((data.referenceTurns ?? []).map((t: ParsedTurn) => `${t.role}: ${t.text}`).join("\n"));
+        setTerms(((data.criticalEntities?.terms ?? []) as string[]).join(", "));
+        setSwapChannels(Array.isArray(data.channelRoles) && data.channelRoles[0] === "guest");
+        setLoaded({ title: data.title, channelRoles: data.channelRoles ?? ["owner", "guest"] });
+      } catch (e: any) {
+        toast({ title: "Не удалось загрузить reference", description: String(e?.message ?? e), variant: "destructive" });
+        onClose();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixtureId, token]);
+
+  async function submit() {
+    if (!fixtureId) return;
+    let referenceTurns: ParsedTurn[];
+    try {
+      referenceTurns = parseTranscript(transcript);
+    } catch (e: any) {
+      toast({ title: "Проверьте транскрипт", description: String(e?.message ?? e), variant: "destructive" });
+      return;
+    }
+    if (referenceTurns.length === 0) {
+      toast({ title: "Транскрипт пуст", description: "Нужна хотя бы одна строка owner:/guest:", variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${BASE}/fixtures/${fixtureId}/reference`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          referenceTurns,
+          terms: terms.split(",").map((t) => t.trim()).filter(Boolean),
+          channelRoles: swapChannels ? ["guest", "owner"] : ["owner", "guest"],
+        }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      toast({ title: "Reference сохранён", description: "Новая версия reference transcript зафиксирована." });
+      qc.invalidateQueries({ queryKey: [BASE, "fixtures"] });
+      onClose();
+    } catch (e: any) {
+      toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={!!fixtureId} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="bg-gray-900 border-gray-800 text-gray-100 max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Edit reference transcript{loaded ? ` — ${loaded.title}` : ""}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-gray-300">Reference transcript (одна строка = один ход, «owner: …» / «guest: …»)</Label>
+            <Textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} rows={14}
+              className="bg-gray-950 border-gray-700 font-mono text-xs" data-testid="input-edit-reference-transcript" />
+          </div>
+          <div>
+            <Label className="text-gray-300">Domain terms (через запятую: eSIM, SMS code, port-in …)</Label>
+            <Input value={terms} onChange={(e) => setTerms(e.target.value)}
+              className="bg-gray-950 border-gray-700" data-testid="input-edit-reference-terms" />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-300">
+            <input type="checkbox" checked={swapChannels} onChange={(e) => setSwapChannels(e.target.checked)}
+              data-testid="checkbox-swap-channels" />
+            Поменять каналы местами (канал 0 = Guest, канал 1 = Owner)
+          </label>
+        </div>
+        <DialogFooter>
+          <Button onClick={submit} disabled={submitting || !loaded} className="bg-cyan-600 hover:bg-cyan-700" data-testid="button-save-reference">
+            {submitting ? "Saving…" : "Save reference"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

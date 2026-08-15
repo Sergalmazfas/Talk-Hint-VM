@@ -87,11 +87,24 @@ export async function startEarsRun(fixtureIds: string[]): Promise<{ runId: strin
       const { runEarsBenchmark } = await import("./earsHarness");
       const availability = await checkEarsAvailability();
       const result = await runEarsBenchmark({ fixtures, candidates: EARS_CANDIDATES, availability });
+      let report: string | null = null;
+      try {
+        const { generateEarsReport } = await import("./report");
+        report = generateEarsReport({
+          availability,
+          scorecard: result.scorecard,
+          notes: result.notes,
+          fixtureTitles: fixtures.map((f) => f.title),
+        });
+      } catch (e: any) {
+        report = `EARS report generation failed: ${String(e?.message ?? e)}`;
+      }
       await finishRun(run.id, {
         status: "completed",
         availability: { ears: availability },
         results: { turnResults: result.turnResults, notes: result.notes },
         scorecard: result.scorecard,
+        report,
       });
     } catch (e: any) {
       await finishRun(run.id, { status: "failed", error: String(e?.stack ?? e) });

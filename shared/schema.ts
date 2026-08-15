@@ -427,6 +427,8 @@ export const benchmarkFixtures = pgTable("benchmark_fixtures", {
   audioBase64: text("audio_base64"),
   audioFormat: text("audio_format"), // e.g. "mulaw8k" | "wav" | "mp3"
   audioChannels: text("audio_channels"), // "mono" | "dual"
+  // Which speaker role each recording channel carries, e.g. ["owner","guest"].
+  channelRoles: jsonb("channel_roles").notNull().default(sql`'["owner","guest"]'::jsonb`),
   sourceCallSid: text("source_call_sid"),
   tags: jsonb("tags").notNull().default(sql`'[]'::jsonb`),
   createdAt: timestamp("created_at").notNull().defaultNow(),

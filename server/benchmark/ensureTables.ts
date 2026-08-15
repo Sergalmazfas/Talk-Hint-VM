@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS benchmark_fixtures (
   created_at timestamp NOT NULL DEFAULT now(),
   updated_at timestamp NOT NULL DEFAULT now()
 );
+ALTER TABLE benchmark_fixtures ADD COLUMN IF NOT EXISTS channel_roles jsonb NOT NULL DEFAULT '["owner","guest"]'::jsonb;
 CREATE TABLE IF NOT EXISTS benchmark_runs (
   id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
   run_type text NOT NULL,

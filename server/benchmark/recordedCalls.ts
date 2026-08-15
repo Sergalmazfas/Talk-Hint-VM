@@ -53,6 +53,38 @@ export async function downloadRecordingWav(recordingUrl: string | undefined, rec
   }
 }
 
+// Look up the newest completed recording for a call directly from Twilio's
+// API (our account only; URL constructed, never taken from input). Used when
+// the call row lives in another environment's DB (e.g. a production call
+// being fixtured from the dev admin) but the recording itself is on Twilio.
+export async function lookupRecordingSidByCallSid(callSid: string): Promise<string | null> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!accountSid || !authToken) throw new Error("Twilio credentials not configured");
+  if (!/^CA[0-9a-f]{32}$/i.test(callSid)) throw new Error("invalid call SID");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const resp = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings.json?CallSid=${callSid}&PageSize=20`,
+      {
+        headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}` },
+        signal: controller.signal,
+        redirect: "error",
+      },
+    );
+    if (!resp.ok) throw new Error(`Twilio recordings lookup failed: HTTP ${resp.status}`);
+    const body: any = await resp.json();
+    const recs: any[] = Array.isArray(body?.recordings) ? body.recordings : [];
+    const completed = recs.filter((r) => r?.status === "completed" && /^RE[0-9a-f]{32}$/i.test(r?.sid ?? ""));
+    if (completed.length === 0) return null;
+    completed.sort((a, b) => new Date(b.date_created).getTime() - new Date(a.date_created).getTime());
+    return completed[0].sid as string;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function recordingMeta(call: { metadata: unknown }) {
   const m = (call.metadata as any) ?? {};
   return {

@@ -27,14 +27,23 @@ import {
   wordErrorRate,
   charErrorRate,
   entityAccuracy,
+  termsAccuracy,
   semanticProxy,
   buildScorecardRow,
   normalizeText,
   type EarsScorecardRow,
   type EarsRowInput,
 } from "./earsMetrics";
+import { splitWavChannels } from "./audioChannels";
 
 const CANDIDATE_STREAM_TIMEOUT_MS = 60000;
+
+/** Stream guard must cover the (accelerated) audio duration plus a flush
+ * window — a real 4-minute call would otherwise time out mid-stream. */
+function streamGuardMs(mulawBytes: number): number {
+  const streamMs = (mulawBytes / 8000) * 1000 / REALTIME_ACCEL; // mulaw8k: 8000 B/s
+  return Math.max(CANDIDATE_STREAM_TIMEOUT_MS, Math.round(streamMs) + 30_000);
+}
 const REALTIME_ACCEL = 4; // send 20ms frames every 5ms (4x faster than realtime)
 const FRAME_BYTES_MULAW = 160; // 20ms @ 8kHz mulaw
 
@@ -97,7 +106,8 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
       }
       resolve({ finals, lastFrameSentAtMs, error: err });
     };
-    const guard = setTimeout(() => done(`timeout after ${CANDIDATE_STREAM_TIMEOUT_MS}ms`), CANDIDATE_STREAM_TIMEOUT_MS);
+    const guardMs = streamGuardMs(mulaw.length);
+    const guard = setTimeout(() => done(`timeout after ${guardMs}ms`), guardMs);
 
     try {
       ws = new WebSocket(url, { headers: { Authorization: `Token ${key}` } });
@@ -118,11 +128,13 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
         done(`server error: ${text.slice(0, 300)}`);
         return;
       }
-      // Flux v2: TurnInfo with event EndOfTurn/Update carries transcript.
+      // Flux v2: TurnInfo carries the CUMULATIVE transcript of the ongoing
+      // turn on every Update — collecting those duplicates the text many
+      // times over and explodes WER. Only EndOfTurn is a final.
       if (msg.type === "TurnInfo") {
         const transcript = String(msg.transcript || "").trim();
-        if (transcript) {
-          finals.push({ text: transcript, atMs: nowMs() - start, isEndOfTurn: msg.event === "EndOfTurn" });
+        if (transcript && msg.event === "EndOfTurn") {
+          finals.push({ text: transcript, atMs: nowMs() - start, isEndOfTurn: true });
         }
         return;
       }
@@ -250,11 +262,14 @@ async function streamOpenAiRealtime(c: EarsCandidate, mulaw: Buffer): Promise<St
       }
       resolve({ finals, lastFrameSentAtMs, error: err });
     };
-    const guard = setTimeout(() => done(`timeout after ${CANDIDATE_STREAM_TIMEOUT_MS}ms`), CANDIDATE_STREAM_TIMEOUT_MS);
+    const guardMs = streamGuardMs(mulaw.length);
+    const guard = setTimeout(() => done(`timeout after ${guardMs}ms`), guardMs);
 
     try {
+      // GA realtime API: no OpenAI-Beta header (beta shape is rejected with
+      // beta_api_shape_disabled since 2026).
       ws = new WebSocket("wss://api.openai.com/v1/realtime?intent=transcription", {
-        headers: { Authorization: `Bearer ${secret.value}`, "OpenAI-Beta": "realtime=v1" },
+        headers: { Authorization: `Bearer ${secret.value}` },
       });
     } catch (e) {
       done(`ws construct error: ${(e as Error).message}`);
@@ -269,6 +284,9 @@ async function streamOpenAiRealtime(c: EarsCandidate, mulaw: Buffer): Promise<St
         return;
       }
       if (msg.type === "error") {
+        // Non-fatal: committing an (already-consumed) buffer under server VAD
+        // returns commit_empty — the transcripts collected so far are valid.
+        if (msg.error?.code === "input_audio_buffer_commit_empty") return;
         done(`server error: ${JSON.stringify(msg.error).slice(0, 300)}`);
         return;
       }
@@ -291,13 +309,16 @@ async function streamOpenAiRealtime(c: EarsCandidate, mulaw: Buffer): Promise<St
           lastFrameSentAtMs = nowMs() - start;
           await sleep(20 / REALTIME_ACCEL);
         }
-        // Commit remaining audio so the server emits a final for the tail.
+        // Server/semantic VAD owns turn boundaries — no manual commit (it
+        // errors with commit_empty). Send a short silence tail so VAD closes
+        // the last turn, then allow time for the final transcription events.
         try {
-          ws!.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+          const silence = Buffer.alloc(Math.round(24000 * 2 * 0.5)); // 0.5s pcm16 silence
+          ws!.send(JSON.stringify({ type: "input_audio_buffer.append", audio: silence.toString("base64") }));
         } catch {
           /* ignore */
         }
-        await sleep(4000);
+        await sleep(8000);
         done();
       } catch (e) {
         done(`stream error: ${(e as Error).message}`);
@@ -320,7 +341,8 @@ async function transcribeOpenAiBatch(
   if (!key) return { finals: [], lastFrameSentAtMs: 0, error: "OPENAI_API_KEY missing" };
   const model = String(c.config.model);
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), CANDIDATE_STREAM_TIMEOUT_MS);
+  // Batch uploads of multi-minute call audio can legitimately take a while.
+  const timer = setTimeout(() => ac.abort(), 180_000);
   try {
     const form = new FormData();
     form.append("model", model);
@@ -416,6 +438,7 @@ function scoreTurn(
   const hyp = a.hypText;
   const ref = a.refTurn.text;
   const ea = entityAccuracy(critical, hyp);
+  const termsAcc = termsAccuracy(critical.terms, ref, hyp);
   // Latency (realtime only): from last-audio-frame-sent to this turn's final.
   let speechEndToFinalMs: number | null = null;
   if (a.hypAtMs !== null && lastFrameSentAtMs > 0) {
@@ -431,7 +454,7 @@ function scoreTurn(
     wer: hyp ? wordErrorRate(ref, hyp) : null,
     cer: hyp ? charErrorRate(ref, hyp) : null,
     entityAccuracy: hyp
-      ? { money: ea.money, dates: ea.dates, digits: ea.digits, names: ea.names }
+      ? { money: ea.money, dates: ea.dates, digits: ea.digits, names: ea.names, terms: termsAcc }
       : null,
     prematureEot: null, // requires per-turn boundary ground truth (not available yet)
     falseContinuation: null,
@@ -504,15 +527,18 @@ export async function runEarsBenchmark(opts: {
       candidateId: c.id,
       label: c.label,
       wer: [],
+      roles: [],
       cer: [],
       semantic: [],
       moneyAcc: [],
       digitsAcc: [],
+      termsAcc: [],
       prematureEotFlags: [],
       falseWaitFlags: [],
       eotLatencies: [],
       finalLatencies: [],
       costEstimate: null,
+      referenceOnly: !!c.referenceOnly,
     });
   }
 
@@ -535,29 +561,67 @@ export async function runEarsBenchmark(opts: {
       continue;
     }
 
+    // Build one or more audio "jobs" per fixture. A dual-channel WAV recording
+    // (real Twilio call) is split into per-channel streams so each candidate
+    // hears exactly what production STT hears: one speaker per stream, at
+    // ORIGINAL 8kHz telephone quality (channel de-interleave + μ-law transcode
+    // only — never resampled or enhanced). Each channel is scored against the
+    // reference turns of its role, which is what makes Owner/Guest WER honest.
+    interface AudioJob {
+      label: string;
+      refTurns: ReferenceTurn[];
+      mulaw: Buffer | null; // null => realtime candidates cannot run this job
+      batchAudio: Buffer;
+      batchFilename: string;
+      batchMime: string;
+    }
+    const jobs: AudioJob[] = [];
+    const isWav = (fixture.audioFormat || "").toLowerCase() === "wav";
+    if (isWav && fixture.audioChannels === "dual") {
+      try {
+        const split = splitWavChannels(audio);
+        const roleMap: Array<"owner" | "guest"> = Array.isArray((fixture as any).channelRoles) && (fixture as any).channelRoles.length
+          ? (fixture as any).channelRoles
+          : ["owner", "guest"];
+        split.channels.forEach((ch, i) => {
+          const role = roleMap[i] === "guest" ? "guest" : roleMap[i] === "owner" ? "owner" : (i === 0 ? "owner" : "guest");
+          jobs.push({
+            label: `channel ${i} (${role})`,
+            refTurns: refTurns.filter((t) => t.role === role),
+            mulaw: ch.mulaw8k,
+            batchAudio: ch.wav,
+            batchFilename: `channel${i}-${role}.wav`,
+            batchMime: "audio/wav",
+          });
+        });
+        notes.push(`fixture ${fixture.id}: dual-channel recording split into ${split.channels.length} per-role streams (${roleMap.join("/")}); original 8kHz telephone audio, no enhancement.`);
+      } catch (e) {
+        notes.push(`fixture ${fixture.id}: channel split failed (${(e as Error).message}) — realtime candidates skipped; batch runs on the whole file.`);
+        jobs.push({ label: "whole file", refTurns, mulaw: null, batchAudio: audio, batchFilename: fmt.filename, batchMime: fmt.mime });
+      }
+    } else if (fmt.isMulaw8k) {
+      jobs.push({ label: "whole stream", refTurns, mulaw: audio, batchAudio: audio, batchFilename: fmt.filename, batchMime: fmt.mime });
+    } else {
+      notes.push(`fixture ${fixture.id}: audioFormat=${fixture.audioFormat}/${fixture.audioChannels ?? "?"} — realtime candidates need mulaw8k or a dual-channel 8kHz WAV; only batch runs.`);
+      jobs.push({ label: "whole file", refTurns, mulaw: null, batchAudio: audio, batchFilename: fmt.filename, batchMime: fmt.mime });
+    }
+
     for (const c of runnable) {
+      for (const job of jobs) {
       // Per-candidate isolation: any failure here becomes a recorded error, not
       // an aborted run.
       try {
         let outcome: StreamOutcome;
         if (c.kind === "batch") {
-          outcome = await transcribeOpenAiBatch(c, audio, fmt.filename, fmt.mime);
-        } else if (c.provider === "deepgram") {
-          if (!fmt.isMulaw8k) {
-            notes.push(
-              `fixture ${fixture.id} / ${c.id}: audioFormat=${fixture.audioFormat} is not mulaw8k; Deepgram candidate expects mulaw8k — skipped.`
-            );
+          outcome = await transcribeOpenAiBatch(c, job.batchAudio, job.batchFilename, job.batchMime);
+        } else if (c.provider === "deepgram" || c.provider === "openai") {
+          if (!job.mulaw) {
+            notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: no mulaw8k stream available for realtime candidate — skipped.`);
             continue;
           }
-          outcome = await streamDeepgram(c, audio);
-        } else if (c.provider === "openai") {
-          if (!fmt.isMulaw8k) {
-            notes.push(
-              `fixture ${fixture.id} / ${c.id}: audioFormat=${fixture.audioFormat} not mulaw8k; realtime path expects mulaw8k source — skipped.`
-            );
-            continue;
-          }
-          outcome = await streamOpenAiRealtime(c, audio);
+          outcome = c.provider === "deepgram"
+            ? await streamDeepgram(c, job.mulaw)
+            : await streamOpenAiRealtime(c, job.mulaw);
         } else {
           notes.push(`fixture ${fixture.id} / ${c.id}: unsupported provider — skipped.`);
           continue;
@@ -582,24 +646,81 @@ export async function runEarsBenchmark(opts: {
           continue;
         }
 
-        const aligned = alignFinalsToTurns(outcome.finals, refTurns);
         const rowAcc = acc.get(c.id)!;
+
+        // Degenerate turn detection (few giant finals — e.g. batch output or a
+        // model whose EOT collapsed on this audio) makes per-turn alignment
+        // meaningless: one reference turn gets the whole channel's text and
+        // WER explodes into the thousands of percent. In that case score the
+        // channel as ONE document (standard document-level WER) — honest, and
+        // clearly noted. Per-channel jobs have a single role, so Owner/Guest
+        // WER stays meaningful.
+        const uniformRole = job.refTurns.every((t) => t.role === job.refTurns[0]?.role)
+          ? job.refTurns[0]?.role ?? null : null;
+        const degenerate = outcome.finals.length > 0 && job.refTurns.length >= 4 &&
+          outcome.finals.length < job.refTurns.length / 2;
+        if (degenerate) {
+          const refJoined = job.refTurns.map((t) => t.text).join(" ");
+          const hypJoined = outcome.finals.map((f) => f.text).join(" ");
+          const docAligned: Aligned = {
+            refTurn: { idx: -1, role: (uniformRole ?? "guest") as any, text: refJoined },
+            hypText: hypJoined,
+            hypAtMs: outcome.finals[outcome.finals.length - 1]?.atMs ?? null,
+            hypEndOfTurn: null,
+          };
+          const tr = scoreTurn(c.id, docAligned, critical, outcome.lastFrameSentAtMs);
+          tr.role = uniformRole as any;
+          turnResults.push(tr);
+          rowAcc.wer.push(tr.wer);
+          rowAcc.cer!.push(tr.cer);
+          rowAcc.roles!.push(uniformRole);
+          rowAcc.semantic.push(semanticProxy(refJoined, hypJoined));
+          rowAcc.moneyAcc.push(tr.entityAccuracy?.money ?? null);
+          rowAcc.digitsAcc.push(tr.entityAccuracy?.digits ?? null);
+          rowAcc.termsAcc!.push(tr.entityAccuracy?.terms ?? null);
+          rowAcc.prematureEotFlags.push(null);
+          rowAcc.falseWaitFlags.push(null);
+          rowAcc.finalLatencies.push(null);
+          rowAcc.eotLatencies.push(null);
+          notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: turn detection produced ${outcome.finals.length} final(s) for ${job.refTurns.length} reference turns — scored as document-level WER instead of per-turn alignment.`);
+          continue;
+        }
+
+        const aligned = alignFinalsToTurns(outcome.finals, job.refTurns);
 
         for (const a of aligned) {
           try {
             const tr = scoreTurn(c.id, a, critical, outcome.lastFrameSentAtMs);
             turnResults.push(tr);
-            // feed scorecard accumulators only for turns that produced hyp text
+            // EVERY reference turn counts. A turn the candidate never
+            // transcribed is a full deletion (WER 1.0) — excluding missed
+            // turns would let a candidate look better by dropping the hard
+            // ones. (Stream-level errors were already handled above and never
+            // reach this loop.)
             if (a.hypText) {
               rowAcc.wer.push(tr.wer);
               rowAcc.cer!.push(tr.cer);
+              rowAcc.roles!.push(a.refTurn.role ?? null);
               rowAcc.semantic.push(semanticProxy(a.refTurn.text, a.hypText));
               rowAcc.moneyAcc.push(tr.entityAccuracy?.money ?? null);
               rowAcc.digitsAcc.push(tr.entityAccuracy?.digits ?? null);
+              rowAcc.termsAcc!.push(tr.entityAccuracy?.terms ?? null);
               rowAcc.prematureEotFlags.push(tr.prematureEot);
               rowAcc.falseWaitFlags.push(tr.falseContinuation);
               rowAcc.finalLatencies.push(tr.speechEndToFinalMs);
               rowAcc.eotLatencies.push(tr.speechEndToEotMs);
+            } else {
+              rowAcc.wer.push(1); // missed turn = everything deleted
+              rowAcc.cer!.push(1);
+              rowAcc.roles!.push(a.refTurn.role ?? null);
+              rowAcc.semantic.push(0);
+              rowAcc.moneyAcc.push(null);
+              rowAcc.digitsAcc.push(null);
+              rowAcc.termsAcc!.push(termsAccuracy(critical.terms, a.refTurn.text, ""));
+              rowAcc.prematureEotFlags.push(null);
+              rowAcc.falseWaitFlags.push(null);
+              rowAcc.finalLatencies.push(null);
+              rowAcc.eotLatencies.push(null);
             }
           } catch (e) {
             // Per-turn isolation.
@@ -620,7 +741,8 @@ export async function runEarsBenchmark(opts: {
           }
         }
       } catch (e) {
-        notes.push(`fixture ${fixture.id} / ${c.id}: candidate run failed — ${(e as Error).message}`);
+        notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: candidate run failed — ${(e as Error).message}`);
+      }
       }
     }
   }

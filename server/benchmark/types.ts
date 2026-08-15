@@ -18,6 +18,8 @@ export interface CriticalEntities {
   digits: string[];
   names: string[];
   decisions: string[];
+  /** domain terms weighted separately (eSIM, SMS code, port-in, ...) */
+  terms?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +150,8 @@ export interface EarsTurnResult {
     dates: number | null;
     digits: number | null;
     names: number | null;
+    /** domain-term accuracy (terms present in this reference turn) */
+    terms?: number | null;
   } | null;
   prematureEot: boolean | null;
   falseContinuation: boolean | null;

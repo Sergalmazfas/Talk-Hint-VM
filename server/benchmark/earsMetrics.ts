@@ -346,6 +346,27 @@ export function entityAccuracy(
   return { money, dates, digits, names };
 }
 
+/**
+ * Domain-term accuracy for one turn: of the fixture's domain terms (eSIM,
+ * SMS code, port-in, ...) that actually appear in THIS reference turn,
+ * what fraction survived into the hypothesis? Terms absent from the
+ * reference turn are not scored (null when none apply) — this keeps the
+ * metric a lower bound and never credits terms the speaker never said.
+ */
+export function termsAccuracy(
+  terms: string[] | undefined,
+  refText: string,
+  hypText: string
+): number | null {
+  const list = (terms ?? []).map((t) => normalizeText(t)).filter((t) => t.length > 0);
+  if (list.length === 0) return null;
+  const refNorm = normalizeText(refText);
+  const applicable = list.filter((t) => refNorm.includes(t));
+  if (applicable.length === 0) return null;
+  const hypNorm = normalizeText(hypText);
+  return applicable.filter((t) => hypNorm.includes(t)).length / applicable.length;
+}
+
 // ---------------------------------------------------------------------------
 // Aggregation helpers
 // ---------------------------------------------------------------------------
@@ -402,8 +423,16 @@ export interface EarsScorecardRow {
   semantic: number | null;
   semanticIsProxy: true;
   wer: number | null;
+  /** mean WER over Owner-role turns only (the metric that matters most) */
+  ownerWer: number | null;
+  /** mean WER over Guest-role turns only */
+  guestWer: number | null;
   /** combined money+digits entity accuracy fraction */
   numbersMoney: number | null;
+  /** domain-term accuracy (eSIM, SMS code, ...) over turns where terms apply */
+  terms: number | null;
+  /** reference-only candidate (accuracy ceiling) — never a LIVE winner */
+  referenceOnly: boolean;
   /** placeholder: role-split accuracy requires diarized reference (null now) */
   roleSplit: number | null;
   /** fraction of turns flagged premature end-of-turn (null if not measured) */
@@ -423,8 +452,12 @@ export interface EarsRowInput {
   candidateId: string;
   label: string;
   wer: Array<number | null>;
+  /** role of the reference turn behind each wer sample (parallel array) */
+  roles?: Array<"owner" | "guest" | null>;
   cer?: Array<number | null>;
   semantic: Array<number | null>;
+  termsAcc?: Array<number | null>;
+  referenceOnly?: boolean;
   moneyAcc: Array<number | null>;
   digitsAcc: Array<number | null>;
   prematureEotFlags: Array<boolean | null>;
@@ -451,13 +484,21 @@ export function buildScorecardRow(input: EarsRowInput): EarsScorecardRow {
   const nonNull = (arr: Array<number | null>): number[] =>
     arr.filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
 
+  const roles = input.roles ?? [];
+  const werForRole = (role: "owner" | "guest"): number | null =>
+    mean(input.wer.filter((_, i) => roles[i] === role));
+
   return {
     candidateId: input.candidateId,
     label: input.label,
     semantic: mean(input.semantic),
     semanticIsProxy: true,
     wer: mean(input.wer),
+    ownerWer: werForRole("owner"),
+    guestWer: werForRole("guest"),
     numbersMoney,
+    terms: mean(input.termsAcc ?? []),
+    referenceOnly: input.referenceOnly ?? false,
     roleSplit: null,
     prematureEot: flagFraction(input.prematureEotFlags),
     falseWait: flagFraction(input.falseWaitFlags),

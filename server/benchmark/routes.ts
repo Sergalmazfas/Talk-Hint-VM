@@ -15,7 +15,7 @@ import { db } from "../db";
 import { benchmarkFixtures, calls } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { ensureBenchmarkTables } from "./ensureTables";
-import { registerRecordedCallRoutes, downloadRecordingWav } from "./recordedCalls";
+import { registerRecordedCallRoutes, downloadRecordingWav, lookupRecordingSidByCallSid } from "./recordedCalls";
 
 export function registerBenchmarkRoutes(app: Express) {
   const base = "/api/admin/benchmark";
@@ -97,8 +97,18 @@ export function registerBenchmarkRoutes(app: Express) {
       const [call] = await db.select().from(calls).where(eq(calls.callSid, callSid));
       const meta = (call?.metadata as any) ?? {};
       const recordingUrl = meta.benchmarkRecordingUrl as string | undefined;
-      const recordingSid = meta.recordingSid as string | undefined;
-      if (!recordingUrl && !recordingSid) return res.status(404).json({ error: "no benchmark recording stored for this call (was recording enabled during the call?)" });
+      let recordingSid = meta.recordingSid as string | undefined;
+      if (!recordingUrl && !recordingSid) {
+        // Call row may live in another environment's DB (e.g. production call
+        // fixtured from dev). The recording is on Twilio either way — look it
+        // up by call SID against our own account.
+        try {
+          recordingSid = (await lookupRecordingSidByCallSid(callSid)) ?? undefined;
+        } catch (e: any) {
+          return res.status(502).json({ error: `Twilio recording lookup failed: ${String(e?.message ?? e)}` });
+        }
+        if (!recordingSid) return res.status(404).json({ error: "no completed recording found on Twilio for this call SID (was recording enabled during the call?)" });
+      }
       let audioBuf: Buffer;
       try {
         // SSRF-guarded: only canonical Twilio recording URLs for our account.
@@ -123,6 +133,75 @@ export function registerBenchmarkRoutes(app: Express) {
     } catch (e: any) {
       res.status(500).json({ error: String(e?.message ?? e) });
     }
+  });
+
+  // Reference transcript of one fixture (for the admin editor).
+  app.get(`${base}/fixtures/:id/reference`, requireBenchmarkAdmin, async (req, res) => {
+    try {
+      const [row] = await db.select().from(benchmarkFixtures).where(eq(benchmarkFixtures.id, req.params.id));
+      if (!row) return res.status(404).json({ error: "fixture not found" });
+      res.json({
+        id: row.id,
+        title: row.title,
+        referenceTurns: row.referenceTurns ?? [],
+        criticalEntities: row.criticalEntities ?? {},
+        channelRoles: (row as any).channelRoles ?? ["owner", "guest"],
+        tags: row.tags ?? [],
+        hasAudio: !!row.audioBase64,
+        audioChannels: row.audioChannels,
+        sourceCallSid: row.sourceCallSid,
+      });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // Manually edit the reference transcript / domain terms / channel-role
+  // mapping of an EXISTING fixture. The production transcript is never the
+  // ground truth — the admin listens to the recording and fixes the reference
+  // by hand. Every save appends a ref-v<timestamp> tag (versioned history).
+  app.put(`${base}/fixtures/:id/reference`, requireBenchmarkAdmin, express.json({ limit: "2mb" }), async (req, res) => {
+    try {
+      const [row] = await db.select().from(benchmarkFixtures).where(eq(benchmarkFixtures.id, req.params.id));
+      if (!row) return res.status(404).json({ error: "fixture not found" });
+
+      const { referenceTurns, terms, channelRoles, title } = req.body ?? {};
+      if (!Array.isArray(referenceTurns) || referenceTurns.length === 0) {
+        return res.status(400).json({ error: "referenceTurns must be a non-empty array of {idx, role: 'owner'|'guest', text}" });
+      }
+      for (const t of referenceTurns) {
+        if (!t || typeof t.text !== "string" || !t.text.trim() || (t.role !== "owner" && t.role !== "guest")) {
+          return res.status(400).json({ error: "every turn needs role 'owner'|'guest' and non-empty text" });
+        }
+      }
+      const cleanTurns = referenceTurns.map((t: any, idx: number) => ({ idx, role: t.role, text: String(t.text).trim() }));
+
+      let roles: string[] | undefined;
+      if (channelRoles !== undefined) {
+        if (!Array.isArray(channelRoles) || channelRoles.some((r: any) => r !== "owner" && r !== "guest")) {
+          return res.status(400).json({ error: "channelRoles must be an array of 'owner'|'guest'" });
+        }
+        roles = channelRoles;
+      }
+
+      const critical = { ...((row.criticalEntities as any) ?? {}) };
+      if (terms !== undefined) {
+        if (!Array.isArray(terms) || terms.some((t: any) => typeof t !== "string")) {
+          return res.status(400).json({ error: "terms must be an array of strings" });
+        }
+        critical.terms = terms.map((t: string) => t.trim()).filter(Boolean);
+      }
+
+      const refVersion = `ref-v${Date.now()}`;
+      const tags = Array.isArray(row.tags) ? [...(row.tags as string[]), refVersion] : [refVersion];
+      const [updated] = await db.update(benchmarkFixtures).set({
+        referenceTurns: cleanTurns,
+        criticalEntities: critical,
+        ...(roles ? { channelRoles: roles } : {}),
+        ...(typeof title === "string" && title.trim() ? { title: title.trim() } : {}),
+        tags,
+        updatedAt: new Date(),
+      }).where(eq(benchmarkFixtures.id, row.id)).returning();
+      res.json({ ...updated, audioBase64: updated.audioBase64 ? "<attached>" : null, refVersion });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
   });
 
   // Availability check run
