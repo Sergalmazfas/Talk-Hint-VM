@@ -11,7 +11,7 @@ import { requireBenchmarkAdmin } from "./adminGate";
 import { db } from "../db";
 import { benchmarkFixtures, calls, users } from "@shared/schema";
 import { eq, sql, desc } from "drizzle-orm";
-import { transcriptToReferenceTurns } from "./diagnosticRecording";
+import { transcriptToReferenceTurns, invalidateDiagnosticRecordingCache } from "./diagnosticRecording";
 
 // SSRF guard: we never fetch a stored URL blindly with Twilio credentials.
 // The only trusted endpoint shape is Twilio's own API for OUR account; when a
@@ -68,6 +68,32 @@ function recordingMeta(call: { metadata: unknown }) {
 }
 
 export function registerRecordedCallRoutes(app: Express, base: string) {
+  // Diagnostic-recording participants: list users and toggle the per-user
+  // recording capability from the admin panel (prod DB is read-only for the
+  // agent, so this is THE way to enroll/remove test accounts in production).
+  app.get(`${base}/diagnostic-users`, requireBenchmarkAdmin, async (_req, res) => {
+    try {
+      const rows = await db.select({
+        id: users.id, email: users.email,
+        diagnosticRecordingEnabled: users.diagnosticRecordingEnabled,
+      }).from(users).orderBy(desc(users.diagnosticRecordingEnabled), users.email).limit(500);
+      res.json(rows);
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  app.post(`${base}/diagnostic-users/:id`, requireBenchmarkAdmin, express.json(), async (req, res) => {
+    try {
+      const enabled = req.body?.enabled === true;
+      const [row] = await db.update(users)
+        .set({ diagnosticRecordingEnabled: enabled })
+        .where(eq(users.id, req.params.id))
+        .returning({ id: users.id, email: users.email, diagnosticRecordingEnabled: users.diagnosticRecordingEnabled });
+      if (!row) return res.status(404).json({ error: "user not found" });
+      invalidateDiagnosticRecordingCache(row.id);
+      res.json(row);
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
   // List recorded calls (any call with recording metadata), newest first.
   app.get(`${base}/recorded-calls`, requireBenchmarkAdmin, async (_req, res) => {
     try {

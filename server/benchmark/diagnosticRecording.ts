@@ -37,6 +37,12 @@ const CAPABILITY_DEADLINE_MS = 800;
 const CAPABILITY_CACHE_MS = 60_000;
 const capabilityCache = new Map<string, { enabled: boolean; at: number }>();
 
+/// Drop the cached capability for one user so an admin toggle takes effect on
+/// the very next call instead of after the cache TTL.
+export function invalidateDiagnosticRecordingCache(userId: string) {
+  capabilityCache.delete(userId);
+}
+
 export async function isDiagnosticRecordingUser(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
   const cached = capabilityCache.get(userId);

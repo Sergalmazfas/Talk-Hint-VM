@@ -1420,6 +1420,95 @@ function fmtDuration(secs?: number | null): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+interface DiagnosticUser {
+  id: string;
+  email: string;
+  diagnosticRecordingEnabled: boolean;
+}
+
+function DiagnosticUsersBlock() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [collapsed, setCollapsed] = useState(true);
+  const [search, setSearch] = useState("");
+
+  const key = [BASE, "diagnostic-users"];
+  const usersQ = useAuthedQuery<DiagnosticUser[]>(key, !!token);
+  const users = usersQ.data ?? [];
+
+  const toggle = useMutation({
+    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
+      const res = await fetch(`${BASE}/diagnostic-users/${id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    },
+    onMutate: async ({ id, enabled }) => {
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<DiagnosticUser[]>(key);
+      qc.setQueryData<DiagnosticUser[]>(key, (old) =>
+        (old ?? []).map((u) => (u.id === id ? { ...u, diagnosticRecordingEnabled: enabled } : u)));
+      return { prev };
+    },
+    onError: (e: any, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
+  });
+
+  const filtered = search.trim()
+    ? users.filter((u) => u.email?.toLowerCase().includes(search.trim().toLowerCase()))
+    : users;
+
+  return (
+    <Card className="bg-gray-900/50 border-gray-800">
+      <CardHeader className="cursor-pointer select-none" onClick={() => setCollapsed((c) => !c)}>
+        <CardTitle className="text-base flex items-center justify-between">
+          <span>Участники диагностической записи</span>
+          <span className="text-xs text-gray-500">{collapsed ? "▸" : "▾"}</span>
+        </CardTitle>
+      </CardHeader>
+      {!collapsed && (
+        <CardContent className="space-y-3">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Поиск по email…"
+            className="bg-gray-950 border-gray-700 max-w-sm"
+            data-testid="input-diag-user-search"
+          />
+          {usersQ.isLoading ? (
+            <p className="text-sm text-gray-500">Загрузка…</p>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-gray-500">Участники не найдены.</p>
+          ) : (
+            <div className="max-h-80 overflow-y-auto divide-y divide-gray-800 rounded border border-gray-800">
+              {filtered.map((u) => (
+                <div key={u.id} className="flex items-center justify-between px-3 py-2" data-testid={`row-diag-user-${u.id}`}>
+                  <span className="text-sm text-gray-200 truncate mr-3">{u.email}</span>
+                  <label className="flex items-center gap-2 text-xs text-gray-400 shrink-0">
+                    <span>{u.diagnosticRecordingEnabled ? "Запись включена" : "Запись выключена"}</span>
+                    <Switch
+                      checked={u.diagnosticRecordingEnabled}
+                      onCheckedChange={(enabled) => toggle.mutate({ id: u.id, enabled })}
+                      data-testid={`switch-diag-user-${u.id}`}
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 function RecordedCallsTab({ active, onOpenReplay }: { active: boolean; onOpenReplay: () => void }) {
   const listQ = useAuthedQuery<RecordedCall[]>([BASE, "recorded-calls"], true, active ? 10000 : false);
   const calls = listQ.data ?? [];
@@ -1431,6 +1520,8 @@ function RecordedCallsTab({ active, onOpenReplay }: { active: boolean; onOpenRep
 
   return (
     <div className="space-y-4">
+      <DiagnosticUsersBlock />
+
       <Card className="bg-gray-900/50 border-gray-800">
         <CardHeader><CardTitle className="text-base">Записанные звонки</CardTitle></CardHeader>
         <CardContent className="overflow-x-auto">
