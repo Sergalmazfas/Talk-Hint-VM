@@ -44,7 +44,8 @@ function streamGuardMs(mulawBytes: number): number {
   const streamMs = (mulawBytes / 8000) * 1000 / REALTIME_ACCEL; // mulaw8k: 8000 B/s
   return Math.max(CANDIDATE_STREAM_TIMEOUT_MS, Math.round(streamMs) + 30_000);
 }
-const REALTIME_ACCEL = 4; // send 20ms frames every 5ms (4x faster than realtime)
+/** @internal exported for unit tests only */
+export const REALTIME_ACCEL = 4; // send 20ms frames every 5ms (4x faster than realtime)
 const FRAME_BYTES_MULAW = 160; // 20ms @ 8kHz mulaw
 
 interface CollectedFinal {
@@ -381,7 +382,8 @@ function similarity(a: string, b: string): number {
   return 1 - Math.min(1, wordErrorRate(a, b));
 }
 
-interface Aligned {
+/** @internal exported for unit tests only */
+export interface Aligned {
   refTurn: ReferenceTurn;
   hypText: string;
   hypAtMs: number | null;
@@ -429,7 +431,15 @@ function alignFinalsToTurns(finals: CollectedFinal[], refTurns: ReferenceTurn[])
 // Per-turn scoring
 // ---------------------------------------------------------------------------
 
-function scoreTurn(
+// A candidate EOT that arrives more than PREMATURE_THRESHOLD_MS before the
+// reference turn boundary is flagged as premature. A small negative window
+// (200 ms) absorbs reference-annotation imprecision without masking real
+// premature fires that cut off trailing words.
+/** @internal exported for unit tests only */
+export const PREMATURE_THRESHOLD_MS = -200;
+
+/** @internal exported for unit tests only */
+export function scoreTurn(
   candidateId: string,
   a: Aligned,
   critical: CriticalEntities,
@@ -439,13 +449,49 @@ function scoreTurn(
   const ref = a.refTurn.text;
   const ea = entityAccuracy(critical, hyp);
   const termsAcc = termsAccuracy(critical.terms, ref, hyp);
+
   // Latency (realtime only): from last-audio-frame-sent to this turn's final.
+  // `lastFrameSentAtMs > 0` distinguishes realtime streams from batch (batch
+  // sets lastFrameSentAtMs = 0 and should not produce latency figures here).
+  const isRealtime = lastFrameSentAtMs > 0;
   let speechEndToFinalMs: number | null = null;
-  if (a.hypAtMs !== null && lastFrameSentAtMs > 0) {
+  if (a.hypAtMs !== null && isRealtime) {
     const delta = a.hypAtMs - lastFrameSentAtMs;
     // Scale accelerated harness clock back toward real time.
     speechEndToFinalMs = delta >= 0 ? Math.round(delta * REALTIME_ACCEL) : null;
   }
+
+  // EOT boundary metrics — only computable when:
+  //   (a) ground-truth turn end timing is annotated (tEndMs on the ref turn), AND
+  //   (b) the candidate is realtime (batch has no streaming EOT concept).
+  // Formula: convert harness wall-clock (accelerated) to real audio-time offset,
+  // then subtract the ground-truth turn boundary.
+  //   candidate EOT in audio time = hypAtMs * REALTIME_ACCEL
+  //   speechEndToEotMs = candidateEotAudioMs − tEndMs
+  //   > 0 → candidate fired after turn ended (desirable, measures reaction delay)
+  //   < 0 → candidate fired before turn ended (premature, cuts off speech)
+  let speechEndToEotMs: number | null = null;
+  let prematureEot: boolean | null = null;
+  let falseContinuation: boolean | null = null;
+  const tEndMs = a.refTurn.tEndMs;
+  if (isRealtime && typeof tEndMs === "number") {
+    if (a.hypAtMs !== null && a.hypEndOfTurn === true) {
+      // Candidate fired an EOT signal for this turn.
+      const candidateEotAudioMs = a.hypAtMs * REALTIME_ACCEL;
+      speechEndToEotMs = Math.round(candidateEotAudioMs - tEndMs);
+      prematureEot = speechEndToEotMs < PREMATURE_THRESHOLD_MS;
+      falseContinuation = false;
+    } else if (a.hypText) {
+      // Candidate produced text but no EOT signal — false continuation (false wait).
+      prematureEot = false;
+      falseContinuation = true;
+    } else {
+      // Candidate missed the turn entirely — counts as false wait (no EOT fired).
+      prematureEot = null;
+      falseContinuation = true;
+    }
+  }
+
   return {
     turnIdx: a.refTurn.idx,
     candidateId,
@@ -456,10 +502,10 @@ function scoreTurn(
     entityAccuracy: hyp
       ? { money: ea.money, dates: ea.dates, digits: ea.digits, names: ea.names, terms: termsAcc }
       : null,
-    prematureEot: null, // requires per-turn boundary ground truth (not available yet)
-    falseContinuation: null,
+    prematureEot,
+    falseContinuation,
     speechEndToFinalMs,
-    speechEndToEotMs: null,
+    speechEndToEotMs,
   };
 }
 
@@ -717,10 +763,12 @@ export async function runEarsBenchmark(opts: {
               rowAcc.moneyAcc.push(null);
               rowAcc.digitsAcc.push(null);
               rowAcc.termsAcc!.push(termsAccuracy(critical.terms, a.refTurn.text, ""));
-              rowAcc.prematureEotFlags.push(null);
-              rowAcc.falseWaitFlags.push(null);
+              // A missed turn with ground-truth tEndMs still scores as false
+              // continuation — the turn boundary passed and no EOT was emitted.
+              rowAcc.prematureEotFlags.push(tr.prematureEot);
+              rowAcc.falseWaitFlags.push(tr.falseContinuation);
               rowAcc.finalLatencies.push(null);
-              rowAcc.eotLatencies.push(null);
+              rowAcc.eotLatencies.push(tr.speechEndToEotMs);
             }
           } catch (e) {
             // Per-turn isolation.

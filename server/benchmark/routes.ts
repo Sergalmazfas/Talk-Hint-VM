@@ -172,7 +172,19 @@ export function registerBenchmarkRoutes(app: Express) {
           return res.status(400).json({ error: "every turn needs role 'owner'|'guest' and non-empty text" });
         }
       }
-      const cleanTurns = referenceTurns.map((t: any, idx: number) => ({ idx, role: t.role, text: String(t.text).trim() }));
+      const cleanTurns = referenceTurns.map((t: any, idx: number) => {
+        const turn: any = { idx, role: t.role, text: String(t.text).trim() };
+        // Preserve optional EOT boundary timings (ms from audio start).
+        // These are set by the admin while listening to the recording and are
+        // used by earsHarness to compute prematureEot / falseWait / eotP50.
+        if (typeof t.tStartMs === "number" && Number.isFinite(t.tStartMs) && t.tStartMs >= 0) {
+          turn.tStartMs = Math.round(t.tStartMs);
+        }
+        if (typeof t.tEndMs === "number" && Number.isFinite(t.tEndMs) && t.tEndMs >= 0) {
+          turn.tEndMs = Math.round(t.tEndMs);
+        }
+        return turn;
+      });
 
       let roles: string[] | undefined;
       if (channelRoles !== undefined) {
