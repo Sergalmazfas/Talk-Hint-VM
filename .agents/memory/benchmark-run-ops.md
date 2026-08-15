@@ -11,3 +11,6 @@ description: How to run EARS/BRAIN benchmark runs and imports as the agent — e
 - Env restarts can roll back uncommitted-looking dev-DB inserts made from one-off tsx scripts — always SELECT-verify after insert, and keep artifacts under `.agents/outputs/`, not /tmp.
 - Fixture import needs criticalEntities populated or the Numbers/Money and Terms scorecard columns come back null.
 - Flux/batch candidates emitting fewer finals than reference turns silently fall back to document-level WER (turnsScored=2), making them incomparable per-turn (see follow-up task).
+
+## Fixture #2 reference is STT-verified, not human-verified
+Fixture #2 (09e6bcce…) reference_turns were rebuilt with user approval from whisper-1 segment boundaries (gives tEndMs → per-turn basis "timestamps") reconciled with gpt-4o-transcribe text; tags `ref-v-stt`/`reference-stt-verified`. **Why:** user chose STT self-verification knowing the bias — WER is systematically flattering to OpenAI candidates; never present these numbers as engine-neutral ground truth or use them alone to demote Flux in production.

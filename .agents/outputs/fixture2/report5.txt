@@ -1,0 +1,56 @@
+Run ID: 3535b3cc-eee4-4a5a-99fb-62796f407ef1 (benchmark_runs, dev DB) — Fixture #2 09e6bcce-3338-47b8-9136-1cc4ed24070c, FINAL run after reference verification. Reference rebuilt from best available STT (whisper-1 segment boundaries reconciled with gpt-4o-transcribe text; user-approved method, bias toward OpenAI candidates acknowledged). criticalEntities filled. Per-turn basis: audio-timeline (tEndMs from whisper segments).
+
+# LIVE EARS Benchmark — Run Report
+Fixtures: Real Call Fixture #2 — iOS real call · 2026-08-15T18:57:36.773Z
+
+## Candidate availability (real API checks — unavailable is shown, never substituted)
+- dg-flux-general-en: **AVAILABLE** — WS open @ wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=mulaw&sample_rate=8000&eot_threshold=0.7&eot_timeout_ms=3000; sent 20ms mulaw silence ok
+- dg-flux-general-multi: **AVAILABLE** — WS open @ wss://api.deepgram.com/v2/listen?model=flux-general-multi&encoding=mulaw&sample_rate=8000&eot_threshold=0.7&eot_timeout_ms=3000; sent 20ms mulaw silence ok
+- dg-nova-3-multi: **AVAILABLE** — WS open @ wss://api.deepgram.com/v1/listen?model=nova-3&language=multi&encoding=mulaw&sample_rate=8000&interim_results=true&punctuate=true; sent 20ms mulaw silence ok
+- oai-realtime-server-vad: **AVAILABLE** — client_secret issued; model=gpt-4o-transcribe, turn_detection=server_vad
+- oai-realtime-semantic-vad: **AVAILABLE** — client_secret issued; model=gpt-4o-transcribe, turn_detection=semantic_vad
+- oai-batch-gpt-4o-transcribe: **AVAILABLE** — transcription accepted (model=gpt-4o-transcribe)
+- azure-speech-realtime: **UNAVAILABLE** — no credentials configured (Azure Speech key not present); skipped without network call
+
+## Best STT for Owner speech (LIVE candidates only — headline metric)
+**oai-realtime-semantic-vad** — Owner WER 13.1% (overall WER 5.9%). Owner accuracy matters most: the Owner speaks with an accent, short phrases and mistakes — that is why TalkHint exists.
+
+## Best STT for Guest speech / overall call (LIVE candidates only)
+Guest: **oai-realtime-server-vad** — Guest WER 2.4%.
+Overall call: **oai-realtime-semantic-vad** — WER 5.9%.
+
+## Accuracy ceiling (batch reference — NOT a LIVE candidate)
+- oai-batch-gpt-4o-transcribe: WER 2.1% (Owner 6.9%, Guest 0.4%). Higher-latency batch transcription; shows how much accuracy is theoretically available, but cannot win a LIVE comparison.
+
+## Scorecard (single comparability rule for every candidate)
+WER / Owner WER / Guest WER / Semantic are CHANNEL-LEVEL (whole per-role stream scored as one document) for ALL candidates — Flux, nova-3, OpenAI realtime and batch are measured by the same method. Per-turn metrics (EOT, premature, false wait) exist only where the finals→turns mapping is provable WITHOUT the candidate's own text — reference turn boundaries (tEndMs) matched against provider-reported audio offsets; count, order, receipt time or text inference are never used. Otherwise per-turn metrics are unavailable, never inferred.
+| STT | LIVE? | WER | Owner WER | Guest WER | Semantic* | Numbers | Terms | Final p50 | Per-turn basis | Turns |
+|---|---|---|---|---|---|---|---|---|---|---|
+| dg-flux-general-en | LIVE | 74.0% | 70.1% | 75.4% | 27.5% | — | 48.1% | — | timestamps | 37 |
+| dg-flux-general-multi | LIVE | 73.6% | 69.0% | 75.3% | 28.2% | — | 48.1% | — | timestamps | 37 |
+| dg-nova-3-multi | LIVE | 73.3% | 69.7% | 74.6% | 28.3% | — | 48.1% | 4264ms | timestamps | 37 |
+| oai-realtime-server-vad | LIVE | 8.6% | 25.5% | 2.4% | 84.4% | — | 85.0% | — | unavailable | 0 |
+| oai-realtime-semantic-vad | LIVE | 5.9% | 13.1% | 3.3% | 91.6% | — | 90.0% | — | unavailable | 0 |
+| oai-batch-gpt-4o-transcribe | ceiling | 2.1% | 6.9% | 0.4% | 95.7% | — | 90.0% | — | unavailable | 0 |
+*Semantic is a content-word proxy, not an embedding score. EOT/premature-EOT metrics are null until per-turn boundary ground truth exists — they are never fabricated.
+
+## Decision
+No candidate is auto-assigned as production winner. Production STT stays unchanged (Deepgram Flux flux-general-en) until a human decides otherwise.
+
+## Notes
+- Realtime streaming accelerated 4x to bound runtime; latency figures scaled back to real time.
+- Candidate azure-speech-realtime skipped: UNAVAILABLE — no credentials configured (Azure Speech key not present); skipped without network call
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c: dual-channel recording split into 2 per-role streams (owner/guest); original 8kHz telephone audio, no enhancement.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-en / channel 0 (owner): per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — 18 turns scored per-turn.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-en / channel 1 (guest): per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — 19 turns scored per-turn.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-multi / channel 0 (owner): per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — 18 turns scored per-turn.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-flux-general-multi / channel 1 (guest): per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — 19 turns scored per-turn.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-nova-3-multi / channel 0 (owner): per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — 18 turns scored per-turn.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / dg-nova-3-multi / channel 1 (guest): per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — 19 turns scored per-turn.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-realtime-server-vad / channel 0 (owner): per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (28 final(s) vs 18 reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-realtime-server-vad / channel 1 (guest): per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (99 final(s) vs 19 reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-realtime-semantic-vad / channel 0 (owner): per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (20 final(s) vs 18 reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-realtime-semantic-vad / channel 1 (guest): per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (22 final(s) vs 19 reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-batch-gpt-4o-transcribe / channel 0 (owner): per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (1 final(s) vs 18 reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.
+- fixture 09e6bcce-3338-47b8-9136-1cc4ed24070c / oai-batch-gpt-4o-transcribe / channel 1 (guest): per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (1 final(s) vs 19 reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.
+- Candidate oai-batch-gpt-4o-transcribe is reference-only (accuracy ceiling); excluded from LIVE winner selection.
