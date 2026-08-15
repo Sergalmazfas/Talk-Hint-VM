@@ -49,6 +49,9 @@ class AuthStorage implements IAuthStorage {
       liveHintsEnabled: true,
       translationEnabled: true,
       diagnosticRecordingEnabled: false,
+      candidatePipelineEnabled: false,
+      candidateStt: null,
+      candidateBrainModel: null,
       createdAt: new Date(),
     };
 

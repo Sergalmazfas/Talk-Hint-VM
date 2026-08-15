@@ -13,7 +13,9 @@ import { EARS_CANDIDATES, BRAIN_CANDIDATES } from "./candidates";
 import { buildReplay } from "./replay";
 import { db } from "../db";
 import { benchmarkFixtures, calls } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
+import { storage } from "../storage";
+import { CANDIDATE_STT_IDS, CANDIDATE_BRAIN_MODELS, isCandidateStt, isCandidateBrainModel, classifyPipelineCall } from "../candidatePipeline";
 import { ensureBenchmarkTables } from "./ensureTables";
 import { registerRecordedCallRoutes, downloadRecordingWav, lookupRecordingSidByCallSid } from "./recordedCalls";
 
@@ -270,6 +272,78 @@ export function registerBenchmarkRoutes(app: Express) {
       const fixture = fixtureId ? await getFixture(fixtureId) : undefined;
       if (!fixture) return res.status(404).json({ error: "fixture not found" });
       res.json(buildReplay(run, fixture, req.params.candidateId));
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Candidate Pipeline v1 (Task #207).
+  // Per-user experimental live pipeline: read/update the admin's own config,
+  // and a verdict view comparing candidate calls vs baseline calls by the
+  // hint-latency metadata flushed at call end.
+  // ---------------------------------------------------------------------------
+
+  app.get(`${base}/candidate-pipeline`, requireBenchmarkAdmin, async (req, res) => {
+    try {
+      const userId = (req as any).user?.id as string;
+      const cfg = await storage.getCandidatePipeline(userId);
+      res.json({ ...cfg, allowedStt: CANDIDATE_STT_IDS, allowedBrainModels: CANDIDATE_BRAIN_MODELS });
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  app.put(`${base}/candidate-pipeline`, requireBenchmarkAdmin, async (req, res) => {
+    try {
+      const userId = (req as any).user?.id as string;
+      const { enabled, stt, brainModel } = req.body ?? {};
+      if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be boolean" });
+      const sttVal = stt ?? null;
+      const brainVal = brainModel ?? null;
+      if (sttVal !== null && !isCandidateStt(sttVal)) {
+        return res.status(400).json({ error: `unknown candidate stt "${sttVal}" — allowed: ${CANDIDATE_STT_IDS.join(", ")}` });
+      }
+      if (brainVal !== null && !isCandidateBrainModel(brainVal)) {
+        return res.status(400).json({ error: `unknown candidate brain model "${brainVal}" — allowed: ${CANDIDATE_BRAIN_MODELS.join(", ")}` });
+      }
+      if (enabled && sttVal === null && brainVal === null) {
+        return res.status(400).json({ error: "enabled pipeline must select at least a candidate STT or a candidate Brain model" });
+      }
+      const saved = await storage.setCandidatePipeline(userId, { enabled, stt: sttVal, brainModel: brainVal });
+      res.json(saved);
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // Latency verdict: the admin's recent calls that carry hint-latency metadata,
+  // split into candidate vs baseline, each with its per-call summary. No
+  // fabricated aggregates: calls without latency metadata are listed as such.
+  app.get(`${base}/candidate-pipeline/verdict`, requireBenchmarkAdmin, async (req, res) => {
+    try {
+      const userId = (req as any).user?.id as string;
+      const rows = await db.select().from(calls).where(eq(calls.userId, userId)).orderBy(desc(calls.startedAt)).limit(30);
+      const items = rows.map((c) => {
+        const meta = (c.metadata && typeof c.metadata === "object" ? c.metadata : {}) as any;
+        const pipeline = meta.candidatePipeline ?? null;
+        const latency = meta.hintLatency ?? null;
+        // HONEST labeling (classifyPipelineCall, unit-tested): STT and Brain
+        // candidacy are independent — a failed STT swap with an active Brain
+        // override is still a Brain-candidate call, never baseline.
+        const label = classifyPipelineCall(pipeline);
+        return {
+          callSid: c.callSid,
+          startedAt: c.startedAt,
+          endedAt: c.endedAt,
+          toNumber: c.toNumber,
+          direction: c.direction,
+          status: c.status,
+          isCandidate: label.isCandidate,
+          sttCandidate: label.sttCandidate,
+          brainCandidate: label.brainCandidate,
+          sttSwapFailed: label.sttSwapFailed,
+          pipeline,
+          latencySummary: latency?.summary ?? null,
+          slaMs: latency?.slaMs ?? null,
+          entries: latency?.entries ?? null,
+        };
+      });
+      res.json({ calls: items });
     } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
   });
 }

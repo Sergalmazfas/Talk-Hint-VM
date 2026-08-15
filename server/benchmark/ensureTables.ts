@@ -10,6 +10,9 @@ let ensured: Promise<void> | null = null;
 
 const DDL = `
 ALTER TABLE users ADD COLUMN IF NOT EXISTS diagnostic_recording_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_pipeline_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_stt text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS candidate_brain_model text;
 CREATE UNIQUE INDEX IF NOT EXISTS benchmark_fixtures_source_call_sid_uq
   ON benchmark_fixtures (source_call_sid) WHERE source_call_sid IS NOT NULL;
 CREATE TABLE IF NOT EXISTS benchmark_fixtures (

@@ -20,6 +20,13 @@ import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { renderTranscriptText } from "./airatomaWebhook";
 import { routeGenerate } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
+import {
+  DISABLED_PIPELINE,
+  isCandidateStt,
+  createOpenAiRealtimeStt,
+  LiveLatencyRecorder,
+  type CandidatePipelineConfig,
+} from "./candidatePipeline";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
 import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
@@ -263,13 +270,17 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true, tutorMemory: string = ""): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true, tutorMemory: string = "", modelOverride?: string): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: { en: string; translation: string };
   sentiment?: { sentiment: 'positive' | 'neutral' | 'negative'; score: number };
   providerUsed?: string;
 }> {
+  // Candidate Pipeline v1 (Task #207): a per-call model override (candidate
+  // Brain) takes precedence over the global UI-selected model — production
+  // calls (no override) are unchanged.
+  const activeModel = modelOverride || currentModel;
   // Don't wait for sentiment - return it separately via callback
   // This makes suggestions appear FASTER
   try {
@@ -327,7 +338,7 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     const hasSuggestion = (r: ReturnType<typeof parseHint>) =>
       !!(r && r.suggestion && typeof r.suggestion.en === "string" && r.suggestion.en.trim().length > 0);
 
-    const isGemini = currentModel.startsWith("gemini");
+    const isGemini = activeModel.startsWith("gemini");
     // Count every Gemini attempt so getHintFallbackStats() can report a rate.
     if (isGemini) geminiHintAttempts++;
     let fellBack = false;
@@ -338,7 +349,7 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     // else goes straight to OpenAI. The onFallback hook records the fallback for
     // the /api/health stats and logs the running rate.
     const content = await routeGenerate(systemPrompt, userPrompt, {
-      model: currentModel,
+      model: activeModel,
       fallbackModel: OPENAI_FALLBACK_MODEL,
       withGemini: generateWithGemini,
       // The combined translation+suggestion JSON needs more room than the
@@ -352,7 +363,7 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
         geminiHintFallbacks++;
         fellBack = true;
         const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
-        log(`Gemini (${currentModel}) failed: ${gemErr?.message ?? gemErr} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
+        log(`Gemini (${activeModel}) failed: ${gemErr?.message ?? gemErr} — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
       },
     });
     let result = parseHint(content);
@@ -362,10 +373,10 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     // translation/suggestion latencies. openai:<model> normally; gemini:* only
     // when a user picks Gemini; openai:<fallback> when a Gemini attempt failed.
     const providerUsed = fellBack
-      ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${currentModel})`
+      ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${activeModel})`
       : isGemini
-        ? `gemini:${currentModel}`
-        : `openai:${currentModel}`;
+        ? `gemini:${activeModel}`
+        : `openai:${activeModel}`;
 
     // Gemini sometimes returns a valid translation but silently drops the
     // suggestion. On a turn that should have a hint (not a reaction/farewell)
@@ -374,7 +385,7 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     if (isGemini && !fellBack && forceSuggestion && !hasSuggestion(result)) {
       geminiHintFallbacks++;
       const pct = Math.round((geminiHintFallbacks / geminiHintAttempts) * 100);
-      log(`Gemini (${currentModel}) returned no suggestion — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
+      log(`Gemini (${activeModel}) returned no suggestion — falling back to OpenAI ${OPENAI_FALLBACK_MODEL} [fallbacks ${geminiHintFallbacks}/${geminiHintAttempts} = ${pct}%]`, "openai");
       try {
         const fbResult = parseHint(await generateWithOpenAI(OPENAI_FALLBACK_MODEL, systemPrompt, userPrompt, 250));
         if (hasSuggestion(fbResult)) {
@@ -410,14 +421,15 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
 // routing (routeGenerate) and a JSON contract so the OpenAI/Gemini fallback
 // behaves identically to the suggestion path. This is intentionally a minimal,
 // isolated translator prompt — it is NOT the hint/objection prompt (unchanged).
-async function translateGuestText(text: string, language: string): Promise<{ translation: string; providerUsed: string }> {
+async function translateGuestText(text: string, language: string, modelOverride?: string): Promise<{ translation: string; providerUsed: string }> {
+  const activeModel = modelOverride || currentModel;
   const langName = language === "es" ? "Spanish" : "Russian";
   const systemPrompt = `You are a translator. Translate the user's message into ${langName}. Respond with ONLY this JSON and nothing else: {"translation":"<the ${langName} translation>"}`;
-  const isGemini = currentModel.startsWith("gemini");
+  const isGemini = activeModel.startsWith("gemini");
   let fellBack = false;
   try {
     const raw = await routeGenerate(systemPrompt, text, {
-      model: currentModel,
+      model: activeModel,
       fallbackModel: OPENAI_FALLBACK_MODEL,
       withGemini: generateWithGemini,
       withOpenAI: generateWithOpenAI,
@@ -430,10 +442,10 @@ async function translateGuestText(text: string, language: string): Promise<{ tra
     }
     if (!translation) translation = raw.trim(); // tolerate a plain-text reply
     const providerUsed = fellBack
-      ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${currentModel})`
+      ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${activeModel})`
       : isGemini
-        ? `gemini:${currentModel}`
-        : `openai:${currentModel}`;
+        ? `gemini:${activeModel}`
+        : `openai:${activeModel}`;
     return { translation, providerUsed };
   } catch (err: any) {
     log(`Guest translation error: ${err.message}`, "openai");
@@ -1105,6 +1117,28 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Per-user live-call feature toggles (Live Hints + Translation), loaded once on "start".
     // Defaults ON so a load failure never silently disables hints for a paying user.
     let callSettings = { liveHintsEnabled: true, translationEnabled: true };
+    // Candidate Pipeline v1 (Task #207): per-user experimental live pipeline.
+    // Disabled by default; loaded on "start" alongside callSettings. When
+    // enabled it may swap the STT (OpenAI realtime instead of Flux) and/or the
+    // Brain model for THIS call only — the global production config is untouched.
+    let candidatePipeline: CandidatePipelineConfig = { ...DISABLED_PIPELINE };
+    // Effective per-call Brain model override (null = production model).
+    let brainModelOverride: string | undefined = undefined;
+    // Candidate STT swap outcome for HONEST labeling: "swapped" = candidate STT
+    // actually carried the call; "failed" = swap failed, Flux kept the call and
+    // the run must NOT be scored as a candidate STT run. Also guards against
+    // Flux auto-reconnect resurrecting itself after a successful swap.
+    let sttSwapState: "none" | "swapped" | "failed" = "none";
+    let sttSwapDelayMs: number | null = null;
+    let streamStartAtMs = 0;
+    // Set on "stop"/ws close. The candidate STT setup is async (config load +
+    // client-secret mint + handshake); if the stream closes first, the swap
+    // must abort and finish any sockets it created — otherwise short/rejected
+    // calls leak orphaned realtime sessions and mutate state after teardown.
+    let streamClosed = false;
+    // Hint latency stages for this call (recorded for every call, flushed to
+    // calls.metadata on close so candidate vs baseline can be compared).
+    const latencyRecorder = new LiveLatencyRecorder();
     let callSettingsReady: Promise<void> = Promise.resolve(); // resolves once callSettings is loaded
     // Auto-built dialogue libraries for the owner — one per GOAL (each row is a
     // distinct goal, with its own goalText + goalType). Consulted FIRST on each
@@ -1349,6 +1383,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       log(`[UtteranceComplete] GST utterance #${utteranceId}: "${text.substring(0, 50)}..."`, "websocket");
       
       const now = Date.now();
+      // Latency SLA: handler entry ≈ STT end-of-turn commit (commitTurn fires
+      // synchronously). Every guest turn opens a latency entry; it flips to
+      // "sent" only if a suggestion actually reaches the /ui websocket.
+      latencyRecorder.start(utteranceId, now);
       // Freshness guard: record this as the newest Guest turn BEFORE any await, so a
       // suggestion generated for an older turn can be dropped once a newer turn arrives.
       latestGuestUtteranceId = utteranceId;
@@ -1515,7 +1553,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const translationStart = Date.now();
       const translationPromise: Promise<{ translation: string; providerUsed: string }> =
         translationEnabled
-          ? translateGuestText(text, currentLanguage)
+          ? translateGuestText(text, currentLanguage, brainModelOverride)
           : Promise.resolve({ translation: "", providerUsed: "translation_off" });
 
       // ===== LIBRARY-FIRST LOOKUP =====
@@ -1550,6 +1588,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       //    already captured eagerly by the superseding turn (stale), or no
       //    future hint can ever use it (goal-achieved hard stop).
       const dropHint = (reason: string, detail: string, preserveQuestion: boolean) => {
+        latencyRecorder.dropped(utteranceId, reason);
         log(`[BLOCKED] reason=${reason} utteranceId=${utteranceId}${detail ? ` ${detail}` : ""}`, "websocket");
         if (preserveQuestion && hintCarryover.remember(hintText, utteranceId, reason)) {
           log(`[Carryover] remembered question from utteranceId=${utteranceId} (reason=${reason})`, "websocket");
@@ -1574,12 +1613,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       }
 
       const suggestionStart = Date.now();
+      if (wantSuggestion) latencyRecorder.trigger(utteranceId);
       // Fired in parallel with the translation so neither waits for the other.
       // translateAndSuggest never throws (it catches internally), so if this turn
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock)
+        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride)
         : null;
 
       // ----- Caption: broadcast as soon as the translation resolves -----
@@ -1703,6 +1743,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         translated = await suggestionPromise;
       }
       const suggestionMs = Date.now() - suggestionStart;
+      // First usable hint text is available server-side (library or model).
+      if (translated?.suggestion?.en) {
+        latencyRecorder.ready(utteranceId, translated.providerUsed === "library" ? "library" : "gpt");
+      }
       log(`[HINT] model=${libraryHit ? "library" : currentModel} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
 
       // Freshness/stale guard: while this suggestion was generating, the Guest started
@@ -1781,6 +1825,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           utteranceId,
           callSid
         });
+        latencyRecorder.sent(utteranceId);
         // Full reaction time: from end of guest's turn to the suggestion leaving the server.
         log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms suggestion_latency_ms=${suggestionMs} utteranceId=${utteranceId}`, "websocket");
       } else {
@@ -2081,6 +2126,70 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       };
     }
 
+    // Candidate Pipeline v1 (Task #207): replace the (already-open) Deepgram
+    // Flux connections with OpenAI realtime transcription for this call only.
+    // Called from the "start" handler once the per-user config is loaded.
+    // Fail-closed for the experiment: if the candidate STT cannot be created,
+    // the Flux connections are LEFT RUNNING and the pipeline is reported as
+    // not swapped (no mixed-STT candidate runs, no silent production change).
+    async function swapToCandidateStt(sttId: import("./candidatePipeline").CandidateSttId): Promise<void> {
+      const mkTrack = async (track: string) => {
+        const { isGuestTrack } = resolveSpeakerRole(track, streamOnCallerLeg);
+        return createOpenAiRealtimeStt({
+          sttId,
+          track,
+          log: (m) => log(m, "deepgram"),
+          onInterim: (text) => {
+            uiBroadcast(
+              isGuestTrack
+                ? { type: "guest_transcript", text, isFinal: false, callSid }
+                : { type: "owner_transcript", text, isFinal: false, callSid }
+            );
+          },
+          onFinal: (transcript) => {
+            const { isGuestTrack: g, speakerLabel, speakerCode } = resolveSpeakerRole(track, streamOnCallerLeg);
+            log(`[OAI-STT] ${track}: final speaker=${speakerLabel} "${transcript.substring(0, 60)}"`, "deepgram");
+            uiBroadcast(
+              g
+                ? { type: "guest_transcript", text: transcript, isFinal: false, callSid }
+                : { type: "owner_transcript", text: transcript, isFinal: false, callSid }
+            );
+            utteranceGate.commitTurn(callSid || "unknown", speakerCode as "GST" | "HON", transcript, undefined);
+          },
+        });
+      };
+      if (streamClosed) return; // stream ended before setup even started
+      const [inbound, outbound] = await Promise.all([mkTrack("inbound"), mkTrack("outbound")]);
+      // Teardown race: the stream may have closed while we were minting
+      // secrets / completing handshakes. Closure wins — finish whatever we
+      // created and leave all pipeline state untouched (cleanup already ran).
+      if (streamClosed) {
+        if (!("error" in inbound)) inbound.finish();
+        if (!("error" in outbound)) outbound.finish();
+        log(`[CandidatePipeline] stream closed during STT setup — aborting swap, candidate sockets closed`, "twilio");
+        return;
+      }
+      if ("error" in inbound || "error" in outbound) {
+        const err = ("error" in inbound && inbound.error) || ("error" in outbound && outbound.error);
+        log(`[CandidatePipeline] STT swap FAILED (${err}) — staying on production Flux; call will be labeled sttEffective=failed (not a candidate STT run)`, "twilio");
+        if (!("error" in inbound)) inbound.finish();
+        if (!("error" in outbound)) outbound.finish();
+        sttSwapState = "failed";
+        return;
+      }
+      // Swap atomically: mark swapped FIRST (blocks any Flux reconnect from
+      // resurrecting into deepgramInbound/outbound), then close Flux and route
+      // media to the candidate.
+      sttSwapState = "swapped";
+      sttSwapDelayMs = streamStartAtMs > 0 ? Date.now() - streamStartAtMs : null;
+      if (deepgramInbound) deepgramInbound.finish();
+      if (deepgramOutbound) deepgramOutbound.finish();
+      deepgramInbound = inbound;
+      deepgramOutbound = outbound;
+      deepgramReady = true;
+      log(`[CandidatePipeline] STT swapped to ${sttId} for call ${callSid} (lead-in on Flux: ${sttSwapDelayMs ?? "?"}ms)`, "twilio");
+    }
+
     ws.on("message", (data: Buffer) => {
       try {
         const message: TwilioMediaMessage = JSON.parse(data.toString());
@@ -2120,6 +2229,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             };
             
             const setupInboundEarly = () => {
+              // After a candidate STT swap, Flux must never resurrect via the
+              // auto-reconnect path — it would silently overwrite the candidate
+              // connection and contaminate the run with mixed STT output.
+              if (sttSwapState === "swapped") return;
               const dg = setupDeepgram("inbound", setupInboundEarly);
               deepgramInbound = dg;
               // Wait for actual WebSocket open
@@ -2132,6 +2245,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               }
             };
             const setupOutboundEarly = () => {
+              if (sttSwapState === "swapped") return; // see setupInboundEarly
               const dg = setupDeepgram("outbound", setupOutboundEarly);
               deepgramOutbound = dg;
               // Wait for actual WebSocket open
@@ -2149,6 +2263,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
           case "start":
             if (message.start) {
+              streamStartAtMs = Date.now();
               streamSid = message.start.streamSid;
               callSid = message.start.callSid;
 
@@ -2288,6 +2403,28 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                 })
                 .catch((err) => log(`[CallSettings] Load failed (defaults ON): ${err}`, "twilio"));
 
+              // Candidate Pipeline v1 (Task #207): load the per-user experimental
+              // pipeline config. Fail-safe: any load error keeps it DISABLED
+              // (production pipeline). When an OpenAI candidate STT is selected,
+              // the Deepgram connections opened early (on "connected") are torn
+              // down and replaced — the few seconds of pre-"start" audio stay
+              // with Flux and are intentionally not replayed to the candidate.
+              candidatePipeline = { ...DISABLED_PIPELINE };
+              const pipelineReady = ownerContextReady
+                .then(async () => {
+                  if (!streamUserId || streamClosed) return;
+                  const cfg = await storage.getCandidatePipeline(streamUserId);
+                  if (!cfg.enabled || streamClosed) return;
+                  candidatePipeline = cfg;
+                  brainModelOverride = cfg.brainModel || undefined;
+                  log(`[CandidatePipeline] ENABLED for ${streamUserId}: stt=${cfg.stt ?? "production"} brain=${cfg.brainModel ?? "production"}`, "twilio");
+                  if (isCandidateStt(cfg.stt)) {
+                    await swapToCandidateStt(cfg.stt);
+                  }
+                })
+                .catch((err) => log(`[CandidatePipeline] Load failed (staying on production): ${err}`, "twilio"));
+              callSettingsReady = callSettingsReady.then(() => pipelineReady);
+
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;
               isPstnForwarding = callType === "pstn_forwarding";
@@ -2355,6 +2492,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
           case "stop":
             log(`Stream ended: ${callSid}, total frames: ${audioFrameCount}`, "twilio");
+            // Abort any in-flight candidate STT setup (see swapToCandidateStt).
+            streamClosed = true;
             // Close Deepgram connections
             if (deepgramInbound) {
               deepgramInbound.finish();
@@ -2387,6 +2526,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       const reasonStr = reason.toString() || "no reason";
       const duration = ((Date.now() - new Date(startTime).getTime()) / 1000).toFixed(1);
       log(`[Twilio] WS closed code=${code} reason="${reasonStr}" duration=${duration}s callSid=${callSid}`, "twilio");
+      // Abort any in-flight candidate STT setup (see swapToCandidateStt) —
+      // late swaps after teardown would leak realtime sockets and mutate state.
+      streamClosed = true;
 
       // Backstop for the "stop" handler: some teardown paths close the socket
       // without a clean stop event — the goal must still die with the call.
@@ -2418,6 +2560,21 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             .updateCallTranscriptByCallSid(callSid, finalText)
             .catch((err) => log(`[Transcript] final persist failed: ${err}`, "websocket"));
         }
+      }
+
+      // Candidate Pipeline v1 (Task #207): flush the per-hint latency stages +
+      // pipeline label into calls.metadata so the admin verdict endpoint can
+      // compare this call against baseline calls. Detached + non-throwing.
+      if (callSid && latencyRecorder.count > 0) {
+        void storage
+          .mergeCallMetadataByCallSid(
+            callSid,
+            latencyRecorder.toMetadata(candidatePipeline, {
+              effective: sttSwapState === "none" ? null : sttSwapState,
+              swapDelayMs: sttSwapDelayMs,
+            })
+          )
+          .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));
       }
 
       // AirAtoma CRM: push the finished call to the external webhook

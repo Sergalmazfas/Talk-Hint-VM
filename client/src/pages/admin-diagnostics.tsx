@@ -356,6 +356,7 @@ export default function AdminDiagnostics() {
             <TabsTrigger value="replay" data-testid="tab-replay">LIVE End-to-End Replay</TabsTrigger>
             <TabsTrigger value="history" data-testid="tab-history">Benchmark History</TabsTrigger>
             <TabsTrigger value="recorded" data-testid="tab-recorded">Записанные звонки</TabsTrigger>
+            <TabsTrigger value="pipeline" data-testid="tab-pipeline">Candidate Pipeline</TabsTrigger>
           </TabsList>
 
           <TabsContent value="ears"><EarsTab candidates={candidatesQ.data?.ears ?? []} /></TabsContent>
@@ -363,6 +364,7 @@ export default function AdminDiagnostics() {
           <TabsContent value="replay"><ReplayTab /></TabsContent>
           <TabsContent value="history"><HistoryTab /></TabsContent>
           <TabsContent value="recorded"><RecordedCallsTab active={tab === "recorded"} onOpenReplay={() => setTab("replay")} /></TabsContent>
+          <TabsContent value="pipeline"><CandidatePipelineTab active={tab === "pipeline"} /></TabsContent>
         </Tabs>
       </main>
     </div>
@@ -2042,5 +2044,223 @@ function DeleteRecordingDialog({ call, onClose }: { call: RecordedCall; onClose:
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ===========================================================================
+// Candidate Pipeline v1 (Task #207): per-user experimental live pipeline
+// (alternate STT / Brain model) + latency verdict vs baseline calls.
+// ===========================================================================
+
+interface PipelineConfig {
+  enabled: boolean;
+  stt: string | null;
+  brainModel: string | null;
+  allowedStt?: string[];
+  allowedBrainModels?: string[];
+}
+
+interface VerdictCall {
+  callSid: string;
+  startedAt: string;
+  toNumber: string;
+  direction: string;
+  status: string;
+  isCandidate: boolean;
+  sttCandidate?: boolean;
+  brainCandidate?: boolean;
+  sttSwapFailed?: boolean;
+  pipeline: { stt: string | null; brainModel: string | null; sttEffective?: string | null; sttSwapDelayMs?: number | null } | null;
+  latencySummary: {
+    hintsSent: number;
+    hintsDropped: number;
+    totalP50Ms: number | null;
+    totalP95Ms: number | null;
+    brainP50Ms: number | null;
+    brainP95Ms: number | null;
+    withinSlaPct: number | null;
+  } | null;
+  slaMs: number | null;
+}
+
+const PROD_SENTINEL = "__production__";
+
+function CandidatePipelineTab({ active }: { active: boolean }) {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const cfgQ = useAuthedQuery<PipelineConfig>([BASE, "candidate-pipeline"], active);
+  const verdictQ = useAuthedQuery<{ calls: VerdictCall[] }>(
+    [BASE, "candidate-pipeline", "verdict"], active, active ? 15000 : false,
+  );
+
+  const [enabled, setEnabled] = useState(false);
+  const [stt, setStt] = useState<string>(PROD_SENTINEL);
+  const [brain, setBrain] = useState<string>(PROD_SENTINEL);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cfgQ.data && loadedFor !== "loaded") {
+      setEnabled(cfgQ.data.enabled);
+      setStt(cfgQ.data.stt ?? PROD_SENTINEL);
+      setBrain(cfgQ.data.brainModel ?? PROD_SENTINEL);
+      setLoadedFor("loaded");
+    }
+  }, [cfgQ.data, loadedFor]);
+
+  const saveM = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${BASE}/candidate-pipeline`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          enabled,
+          stt: stt === PROD_SENTINEL ? null : stt,
+          brainModel: brain === PROD_SENTINEL ? null : brain,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Сохранено", description: "Настройки candidate pipeline применяются к следующему звонку." });
+      qc.invalidateQueries({ queryKey: [BASE, "candidate-pipeline"] });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+
+  const fmt = (v: number | null | undefined) => (v == null ? "—" : `${v} мс`);
+  const callsList = verdictQ.data?.calls ?? [];
+  const withLatency = callsList.filter((c) => c.latencySummary && c.latencySummary.hintsSent + c.latencySummary.hintsDropped > 0);
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-gray-900 border-gray-800">
+        <CardHeader><CardTitle className="text-base">Candidate Pipeline v1 — настройка (только мой аккаунт)</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-400">
+            Экспериментальный live-pipeline для СЛЕДУЮЩЕГО звонка: альтернативный realtime STT и/или Brain-модель.
+            Production-конфиг не меняется; выключено — звонок идёт как обычно (Flux + текущая модель).
+            При включении нужно выбрать хотя бы одного кандидата.
+          </p>
+          <div className="flex items-center gap-3">
+            <Switch checked={enabled} onCheckedChange={setEnabled} data-testid="switch-pipeline-enabled" />
+            <Label>Включить candidate pipeline для моих звонков</Label>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label className="text-gray-400">STT (Ears)</Label>
+              <Select value={stt} onValueChange={setStt}>
+                <SelectTrigger className="bg-gray-950 border-gray-700" data-testid="select-pipeline-stt"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PROD_SENTINEL}>Production (Deepgram Flux)</SelectItem>
+                  {(cfgQ.data?.allowedStt ?? []).map((s) => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-gray-400">Brain (модель подсказок)</Label>
+              <Select value={brain} onValueChange={setBrain}>
+                <SelectTrigger className="bg-gray-950 border-gray-700" data-testid="select-pipeline-brain"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PROD_SENTINEL}>Production (текущая модель)</SelectItem>
+                  {(cfgQ.data?.allowedBrainModels ?? []).map((m) => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <Button
+            onClick={() => saveM.mutate()}
+            disabled={saveM.isPending || (enabled && stt === PROD_SENTINEL && brain === PROD_SENTINEL)}
+            data-testid="button-pipeline-save"
+          >
+            {saveM.isPending ? "Сохраняю..." : "Сохранить"}
+          </Button>
+          {enabled && stt === PROD_SENTINEL && brain === PROD_SENTINEL && (
+            <p className="text-xs text-amber-400">Выберите хотя бы одного кандидата (STT или Brain), иначе включать нечего.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-gray-900 border-gray-800">
+        <CardHeader><CardTitle className="text-base">Вердикт: latency подсказок по последним звонкам</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-400 mb-3">
+            Каждый звонок пишет этапы задержки подсказок (конец реплики гостя → триггер Brain → готовый текст → отправка в UI)
+            в метаданные. SLA цель: ≤ 1000 мс end-to-end. Candidate-звонки помечены; сравнивайте с baseline вручную —
+            автоматический победитель не объявляется.
+          </p>
+          {verdictQ.isLoading ? (
+            <p className="text-gray-500 text-sm">Загрузка...</p>
+          ) : withLatency.length === 0 ? (
+            <p className="text-gray-500 text-sm" data-testid="text-pipeline-no-calls">
+              Пока нет звонков с latency-метриками. Сделайте звонок — метрики появятся после его завершения.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Звонок</TableHead>
+                  <TableHead>Pipeline</TableHead>
+                  <TableHead>Подсказки</TableHead>
+                  <TableHead>p50 total</TableHead>
+                  <TableHead>p95 total</TableHead>
+                  <TableHead>p50 brain</TableHead>
+                  <TableHead>≤ SLA</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {withLatency.map((c) => (
+                  <TableRow key={c.callSid} data-testid={`row-pipeline-call-${c.callSid}`}>
+                    <TableCell className="text-xs">
+                      <div>{new Date(c.startedAt).toLocaleString()}</div>
+                      <div className="text-gray-500">{c.direction} → {c.toNumber}</div>
+                    </TableCell>
+                    <TableCell>
+                      {c.isCandidate ? (
+                        <div className="space-y-1">
+                          <div className="flex gap-1 flex-wrap">
+                            {c.sttCandidate && <Badge className="bg-purple-600 hover:bg-purple-600">candidate STT</Badge>}
+                            {c.brainCandidate && <Badge className="bg-blue-600 hover:bg-blue-600">candidate Brain</Badge>}
+                            {c.sttSwapFailed && <Badge variant="destructive">STT swap failed</Badge>}
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {c.sttCandidate ? c.pipeline?.stt : "prod STT"} / {c.brainCandidate ? c.pipeline?.brainModel : "prod brain"}
+                            {c.pipeline?.sttSwapDelayMs != null && (
+                              <span className="text-gray-500"> (Flux lead-in {c.pipeline.sttSwapDelayMs} мс)</span>
+                            )}
+                          </div>
+                        </div>
+                      ) : c.sttSwapFailed ? (
+                        <div className="space-y-1">
+                          <Badge variant="destructive">swap failed</Badge>
+                          <div className="text-xs text-gray-500">кандидатный STT не поднялся — звонок шёл на production, не считается candidate</div>
+                        </div>
+                      ) : (
+                        <Badge variant="outline" className="text-gray-400 border-gray-600">baseline</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {c.latencySummary!.hintsSent} отправлено / {c.latencySummary!.hintsDropped} без подсказки
+                    </TableCell>
+                    <TableCell>{fmt(c.latencySummary!.totalP50Ms)}</TableCell>
+                    <TableCell>{fmt(c.latencySummary!.totalP95Ms)}</TableCell>
+                    <TableCell>{fmt(c.latencySummary!.brainP50Ms)}</TableCell>
+                    <TableCell>
+                      {c.latencySummary!.withinSlaPct == null ? "—" : `${c.latencySummary!.withinSlaPct}%`}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

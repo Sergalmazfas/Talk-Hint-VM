@@ -277,6 +277,9 @@ export interface IStorage {
   setUserContext(id: string, context: string): Promise<string>;
   getUserCallSettings(id: string): Promise<{ liveHintsEnabled: boolean; translationEnabled: boolean }>;
   setUserCallSettings(id: string, settings: { liveHintsEnabled?: boolean; translationEnabled?: boolean }): Promise<{ liveHintsEnabled: boolean; translationEnabled: boolean }>;
+  getCandidatePipeline(id: string): Promise<{ enabled: boolean; stt: string | null; brainModel: string | null }>;
+  setCandidatePipeline(id: string, cfg: { enabled: boolean; stt: string | null; brainModel: string | null }): Promise<{ enabled: boolean; stt: string | null; brainModel: string | null }>;
+  mergeCallMetadataByCallSid(callSid: string, patch: Record<string, unknown>): Promise<void>;
   
   // Phone Numbers
   getPhoneNumber(id: string): Promise<PhoneNumber | undefined>;
@@ -438,6 +441,9 @@ export class DatabaseStorage implements IStorage {
         liveHintsEnabled: true,
         translationEnabled: true,
         diagnosticRecordingEnabled: false,
+        candidatePipelineEnabled: false,
+        candidateStt: null,
+        candidateBrainModel: null,
         createdAt: new Date(),
       };
       memoryUsers.set(newUser.id, newUser);
@@ -469,6 +475,9 @@ export class DatabaseStorage implements IStorage {
         liveHintsEnabled: true,
         translationEnabled: true,
         diagnosticRecordingEnabled: false,
+        candidatePipelineEnabled: false,
+        candidateStt: null,
+        candidateBrainModel: null,
         createdAt: new Date(),
       };
       memoryUsers.set(fallbackUser.id, fallbackUser);
@@ -525,6 +534,31 @@ export class DatabaseStorage implements IStorage {
     return {
       liveHintsEnabled: updated?.liveHintsEnabled ?? true,
       translationEnabled: updated?.translationEnabled ?? true,
+    };
+  }
+
+  // Candidate Pipeline v1 (Task #207): per-user experimental live pipeline.
+  // Disabled config is the safe default on any read failure — the production
+  // pipeline must never be swapped out by accident.
+  async getCandidatePipeline(id: string): Promise<{ enabled: boolean; stt: string | null; brainModel: string | null }> {
+    const user = await this.getUser(id);
+    return {
+      enabled: user?.candidatePipelineEnabled ?? false,
+      stt: user?.candidateStt ?? null,
+      brainModel: user?.candidateBrainModel ?? null,
+    };
+  }
+
+  async setCandidatePipeline(id: string, cfg: { enabled: boolean; stt: string | null; brainModel: string | null }): Promise<{ enabled: boolean; stt: string | null; brainModel: string | null }> {
+    const updated = await this.updateUser(id, {
+      candidatePipelineEnabled: cfg.enabled,
+      candidateStt: cfg.stt,
+      candidateBrainModel: cfg.brainModel,
+    });
+    return {
+      enabled: updated?.candidatePipelineEnabled ?? false,
+      stt: updated?.candidateStt ?? null,
+      brainModel: updated?.candidateBrainModel ?? null,
     };
   }
   
@@ -827,6 +861,21 @@ export class DatabaseStorage implements IStorage {
       recordWriteSuccess("calls");
     } catch (error) {
       recordWriteFailure("calls", "updateCallTranscriptByCallSid", error);
+    }
+  }
+
+  // Merge a JSON patch into calls.metadata (shallow, key-level) by CallSid.
+  // Non-throwing — latency/verdict metadata must never break call teardown.
+  async mergeCallMetadataByCallSid(callSid: string, patch: Record<string, unknown>): Promise<void> {
+    if (!isDatabaseAvailable()) return;
+    try {
+      const [call] = await db.select().from(calls).where(eq(calls.callSid, callSid));
+      if (!call) return;
+      const existing = (call.metadata && typeof call.metadata === "object") ? (call.metadata as Record<string, unknown>) : {};
+      await db.update(calls).set({ metadata: { ...existing, ...patch } }).where(eq(calls.callSid, callSid));
+      recordWriteSuccess("calls");
+    } catch (error) {
+      recordWriteFailure("calls", "mergeCallMetadataByCallSid", error);
     }
   }
   

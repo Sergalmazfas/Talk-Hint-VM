@@ -24,6 +24,12 @@ export const users = pgTable("users", {
   // default; enabled explicitly per-user (admin/test accounts only). NOT tied
   // to admin role — it is a separate backend policy flag.
   diagnosticRecordingEnabled: boolean("diagnostic_recording_enabled").notNull().default(false),
+  // Candidate Pipeline v1 (Task #207): per-user experimental live-call pipeline
+  // (alternate STT and/or Brain model). OFF by default — production config is
+  // never changed by this flag; admin-only via benchmark endpoints.
+  candidatePipelineEnabled: boolean("candidate_pipeline_enabled").notNull().default(false),
+  candidateStt: text("candidate_stt"),
+  candidateBrainModel: text("candidate_brain_model"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
