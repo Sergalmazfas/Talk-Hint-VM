@@ -50,9 +50,13 @@ const FRAME_BYTES_MULAW = 160; // 20ms @ 8kHz mulaw
 
 interface CollectedFinal {
   text: string;
-  /** ms since first audio frame sent (harness clock) */
+  /** ms since first audio frame sent (harness clock, receipt time) */
   atMs: number;
   isEndOfTurn: boolean;
+  /** provider-reported AUDIO-timeline end of the transcribed segment, in ms —
+   * the only evidence strong enough to map a final onto a reference turn.
+   * null when the provider does not report audio offsets. */
+  audioEndMs?: number | null;
 }
 
 interface StreamOutcome {
@@ -135,7 +139,10 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
       if (msg.type === "TurnInfo") {
         const transcript = String(msg.transcript || "").trim();
         if (transcript && msg.event === "EndOfTurn") {
-          finals.push({ text: transcript, atMs: nowMs() - start, isEndOfTurn: true });
+          // Flux reports the turn's audio window in SECONDS.
+          const audioEndMs = typeof msg.audio_window_end === "number"
+            ? Math.round(msg.audio_window_end * 1000) : null;
+          finals.push({ text: transcript, atMs: nowMs() - start, isEndOfTurn: true, audioEndMs });
         }
         return;
       }
@@ -144,7 +151,10 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
         const alt = msg.channel?.alternatives?.[0];
         const transcript = String(alt?.transcript || "").trim();
         if (transcript && (msg.is_final || msg.speech_final)) {
-          finals.push({ text: transcript, atMs: nowMs() - start, isEndOfTurn: !!msg.speech_final });
+          // nova-3 reports segment start/duration in SECONDS.
+          const audioEndMs = typeof msg.start === "number" && typeof msg.duration === "number"
+            ? Math.round((msg.start + msg.duration) * 1000) : null;
+          finals.push({ text: transcript, atMs: nowMs() - start, isEndOfTurn: !!msg.speech_final, audioEndMs });
         }
       }
     });
@@ -375,12 +385,25 @@ async function transcribeOpenAiBatch(
 }
 
 // ---------------------------------------------------------------------------
-// Alignment: greedy best-match of collected finals to reference turns
+// Alignment: PROVABLE mapping only.
+//
+// HARD RULE (measurement honesty): alignment must never use the candidate's
+// own transcript text to decide which reference turn a final belongs to,
+// and must never be inferred from receipt order, final counts, or receipt
+// wall-clock time plus a slack heuristic — none of those can prove where a
+// candidate segment sits on the AUDIO timeline (an STT can merge/split turns
+// while keeping the count, and network/processing delay shifts receipt time
+// arbitrarily).
+//
+// The ONLY accepted basis is explicit audio-timeline evidence on BOTH sides:
+//   - every reference turn carries a ground-truth end boundary (tEndMs,
+//     strictly increasing), AND
+//   - every candidate final carries a provider-reported audio end offset
+//     (audioEndMs) for the segment it transcribed.
+// A final then belongs to the unique reference turn whose boundary interval
+// (tEnd[i-1], tEnd[i]] contains its audioEndMs. If either side lacks the
+// metadata, per-turn metrics are UNAVAILABLE for that stream — never guessed.
 // ---------------------------------------------------------------------------
-
-function similarity(a: string, b: string): number {
-  return 1 - Math.min(1, wordErrorRate(a, b));
-}
 
 /** @internal exported for unit tests only */
 export interface Aligned {
@@ -390,41 +413,40 @@ export interface Aligned {
   hypEndOfTurn: boolean | null;
 }
 
-/**
- * Greedy alignment by order + similarity: walk reference turns in order and,
- * for each, consume the next best-matching final that appears at or after the
- * previously consumed final. Finals that don't clearly match are concatenated
- * into the nearest reference turn to avoid dropping content.
- */
-function alignFinalsToTurns(finals: CollectedFinal[], refTurns: ReferenceTurn[]): Aligned[] {
-  const aligned: Aligned[] = refTurns.map((t) => ({
-    refTurn: t,
-    hypText: "",
-    hypAtMs: null,
-    hypEndOfTurn: null,
-  }));
-  if (finals.length === 0 || refTurns.length === 0) return aligned;
+export type PerTurnBasis = "timestamps" | "unavailable";
 
-  let refCursor = 0;
+/** @internal exported for unit tests only */
+export function alignProvably(
+  finals: CollectedFinal[],
+  refTurns: ReferenceTurn[]
+): { basis: PerTurnBasis; aligned: Aligned[] } {
+  const empty = (): Aligned[] =>
+    refTurns.map((t) => ({ refTurn: t, hypText: "", hypAtMs: null, hypEndOfTurn: null }));
+
+  if (refTurns.length === 0) return { basis: "unavailable", aligned: [] };
+
+  const boundaries = refTurns.map((t) => (typeof t.tEndMs === "number" ? t.tEndMs : null));
+  const refOk = boundaries.every((b, i) => b !== null && (i === 0 || b > (boundaries[i - 1] as number)));
+  const candOk = finals.every((f) => typeof f.audioEndMs === "number" && !Number.isNaN(f.audioEndMs));
+  if (!refOk || !candOk) return { basis: "unavailable", aligned: empty() };
+
+  const aligned = empty();
+  const last = refTurns.length - 1;
   for (const f of finals) {
-    // Search a small forward window for the best matching reference turn.
-    let bestIdx = refCursor;
-    let bestSim = -1;
-    const windowEnd = Math.min(refTurns.length, refCursor + 4);
-    for (let i = refCursor; i < windowEnd; i++) {
-      const s = similarity(refTurns[i].text, f.text);
-      if (s > bestSim) {
-        bestSim = s;
-        bestIdx = i;
-      }
+    const endMs = f.audioEndMs as number;
+    // Unique turn whose boundary interval (tEnd[i-1], tEnd[i]] contains the
+    // segment's audio end; content ending after the last boundary belongs to
+    // the last turn (no later turn exists on this channel).
+    let idx = last;
+    for (let i = 0; i < boundaries.length; i++) {
+      if (endMs <= (boundaries[i] as number)) { idx = i; break; }
     }
-    const slot = aligned[bestIdx];
+    const slot = aligned[idx];
     slot.hypText = slot.hypText ? `${slot.hypText} ${f.text}` : f.text;
     slot.hypAtMs = f.atMs;
     slot.hypEndOfTurn = f.isEndOfTurn;
-    refCursor = bestIdx; // don't move backwards
   }
-  return aligned;
+  return { basis: "timestamps", aligned };
 }
 
 // ---------------------------------------------------------------------------
@@ -573,8 +595,11 @@ export async function runEarsBenchmark(opts: {
       candidateId: c.id,
       label: c.label,
       wer: [],
+      werWeights: [],
       roles: [],
       cer: [],
+      perTurnBases: [],
+      perTurnScored: 0,
       semantic: [],
       moneyAcc: [],
       digitsAcc: [],
@@ -673,15 +698,34 @@ export async function runEarsBenchmark(opts: {
           continue;
         }
 
+        const rowAcc = acc.get(c.id)!;
+        const jobRole = job.refTurns.every((t) => t.role === job.refTurns[0]?.role)
+          ? job.refTurns[0]?.role ?? null : null;
+        const jobRefJoined = job.refTurns.map((t) => t.text).join(" ");
+        const jobRefWords = jobRefJoined.split(/\s+/).filter(Boolean).length;
+
         if (outcome.error) {
-          notes.push(`fixture ${fixture.id} / ${c.id}: stream error — ${outcome.error}`);
+          // A failed channel is a FULL DELETION for the comparable channel
+          // score — skipping it would let a candidate improve its aggregate
+          // by failing on hard channels.
+          notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: stream error — ${outcome.error}; channel scored as full deletion (WER 1.0), never skipped.`);
+          rowAcc.wer.push(1);
+          rowAcc.werWeights!.push(jobRefWords);
+          rowAcc.cer!.push(1);
+          rowAcc.roles!.push(jobRole);
+          rowAcc.semantic.push(0);
+          const eaFail = entityAccuracy(critical, "");
+          rowAcc.moneyAcc.push(eaFail.money);
+          rowAcc.digitsAcc.push(eaFail.digits);
+          rowAcc.termsAcc!.push(termsAccuracy(critical.terms, jobRefJoined, ""));
+          rowAcc.perTurnBases!.push("unavailable");
           turnResults.push({
             turnIdx: -1,
             candidateId: c.id,
             hypothesisText: "",
-            role: null,
-            wer: null,
-            cer: null,
+            role: jobRole,
+            wer: 1,
+            cer: 1,
             entityAccuracy: null,
             prematureEot: null,
             falseContinuation: null,
@@ -692,84 +736,60 @@ export async function runEarsBenchmark(opts: {
           continue;
         }
 
-        const rowAcc = acc.get(c.id)!;
+        // -------------------------------------------------------------------
+        // UNIFIED COMPARABILITY RULE — identical for EVERY candidate:
+        //
+        // 1. WER / Owner WER / Guest WER / Semantic / entity accuracy are
+        //    scored at the CHANNEL level (whole per-role stream as one
+        //    document). No alignment involved, so Flux, nova-3, OpenAI
+        //    realtime and batch are all measured by the same method.
+        // 2. Per-turn metrics (EOT latency, premature EOT, false wait) are
+        //    computed ONLY when the finals→turns mapping is provable without
+        //    the candidate's own text (timestamps or exact count). Otherwise
+        //    they are UNAVAILABLE — never inferred.
+        // -------------------------------------------------------------------
+        const hypJoined = outcome.finals.map((f) => f.text).join(" ");
+        const docAligned: Aligned = {
+          refTurn: { idx: -1, role: (jobRole ?? "guest") as any, text: jobRefJoined },
+          hypText: hypJoined,
+          hypAtMs: null, // channel-level score carries no latency semantics
+          hypEndOfTurn: null,
+        };
+        const docTr = scoreTurn(c.id, docAligned, critical, 0);
+        docTr.role = jobRole as any;
+        turnResults.push(docTr);
+        rowAcc.wer.push(hypJoined ? docTr.wer : 1); // empty stream = full deletion
+        rowAcc.werWeights!.push(jobRefWords);
+        rowAcc.cer!.push(hypJoined ? docTr.cer : 1);
+        rowAcc.roles!.push(jobRole);
+        rowAcc.semantic.push(semanticProxy(jobRefJoined, hypJoined));
+        // Empty stream = missed applicable entities score ZERO, not null —
+        // otherwise dropping the audio would exclude the penalty entirely.
+        const eaDoc = hypJoined ? docTr.entityAccuracy : entityAccuracy(critical, "");
+        rowAcc.moneyAcc.push(eaDoc?.money ?? null);
+        rowAcc.digitsAcc.push(eaDoc?.digits ?? null);
+        rowAcc.termsAcc!.push(hypJoined ? docTr.entityAccuracy?.terms ?? null : termsAccuracy(critical.terms, jobRefJoined, ""));
 
-        // Degenerate turn detection (few giant finals — e.g. batch output or a
-        // model whose EOT collapsed on this audio) makes per-turn alignment
-        // meaningless: one reference turn gets the whole channel's text and
-        // WER explodes into the thousands of percent. In that case score the
-        // channel as ONE document (standard document-level WER) — honest, and
-        // clearly noted. Per-channel jobs have a single role, so Owner/Guest
-        // WER stays meaningful.
-        const uniformRole = job.refTurns.every((t) => t.role === job.refTurns[0]?.role)
-          ? job.refTurns[0]?.role ?? null : null;
-        const degenerate = outcome.finals.length > 0 && job.refTurns.length >= 4 &&
-          outcome.finals.length < job.refTurns.length / 2;
-        if (degenerate) {
-          const refJoined = job.refTurns.map((t) => t.text).join(" ");
-          const hypJoined = outcome.finals.map((f) => f.text).join(" ");
-          const docAligned: Aligned = {
-            refTurn: { idx: -1, role: (uniformRole ?? "guest") as any, text: refJoined },
-            hypText: hypJoined,
-            hypAtMs: outcome.finals[outcome.finals.length - 1]?.atMs ?? null,
-            hypEndOfTurn: null,
-          };
-          const tr = scoreTurn(c.id, docAligned, critical, outcome.lastFrameSentAtMs);
-          tr.role = uniformRole as any;
-          turnResults.push(tr);
-          rowAcc.wer.push(tr.wer);
-          rowAcc.cer!.push(tr.cer);
-          rowAcc.roles!.push(uniformRole);
-          rowAcc.semantic.push(semanticProxy(refJoined, hypJoined));
-          rowAcc.moneyAcc.push(tr.entityAccuracy?.money ?? null);
-          rowAcc.digitsAcc.push(tr.entityAccuracy?.digits ?? null);
-          rowAcc.termsAcc!.push(tr.entityAccuracy?.terms ?? null);
-          rowAcc.prematureEotFlags.push(null);
-          rowAcc.falseWaitFlags.push(null);
-          rowAcc.finalLatencies.push(null);
-          rowAcc.eotLatencies.push(null);
-          notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: turn detection produced ${outcome.finals.length} final(s) for ${job.refTurns.length} reference turns — scored as document-level WER instead of per-turn alignment.`);
+        // Per-turn pass — provable mapping only.
+        const { basis, aligned } = alignProvably(outcome.finals, job.refTurns);
+        rowAcc.perTurnBases!.push(basis);
+        if (basis === "unavailable") {
+          notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: per-turn metrics UNAVAILABLE — mapping requires reference turn boundaries (tEndMs) AND provider audio offsets on every final (${outcome.finals.length} final(s) vs ${job.refTurns.length} reference turns); refusing count/order/receipt-time/text inference. Channel-level WER above is the comparable score.`);
           continue;
         }
-
-        const aligned = alignFinalsToTurns(outcome.finals, job.refTurns);
+        notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: per-turn mapping proven by audio-timeline boundaries (reference tEndMs × provider audio offsets) — ${aligned.length} turns scored per-turn.`);
 
         for (const a of aligned) {
           try {
             const tr = scoreTurn(c.id, a, critical, outcome.lastFrameSentAtMs);
             turnResults.push(tr);
-            // EVERY reference turn counts. A turn the candidate never
-            // transcribed is a full deletion (WER 1.0) — excluding missed
-            // turns would let a candidate look better by dropping the hard
-            // ones. (Stream-level errors were already handled above and never
-            // reach this loop.)
-            if (a.hypText) {
-              rowAcc.wer.push(tr.wer);
-              rowAcc.cer!.push(tr.cer);
-              rowAcc.roles!.push(a.refTurn.role ?? null);
-              rowAcc.semantic.push(semanticProxy(a.refTurn.text, a.hypText));
-              rowAcc.moneyAcc.push(tr.entityAccuracy?.money ?? null);
-              rowAcc.digitsAcc.push(tr.entityAccuracy?.digits ?? null);
-              rowAcc.termsAcc!.push(tr.entityAccuracy?.terms ?? null);
-              rowAcc.prematureEotFlags.push(tr.prematureEot);
-              rowAcc.falseWaitFlags.push(tr.falseContinuation);
-              rowAcc.finalLatencies.push(tr.speechEndToFinalMs);
-              rowAcc.eotLatencies.push(tr.speechEndToEotMs);
-            } else {
-              rowAcc.wer.push(1); // missed turn = everything deleted
-              rowAcc.cer!.push(1);
-              rowAcc.roles!.push(a.refTurn.role ?? null);
-              rowAcc.semantic.push(0);
-              rowAcc.moneyAcc.push(null);
-              rowAcc.digitsAcc.push(null);
-              rowAcc.termsAcc!.push(termsAccuracy(critical.terms, a.refTurn.text, ""));
-              // A missed turn with ground-truth tEndMs still scores as false
-              // continuation — the turn boundary passed and no EOT was emitted.
-              rowAcc.prematureEotFlags.push(tr.prematureEot);
-              rowAcc.falseWaitFlags.push(tr.falseContinuation);
-              rowAcc.finalLatencies.push(null);
-              rowAcc.eotLatencies.push(tr.speechEndToEotMs);
-            }
+            rowAcc.perTurnScored = (rowAcc.perTurnScored ?? 0) + 1;
+            // Per-turn samples feed ONLY the turn-boundary metrics. Accuracy
+            // columns stay channel-level so all candidates remain comparable.
+            rowAcc.prematureEotFlags.push(tr.prematureEot);
+            rowAcc.falseWaitFlags.push(tr.falseContinuation);
+            rowAcc.finalLatencies.push(a.hypText ? tr.speechEndToFinalMs : null);
+            rowAcc.eotLatencies.push(tr.speechEndToEotMs);
           } catch (e) {
             // Per-turn isolation.
             turnResults.push({

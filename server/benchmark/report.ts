@@ -39,8 +39,12 @@ export function generateEarsReport(inp: {
   for (const a of inp.availability) lines.push(`- ${a.candidateId}: **${a.status}** — ${a.detail}`);
   lines.push("");
 
-  const live = inp.scorecard.filter((r) => !r.referenceOnly && r.turnsScored > 0);
-  const ceiling = inp.scorecard.filter((r) => r.referenceOnly && r.turnsScored > 0);
+  // A row is scoreable when it has any channel-level samples (accuracy columns
+  // are channel-level for everyone); per-turn availability (turnsScored) only
+  // affects turn-boundary metrics, not eligibility here.
+  const scoreable = (r: EarsScorecardRow) => (r.channelsScored ?? r.turnsScored) > 0;
+  const live = inp.scorecard.filter((r) => !r.referenceOnly && scoreable(r));
+  const ceiling = inp.scorecard.filter((r) => r.referenceOnly && scoreable(r));
 
   lines.push(`## Best STT for Owner speech (LIVE candidates only — headline metric)`);
   const bestOwner = bestBy(live, "ownerWer");
@@ -72,11 +76,12 @@ export function generateEarsReport(inp: {
   }
   lines.push("");
 
-  lines.push(`## Scorecard`);
-  lines.push(`| STT | LIVE? | WER | Owner WER | Guest WER | Semantic* | Numbers | Terms | Final p50 | Turns |`);
-  lines.push(`|---|---|---|---|---|---|---|---|---|---|`);
+  lines.push(`## Scorecard (single comparability rule for every candidate)`);
+  lines.push(`WER / Owner WER / Guest WER / Semantic are CHANNEL-LEVEL (whole per-role stream scored as one document) for ALL candidates — Flux, nova-3, OpenAI realtime and batch are measured by the same method. Per-turn metrics (EOT, premature, false wait) exist only where the finals→turns mapping is provable WITHOUT the candidate's own text — reference turn boundaries (tEndMs) matched against provider-reported audio offsets; count, order, receipt time or text inference are never used. Otherwise per-turn metrics are unavailable, never inferred.`);
+  lines.push(`| STT | LIVE? | WER | Owner WER | Guest WER | Semantic* | Numbers | Terms | Final p50 | Per-turn basis | Turns |`);
+  lines.push(`|---|---|---|---|---|---|---|---|---|---|---|`);
   for (const r of inp.scorecard) {
-    lines.push(`| ${r.candidateId} | ${r.referenceOnly ? "ceiling" : "LIVE"} | ${fmtPct(r.wer)} | ${fmtPct(r.ownerWer)} | ${fmtPct(r.guestWer)} | ${fmtPct(r.semantic)} | ${fmtPct(r.numbersMoney)} | ${fmtPct(r.terms)} | ${r.finalP50 != null ? Math.round(r.finalP50) + "ms" : "—"} | ${r.turnsScored} |`);
+    lines.push(`| ${r.candidateId} | ${r.referenceOnly ? "ceiling" : "LIVE"} | ${fmtPct(r.wer)} | ${fmtPct(r.ownerWer)} | ${fmtPct(r.guestWer)} | ${fmtPct(r.semantic)} | ${fmtPct(r.numbersMoney)} | ${fmtPct(r.terms)} | ${r.finalP50 != null ? Math.round(r.finalP50) + "ms" : "—"} | ${r.perTurnBasis ?? "—"} | ${r.turnsScored} |`);
   }
   lines.push(`*Semantic is a content-word proxy, not an embedding score. EOT/premature-EOT metrics are null until per-turn boundary ground truth exists — they are never fabricated.`);
   lines.push("");

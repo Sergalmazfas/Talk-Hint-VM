@@ -445,16 +445,31 @@ export interface EarsScorecardRow {
   finalP50: number | null;
   /** rough cost estimate in USD for the corpus run (null if unknown) */
   costEstimate: number | null;
+  /** number of turns scored per-turn under a PROVABLE mapping (0 when
+   * per-turn metrics are unavailable for this candidate) */
   turnsScored: number;
+  /** number of channel-level (document) samples behind the accuracy columns */
+  channelsScored?: number;
+  /** basis of the per-turn mapping: "timestamps" | "positional" |
+   * "unavailable" | "mixed" | null (no streams scored) */
+  perTurnBasis?: string | null;
 }
 
 export interface EarsRowInput {
   candidateId: string;
   label: string;
   wer: Array<number | null>;
+  /** reference word count behind each wer sample (parallel array) — when
+   * present, aggregate WER is word-weighted instead of a plain mean, so a
+   * short channel cannot dominate a long one. */
+  werWeights?: Array<number | null>;
   /** role of the reference turn behind each wer sample (parallel array) */
   roles?: Array<"owner" | "guest" | null>;
   cer?: Array<number | null>;
+  /** provable per-turn mapping basis for each scored stream */
+  perTurnBases?: Array<"timestamps" | "unavailable">;
+  /** number of turns actually scored per-turn (provable mapping only) */
+  perTurnScored?: number;
   semantic: Array<number | null>;
   termsAcc?: Array<number | null>;
   referenceOnly?: boolean;
@@ -485,15 +500,36 @@ export function buildScorecardRow(input: EarsRowInput): EarsScorecardRow {
     arr.filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
 
   const roles = input.roles ?? [];
+  const weights = input.werWeights ?? [];
+
+  /** Word-weighted mean over the selected wer samples; plain mean when no
+   * usable weights exist (backward compatible). */
+  const weightedWer = (indices: number[]): number | null => {
+    const usable = indices.filter((i) => typeof input.wer[i] === "number" && !Number.isNaN(input.wer[i] as number));
+    if (usable.length === 0) return null;
+    const haveWeights = usable.every((i) => typeof weights[i] === "number" && (weights[i] as number) > 0);
+    if (!haveWeights) return mean(usable.map((i) => input.wer[i]));
+    const totalW = usable.reduce((s, i) => s + (weights[i] as number), 0);
+    if (totalW <= 0) return mean(usable.map((i) => input.wer[i]));
+    return usable.reduce((s, i) => s + (input.wer[i] as number) * (weights[i] as number), 0) / totalW;
+  };
+  const allIdx = input.wer.map((_, i) => i);
   const werForRole = (role: "owner" | "guest"): number | null =>
-    mean(input.wer.filter((_, i) => roles[i] === role));
+    weightedWer(allIdx.filter((i) => roles[i] === role));
+
+  const bases = (input.perTurnBases ?? []).filter((b) => b !== undefined);
+  let perTurnBasis: string | null = null;
+  if (bases.length > 0) {
+    const uniq = Array.from(new Set(bases));
+    perTurnBasis = uniq.length === 1 ? uniq[0] : "mixed";
+  }
 
   return {
     candidateId: input.candidateId,
     label: input.label,
     semantic: mean(input.semantic),
     semanticIsProxy: true,
-    wer: mean(input.wer),
+    wer: weightedWer(allIdx),
     ownerWer: werForRole("owner"),
     guestWer: werForRole("guest"),
     numbersMoney,
@@ -505,6 +541,8 @@ export function buildScorecardRow(input: EarsRowInput): EarsScorecardRow {
     eotP50: percentile(nonNull(input.eotLatencies), 50),
     finalP50: percentile(nonNull(input.finalLatencies), 50),
     costEstimate: input.costEstimate ?? null,
-    turnsScored: input.wer.length,
+    turnsScored: input.perTurnScored ?? input.wer.length,
+    channelsScored: input.wer.length,
+    perTurnBasis,
   };
 }
