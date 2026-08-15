@@ -83,7 +83,7 @@ describe("buildEnvelopeInputs on GOLD_CALL_TURNS", () => {
   });
 
   it("PROMPT_VERSION and system prompt are stable / non-empty", () => {
-    expect(PROMPT_VERSION).toBe("brain-v1");
+    expect(PROMPT_VERSION).toBe("brain-v2");
     const p = buildSystemPrompt();
     expect(p.toLowerCase()).toContain("restraint");
     expect(p.toLowerCase()).toContain("american english");

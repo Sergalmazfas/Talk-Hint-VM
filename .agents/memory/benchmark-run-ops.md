@@ -18,3 +18,8 @@ Fixture #2 (09e6bcce…) reference_turns were rebuilt with user approval from wh
 ## Per-turn reference verification (2026-08-15)
 - Admin Edit Reference is now per-turn: turn-audio clips are sliced from the ROLE's channel using tStartMs/tEndMs (per-channel timeline, +300ms pad); PATCH one turn; bulk PUT is gated — structural change without `confirmDestructive:true` returns 409 (mergeReferenceTurns preserves timings/verified positionally). Never bulk-save an annotated fixture casually.
 - Realtime-only EARS run: POST /ears/run {realtimeOnly:true} → shortlist section in report. First shortlist run on Fixture #2 (~20 min wall): OpenAI realtime WER ~7-9% vs Deepgram ~74% — a gap that large on the same audio smells like a measurement artifact (reference built by OpenAI STT + normalization), not real quality; do not act on it without human-verified turns.
+
+## Copilot-chain judge (brain-v2)
+- Judge = 6 chain dims + overall, each {score, explanation}; parse is fail-closed (any missing/malformed dim → null judge, never fabricated 1s); legacy bare-int accepted explicitly.
+- The judge MUST receive the candidate-specific envelope (envByTurnIdx in brainHarness) — the pre-built envelopes have EMPTY hint history; passing them silently invalidates tried_memory/avoids_rejected_strategy. **Why:** this exact bug shipped once and was caught in review.
+- Judge scores swing run-to-run (gpt-5.2: 8.71→6.43 on identical config) — single-sample LLM judging is noisy; don't make model decisions off one run (follow-up filed).

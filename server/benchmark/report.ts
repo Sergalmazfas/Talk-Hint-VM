@@ -206,6 +206,30 @@ export function generateReport(inp: ReportInput): string {
   }
   lines.push("");
 
+  // Золотая середина: quality + speed + cost in one view. A live copilot that
+  // answers 9/10 in 700–1000ms beats 9.7/10 in 4s — the hint must land while
+  // the Owner can still use it.
+  lines.push(`## GOLDEN MIDDLE (качество × скорость × стоимость)`);
+  if (ranked.length === 0) {
+    lines.push(`No usable candidates to compare.`);
+  } else {
+    lines.push(`| Candidate | Judge overall | Avg ready | ≤1000ms hints | Cost/10min |`);
+    lines.push(`|---|---|---|---|---|`);
+    for (const r of ranked) {
+      const b1000 = r.deadlineBuckets?.["<=1000"];
+      lines.push(`| ${r.candidateId}${r.selfJudged ? " (self-judged)" : ""} | ${r.judgeOverall ?? "—"}/10 | ${fmtMs(r.avgReadyMs)} | ${b1000 ? b1000.pct + "%" : "—"} | ${r.estCostPer10MinCall != null ? "$" + r.estCostPer10MinCall.toFixed(4) : "unknown"} |`);
+    }
+    const bestQ = ranked[0].judgeOverall ?? 0;
+    // Golden pick: within 1.0 judge point of the best AND fastest avg ready.
+    const contenders = ranked.filter((r) => (r.judgeOverall ?? 0) >= bestQ - 1.0 && r.avgReadyMs != null);
+    const golden = contenders.sort((a, b) => (a.avgReadyMs as number) - (b.avgReadyMs as number))[0];
+    if (golden) {
+      lines.push(`**Golden pick: ${golden.candidateId}** — ${golden.judgeOverall ?? "—"}/10 at ${fmtMs(golden.avgReadyMs)} avg ready (fastest среди кандидатов в пределах 1.0 балла от лучшего качества).`);
+      if (golden.estCostPer10MinCall == null) lines.push(`Cost caveat: no public pricing known for ${golden.model} — cost column is honest "unknown", not zero.`);
+    }
+  }
+  lines.push("");
+
   lines.push(`## BOTTLENECK`);
   if (!inp.earsHadRealAudio) {
     const readys = ranked.map((r) => r.avgReadyMs).filter((v): v is number => v != null);

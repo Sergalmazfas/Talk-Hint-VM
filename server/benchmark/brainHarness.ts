@@ -149,6 +149,11 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
     let consecutiveMissed = 0;
 
     const candTurnResults: BrainTurnResult[] = [];
+    // The EXACT envelope sent to the candidate for each turn (including its
+    // candidate-specific previousHintsShown/Rejected history). The judge MUST
+    // see this envelope — not the pre-built one with empty history — or the
+    // tried_memory / avoids_rejected_strategy scores would be meaningless.
+    const envByTurnIdx = new Map<number, BrainEnvelopeInput>();
 
     for (const env of envelopes) {
       const turnIdx = env.currentGuestTurn.idx;
@@ -166,6 +171,7 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
         previousHintsShown: [...shownHints],
         previousHintsRejected: [...rejectedHints],
       };
+      envByTurnIdx.set(turnIdx, envForCall);
 
       const reasoningEffort =
         candidate.reasoningEffort === "none" || candidate.reasoningEffort === "low"
@@ -286,7 +292,7 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
     if (judgeModel) {
       for (const tr of candTurnResults) {
         if (!tr.output) continue;
-        const env = envelopes.find((e) => e.currentGuestTurn.idx === tr.turnIdx);
+        const env = envByTurnIdx.get(tr.turnIdx);
         if (!env) continue;
         // Judge failure (bounded timeout OR any thrown error) => judge:null and
         // a note; it must NEVER abort the turn loop.

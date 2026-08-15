@@ -118,20 +118,29 @@ export interface DeterministicChecks {
   notes: string[];
 }
 
+// Copilot-chain judge scores: each link of the live-copilot chain is scored
+// separately (1-10) with its own short explanation. overall_* is kept for
+// winner ranking and run-history compatibility.
 export interface JudgeScores {
   judgeModel: string;
   selfJudged: boolean;
   scores: {
-    goal_awareness: number;
-    current_turn_relevance: number;
-    conversation_intelligence: number;
-    usefulness: number;
-    language_naturalness: number;
-    non_repetition: number;
-    strategy_progression: number;
-    restraint: number;
-    multi_turn_coherence: number;
+    understood_current_turn: number;
+    goal_memory: number;
+    tried_memory: number;
+    avoids_rejected_strategy: number;
+    next_move_quality: number;
+    reply_naturalness_en: number;
     overall_live_copilot_quality: number;
+  };
+  explanations: {
+    understood_current_turn: string;
+    goal_memory: string;
+    tried_memory: string;
+    avoids_rejected_strategy: string;
+    next_move_quality: string;
+    reply_naturalness_en: string;
+    overall_live_copilot_quality: string;
   };
   rationale: string;
 }

@@ -13,7 +13,7 @@ import type {
 
 // Bump this whenever the benchmark system prompt or envelope shape changes so
 // runs stay comparable in benchmark_runs.promptVersion.
-export const PROMPT_VERSION = "brain-v1";
+export const PROMPT_VERSION = "brain-v2"; // v2: generic call-state events + copilot-chain judge
 
 // Shape of a fixture as consumed here. This is a structural subset of the
 // benchmark_fixtures row (schema.ts) so both the DB fixture and the frozen
@@ -120,6 +120,21 @@ export function buildCallState(
   const window = turns.slice(0, currentIdx + 1);
   for (const t of window) {
     const lc = t.text.toLowerCase();
+    // Generic service-call events (deterministic keyword scan; identical for
+    // every candidate). Telecom / number-transfer family:
+    if (/transfer (my|your|the) (existing )?(number|phone number)|port(ing)? (my|the|your) number|number transfer/.test(lc)) {
+      push("call is about transferring/porting a phone number");
+    }
+    if (/\besim\b|e-sim/.test(lc)) push("eSIM was discussed");
+    if (/activation code|activate (a )?sim|activate service/.test(lc)) push("SIM/service activation was discussed");
+    if (/account number/.test(lc)) push("account number was requested or discussed");
+    if (/transfer pin|port(ing)? pin|\bpin\b.*(transfer|port)/.test(lc)) push("transfer PIN was requested or discussed");
+    if (/current carrier|old carrier|previous carrier/.test(lc)) push("the current/previous carrier was discussed");
+    // Generic agent-interaction events:
+    if (/(place|put) you on (a brief )?hold|one moment while i|please hold/.test(lc)) push("agent put the call on hold");
+    if (/transfer (you|your call) to|connect you (to|with)/.test(lc)) push("agent offered to transfer the call");
+    if (/verify (your|the) (identity|account)|for verification/.test(lc)) push("identity/account verification was requested");
+    // Payment-plan family (Gold Call #1):
     if (/returned/.test(lc)) push("original scheduled payment was returned");
     if (/additional/.test(lc)) push("bank counts the extra payments as additional, not the missed one");
     if (/missed/.test(lc)) push("the scheduled plan payment was reported missed");

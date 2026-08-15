@@ -83,9 +83,8 @@ interface EarsScorecardRow {
   turnsScored?: number;
 }
 type JudgeDim =
-  | "goal_awareness" | "current_turn_relevance" | "conversation_intelligence"
-  | "usefulness" | "language_naturalness" | "non_repetition"
-  | "strategy_progression" | "restraint" | "multi_turn_coherence"
+  | "understood_current_turn" | "goal_memory" | "tried_memory"
+  | "avoids_rejected_strategy" | "next_move_quality" | "reply_naturalness_en"
   | "overall_live_copilot_quality";
 
 interface DeadlineBucket { count: number; pct: number }
@@ -1290,13 +1289,13 @@ function BrainTab({ candidates }: { candidates: BrainCandidate[] }) {
                 <TableHeader>
                   <TableRow className="border-gray-800">
                     <TableHead>LLM</TableHead>
-                    <TableHead>Goal</TableHead>
-                    <TableHead>Current turn</TableHead>
-                    <TableHead>Next reply</TableHead>
-                    <TableHead>Coherence</TableHead>
-                    <TableHead>Strategy</TableHead>
-                    <TableHead>Non-repeat</TableHead>
+                    <TableHead title="Понял текущую реплику Guest">Понял ход</TableHead>
+                    <TableHead title="Помнит цель звонка">Цель</TableHead>
+                    <TableHead title="Помнит, что уже пробовали">Помнит попытки</TableHead>
+                    <TableHead title="Не повторяет отвергнутую стратегию">Не повторяет</TableHead>
+                    <TableHead title="Выбирает правильный следующий ход">След. ход</TableHead>
                     <TableHead>Natural EN</TableHead>
+                    <TableHead className="text-cyan-400">Overall</TableHead>
                     <TableHead>First token avg</TableHead>
                     <TableHead>Ready avg</TableHead>
                     <TableHead>Cost/call</TableHead>
@@ -1312,13 +1311,13 @@ function BrainTab({ candidates }: { candidates: BrainCandidate[] }) {
                           {labelById[r.candidateId] ?? r.model ?? r.candidateId}
                           {selfJudged && <Badge variant="outline" className="ml-2 text-amber-400 border-amber-600">self-judged</Badge>}
                         </TableCell>
-                        <TableCell>{num(j?.goal_awareness ?? null, 1)}</TableCell>
-                        <TableCell>{num(j?.current_turn_relevance ?? null, 1)}</TableCell>
-                        <TableCell>{num(j?.usefulness ?? null, 1)}</TableCell>
-                        <TableCell>{num(j?.multi_turn_coherence ?? null, 1)}</TableCell>
-                        <TableCell>{num(j?.strategy_progression ?? null, 1)}</TableCell>
-                        <TableCell>{num(j?.non_repetition ?? null, 1)}</TableCell>
-                        <TableCell>{num(j?.language_naturalness ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.understood_current_turn ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.goal_memory ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.tried_memory ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.avoids_rejected_strategy ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.next_move_quality ?? null, 1)}</TableCell>
+                        <TableCell>{num(j?.reply_naturalness_en ?? null, 1)}</TableCell>
+                        <TableCell className="text-cyan-300">{num(j?.overall_live_copilot_quality ?? null, 1)}</TableCell>
                         <TableCell>{ms(r.avgFirstTokenMs)}</TableCell>
                         <TableCell>{ms(r.avgReadyMs)}</TableCell>
                         <TableCell>
@@ -1418,6 +1417,10 @@ function BrainTab({ candidates }: { candidates: BrainCandidate[] }) {
               <TableBody>
                 {turnResults.map((t, i) => {
                   const overall = t.judge?.scores?.overall_live_copilot_quality ?? null;
+                  const jx = (t.judge as any)?.explanations as Record<string, string> | undefined;
+                  const chainTip = jx
+                    ? Object.entries(jx).map(([k, v]) => `${k}: ${(t.judge?.scores as any)?.[k] ?? "—"} — ${v}`).join("\n")
+                    : (t.judge as any)?.rationale;
                   return (
                     <TableRow key={`${t.candidateId}-${t.turnIdx}-${i}`} className="border-gray-800" data-testid={`row-turn-${t.candidateId}-${t.turnIdx}`}>
                       <TableCell>{t.turnIdx}</TableCell>
@@ -1429,7 +1432,7 @@ function BrainTab({ candidates }: { candidates: BrainCandidate[] }) {
                       <TableCell className="max-w-sm text-xs">{t.output?.should_suggest ? (t.output?.suggested_reply ?? "—") : <span className="text-gray-500">(no suggest)</span>}</TableCell>
                       <TableCell>{t.output?.strategy ? <Badge variant="outline" className="border-cyan-700 text-cyan-300">{t.output.strategy}</Badge> : "—"}</TableCell>
                       <TableCell>{ms(t.suggestionReadyAfterGuestEndMs)}</TableCell>
-                      <TableCell>
+                      <TableCell title={chainTip || undefined} className={chainTip ? "cursor-help" : undefined}>
                         {overall !== null ? num(overall, 1) : "—"}
                         {t.judge?.selfJudged && <Badge variant="outline" className="ml-1 text-amber-400 border-amber-600">self</Badge>}
                       </TableCell>
