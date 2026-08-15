@@ -21,6 +21,15 @@ enum CallHintEvent: Equatable {
     /// The active goal changed mid-call (e.g. the user redefined it via the
     /// assistant input). Rendered as a compact "Goal updated" feed event.
     case goalUpdated(text: String)
+    /// PREPARE stage: Sol's conversational reply. `proposedGoal` is non-nil when
+    /// the model is proposing a compact call goal for explicit confirmation.
+    case prepareReply(text: String, proposedGoal: String?)
+    /// PREPARE stage: the goal was confirmed and Sol produced the opening phrase
+    /// (American English + translation into the user's language).
+    case prepareOpening(phraseEn: String, translation: String?)
+    /// PREPARE stage: an honest, user-facing failure (Sol unavailable, reset
+    /// mid-flight, …). The text is safe to show verbatim — never substituted.
+    case prepareError(text: String)
 }
 
 protocol CallHintStreamDelegate: AnyObject {
@@ -116,6 +125,27 @@ final class CallHintStream: NSObject {
         send(CallHintStream.setModePayload(mode: mode))
     }
 
+    // MARK: - PREPARE stage (pre-call preparation chat)
+
+    /// Sends one PREPARE turn (typed or transcribed). The reply arrives as a
+    /// `prepareReply` event (or `prepareError` on an honest failure).
+    func sendPrepareMessage(_ text: String) {
+        send(CallHintStream.prepareMessagePayload(text: text))
+    }
+
+    /// Confirms the proposed call goal. The server activates it via the existing
+    /// goal mechanism (a `goal_set` event echoes back) and then delivers the
+    /// opening phrase as a `prepareOpening` event.
+    func confirmPrepareGoal(_ goal: String) {
+        send(CallHintStream.prepareConfirmGoalPayload(goal: goal))
+    }
+
+    /// Resets the server-side PREPARE conversation so the next preparation
+    /// starts from a clean slate.
+    func resetPrepare() {
+        send(CallHintStream.prepareResetPayload())
+    }
+
     // MARK: - Pure outgoing-payload builders
     //
     // These mirror `decode(_:)` on the inbound side: side-effect free (no
@@ -145,6 +175,21 @@ final class CallHintStream: NSObject {
     /// Builds the `set_mode` control message.
     static func setModePayload(mode: String) -> [String: Any] {
         ["type": "set_mode", "mode": mode]
+    }
+
+    /// Builds the `prepare_message` control message (one PREPARE turn).
+    static func prepareMessagePayload(text: String) -> [String: Any] {
+        ["type": "prepare_message", "text": text]
+    }
+
+    /// Builds the `prepare_confirm_goal` control message.
+    static func prepareConfirmGoalPayload(goal: String) -> [String: Any] {
+        ["type": "prepare_confirm_goal", "goal": goal]
+    }
+
+    /// Builds the `prepare_reset` control message.
+    static func prepareResetPayload() -> [String: Any] {
+        ["type": "prepare_reset"]
     }
 
     /// Pushes the user's saved Assistant-tab selections (mode, language, goal) to
@@ -426,6 +471,15 @@ final class CallHintStream: NSObject {
         case "goal_updated":
             guard let body = obj["goal"] as? String, !body.isEmpty else { return nil }
             return .goalUpdated(text: body)
+        case "prepare_reply":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
+            return .prepareReply(text: body, proposedGoal: nonEmpty(obj["proposedGoal"]))
+        case "prepare_opening":
+            guard let phrase = obj["phraseEn"] as? String, !phrase.isEmpty else { return nil }
+            return .prepareOpening(phraseEn: phrase, translation: nonEmpty(obj["translation"]))
+        case "prepare_error":
+            guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
+            return .prepareError(text: body)
         default:
             return nil
         }

@@ -62,7 +62,25 @@ final class HomeViewController: UIViewController {
         callButton.translatesAutoresizingMaskIntoConstraints = false
         callButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
 
-        let dialer = UIStackView(arrangedSubviews: [numberField, callButton])
+        // PREPARE stage entry: the pre-call preparation chat (voice + text),
+        // same flow as the web /app UI.
+        let prepareButton = UIButton(type: .system)
+        if #available(iOS 15.0, *) {
+            var config = UIButton.Configuration.tinted()
+            config.cornerStyle = .large
+            config.image = UIImage(systemName: "target")
+            config.imagePadding = 8
+            config.title = "Подготовить звонок"
+            prepareButton.configuration = config
+        } else {
+            prepareButton.setTitle("Подготовить звонок", for: .normal)
+        }
+        prepareButton.addTarget(self, action: #selector(prepareTapped), for: .touchUpInside)
+        prepareButton.accessibilityIdentifier = "button-prepare-call"
+        prepareButton.translatesAutoresizingMaskIntoConstraints = false
+        prepareButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+
+        let dialer = UIStackView(arrangedSubviews: [numberField, callButton, prepareButton])
         dialer.axis = .vertical
         dialer.spacing = 12
 
@@ -77,6 +95,10 @@ final class HomeViewController: UIViewController {
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
         ])
+    }
+
+    @objc private func prepareTapped() {
+        navigationController?.pushViewController(PrepareViewController(), animated: true)
     }
 
     @objc private func dismissKeyboard() {

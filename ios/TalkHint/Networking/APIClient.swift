@@ -572,6 +572,24 @@ final class APIClient {
         return KnowledgeCardItem(id: id, cardType: cardType, title: title, body: body, sortOrder: sortOrder)
     }
 
+    // MARK: - PREPARE stage (pre-call voice input)
+
+    /// Transcribes one complete PREPARE utterance via the backend
+    /// `/api/prepare/stt` (OpenAI gpt-4o-transcribe; auto language RU/EN/ES).
+    /// Returns the recognized text (possibly empty when nothing was heard).
+    /// Errors are honest server messages — no silent fallback to another STT.
+    func prepareTranscribe(audio: Data, mimeType: String) async throws -> String {
+        let body: [String: Any] = [
+            "audio": audio.base64EncodedString(),
+            "mimeType": mimeType,
+        ]
+        let data = try await request("/api/prepare/stt", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        return ((obj["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {
