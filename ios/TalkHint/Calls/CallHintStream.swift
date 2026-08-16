@@ -472,9 +472,9 @@ final class CallHintStream: NSObject {
     /// attempt count or lost escalation would otherwise be a silent UX regression.
     static func reconnectingStatusText(attempt: Int, of maxAttempts: Int) -> String {
         let lead = attempt >= maxAttempts
-            ? "Still trying to reconnect"
-            : "Reconnecting to live assistant"
-        return "\(lead)… (attempt \(attempt) of \(maxAttempts))"
+            ? NSLocalizedString("incall.reconnect.still_trying", comment: "")
+            : NSLocalizedString("incall.reconnect.reconnecting", comment: "")
+        return String(format: NSLocalizedString("incall.reconnect.status", comment: ""), lead, attempt, maxAttempts)
     }
 
     private func handle(text: String) {

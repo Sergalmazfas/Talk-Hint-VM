@@ -20,9 +20,9 @@ final class SessionStore {
     /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
     /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
     static let availableModes: [(id: String, name: String)] = [
-        ("universal", "Universal Assistant"),
-        ("massage", "Massage Salon Assistant"),
-        ("dispatcher", "Dispatcher Assistant"),
+        ("universal", NSLocalizedString("mode.universal", comment: "")),
+        ("massage", NSLocalizedString("mode.massage", comment: "")),
+        ("dispatcher", NSLocalizedString("mode.dispatcher", comment: "")),
     ]
 
     /// Languages the live assistant accepts for translations (server only honors

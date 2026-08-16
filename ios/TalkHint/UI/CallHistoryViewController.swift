@@ -20,7 +20,7 @@ final class CallHistoryViewController: UITableViewController {
 
     init() {
         super.init(style: .insetGrouped)
-        title = "History"
+        title = NSLocalizedString("history.title", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -98,7 +98,7 @@ final class CallHistoryViewController: UITableViewController {
 
     private func directionLabel(_ call: APIClient.CallRecord) -> String {
         guard let dir = call.direction?.lowercased(), !dir.isEmpty else { return "" }
-        return isOutgoing(call) ? "Outgoing" : "Incoming"
+        return isOutgoing(call) ? NSLocalizedString("history.direction.outgoing", comment: "") : NSLocalizedString("history.direction.incoming", comment: "")
     }
 
     private func directionImage(_ call: APIClient.CallRecord) -> UIImage? {
@@ -118,7 +118,7 @@ final class CallHistoryViewController: UITableViewController {
         var config = cell.defaultContentConfiguration()
 
         if calls.isEmpty {
-            config.text = didLoadOnce ? "No calls yet" : "Loading…"
+            config.text = didLoadOnce ? NSLocalizedString("history.empty", comment: "") : NSLocalizedString("common.loading", comment: "")
             config.textProperties.color = .secondaryLabel
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -130,7 +130,7 @@ final class CallHistoryViewController: UITableViewController {
         let call = calls[indexPath.row]
         let party = otherParty(call)
         // Prefer the saved contact name; fall back to the raw number.
-        let title = contactName(call) ?? (party.isEmpty ? "Unknown" : party)
+        let title = contactName(call) ?? (party.isEmpty ? NSLocalizedString("history.unknown", comment: "") : party)
         config.text = title
         config.secondaryText = subtitle(call)
         config.secondaryTextProperties.color = .secondaryLabel
@@ -154,10 +154,10 @@ final class CallHistoryViewController: UITableViewController {
     }
 
     private func showError(_ error: Error) {
-        let alert = UIAlertController(title: "Something went wrong",
+        let alert = UIAlertController(title: NSLocalizedString("common.error", comment: ""),
                                       message: error.localizedDescription,
                                       preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }
 }

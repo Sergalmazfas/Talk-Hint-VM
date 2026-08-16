@@ -24,7 +24,7 @@ final class CallDetailViewController: UITableViewController {
         if let name, !name.isEmpty {
             title = name
         } else {
-            title = otherParty.isEmpty ? "Call" : otherParty
+            title = otherParty.isEmpty ? NSLocalizedString("call_detail.title.call", comment: "") : otherParty
         }
     }
 
@@ -63,27 +63,27 @@ final class CallDetailViewController: UITableViewController {
         case transcript
     }
 
-    private struct DetailRow { let label: String; let value: String }
+    private struct DetailRow { let key: String; let label: String; let value: String }
 
     private var detailRows: [DetailRow] {
         var rows: [DetailRow] = []
         let name = call.contactName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let name, !name.isEmpty {
-            rows.append(DetailRow(label: "With", value: name))
+            rows.append(DetailRow(key: "with", label: NSLocalizedString("call_detail.field.with", comment: ""), value: name))
             if !otherParty.isEmpty {
-                rows.append(DetailRow(label: "Number", value: otherParty))
+                rows.append(DetailRow(key: "number", label: NSLocalizedString("call_detail.field.number", comment: ""), value: otherParty))
             }
         } else {
-            rows.append(DetailRow(label: "With", value: otherParty.isEmpty ? "Unknown" : otherParty))
+            rows.append(DetailRow(key: "with", label: NSLocalizedString("call_detail.field.with", comment: ""), value: otherParty.isEmpty ? NSLocalizedString("call_detail.value.unknown", comment: "") : otherParty))
         }
         if !call.status.isEmpty {
-            rows.append(DetailRow(label: "Status", value: call.status.capitalized))
+            rows.append(DetailRow(key: "status", label: NSLocalizedString("call_detail.field.status", comment: ""), value: call.status.capitalized))
         }
         if let started = call.startedAt {
-            rows.append(DetailRow(label: "Started", value: Self.dateFormatter.string(from: started)))
+            rows.append(DetailRow(key: "started", label: NSLocalizedString("call_detail.field.started", comment: ""), value: Self.dateFormatter.string(from: started)))
         }
         if let ended = call.endedAt {
-            rows.append(DetailRow(label: "Ended", value: Self.dateFormatter.string(from: ended)))
+            rows.append(DetailRow(key: "ended", label: NSLocalizedString("call_detail.field.ended", comment: ""), value: Self.dateFormatter.string(from: ended)))
         }
         return rows
     }
@@ -96,7 +96,7 @@ final class CallDetailViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section) {
-        case .details: return "Details"
+        case .details: return NSLocalizedString("call_detail.section.details", comment: "")
         case .transcript: return nil // custom header with a copy button
         case .none: return nil
         }
@@ -107,7 +107,7 @@ final class CallDetailViewController: UITableViewController {
         let container = UIView()
 
         let label = UILabel()
-        label.text = "TRANSCRIPT"
+        label.text = NSLocalizedString("call_detail.transcript.header", comment: "")
         label.font = .preferredFont(forTextStyle: .footnote)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -115,7 +115,7 @@ final class CallDetailViewController: UITableViewController {
         let copyButton = UIButton(type: .system)
         copyButton.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
         copyButton.accessibilityIdentifier = "button-copy-transcript"
-        copyButton.accessibilityLabel = "Copy transcript"
+        copyButton.accessibilityLabel = NSLocalizedString("call_detail.copy_transcript", comment: "")
         copyButton.addTarget(self, action: #selector(copyTranscriptTapped(_:)), for: .touchUpInside)
         copyButton.translatesAutoresizingMaskIntoConstraints = false
 
@@ -172,17 +172,17 @@ final class CallDetailViewController: UITableViewController {
             let row = detailRows[indexPath.row]
             config.text = row.label
             config.secondaryText = row.value
-            cell.accessibilityIdentifier = "text-detail-\(row.label.lowercased())"
+            cell.accessibilityIdentifier = "text-detail-\(row.key)"
             cell.contentConfiguration = config
 
         case .transcript:
             var config = cell.defaultContentConfiguration()
             let transcript = call.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if loadingTranscript {
-                config.text = "Loading…"
+                config.text = NSLocalizedString("common.loading", comment: "")
                 config.textProperties.color = .secondaryLabel
             } else if transcript.isEmpty {
-                config.text = "No transcript available for this call."
+                config.text = NSLocalizedString("call_detail.no_transcript", comment: "")
                 config.textProperties.color = .secondaryLabel
             } else {
                 config.text = transcript

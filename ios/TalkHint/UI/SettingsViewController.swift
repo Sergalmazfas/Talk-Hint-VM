@@ -46,7 +46,7 @@ final class SettingsViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Settings"
+        title = NSLocalizedString("settings.title", comment: "")
         tableView.accessibilityIdentifier = "table-settings"
     }
 
@@ -92,19 +92,19 @@ final class SettingsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
-        case .language: return "Hint language"
-        case .features: return "Live call"
-        case .phone: return "Phone"
-        case .account: return "Account"
+        case .language: return NSLocalizedString("settings.section.hint_language", comment: "")
+        case .features: return NSLocalizedString("settings.section.live_call", comment: "")
+        case .phone: return NSLocalizedString("settings.section.phone", comment: "")
+        case .account: return NSLocalizedString("settings.section.account", comment: "")
         }
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
         case .language:
-            return "Language used for translations and hints during live calls."
+            return NSLocalizedString("settings.footer.language", comment: "")
         case .features:
-            return "Live Hints shows AI reply suggestions during a call. Translation translates the live conversation and hints into your hint language. Transcription, saved transcripts, and call summaries always stay on."
+            return NSLocalizedString("settings.footer.features", comment: "")
         case .phone, .account:
             return nil
         }
@@ -123,12 +123,12 @@ final class SettingsViewController: UITableViewController {
         case .features:
             switch FeatureRow(rawValue: indexPath.row)! {
             case .liveHints:
-                return featureCell(title: "Live Hints",
+                return featureCell(title: NSLocalizedString("settings.feature.live_hints", comment: ""),
                                    isOn: liveHintsEnabled,
                                    identifier: "switch-live-hints",
                                    action: #selector(liveHintsChanged(_:)))
             case .translation:
-                return featureCell(title: "Translation",
+                return featureCell(title: NSLocalizedString("settings.feature.translation", comment: ""),
                                    isOn: translationEnabled,
                                    identifier: "switch-translation",
                                    action: #selector(translationChanged(_:)))
@@ -136,7 +136,7 @@ final class SettingsViewController: UITableViewController {
 
         case .phone:
             let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-            cell.textLabel?.text = "My TalkHint number"
+            cell.textLabel?.text = NSLocalizedString("settings.my_number", comment: "")
             cell.detailTextLabel?.text = myNumber ?? "—"
             cell.detailTextLabel?.textColor = .secondaryLabel
             cell.imageView?.image = UIImage(systemName: "phone")
@@ -146,7 +146,7 @@ final class SettingsViewController: UITableViewController {
 
         case .account:
             let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
-            cell.textLabel?.text = "Account"
+            cell.textLabel?.text = NSLocalizedString("settings.section.account", comment: "")
             cell.imageView?.image = UIImage(systemName: "person.crop.circle")
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-account"
@@ -216,14 +216,14 @@ final class SettingsViewController: UITableViewController {
             } catch {
                 sender.setOn(previous, animated: true)
                 if liveHints != nil { liveHintsEnabled = previous } else { translationEnabled = previous }
-                showAlert(title: "Could not save", message: error.localizedDescription)
+                showAlert(title: NSLocalizedString("settings.error.save", comment: ""), message: error.localizedDescription)
             }
         }
     }
 
     private func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }
 }

@@ -7,8 +7,8 @@ import UIKit
 final class KnowledgeCardsViewController: UITableViewController {
 
     private let groups: [(type: String, title: String)] = [
-        ("project", "Projects"),
-        ("company", "Company / Services"),
+        ("project", NSLocalizedString("cards.group.projects", comment: "")),
+        ("company", NSLocalizedString("cards.group.company", comment: "")),
     ]
 
     private var cards: [APIClient.KnowledgeCardItem] = []
@@ -16,7 +16,7 @@ final class KnowledgeCardsViewController: UITableViewController {
 
     init() {
         super.init(style: .insetGrouped)
-        title = "Static Context"
+        title = NSLocalizedString("cards.title", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -72,7 +72,7 @@ final class KnowledgeCardsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         section == groups.count - 1
-            ? "Short facts the assistant always knows on every call. The highest-priority cards are used first."
+            ? NSLocalizedString("cards.footer", comment: "")
             : nil
     }
 
@@ -82,7 +82,7 @@ final class KnowledgeCardsViewController: UITableViewController {
         let group = cards(for: groups[indexPath.section].type)
 
         if group.isEmpty {
-            config.text = "No cards yet"
+            config.text = NSLocalizedString("cards.empty", comment: "")
             config.textProperties.color = .secondaryLabel
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -131,11 +131,11 @@ final class KnowledgeCardsViewController: UITableViewController {
         guard editingStyle == .delete, !group.isEmpty else { return }
         let card = group[indexPath.row]
         let alert = UIAlertController(
-            title: "Delete card",
-            message: "Delete \"\(card.title)\"? This can't be undone.",
+            title: NSLocalizedString("cards.delete.title", comment: ""),
+            message: String(format: NSLocalizedString("cards.delete.message", comment: ""), card.title),
             preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.delete", comment: ""), style: .destructive) { [weak self] _ in
             self?.performDelete(card)
         })
         present(alert, animated: true)
@@ -149,10 +149,10 @@ final class KnowledgeCardsViewController: UITableViewController {
                 tableView.reloadData()
             } catch {
                 let alert = UIAlertController(
-                    title: "Couldn't delete",
+                    title: NSLocalizedString("common.delete_failed", comment: ""),
                     message: error.localizedDescription,
                     preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
                 present(alert, animated: true)
             }
         }
@@ -167,7 +167,10 @@ final class KnowledgeCardEditorViewController: UIViewController {
     private let card: APIClient.KnowledgeCardItem?
     private let onSave: () -> Void
 
-    private let typeControl = UISegmentedControl(items: ["Project", "Company / Service"])
+    private let typeControl = UISegmentedControl(items: [
+        NSLocalizedString("card_editor.type.project", comment: ""),
+        NSLocalizedString("card_editor.type.company", comment: ""),
+    ])
     private let titleField = UITextField()
     private let bodyView = UITextView()
     private let sortField = UITextField()
@@ -182,7 +185,7 @@ final class KnowledgeCardEditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = card == nil ? "New card" : "Edit card"
+        title = card == nil ? NSLocalizedString("card_editor.title.new", comment: "") : NSLocalizedString("card_editor.title.edit", comment: "")
         view.backgroundColor = .systemGroupedBackground
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
@@ -193,15 +196,15 @@ final class KnowledgeCardEditorViewController: UIViewController {
         typeControl.translatesAutoresizingMaskIntoConstraints = false
         typeControl.accessibilityIdentifier = "segment-card-type"
 
-        let titleLabel = makeLabel("Title")
+        let titleLabel = makeLabel(NSLocalizedString("card_editor.field.title", comment: ""))
         titleField.text = card?.title
-        titleField.placeholder = "e.g. E-commerce site for Acme"
+        titleField.placeholder = NSLocalizedString("card_editor.field.title.placeholder", comment: "")
         titleField.borderStyle = .roundedRect
         titleField.backgroundColor = .secondarySystemGroupedBackground
         titleField.translatesAutoresizingMaskIntoConstraints = false
         titleField.accessibilityIdentifier = "input-card-title"
 
-        let bodyLabel = makeLabel("Details")
+        let bodyLabel = makeLabel(NSLocalizedString("card_editor.field.details", comment: ""))
         bodyView.text = card?.body
         bodyView.font = .preferredFont(forTextStyle: .body)
         bodyView.backgroundColor = .secondarySystemGroupedBackground
@@ -210,7 +213,7 @@ final class KnowledgeCardEditorViewController: UIViewController {
         bodyView.translatesAutoresizingMaskIntoConstraints = false
         bodyView.accessibilityIdentifier = "input-card-body"
 
-        let sortLabel = makeLabel("Priority (lower shows first)")
+        let sortLabel = makeLabel(NSLocalizedString("card_editor.field.priority", comment: ""))
         sortField.text = String(card?.sortOrder ?? 0)
         sortField.placeholder = "0"
         sortField.keyboardType = .numberPad
@@ -257,8 +260,8 @@ final class KnowledgeCardEditorViewController: UIViewController {
         let body = bodyView.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let sortOrder = Int(sortField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
 
-        guard !title.isEmpty else { return showError("Title is required") }
-        guard !body.isEmpty else { return showError("Details are required") }
+        guard !title.isEmpty else { return showError(NSLocalizedString("card_editor.error.title_required", comment: "")) }
+        guard !body.isEmpty else { return showError(NSLocalizedString("card_editor.error.details_required", comment: "")) }
 
         navigationItem.rightBarButtonItem?.isEnabled = false
         Task { @MainActor in
@@ -280,8 +283,8 @@ final class KnowledgeCardEditorViewController: UIViewController {
     }
 
     private func showError(_ message: String) {
-        let alert = UIAlertController(title: "Couldn't save", message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        let alert = UIAlertController(title: NSLocalizedString("common.save_failed", comment: ""), message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }
 }

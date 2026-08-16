@@ -48,7 +48,7 @@ final class HomeViewController: UIViewController {
     private func buildUI() {
         // Header: "Calls" + gear.
         let titleLabel = UILabel()
-        titleLabel.text = "Calls"
+        titleLabel.text = NSLocalizedString("home.title", comment: "")
         titleLabel.font = .systemFont(ofSize: 32, weight: .bold)
         titleLabel.textColor = Theme.ink
 
@@ -83,7 +83,7 @@ final class HomeViewController: UIViewController {
         numberLabel.lineBreakMode = .byTruncatingHead
         numberLabel.accessibilityIdentifier = "input-dial-number"
 
-        placeholderLabel.text = "Enter number"
+        placeholderLabel.text = NSLocalizedString("home.enter_number", comment: "")
         placeholderLabel.font = .systemFont(ofSize: 16)
         placeholderLabel.textColor = .tertiaryLabel
 
@@ -104,7 +104,7 @@ final class HomeViewController: UIViewController {
 
         // …replaced by a compact "Goal ready ✓" badge once confirmed
         // (tapping it re-opens Prepare to review or change the goal).
-        goalBadge.setTitle("Goal ready ✓", for: .normal)
+        goalBadge.setTitle(NSLocalizedString("home.goal_ready", comment: ""), for: .normal)
         goalBadge.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
         goalBadge.setTitleColor(Theme.greenDark, for: .normal)
         goalBadge.backgroundColor = Theme.greenBg
@@ -140,7 +140,7 @@ final class HomeViewController: UIViewController {
         callConfig.baseForegroundColor = .white
         callConfig.image = UIImage(systemName: "phone.fill")
         callConfig.imagePadding = 8
-        callConfig.title = "Call"
+        callConfig.title = NSLocalizedString("home.call", comment: "")
         callConfig.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 32, bottom: 12, trailing: 32)
         callButton.configuration = callConfig
         callButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
@@ -153,12 +153,12 @@ final class HomeViewController: UIViewController {
 
         // Recents.
         let recentsTitle = UILabel()
-        recentsTitle.text = "RECENT CALLS"
+        recentsTitle.text = NSLocalizedString("home.recent_calls", comment: "")
         recentsTitle.font = .systemFont(ofSize: 12, weight: .semibold)
         recentsTitle.textColor = Theme.sub
 
         let seeAll = UIButton(type: .system)
-        seeAll.setTitle("See all", for: .normal)
+        seeAll.setTitle(NSLocalizedString("home.see_all", comment: ""), for: .normal)
         seeAll.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
         seeAll.setTitleColor(Theme.green, for: .normal)
         seeAll.accessibilityIdentifier = "button-see-all-calls"
@@ -409,7 +409,7 @@ final class HomeViewController: UIViewController {
         numberLabel.textColor = Theme.ink
 
         let nameLabel = UILabel()
-        nameLabel.text = name.isEmpty ? (isOutgoing(call) ? "Outgoing" : "Incoming") : name
+        nameLabel.text = name.isEmpty ? (isOutgoing(call) ? NSLocalizedString("home.outgoing", comment: "") : NSLocalizedString("home.incoming", comment: "")) : name
         nameLabel.font = .systemFont(ofSize: 12)
         nameLabel.textColor = Theme.sub
 
@@ -492,10 +492,10 @@ final class HomeViewController: UIViewController {
         // The backend only routes outbound dials to E.164 numbers (leading "+").
         guard cleaned.range(of: "^\\+[1-9]\\d{6,14}$", options: .regularExpression) != nil else {
             let alert = UIAlertController(
-                title: "Enter a valid number",
-                message: "Use international format, for example +15551234567. Hold «0» to enter «+».",
+                title: NSLocalizedString("home.invalid_number.title", comment: ""),
+                message: NSLocalizedString("home.invalid_number.message", comment: ""),
                 preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
             present(alert, animated: true)
             return
         }

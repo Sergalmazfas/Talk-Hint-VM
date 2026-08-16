@@ -16,7 +16,7 @@ final class PromptEditorViewController: UIViewController {
     init(prompt: APIClient.UserPrompt?) {
         self.prompt = prompt
         super.init(nibName: nil, bundle: nil)
-        title = prompt == nil ? "New Prompt" : "Edit Prompt"
+        title = prompt == nil ? NSLocalizedString("prompt_editor.title.new", comment: "") : NSLocalizedString("prompt_editor.title.edit", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -37,18 +37,18 @@ final class PromptEditorViewController: UIViewController {
         navigationItem.rightBarButtonItem = saveButton
 
         let nameLabel = UILabel()
-        nameLabel.text = "Name"
+        nameLabel.text = NSLocalizedString("prompt_editor.name.label", comment: "")
         nameLabel.font = .preferredFont(forTextStyle: .footnote)
         nameLabel.textColor = .secondaryLabel
 
-        nameField.placeholder = "e.g. Restaurant booking"
+        nameField.placeholder = NSLocalizedString("prompt_editor.name.placeholder", comment: "")
         nameField.borderStyle = .roundedRect
         nameField.font = .preferredFont(forTextStyle: .body)
         nameField.addTarget(self, action: #selector(textChanged), for: .editingChanged)
         nameField.accessibilityIdentifier = "input-prompt-name"
 
         let contentLabel = UILabel()
-        contentLabel.text = "Instructions"
+        contentLabel.text = NSLocalizedString("prompt_editor.content.label", comment: "")
         contentLabel.font = .preferredFont(forTextStyle: .footnote)
         contentLabel.textColor = .secondaryLabel
 
@@ -59,7 +59,7 @@ final class PromptEditorViewController: UIViewController {
         contentView.delegate = self
         contentView.accessibilityIdentifier = "input-prompt-content"
 
-        contentPlaceholder.text = "Tell the assistant how to help on calls…"
+        contentPlaceholder.text = NSLocalizedString("prompt_editor.content.placeholder", comment: "")
         contentPlaceholder.font = .preferredFont(forTextStyle: .body)
         contentPlaceholder.textColor = .placeholderText
         contentPlaceholder.numberOfLines = 0
@@ -119,10 +119,10 @@ final class PromptEditorViewController: UIViewController {
             } catch {
                 await MainActor.run {
                     self.saveButton.isEnabled = true
-                    let alert = UIAlertController(title: "Could not save",
+                    let alert = UIAlertController(title: NSLocalizedString("prompt_editor.save_error.title", comment: ""),
                                                   message: error.localizedDescription,
                                                   preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
                     self.present(alert, animated: true)
                 }
             }

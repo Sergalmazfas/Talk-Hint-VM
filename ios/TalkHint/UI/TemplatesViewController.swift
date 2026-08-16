@@ -10,7 +10,7 @@ final class TemplatesViewController: UITableViewController {
 
     init() {
         super.init(style: .insetGrouped)
-        title = "Templates"
+        title = NSLocalizedString("templates.title", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -53,7 +53,7 @@ final class TemplatesViewController: UITableViewController {
         var config = cell.defaultContentConfiguration()
 
         if templates.isEmpty {
-            config.text = "No templates available"
+            config.text = NSLocalizedString("templates.empty", comment: "")
             config.textProperties.color = .secondaryLabel
             cell.selectionStyle = .none
             cell.accessoryType = .none
@@ -84,10 +84,10 @@ final class TemplatesViewController: UITableViewController {
             title: template.name,
             message: template.content(for: SessionStore.shared.language),
             preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Save as my prompt", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("templates.save_as_prompt", comment: ""), style: .default) { [weak self] _ in
             self?.saveAsPrompt(template)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
         if let popover = alert.popoverPresentationController,
            let cell = tableView.cellForRow(at: indexPath) {
             popover.sourceView = cell
@@ -102,10 +102,10 @@ final class TemplatesViewController: UITableViewController {
             do {
                 try await APIClient.shared.createPrompt(name: template.name, content: content)
                 await MainActor.run {
-                    let done = UIAlertController(title: "Saved",
-                                                 message: "“\(template.name)” was added to your prompts.",
+                    let done = UIAlertController(title: NSLocalizedString("templates.saved.title", comment: ""),
+                                                 message: String(format: NSLocalizedString("templates.saved.message", comment: ""), template.name),
                                                  preferredStyle: .alert)
-                    done.addAction(UIAlertAction(title: "OK", style: .default))
+                    done.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
                     self.present(done, animated: true)
                 }
             } catch {
@@ -115,10 +115,10 @@ final class TemplatesViewController: UITableViewController {
     }
 
     private func showError(_ error: Error) {
-        let alert = UIAlertController(title: "Something went wrong",
+        let alert = UIAlertController(title: NSLocalizedString("common.error.title", comment: ""),
                                       message: error.localizedDescription,
                                       preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }
 }

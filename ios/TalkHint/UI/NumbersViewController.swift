@@ -13,7 +13,7 @@ final class NumbersViewController: UIViewController, UITableViewDataSource, UITa
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Numbers"
+        title = NSLocalizedString("numbers.title", comment: "")
         view.backgroundColor = .systemGroupedBackground
 
         let addButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(addTapped))
@@ -90,13 +90,13 @@ final class NumbersViewController: UIViewController, UITableViewDataSource, UITa
                 }
                 tableView.reloadData()
                 if numbers.isEmpty {
-                    messageLabel.text = "No numbers yet.\nTap + to add a number."
+                    messageLabel.text = NSLocalizedString("numbers.empty", comment: "")
                     messageLabel.isHidden = false
                 }
             } catch {
                 numbers = []
                 tableView.reloadData()
-                messageLabel.text = "Couldn't load your numbers.\nPull down to try again."
+                messageLabel.text = NSLocalizedString("numbers.load_error", comment: "")
                 messageLabel.isHidden = false
             }
         }
@@ -116,7 +116,7 @@ final class NumbersViewController: UIViewController, UITableViewDataSource, UITa
         let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
         let item = numbers[indexPath.row]
         var config = cell.defaultContentConfiguration()
-        config.text = item.name.isEmpty ? "My Number" : item.name
+        config.text = item.name.isEmpty ? NSLocalizedString("numbers.default_name", comment: "") : item.name
         config.secondaryText = item.number
         cell.contentConfiguration = config
         cell.accessoryType = (item.id == SessionStore.shared.activeNumberId) ? .checkmark : .none
@@ -125,11 +125,11 @@ final class NumbersViewController: UIViewController, UITableViewDataSource, UITa
     }
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        numbers.isEmpty ? nil : "Your numbers"
+        numbers.isEmpty ? nil : NSLocalizedString("numbers.section.header", comment: "")
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        numbers.count > 1 ? "Tap a number to make it your active line." : nil
+        numbers.count > 1 ? NSLocalizedString("numbers.section.footer", comment: "") : nil
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

@@ -22,7 +22,7 @@ final class AssistantViewController: UITableViewController {
 
     init() {
         super.init(style: .insetGrouped)
-        title = "Assistant"
+        title = NSLocalizedString("assistant.title", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -71,24 +71,24 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
-        case .tutor: return "Тренировка"
-        case .mode: return "Mode"
-        case .language: return "Language"
-        case .goal: return "Call goal"
-        case .context: return "My context"
-        case .contacts: return "Contacts"
-        case .cards: return "Static context"
-        case .library: return "Prompts"
+        case .tutor: return NSLocalizedString("assistant.section.tutor", comment: "")
+        case .mode: return NSLocalizedString("assistant.section.mode", comment: "")
+        case .language: return NSLocalizedString("assistant.section.language", comment: "")
+        case .goal: return NSLocalizedString("assistant.section.goal", comment: "")
+        case .context: return NSLocalizedString("assistant.section.context", comment: "")
+        case .contacts: return NSLocalizedString("assistant.section.contacts", comment: "")
+        case .cards: return NSLocalizedString("assistant.section.cards", comment: "")
+        case .library: return NSLocalizedString("assistant.section.prompts", comment: "")
         }
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
-        case .tutor: return "Потренируйте разговор с ИИ-репетитором Emma. После тренировки подтвердите память разговора — она поможет в реальном звонке."
-        case .goal: return "Applied to your next call to keep the assistant on track."
-        case .context: return "Tell the assistant about you (job, business, tone). Added to every call's hints."
-        case .contacts: return "View, fix or delete what the assistant remembers about each caller."
-        case .cards: return "Short facts about your projects and company the assistant uses on every call."
+        case .tutor: return NSLocalizedString("assistant.footer.tutor", comment: "")
+        case .goal: return NSLocalizedString("assistant.footer.goal", comment: "")
+        case .context: return NSLocalizedString("assistant.footer.context", comment: "")
+        case .contacts: return NSLocalizedString("assistant.footer.contacts", comment: "")
+        case .cards: return NSLocalizedString("assistant.footer.cards", comment: "")
         default: return nil
         }
     }
@@ -101,8 +101,8 @@ final class AssistantViewController: UITableViewController {
 
         switch Section(rawValue: indexPath.section)! {
         case .tutor:
-            config.text = "Репетитор Emma"
-            config.secondaryText = "Тренировка звонка на английском"
+            config.text = NSLocalizedString("assistant.tutor.name", comment: "")
+            config.secondaryText = NSLocalizedString("assistant.tutor.subtitle", comment: "")
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-tutor"
         case .mode:
@@ -117,31 +117,31 @@ final class AssistantViewController: UITableViewController {
             cell.accessibilityIdentifier = "cell-language-\(language.code)"
         case .goal:
             let goal = SessionStore.shared.callGoal.trimmingCharacters(in: .whitespacesAndNewlines)
-            config.text = goal.isEmpty ? "Set a call goal" : goal
+            config.text = goal.isEmpty ? NSLocalizedString("assistant.goal.set", comment: "") : goal
             config.textProperties.color = goal.isEmpty ? .secondaryLabel : .label
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-goal"
         case .context:
             let context = SessionStore.shared.userContext.trimmingCharacters(in: .whitespacesAndNewlines)
-            config.text = context.isEmpty ? "Set my context" : context
+            config.text = context.isEmpty ? NSLocalizedString("assistant.context.set", comment: "") : context
             config.textProperties.color = context.isEmpty ? .secondaryLabel : .label
             config.textProperties.numberOfLines = 3
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-context"
         case .contacts:
-            config.text = "Manage contacts"
+            config.text = NSLocalizedString("assistant.manage_contacts", comment: "")
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-contacts"
         case .cards:
-            config.text = "Manage cards"
+            config.text = NSLocalizedString("assistant.manage_cards", comment: "")
             cell.accessoryType = .disclosureIndicator
             cell.accessibilityIdentifier = "cell-cards"
         case .library:
             if indexPath.row == 0 {
-                config.text = "Browse templates"
+                config.text = NSLocalizedString("assistant.browse_templates", comment: "")
                 cell.accessibilityIdentifier = "cell-templates"
             } else {
-                config.text = "Manage my prompts"
+                config.text = NSLocalizedString("assistant.manage_prompts", comment: "")
                 cell.accessibilityIdentifier = "cell-prompts"
             }
             cell.accessoryType = .disclosureIndicator
@@ -184,20 +184,20 @@ final class AssistantViewController: UITableViewController {
 
     private func promptForGoal() {
         let alert = UIAlertController(
-            title: "Call goal",
-            message: "What do you want to achieve on the call? (e.g. book a table)",
+            title: NSLocalizedString("assistant.goal.prompt.title", comment: ""),
+            message: NSLocalizedString("assistant.goal.prompt.message", comment: ""),
             preferredStyle: .alert)
         alert.addTextField { field in
-            field.placeholder = "Book a table for two"
+            field.placeholder = NSLocalizedString("assistant.goal.prompt.placeholder", comment: "")
             field.text = SessionStore.shared.callGoal
             field.accessibilityIdentifier = "input-goal"
         }
-        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.clear", comment: ""), style: .destructive) { [weak self] _ in
             SessionStore.shared.callGoal = ""
             self?.tableView.reloadSections(IndexSet(integer: Section.goal.rawValue), with: .none)
         })
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Save", style: .default) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.save", comment: ""), style: .default) { [weak self] _ in
             let text = alert.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             SessionStore.shared.callGoal = text
             self?.tableView.reloadSections(IndexSet(integer: Section.goal.rawValue), with: .none)
@@ -213,9 +213,9 @@ final class ContextEditorViewController: UIViewController {
 
     /// Quick-start templates mirrored from the web `/app` UI.
     private static let templates: [(title: String, body: String)] = [
-        ("CDL Driver", "I'm a CDL truck driver looking for dispatch/driving jobs. I have OTR experience and a clean driving record. On calls, help me ask about pay per mile, routes, home time, and equipment. Keep replies short and professional. Never claim endorsements or certifications I haven't confirmed."),
-        ("Massage", "I run a massage salon. Services: Classic massage ($80/hr), Deep tissue ($100/hr), Sports massage ($120/90min). I want to book clients, confirm date/time, and upsell add-ons like hot stones. Keep replies warm, friendly, and concise."),
-        ("Universal", "I'm a small business owner handling calls with clients and partners. My goal is to be clear, polite, and move every call toward a concrete next step (a booking, a price agreement, or a follow-up). Keep suggestions short and natural."),
+        (NSLocalizedString("context_editor.template.cdl.title", comment: ""), NSLocalizedString("context_editor.template.cdl.body", comment: "")),
+        (NSLocalizedString("context_editor.template.massage.title", comment: ""), NSLocalizedString("context_editor.template.massage.body", comment: "")),
+        (NSLocalizedString("context_editor.template.universal.title", comment: ""), NSLocalizedString("context_editor.template.universal.body", comment: "")),
     ]
 
     /// Mirrors the backend `MAX_USER_CONTEXT_LENGTH` so the UI fails fast.
@@ -226,7 +226,7 @@ final class ContextEditorViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "My Context"
+        title = NSLocalizedString("context_editor.title", comment: "")
         view.backgroundColor = .systemGroupedBackground
 
         navigationItem.rightBarButtonItem = UIBarButtonItem(
@@ -259,7 +259,7 @@ final class ContextEditorViewController: UIViewController {
         textView.delegate = self
         textView.text = SessionStore.shared.userContext
 
-        placeholderLabel.text = "Describe yourself: your profession, business, what you offer, your goals and tone. The assistant uses this on every call."
+        placeholderLabel.text = NSLocalizedString("context_editor.placeholder", comment: "")
         placeholderLabel.font = .preferredFont(forTextStyle: .body)
         placeholderLabel.textColor = .placeholderText
         placeholderLabel.numberOfLines = 0
@@ -311,10 +311,10 @@ final class ContextEditorViewController: UIViewController {
             } catch {
                 navigationItem.rightBarButtonItem?.isEnabled = true
                 let alert = UIAlertController(
-                    title: "Couldn't save",
+                    title: NSLocalizedString("common.save_failed", comment: ""),
                     message: error.localizedDescription,
                     preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
                 present(alert, animated: true)
             }
         }

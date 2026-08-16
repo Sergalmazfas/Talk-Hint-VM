@@ -13,7 +13,7 @@ final class AvailableNumbersViewController: UIViewController, UITableViewDataSou
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Add a Number"
+        title = NSLocalizedString("available.title", comment: "")
         view.backgroundColor = .systemGroupedBackground
         setupTable()
         setupOverlays()
@@ -67,13 +67,13 @@ final class AvailableNumbersViewController: UIViewController, UITableViewDataSou
                 available = try await APIClient.shared.availableNumbers()
                 tableView.reloadData()
                 if available.isEmpty {
-                    messageLabel.text = "No numbers available right now.\nPlease try again later."
+                    messageLabel.text = NSLocalizedString("available.empty", comment: "")
                     messageLabel.isHidden = false
                 }
             } catch {
                 available = []
                 tableView.reloadData()
-                messageLabel.text = "Couldn't load available numbers.\nPlease try again later."
+                messageLabel.text = NSLocalizedString("available.load_error", comment: "")
                 messageLabel.isHidden = false
             }
         }
@@ -98,7 +98,7 @@ final class AvailableNumbersViewController: UIViewController, UITableViewDataSou
     }
 
     func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        available.isEmpty ? nil : "Pick a number, then give it a friendly name."
+        available.isEmpty ? nil : NSLocalizedString("available.section.footer", comment: "")
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -108,18 +108,18 @@ final class AvailableNumbersViewController: UIViewController, UITableViewDataSou
 
     private func promptForName(item: APIClient.AvailablePhoneNumber) {
         let alert = UIAlertController(
-            title: "Name this number", message: item.number, preferredStyle: .alert)
+            title: NSLocalizedString("available.name.title", comment: ""), message: item.number, preferredStyle: .alert)
         alert.addTextField { field in
-            field.placeholder = "e.g. Work, Personal"
-            field.text = "My Number"
+            field.placeholder = NSLocalizedString("available.name.placeholder", comment: "")
+            field.text = NSLocalizedString("numbers.default_name", comment: "")
             field.autocapitalizationType = .words
             field.clearButtonMode = .whileEditing
             field.accessibilityIdentifier = "input-number-name"
         }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Assign", style: .default) { [weak self, weak alert] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("available.name.assign", comment: ""), style: .default) { [weak self, weak alert] _ in
             let raw = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let name = raw.isEmpty ? "My Number" : raw
+            let name = raw.isEmpty ? NSLocalizedString("numbers.default_name", comment: "") : raw
             self?.assign(item: item, name: name)
         })
         present(alert, animated: true)
@@ -155,10 +155,10 @@ final class AvailableNumbersViewController: UIViewController, UITableViewDataSou
             message = serverMessage
         }
         let alert = UIAlertController(
-            title: "Couldn't add number",
+            title: NSLocalizedString("available.error.title", comment: ""),
             message: message,
             preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }
 }

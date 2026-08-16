@@ -76,10 +76,10 @@ final class PrepareViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Prepare call"
+        title = NSLocalizedString("prepare.title", comment: "")
         view.backgroundColor = .systemBackground
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Заново", style: .plain, target: self, action: #selector(resetTapped))
+            title: NSLocalizedString("prepare.reset", comment: ""), style: .plain, target: self, action: #selector(resetTapped))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-prepare-reset"
         if presentingViewController != nil || navigationController?.presentingViewController != nil {
             // Presented as a bottom sheet over Calls — give it an explicit close.
@@ -94,7 +94,7 @@ final class PrepareViewController: UIViewController {
         stream.delegate = self
         stream.connect()
 
-        addAIMessage("Расскажите голосом или текстом, что за звонок вам предстоит и чего вы хотите добиться. Я задам пару уточняющих вопросов и предложу цель.")
+        addAIMessage(NSLocalizedString("prepare.intro", comment: ""))
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(keyboardWillChange(_:)),
@@ -151,7 +151,7 @@ final class PrepareViewController: UIViewController {
         micButton.addTarget(self, action: #selector(micTapped), for: .touchUpInside)
         micButton.translatesAutoresizingMaskIntoConstraints = false
 
-        textField.placeholder = "Опишите ситуацию…"
+        textField.placeholder = NSLocalizedString("prepare.input.placeholder", comment: "")
         textField.borderStyle = .roundedRect
         textField.returnKeyType = .send
         textField.delegate = self
@@ -287,7 +287,7 @@ final class PrepareViewController: UIViewController {
         card.accessibilityIdentifier = "card-goal-proposal"
 
         let header = UILabel()
-        header.text = "🎯 ЦЕЛЬ ЗВОНКА"
+        header.text = NSLocalizedString("prepare.goal_header", comment: "")
         header.font = .preferredFont(forTextStyle: .caption1)
         header.textColor = Theme.purple
 
@@ -297,7 +297,7 @@ final class PrepareViewController: UIViewController {
         goalLabel.font = .preferredFont(forTextStyle: .body)
 
         let confirmButton = UIButton(type: .system)
-        confirmButton.setTitle("Да, верно", for: .normal)
+        confirmButton.setTitle(NSLocalizedString("prepare.goal_confirm", comment: ""), for: .normal)
         confirmButton.setTitleColor(.white, for: .normal)
         confirmButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         confirmButton.backgroundColor = Theme.purple
@@ -305,7 +305,7 @@ final class PrepareViewController: UIViewController {
         confirmButton.accessibilityIdentifier = "button-goal-confirm"
 
         let editButton = UIButton(type: .system)
-        editButton.setTitle("Нет, уточнить", for: .normal)
+        editButton.setTitle(NSLocalizedString("prepare.goal_edit", comment: ""), for: .normal)
         editButton.setTitleColor(Theme.ink, for: .normal)
         editButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         editButton.backgroundColor = .systemBackground
@@ -329,7 +329,7 @@ final class PrepareViewController: UIViewController {
 
         editButton.addAction(UIAction { [weak self, weak buttons] _ in
             buttons?.removeFromSuperview()
-            self?.textField.placeholder = "Что уточнить в цели?"
+            self?.textField.placeholder = NSLocalizedString("prepare.goal_edit.placeholder", comment: "")
             self?.textField.becomeFirstResponder()
         }, for: .touchUpInside)
 
@@ -357,7 +357,7 @@ final class PrepareViewController: UIViewController {
         card.accessibilityIdentifier = "card-opening-phrase"
 
         let header = UILabel()
-        header.text = "💬 ПЕРВАЯ ФРАЗА"
+        header.text = NSLocalizedString("prepare.opening_header", comment: "")
         header.font = .preferredFont(forTextStyle: .caption1)
         header.textColor = Theme.greenDark
 
@@ -396,7 +396,7 @@ final class PrepareViewController: UIViewController {
         let text = (textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         textField.text = ""
-        textField.placeholder = "Опишите ситуацию…"
+        textField.placeholder = NSLocalizedString("prepare.input.placeholder", comment: "")
         addUserMessage(text)
         sendPrepareText(text, clientMessageId: UUID().uuidString)
     }
@@ -411,7 +411,7 @@ final class PrepareViewController: UIViewController {
         // is unacknowledged would make ack-to-message correlation ambiguous.
         if pendingMessage != nil || pendingConfirm != nil {
             textField.text = text
-            addAIMessage("⚠️ Дождитесь ответа на предыдущее сообщение — ваш текст сохранён в поле ввода.")
+            addAIMessage(NSLocalizedString("prepare.wait_previous", comment: ""))
             return
         }
         pendingMessage = (text: text, id: clientMessageId)
@@ -420,7 +420,7 @@ final class PrepareViewController: UIViewController {
             hideThinking()
             pendingMessage = nil
             textField.text = text
-            addAIMessage("⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — нажмите «Отправить» ещё раз, когда связь восстановится.")
+            addAIMessage(NSLocalizedString("prepare.no_connection.resend", comment: ""))
         }
     }
 
@@ -434,7 +434,7 @@ final class PrepareViewController: UIViewController {
         if !stream.confirmPrepareGoal(goal, clientMessageId: pendingConfirm!.id) {
             hideThinking()
             pendingConfirm = nil
-            addAIMessage("⚠️ Нет соединения с сервером. Подтвердите цель ещё раз, когда связь восстановится.")
+            addAIMessage(NSLocalizedString("prepare.no_connection.confirm", comment: ""))
             addGoalProposal(goal)
         }
     }
@@ -451,7 +451,7 @@ final class PrepareViewController: UIViewController {
         pendingConfirm = nil
         pendingGoalButtons?.removeFromSuperview()
         feedStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        addAIMessage("Начнём заново. Расскажите, что за звонок вам предстоит.")
+        addAIMessage(NSLocalizedString("prepare.reset.intro", comment: ""))
     }
 
     // MARK: - Voice input (tap-to-record → /api/prepare/stt)
@@ -470,7 +470,7 @@ final class PrepareViewController: UIViewController {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 guard granted else {
-                    self.addAIMessage("⚠️ Нет доступа к микрофону. Разрешите доступ в Настройках iOS.")
+                    self.addAIMessage(NSLocalizedString("prepare.mic.no_permission", comment: ""))
                     return
                 }
                 do {
@@ -489,9 +489,9 @@ final class PrepareViewController: UIViewController {
                     self.isRecording = true
                     self.micButton.tintColor = .systemRed
                     self.micButton.setImage(UIImage(systemName: "stop.circle.fill"), for: .normal)
-                    self.statusLabel.text = "🎙 Запись… нажмите ещё раз, чтобы остановить"
+                    self.statusLabel.text = NSLocalizedString("prepare.recording", comment: "")
                 } catch {
-                    self.addAIMessage("⚠️ Не удалось начать запись: \(error.localizedDescription)")
+                    self.addAIMessage(String(format: NSLocalizedString("prepare.recording.failed", comment: ""), error.localizedDescription))
                 }
             }
         }
@@ -505,7 +505,7 @@ final class PrepareViewController: UIViewController {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         micButton.tintColor = .systemBlue
         micButton.setImage(UIImage(systemName: "mic.fill"), for: .normal)
-        statusLabel.text = "Распознаю речь…"
+        statusLabel.text = NSLocalizedString("prepare.transcribing", comment: "")
         micButton.isEnabled = false
 
         let url = recordingURL
@@ -515,7 +515,7 @@ final class PrepareViewController: UIViewController {
                 self.statusLabel.text = ""
             }
             guard let data = try? Data(contentsOf: url), data.count > 2000 else {
-                self.addAIMessage("⚠️ Запись слишком короткая — попробуйте ещё раз.")
+                self.addAIMessage(NSLocalizedString("prepare.recording.too_short", comment: ""))
                 return
             }
             // Retain the recording BEFORE the STT attempt so a network failure
@@ -533,7 +533,7 @@ final class PrepareViewController: UIViewController {
     @MainActor
     private func submitPendingAudio() async {
         guard let audio = pendingAudio else { return }
-        statusLabel.text = "Распознаю речь…"
+        statusLabel.text = NSLocalizedString("prepare.transcribing", comment: "")
         micButton.isEnabled = false
         defer {
             micButton.isEnabled = true
@@ -543,7 +543,7 @@ final class PrepareViewController: UIViewController {
             let text = try await APIClient.shared.prepareTranscribe(audio: audio.data, mimeType: audio.mime)
             guard !text.isEmpty else {
                 pendingAudio = nil
-                addAIMessage("⚠️ Речь не распознана — попробуйте ещё раз, чуть ближе к микрофону.")
+                addAIMessage(NSLocalizedString("prepare.stt.empty", comment: ""))
                 return
             }
             // STT succeeded — release the recording and send the text as one
@@ -552,7 +552,7 @@ final class PrepareViewController: UIViewController {
             addUserMessage(text)
             sendPrepareText(text, clientMessageId: audio.utteranceId)
         } catch {
-            addRetryMessage("⚠️ " + error.localizedDescription + " Запись сохранена — нажмите «Повторить» или наберите сообщение текстом.")
+            addRetryMessage(String(format: NSLocalizedString("prepare.stt.failed", comment: ""), error.localizedDescription))
         }
     }
 
@@ -575,7 +575,7 @@ final class PrepareViewController: UIViewController {
         label.font = .preferredFont(forTextStyle: .body)
 
         let retryButton = UIButton(type: .system)
-        retryButton.setTitle("🔄 Повторить", for: .normal)
+        retryButton.setTitle(NSLocalizedString("prepare.retry", comment: ""), for: .normal)
         retryButton.setTitleColor(.white, for: .normal)
         retryButton.backgroundColor = .systemIndigo
         retryButton.layer.cornerRadius = 8
@@ -638,7 +638,7 @@ extension PrepareViewController: CallHintStreamDelegate {
             pendingConfirm = nil
             hideThinking()
             addOpeningPhrase(en: phraseEn, translation: translation)
-            addAIMessage("📞 Цель подтверждена. Начинайте звонок с этой фразы — я буду подсказывать дальше.")
+            addAIMessage(NSLocalizedString("prepare.goal_confirmed", comment: ""))
             onGoalConfirmed?()
         case .prepareError(let text):
             // The server processed (and honestly failed) the turn — restore the
@@ -648,7 +648,7 @@ extension PrepareViewController: CallHintStreamDelegate {
             }
             pendingMessage = nil
             hideThinking()
-            addAIMessage("⚠️ " + text)
+            addAIMessage(String(format: NSLocalizedString("prepare.error", comment: ""), text))
             // A failed confirmation gets its card back — an explicit retry
             // control instead of a dead end (the buttons were already removed).
             if let confirm = pendingConfirm {
@@ -659,7 +659,7 @@ extension PrepareViewController: CallHintStreamDelegate {
             // Confirmation activated the goal through the existing mechanism —
             // mirror it locally so the next call is grounded in it.
             SessionStore.shared.callGoal = goal
-            addAIMessage("🎯 Цель: " + goal)
+            addAIMessage(String(format: NSLocalizedString("prepare.goal_active", comment: ""), goal))
         default:
             break // live-call events are not relevant on the PREPARE screen
         }
@@ -677,7 +677,7 @@ extension PrepareViewController: CallHintStreamDelegate {
                 hideThinking()
                 pendingMessage = nil
                 textField.text = pending.text
-                addAIMessage("⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — нажмите «Отправить» ещё раз, когда связь восстановится.")
+                addAIMessage(NSLocalizedString("prepare.no_connection.resend", comment: ""))
             }
         }
         if let confirm = pendingConfirm {
@@ -695,7 +695,7 @@ extension PrepareViewController: CallHintStreamDelegate {
     }
 
     func callHintStreamDidFailTerminally(_ stream: CallHintStream) {
-        statusLabel.text = "Нет соединения с сервером"
+        statusLabel.text = NSLocalizedString("prepare.status.no_connection", comment: "")
         hideThinking()
         // Reconnects are over — hand the unacknowledged text back to the user
         // so nothing typed or dictated is lost.
@@ -707,11 +707,11 @@ extension PrepareViewController: CallHintStreamDelegate {
             pendingConfirm = nil
             addGoalProposal(confirm.goal)
         }
-        addAIMessage("⚠️ Нет соединения с сервером. Ваш текст сохранён в поле ввода — попробуйте отправить позже.")
+        addAIMessage(NSLocalizedString("prepare.no_connection.terminal", comment: ""))
     }
 
     func callHintStreamDidRequireSignIn(_ stream: CallHintStream) {
-        statusLabel.text = "Требуется вход в аккаунт"
-        addAIMessage("⚠️ Войдите в аккаунт, чтобы готовить звонок.")
+        statusLabel.text = NSLocalizedString("prepare.status.sign_in_required", comment: "")
+        addAIMessage(NSLocalizedString("prepare.sign_in_required", comment: ""))
     }
 }

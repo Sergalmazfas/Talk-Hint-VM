@@ -52,7 +52,7 @@ extension PushManager: PKPushRegistryDelegate {
 
         let dict = payload.dictionaryPayload
         let callSid = dict["callSid"] as? String
-        let fromNumber = (dict["fromNumber"] as? String) ?? "Unknown"
+        let fromNumber = (dict["fromNumber"] as? String) ?? NSLocalizedString("call.unknown_caller", comment: "")
 
         Task { @MainActor in
             if let callSid = callSid {

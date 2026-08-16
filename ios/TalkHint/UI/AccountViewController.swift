@@ -15,7 +15,7 @@ final class AccountViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Account"
+        title = NSLocalizedString("account.title", comment: "")
         view.backgroundColor = .systemGroupedBackground
         buildUI()
     }
@@ -28,13 +28,13 @@ final class AccountViewController: UIViewController {
 
     private func buildUI() {
         let card = UIStackView(arrangedSubviews: [
-            row(title: "Signed in as", valueLabel: emailValue, testId: "email"),
+            row(title: NSLocalizedString("account.signed_in_as", comment: ""), valueLabel: emailValue, testId: "email"),
             separator(),
-            row(title: "Plan", valueLabel: planValue, testId: "plan"),
+            row(title: NSLocalizedString("account.plan", comment: ""), valueLabel: planValue, testId: "plan"),
             separator(),
-            row(title: "Subscription", valueLabel: statusValue, testId: "status"),
+            row(title: NSLocalizedString("account.subscription", comment: ""), valueLabel: statusValue, testId: "status"),
             separator(),
-            row(title: "Phone number", valueLabel: numberValue, testId: "number"),
+            row(title: NSLocalizedString("account.phone_number", comment: ""), valueLabel: numberValue, testId: "number"),
         ])
         card.axis = .vertical
         card.spacing = 0
@@ -44,7 +44,7 @@ final class AccountViewController: UIViewController {
         card.layoutMargins = UIEdgeInsets(top: 4, left: 16, bottom: 4, right: 16)
         card.translatesAutoresizingMaskIntoConstraints = false
 
-        logoutButton.setTitle("Log Out", for: .normal)
+        logoutButton.setTitle(NSLocalizedString("account.log_out", comment: ""), for: .normal)
         logoutButton.setTitleColor(.systemRed, for: .normal)
         logoutButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         logoutButton.addTarget(self, action: #selector(logoutTapped), for: .touchUpInside)
@@ -107,22 +107,22 @@ final class AccountViewController: UIViewController {
 
             if let info = try? await planResult {
                 planValue.text = info.plan.capitalized
-                statusValue.text = info.hasStripeCustomer ? "Active" : "None"
+                statusValue.text = info.hasStripeCustomer ? NSLocalizedString("account.status.active", comment: "") : NSLocalizedString("account.status.none", comment: "")
             } else {
-                planValue.text = "Unavailable"
-                statusValue.text = "Unavailable"
+                planValue.text = NSLocalizedString("account.unavailable", comment: "")
+                statusValue.text = NSLocalizedString("account.unavailable", comment: "")
             }
 
             if let numbers = try? await numbersResult {
                 let active = numbers.first(where: { $0.id == SessionStore.shared.activeNumberId }) ?? numbers.first
                 if let active = active {
-                    let label = active.name.isEmpty ? active.number : "\(active.name) · \(active.number)"
-                    numberValue.text = numbers.count > 1 ? "\(label) (+\(numbers.count - 1) more)" : label
+                    let label = active.name.isEmpty ? active.number : String(format: NSLocalizedString("account.number.label", comment: ""), active.name, active.number)
+                    numberValue.text = numbers.count > 1 ? String(format: NSLocalizedString("account.number.more", comment: ""), label, numbers.count - 1) : label
                 } else {
-                    numberValue.text = "None yet"
+                    numberValue.text = NSLocalizedString("account.number.none", comment: "")
                 }
             } else {
-                numberValue.text = "Unavailable"
+                numberValue.text = NSLocalizedString("account.unavailable", comment: "")
             }
 
             spinner.stopAnimating()

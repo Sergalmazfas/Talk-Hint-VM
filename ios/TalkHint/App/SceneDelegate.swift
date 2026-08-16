@@ -41,15 +41,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let calls = HomeViewController()
         calls.tabBarItem = UITabBarItem(
-            title: "Calls", image: UIImage(systemName: "phone.fill"), tag: 0)
+            title: NSLocalizedString("tab.calls", comment: ""), image: UIImage(systemName: "phone.fill"), tag: 0)
 
         let tutor = TutorViewController()
         tutor.tabBarItem = UITabBarItem(
-            title: "Tutor", image: UIImage(systemName: "graduationcap"), tag: 1)
+            title: NSLocalizedString("tab.tutor", comment: ""), image: UIImage(systemName: "graduationcap"), tag: 1)
 
         let history = CallHistoryViewController()
         history.tabBarItem = UITabBarItem(
-            title: "History", image: UIImage(systemName: "clock"), tag: 2)
+            title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 2)
 
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),

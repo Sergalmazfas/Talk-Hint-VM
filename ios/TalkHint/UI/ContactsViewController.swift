@@ -11,7 +11,7 @@ final class ContactsViewController: UITableViewController {
 
     init() {
         super.init(style: .insetGrouped)
-        title = "Contacts"
+        title = NSLocalizedString("contacts.title", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -50,7 +50,7 @@ final class ContactsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
-        "After each call, the assistant saves a short summary here. Edit anything that's wrong."
+        NSLocalizedString("contacts.footer", comment: "")
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -58,7 +58,7 @@ final class ContactsViewController: UITableViewController {
         var config = cell.defaultContentConfiguration()
 
         if contacts.isEmpty {
-            config.text = "No saved contacts yet"
+            config.text = NSLocalizedString("contacts.empty", comment: "")
             config.textProperties.color = .secondaryLabel
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -77,12 +77,12 @@ final class ContactsViewController: UITableViewController {
             config.text = contact.phoneNumber
         }
         if let importance = contact.importance?.trimmingCharacters(in: .whitespacesAndNewlines), !importance.isEmpty {
-            detailParts.append("★ \(importance)")
+            detailParts.append(String(format: NSLocalizedString("contacts.importance_badge", comment: ""), importance))
         }
         if let summary = contact.summary?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
             detailParts.append(summary)
         }
-        config.secondaryText = detailParts.isEmpty ? "No details yet" : detailParts.joined(separator: " · ")
+        config.secondaryText = detailParts.isEmpty ? NSLocalizedString("contacts.no_details", comment: "") : detailParts.joined(separator: " · ")
         config.secondaryTextProperties.numberOfLines = 2
         config.secondaryTextProperties.color = .secondaryLabel
         cell.accessoryType = .disclosureIndicator
@@ -115,11 +115,11 @@ final class ContactsViewController: UITableViewController {
         guard editingStyle == .delete, !contacts.isEmpty else { return }
         let contact = contacts[indexPath.row]
         let alert = UIAlertController(
-            title: "Delete contact",
-            message: "Delete what the assistant remembers about \(contact.phoneNumber)? This can't be undone.",
+            title: NSLocalizedString("contacts.delete.title", comment: ""),
+            message: String(format: NSLocalizedString("contacts.delete.message", comment: ""), contact.phoneNumber),
             preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.delete", comment: ""), style: .destructive) { [weak self] _ in
             self?.performDelete(contact)
         })
         present(alert, animated: true)
@@ -133,10 +133,10 @@ final class ContactsViewController: UITableViewController {
                 tableView.reloadData()
             } catch {
                 let alert = UIAlertController(
-                    title: "Couldn't delete",
+                    title: NSLocalizedString("common.delete_failed", comment: ""),
                     message: error.localizedDescription,
                     preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
                 present(alert, animated: true)
             }
         }
@@ -173,26 +173,26 @@ final class ContactEditorViewController: UIViewController {
             barButtonSystemItem: .save, target: self, action: #selector(save))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-contact-save"
 
-        let nameLabel = makeLabel("Name")
+        let nameLabel = makeLabel(NSLocalizedString("contact_editor.name", comment: ""))
         nameField.text = contact.name
-        nameField.placeholder = "e.g. John from accounting"
+        nameField.placeholder = NSLocalizedString("contact_editor.name.placeholder", comment: "")
         nameField.borderStyle = .roundedRect
         nameField.backgroundColor = .secondarySystemGroupedBackground
         nameField.translatesAutoresizingMaskIntoConstraints = false
         nameField.accessibilityIdentifier = "input-contact-name"
 
-        let importanceLabel = makeLabel("Importance")
+        let importanceLabel = makeLabel(NSLocalizedString("contact_editor.importance", comment: ""))
         importanceField.text = contact.importance
-        importanceField.placeholder = "e.g. VIP, regular, one-time"
+        importanceField.placeholder = NSLocalizedString("contact_editor.importance.placeholder", comment: "")
         importanceField.borderStyle = .roundedRect
         importanceField.backgroundColor = .secondarySystemGroupedBackground
         importanceField.translatesAutoresizingMaskIntoConstraints = false
         importanceField.accessibilityIdentifier = "input-contact-importance"
 
-        let summaryLabel = makeLabel("Summary")
+        let summaryLabel = makeLabel(NSLocalizedString("contact_editor.summary", comment: ""))
         configureTextView(summaryView, text: contact.summary, identifier: "input-contact-summary")
 
-        let notesLabel = makeLabel("Notes")
+        let notesLabel = makeLabel(NSLocalizedString("contact_editor.notes", comment: ""))
         configureTextView(notesView, text: contact.notes, identifier: "input-contact-notes")
 
         let stack = UIStackView(arrangedSubviews: [
@@ -253,10 +253,10 @@ final class ContactEditorViewController: UIViewController {
             } catch {
                 navigationItem.rightBarButtonItem?.isEnabled = true
                 let alert = UIAlertController(
-                    title: "Couldn't save",
+                    title: NSLocalizedString("common.save_failed", comment: ""),
                     message: error.localizedDescription,
                     preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
                 present(alert, animated: true)
             }
         }

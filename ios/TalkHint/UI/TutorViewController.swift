@@ -17,7 +17,7 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Репетитор Emma"
+        title = NSLocalizedString("tutor.title", comment: "")
         view.backgroundColor = .systemBackground
 
         let config = WKWebViewConfiguration()
@@ -101,10 +101,10 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
             loadTutorPage()
         case "callMemoryConfirmed":
             let alert = UIAlertController(
-                title: "Подготовка подтверждена",
-                message: "Память тренировки будет использована в вашем следующем реальном звонке.",
+                title: NSLocalizedString("tutor.memory_confirmed.title", comment: ""),
+                message: NSLocalizedString("tutor.memory_confirmed.message", comment: ""),
                 preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
             present(alert, animated: true)
         default:
             break

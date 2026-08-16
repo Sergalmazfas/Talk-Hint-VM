@@ -20,24 +20,24 @@ final class LoginViewController: UIViewController {
     }
 
     private func buildUI() {
-        emailField.placeholder = "Email"
+        emailField.placeholder = NSLocalizedString("login.email.placeholder", comment: "")
         emailField.keyboardType = .emailAddress
         emailField.autocapitalizationType = .none
         emailField.autocorrectionType = .no
         emailField.borderStyle = .roundedRect
         emailField.accessibilityIdentifier = "input-email"
 
-        passwordField.placeholder = "Password"
+        passwordField.placeholder = NSLocalizedString("login.password.placeholder", comment: "")
         passwordField.isSecureTextEntry = true
         passwordField.borderStyle = .roundedRect
         passwordField.accessibilityIdentifier = "input-password"
 
-        loginButton.setTitle("Log In", for: .normal)
+        loginButton.setTitle(NSLocalizedString("login.button.login", comment: ""), for: .normal)
         loginButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
         loginButton.accessibilityIdentifier = "button-login"
 
-        googleButton.setTitle("Continue with Google", for: .normal)
+        googleButton.setTitle(NSLocalizedString("login.button.google", comment: ""), for: .normal)
         googleButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         googleButton.addTarget(self, action: #selector(googleTapped), for: .touchUpInside)
         googleButton.accessibilityIdentifier = "button-google-login"
@@ -64,7 +64,7 @@ final class LoginViewController: UIViewController {
         let email = emailField.text?.trimmingCharacters(in: .whitespaces) ?? ""
         let password = passwordField.text ?? ""
         guard !email.isEmpty, !password.isEmpty else {
-            statusLabel.text = "Enter your email and password."
+            statusLabel.text = NSLocalizedString("login.error.empty_fields", comment: "")
             return
         }
 
@@ -87,7 +87,7 @@ final class LoginViewController: UIViewController {
     @objc private func googleTapped() {
         statusLabel.text = nil
         guard let url = APIClient.shared.googleLoginURL else {
-            statusLabel.text = "Could not start Google sign in."
+            statusLabel.text = NSLocalizedString("login.error.google_start", comment: "")
             return
         }
 
@@ -108,7 +108,7 @@ final class LoginViewController: UIViewController {
             guard let callbackURL = callbackURL,
                   let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
                 self.setLoading(false)
-                self.statusLabel.text = "Google sign in failed."
+                self.statusLabel.text = NSLocalizedString("login.error.google_failed", comment: "")
                 return
             }
 
@@ -118,7 +118,7 @@ final class LoginViewController: UIViewController {
             } else {
                 self.setLoading(false)
                 let reason = items.first(where: { $0.name == "error" })?.value ?? "unknown_error"
-                self.statusLabel.text = "Google sign in failed (\(reason))."
+                self.statusLabel.text = String(format: NSLocalizedString("login.error.google_failed_reason", comment: ""), reason)
             }
         }
 

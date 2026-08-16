@@ -10,7 +10,7 @@ final class PromptsViewController: UITableViewController {
 
     init() {
         super.init(style: .insetGrouped)
-        title = "My Prompts"
+        title = NSLocalizedString("prompts.title", comment: "")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -78,7 +78,7 @@ final class PromptsViewController: UITableViewController {
         var config = cell.defaultContentConfiguration()
 
         if prompts.isEmpty {
-            config.text = "No prompts yet"
+            config.text = NSLocalizedString("prompts.empty", comment: "")
             config.textProperties.color = .secondaryLabel
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -142,7 +142,7 @@ final class PromptsViewController: UITableViewController {
     -> UISwipeActionsConfiguration? {
         guard !prompts.isEmpty else { return nil }
         let prompt = prompts[indexPath.row]
-        let delete = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, done in
+        let delete = UIContextualAction(style: .destructive, title: NSLocalizedString("common.delete", comment: "")) { [weak self] _, _, done in
             self?.delete(prompt, completion: done)
         }
         return UISwipeActionsConfiguration(actions: [delete])
@@ -155,7 +155,7 @@ final class PromptsViewController: UITableViewController {
     -> UISwipeActionsConfiguration? {
         guard !prompts.isEmpty else { return nil }
         let prompt = prompts[indexPath.row]
-        let edit = UIContextualAction(style: .normal, title: "Edit") { [weak self] _, _, done in
+        let edit = UIContextualAction(style: .normal, title: NSLocalizedString("common.edit", comment: "")) { [weak self] _, _, done in
             guard let self = self else { done(false); return }
             let editor = PromptEditorViewController(prompt: prompt)
             editor.onSaved = { [weak self] in self?.reload() }
@@ -187,10 +187,10 @@ final class PromptsViewController: UITableViewController {
     }
 
     private func showError(_ error: Error) {
-        let alert = UIAlertController(title: "Something went wrong",
+        let alert = UIAlertController(title: NSLocalizedString("common.error.title", comment: ""),
                                       message: error.localizedDescription,
                                       preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }
 }

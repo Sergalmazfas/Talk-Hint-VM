@@ -99,14 +99,14 @@ final class InCallViewController: UIViewController {
 
     private func buildUI() {
         let titleLabel = UILabel()
-        titleLabel.text = "On call with \(callerName)"
+        titleLabel.text = String(format: NSLocalizedString("incall.title", comment: ""), callerName)
         titleLabel.font = .systemFont(ofSize: 22, weight: .bold)
         titleLabel.textColor = Theme.ink
         titleLabel.textAlignment = .center
         titleLabel.numberOfLines = 0
         titleLabel.accessibilityIdentifier = "text-incall-title"
 
-        statusLabel.text = "Connecting to live assistant…"
+        statusLabel.text = NSLocalizedString("incall.status.connecting", comment: "")
         statusLabel.font = .systemFont(ofSize: 13)
         statusLabel.textColor = Theme.sub
         statusLabel.textAlignment = .center
@@ -119,7 +119,7 @@ final class InCallViewController: UIViewController {
         reconnectSpinner.setContentHuggingPriority(.required, for: .horizontal)
         reconnectSpinner.accessibilityIdentifier = "spinner-incall-reconnect"
 
-        retryButton.setTitle("Reconnect", for: .normal)
+        retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
         retryButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
         retryButton.setTitleColor(Theme.green, for: .normal)
         retryButton.isHidden = true
@@ -223,7 +223,7 @@ final class InCallViewController: UIViewController {
         icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
 
         let caption = UILabel()
-        caption.text = "Your goal"
+        caption.text = NSLocalizedString("incall.your_goal", comment: "")
         caption.font = .systemFont(ofSize: 13, weight: .semibold)
         caption.textColor = Theme.greenDark
 
@@ -232,7 +232,7 @@ final class InCallViewController: UIViewController {
         captionRow.spacing = 6
         captionRow.alignment = .center
 
-        goalField.placeholder = "Set call goal (e.g. book a table)"
+        goalField.placeholder = NSLocalizedString("incall.goal.placeholder", comment: "")
         goalField.text = SessionStore.shared.callGoal
         goalField.borderStyle = .none
         goalField.font = .systemFont(ofSize: 14)
@@ -242,7 +242,7 @@ final class InCallViewController: UIViewController {
         goalField.accessibilityIdentifier = "input-goal"
 
         let setGoalButton = UIButton(type: .system)
-        setGoalButton.setTitle("Set", for: .normal)
+        setGoalButton.setTitle(NSLocalizedString("incall.set", comment: ""), for: .normal)
         setGoalButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
         setGoalButton.setTitleColor(Theme.greenDark, for: .normal)
         setGoalButton.backgroundColor = Theme.greenBg
@@ -272,7 +272,7 @@ final class InCallViewController: UIViewController {
     }
 
     private func buildInputBar() -> UIView {
-        questionField.placeholder = "Ask the assistant…"
+        questionField.placeholder = NSLocalizedString("incall.ask.placeholder", comment: "")
         questionField.borderStyle = .none
         questionField.font = .systemFont(ofSize: 15)
         questionField.textColor = Theme.ink
@@ -297,7 +297,7 @@ final class InCallViewController: UIViewController {
         ])
 
         let askButton = UIButton(type: .system)
-        askButton.setTitle("Ask", for: .normal)
+        askButton.setTitle(NSLocalizedString("incall.ask", comment: ""), for: .normal)
         askButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
         askButton.setTitleColor(.white, for: .normal)
         askButton.backgroundColor = Theme.purple
@@ -336,7 +336,7 @@ final class InCallViewController: UIViewController {
         sparkles.widthAnchor.constraint(equalToConstant: 16).isActive = true
 
         let tag = UILabel()
-        tag.text = "Hint"
+        tag.text = NSLocalizedString("incall.hint", comment: "")
         tag.font = .systemFont(ofSize: 13, weight: .semibold)
         tag.textColor = Theme.purple
 
@@ -347,7 +347,7 @@ final class InCallViewController: UIViewController {
         liveDot.heightAnchor.constraint(equalToConstant: 6).isActive = true
 
         let liveLabel = UILabel()
-        liveLabel.text = "live"
+        liveLabel.text = NSLocalizedString("incall.live", comment: "")
         liveLabel.font = .systemFont(ofSize: 11, weight: .medium)
         liveLabel.textColor = Theme.sub
         liveLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -506,7 +506,7 @@ final class InCallViewController: UIViewController {
         endButton.accessibilityIdentifier = "button-end-call"
 
         let endCaption = UILabel()
-        endCaption.text = "End"
+        endCaption.text = NSLocalizedString("incall.end", comment: "")
         endCaption.font = .systemFont(ofSize: 12)
         endCaption.textColor = Theme.sub
         endCaption.textAlignment = .center
@@ -563,14 +563,14 @@ final class InCallViewController: UIViewController {
     /// label the route control so it always reflects the live route.
     private func currentRouteDescription() -> (caption: String, icon: String) {
         let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-        guard let port = outputs.first else { return ("Audio", "speaker.wave.2") }
+        guard let port = outputs.first else { return (NSLocalizedString("incall.route.audio", comment: ""), "speaker.wave.2") }
         switch port.portType {
         case .builtInSpeaker:
-            return ("Speaker", "speaker.wave.2.fill")
+            return (NSLocalizedString("incall.route.speaker", comment: ""), "speaker.wave.2.fill")
         case .builtInReceiver:
-            return ("iPhone", "iphone")
+            return (NSLocalizedString("incall.route.iphone", comment: ""), "iphone")
         case .headphones, .headsetMic:
-            return ("Headphones", "headphones")
+            return (NSLocalizedString("incall.route.headphones", comment: ""), "headphones")
         case .bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .usbAudio:
             return (port.portName, "headphones")
         case .carAudio:
@@ -603,14 +603,14 @@ final class InCallViewController: UIViewController {
     @objc private func routeButtonTapped() {
         let session = AVAudioSession.sharedInstance()
         let currentType = session.currentRoute.outputs.first?.portType
-        let sheet = UIAlertController(title: "Audio Output", message: nil,
+        let sheet = UIAlertController(title: NSLocalizedString("incall.route.title", comment: ""), message: nil,
                                       preferredStyle: .actionSheet)
 
-        sheet.addAction(routeAction(title: "iPhone",
+        sheet.addAction(routeAction(title: NSLocalizedString("incall.route.iphone", comment: ""),
                                     selected: currentType == .builtInReceiver) { [weak self] in
             self?.routeToBuiltInReceiver()
         })
-        sheet.addAction(routeAction(title: "Speaker",
+        sheet.addAction(routeAction(title: NSLocalizedString("incall.route.speaker", comment: ""),
                                     selected: currentType == .builtInSpeaker) { [weak self] in
             self?.routeToSpeaker()
         })
@@ -624,7 +624,7 @@ final class InCallViewController: UIViewController {
             })
         }
 
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
 
         // Required for iPad — anchor the action sheet to the route button.
         if let popover = sheet.popoverPresentationController {
@@ -637,7 +637,7 @@ final class InCallViewController: UIViewController {
     private func routeAction(title: String,
                              selected: Bool,
                              handler: @escaping () -> Void) -> UIAlertAction {
-        let action = UIAlertAction(title: selected ? "✓ \(title)" : title,
+        let action = UIAlertAction(title: selected ? String(format: NSLocalizedString("incall.route.selected", comment: ""), title) : title,
                                    style: .default) { _ in handler() }
         action.accessibilityIdentifier = "action-route-\(title)"
         return action
@@ -698,7 +698,7 @@ final class InCallViewController: UIViewController {
         let muted = CallManager.shared.isMuted
         muteButton.setImage(
             UIImage(systemName: muted ? "mic.slash.fill" : "mic.fill"), for: .normal)
-        muteCaption.text = muted ? "Muted" : "Mute"
+        muteCaption.text = muted ? NSLocalizedString("incall.muted", comment: "") : NSLocalizedString("incall.mute", comment: "")
         muteButton.backgroundColor = muted
             ? UIColor.systemRed.withAlphaComponent(0.15)
             : Theme.fill
@@ -769,7 +769,7 @@ final class InCallViewController: UIViewController {
             return
         }
         retryButton.isHidden = true
-        statusLabel.text = "Reconnecting to live assistant…"
+        statusLabel.text = NSLocalizedString("incall.status.reconnecting", comment: "")
         stream.retry()
     }
 
@@ -801,9 +801,9 @@ final class InCallViewController: UIViewController {
     /// role.
     private func resumeAfterSignIn() {
         needsSignIn = false
-        retryButton.setTitle("Reconnect", for: .normal)
+        retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
         retryButton.isHidden = true
-        statusLabel.text = "Reconnecting to live assistant…"
+        statusLabel.text = NSLocalizedString("incall.status.reconnecting", comment: "")
         reconnectSpinner.startAnimating()
         stream.retry()
     }
@@ -813,7 +813,7 @@ final class InCallViewController: UIViewController {
         guard !question.isEmpty else { return }
         let goal = goalField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
         stream.askAI(question, goal: goal)
-        appendCard(title: "ASKED", titleColor: Theme.purple,
+        appendCard(title: NSLocalizedString("incall.card.asked", comment: ""), titleColor: Theme.purple,
                    primary: question, secondary: nil,
                    background: Theme.purpleBg,
                    testIdSuffix: "asked")
@@ -1006,7 +1006,7 @@ extension InCallViewController: CallHintStreamDelegate {
                 return
             }
             upsertTranscript(card: &currentCallerCard,
-                             title: "CALLER", titleColor: Theme.greenDark,
+                             title: NSLocalizedString("incall.card.caller", comment: ""), titleColor: Theme.greenDark,
                              primary: text, secondary: translation,
                              testIdSuffix: "guest", isFinal: isFinal)
         case .ownerTranscript(let text, let confidence, let isFinal):
@@ -1017,18 +1017,18 @@ extension InCallViewController: CallHintStreamDelegate {
                 return
             }
             upsertTranscript(card: &currentYouCard,
-                             title: "YOU", titleColor: Theme.sub,
+                             title: NSLocalizedString("incall.card.you", comment: ""), titleColor: Theme.sub,
                              primary: text, secondary: nil,
                              testIdSuffix: "owner", isFinal: isFinal)
         case .suggestion(let en, let translation, let options):
             showSuggestion(en: en, translation: translation, options: options)
         case .fastPhrase(let text, let translation):
-            appendCard(title: "QUICK PHRASE", titleColor: Theme.purple,
+            appendCard(title: NSLocalizedString("incall.card.quick_phrase", comment: ""), titleColor: Theme.purple,
                        primary: text, secondary: translation,
                        background: Theme.purpleBg,
                        testIdSuffix: "fast-phrase")
         case .aiResponse(let text, let isError):
-            appendCard(title: isError ? "ERROR" : "ASSISTANT",
+            appendCard(title: isError ? NSLocalizedString("common.error", comment: "") : NSLocalizedString("incall.card.assistant", comment: ""),
                        titleColor: isError ? .systemRed : Theme.purple,
                        primary: text, secondary: nil,
                        background: isError
@@ -1040,7 +1040,7 @@ extension InCallViewController: CallHintStreamDelegate {
             // duplicate echo the server sends after a mid-call reconnect.
             guard text != lastGoalShownInFeed else { return }
             lastGoalShownInFeed = text
-            appendCard(title: "GOAL", titleColor: Theme.greenDark,
+            appendCard(title: NSLocalizedString("incall.card.goal", comment: ""), titleColor: Theme.greenDark,
                        primary: text, secondary: nil,
                        background: Theme.greenBg,
                        testIdSuffix: "goal")
@@ -1051,7 +1051,7 @@ extension InCallViewController: CallHintStreamDelegate {
             // the new goal, and the goal field reflects what Brain now targets.
             SessionStore.shared.callGoal = text
             goalField.text = text
-            appendCard(title: "GOAL UPDATED", titleColor: Theme.greenDark,
+            appendCard(title: NSLocalizedString("incall.card.goal_updated", comment: ""), titleColor: Theme.greenDark,
                        primary: text, secondary: nil,
                        background: Theme.greenBg,
                        testIdSuffix: "goal-updated")
@@ -1096,8 +1096,8 @@ extension InCallViewController: CallHintStreamDelegate {
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
         needsSignIn = false
-        retryButton.setTitle("Reconnect", for: .normal)
-        statusLabel.text = "Live assistant connected"
+        retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
+        statusLabel.text = NSLocalizedString("incall.status.connected", comment: "")
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = true
     }
@@ -1108,7 +1108,7 @@ extension InCallViewController: CallHintStreamDelegate {
         // A live network retry, not a sign-in failure — restore the plain
         // "Reconnect" affordance in case we were previously in the signed-out state.
         needsSignIn = false
-        retryButton.setTitle("Reconnect", for: .normal)
+        retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
         // Show progress (attempt N of M) with a live spinner so the feed reads as
         // actively recovering, not frozen, until the terminal state is reached.
         statusLabel.text = CallHintStream.reconnectingStatusText(attempt: attempt, of: maxAttempts)
@@ -1119,8 +1119,8 @@ extension InCallViewController: CallHintStreamDelegate {
     func callHintStreamDidFailTerminally(_ stream: CallHintStream) {
         // A network/server give-up (not a missing token) — the button reconnects.
         needsSignIn = false
-        retryButton.setTitle("Reconnect", for: .normal)
-        statusLabel.text = "Live assistant unavailable. Check your connection."
+        retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
+        statusLabel.text = NSLocalizedString("incall.status.unavailable", comment: "")
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = false
     }
@@ -1131,9 +1131,9 @@ extension InCallViewController: CallHintStreamDelegate {
         // action that routes to the login screen, so the user can actually recover
         // the live assistant instead of re-hitting the same sign-in message.
         needsSignIn = true
-        statusLabel.text = "Sign in to use the live assistant"
+        statusLabel.text = NSLocalizedString("incall.status.sign_in", comment: "")
         reconnectSpinner.stopAnimating()
-        retryButton.setTitle("Sign in", for: .normal)
+        retryButton.setTitle(NSLocalizedString("incall.sign_in", comment: ""), for: .normal)
         retryButton.isHidden = false
     }
 }
