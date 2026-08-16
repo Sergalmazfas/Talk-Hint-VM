@@ -19,6 +19,23 @@ export function looksLikeModelJson(raw: string | null | undefined): boolean {
   return !!raw && /\{[\s\S]*\}/.test(raw);
 }
 
+// Build the OpenAI chat-completions request body for live hint generation.
+// gpt-5.x models must be called with the SAME profile the BRAIN benchmark used
+// (server/benchmark/openaiClient.ts buildChatBody): max_completion_tokens
+// instead of max_tokens, reasoning_effort="none", and NO temperature (the
+// gpt-5 family rejects non-default temperature). Legacy models keep the exact
+// request body they always had (temperature 0.4 + max_tokens).
+export function buildOpenAIChatBody(model: string, systemPrompt: string, userPrompt: string, maxTokens: number): Record<string, any> {
+  const messages = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+  if (model.startsWith("gpt-5")) {
+    return { model, messages, max_completion_tokens: maxTokens, reasoning_effort: "none" };
+  }
+  return { model, messages, temperature: 0.4, max_tokens: maxTokens };
+}
+
 export interface RouteGenerateDeps {
   // The active model. gemini-* routes to Gemini first; anything else to OpenAI.
   model: string;

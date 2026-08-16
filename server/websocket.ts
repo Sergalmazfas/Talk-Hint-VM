@@ -18,7 +18,7 @@ import { formatContactMemory, deriveOtherPartyPhone, buildContextSections, build
 import { claimActiveCallMemory, formatCallMemoryBlock } from "./tutorStorage";
 import { deliverCallToAirAtoma } from "./airatomaRetryWorker";
 import { renderTranscriptText } from "./airatomaWebhook";
-import { routeGenerate } from "./hintProvider";
+import { routeGenerate, buildOpenAIChatBody } from "./hintProvider";
 import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import {
   DISABLED_PIPELINE,
@@ -170,10 +170,17 @@ function stripPreamble(text: string): string {
 // 50-71% of turns and — with no timeout — caused 5-15s stalls. Gemini stays
 // available (user-selectable / as a fallback) but is hard-capped at 700ms
 // (GEMINI_TIMEOUT_MS) so it can never stall a live call again.
-const HINT_MODEL = process.env.HINT_MODEL || "gpt-4.1-mini";
+// LIVE BRAIN switch (benchmark-driven): default is now gpt-5.6-terra — the
+// exact profile that ran in the BRAIN benchmark (reasoning_effort="none",
+// max_completion_tokens, no temperature — see generateWithOpenAI). Everything
+// else (prompt, STT, wire-format, timeouts, telemetry) is unchanged.
+// Rollback: set HINT_MODEL=gpt-4.1-mini (env) or set_model from the UI —
+// gpt-4.1-mini stays in the allowlist and remains the automatic fallback model.
+const HINT_MODEL = process.env.HINT_MODEL || "gpt-5.6-terra";
 // Models the user is allowed to pick from the settings UI.
 // gemini-* models are routed to Google Gemini; everything else to OpenAI.
 const ALLOWED_HINT_MODELS = [
+  "gpt-5.6-terra",
   "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "gpt-4o",
   "gemini-2.5-flash-lite", "gemini-2.5-flash",
 ];
@@ -258,15 +265,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
       "Content-Type": "application/json",
       "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
     },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      temperature: 0.4,
-      max_tokens: maxTokens
-    }),
+    body: JSON.stringify(buildOpenAIChatBody(model, systemPrompt, userPrompt, maxTokens)),
   });
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
@@ -1768,7 +1767,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (translated?.suggestion?.en) {
         latencyRecorder.ready(utteranceId, translated.providerUsed === "library" ? "library" : "gpt");
       }
-      log(`[HINT] model=${libraryHit ? "library" : currentModel} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
+      log(`[HINT] model=${libraryHit ? "library" : (brainModelOverride || currentModel)} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
 
       // Freshness/stale guard: while this suggestion was generating, the Guest started
       // a newer turn. Drop the now-outdated suggestion and do NOT arm the cooldown, so

@@ -89,7 +89,7 @@ export const EARS_CANDIDATES: EarsCandidate[] = [
 
 // Current production model is read from the same env override the production
 // path uses, but the benchmark NEVER writes it.
-export const CURRENT_PRODUCTION_MODEL = process.env.HINT_MODEL || "gpt-4.1-mini";
+export const CURRENT_PRODUCTION_MODEL = process.env.HINT_MODEL || "gpt-5.6-terra";
 
 export const BRAIN_CANDIDATES: BrainCandidate[] = [
   {

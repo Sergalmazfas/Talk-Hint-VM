@@ -12,7 +12,7 @@ import { describe, it, expect, vi } from "vitest";
 // API call — consistent with the other tests.
 // ---------------------------------------------------------------------------
 
-const { routeGenerate, looksLikeModelJson } = await import("../hintProvider");
+const { routeGenerate, looksLikeModelJson, buildOpenAIChatBody } = await import("../hintProvider");
 
 const SYSTEM = "system prompt";
 const USER = "user prompt";
@@ -119,5 +119,43 @@ describe("routeGenerate", () => {
     expect(out).toBe(GOOD);
     expect(d.withGemini).toHaveBeenCalledWith("custom-llm", SYSTEM, USER);
     expect(d.withOpenAI).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildOpenAIChatBody — the LIVE BRAIN request profile. gpt-5.x models must be
+// called exactly the way the BRAIN benchmark called them (reasoning_effort
+// "none", max_completion_tokens, NO temperature); legacy models keep the
+// original body byte-for-byte (temperature 0.4 + max_tokens).
+// ---------------------------------------------------------------------------
+describe("buildOpenAIChatBody", () => {
+  it("uses the benchmark profile for gpt-5.x models (terra)", () => {
+    const body = buildOpenAIChatBody("gpt-5.6-terra", "sys", "usr", 250);
+    expect(body).toEqual({
+      model: "gpt-5.6-terra",
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "usr" },
+      ],
+      max_completion_tokens: 250,
+      reasoning_effort: "none",
+    });
+    expect(body.temperature).toBeUndefined();
+    expect(body.max_tokens).toBeUndefined();
+  });
+
+  it("keeps the legacy body for gpt-4.1-mini (rollback model unchanged)", () => {
+    const body = buildOpenAIChatBody("gpt-4.1-mini", "sys", "usr", 250);
+    expect(body).toEqual({
+      model: "gpt-4.1-mini",
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "usr" },
+      ],
+      temperature: 0.4,
+      max_tokens: 250,
+    });
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(body.max_completion_tokens).toBeUndefined();
   });
 });
