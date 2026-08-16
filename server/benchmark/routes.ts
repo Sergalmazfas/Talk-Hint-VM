@@ -5,8 +5,9 @@ import type { Express } from "express";
 import express from "express";
 import { requireBenchmarkAdmin } from "./adminGate";
 import {
-  runAvailabilityCheck, startEarsRun, startBrainRun,
+  runAvailabilityCheck, startEarsRun, startBrainRun, startGoalReturnRun,
   getRun, listRuns, listFixtures, getFixture,
+  type GoalReturnRunCall,
 } from "./orchestrator";
 import { ensureGoldCallFixture } from "./seed";
 import { EARS_CANDIDATES, BRAIN_CANDIDATES } from "./candidates";
@@ -401,6 +402,66 @@ export function registerBenchmarkRoutes(app: Express) {
       const fixture = fixtureId ? await getFixture(fixtureId) : undefined;
       if (!fixture) return res.status(404).json({ error: "fixture not found" });
       res.json(buildReplay(run, fixture, req.params.candidateId));
+    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Goal-return analysis (Task #227): offline per-call analysis of digressions
+  // and returns to the call goal. Body: { calls: [{ title, goal, goalSource,
+  // transcript?, callSid? }] }. When callSid is given and transcript is not,
+  // the transcript (and hintLatency counts) are read from OUR calls table;
+  // production transcripts must be passed in explicitly (this server's DB is
+  // the dev DB). Goals are never invented: a call without a goal is rejected.
+  app.post(`${base}/goal-return/run`, requireBenchmarkAdmin, express.json({ limit: "5mb" }), async (req, res) => {
+    try {
+      const callsInRaw = req.body?.calls;
+      if (!Array.isArray(callsInRaw) || callsInRaw.length === 0) {
+        return res.status(400).json({ error: "calls[] required" });
+      }
+      const callsIn: GoalReturnRunCall[] = [];
+      for (const c of callsInRaw) {
+        if (!c || typeof c !== "object") return res.status(400).json({ error: "each call must be an object" });
+        if (!c.goal || typeof c.goal !== "string" || !c.goal.trim()) {
+          return res.status(400).json({ error: `call "${c.title ?? "?"}": goal required — goals are not persisted on production calls, supply one and its source` });
+        }
+        let transcript: string | undefined = typeof c.transcript === "string" ? c.transcript : undefined;
+        let hintStats: { hintsSent: number; hintsDropped: number } | null =
+          c.hintStats && Number.isFinite(c.hintStats.hintsSent) && Number.isFinite(c.hintStats.hintsDropped)
+            ? { hintsSent: c.hintStats.hintsSent, hintsDropped: c.hintStats.hintsDropped }
+            : null;
+        if (!transcript && typeof c.callSid === "string" && c.callSid) {
+          const [row] = await db.select().from(calls).where(eq(calls.callSid, c.callSid));
+          if (!row?.transcript) return res.status(404).json({ error: `call ${c.callSid}: no transcript in this server's DB — pass transcript explicitly` });
+          transcript = row.transcript;
+          const summary = (row.metadata as any)?.hintLatency?.summary;
+          if (!hintStats && summary && Number.isFinite(summary.hintsSent)) {
+            hintStats = { hintsSent: summary.hintsSent, hintsDropped: summary.hintsDropped ?? 0 };
+          }
+        }
+        if (!transcript?.trim()) return res.status(400).json({ error: `call "${c.title ?? c.callSid ?? "?"}": transcript required` });
+        // Explicit hint records only — hint metrics are never inferred from
+        // the transcript. Malformed entries are rejected, not skipped.
+        let hints: { text: string; utteranceId?: number }[] | null = null;
+        if (c.hints !== undefined && c.hints !== null) {
+          if (!Array.isArray(c.hints)) return res.status(400).json({ error: `call "${c.title ?? "?"}": hints must be an array of {text, utteranceId?}` });
+          hints = [];
+          for (const h of c.hints) {
+            if (!h || typeof h.text !== "string" || !h.text.trim()) {
+              return res.status(400).json({ error: `call "${c.title ?? "?"}": each hint needs a non-empty text` });
+            }
+            hints.push({ text: h.text, ...(Number.isFinite(h.utteranceId) ? { utteranceId: h.utteranceId } : {}) });
+          }
+        }
+        callsIn.push({
+          hints,
+          title: typeof c.title === "string" && c.title ? c.title : (c.callSid ?? "untitled call"),
+          goal: c.goal.trim(),
+          goalSource: typeof c.goalSource === "string" && c.goalSource ? c.goalSource : "unspecified",
+          transcript,
+          hintStats,
+        });
+      }
+      res.json(await startGoalReturnRun(callsIn));
     } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
   });
 

@@ -12,7 +12,7 @@ import { EARS_CANDIDATES, BRAIN_CANDIDATES } from "./candidates";
 import type { AvailabilityResult } from "./types";
 import { corpusHash } from "./seed";
 
-type RunType = "ears" | "brain" | "availability" | "replay";
+type RunType = "ears" | "brain" | "availability" | "replay" | "goal_return";
 
 async function createRun(runType: RunType, fixtures: BenchmarkFixture[], config: Record<string, unknown>, promptVersion = "v1"): Promise<BenchmarkRun> {
   const [row] = await db.insert(benchmarkRuns).values({
@@ -127,6 +127,106 @@ export async function startEarsRun(
         availability: { ears: availability },
         results: { turnResults: result.turnResults, notes: result.notes },
         scorecard: result.scorecard,
+        report,
+      });
+    } catch (e: any) {
+      await finishRun(run.id, { status: "failed", error: String(e?.stack ?? e) });
+    }
+  })();
+  return { runId: run.id };
+}
+
+// ---------------------------------------------------------------------------
+// GOAL-RETURN analysis run (Task #227) — offline per-call analysis of whether
+// the conversation stays on the goal, digresses when justified and returns.
+// Each call in the batch is independent (continuity invariant: one failed
+// judgement never aborts the rest).
+// ---------------------------------------------------------------------------
+
+export interface GoalReturnRunCall {
+  title: string;
+  goal: string;
+  goalSource: string; // "frozen fixture <id>" | "operator-supplied" | ...
+  transcript: string; // persisted "Speaker: text" format
+  hintStats?: { hintsSent: number; hintsDropped: number } | null;
+  // Explicit delivered-hint records; hint-level evaluation runs ONLY on these.
+  hints?: { text: string; utteranceId?: number }[] | null;
+}
+
+export async function startGoalReturnRun(callsIn: GoalReturnRunCall[]): Promise<{ runId: string }> {
+  if (callsIn.length === 0) throw new Error("no calls supplied");
+  for (const c of callsIn) {
+    if (!c.goal?.trim()) throw new Error(`call "${c.title}": goal required (goals are not persisted on production calls — supply one and record its source)`);
+    if (!c.transcript?.trim()) throw new Error(`call "${c.title}": transcript required`);
+  }
+  const run = await createRun("goal_return", [], { calls: callsIn.map(({ transcript, ...rest }) => ({ ...rest, transcriptChars: transcript.length })) });
+  void (async () => {
+    try {
+      const { checkBrainAvailability } = await import("./brainAvailability");
+      const { pickJudgeModel } = await import("./judge");
+      const { BRAIN_CANDIDATES } = await import("./candidates");
+      const {
+        parseTranscriptTurns, judgeGoalReturn, computeGoalReturnMetrics,
+        judgeDeliveredHints, computeHintMetrics, generateGoalReturnReport,
+      } = await import("./goalReturn");
+
+      const availability = await checkBrainAvailability();
+      const judgeModel = pickJudgeModel(BRAIN_CANDIDATES, availability);
+      if (!judgeModel) {
+        // Fail-closed: no available judge => the run fails loudly.
+        await finishRun(run.id, { status: "failed", availability: { brain: availability }, error: "no judge model available — goal-return analysis cannot run" });
+        return;
+      }
+
+      const reportInputs = [] as any[];
+      for (const c of callsIn) {
+        const turns = parseTranscriptTurns(c.transcript);
+        const notes: string[] = [];
+        let judgement = null;
+        let metrics = null;
+        let hintJudgement = null;
+        let hintMetrics = null;
+        if (turns.length === 0) {
+          notes.push("transcript parsed to zero turns — not scoreable");
+        } else {
+          judgement = await judgeGoalReturn(judgeModel, c.goal, turns).catch((e: any) => {
+            notes.push(`judge error: ${String(e?.message ?? e)}`);
+            return null;
+          });
+          if (judgement) metrics = computeGoalReturnMetrics(turns, judgement.labels);
+          else if (notes.length === 0) notes.push("judge returned no valid labeling (fail-closed)");
+          // Hint-level evaluation ONLY over explicit hint records.
+          if (Array.isArray(c.hints) && c.hints.length > 0) {
+            hintJudgement = await judgeDeliveredHints(judgeModel, c.goal, turns, c.hints).catch((e: any) => {
+              notes.push(`hint judge error: ${String(e?.message ?? e)}`);
+              return null;
+            });
+            if (hintJudgement) hintMetrics = computeHintMetrics(c.hints, hintJudgement.labels);
+            else notes.push("hint judge returned no valid labeling — hints unscored (fail-closed)");
+          }
+        }
+        reportInputs.push({
+          title: c.title, goal: c.goal, goalSource: c.goalSource, judgement, metrics, turns,
+          hintStats: c.hintStats ?? null, hints: c.hints ?? null, hintJudgement, hintMetrics, notes,
+        });
+      }
+
+      const report = generateGoalReturnReport(reportInputs);
+      await finishRun(run.id, {
+        status: "completed",
+        availability: { brain: availability },
+        results: {
+          judgeModel,
+          calls: reportInputs.map((r) => ({
+            title: r.title, goal: r.goal, goalSource: r.goalSource,
+            labels: r.judgement?.labels ?? null, rationale: r.judgement?.rationale ?? null,
+            metrics: r.metrics, hintStats: r.hintStats,
+            hints: r.hints, hintLabels: r.hintJudgement?.labels ?? null,
+            hintRationale: r.hintJudgement?.rationale ?? null, hintMetrics: r.hintMetrics,
+            notes: r.notes,
+          })),
+        },
+        scorecard: { calls: reportInputs.map((r) => ({ title: r.title, ...(r.metrics ?? { unscored: true }) })) },
         report,
       });
     } catch (e: any) {
