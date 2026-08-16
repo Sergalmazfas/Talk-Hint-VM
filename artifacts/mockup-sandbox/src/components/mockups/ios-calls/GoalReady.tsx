@@ -1,10 +1,9 @@
 import { Check } from "lucide-react";
-import { Screen, StatusBar, Header, TabBar, T } from "./_shared/Phone";
+import { Screen, Header, TabBar, T } from "./_shared/Phone";
 
 export function GoalReady() {
   return (
     <Screen>
-      <StatusBar />
       <Header />
       <div className="px-5">
         <div className="rounded-3xl border p-6 flex flex-col items-center text-center" style={{ borderColor: T.line, background: "#fff" }}>

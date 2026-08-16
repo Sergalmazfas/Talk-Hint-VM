@@ -29,7 +29,7 @@ export function StatusBar({ dark = false }: { dark?: boolean }) {
 
 export function Header() {
   return (
-    <div className="flex items-center justify-between px-5 pt-2 pb-3">
+    <div className="flex items-center justify-between px-5 pt-5 pb-3">
       <h1 className="text-[32px] font-bold tracking-tight" style={{ color: T.ink }}>Calls</h1>
       <Settings className="w-6 h-6" style={{ color: T.sub }} />
     </div>
@@ -134,7 +134,6 @@ export function Screen({ children, dark = false, dim = false }: { children: Reac
 export function CallsBase({ goalReady = false, number }: { goalReady?: boolean; number?: string }) {
   return (
     <>
-      <StatusBar />
       <Header />
       <NumberField value={number} goalReady={goalReady} />
       <Keypad />
