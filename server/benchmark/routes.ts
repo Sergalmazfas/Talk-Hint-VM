@@ -531,6 +531,7 @@ export function registerBenchmarkRoutes(app: Express) {
           latencySummary: latency?.summary ?? null,
           slaMs: latency?.slaMs ?? null,
           entries: latency?.entries ?? null,
+          hintUsage: meta.hintUsage ?? null,
         };
       });
       res.json({ calls: items });

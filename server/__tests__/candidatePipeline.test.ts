@@ -313,7 +313,7 @@ describe("websocket.ts suggestion_ack wiring (source guards)", () => {
     const idx = wsSrc.indexOf('latencyRecorder.ready(utteranceId, "wait_state")');
     expect(idx).toBeGreaterThan(-1);
     // sent() follows the wait-state uiBroadcast
-    expect(wsSrc.slice(idx, idx + 800)).toContain("latencyRecorder.sent(utteranceId)");
+    expect(wsSrc.slice(idx, idx + 800)).toContain("latencyRecorder.sent(utteranceId, ack.en)");
   });
 });
 

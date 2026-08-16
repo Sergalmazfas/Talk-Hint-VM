@@ -1207,6 +1207,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // The suggestion is what HON should say next; if HON already voiced essentially
     // the same thing recently, repeating it as a hint is pure noise.
     const recentOwnerUtterances: string[] = []; // Last few HON turns for self-overlap check
+    // Full owner-turn history WITH timestamps — feeds hint-usage matching at
+    // call finalization (which delivered hints did the owner actually speak).
+    const ownerTurnsTimed: { text: string; ts: number }[] = [];
     const RECENT_OWNER_MAX = 3;            // How many past HON turns to compare against
 
     // Anti-echo (cross-track) - same speech transcribed on BOTH tracks (mic/speaker bleed)
@@ -1723,7 +1726,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             utteranceId,
             callSid
           });
-          latencyRecorder.sent(utteranceId);
+          latencyRecorder.sent(utteranceId, ack.en);
           lastHintTs = Date.now();
           lastHintUtteranceId = utteranceId;
           log(`[WAIT_STATE] ACK shown - "Sure, I'll wait." - now blocking STEER`, "websocket");
@@ -1845,7 +1848,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           utteranceId,
           callSid
         });
-        latencyRecorder.sent(utteranceId);
+        latencyRecorder.sent(utteranceId, translated.suggestion.en);
         // Full reaction time: from end of guest's turn to the suggestion leaving the server.
         log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms suggestion_latency_ms=${suggestionMs} utteranceId=${utteranceId}`, "websocket");
       } else {
@@ -1873,6 +1876,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // Track recent HON turns for the self-overlap guard (don't re-suggest what HON just said)
       recentOwnerUtterances.push(text);
       if (recentOwnerUtterances.length > RECENT_OWNER_MAX) recentOwnerUtterances.shift();
+      ownerTurnsTimed.push({ text, ts: Date.now() });
       
       // Update GoalEngine
       if (goalEngine) {
@@ -2601,11 +2605,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           effective: sttSwapState === "none" ? null : (sttSwapState as "swapped" | "failed"),
           swapDelayMs: sttSwapDelayMs,
         };
+        const flushOwnerTurns = ownerTurnsTimed.slice();
         setTimeout(() => {
           unregisterLatencyRecorder(flushSid);
           if (latencyRecorder.count > 0) {
             void storage
-              .mergeCallMetadataByCallSid(flushSid, latencyRecorder.toMetadata(flushPipeline, flushSttInfo))
+              .mergeCallMetadataByCallSid(flushSid, latencyRecorder.toMetadata(flushPipeline, flushSttInfo, flushOwnerTurns))
               .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));
           }
         }, SUGGESTION_ACK_GRACE_MS);

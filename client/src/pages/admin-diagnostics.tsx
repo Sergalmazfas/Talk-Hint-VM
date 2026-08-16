@@ -2296,7 +2296,18 @@ interface VerdictCall {
     source?: string;
     outcome: "sent" | "dropped";
     dropReason?: string;
+    text?: string;
   }[] | null;
+  // Hint usage (Task #226): which delivered hints the owner actually spoke.
+  hintUsage?: {
+    delivered: number;
+    usedFull: number;
+    usedPartial: number;
+    ignored: number;
+    unknown: number;
+    usageRatePct: number | null;
+    entries: { utteranceId: number; verdict: "full" | "partial" | "ignored" | "unknown"; score: number; matchedOwnerText?: string }[];
+  } | null;
 }
 
 const PROD_SENTINEL = "__production__";
@@ -2472,6 +2483,14 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
                     </TableCell>
                     <TableCell className="text-xs">
                       {c.latencySummary!.hintsSent} отправлено / {c.latencySummary!.hintsDropped} без подсказки
+                      {c.hintUsage && (
+                        <div className="text-gray-400" data-testid={`text-usage-${c.callSid}`}>
+                          использовано: {c.hintUsage.usageRatePct == null ? "—" : `${c.hintUsage.usageRatePct}%`}
+                          {c.hintUsage.delivered > 0 && (
+                            <span className="text-gray-500"> ({c.hintUsage.usedFull} полн. / {c.hintUsage.usedPartial} част. / {c.hintUsage.ignored} игнор.{c.hintUsage.unknown > 0 ? ` / ${c.hintUsage.unknown} без текста` : ""})</span>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>{fmt(c.latencySummary!.totalP50Ms)}</TableCell>
                     <TableCell>{fmt(c.latencySummary!.totalP95Ms)}</TableCell>
@@ -2509,6 +2528,14 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
                             ))}
                           </div>
                         )}
+                        {c.hintUsage && c.hintUsage.delivered > 0 && (
+                          <div className="text-xs text-gray-300 mb-2" data-testid={`usage-summary-${c.callSid}`}>
+                            <span className="text-gray-500">Использование подсказок: </span>
+                            {c.hintUsage.usageRatePct == null ? "не измеримо (нет текста подсказок)" : `${c.hintUsage.usageRatePct}% произнесено`}
+                            {" — "}{c.hintUsage.usedFull} полностью, {c.hintUsage.usedPartial} частично, {c.hintUsage.ignored} игнорировано
+                            {c.hintUsage.unknown > 0 && `, ${c.hintUsage.unknown} без текста (старый звонок)`}
+                          </div>
+                        )}
                         {(c.latencySummary?.stageNotes?.length ?? 0) > 0 && (
                           <ul className="text-xs text-amber-400/80 list-disc ml-4 mb-2">
                             {c.latencySummary!.stageNotes!.map((n, i) => <li key={i}>{n}</li>)}
@@ -2527,11 +2554,19 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
                                 <TableHead className="text-xs">отправка→устройство</TableHead>
                                 <TableHead className="text-xs">e2e</TableHead>
                                 <TableHead className="text-xs">Источник / исход</TableHead>
+                                <TableHead className="text-xs">Подсказка / использование</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {c.entries.map((e) => {
                                 const d = (a?: number, b?: number) => (a != null && b != null ? `${b - a} мс` : "—");
+                                const usage = c.hintUsage?.entries?.find((u) => u.utteranceId === e.utteranceId);
+                                const verdictLabel = usage
+                                  ? { full: "произнесена", partial: "частично", ignored: "игнорирована", unknown: "нет текста" }[usage.verdict]
+                                  : null;
+                                const verdictColor = usage
+                                  ? { full: "text-green-400", partial: "text-yellow-400", ignored: "text-gray-500", unknown: "text-gray-600" }[usage.verdict]
+                                  : "";
                                 return (
                                   <TableRow key={e.utteranceId} className="text-xs">
                                     <TableCell>{e.utteranceId}</TableCell>
@@ -2542,6 +2577,23 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
                                     <TableCell>{d(e.sttFinalAt, e.deliveredAt)}</TableCell>
                                     <TableCell className="text-gray-400">
                                       {e.outcome === "sent" ? (e.source ?? "—") : `drop: ${e.dropReason ?? "?"}`}
+                                    </TableCell>
+                                    <TableCell className="max-w-[280px]">
+                                      {e.outcome !== "sent" ? (
+                                        <span className="text-gray-600">—</span>
+                                      ) : (
+                                        <div>
+                                          {e.text && <div className="text-gray-300 truncate" title={e.text}>«{e.text}»</div>}
+                                          {usage && (
+                                            <div className={verdictColor}>
+                                              {verdictLabel}{usage.verdict !== "unknown" && ` (${Math.round(usage.score * 100)}%)`}
+                                              {usage.matchedOwnerText && (
+                                                <span className="text-gray-500 block truncate" title={usage.matchedOwnerText}>→ {usage.matchedOwnerText}</span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                     </TableCell>
                                   </TableRow>
                                 );

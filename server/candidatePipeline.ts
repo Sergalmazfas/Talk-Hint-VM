@@ -11,6 +11,7 @@
 // candidate call against baseline calls.
 
 import WebSocket from "ws";
+import { computeHintUsage, type OwnerTurn } from "./hintUsage";
 
 // ---------------------------------------------------------------------------
 // Allowed candidate ids — kept in lockstep with the benchmark candidate lists
@@ -296,6 +297,8 @@ export interface HintLatencyEntry {
   source?: string; // library | gpt | ...
   outcome: "sent" | "dropped";
   dropReason?: string;
+  /** English hint text as delivered — required for hint-usage matching. */
+  text?: string;
 }
 
 function percentile(sorted: number[], p: number): number | null {
@@ -396,11 +399,14 @@ export class LiveLatencyRecorder {
       if (source) e.source = source;
     }
   }
-  sent(utteranceId: number): void {
+  sent(utteranceId: number, text?: string): void {
     const e = this.byUtterance.get(utteranceId);
     if (e) {
       e.sentAt = Date.now();
       e.outcome = "sent";
+      // Delivered hint text, kept for usage matching. Bounded so metadata
+      // never balloons; absence stays honest (entry counts as "unknown").
+      if (text) e.text = text.slice(0, 500);
     }
   }
   /** Device (web UI / iPhone) confirmed rendering the suggestion. First ack wins. */
@@ -422,9 +428,12 @@ export class LiveLatencyRecorder {
    */
   toMetadata(
     pipeline: CandidatePipelineConfig,
-    sttInfo?: { effective: "swapped" | "failed" | null; swapDelayMs: number | null }
+    sttInfo?: { effective: "swapped" | "failed" | null; swapDelayMs: number | null },
+    ownerTurns?: OwnerTurn[]
   ): Record<string, unknown> {
     return {
+      // Which delivered hints the owner actually spoke (Brain quality metric).
+      hintUsage: computeHintUsage(this.entries, ownerTurns ?? []),
       candidatePipeline: {
         enabled: pipeline.enabled,
         stt: pipeline.enabled ? pipeline.stt : null,
