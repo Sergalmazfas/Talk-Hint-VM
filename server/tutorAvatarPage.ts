@@ -186,6 +186,13 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   .tutorChip .tName{font-size:12px;font-weight:700;color:#29252f}
   .tutorChip.sel{border-color:#7c3aed;background:#f3ecfd}
   #simSheet h3{font-size:19px;font-weight:800;margin-bottom:10px;text-align:center}
+  /* Voice-driven setup: speak the goal, fields fill themselves */
+  #simVoiceRow{display:flex;align-items:center;gap:12px;background:#f5efff;border-radius:16px;padding:10px 12px;margin-bottom:4px}
+  #simVoiceBtn{flex:0 0 46px;width:46px;height:46px;border:0;border-radius:50%;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center}
+  #simVoiceBtn.rec{background:#e0245e;animation:pulse 1.2s infinite}
+  #simVoiceBtn:disabled{opacity:.5}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(224,36,94,.4)}70%{box-shadow:0 0 0 12px rgba(224,36,94,0)}100%{box-shadow:0 0 0 0 rgba(224,36,94,0)}}
+  #simVoiceHint{font-size:13px;line-height:1.35;color:#5c5663}
   #simSheet label{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a8792;margin:12px 0 5px}
   #simSheet input,#simSheet textarea,#simSheet select{width:100%;background:#fff;border:1px solid #e5e0e9;border-radius:14px;color:#29252f;padding:11px 12px;font-size:14px;font-family:inherit}
   #simSheet textarea{min-height:64px;resize:vertical}
@@ -303,6 +310,10 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
 <div id="simSheet" class="sheet">
   <div class="grab"></div>
   <h3></h3>
+  <div id="simVoiceRow">
+    <button id="simVoiceBtn" aria-label="speak your goal">${svg("mic", 21)}</button>
+    <div id="simVoiceHint"></div>
+  </div>
   <label id="lSimGoal"></label><textarea id="simGoal" maxlength="500"></textarea>
   <label id="lSimEmma"></label><input id="simEmma" maxlength="120"/>
   <label id="lSimYou"></label><input id="simYou" maxlength="120"/>
@@ -385,6 +396,11 @@ const L = RU ? {
   mMute: "Звук Emma", mEnd: "Завершить практику",
   mTutor: "Репетитор", tutorTitle: "Выберите репетитора", tutorDone: "Готово",
   tutorApplyNext: "Применится в следующей практике",
+  simVoiceHint: "Нажмите и скажите цель звонка — поля заполнятся сами",
+  simVoiceRec: "Слушаю… нажмите ещё раз, когда закончите",
+  simVoiceThink: "Готовлю симуляцию…",
+  simVoiceNoMic: "Нет доступа к микрофону",
+  simVoiceEmpty: "Не расслышала — попробуйте ещё раз",
   on: "Вкл", off: "Выкл",
   tutorPrefix: "Репетитор ",
   stLive: "Live", stListen: "Слушаю", stThink: "Думает", stSpeak: "Говорит",
@@ -436,6 +452,11 @@ const L = RU ? {
   mMute: "Emma's voice", mEnd: "End practice",
   mTutor: "Tutor", tutorTitle: "Choose your tutor", tutorDone: "Done",
   tutorApplyNext: "Will apply to your next practice",
+  simVoiceHint: "Tap and say the goal of the call — the fields fill themselves",
+  simVoiceRec: "Listening… tap again when you're done",
+  simVoiceThink: "Preparing your simulation…",
+  simVoiceNoMic: "Microphone access denied",
+  simVoiceEmpty: "Didn't catch that — try again",
   on: "On", off: "Off",
   tutorPrefix: "Tutor ",
   stLive: "Live", stListen: "Listening", stThink: "Thinking", stSpeak: "Speaking",
@@ -467,7 +488,7 @@ const api = async (path, opts={}) => {
   const r = await fetch(path, { ...opts, headers: { "Authorization": "Bearer " + AUTH, "Content-Type": "application/json", ...(opts.headers||{}) } });
   if (!r.ok) {
     const body = await r.json().catch(()=>({}));
-    const err = new Error(body.message || ("HTTP "+r.status));
+    const err = new Error(body.message || (typeof body.error === "string" && body.error.indexOf(" ") > 0 ? body.error : "HTTP "+r.status));
     err.code = body.error || null; // backend error code (e.g. simulation fail-closed table)
     throw err;
   }
@@ -693,7 +714,7 @@ function openQuitSheet() {
 }
 function closeQuitSheet() { document.body.classList.remove("sheet-quit"); }
 document.getElementById("continueBtn").onclick = closeQuitSheet;
-document.getElementById("sheetBackdrop").onclick = () => { closeQuitSheet(); closeAttach(); closeTutorSheet(); };
+document.getElementById("sheetBackdrop").onclick = () => { closeQuitSheet(); closeAttach(); closeTutorSheet(); if (typeof stopSimRecording === "function") stopSimRecording(true); };
 document.getElementById("xBtn").onclick = () => {
   if (!sessionId) { notifyNative({ event: "closeRequested" }); return; }
   openQuitSheet();
@@ -1319,6 +1340,85 @@ function openStartChoice() {
   document.body.classList.remove("sheet-sim");
   document.body.classList.add("sheet-start");
 }
+
+// ---- Voice-driven simulation setup ("как Talk-In"): tap the mic, say the
+// goal, STT (our /api/prepare/stt) + gpt-5.6-sol (/api/tutor/sim-prepare)
+// fill the form, the confirmation question shows in simStatus, and the user
+// just taps Start. Fields stay editable — voice is a shortcut, not a cage.
+const simVoiceBtn = document.getElementById("simVoiceBtn");
+const simVoiceHint = document.getElementById("simVoiceHint");
+simVoiceHint.textContent = L.simVoiceHint;
+let simRec = null, simRecChunks = [], simRecStream = null, simRecTimer = null;
+// Hard stop: recorder, mic tracks, UI state. Called from Back / backdrop /
+// errors so the microphone can NEVER stay hot after the sheet is gone.
+function stopSimRecording(discard) {
+  if (simRecTimer) { clearTimeout(simRecTimer); simRecTimer = null; }
+  if (simRec && simRec.state === "recording") {
+    if (discard) simRec.onstop = null; // leaving the sheet: drop the take
+    try { simRec.stop(); } catch (e) {}
+  }
+  if (discard && simRecStream) { simRecStream.getTracks().forEach((t) => t.stop()); simRecStream = null; }
+  if (discard) { simVoiceBtn.classList.remove("rec"); simVoiceHint.textContent = L.simVoiceHint; }
+}
+simVoiceBtn.onclick = async () => {
+  if (simRec && simRec.state === "recording") { stopSimRecording(false); return; }
+  if (typeof MediaRecorder === "undefined") { simStatus.textContent = L.simVoiceNoMic; return; }
+  let ms;
+  try { ms = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { simStatus.textContent = L.simVoiceNoMic; return; }
+  simRecStream = ms;
+  simRecChunks = [];
+  try {
+    const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm"
+      : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
+    simRec = mime ? new MediaRecorder(ms, { mimeType: mime }) : new MediaRecorder(ms);
+  } catch (e) {
+    ms.getTracks().forEach((t) => t.stop()); simRecStream = null;
+    simStatus.textContent = L.simVoiceNoMic; return;
+  }
+  simRec.ondataavailable = (e) => { if (e.data && e.data.size) simRecChunks.push(e.data); };
+  simRec.onstop = async () => {
+    if (simRecTimer) { clearTimeout(simRecTimer); simRecTimer = null; }
+    ms.getTracks().forEach((t) => t.stop()); simRecStream = null;
+    simVoiceBtn.classList.remove("rec");
+    simVoiceBtn.disabled = true;
+    simVoiceHint.textContent = L.simVoiceThink;
+    try {
+      const blob = new Blob(simRecChunks, { type: simRec.mimeType || mime || "audio/webm" });
+      const b64 = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(String(fr.result).split(",")[1] || "");
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+      const stt = await api("/api/prepare/stt", { method: "POST", body: JSON.stringify({ audio: b64, mimeType: blob.type }) });
+      const said = (stt.text || "").trim();
+      if (!said) { simStatus.textContent = L.simVoiceEmpty; return; }
+      const prep = await api("/api/tutor/sim-prepare", { method: "POST", body: JSON.stringify({ text: said }) });
+      if (prep.goal) document.getElementById("simGoal").value = prep.goal;
+      if (prep.tutorRole) document.getElementById("simEmma").value = prep.tutorRole;
+      if (prep.learnerRole) document.getElementById("simYou").value = prep.learnerRole;
+      // Her confirmation ("Цель: … Верно?") — user answers by tapping Start
+      // (or re-recording / editing the fields).
+      simStatus.textContent = prep.confirm || "";
+    } catch (e) {
+      simStatus.textContent = e.message || String(e);
+    } finally {
+      simVoiceBtn.disabled = false;
+      simVoiceHint.textContent = L.simVoiceHint;
+    }
+  };
+  try { simRec.start(); } catch (e) {
+    ms.getTracks().forEach((t) => t.stop()); simRecStream = null;
+    simStatus.textContent = L.simVoiceNoMic; return;
+  }
+  simVoiceBtn.classList.add("rec");
+  simVoiceHint.textContent = L.simVoiceRec;
+  simStatus.textContent = "";
+  // Safety bound: auto-stop after 90s so a forgotten recording can't grow
+  // unbounded (the STT route rejects >24 MiB anyway — fail early instead).
+  simRecTimer = setTimeout(() => stopSimRecording(false), 90000);
+};
 let memsLoaded = false;
 async function openSimSheet(statusText) {
   document.body.classList.remove("sheet-start");
@@ -1394,7 +1494,7 @@ function renderTutorRow() {
 
 freeBtn.onclick = () => { document.body.classList.remove("sheet-start"); connect(null); };
 simBtn.onclick = () => openSimSheet("");
-document.getElementById("simBackBtn").onclick = openStartChoice;
+document.getElementById("simBackBtn").onclick = () => { stopSimRecording(true); openStartChoice(); };
 document.getElementById("simStartBtn").onclick = () => {
   const goal = document.getElementById("simGoal").value.trim();
   const tutorRole = document.getElementById("simEmma").value.trim();

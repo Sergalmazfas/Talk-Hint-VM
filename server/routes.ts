@@ -2959,6 +2959,86 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  // Voice-driven Call Simulation setup (tutor page): the user SPEAKS the goal
+  // ("как Talk-In"), we turn it into the simulation form fields. Single-shot,
+  // stateless — no per-user conversation like PREPARE. Same brain policy:
+  // OpenAI gpt-5.6-sol via /v1/responses, honest error, no silent fallback.
+  // Per-user limiter: each request invokes the paid Sol model (plus the STT
+  // call the client chains before it), so cap the per-minute burn.
+  const simPrepareHits = new Map<string, number[]>();
+  const SIM_PREPARE_LIMIT = 6; // requests per user per minute
+  app.post("/api/tutor/sim-prepare", authMiddleware, async (req, res) => {
+    try {
+      const uid = req.user?.id || "unknown";
+      const now = Date.now();
+      const hits = (simPrepareHits.get(uid) || []).filter((t) => now - t < 60_000);
+      if (hits.length >= SIM_PREPARE_LIMIT) {
+        return res.status(429).json({ error: "Слишком часто — подождите минуту и попробуйте снова" });
+      }
+      hits.push(now);
+      simPrepareHits.set(uid, hits);
+
+      const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+      if (!text) return res.status(400).json({ error: "No text provided" });
+      if (text.length > 2000) return res.status(413).json({ error: "Text too long" });
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "OpenAI API key not configured" });
+
+      const instructions = [
+        "You turn a user's spoken description of an upcoming phone call into call-simulation parameters.",
+        "The user speaks Russian, English, Spanish, or a mix. The simulation goal and roles must be in ENGLISH (the practice call is in English).",
+        "Output STRICT JSON only, no markdown, with exactly these keys:",
+        '{"goal":"<the goal of the call, English, one sentence>",',
+        '"tutor_role":"<who the OTHER side is, English, short — e.g. clinic receptionist>",',
+        '"learner_role":"<the user\'s role, English, short, or "" if just the caller>",',
+        '"confirm":"<one short confirmation question IN RUSSIAN restating the goal and who the tutor will play, ending with Верно?>"}',
+        "If the utterance has no discernible call goal, output {\"goal\":\"\",\"tutor_role\":\"\",\"learner_role\":\"\",\"confirm\":\"<ask in Russian what call they want to practice>\"}.",
+        "Never invent facts the user did not say; infer the counterpart role only when it is obvious from the goal.",
+      ].join("\n");
+
+      const resp = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-5.6-sol",
+          instructions,
+          input: [{ role: "user", content: text }],
+          max_output_tokens: 600,
+        }),
+      });
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => "");
+        console.error("[SimPrepare] OpenAI error:", resp.status, errorText.slice(0, 300));
+        return res.status(502).json({ error: `Подготовка симуляции недоступна (HTTP ${resp.status})` });
+      }
+      const data = await resp.json() as any;
+      let out = "";
+      for (const item of data.output ?? []) {
+        if (item.type === "message") {
+          for (const c of item.content ?? []) {
+            if (c.type === "output_text" && typeof c.text === "string") out += c.text;
+          }
+        }
+      }
+      let parsed: any;
+      try {
+        parsed = JSON.parse(out.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, ""));
+      } catch {
+        console.error("[SimPrepare] Unparseable model output:", out.slice(0, 200));
+        return res.status(502).json({ error: "Модель вернула нечитаемый ответ — попробуйте ещё раз" });
+      }
+      res.json({
+        goal: typeof parsed.goal === "string" ? parsed.goal.trim() : "",
+        tutorRole: typeof parsed.tutor_role === "string" ? parsed.tutor_role.trim() : "",
+        learnerRole: typeof parsed.learner_role === "string" ? parsed.learner_role.trim() : "",
+        confirm: typeof parsed.confirm === "string" ? parsed.confirm.trim() : "",
+      });
+    } catch (error: any) {
+      console.error("[SimPrepare] Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // STT endpoint for training mode - accepts audio and returns transcribed text
   app.post("/training/stt", authMiddleware, async (req, res) => {
     try {
