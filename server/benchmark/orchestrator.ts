@@ -220,6 +220,7 @@ export async function startGoalReturnRun(callsIn: GoalReturnRunCall[]): Promise<
           calls: reportInputs.map((r) => ({
             title: r.title, goal: r.goal, goalSource: r.goalSource,
             labels: r.judgement?.labels ?? null, rationale: r.judgement?.rationale ?? null,
+            turns: r.turns ?? null,
             metrics: r.metrics, hintStats: r.hintStats,
             hints: r.hints, hintLabels: r.hintJudgement?.labels ?? null,
             hintRationale: r.hintJudgement?.rationale ?? null, hintMetrics: r.hintMetrics,
