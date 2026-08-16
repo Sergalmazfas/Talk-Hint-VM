@@ -22,6 +22,7 @@
 - [Tutor catalog is dynamic](tutor-catalog-dynamic.md) — tutors come from engine GET /tutors at runtime, never hardcode ids; GLB Cache API per tutor_id+asset_version; tn() name substitution.
 - [Goal-driven simulation contract](tutor-simulation-contract.md) — fail-closed create (no practice fallback, echo verified), opening-turn mic gate; v1 not yet deployed at engine base; group_id/version source unconfirmed.
 - [Tutor Engine contract testing](tutor-engine-contract-testing.md) — consumer contract doc + frozen fixtures + live probe; canonical tutor.suggested_reply, no silent alias success; probe must be bounded + status-exact.
+- [Local prod-boot testing](prod-boot-local-testing.md) — NEVER run dist build locally without DISABLE_AUTO_WEBHOOK_REPOINT=true (it hijacks live Twilio webhooks to dev); ready-wait failure w/o logs = platform, retry.
 - [Publish gating via build script](publish-gating.md) — no publish hook exists; mandatory pre-publish checks must run inside script/build.ts and exit non-zero to block deploy.
 - [Tutor compat handshake](tutor-compat-handshake.md) — fail-closed contract check inside createTutorSession; unverifiable metadata/outage refuses the lesson, never fail-open.
 - [Ears & Brain benchmark bench](benchmark-bench.md) — separate admin layer, fail-closed availability (no silent substitution); OpenAI credits exhausted blocked Run #1; realtime STT now provisioned via client_secrets.
