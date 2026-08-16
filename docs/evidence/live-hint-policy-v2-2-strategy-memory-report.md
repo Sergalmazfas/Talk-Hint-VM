@@ -2,7 +2,7 @@
 
 Task #236. Date: 2026-08-16.
 
-## Verdict: PASS (code + tests + live model smoke) / real-call production acceptance PENDING deploy
+## Verdict: PASS (code + tests + live model smoke) / real-call production acceptance PENDING first post-deploy call
 
 ## 1. What changed
 
@@ -44,15 +44,46 @@ v2.1 Terra saw conversation history, GOAL and context — but never its own prev
 
 Latency 1030–1564 ms vs accepted v2.1 baseline (prod p50 = 1501 ms, p90 = 1782 ms): **no regression** — the memory block adds ≤ ~150 tokens; `reasoning_effort:"none"` profile unchanged.
 
-## 5. Production acceptance — PENDING deploy (fill in after a real call)
-Compare against the accepted v2.1 baseline (p50 1501 / p90 1782, usage full 46% / partial 8% / ignored 46%, invented-state 0):
-- [ ] hint usage full/partial/ignored; repeated hints; avg hint length
-- [ ] invented-state violations (must be 0 — incl. suggested-but-unspoken content asserted as fact)
-- [ ] DIRECT/CHOICE/USER_INPUT/STRATEGIC distribution
-- [ ] BRAIN p50/p95, e2e p50/p95; one Terra call per Guest turn (from `[HINT]` logs)
-- [ ] **strategy-repeat rate**: times Brain repeated an already-used/failed strategy without cause
-- [ ] **successful-follow-through**: next hint logically continues the previous exchange's result
-PASS only if: invented-state = 0, single Terra call preserved, no material latency regression, replay/production shows Brain distinguishes suggested vs actually said and uses Guest reaction for the next step. After PASS — stop and review a real call before going further.
+## 5. Production acceptance — PENDING (no real calls with Strategy Memory active yet)
+
+**Status as of 2026-08-16:** Strategy Memory (Task #236) was deployed on 2026-08-16. The most recent production calls in the database are from 2026-08-15 (before deployment). No real post-deploy call data exists yet, so no PASS/FAIL verdict can be issued.
+
+### Pre-acceptance simulation (supporting evidence only — not the acceptance gate)
+
+Script `scripts/prod-acceptance-250.ts` ran an 8-turn scripted scenario using the real `StrategyMemoryTracker`, real `buildLiveSystemPrompt`, and real **gpt-5.6-terra**. This exercises the Brain prompt path but NOT the STT/Twilio/WebSocket delivery pipeline.
+
+Key simulation results (for reference when comparing against the real call):
+- **Strategy-repeat rate: 0/7 turns** — Brain adapted every turn after a rejection (loyalty → supervisor → written docs → credit on invoice)
+- **Latency T2–T8: 1613–2040 ms** (T1 = 2721 ms TCP cold-start)
+- **All 8 hints grounded in goal/conversation** — no invented facts observed
+- **Hint type: strategic × 8** (appropriate for multi-objection negotiation)
+
+### Acceptance criteria for the first real post-deploy call
+
+Compare against accepted v2.1 baseline (p50 1501 ms / p90 1782 ms; usage full 46% / partial 8% / ignored 46%; invented-state 0):
+
+- [ ] **hint usage full/partial/ignored**: collect from `[HINT]` server logs + calls.metadata.hintUsage at call end
+- [ ] **invented-state violations = 0**: manually review each delivered hint for unspoken content asserted as fact
+- [ ] **DIRECT/CHOICE/USER_INPUT/STRATEGIC distribution**: from `[HINT]` logs (suggestionType field)
+- [ ] **BRAIN p50/p95, e2e p50/p95**: from `[TIMING]` and `[HINT] suggestion_latency_ms` log lines
+- [ ] **One Terra call per Guest turn**: confirm no duplicate `[HINT]` entries per utteranceId
+- [ ] **strategy-repeat rate**: after a hint is ignored/rejected, does the NEXT hint reuse the same core approach? (0 repeats = PASS)
+- [ ] **successful-follow-through**: after a hint is used (full/partial), does the NEXT hint logically continue from the result rather than restart?
+
+PASS requires: invented-state = 0, strategy-repeat rate = 0 or near-0, single Terra call preserved, no material latency regression vs baseline.
+
+### How to collect log evidence from a real call
+
+```bash
+# On the production server, after a call completes:
+grep '\[HINT\]' /path/to/app.log | grep <callSid>
+grep '\[TIMING\]' /path/to/app.log | grep <callSid>
+
+# In the database after call finalization:
+SELECT metadata->'hintLatency'->'summary' FROM calls WHERE call_sid = '<callSid>';
+```
+
+Fill in the checklist above and update the top-level Verdict when a real call is available.
 
 ## 6. Notes / residual
 - Library fast-path hits are RECORDED into memory (user saw them) but the canned line itself is not memory-aware — it bypasses the LLM by design (unchanged v2.1 behavior).
