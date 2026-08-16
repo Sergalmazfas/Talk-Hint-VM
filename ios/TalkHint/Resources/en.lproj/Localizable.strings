@@ -111,6 +111,7 @@
 "history.empty" = "No calls yet";
 "history.unknown" = "Unknown";
 "home.title" = "Calls";
+"home.prepare" = "Prepare";
 "home.enter_number" = "Enter number";
 "home.goal_ready" = "Goal ready ✓";
 "home.call" = "Call";

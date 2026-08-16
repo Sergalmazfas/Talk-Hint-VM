@@ -58,9 +58,34 @@ final class HomeViewController: UIViewController {
         gear.accessibilityIdentifier = "button-open-settings"
         gear.addTarget(self, action: #selector(settingsTapped), for: .touchUpInside)
 
-        let header = UIStackView(arrangedSubviews: [titleLabel, UIView(), gear])
+        // Always-visible Prepare entry in the header (centered pill): the
+        // in-field sparkle can get replaced/squeezed while dialing, so this is
+        // the stable way into call preparation.
+        var prepConfig = UIButton.Configuration.filled()
+        prepConfig.image = UIImage(systemName: "sparkles")
+        prepConfig.imagePadding = 6
+        prepConfig.baseBackgroundColor = Theme.purple.withAlphaComponent(0.12)
+        prepConfig.baseForegroundColor = Theme.purple
+        prepConfig.cornerStyle = .capsule
+        prepConfig.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 12, bottom: 7, trailing: 12)
+        prepConfig.attributedTitle = AttributedString(
+            NSLocalizedString("home.prepare", comment: ""),
+            attributes: AttributeContainer([.font: UIFont.systemFont(ofSize: 14, weight: .semibold)]))
+        let headerPrepare = UIButton(configuration: prepConfig)
+        headerPrepare.accessibilityIdentifier = "button-prepare-call-header"
+        headerPrepare.addTarget(self, action: #selector(prepareTapped), for: .touchUpInside)
+        headerPrepare.setContentHuggingPriority(.required, for: .horizontal)
+        headerPrepare.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let spacerL = UIView()
+        let spacerR = UIView()
+        let header = UIStackView(arrangedSubviews: [titleLabel, spacerL, headerPrepare, spacerR, gear])
         header.axis = .horizontal
         header.alignment = .center
+        header.spacing = 8
+        // Equal-width spacers keep the pill visually centered between the
+        // title and the gear (a plain .fill stack splits them arbitrarily).
+        spacerL.widthAnchor.constraint(equalTo: spacerR.widthAnchor).isActive = true
 
         // Number field card.
         let fieldCard = UIView()

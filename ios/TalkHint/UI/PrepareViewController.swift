@@ -99,6 +99,16 @@ final class PrepareViewController: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(keyboardWillChange(_:)),
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+
+        // Tap anywhere on the chat feed to dismiss the keyboard (it otherwise
+        // has no way down: return sends, and short feeds can't drag-dismiss).
+        let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        tap.cancelsTouchesInView = false
+        scrollView.addGestureRecognizer(tap)
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {

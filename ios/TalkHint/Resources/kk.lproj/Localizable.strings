@@ -111,6 +111,7 @@
 "history.empty" = "Әзірге қоңыраулар жоқ";
 "history.unknown" = "Белгісіз";
 "home.title" = "Қоңыраулар";
+"home.prepare" = "Дайындық";
 "home.enter_number" = "Нөмірді енгізіңіз";
 "home.goal_ready" = "Мақсат дайын ✓";
 "home.call" = "Қоңырау шалу";

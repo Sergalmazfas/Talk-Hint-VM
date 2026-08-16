@@ -111,6 +111,7 @@
 "history.empty" = "Пока нет звонков";
 "history.unknown" = "Неизвестно";
 "home.title" = "Звонки";
+"home.prepare" = "Подготовка";
 "home.enter_number" = "Введите номер";
 "home.goal_ready" = "Цель готова ✓";
 "home.call" = "Позвонить";
