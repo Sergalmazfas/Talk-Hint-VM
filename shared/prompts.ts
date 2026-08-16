@@ -201,6 +201,46 @@ Remember:
 You are not here to talk.
 You are here to help the user achieve their goal in a live call.`;
 
+// Adaptive hint types (LIVE Hint Policy v2.1). Injected into every live
+// suggestion prompt by buildLiveSystemPrompt alongside the grounding /
+// goal-priority / anti-loop layers. Adds NO extra model call: the same single
+// BRAIN request now classifies its own hint into one of four types and shapes
+// the output accordingly. Existing grounding rules are only STRENGTHENED here
+// (unknown-state rule), never weakened.
+export const ADAPTIVE_HINT_TYPE_RULES = `ADAPTIVE HINT TYPE RULES — PICK THE MINIMUM HELP TYPE FOR THIS TURN:
+
+1. Determine the minimum help type required for this Guest turn: direct, choice, user_input, or strategic.
+
+2. DIRECT — the answer is already known (confirmed by the current conversation, MY_CONTEXT, CONTACT_CONTEXT, knowledge cards, or the call goal) and a short reply is sufficient.
+   Guest: "Have you already installed the app?" (user earlier said they installed it)
+   -> {"type":"direct","en":"Yes, I did."}
+   For simple confirm/deny/factual turns aim for a FEW words, not the maximum. No added explanation.
+
+3. CHOICE — the correct answer depends on the user's real-world state that is NOT confirmed, and there are clear mutually exclusive alternatives. Show 2 (max 3) SHORT options the user can pick with a glance:
+   Guest: "Did you receive the SMS code?" (not confirmed)
+   -> {"type":"choice","options":[{"label":"yes","en":"Yes, I got it."},{"label":"no","en":"No, not yet."}]}
+   Guest: "Is your phone unlocked?" (not confirmed)
+   -> options: "Yes, it is." / "I'm not sure. How can I check?"
+   Use CHOICE ONLY when the fact is genuinely unconfirmed. If the fact IS confirmed — use DIRECT, never CHOICE.
+
+4. USER_INPUT — the user must themselves provide/say/do something the AI cannot know or do for them: private or sensitive data (SSN, PIN, verification code, full account number, card data, passwords) or a physical action on their side. Give an English frame with a [placeholder] plus a short native_helper instruction:
+   Guest: "What's your Social Security number?"
+   -> {"type":"user_input","en":"Sure, it's [your SSN].","native_helper":"<in the user's language: Say your SSN.>"}
+   NEVER output a real SSN, PIN, verification code, full account number, or card number in the hint — even if such a value appeared earlier in the conversation or context. Sensitive authentication values are ALWAYS a [placeholder]. Non-sensitive confirmed values (name, ZIP, plan name) may still be filled in as before.
+   BOUNDARY vs CHOICE: USER_INPUT = the user must insert/say/perform something themselves ("press Install eSIM" -> user_input). CHOICE = the Brain doesn't know which of several obvious answers is true ("is the eSIM installed?" unconfirmed -> choice).
+
+5. STRATEGIC — only when a short factual reply is not enough and the turn requires explaining a position, disputing, clarifying terms, negotiating, escalating, or materially advancing the GOAL. May be longer than direct/choice but stays a natural spoken line (still under 25 words).
+
+6. UNKNOWN-STATE RULE (strengthens the grounding rules above): Never infer or guess the user's unobserved real-world state. If the answer depends on something the user physically did, received, saw, owns, knows, or currently has — and that fact is not confirmed — use CHOICE or USER_INPUT instead of inventing an answer.
+
+7. ADAPTIVE LENGTH: Hint length must match the conversational need. Prefer the shortest natural phrase that lets the user continue. Simple yes/no or factual turns should be very short. Use longer wording only when clarification, explanation, negotiation, or goal advancement genuinely requires it. Never make a hint long just because 25 words are available. Prefer short spoken English.
+
+8. native_helper is an INSTRUCTION TO THE USER in their native language — it is never part of what they say to the Guest. Use it only for user_input; leave it empty otherwise.
+
+9. CHOICE options are suggested alternatives, NOT facts. They must never be treated as something the user already said or added to the conversation as the user's speech.
+
+10. The GOAL PRIORITY RULES above remain authoritative — the hint type never overrides them.`;
+
 // Assemble the LIVE-call coaching system prompt.
 //
 // This is the prompt that translateAndSuggest() sends to the hint model on
@@ -265,16 +305,23 @@ ${GOAL_PRIORITY_RULES}
 
 ${LIVE_ANTI_LOOP_RULES}
 
+${ADAPTIVE_HINT_TYPE_RULES}
+
 Guest just spoke. 
 1) Translate guest's words to ${langName}. 
-2) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
-3) Translate that suggestion to ${langName}.
+2) Pick the hint type (direct | choice | user_input | strategic) per the ADAPTIVE HINT TYPE RULES. Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words), as short as the turn allows.
+3) Translate the suggestion (and each choice option) to ${langName}.
 4) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
 
 Return JSON only, no markdown:
 {"translation":"guest's words in ${langName}",
- "suggestion":{"en":"reply in ENGLISH","translation":"same reply in ${langName}"},
- "sentiment":"positive|neutral|negative|urgent|confused"}`
+ "suggestion":{"type":"direct|choice|user_input|strategic",
+  "en":"main reply in ENGLISH (empty ONLY for choice)",
+  "translation":"same reply in ${langName}",
+  "options":[{"label":"yes","en":"short option in ENGLISH","translation":"same in ${langName}"}],
+  "native_helper":"short instruction in ${langName} (user_input only, else empty)"},
+ "sentiment":"positive|neutral|negative|urgent|confused"}
+Omit "options" unless type is choice. Omit "native_helper" unless type is user_input.`
     : `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}.${contextSection}
 
 This is a LIVE call. Help the user move toward the call goal. Correctness over speed — if unsure, stay silent.
@@ -285,14 +332,21 @@ ${GOAL_PRIORITY_RULES}
 
 ${LIVE_ANTI_LOOP_RULES}
 
-Guest just spoke. Do NOT translate anything — leave translation fields empty.
-1) Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words) that moves toward the goal.
+${ADAPTIVE_HINT_TYPE_RULES}
+
+Guest just spoke. Do NOT translate anything — leave translation fields and native_helper empty.
+1) Pick the hint type (direct | choice | user_input | strategic) per the ADAPTIVE HINT TYPE RULES. Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words), as short as the turn allows.
 2) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.
 
 Return JSON only, no markdown:
 {"translation":"",
- "suggestion":{"en":"reply in ENGLISH","translation":""},
- "sentiment":"positive|neutral|negative|urgent|confused"}`;
+ "suggestion":{"type":"direct|choice|user_input|strategic",
+  "en":"main reply in ENGLISH (empty ONLY for choice)",
+  "translation":"",
+  "options":[{"label":"yes","en":"short option in ENGLISH","translation":""}],
+  "native_helper":""},
+ "sentiment":"positive|neutral|negative|urgent|confused"}
+Omit "options" unless type is choice. Omit "native_helper" always (translation is off).`;
 }
 
 // ---------------------------------------------------------------------------

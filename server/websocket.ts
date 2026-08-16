@@ -39,6 +39,7 @@ import { HintCarryover } from "./hintCarryover";
 import { prepareMessage, clearPrepareState, clearOpeningDedup, PrepareUnavailableError } from "./prepare";
 import { handlePrepareConfirmGoal } from "./prepareConfirm";
 import { SuggestionDedupGuard } from "./hintDedup";
+import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -278,7 +279,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
 async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true, tutorMemory: string = "", modelOverride?: string): Promise<{
   translation: string;
   explanation?: string;
-  suggestion?: { en: string; translation: string };
+  suggestion?: NormalizedSuggestion;
   sentiment?: { sentiment: 'positive' | 'neutral' | 'negative'; score: number };
   providerUsed?: string;
 }> {
@@ -324,14 +325,11 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
         : (sentimentRaw === "urgent" || sentimentRaw === "confused")
           ? "negative"
           : undefined;
-      let suggestion = parsed.suggestion || undefined;
-      if (suggestion) {
-        suggestion = {
-          ...suggestion,
-          en: typeof suggestion.en === "string" ? stripPreamble(suggestion.en) : suggestion.en,
-          translation: typeof suggestion.translation === "string" ? stripPreamble(suggestion.translation) : suggestion.translation,
-        };
-      }
+      // Adaptive hint types (v2.1): validate type/options/native_helper, apply
+      // the translate gate, and compose the old-client compatibility en/
+      // translation for CHOICE — all pure string work (no extra model call).
+      // Legacy replies (no type) keep the exact pre-v2.1 shape/behavior.
+      const suggestion = normalizeSuggestion(parsed.suggestion, { translateEnabled, stripPreamble }) ?? undefined;
       return {
         translation: parsed.translation || "",
         explanation: parsed.explanation || undefined,
@@ -403,13 +401,11 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
     }
 
     // Translation disabled: enforce empties even if the model ignored the prompt,
-    // so the guest transcript and the hint are never shown translated.
+    // so the guest transcript and the hint are never shown translated. The
+    // suggestion's own translated fields (translation, option translations,
+    // native_helper) are already force-emptied inside normalizeSuggestion.
     if (!translateEnabled && result) {
-      result = {
-        ...result,
-        translation: "",
-        suggestion: result.suggestion ? { en: result.suggestion.en, translation: "" } : undefined,
-      };
+      result = { ...result, translation: "" };
     }
 
     const finalResult = result ?? { translation: "" };
@@ -1752,7 +1748,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // no model call); otherwise we await the LLM suggestion generated above.
       let translated: {
         translation?: string;
-        suggestion?: { en: string; translation: string };
+        suggestion?: NormalizedSuggestion;
         providerUsed?: string;
       };
       if (libraryHit) {
@@ -1844,6 +1840,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         if (recentSuggestions.length > RECENT_SUGGESTIONS_MAX) recentSuggestions.shift();
         
         log(`[Suggestion] Sending to HON, basedOn=GST, utteranceId=${utteranceId}, intent=${currentIntent}`, "websocket");
+        // Adaptive hint types (v2.1): new fields are ADDITIVE and only sent
+        // when present. en/translation stay populated for every type (CHOICE
+        // gets a server-composed compatibility string), so old clients that
+        // only read en/translation keep working and never show an empty card.
         uiBroadcast({
           type: "suggestion",
           target: "HON",
@@ -1852,6 +1852,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           basedOnSpeaker: "GST",
           en: translated.suggestion.en,
           translation: translated.suggestion.translation,
+          ...(translated.suggestion.type ? { suggestionType: translated.suggestion.type } : {}),
+          ...(translated.suggestion.options ? { options: translated.suggestion.options } : {}),
+          ...(translated.suggestion.nativeHelper ? { nativeHelper: translated.suggestion.nativeHelper } : {}),
           utteranceId,
           callSid
         });
