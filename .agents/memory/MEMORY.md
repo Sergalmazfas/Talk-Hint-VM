@@ -36,4 +36,5 @@
 - [Dialogue library per goal](dialogue-library-per-goal.md) — auto-built call dialogue libs keyed per-user-per-goal (own UUID id), NOT per goalType; runtime picks by goalText fuzzy match then goalType; always fall through to translateAndSuggest.
 - [iOS Calls mockup style rules](ios-calls-mockup-style.md) — no simulated iPhone chrome; light TalkHint style only, black legacy live-call UI is not a reference.
 - [iOS UI localization](ios-ui-localization.md) — UI follows iPhone system language (en/ru/es/kk/uk); 5 .strings files must stay key/placeholder-identical; hint language is separate.
+- [Tutor page WKWebView caching](tutor-page-caching.md) — /tutor must be no-store + iOS ignores cache; stale cached page caused «5 deploys didn't help»; diag beacons need Bearer auth.
 - [Tutor / Calls separation](tutor-calls-separation.md) — Tutor tab = learning only (Session Report end screen); ALL call prep lives in Calls flow; Engine stays call-agnostic (MBLEx reuse).

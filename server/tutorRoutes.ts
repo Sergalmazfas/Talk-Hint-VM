@@ -76,6 +76,10 @@ export function registerTutorRoutes(app: Express) {
   // The avatar page rendered inside the iOS WKWebView. Auth happens via the
   // normal Bearer session token which the page passes to our /api/tutor calls.
   app.get("/tutor", (_req, res) => {
+    // no-store: the page is served inside the iOS WKWebView, which otherwise
+    // heuristically caches it (no Cache-Control + ETag) and keeps showing a
+    // STALE page for days after a deploy — "tutor stopped working" incidents.
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     res.type("html").send(TUTOR_AVATAR_PAGE_HTML);
   });
 
@@ -365,10 +369,17 @@ export function registerTutorRoutes(app: Express) {
     if (h && now - h.t < 60_000) {
       if (h.n >= 120) return res.status(429).json({ error: "rate_limited" });
       h.n++;
-    } else diagHits.set(uid, { n: 1, t: now });
-    const step = String(req.body?.step ?? "").slice(0, 64);
-    const detail = String(req.body?.detail ?? "").slice(0, 300);
-    const sid = String(req.body?.sessionId ?? "").slice(0, 64);
+    } else {
+      // Fixed 1-minute window; sweep expired entries so the map stays bounded.
+      diagHits.forEach((v, k) => { if (now - v.t >= 60_000) diagHits.delete(k); });
+      diagHits.set(uid, { n: 1, t: now });
+    }
+    // Sanitize: single line, printable, capped — logs must never be forgeable
+    // and never carry tokens (client sends only step names + error messages).
+    const clean = (v: unknown, max: number) => String(v ?? "").replace(/[\r\n\t]+/g, " ").replace(/[^\x20-\x7E\u00A0-\uFFFF]/g, "").slice(0, max);
+    const step = clean(req.body?.step, 64);
+    const detail = clean(req.body?.detail, 300);
+    const sid = clean(req.body?.sessionId, 64);
     console.log(`[TutorDiag] user=${uid} session=${sid} step=${step}${detail ? " detail=" + detail : ""}`);
     res.json({ ok: true });
   });

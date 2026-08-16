@@ -48,7 +48,11 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
         // page asks for it via the "needAuth" bridge message and receives it
         // through window.__setAuth(...).
         guard let url = URL(string: "\(AppConfig.baseURL)/tutor") else { return }
-        webView.load(URLRequest(url: url))
+        // Ignore ALL caches: WKWebView otherwise heuristically caches the page
+        // and keeps serving a stale copy for days after a server deploy
+        // ("tutor stopped responding" incidents). The page must always be the
+        // one the server ships right now.
+        webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData))
     }
 
     private func injectAuthToken() {

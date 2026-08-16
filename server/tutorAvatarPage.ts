@@ -694,8 +694,10 @@ const notifyNative = (msg) => { try { window.webkit?.messageHandlers?.tutor?.pos
 // so client-side stalls (ws/auth/mic/audio) are invisible in server logs
 // without this. Fire-and-forget; failures are silent by design.
 const diag = (step, detail) => { try {
-  fetch("/api/tutor/diag", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ step, detail: detail == null ? "" : String(detail).slice(0, 300), sessionId: sessionId || "" }), keepalive: true }).catch(() => {});
+  // Same Bearer auth as api() — the page is loaded without cookies, so
+  // credentials:"include" alone would 401 and the beacon would vanish.
+  authReady.then(() => fetch("/api/tutor/diag", { method: "POST", headers: { "Authorization": "Bearer " + AUTH, "Content-Type": "application/json" },
+    body: JSON.stringify({ step, detail: detail == null ? "" : String(detail).slice(0, 300), sessionId: sessionId || "" }), keepalive: true })).catch(() => {});
 } catch(_){} };
 notifyNative({ event: "needAuth" });
 
