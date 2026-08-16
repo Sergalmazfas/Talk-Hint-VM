@@ -326,3 +326,92 @@ describe("summarizeAndSaveContactMemory", () => {
     expect(log).toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Retry behaviour when the first response is truncated mid-JSON
+// ---------------------------------------------------------------------------
+describe("summarizeAndSaveContactMemory — unparseable_json retry", () => {
+  const TRUNCATED = '{"summary":"Wells Fargo billing issue","notes":"asked about late fee","importance":"hig';
+
+  it("classifies a mid-JSON truncated response as unparseable_json", async () => {
+    const { classifySummaryParseFailure } = await import("../contactMemory");
+    expect(classifySummaryParseFailure(TRUNCATED)).toBe("unparseable_json");
+  });
+
+  it("retries once when first response is truncated, succeeds on second attempt", async () => {
+    const { summarizeAndSaveContactMemory: run } = await import("../contactMemory");
+    const save = vi.fn(async () => ({ id: "retry-success" }));
+    const log = vi.fn();
+    let callCount = 0;
+
+    await run(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async (sp: string) => {
+        callCount++;
+        if (callCount === 1) return TRUNCATED;
+        // second call (retry with compact reminder) returns valid JSON
+        return JSON.stringify({ summary: "Wells Fargo billing issue", notes: "asked about late fee", importance: "medium" });
+      },
+      save,
+      log,
+    });
+
+    expect(callCount).toBe(2);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].summary).toBe("Wells Fargo billing issue");
+    // retry log must be present
+    const logs = log.mock.calls.map((c: any[]) => String(c[0])).join("\n");
+    expect(logs).toContain("retrying with compact-JSON reminder");
+  });
+
+  it("logs both failures and skips save when retry also returns truncated JSON", async () => {
+    const { summarizeAndSaveContactMemory: run } = await import("../contactMemory");
+    const save = vi.fn();
+    const log = vi.fn();
+
+    await run(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () => TRUNCATED,
+      save,
+      log,
+    });
+
+    expect(save).not.toHaveBeenCalled();
+    const logs = log.mock.calls.map((c: any[]) => String(c[0])).join("\n");
+    expect(logs).toContain("retrying with compact-JSON reminder");
+    expect(logs).toContain("no usable summary after retry");
+  });
+
+  it("retry prompt contains compact-JSON reminder text", async () => {
+    const { summarizeAndSaveContactMemory: run } = await import("../contactMemory");
+    const prompts: string[] = [];
+
+    await run(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async (sp: string, up: string) => {
+        prompts.push(sp);
+        return TRUNCATED; // always truncated — we're only checking prompts
+      },
+      save: vi.fn(),
+      log: vi.fn(),
+    });
+
+    expect(prompts.length).toBe(2);
+    expect(prompts[1]).toContain("compact JSON");
+  });
+
+  it("does NOT retry for no_json_object or empty_output failures (only unparseable_json)", async () => {
+    const { summarizeAndSaveContactMemory: run } = await import("../contactMemory");
+    const log = vi.fn();
+    let callCount = 0;
+
+    await run(USER_ID, PHONE, TRANSCRIPT, {
+      generate: async () => { callCount++; return "I cannot summarize this call."; },
+      save: vi.fn(),
+      log,
+    });
+
+    // no_json_object → no retry
+    expect(callCount).toBe(1);
+    const logs = log.mock.calls.map((c: any[]) => String(c[0])).join("\n");
+    expect(logs).not.toContain("retrying");
+    expect(logs).toContain("reason=no_json_object");
+  });
+});

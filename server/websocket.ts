@@ -476,7 +476,9 @@ async function summarizeAndSaveContactMemory(
         model: currentModel,
         fallbackModel: OPENAI_FALLBACK_MODEL,
         withGemini: generateWithGemini,
-        withOpenAI: generateWithOpenAI,
+        // Contact summaries can run to ~300 tokens of JSON; the default 80-token
+        // cap truncated long-call responses mid-object (unparseable_json).
+        withOpenAI: (model, sp, up) => generateWithOpenAI(model, sp, up, 400),
       }),
     // The upsert fills the auto-extracted name atomically (COALESCE) — it only
     // writes a missing name and never overwrites a user-set one, so no separate

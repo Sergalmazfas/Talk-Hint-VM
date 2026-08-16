@@ -358,8 +358,34 @@ export async function summarizeAndSaveContactMemory(
     return;
   }
 
-  const parsed = parseContactSummary(raw);
-  if (!parsed) {
+  let parsed = parseContactSummary(raw);
+  if (!parsed && classifySummaryParseFailure(raw) === "unparseable_json") {
+    // The response was likely truncated mid-JSON (output token limit hit).
+    // One fail-soft retry with an explicit compact-JSON reminder so the model
+    // keeps its reply short. Both failures are logged honestly — no invented data.
+    deps.log?.(
+      `[ContactMemory] response truncated for ${phoneNumber} (raw ${raw?.length ?? 0} chars), retrying with compact-JSON reminder`,
+    );
+    let retryRaw = "";
+    try {
+      retryRaw = await deps.generate(
+        CONTACT_SUMMARY_SYSTEM_PROMPT +
+          "\n\nIMPORTANT: return ONLY compact JSON, no markdown, no extra text. Keep summary + notes under 60 words total.",
+        buildContactSummaryUserPrompt(convo),
+      );
+    } catch (err: any) {
+      deps.log?.(`[ContactMemory] retry summarization failed: ${err?.message ?? err}`);
+      return;
+    }
+    const retryParsed = parseContactSummary(retryRaw);
+    if (!retryParsed) {
+      deps.log?.(
+        `[ContactMemory] no usable summary after retry for ${phoneNumber} (raw ${retryRaw?.length ?? 0} chars, reason=${classifySummaryParseFailure(retryRaw)})`,
+      );
+      return;
+    }
+    parsed = retryParsed;
+  } else if (!parsed) {
     // Keep the failure diagnosable WITHOUT leaking transcript-derived content
     // into logs: only safe metadata — output length and a failure category.
     deps.log?.(
