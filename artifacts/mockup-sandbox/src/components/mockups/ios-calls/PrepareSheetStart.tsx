@@ -5,7 +5,6 @@ export function PrepareSheetStart() {
   return (
     <Screen dim>
       <CallsBase />
-      <div className="absolute inset-0 bg-black/40 z-[5]" />
       <Sheet title="Prepare call">
         <div className="flex flex-col items-center px-8 pt-4 pb-2 text-center">
           <div className="w-20 h-20 rounded-full flex items-center justify-center mb-5" style={{ background: T.purpleBg }}>

@@ -5,7 +5,6 @@ export function PrepareConfirm() {
   return (
     <Screen dim>
       <CallsBase />
-      <div className="absolute inset-0 bg-black/40 z-[5]" />
       <Sheet title="Prepare call">
         <div className="px-6 pt-3 pb-2">
           <div className="flex gap-3 mb-5">

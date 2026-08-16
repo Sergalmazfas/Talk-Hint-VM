@@ -126,7 +126,7 @@ export function Screen({ children, dark = false, dim = false }: { children: Reac
   return (
     <div className="h-screen w-full flex flex-col font-['Inter'] relative overflow-hidden" style={{ background: dark ? "#0B0F14" : "#fff" }}>
       {children}
-      {dim && <div className="absolute inset-0 bg-black/40" />}
+      {dim && <div className="absolute inset-0 bg-black/15" />}
     </div>
   );
 }

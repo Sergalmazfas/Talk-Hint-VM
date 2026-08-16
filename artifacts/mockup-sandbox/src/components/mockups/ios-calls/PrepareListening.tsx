@@ -5,7 +5,6 @@ export function PrepareListening() {
   return (
     <Screen dim>
       <CallsBase />
-      <div className="absolute inset-0 bg-black/40 z-[5]" />
       <Sheet title="Prepare call">
         <div className="flex flex-col items-center px-8 pt-4 pb-2 text-center">
           <p className="text-[18px] font-bold mb-6" style={{ color: T.ink }}>Я слушаю…</p>
