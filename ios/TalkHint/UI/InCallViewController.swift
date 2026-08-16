@@ -25,6 +25,9 @@ final class InCallViewController: UIViewController {
     private let suggestionBanner = UIView()
     private let suggestionPrimaryLabel = UILabel()
     private let suggestionSecondaryLabel = UILabel()
+    /// Vertical stack of tappable pill buttons shown for CHOICE-type hints;
+    /// hidden for every other hint type.
+    private let choiceButtonsStack = UIStackView()
 
     private let goalField = UITextField()
     private let questionField = UITextField()
@@ -355,7 +358,13 @@ final class InCallViewController: UIViewController {
         suggestionSecondaryLabel.isHidden = true
         suggestionSecondaryLabel.accessibilityIdentifier = "text-suggestion-translation"
 
-        let labels = UIStackView(arrangedSubviews: [tagRow, suggestionPrimaryLabel, suggestionSecondaryLabel])
+        // CHOICE hint buttons — vertical stack, hidden until a CHOICE arrives.
+        choiceButtonsStack.axis = .vertical
+        choiceButtonsStack.spacing = 8
+        choiceButtonsStack.isHidden = true
+        choiceButtonsStack.accessibilityIdentifier = "stack-choice-buttons"
+
+        let labels = UIStackView(arrangedSubviews: [tagRow, suggestionPrimaryLabel, suggestionSecondaryLabel, choiceButtonsStack])
         labels.axis = .vertical
         labels.spacing = 4
         labels.translatesAutoresizingMaskIntoConstraints = false
@@ -367,6 +376,93 @@ final class InCallViewController: UIViewController {
             labels.trailingAnchor.constraint(equalTo: suggestionBanner.trailingAnchor, constant: -12),
         ])
         return suggestionBanner
+    }
+
+    /// Builds one CHOICE option pill button.
+    ///
+    /// - `option`: the CHOICE option to display.
+    /// - `isPrimary`: the first option uses the filled purple style; subsequent
+    ///   options use the outlined white-background style.
+    private func buildChoiceButton(option: ChoiceOption, isPrimary: Bool) -> UIButton {
+        let btn = UIButton(type: .custom)
+        btn.contentHorizontalAlignment = .leading
+        btn.layer.cornerRadius = 12
+        btn.contentEdgeInsets = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+        btn.titleLabel?.numberOfLines = 0
+        btn.titleLabel?.lineBreakMode = .byWordWrapping
+
+        // Title: if translation is present show it on line 1 with the en phrase
+        // in quotes on line 2 (matching the mockup); otherwise show en alone.
+        let displayTitle: String
+        let enPhrase = option.en
+        let hasTranslation = !option.translation.isEmpty
+        if hasTranslation {
+            displayTitle = option.translation + "\n" + "\"" + enPhrase + "\""
+        } else {
+            displayTitle = enPhrase
+        }
+
+        if isPrimary {
+            btn.backgroundColor = Theme.purple
+            let para = NSMutableParagraphStyle()
+            para.lineBreakMode = .byWordWrapping
+            let attrTitle = NSMutableAttributedString(
+                string: displayTitle,
+                attributes: [
+                    .font: UIFont.systemFont(ofSize: 14, weight: .semibold),
+                    .foregroundColor: UIColor.white,
+                    .paragraphStyle: para,
+                ]
+            )
+            // Dim the en-phrase part (second line) slightly when translation shown
+            if hasTranslation, let nlRange = displayTitle.range(of: "\n") {
+                let secondStart = displayTitle.distance(from: displayTitle.startIndex,
+                                                        to: nlRange.upperBound)
+                let nsRange = NSRange(location: secondStart,
+                                     length: displayTitle.count - secondStart)
+                attrTitle.addAttribute(.foregroundColor,
+                                       value: UIColor.white.withAlphaComponent(0.8),
+                                       range: nsRange)
+                attrTitle.addAttribute(.font,
+                                       value: UIFont.systemFont(ofSize: 12),
+                                       range: nsRange)
+            }
+            btn.setAttributedTitle(attrTitle, for: .normal)
+        } else {
+            btn.backgroundColor = .white
+            btn.layer.borderWidth = 1
+            btn.layer.borderColor = Theme.line.cgColor
+            let para = NSMutableParagraphStyle()
+            para.lineBreakMode = .byWordWrapping
+            let attrTitle = NSMutableAttributedString(
+                string: displayTitle,
+                attributes: [
+                    .font: UIFont.systemFont(ofSize: 14, weight: .semibold),
+                    .foregroundColor: Theme.ink,
+                    .paragraphStyle: para,
+                ]
+            )
+            if hasTranslation, let nlRange = displayTitle.range(of: "\n") {
+                let secondStart = displayTitle.distance(from: displayTitle.startIndex,
+                                                        to: nlRange.upperBound)
+                let nsRange = NSRange(location: secondStart,
+                                     length: displayTitle.count - secondStart)
+                attrTitle.addAttribute(.foregroundColor,
+                                       value: Theme.sub,
+                                       range: nsRange)
+                attrTitle.addAttribute(.font,
+                                       value: UIFont.systemFont(ofSize: 12),
+                                       range: nsRange)
+            }
+            btn.setAttributedTitle(attrTitle, for: .normal)
+        }
+
+        // Store the en phrase so the tap handler can retrieve it regardless of
+        // which attributed-title configuration is displayed.
+        btn.accessibilityValue = enPhrase
+        btn.accessibilityIdentifier = isPrimary ? "button-choice-primary" : "button-choice-secondary"
+        btn.addTarget(self, action: #selector(choiceOptionTapped(_:)), for: .touchUpInside)
+        return btn
     }
 
     /// The circular Mute / End / Audio controls per the approved mockup —
@@ -824,15 +920,50 @@ final class InCallViewController: UIViewController {
     }
 
     /// Show or replace the pinned suggestion banner with the latest suggestion.
-    private func showSuggestion(en: String, translation: String?) {
-        suggestionPrimaryLabel.text = en
-        if let translation = translation, !translation.isEmpty {
-            suggestionSecondaryLabel.text = translation
-            suggestionSecondaryLabel.isHidden = false
-        } else {
+    /// When `options` contains ≥ 2 entries the banner renders CHOICE pill
+    /// buttons instead of plain text; the primary label is hidden in that mode.
+    private func showSuggestion(en: String, translation: String?, options: [ChoiceOption]?) {
+        // CHOICE path: hide the plain-text label and show tappable pill buttons.
+        if let options = options, options.count >= 2 {
+            suggestionPrimaryLabel.isHidden = true
             suggestionSecondaryLabel.isHidden = true
+
+            // Remove any buttons from the previous CHOICE hint.
+            choiceButtonsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            for (index, option) in options.enumerated() {
+                let btn = buildChoiceButton(option: option, isPrimary: index == 0)
+                choiceButtonsStack.addArrangedSubview(btn)
+            }
+            choiceButtonsStack.isHidden = false
+        } else {
+            // Plain-text path: show the primary (and optional secondary) label.
+            suggestionPrimaryLabel.text = en
+            suggestionPrimaryLabel.isHidden = false
+            if let translation = translation, !translation.isEmpty {
+                suggestionSecondaryLabel.text = translation
+                suggestionSecondaryLabel.isHidden = false
+            } else {
+                suggestionSecondaryLabel.isHidden = true
+            }
+            // Remove any stale CHOICE buttons left from the previous hint.
+            choiceButtonsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            choiceButtonsStack.isHidden = true
         }
         suggestionBanner.isHidden = false
+    }
+
+    /// Copies the tapped CHOICE option's English phrase into the question field
+    /// so the user can review it and say it aloud (or edit before sending).
+    ///
+    /// Deliberately does NOT auto-send via Ask AI: CHOICE alternatives are
+    /// candidate spoken replies, not assistant queries — routing them through
+    /// `ask_ai` would trigger goal-update detection and generate an unrelated
+    /// assistant response. Populating the field lets the user act on it in the
+    /// same way they would after typing any other phrase.
+    @objc private func choiceOptionTapped(_ sender: UIButton) {
+        guard let phrase = sender.accessibilityValue, !phrase.isEmpty else { return }
+        questionField.text = phrase
+        questionField.becomeFirstResponder()
     }
 
     private func scrollToBottom() {
@@ -872,8 +1003,8 @@ extension InCallViewController: CallHintStreamDelegate {
                              title: "YOU", titleColor: Theme.sub,
                              primary: text, secondary: nil,
                              testIdSuffix: "owner", isFinal: isFinal)
-        case .suggestion(let en, let translation):
-            showSuggestion(en: en, translation: translation)
+        case .suggestion(let en, let translation, let options):
+            showSuggestion(en: en, translation: translation, options: options)
         case .fastPhrase(let text, let translation):
             appendCard(title: "QUICK PHRASE", titleColor: Theme.purple,
                        primary: text, secondary: translation,

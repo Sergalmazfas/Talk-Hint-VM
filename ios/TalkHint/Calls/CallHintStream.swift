@@ -1,5 +1,18 @@
 import Foundation
 
+/// An individual selectable option within a CHOICE-type suggestion, matching
+/// the server's `HintOption` wire shape (`{label, en, translation}`).
+struct ChoiceOption: Equatable {
+    /// Short label describing the option (e.g. "yes", "no", "eSIM") — may be
+    /// empty when the server omits it. Used as the button's display title when
+    /// non-empty; falls back to `en` when blank.
+    let label: String
+    /// The English phrase the user should say if they pick this option.
+    let en: String
+    /// Native-language translation of the phrase (empty when translation is off).
+    let translation: String
+}
+
 /// A single item rendered in the in-call assistant feed.
 enum CallHintEvent: Equatable {
     /// What the caller (the other party) said, optionally translated.
@@ -9,8 +22,11 @@ enum CallHintEvent: Equatable {
     /// What the user (the phone owner) said. `confidence` is the STT confidence
     /// score when the server provides one (used to filter garbled finals).
     case ownerTranscript(text: String, confidence: Double?, isFinal: Bool)
-    /// A GPT reply suggestion for the user to say, with its translation.
-    case suggestion(en: String, translation: String?)
+    /// A GPT reply suggestion for the user to say. `options` is non-nil for
+    /// CHOICE-type hints (≥ 2 entries), nil for every other hint type.
+    /// `en` is always populated — for CHOICE it holds the server-composed
+    /// compat string so legacy rendering paths never show an empty card.
+    case suggestion(en: String, translation: String?, options: [ChoiceOption]?)
     /// A low-latency "fast layer" phrase to fill a pause.
     case fastPhrase(text: String, translation: String?)
     /// A reply to a question the user typed via "Ask AI".
@@ -502,7 +518,22 @@ final class CallHintStream: NSObject {
             )
         case "suggestion":
             guard let en = obj["en"] as? String, !en.isEmpty else { return nil }
-            return .suggestion(en: en, translation: nonEmpty(obj["translation"]))
+            // Parse CHOICE options (additive v2.1 field). Only accepted when
+            // the server sends at least 2 valid entries — a single option
+            // is semantically a direct hint and should use the plain-text path.
+            var options: [ChoiceOption]? = nil
+            if let rawOptions = obj["options"] as? [[String: Any]], rawOptions.count >= 2 {
+                let parsed: [ChoiceOption] = rawOptions.compactMap { o in
+                    guard let oEn = o["en"] as? String, !oEn.isEmpty else { return nil }
+                    return ChoiceOption(
+                        label: (o["label"] as? String) ?? "",
+                        en: oEn,
+                        translation: (o["translation"] as? String) ?? ""
+                    )
+                }
+                if parsed.count >= 2 { options = parsed }
+            }
+            return .suggestion(en: en, translation: nonEmpty(obj["translation"]), options: options)
         case "fast_phrase":
             guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
             return .fastPhrase(text: body, translation: nonEmpty(obj["translation"]))

@@ -87,7 +87,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"suggestion","en":"Offer the morning slot","translation":"Predlozhi utro"}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .suggestion(en: "Offer the morning slot", translation: "Predlozhi utro")
+            .suggestion(en: "Offer the morning slot", translation: "Predlozhi utro", options: nil)
         )
     }
 
@@ -95,7 +95,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"suggestion","en":"Ask for their name"}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .suggestion(en: "Ask for their name", translation: nil)
+            .suggestion(en: "Ask for their name", translation: nil, options: nil)
         )
     }
 
@@ -108,6 +108,73 @@ final class CallHintStreamDecodeTests: XCTestCase {
         // A renamed field (e.g. server sends "text" instead of "en") must drop.
         let json = #"{"type":"suggestion","text":"Offer the slot"}"#
         XCTAssertNil(CallHintStream.decode(json))
+    }
+
+    // MARK: suggestion — CHOICE options (v2.1)
+
+    func testChoiceSuggestionTwoOptions() {
+        // Server sends suggestionType + options array alongside the compat en string.
+        let json = #"{"type":"suggestion","en":"If yes: \"Yes.\" / If no: \"No.\"","translation":"","suggestionType":"choice","options":[{"label":"yes","en":"Yes.","translation":"Да."},{"label":"no","en":"No, not yet.","translation":"Нет."}]}"#
+        let event = CallHintStream.decode(json)
+        let expected: CallHintEvent = .suggestion(
+            en: #"If yes: "Yes." / If no: "No.""#,
+            translation: nil,
+            options: [
+                ChoiceOption(label: "yes", en: "Yes.", translation: "Да."),
+                ChoiceOption(label: "no", en: "No, not yet.", translation: "Нет."),
+            ]
+        )
+        XCTAssertEqual(event, expected)
+    }
+
+    func testChoiceSuggestionThreeOptions() {
+        let json = #"{"type":"suggestion","en":"compat","options":[{"label":"a","en":"Option A","translation":""},{"label":"b","en":"Option B","translation":""},{"label":"c","en":"Option C","translation":""}]}"#
+        guard case let .suggestion(_, _, options) = CallHintStream.decode(json) else {
+            return XCTFail("expected .suggestion event")
+        }
+        XCTAssertEqual(options?.count, 3)
+        XCTAssertEqual(options?.first?.en, "Option A")
+        XCTAssertEqual(options?.last?.en, "Option C")
+    }
+
+    func testChoiceSuggestionSingleOptionDroppedToNil() {
+        // One option is not a real CHOICE — treated as plain suggestion (no buttons).
+        let json = #"{"type":"suggestion","en":"compat","options":[{"label":"a","en":"Option A","translation":""}]}"#
+        guard case let .suggestion(_, _, options) = CallHintStream.decode(json) else {
+            return XCTFail("expected .suggestion event")
+        }
+        XCTAssertNil(options, "a single-option array must yield options == nil")
+    }
+
+    func testChoiceSuggestionOptionsWithEmptyEnAreSkipped() {
+        // Options whose `en` is empty/missing are silently dropped; if < 2 usable
+        // options remain, options must be nil.
+        let json = #"{"type":"suggestion","en":"compat","options":[{"label":"a","en":"Good one","translation":""},{"label":"b","en":"","translation":"x"}]}"#
+        guard case let .suggestion(_, _, options) = CallHintStream.decode(json) else {
+            return XCTFail("expected .suggestion event")
+        }
+        XCTAssertNil(options, "only 1 usable option after filtering empties")
+    }
+
+    func testChoiceSuggestionMissingOptionsKeyYieldsNilOptions() {
+        // Plain direct suggestion — no options key at all — must work normally.
+        let json = #"{"type":"suggestion","en":"Direct hint"}"#
+        guard case let .suggestion(en, _, options) = CallHintStream.decode(json) else {
+            return XCTFail("expected .suggestion event")
+        }
+        XCTAssertEqual(en, "Direct hint")
+        XCTAssertNil(options)
+    }
+
+    func testChoiceOptionLabelDefaultsToEmpty() {
+        // Server omits `label` — the ChoiceOption must still be constructed.
+        let json = #"{"type":"suggestion","en":"compat","options":[{"en":"Option A"},{"en":"Option B"}]}"#
+        guard case let .suggestion(_, _, options) = CallHintStream.decode(json) else {
+            return XCTFail("expected .suggestion event")
+        }
+        XCTAssertEqual(options?.count, 2)
+        XCTAssertEqual(options?.first?.label, "")
+        XCTAssertEqual(options?.first?.en, "Option A")
     }
 
     // MARK: fast_phrase

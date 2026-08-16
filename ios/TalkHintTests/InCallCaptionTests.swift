@@ -190,7 +190,7 @@ final class InCallCaptionTests: XCTestCase {
         let feedCountBefore = feedCards(vc).count
 
         vc.callHintStream(stream, didReceive:
-            .suggestion(en: "Offer the morning slot", translation: "Predlozhi utro"))
+            .suggestion(en: "Offer the morning slot", translation: "Predlozhi utro", options: nil))
         XCTAssertFalse(banner.isHidden, "banner should become visible on first suggestion")
         XCTAssertEqual(suggestionText(vc), "Offer the morning slot")
         XCTAssertEqual(feedCards(vc).count, feedCountBefore,
@@ -199,13 +199,135 @@ final class InCallCaptionTests: XCTestCase {
         // A second suggestion replaces the text in place — still one banner, still
         // no feed cards added.
         vc.callHintStream(stream, didReceive:
-            .suggestion(en: "Ask for their name", translation: nil))
+            .suggestion(en: "Ask for their name", translation: nil, options: nil))
         XCTAssertEqual(suggestionText(vc), "Ask for their name",
                        "banner text should update in place")
         XCTAssertEqual(feedCards(vc).count, feedCountBefore,
                        "updating the suggestion must not add a feed card")
         XCTAssertEqual(views(withIdentifierPrefix: "card-suggestion", in: vc.view).count, 1,
                        "there must remain exactly one suggestion banner")
+    }
+
+    /// When a CHOICE hint arrives the banner switches to button layout: the
+    /// plain-text suggestion label is hidden, the choice-buttons stack is visible,
+    /// and each button carries the corresponding en phrase in accessibilityValue.
+    func testChoiceHintShowsButtonsAndHidesPrimaryLabel() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        let options = [
+            ChoiceOption(label: "yes", en: "Yes, I have it.", translation: "Да, есть."),
+            ChoiceOption(label: "no",  en: "No, not yet.",   translation: "Нет, пока нет."),
+        ]
+        vc.callHintStream(stream, didReceive:
+            .suggestion(en: "If yes: \"Yes.\" / If no: \"No.\"", translation: nil, options: options))
+
+        // Banner is visible.
+        guard let banner = view(withIdentifier: "card-suggestion", in: vc.view) else {
+            return XCTFail("suggestion banner not found")
+        }
+        XCTAssertFalse(banner.isHidden, "banner must be visible after a CHOICE hint")
+
+        // Primary label must be hidden — the buttons replace it.
+        let primaryLabel = label(withIdentifier: "text-suggestion", in: vc.view)
+        XCTAssertTrue(primaryLabel?.isHidden ?? true,
+                      "primary text label must be hidden while CHOICE buttons are shown")
+
+        // The choice buttons stack must be visible.
+        guard let stack = view(withIdentifier: "stack-choice-buttons", in: vc.view) else {
+            return XCTFail("stack-choice-buttons not found in hierarchy")
+        }
+        XCTAssertFalse(stack.isHidden, "choice buttons stack must be visible for CHOICE hints")
+
+        // Primary button carries the first option's en phrase.
+        let primaryButton = descendants(of: vc.view)
+            .compactMap { $0 as? UIButton }
+            .first { $0.accessibilityIdentifier == "button-choice-primary" }
+        XCTAssertNotNil(primaryButton, "button-choice-primary must exist")
+        XCTAssertEqual(primaryButton?.accessibilityValue, "Yes, I have it.",
+                       "primary button must store the first option's en phrase")
+
+        // Secondary button carries the second option's en phrase.
+        let secondaryButton = descendants(of: vc.view)
+            .compactMap { $0 as? UIButton }
+            .first { $0.accessibilityIdentifier == "button-choice-secondary" }
+        XCTAssertNotNil(secondaryButton, "button-choice-secondary must exist")
+        XCTAssertEqual(secondaryButton?.accessibilityValue, "No, not yet.",
+                       "secondary button must store the second option's en phrase")
+    }
+
+    /// Tapping a CHOICE button copies the option's en phrase into the question
+    /// field so the user can review/say it — but must NOT trigger an Ask AI
+    /// request, because CHOICE options are candidate spoken replies, not assistant
+    /// queries. Verifies no "ASKED" feed card is produced by the tap.
+    func testChoiceButtonTapPopulatesQuestionFieldWithoutAskingAI() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        let options = [
+            ChoiceOption(label: "yes", en: "Yes, I have it.", translation: ""),
+            ChoiceOption(label: "no",  en: "No, not yet.",   translation: ""),
+        ]
+        vc.callHintStream(stream, didReceive:
+            .suggestion(en: "compat", translation: nil, options: options))
+
+        let feedCountBefore = feedCards(vc).count
+
+        // Find and tap the primary (first) choice button.
+        guard let primaryButton = descendants(of: vc.view)
+            .compactMap({ $0 as? UIButton })
+            .first(where: { $0.accessibilityIdentifier == "button-choice-primary" }) else {
+            return XCTFail("button-choice-primary not found")
+        }
+        primaryButton.sendActions(for: .touchUpInside)
+
+        // The question field must now hold the selected phrase.
+        let questionField = descendants(of: vc.view)
+            .compactMap { $0 as? UITextField }
+            .first { $0.accessibilityIdentifier == "input-question" }
+        XCTAssertEqual(questionField?.text, "Yes, I have it.",
+                       "tapping primary choice button must copy its en phrase to the question field")
+
+        // No Ask AI request should have been fired — the feed must be unchanged.
+        XCTAssertEqual(feedCards(vc).count, feedCountBefore,
+                       "tapping a CHOICE button must not produce an ASKED feed card")
+    }
+
+    /// After a CHOICE hint, a plain (non-CHOICE) suggestion must clear the choice
+    /// buttons and restore the primary text label, so the layouts never bleed into
+    /// each other.
+    func testPlainHintAfterChoiceRestoresTextLayout() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        // First: a CHOICE hint.
+        let options = [
+            ChoiceOption(label: "a", en: "Option A", translation: ""),
+            ChoiceOption(label: "b", en: "Option B", translation: ""),
+        ]
+        vc.callHintStream(stream, didReceive:
+            .suggestion(en: "compat", translation: nil, options: options))
+
+        // Precondition: buttons visible, primary label hidden.
+        XCTAssertFalse(
+            view(withIdentifier: "stack-choice-buttons", in: vc.view)?.isHidden ?? true,
+            "choice stack should be visible after CHOICE hint (precondition)")
+
+        // Then: a plain direct hint with no options.
+        vc.callHintStream(stream, didReceive:
+            .suggestion(en: "Ask for their name", translation: nil, options: nil))
+
+        // Choice buttons stack must be gone / hidden.
+        let stack = view(withIdentifier: "stack-choice-buttons", in: vc.view)
+        XCTAssertTrue(stack?.isHidden ?? true,
+                      "choice buttons stack must be hidden after a plain hint")
+
+        // Primary text label must be visible with the new hint text.
+        let primaryLabel = label(withIdentifier: "text-suggestion", in: vc.view)
+        XCTAssertFalse(primaryLabel?.isHidden ?? false,
+                       "primary text label must be visible after a plain hint")
+        XCTAssertEqual(primaryLabel?.text, "Ask for their name",
+                       "primary label must show the plain hint text")
     }
 
     /// Drives the controller through its real `CallHintStreamDelegate` across the
