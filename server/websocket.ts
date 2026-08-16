@@ -1185,6 +1185,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     let lastHintUtteranceId = -1;          // Utterance ID of last hint
     let latestGuestUtteranceId = -1;       // Newest Guest turn seen (freshness/stale guard)
     let goalAchievedFlag = false;          // context/UI/analytics only — goal status NEVER gates hint delivery (no stop, no forced closing phrase)
+    // Most-recent call goal — captured for the metadata flush at call end.
+    // goalText mirrors goalsByUser[streamUserId] (updated whenever goal text
+    // changes); goalType mirrors the GoalEngine's last reported goalType.
+    let callGoalText = "";
+    let callGoalType: GoalType = "other";
     const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
     
     // Anti-loop guards - prevents cycling on same emotions/suggestions
@@ -1432,6 +1437,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         
         const state = goalUpdate.state;
         detectedGoalType = state.goalType;
+        callGoalType = state.goalType;
+        callGoalText = getUserGoal(streamUserId) || callGoalText;
         const missingSlot = state.missingSlots[0] || "none";
         fastLayer.setGoal(state.goalType, missingSlot);
         
@@ -1887,6 +1894,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         });
         
         const state = goalUpdate.state;
+        callGoalType = state.goalType;
+        callGoalText = getUserGoal(streamUserId) || callGoalText;
         
         uiBroadcast({
           type: "goal_state_update",
@@ -2540,6 +2549,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             }
             // The goal belongs to THIS call's history — the next call must start
             // without it (clients also clear their local copy on call end).
+            // Capture last active goal text before clearing (for metadata flush).
+            callGoalText = getUserGoal(streamUserId) || callGoalText;
             setUserGoal(streamUserId, "");
             break;
         }
@@ -2563,6 +2574,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
 
       // Backstop for the "stop" handler: some teardown paths close the socket
       // without a clean stop event — the goal must still die with the call.
+      // Capture last active goal text before the backstop clear (for metadata flush).
+      callGoalText = callGoalText || getUserGoal(streamUserId);
       setUserGoal(streamUserId, "");
 
       // Contact memory: summarize this call and upsert it for (owner, other party).
@@ -2606,11 +2619,23 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           swapDelayMs: sttSwapDelayMs,
         };
         const flushOwnerTurns = ownerTurnsTimed.slice();
+        // Snapshot goal state (already cleared from goalsByUser above).
+        const flushGoalText = callGoalText;
+        const flushGoalType = callGoalType;
         setTimeout(() => {
           unregisterLatencyRecorder(flushSid);
-          if (latencyRecorder.count > 0) {
+          if (latencyRecorder.count > 0 || flushGoalText) {
+            const meta: Record<string, unknown> = {
+              ...latencyRecorder.toMetadata(flushPipeline, flushSttInfo, flushOwnerTurns),
+            };
+            // Persist the active goal so offline analysis can read it directly
+            // from the call record rather than relying on a frozen fixture.
+            if (flushGoalText) {
+              meta.goalText = flushGoalText;
+              meta.goalType = flushGoalType;
+            }
             void storage
-              .mergeCallMetadataByCallSid(flushSid, latencyRecorder.toMetadata(flushPipeline, flushSttInfo, flushOwnerTurns))
+              .mergeCallMetadataByCallSid(flushSid, meta)
               .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));
           }
         }, SUGGESTION_ACK_GRACE_MS);

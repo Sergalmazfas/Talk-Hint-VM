@@ -5,6 +5,6 @@ description: Data limits for offline goal-return/digression analysis of recorded
 
 # Goal-return analysis (offline)
 
-- Production call records persist neither the call goal nor delivered hint texts; hint metadata carries timings/outcomes only.
-- **Why:** goal and hint history are in-memory per-call state, cleared at call end.
-- **How to apply:** offline goal analysis must take the goal from a frozen fixture or an operator-supplied value and record the source honestly. Owner-turn labels measure the owner's goal adherence — never present them as hint effectiveness (ordinary owner speech is indistinguishable from an accepted hint). Hint-level judging runs only over explicit hint records, with a fuzzy owner-turn "spoken match" as an admitted heuristic, fail-closed everywhere.
+- Production call records now persist `goalText` + `goalType` in `calls.metadata` (flushed at call end alongside `hintLatency`). Delivered hint `text` was already in `hintLatency.entries[].text` since the latency recorder started.
+- **Why:** goal and hint history were in-memory per-call state, cleared at call end; offline analysis had no access to them.
+- **How to apply:** offline goal analysis reads `metadata.goalText` / `metadata.goalType` directly from the call record. If absent (legacy call recorded before the flush was added), fall back to a frozen fixture and mark the source honestly. Hint texts are in `metadata.hintLatency.entries[].text` (sent hints only, capped at 500 chars each; absent = unknown). Owner-turn labels remain a fuzzy "spoken match" heuristic, not a replacement for explicit hint records.
