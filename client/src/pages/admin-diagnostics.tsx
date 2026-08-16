@@ -2621,18 +2621,45 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
 // GOAL-RETURN TAB
 // ===========================================================================
 
+// ---------------------------------------------------------------------------
+// GoalReturnTab — queue-based batch analysis (2–10 calls per run)
+// ---------------------------------------------------------------------------
+
+const GR_MIN_QUEUE = 2;
+const GR_MAX_QUEUE = 10;
+
+interface GrQueueEntry {
+  /** Stable local key for React list rendering */
+  key: string;
+  sourceType: "recorded_call" | "fixture";
+  /** id in callsWithTranscript (recorded_call) or fixture.id (fixture) */
+  sourceId: string;
+  /** Display label derived from the source */
+  sourceLabel: string;
+  goal: string;
+  goalSource: string;
+  callTitle: string;
+}
+
+function grEntryKey() {
+  return `gr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
 function GoalReturnTab() {
   const { token } = useAuth();
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  // Source type: recorded call (by callSid) or fixture (transcript built inline)
+  // ---- form state for the "add entry" panel ----
   const [sourceType, setSourceType] = useState<"recorded_call" | "fixture">("recorded_call");
   const [selectedCallId, setSelectedCallId] = useState<string>("");
   const [selectedFixtureId, setSelectedFixtureId] = useState<string>("");
   const [goal, setGoal] = useState("");
   const [goalSource, setGoalSource] = useState("operator-supplied");
   const [callTitle, setCallTitle] = useState("");
+
+  // ---- queued entries ----
+  const [queue, setQueue] = useState<GrQueueEntry[]>([]);
 
   // Report viewer: id of the goal_return run whose report is displayed
   const [viewRunId, setViewRunId] = useState<string | null>(null);
@@ -2686,40 +2713,94 @@ function GoalReturnTab() {
     }
   }, [latestGoalReturnRun?.id, latestGoalReturnRun?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- add current form state as a queued entry ----
+  function handleAddToQueue() {
+    const trimmedGoal = goal.trim();
+    if (!trimmedGoal) {
+      toast({ title: "Укажите цель звонка", variant: "destructive" });
+      return;
+    }
+    if (sourceType === "recorded_call" && !selectedCallId) {
+      toast({ title: "Выберите звонок", variant: "destructive" });
+      return;
+    }
+    if (sourceType === "fixture" && !selectedFixtureId) {
+      toast({ title: "Выберите фикстуру", variant: "destructive" });
+      return;
+    }
+    if (queue.length >= GR_MAX_QUEUE) {
+      toast({ title: `Максимум ${GR_MAX_QUEUE} звонков в одном запуске`, variant: "destructive" });
+      return;
+    }
+
+    let sourceLabel = "";
+    let derivedTitle = callTitle;
+    if (sourceType === "recorded_call") {
+      const c = callsWithTranscript.find((x) => x.id === selectedCallId);
+      sourceLabel = c ? `${fmtTime(c.startedAt)} · ${c.callSid?.slice(0, 14) ?? c.id}` : selectedCallId;
+      derivedTitle = derivedTitle || (c?.callSid ?? c?.id ?? selectedCallId);
+    } else {
+      const f = fixtures.find((x) => x.id === selectedFixtureId);
+      sourceLabel = f ? f.title : selectedFixtureId;
+      derivedTitle = derivedTitle || sourceLabel;
+    }
+
+    setQueue((prev) => [
+      ...prev,
+      {
+        key: grEntryKey(),
+        sourceType,
+        sourceId: sourceType === "recorded_call" ? selectedCallId : selectedFixtureId,
+        sourceLabel,
+        goal: trimmedGoal,
+        goalSource: goalSource.trim() || "operator-supplied",
+        callTitle: derivedTitle,
+      },
+    ]);
+
+    // Reset form for the next entry
+    setSelectedCallId("");
+    setSelectedFixtureId("");
+    setGoal("");
+    setGoalSource("operator-supplied");
+    setCallTitle("");
+  }
+
+  // ---- run the queued batch ----
   const runMutation = useMutation({
     mutationFn: async () => {
-      const trimmedGoal = goal.trim();
-      if (!trimmedGoal) throw new Error("Цель звонка обязательна.");
+      if (queue.length === 0) throw new Error("Очередь пуста — добавьте хотя бы один звонок.");
 
-      let callEntry: Record<string, unknown>;
-      if (sourceType === "recorded_call") {
-        if (!selectedCallId) throw new Error("Выберите звонок.");
-        const call = callsWithTranscript.find((c) => c.id === selectedCallId);
-        if (!call) throw new Error("Звонок не найден.");
-        callEntry = {
-          callSid: call.callSid,
-          title: callTitle || call.callSid || call.id,
-          goal: trimmedGoal,
-          goalSource: goalSource.trim() || "operator-supplied",
-        };
-      } else {
-        if (!selectedFixtureId) throw new Error("Выберите фикстуру.");
-        if (!selectedFixture) throw new Error("Фикстура не найдена.");
-        const turns = (selectedFixture.referenceTurns ?? []) as { role: string; text: string }[];
-        if (turns.length === 0) throw new Error("Фикстура не содержит реплик для анализа.");
-        const transcript = turns.map((t) => `${t.role}: ${t.text}`).join("\n");
-        callEntry = {
-          title: callTitle || selectedFixture.title,
-          goal: trimmedGoal,
-          goalSource: goalSource.trim() || `frozen fixture: ${selectedFixture.title}`,
-          transcript,
-        };
+      const callsPayload: Record<string, unknown>[] = [];
+      for (const entry of queue) {
+        if (entry.sourceType === "recorded_call") {
+          const call = callsWithTranscript.find((c) => c.id === entry.sourceId);
+          if (!call) throw new Error(`Звонок ${entry.sourceId} не найден.`);
+          callsPayload.push({
+            callSid: call.callSid,
+            title: entry.callTitle || call.callSid || call.id,
+            goal: entry.goal,
+            goalSource: entry.goalSource,
+          });
+        } else {
+          const fixture = fixtures.find((f) => f.id === entry.sourceId);
+          if (!fixture) throw new Error(`Фикстура ${entry.sourceId} не найдена.`);
+          const turns = (fixture.referenceTurns ?? []) as { role: string; text: string }[];
+          if (turns.length === 0) throw new Error(`Фикстура «${fixture.title}» не содержит реплик.`);
+          const transcript = turns.map((t) => `${t.role}: ${t.text}`).join("\n");
+          callsPayload.push({
+            title: entry.callTitle || fixture.title,
+            goal: entry.goal,
+            goalSource: entry.goalSource,
+            transcript,
+          });
+        }
       }
 
       const res = await fetch(`${BASE}/goal-return/run`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ calls: [callEntry] }),
+        body: JSON.stringify({ calls: callsPayload }),
       });
       if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
       return res.json() as Promise<{ runId: string }>;
@@ -2727,7 +2808,11 @@ function GoalReturnTab() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: [BASE, "runs"] });
       setViewRunId(data.runId);
-      toast({ title: "Goal-Return анализ запущен", description: "Результат появится после завершения." });
+      setQueue([]);
+      toast({
+        title: "Goal-Return анализ запущен",
+        description: "Результат появится после завершения.",
+      });
     },
     onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
   });
@@ -2742,6 +2827,7 @@ function GoalReturnTab() {
         <CardContent className="space-y-5">
           <p className="text-sm text-gray-400">
             Офлайн-анализ: насколько разговор придерживается цели звонка, когда отклоняется и возвращается ли обратно.
+            Добавьте от {GR_MIN_QUEUE} до {GR_MAX_QUEUE} звонков/фикстур в очередь, затем нажмите «Запустить».
             Цели на продакшн-звонках не сохраняются — источник цели отображается явно в отчёте.
           </p>
 
@@ -2879,8 +2965,108 @@ function GoalReturnTab() {
           </div>
 
           <Button
+            onClick={handleAddToQueue}
+            disabled={queue.length >= GR_MAX_QUEUE}
+            variant="outline"
+            className="border-cyan-700 text-cyan-300 hover:bg-cyan-900/30"
+            data-testid="button-add-to-queue"
+          >
+            + Добавить в очередь
+            {queue.length > 0 && (
+              <span className="ml-2 text-xs bg-cyan-700/50 text-cyan-200 rounded-full px-1.5 py-0.5">
+                {queue.length}/{GR_MAX_QUEUE}
+              </span>
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* ---- Queue card ---- */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span>
+              Очередь анализа
+              {queue.length > 0 && (
+                <Badge className="ml-2 bg-cyan-700 hover:bg-cyan-700 text-xs">{queue.length}</Badge>
+              )}
+            </span>
+            {queue.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-gray-500"
+                onClick={() => setQueue([])}
+                data-testid="button-clear-queue"
+              >
+                Очистить
+              </Button>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {queue.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Очередь пуста. Заполните форму выше и нажмите «Добавить в очередь».
+            </p>
+          ) : (
+            <div className="space-y-2 mb-4">
+              {queue.map((entry, idx) => (
+                <div
+                  key={entry.key}
+                  className="flex items-start gap-3 rounded border border-gray-700 bg-gray-950 px-3 py-2"
+                  data-testid={`gr-queue-entry-${idx}`}
+                >
+                  <span className="text-gray-600 text-xs pt-0.5 w-4 shrink-0">{idx + 1}.</span>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-200 truncate max-w-xs" title={entry.callTitle}>
+                        {entry.callTitle}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className="text-xs border-gray-600 text-gray-400 shrink-0"
+                      >
+                        {entry.sourceType === "recorded_call" ? "📞 звонок" : "📄 фикстура"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-gray-500 truncate" title={entry.sourceLabel}>
+                      {entry.sourceLabel}
+                    </p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
+                      <span>
+                        <span className="text-gray-500">цель: </span>
+                        <span className="text-cyan-300">{entry.goal.length > 80 ? entry.goal.slice(0, 80) + "…" : entry.goal}</span>
+                      </span>
+                      <span>
+                        <span className="text-gray-500">источник: </span>
+                        <span className="text-gray-400">{entry.goalSource}</span>
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs text-gray-500 hover:text-red-400 shrink-0"
+                    onClick={() => setQueue((prev) => prev.filter((e) => e.key !== entry.key))}
+                    data-testid={`button-remove-queue-entry-${idx}`}
+                  >
+                    ✕
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {queue.length > 0 && queue.length < GR_MIN_QUEUE && (
+            <p className="text-xs text-amber-400" data-testid="gr-min-queue-hint">
+              Добавьте ещё {GR_MIN_QUEUE - queue.length} звонок, чтобы запустить пакетный анализ (минимум {GR_MIN_QUEUE}).
+            </p>
+          )}
+
+          <Button
             onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending || anyRunning}
+            disabled={runMutation.isPending || anyRunning || queue.length < GR_MIN_QUEUE}
             className="bg-emerald-600 hover:bg-emerald-700"
             data-testid="button-run-goal-return"
           >
@@ -2888,7 +3074,9 @@ function GoalReturnTab() {
               ? "Запуск…"
               : anyRunning
               ? "Идёт анализ…"
-              : "Запустить Goal-Return анализ"}
+              : queue.length < GR_MIN_QUEUE
+              ? `Нужно минимум ${GR_MIN_QUEUE} звонка`
+              : `Запустить Goal-Return анализ (${queue.length} ${queue.length < 5 ? "звонка" : "звонков"})`}
           </Button>
         </CardContent>
       </Card>

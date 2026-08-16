@@ -15,7 +15,10 @@ import {
   validateHintLabels,
   judgeDeliveredHints,
   computeHintMetrics,
+  validateGoalReturnBatchSize,
   SPOKEN_MATCH_THRESHOLD,
+  GOAL_RETURN_BATCH_MIN,
+  GOAL_RETURN_BATCH_MAX,
   type GoalReturnTurn,
   type TurnLabel,
   type DeliveredHint,
@@ -233,6 +236,28 @@ describe("hint evaluation — only from explicit hint records", () => {
     }]);
     expect(withHints).toContain("Оценка доставленных подсказок (1 записей подсказок)");
     expect(withHints).toContain("Подсказок оценено (по явным записям подсказок): 1");
+  });
+});
+
+describe("validateGoalReturnBatchSize — 2–10 entry contract", () => {
+  it("rejects a single-entry batch (below minimum)", () => {
+    const err = validateGoalReturnBatchSize([{}]);
+    expect(err).not.toBeNull();
+    expect(err).toContain(String(GOAL_RETURN_BATCH_MIN));
+  });
+
+  it("accepts exactly the minimum (2 entries)", () => {
+    expect(validateGoalReturnBatchSize([{}, {}])).toBeNull();
+  });
+
+  it("accepts exactly the maximum (10 entries)", () => {
+    expect(validateGoalReturnBatchSize(Array(GOAL_RETURN_BATCH_MAX).fill({}))).toBeNull();
+  });
+
+  it("rejects 11 entries (above maximum)", () => {
+    const err = validateGoalReturnBatchSize(Array(GOAL_RETURN_BATCH_MAX + 1).fill({}));
+    expect(err).not.toBeNull();
+    expect(err).toContain(String(GOAL_RETURN_BATCH_MAX));
   });
 });
 

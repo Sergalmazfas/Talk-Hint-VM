@@ -9,6 +9,7 @@ import {
   getRun, listRuns, listFixtures, getFixture,
   type GoalReturnRunCall,
 } from "./orchestrator";
+import { validateGoalReturnBatchSize } from "./goalReturn";
 import { ensureGoldCallFixture } from "./seed";
 import { EARS_CANDIDATES, BRAIN_CANDIDATES } from "./candidates";
 import { buildReplay } from "./replay";
@@ -418,6 +419,8 @@ export function registerBenchmarkRoutes(app: Express) {
       if (!Array.isArray(callsInRaw) || callsInRaw.length === 0) {
         return res.status(400).json({ error: "calls[] required" });
       }
+      const batchSizeError = validateGoalReturnBatchSize(callsInRaw);
+      if (batchSizeError) return res.status(400).json({ error: batchSizeError });
       const callsIn: GoalReturnRunCall[] = [];
       for (const c of callsInRaw) {
         if (!c || typeof c !== "object") return res.status(400).json({ error: "each call must be an object" });

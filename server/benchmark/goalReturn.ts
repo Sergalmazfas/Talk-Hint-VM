@@ -618,3 +618,24 @@ export function generateGoalReturnReport(callsIn: GoalReturnCallReportInput[]): 
   }
   return L.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// Batch-size validation (shared between the HTTP route and tests)
+// ---------------------------------------------------------------------------
+
+export const GOAL_RETURN_BATCH_MIN = 2;
+export const GOAL_RETURN_BATCH_MAX = 10;
+
+/**
+ * Returns an error string when the calls array violates the 2–10 contract,
+ * or null when the size is acceptable.
+ */
+export function validateGoalReturnBatchSize(calls: unknown[]): string | null {
+  if (calls.length < GOAL_RETURN_BATCH_MIN) {
+    return `calls[] requires at least ${GOAL_RETURN_BATCH_MIN} entries — add a second call to enable batch analysis`;
+  }
+  if (calls.length > GOAL_RETURN_BATCH_MAX) {
+    return `calls[] allows at most ${GOAL_RETURN_BATCH_MAX} entries per run`;
+  }
+  return null;
+}
