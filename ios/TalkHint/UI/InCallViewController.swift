@@ -189,9 +189,19 @@ final class InCallViewController: UIViewController {
 
         observeKeyboard()
         observeAudioRoute()
+        // Tap anywhere (not just the transcript scroll view — with the keyboard
+        // up on small screens the scroll view can be fully covered, leaving the
+        // user with NO way to dismiss the keyboard) to end editing. Buttons and
+        // fields still receive their touches because cancelsTouchesInView=false,
+        // and the delegate below excludes them from triggering dismissal (a tap
+        // INTO a text field must focus it, not immediately resign it).
         let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
         tap.cancelsTouchesInView = false
-        scrollView.addGestureRecognizer(tap)
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
+        // Also let a downward drag on the transcript dismiss the keyboard, like
+        // Messages.
+        scrollView.keyboardDismissMode = .interactive
     }
 
     /// The "Your goal" card pinned under the header, per the approved mockup —
@@ -351,12 +361,19 @@ final class InCallViewController: UIViewController {
         suggestionPrimaryLabel.textColor = Theme.ink
         suggestionPrimaryLabel.numberOfLines = 0
         suggestionPrimaryLabel.accessibilityIdentifier = "text-suggestion"
+        // The hint text must NEVER be squeezed out of existence. When the
+        // keyboard is up on a small screen the bottom stack can run out of
+        // vertical room, and Auto Layout resolves the overflow by compressing
+        // the lowest-priority views — which was these labels, leaving a hint
+        // card with only the "Hint • live" header and no visible hint.
+        suggestionPrimaryLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         suggestionSecondaryLabel.font = .systemFont(ofSize: 14)
         suggestionSecondaryLabel.textColor = Theme.sub
         suggestionSecondaryLabel.numberOfLines = 0
         suggestionSecondaryLabel.isHidden = true
         suggestionSecondaryLabel.accessibilityIdentifier = "text-suggestion-translation"
+        suggestionSecondaryLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         // CHOICE hint buttons — vertical stack, hidden until a CHOICE arrives.
         choiceButtonsStack.axis = .vertical
@@ -1118,6 +1135,25 @@ extension InCallViewController: CallHintStreamDelegate {
         reconnectSpinner.stopAnimating()
         retryButton.setTitle("Sign in", for: .normal)
         retryButton.isHidden = false
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension InCallViewController: UIGestureRecognizerDelegate {
+    /// The background tap-to-dismiss recognizer must ignore touches that land on
+    /// interactive controls (text fields, buttons): with the recognizer attached
+    /// to the root view, a tap INTO a text field would otherwise focus the field
+    /// and then instantly resign it via `dismissKeyboard`, making text entry
+    /// impossible.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldReceive touch: UITouch) -> Bool {
+        var v: UIView? = touch.view
+        while let current = v {
+            if current is UIControl { return false }
+            v = current.superview
+        }
+        return true
     }
 }
 
