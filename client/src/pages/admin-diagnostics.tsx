@@ -3324,11 +3324,22 @@ export function GoalReturnRunDetail({ run }: { run: BenchmarkRun }) {
                   }
                 }
 
+                const turnsAbsent = !Array.isArray(c.turns) || c.turns.length === 0;
+
                 return (
                   <div key={ci} className="border border-gray-800 rounded overflow-hidden">
                     <div className="bg-gray-900 px-3 py-2 text-xs font-medium text-gray-300">
                       {c.title}
                     </div>
+                    {turnsAbsent && (
+                      <div
+                        className="bg-gray-900/60 border-b border-gray-800 px-3 py-2 flex items-center gap-2 text-xs text-amber-400/80"
+                        data-testid={`gr-no-turns-notice-${ci}`}
+                      >
+                        <span>⚠</span>
+                        <span>Тексты реплик не сохранены для этого прогона (запущен до обновления) — метки судьи доступны, текст реплик отсутствует.</span>
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
