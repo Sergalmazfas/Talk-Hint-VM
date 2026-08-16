@@ -60,3 +60,37 @@ Baselines already collected (hint usage full/partial/ignored %, goal-return adhe
 - native_helper is suppressed when per-user Translation is OFF (it is a native-language field; obeys the existing gate). If a translation-off user needs helpers, that's a future product decision.
 - Library-first hits and wait-state ACKs carry no `suggestionType` (source ≠ model) — unchanged legacy shape, intentional.
 - Residual sensitive-leak risk: 4-5-digit codes in direct/choice/strategic hints rely on the prompt rule only (safe redaction impossible without breaking prices/quantities) — full negative-test coverage is Task #237.
+
+---
+
+## 8. PRODUCTION ACCEPTANCE — real call, 2026-08-16
+
+Call: `CA26c23c1e8fd4ddd5a2f6efd2967b60f4`, 2026-08-16 08:58–09:02 UTC (~4.5 min), Mint Mobile (+18006837392), status completed. Deploy with v2.1 went live 08:56 UTC. Verdict: **PASS**.
+
+**Context note (important for DIRECT analysis):** the user manually copied the PREVIOUS conversation into the context/goal field before this call — the stored `goalText` contains that pasted dialogue verbatim (`goalType: other`). Terra therefore legitimately had confirmed facts (new iPhone, unlocked, plan to keep number, prior progress) available. DIRECT answers grounded in that pasted context are NOT invented-state violations.
+
+### Type distribution (16 generated hints; classified from persisted hint texts)
+- DIRECT / short factual: 12 — e.g. "Yes, I did.", "Yes, I'm logged in.", "Yes, I see the menu.", "I selected Change Device." (2–7 words; adaptive length working)
+- CHOICE: 3 — uid 11 `If yes: "Yes, I did." / If no: "Not yet. I'm doing that now."`; uid 14 (options selected?); uid 17 (checkout vs blank screen). All three fired exactly on turns where the user's real-world state was unconfirmed — the compat composition format matches the spec.
+- USER_INPUT: 1 — uid 15 `[read the four options on your screen].` — placeholder frame for something only the user can see/do.
+- STRATEGIC: 0 — correct: a cooperative walkthrough call had no dispute/negotiation turns.
+
+### Invented-state violations: **0**
+Every unconfirmed-state question (confirmation email received? options selected? checkout done?) produced CHOICE or USER_INPUT instead of a guessed answer. Early affirmative DIRECT hints ("Yes, it's unlocked…", "Yes, I did.") were each grounded in the pasted prior-conversation context or in the owner's own earlier turns in this call — verified against the transcript and the copied context; none invented.
+
+### Hint usage (#226 pipeline, persisted verdicts)
+13 scored hints: **full 6 (46%), partial 1 (8%), ignored 6 (46%)**. Notably both delivered CHOICE hints that got verdicts were scored (uid 14/17 ignored, uid 11 partial 0.48) — the user often answered before reading, consistent with a fast cooperative bot call.
+
+### Latency (persisted per-hint sttFinal→ready, n=16)
+- **p50 = 1501 ms, p90 = 1782 ms, p95/max = 2166 ms**
+- Baseline (#226, pre-v2.1 Mint call): p50 = 1600 ms, p90 = 1824 ms.
+- **No regression** — p50/p90 slightly better than baseline despite the larger prompt.
+
+### One Terra call per guest turn: confirmed
+16 model generations for 16 gated guest turns (utteranceIds 1–18 minus 2 cooldown drops that made NO model call); every `[HINT]` log line shows `provider_used=openai:gpt-5.6-terra`, zero Gemini fallbacks, no duplicate generations per utteranceId. Candidate pipeline disabled (`enabled:false`).
+
+### GOAL presence
+Goal/context was present throughout (pasted prior conversation; `goalType: other`). Note: because the user pasted a dialogue instead of a one-line goal, goal-return scoring for this call should treat the pasted text as context. Goal-Return (#227) judge analysis can be launched from the admin panel button (#229) / batch runner (#238) against this call.
+
+### Delivery pipeline health
+12 hints delivered; 3 stale drops (owner already spoke — correct supersede behavior), 2 cooldown drops (no model call), 1 duplicate exemption for a re-asked question. AirAtoma delivery succeeded on retry (status 200). Recording + transcript persisted (2115 chars).
