@@ -1495,6 +1495,11 @@ function renderTutorRow() {
 freeBtn.onclick = () => { document.body.classList.remove("sheet-start"); connect(null); };
 simBtn.onclick = () => openSimSheet("");
 document.getElementById("simBackBtn").onclick = () => { stopSimRecording(true); openStartChoice(); };
+// Release the microphone if the app goes to background (iOS home-swipe / lock
+// screen) while a sim-sheet recording is in progress. The visibilitychange event
+// fires reliably in WKWebView when the process is suspended, so the mic indicator
+// in the iOS status bar clears even when the user never taps Back.
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopSimRecording(true); });
 document.getElementById("simStartBtn").onclick = () => {
   const goal = document.getElementById("simGoal").value.trim();
   const tutorRole = document.getElementById("simEmma").value.trim();

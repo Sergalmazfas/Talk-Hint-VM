@@ -101,6 +101,18 @@ final class PrepareViewController: UIViewController {
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
     }
 
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Sheet is being swiped down or closed: stop the recorder immediately so
+        // the iOS microphone indicator clears without waiting for deinit.
+        if isRecording {
+            recorder?.stop()
+            recorder = nil
+            isRecording = false
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
     deinit {
         stream.disconnect()
         recorder?.stop()
@@ -489,6 +501,8 @@ final class PrepareViewController: UIViewController {
         recorder?.stop()
         recorder = nil
         isRecording = false
+        // Deactivate the session so the iOS microphone indicator clears immediately.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         micButton.tintColor = .systemBlue
         micButton.setImage(UIImage(systemName: "mic.fill"), for: .normal)
         statusLabel.text = "Распознаю речь…"
