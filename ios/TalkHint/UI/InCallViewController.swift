@@ -32,6 +32,8 @@ final class InCallViewController: UIViewController {
 
     private let routeButton = UIButton(type: .system)
     private let muteButton = UIButton(type: .system)
+    private let routeCaption = UILabel()
+    private let muteCaption = UILabel()
 
     // Live (non-finalized) transcript card per speaker, kept independently —
     // like `interimMessages['guest']` / `interimMessages['you']` in the web.
@@ -60,7 +62,7 @@ final class InCallViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .white
         buildUI()
 
         stream.delegate = self
@@ -95,14 +97,15 @@ final class InCallViewController: UIViewController {
     private func buildUI() {
         let titleLabel = UILabel()
         titleLabel.text = "On call with \(callerName)"
-        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.font = .systemFont(ofSize: 22, weight: .bold)
+        titleLabel.textColor = Theme.ink
         titleLabel.textAlignment = .center
         titleLabel.numberOfLines = 0
         titleLabel.accessibilityIdentifier = "text-incall-title"
 
         statusLabel.text = "Connecting to live assistant…"
-        statusLabel.font = .preferredFont(forTextStyle: .footnote)
-        statusLabel.textColor = .secondaryLabel
+        statusLabel.font = .systemFont(ofSize: 13)
+        statusLabel.textColor = Theme.sub
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 0
         statusLabel.accessibilityIdentifier = "text-incall-status"
@@ -114,7 +117,8 @@ final class InCallViewController: UIViewController {
         reconnectSpinner.accessibilityIdentifier = "spinner-incall-reconnect"
 
         retryButton.setTitle("Reconnect", for: .normal)
-        retryButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+        retryButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        retryButton.setTitleColor(Theme.green, for: .normal)
         retryButton.isHidden = true
         retryButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
         retryButton.accessibilityIdentifier = "button-incall-retry"
@@ -135,9 +139,12 @@ final class InCallViewController: UIViewController {
         statusRow.spacing = 6
         statusRow.alignment = .center
 
-        let header = UIStackView(arrangedSubviews: [titleLabel, statusRow, retryButton])
+        let goalCard = buildGoalCard()
+
+        let header = UIStackView(arrangedSubviews: [titleLabel, statusRow, retryButton, goalCard])
         header.axis = .vertical
         header.spacing = 4
+        header.setCustomSpacing(12, after: retryButton)
         header.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(header)
         view.addSubview(scrollView)
@@ -184,18 +191,50 @@ final class InCallViewController: UIViewController {
         scrollView.addGestureRecognizer(tap)
     }
 
-    private func buildInputBar() -> UIView {
+    /// The "Your goal" card pinned under the header, per the approved mockup —
+    /// a white card with a hairline border, target icon, and the (editable)
+    /// goal text. Editing here keeps the existing goal-editor behavior: typing
+    /// a goal and hitting Set/Done sends it over the live stream.
+    private func buildGoalCard() -> UIView {
+        let card = UIView()
+        card.backgroundColor = .white
+        card.layer.cornerRadius = 16
+        card.layer.borderWidth = 1
+        card.layer.borderColor = Theme.line.cgColor
+        card.accessibilityIdentifier = "card-goal-editor"
+
+        let icon = UIImageView(image: UIImage(systemName: "target"))
+        icon.tintColor = Theme.green
+        icon.contentMode = .scaleAspectFit
+        icon.setContentHuggingPriority(.required, for: .horizontal)
+        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+
+        let caption = UILabel()
+        caption.text = "Your goal"
+        caption.font = .systemFont(ofSize: 13, weight: .semibold)
+        caption.textColor = Theme.greenDark
+
+        let captionRow = UIStackView(arrangedSubviews: [icon, caption, UIView()])
+        captionRow.axis = .horizontal
+        captionRow.spacing = 6
+        captionRow.alignment = .center
+
         goalField.placeholder = "Set call goal (e.g. book a table)"
         goalField.text = SessionStore.shared.callGoal
-        goalField.borderStyle = .roundedRect
-        goalField.font = .preferredFont(forTextStyle: .subheadline)
+        goalField.borderStyle = .none
+        goalField.font = .systemFont(ofSize: 14)
+        goalField.textColor = Theme.ink
         goalField.returnKeyType = .done
         goalField.delegate = self
         goalField.accessibilityIdentifier = "input-goal"
 
         let setGoalButton = UIButton(type: .system)
         setGoalButton.setTitle("Set", for: .normal)
-        setGoalButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        setGoalButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        setGoalButton.setTitleColor(Theme.greenDark, for: .normal)
+        setGoalButton.backgroundColor = Theme.greenBg
+        setGoalButton.layer.cornerRadius = 12
+        setGoalButton.contentEdgeInsets = UIEdgeInsets(top: 5, left: 12, bottom: 5, right: 12)
         setGoalButton.addTarget(self, action: #selector(setGoalTapped), for: .touchUpInside)
         setGoalButton.accessibilityIdentifier = "button-set-goal"
         setGoalButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -205,63 +244,120 @@ final class InCallViewController: UIViewController {
         goalRow.spacing = 8
         goalRow.alignment = .center
 
+        let content = UIStackView(arrangedSubviews: [captionRow, goalRow])
+        content.axis = .vertical
+        content.spacing = 6
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+        ])
+        return card
+    }
+
+    private func buildInputBar() -> UIView {
         questionField.placeholder = "Ask the assistant…"
-        questionField.borderStyle = .roundedRect
-        questionField.font = .preferredFont(forTextStyle: .body)
+        questionField.borderStyle = .none
+        questionField.font = .systemFont(ofSize: 15)
+        questionField.textColor = Theme.ink
         questionField.returnKeyType = .send
         questionField.delegate = self
         questionField.accessibilityIdentifier = "input-question"
 
+        // The question field lives in a bordered pill so it reads as an input
+        // on the all-white background (borderStyle .none has no chrome).
+        let fieldPill = UIView()
+        fieldPill.backgroundColor = Theme.fill
+        fieldPill.layer.cornerRadius = 12
+        fieldPill.layer.borderWidth = 1
+        fieldPill.layer.borderColor = Theme.line.cgColor
+        questionField.translatesAutoresizingMaskIntoConstraints = false
+        fieldPill.addSubview(questionField)
+        NSLayoutConstraint.activate([
+            questionField.topAnchor.constraint(equalTo: fieldPill.topAnchor, constant: 8),
+            questionField.bottomAnchor.constraint(equalTo: fieldPill.bottomAnchor, constant: -8),
+            questionField.leadingAnchor.constraint(equalTo: fieldPill.leadingAnchor, constant: 12),
+            questionField.trailingAnchor.constraint(equalTo: fieldPill.trailingAnchor, constant: -12),
+        ])
+
         let askButton = UIButton(type: .system)
         askButton.setTitle("Ask", for: .normal)
-        askButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        askButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        askButton.setTitleColor(.white, for: .normal)
+        askButton.backgroundColor = Theme.purple
+        askButton.layer.cornerRadius = 12
+        askButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
         askButton.addTarget(self, action: #selector(askTapped), for: .touchUpInside)
         askButton.accessibilityIdentifier = "button-ask-ai"
         askButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let askRow = UIStackView(arrangedSubviews: [questionField, askButton])
+        let askRow = UIStackView(arrangedSubviews: [fieldPill, askButton])
         askRow.axis = .horizontal
         askRow.spacing = 8
         askRow.alignment = .center
-
-        let bar = UIStackView(arrangedSubviews: [goalRow, askRow])
-        bar.axis = .vertical
-        bar.spacing = 8
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        return bar
+        askRow.translatesAutoresizingMaskIntoConstraints = false
+        return askRow
     }
 
     /// The pinned "SUGGESTION" banner shown above the controls. Hidden until the
     /// first suggestion arrives, then updated in place with the latest one so it
     /// stays visible and never scrolls away with the transcript feed.
     private func buildSuggestionBanner() -> UIView {
-        suggestionBanner.backgroundColor = .systemGreen.withAlphaComponent(0.18)
-        suggestionBanner.layer.cornerRadius = 12
+        // Purple "AI hint" card per the approved mockup: light purple surface,
+        // soft purple border, sparkles icon + "Hint" tag with a live dot.
+        suggestionBanner.backgroundColor = Theme.purpleBg
+        suggestionBanner.layer.cornerRadius = 16
+        suggestionBanner.layer.borderWidth = 1
+        suggestionBanner.layer.borderColor = UIColor(
+            red: 0xC9 / 255.0, green: 0xBC / 255.0, blue: 0xFF / 255.0, alpha: 1).cgColor
         suggestionBanner.isHidden = true
         suggestionBanner.accessibilityIdentifier = "card-suggestion"
 
-        let tag = UILabel()
-        tag.text = "SUGGESTION"
-        tag.font = .preferredFont(forTextStyle: .caption2)
-        tag.textColor = .systemGreen
+        let sparkles = UIImageView(image: UIImage(systemName: "sparkles"))
+        sparkles.tintColor = Theme.purple
+        sparkles.contentMode = .scaleAspectFit
+        sparkles.setContentHuggingPriority(.required, for: .horizontal)
+        sparkles.widthAnchor.constraint(equalToConstant: 16).isActive = true
 
-        // Larger, bold primary text so the suggestion stands out at a glance.
-        let titleFont = UIFont.preferredFont(forTextStyle: .title3)
-        suggestionPrimaryLabel.font = titleFont.fontDescriptor
-            .withSymbolicTraits(.traitBold)
-            .map { UIFont(descriptor: $0, size: 0) } ?? titleFont
+        let tag = UILabel()
+        tag.text = "Hint"
+        tag.font = .systemFont(ofSize: 13, weight: .semibold)
+        tag.textColor = Theme.purple
+
+        let liveDot = UIView()
+        liveDot.backgroundColor = Theme.green
+        liveDot.layer.cornerRadius = 3
+        liveDot.widthAnchor.constraint(equalToConstant: 6).isActive = true
+        liveDot.heightAnchor.constraint(equalToConstant: 6).isActive = true
+
+        let liveLabel = UILabel()
+        liveLabel.text = "live"
+        liveLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        liveLabel.textColor = Theme.sub
+        liveLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let tagRow = UIStackView(arrangedSubviews: [sparkles, tag, UIView(), liveDot, liveLabel])
+        tagRow.axis = .horizontal
+        tagRow.spacing = 6
+        tagRow.alignment = .center
+
+        suggestionPrimaryLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        suggestionPrimaryLabel.textColor = Theme.ink
         suggestionPrimaryLabel.numberOfLines = 0
         suggestionPrimaryLabel.accessibilityIdentifier = "text-suggestion"
 
-        suggestionSecondaryLabel.font = .preferredFont(forTextStyle: .subheadline)
-        suggestionSecondaryLabel.textColor = .secondaryLabel
+        suggestionSecondaryLabel.font = .systemFont(ofSize: 14)
+        suggestionSecondaryLabel.textColor = Theme.sub
         suggestionSecondaryLabel.numberOfLines = 0
         suggestionSecondaryLabel.isHidden = true
         suggestionSecondaryLabel.accessibilityIdentifier = "text-suggestion-translation"
 
-        let labels = UIStackView(arrangedSubviews: [tag, suggestionPrimaryLabel, suggestionSecondaryLabel])
+        let labels = UIStackView(arrangedSubviews: [tagRow, suggestionPrimaryLabel, suggestionSecondaryLabel])
         labels.axis = .vertical
-        labels.spacing = 2
+        labels.spacing = 4
         labels.translatesAutoresizingMaskIntoConstraints = false
         suggestionBanner.addSubview(labels)
         NSLayoutConstraint.activate([
@@ -273,41 +369,75 @@ final class InCallViewController: UIViewController {
         return suggestionBanner
     }
 
+    /// The circular Mute / End / Audio controls per the approved mockup —
+    /// round buttons with small captions beneath. The mockup's third slot shows
+    /// "Keypad", but DTMF isn't supported in-call; the existing audio-route
+    /// control keeps that slot so no functionality is lost.
     private func buildControlsRow() -> UIView {
-        routeButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
-        routeButton.titleLabel?.adjustsFontSizeToFitWidth = true
-        routeButton.titleLabel?.minimumScaleFactor = 0.7
-        routeButton.titleLabel?.lineBreakMode = .byTruncatingTail
-        routeButton.layer.cornerRadius = 10
-        routeButton.addTarget(self, action: #selector(routeButtonTapped), for: .touchUpInside)
-        routeButton.accessibilityIdentifier = "button-audio-route"
-        updateRouteButton()
-
-        muteButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
-        muteButton.titleLabel?.adjustsFontSizeToFitWidth = true
-        muteButton.titleLabel?.minimumScaleFactor = 0.7
-        muteButton.titleLabel?.lineBreakMode = .byTruncatingTail
-        muteButton.layer.cornerRadius = 10
+        configureCircleButton(muteButton, diameter: 56)
         muteButton.addTarget(self, action: #selector(muteButtonTapped), for: .touchUpInside)
         muteButton.accessibilityIdentifier = "button-mute"
+        muteCaption.font = .systemFont(ofSize: 12)
+        muteCaption.textColor = Theme.sub
+        muteCaption.textAlignment = .center
         updateMuteButton()
 
         let endButton = UIButton(type: .system)
-        endButton.setTitle("End Call", for: .normal)
-        endButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
-        endButton.setTitleColor(.white, for: .normal)
-        endButton.backgroundColor = .systemRed
-        endButton.layer.cornerRadius = 10
+        configureCircleButton(endButton, diameter: 68)
+        endButton.setImage(UIImage(systemName: "phone.down.fill"), for: .normal)
+        endButton.tintColor = .white
+        endButton.backgroundColor = UIColor(
+            red: 0xEF / 255.0, green: 0x44 / 255.0, blue: 0x44 / 255.0, alpha: 1)
+        endButton.layer.borderWidth = 0
         endButton.addTarget(self, action: #selector(endCallTapped), for: .touchUpInside)
         endButton.accessibilityIdentifier = "button-end-call"
 
-        let row = UIStackView(arrangedSubviews: [routeButton, muteButton, endButton])
+        let endCaption = UILabel()
+        endCaption.text = "End"
+        endCaption.font = .systemFont(ofSize: 12)
+        endCaption.textColor = Theme.sub
+        endCaption.textAlignment = .center
+
+        configureCircleButton(routeButton, diameter: 56)
+        routeButton.addTarget(self, action: #selector(routeButtonTapped), for: .touchUpInside)
+        routeButton.accessibilityIdentifier = "button-audio-route"
+        routeCaption.font = .systemFont(ofSize: 12)
+        routeCaption.textColor = Theme.sub
+        routeCaption.textAlignment = .center
+        routeCaption.adjustsFontSizeToFitWidth = true
+        routeCaption.minimumScaleFactor = 0.7
+        updateRouteButton()
+
+        let mute = circleControl(button: muteButton, caption: muteCaption)
+        let end = circleControl(button: endButton, caption: endCaption)
+        let route = circleControl(button: routeButton, caption: routeCaption)
+
+        let row = UIStackView(arrangedSubviews: [mute, end, route])
         row.axis = .horizontal
         row.spacing = 12
         row.distribution = .fillEqually
+        row.alignment = .bottom
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.heightAnchor.constraint(equalToConstant: 50).isActive = true
         return row
+    }
+
+    private func configureCircleButton(_ button: UIButton, diameter: CGFloat) {
+        button.backgroundColor = Theme.fill
+        button.layer.cornerRadius = diameter / 2
+        button.layer.borderWidth = 1
+        button.layer.borderColor = Theme.line.cgColor
+        button.tintColor = Theme.ink
+        button.widthAnchor.constraint(equalToConstant: diameter).isActive = true
+        button.heightAnchor.constraint(equalToConstant: diameter).isActive = true
+    }
+
+    /// A circular control with its caption beneath, centered as one unit.
+    private func circleControl(button: UIButton, caption: UILabel) -> UIView {
+        let stack = UIStackView(arrangedSubviews: [button, caption])
+        stack.axis = .vertical
+        stack.spacing = 6
+        stack.alignment = .center
+        return stack
     }
 
     /// True when the session's current output route is the built-in speaker.
@@ -316,34 +446,34 @@ final class InCallViewController: UIViewController {
             .contains { $0.portType == .builtInSpeaker }
     }
 
-    /// Icon + short name describing the current audio output route, used to
-    /// label the route button so it always reflects the live route.
-    private func currentRouteLabel() -> String {
+    /// Caption + SF Symbol describing the current audio output route, used to
+    /// label the route control so it always reflects the live route.
+    private func currentRouteDescription() -> (caption: String, icon: String) {
         let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-        guard let port = outputs.first else { return "🔈 Audio" }
+        guard let port = outputs.first else { return ("Audio", "speaker.wave.2") }
         switch port.portType {
         case .builtInSpeaker:
-            return "🔊 Speaker"
+            return ("Speaker", "speaker.wave.2.fill")
         case .builtInReceiver:
-            return "📱 iPhone"
+            return ("iPhone", "iphone")
         case .headphones, .headsetMic:
-            return "🎧 Headphones"
-        case .bluetoothHFP, .bluetoothA2DP, .bluetoothLE:
-            return "🎧 \(port.portName)"
-        case .usbAudio:
-            return "🎧 \(port.portName)"
+            return ("Headphones", "headphones")
+        case .bluetoothHFP, .bluetoothA2DP, .bluetoothLE, .usbAudio:
+            return (port.portName, "headphones")
         case .carAudio:
-            return "🚗 \(port.portName)"
+            return (port.portName, "car.fill")
         default:
-            return "🔈 \(port.portName)"
+            return (port.portName, "speaker.wave.2")
         }
     }
 
     private func updateRouteButton() {
-        routeButton.setTitle(currentRouteLabel(), for: .normal)
-        routeButton.backgroundColor = isSpeakerRouteActive
-            ? UIColor.systemBlue.withAlphaComponent(0.20)
-            : .secondarySystemBackground
+        let route = currentRouteDescription()
+        routeButton.setImage(UIImage(systemName: route.icon), for: .normal)
+        routeCaption.text = route.caption
+        // Active speaker reads as "selected": green surface + green icon.
+        routeButton.backgroundColor = isSpeakerRouteActive ? Theme.greenBg : Theme.fill
+        routeButton.tintColor = isSpeakerRouteActive ? Theme.greenDark : Theme.ink
     }
 
     /// External (non-built-in) input ports the user can explicitly select as a
@@ -453,10 +583,13 @@ final class InCallViewController: UIViewController {
 
     private func updateMuteButton() {
         let muted = CallManager.shared.isMuted
-        muteButton.setTitle(muted ? "🔇 Muted" : "🎙 Mute", for: .normal)
+        muteButton.setImage(
+            UIImage(systemName: muted ? "mic.slash.fill" : "mic.fill"), for: .normal)
+        muteCaption.text = muted ? "Muted" : "Mute"
         muteButton.backgroundColor = muted
-            ? UIColor.systemRed.withAlphaComponent(0.20)
-            : .secondarySystemBackground
+            ? UIColor.systemRed.withAlphaComponent(0.15)
+            : Theme.fill
+        muteButton.tintColor = muted ? .systemRed : Theme.ink
     }
 
     /// Called by CallManager whenever the call's mute state changes (including
@@ -567,9 +700,9 @@ final class InCallViewController: UIViewController {
         guard !question.isEmpty else { return }
         let goal = goalField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
         stream.askAI(question, goal: goal)
-        appendCard(title: "ASKED", titleColor: .systemPurple,
+        appendCard(title: "ASKED", titleColor: Theme.purple,
                    primary: question, secondary: nil,
-                   background: .systemPurple.withAlphaComponent(0.10),
+                   background: Theme.purpleBg,
                    testIdSuffix: "asked")
         questionField.text = ""
     }
@@ -616,26 +749,27 @@ final class InCallViewController: UIViewController {
                             testIdSuffix: String) -> FeedCard {
         let card = UIView()
         card.backgroundColor = background
-        card.layer.cornerRadius = 12
+        card.layer.cornerRadius = 14
         card.translatesAutoresizingMaskIntoConstraints = false
         card.accessibilityIdentifier = "card-\(testIdSuffix)"
 
         let tag = UILabel()
         tag.text = title
-        tag.font = .preferredFont(forTextStyle: .caption2)
+        tag.font = .systemFont(ofSize: 11, weight: .semibold)
         tag.textColor = titleColor
 
         let primaryLabel = UILabel()
         primaryLabel.text = primary
-        primaryLabel.font = .preferredFont(forTextStyle: .body)
+        primaryLabel.font = .systemFont(ofSize: 15)
+        primaryLabel.textColor = Theme.ink
         primaryLabel.numberOfLines = 0
         primaryLabel.accessibilityIdentifier = "text-\(testIdSuffix)"
 
         // Always create the translation label so it can be filled in later when
         // an interim transcript is finalized; hidden until it has content.
         let secondaryLabel = UILabel()
-        secondaryLabel.font = .preferredFont(forTextStyle: .subheadline)
-        secondaryLabel.textColor = .secondaryLabel
+        secondaryLabel.font = .systemFont(ofSize: 13)
+        secondaryLabel.textColor = Theme.sub
         secondaryLabel.numberOfLines = 0
         secondaryLabel.accessibilityIdentifier = "text-\(testIdSuffix)-translation"
         if let secondary = secondary, !secondary.isEmpty {
@@ -679,7 +813,7 @@ final class InCallViewController: UIViewController {
         } else {
             let new = appendCard(title: title, titleColor: titleColor,
                                  primary: primary, secondary: secondary,
-                                 background: .secondarySystemBackground,
+                                 background: Theme.fill,
                                  testIdSuffix: testIdSuffix)
             new.setInterim(!isFinal)
             card = new
@@ -724,7 +858,7 @@ extension InCallViewController: CallHintStreamDelegate {
                 return
             }
             upsertTranscript(card: &currentCallerCard,
-                             title: "CALLER", titleColor: .systemBlue,
+                             title: "CALLER", titleColor: Theme.greenDark,
                              primary: text, secondary: translation,
                              testIdSuffix: "guest", isFinal: isFinal)
         case .ownerTranscript(let text, let confidence, let isFinal):
@@ -735,31 +869,32 @@ extension InCallViewController: CallHintStreamDelegate {
                 return
             }
             upsertTranscript(card: &currentYouCard,
-                             title: "YOU", titleColor: .systemGray,
+                             title: "YOU", titleColor: Theme.sub,
                              primary: text, secondary: nil,
                              testIdSuffix: "owner", isFinal: isFinal)
         case .suggestion(let en, let translation):
             showSuggestion(en: en, translation: translation)
         case .fastPhrase(let text, let translation):
-            appendCard(title: "QUICK PHRASE", titleColor: .systemOrange,
+            appendCard(title: "QUICK PHRASE", titleColor: Theme.purple,
                        primary: text, secondary: translation,
-                       background: .systemOrange.withAlphaComponent(0.12),
+                       background: Theme.purpleBg,
                        testIdSuffix: "fast-phrase")
         case .aiResponse(let text, let isError):
             appendCard(title: isError ? "ERROR" : "ASSISTANT",
-                       titleColor: isError ? .systemRed : .systemPurple,
+                       titleColor: isError ? .systemRed : Theme.purple,
                        primary: text, secondary: nil,
-                       background: (isError ? UIColor.systemRed : UIColor.systemPurple)
-                        .withAlphaComponent(0.12),
+                       background: isError
+                        ? UIColor.systemRed.withAlphaComponent(0.10)
+                        : Theme.purpleBg,
                        testIdSuffix: "ai-response")
         case .goalSet(let text):
             // Compact one-time feed event; scrolls away with history. Skip the
             // duplicate echo the server sends after a mid-call reconnect.
             guard text != lastGoalShownInFeed else { return }
             lastGoalShownInFeed = text
-            appendCard(title: "GOAL", titleColor: .systemGreen,
+            appendCard(title: "GOAL", titleColor: Theme.greenDark,
                        primary: text, secondary: nil,
-                       background: .systemGreen.withAlphaComponent(0.10),
+                       background: Theme.greenBg,
                        testIdSuffix: "goal")
         case .goalUpdated(let text):
             guard text != lastGoalShownInFeed else { return }
@@ -768,9 +903,9 @@ extension InCallViewController: CallHintStreamDelegate {
             // the new goal, and the goal field reflects what Brain now targets.
             SessionStore.shared.callGoal = text
             goalField.text = text
-            appendCard(title: "GOAL UPDATED", titleColor: .systemGreen,
+            appendCard(title: "GOAL UPDATED", titleColor: Theme.greenDark,
                        primary: text, secondary: nil,
-                       background: .systemGreen.withAlphaComponent(0.10),
+                       background: Theme.greenBg,
                        testIdSuffix: "goal-updated")
         case .prepareReply, .prepareOpening, .prepareError:
             // PREPARE-stage events belong to PrepareViewController; the in-call
