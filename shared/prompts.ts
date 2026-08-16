@@ -241,6 +241,25 @@ export const ADAPTIVE_HINT_TYPE_RULES = `ADAPTIVE HINT TYPE RULES — PICK THE M
 
 10. The GOAL PRIORITY RULES above remain authoritative — the hint type never overrides them.`;
 
+// Strategy Memory (LIVE Hint Policy v2.2). The server injects a compact
+// RECENT STRATEGY MEMORY block (last few hint cycles: what TalkHint suggested,
+// what the Owner ACTUALLY said, how the Guest reacted, deterministic outcome)
+// before every Terra call. These rules teach the model how to use that block
+// without ever confusing a suggestion with a fact. No extra model call: the
+// memory is assembled deterministically server-side (server/strategyMemory.ts).
+export const STRATEGY_MEMORY_RULES = `STRATEGY MEMORY RULES — SUGGESTIONS ARE ADVICE, NOT FACTS:
+
+1. Previous suggestions are advice, not facts. A suggestion shown to the user never becomes a fact by itself.
+2. Only Owner speech and trusted context establish user facts.
+3. Consider what was suggested, what the Owner actually said, and how the Guest responded.
+4. If the previous approach worked, advance to the next step instead of repeating it.
+5. If the Owner ignored a suggestion, do not assume it was said.
+6. If the Owner used only part of a suggestion, rely only on the meaning actually expressed — the unspoken part remains unsaid.
+7. If the Guest did not understand, simplify or rephrase — never repeat the identical wording.
+8. If the Guest rejected the previous approach, adapt the strategy rather than repeating it.
+9. CHOICE alternatives remain hypothetical until the Owner selects one through actual speech. An unselected option is never a fact.
+10. Keep Strategy Memory secondary to the current Guest question, the current Owner intent, trusted facts, and the GOAL PRIORITY RULES.`;
+
 // Assemble the LIVE-call coaching system prompt.
 //
 // This is the prompt that translateAndSuggest() sends to the hint model on
@@ -260,13 +279,16 @@ export const ADAPTIVE_HINT_TYPE_RULES = `ADAPTIVE HINT TYPE RULES — PICK THE M
 // call. Lives here (not inline in routes.ts) so tests can assert the real
 // assembled string — the grounding layer must reach this path too, since it
 // bypasses buildLiveSystemPrompt.
-export function buildLiveChatSystemPrompt(opts: { goal?: string; language?: string }): string {
+export function buildLiveChatSystemPrompt(opts: { goal?: string; language?: string; strategyMemory?: string }): string {
   const langName = LANGUAGE_NAMES[opts.language || "ru"] || "Russian";
+  const memoryBlock = opts.strategyMemory ? `\n\n${opts.strategyMemory}` : "";
   return `${TALKHINT_GOLDEN_PROMPT}
 
 ${LIVE_GROUNDING_RULES}
 
 ${GOAL_PRIORITY_RULES}
+
+${STRATEGY_MEMORY_RULES}${memoryBlock}
 
 USER'S GOAL: ${opts.goal || "Have a successful phone conversation"}
 USER'S NATIVE LANGUAGE: ${langName}
@@ -280,6 +302,7 @@ export function buildLiveSystemPrompt(opts: {
   conversationContext?: string;
   contextSections?: string;
   translateEnabled?: boolean;
+  strategyMemory?: string;
 }): string {
   const {
     goal,
@@ -287,12 +310,17 @@ export function buildLiveSystemPrompt(opts: {
     conversationContext = "",
     contextSections = "",
     translateEnabled = true,
+    strategyMemory = "",
   } = opts;
 
   const langName = LANGUAGE_NAMES[language] || "Russian";
   const contextSection = conversationContext
     ? `\n\nCONVERSATION HISTORY:\n${conversationContext}\n`
     : "";
+  // v2.2 Strategy Memory: the server-composed RECENT STRATEGY MEMORY block
+  // (deterministic, bounded — see server/strategyMemory.ts). It supplements —
+  // never replaces — CONVERSATION HISTORY, and is omitted when empty.
+  const memorySection = strategyMemory ? `\n${strategyMemory}\n` : "";
 
   return translateEnabled
     ? `You help user during phone calls. User's goal: ${goal || "Have a successful conversation"}. User speaks ${langName}.${contextSection}
@@ -307,6 +335,8 @@ ${LIVE_ANTI_LOOP_RULES}
 
 ${ADAPTIVE_HINT_TYPE_RULES}
 
+${STRATEGY_MEMORY_RULES}
+${memorySection}
 Guest just spoke. 
 1) Translate guest's words to ${langName}. 
 2) Pick the hint type (direct | choice | user_input | strategic) per the ADAPTIVE HINT TYPE RULES. Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words), as short as the turn allows.
@@ -334,6 +364,8 @@ ${LIVE_ANTI_LOOP_RULES}
 
 ${ADAPTIVE_HINT_TYPE_RULES}
 
+${STRATEGY_MEMORY_RULES}
+${memorySection}
 Guest just spoke. Do NOT translate anything — leave translation fields and native_helper empty.
 1) Pick the hint type (direct | choice | user_input | strategic) per the ADAPTIVE HINT TYPE RULES. Suggest what user should say next - a natural spoken reply IN ENGLISH (under 25 words), as short as the turn allows.
 2) Classify guest sentiment in one word: positive | neutral | negative | urgent | confused.

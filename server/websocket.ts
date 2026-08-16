@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, buildLiveSystemPrompt } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, STRATEGY_MEMORY_RULES, buildLiveSystemPrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
@@ -40,6 +40,7 @@ import { prepareMessage, clearPrepareState, clearOpeningDedup, PrepareUnavailabl
 import { handlePrepareConfirmGoal } from "./prepareConfirm";
 import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
+import { StrategyMemoryTracker } from "./strategyMemory";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -276,7 +277,7 @@ async function generateWithOpenAI(model: string, systemPrompt: string, userPromp
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true, tutorMemory: string = "", modelOverride?: string): Promise<{
+async function translateAndSuggest(text: string, goal: string, language: string = "ru", conversationContext: string = "", forceSuggestion: boolean = true, userContext: string = "", contactContext: string = "", staticCards: string = "", translateEnabled: boolean = true, tutorMemory: string = "", modelOverride?: string, strategyMemory: string = ""): Promise<{
   translation: string;
   explanation?: string;
   suggestion?: NormalizedSuggestion;
@@ -303,6 +304,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
       conversationContext,
       contextSections,
       translateEnabled,
+      strategyMemory,
     });
 
     const userPrompt = `Guest said: "${text}"
@@ -634,7 +636,7 @@ class GPTRealtimeHandler {
     // LIVE_GROUNDING_RULES: the realtime path bypasses buildLiveSystemPrompt,
     // so the grounding layer (never invent user facts / real-world state,
     // state precedence) must be injected here explicitly too.
-    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${GOAL_PRIORITY_RULES}\n\n${getRealtimePrompt(this.mode)}`;
+    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${GOAL_PRIORITY_RULES}\n\n${STRATEGY_MEMORY_RULES}\n\n${getRealtimePrompt(this.mode)}`;
     
     this.send({
       type: "session.update",
@@ -887,6 +889,8 @@ GOAL FOCUS: The user has set a clear goal: "${goal}"
 ${LIVE_GROUNDING_RULES}
 
 ${GOAL_PRIORITY_RULES}
+
+${STRATEGY_MEMORY_RULES}
 
 The user's goal for this call: ${goal || "Not specified"}
 The user's native language: ${langName}
@@ -1204,6 +1208,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Robot callers speak in 3-5s bursts, which used to silently swallow questions.
     const hintCarryover = new HintCarryover();
 
+    // v2.2 Strategy Memory (Task #236): bounded per-call tracker of the last
+    // few hint cycles (suggestion -> actual Owner speech -> Guest reaction).
+    // Deterministic string work only — no LLM, no DB, no extra latency. Its
+    // render() feeds the RECENT STRATEGY MEMORY block of the live prompt.
+    const strategyMemory = new StrategyMemoryTracker();
+
     // Self-overlap guard - don't suggest something the owner (HON) already said.
     // The suggestion is what HON should say next; if HON already voiced essentially
     // the same thing recently, repeating it as a hint is pure noise.
@@ -1418,6 +1428,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       });
       if (conversationLog.length > 10) conversationLog.shift();
       fullConversation.push({ speaker: "Guest", text });
+      // Strategy Memory: this Guest turn is the REACTION that closes the
+      // previous hint cycle (before this turn's own Terra call is built).
+      strategyMemory.recordGuestTurn(text);
       persistTranscriptSoon();
       
       // ALWAYS update GoalEngine (even if hints are blocked)
@@ -1640,7 +1653,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride)
+        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
         : null;
 
       // ----- Caption: broadcast as soon as the translation resolves -----
@@ -1859,6 +1872,14 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           callSid
         });
         latencyRecorder.sent(utteranceId, translated.suggestion.en);
+        // Strategy Memory: only a hint that actually REACHED the user opens a
+        // cycle (drops/stale/dedup above never do — an unseen hint can't shape
+        // the owner's behavior). Library hits count too: the user saw them.
+        strategyMemory.recordSuggestion(
+          translated.suggestion.en,
+          translated.suggestion.type,
+          translated.suggestion.options,
+        );
         // Full reaction time: from end of guest's turn to the suggestion leaving the server.
         log(`[TIMING] reaction end_of_turn->suggestion=${Date.now() - now}ms suggestion_latency_ms=${suggestionMs} utteranceId=${utteranceId}`, "websocket");
       } else {
@@ -1887,6 +1908,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       recentOwnerUtterances.push(text);
       if (recentOwnerUtterances.length > RECENT_OWNER_MAX) recentOwnerUtterances.shift();
       ownerTurnsTimed.push({ text, ts: Date.now() });
+      // Strategy Memory: actual Owner speech — the ONLY thing that can turn a
+      // suggestion into something "actually said" (suggestion ≠ fact).
+      strategyMemory.recordOwnerTurn(text);
       
       // Update GoalEngine
       if (goalEngine) {

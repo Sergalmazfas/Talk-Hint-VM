@@ -82,7 +82,7 @@ describe("tutor memory lifecycle (source guards)", () => {
 
   it("live call path claims the memory atomically and passes it to translateAndSuggest", () => {
     expect(wsSrc).toContain("claimActiveCallMemory(streamUserId");
-    expect(wsSrc).toContain("tutorMemoryBlock, brainModelOverride)");
+    expect(wsSrc).toContain("tutorMemoryBlock, brainModelOverride, strategyMemory.render())");
   });
 
   it("/end verifies session ownership and is idempotent", () => {
