@@ -10,12 +10,10 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
 
     private var webView: WKWebView!
 
-    // Dedicated session feel (spec §11): the normal TalkHint tab bar is hidden
-    // for the whole practice session; Back returns to the prior screen.
-    override var hidesBottomBarWhenPushed: Bool {
-        get { true }
-        set { }
-    }
+    // The tab bar stays VISIBLE on this screen. It used to be hidden for a
+    // "dedicated session feel", but combined with the page's Back button being
+    // ignored natively that left users with literally no way out of the tutor
+    // short of relaunching the app.
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -95,6 +93,12 @@ final class TutorViewController: UIViewController, WKScriptMessageHandler, WKUID
                host == AppConfig.baseURL.host {
                 injectAuthToken()
             }
+        case "closeRequested":
+            // The page's X / Back (e.g. on the "Call memory confirmed" screen)
+            // asks us to leave the tutor: return to the Calls tab and reload
+            // the page so the next visit starts fresh at the practice chooser.
+            tabBarController?.selectedIndex = 0
+            loadTutorPage()
         case "callMemoryConfirmed":
             let alert = UIAlertController(
                 title: "Подготовка подтверждена",

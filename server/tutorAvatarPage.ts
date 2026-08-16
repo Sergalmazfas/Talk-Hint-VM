@@ -171,6 +171,10 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   #quitSheet .secondary,#startSheet .secondary,#simSheet .secondary{width:100%;border:0;border-radius:24px;padding:15px;font-size:16px;font-weight:800;color:#29252f;background:#f1f1f5}
   /* --- Start chooser + simulation form (Goal-Driven Simulation, contract v1) -- */
   body.sheet-start #sheetBackdrop,body.sheet-start #startSheet{display:block}
+  body.sheet-tutor #sheetBackdrop,body.sheet-tutor #tutorSheet{display:block}
+  #tutorSheet{text-align:center}
+  #tutorSheet h3{font-size:21px;font-weight:800;margin-bottom:14px}
+  #tutorSheet .secondary{width:100%;border:0;border-radius:24px;padding:15px;font-size:16px;font-weight:800;color:#29252f;background:#f1f1f5;margin-top:6px}
   body.sheet-sim #sheetBackdrop,body.sheet-sim #simSheet{display:block}
   #startSheet{text-align:center}
   #startSheet h3{font-size:21px;font-weight:800;margin-bottom:8px}
@@ -271,6 +275,7 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
 </div>
 <div id="menuBackdrop"></div>
 <div id="menu">
+  <button class="mrow" id="mTutor"><span class="ic">${svg("settings", 18)}</span><span></span><span class="val"></span></button>
   <button class="mrow" id="mMute"><span class="ic">${svg("volume2", 18)}</span><span></span><span class="val"></span></button>
   <button class="mrow" id="mEnd"><span class="ic">${svg("flag", 18)}</span><span></span></button>
 </div>
@@ -286,9 +291,14 @@ export const TUTOR_AVATAR_PAGE_HTML = `<!DOCTYPE html>
   <div class="grab"></div>
   <h3></h3>
   <p></p>
-  <div id="tutorRow"></div>
   <button class="primary" id="freeBtn"></button>
   <button class="secondary" id="simBtn"></button>
+</div>
+<div id="tutorSheet" class="sheet">
+  <div class="grab"></div>
+  <h3></h3>
+  <div id="tutorRow"></div>
+  <button class="secondary" id="tutorDoneBtn"></button>
 </div>
 <div id="simSheet" class="sheet">
   <div class="grab"></div>
@@ -373,6 +383,8 @@ const L = RU ? {
   quitBodyEmpty: "Вы ещё ничего не сказали. Память разговора не будет создана.",
   continueBtn: "Продолжить практику", endBtn: "Завершить",
   mMute: "Звук Emma", mEnd: "Завершить практику",
+  mTutor: "Репетитор", tutorTitle: "Выберите репетитора", tutorDone: "Готово",
+  tutorApplyNext: "Применится в следующей практике",
   on: "Вкл", off: "Выкл",
   tutorPrefix: "Репетитор ",
   stLive: "Live", stListen: "Слушаю", stThink: "Думает", stSpeak: "Говорит",
@@ -422,6 +434,8 @@ const L = RU ? {
   quitBodyEmpty: "You haven't said anything yet. No call memory will be created.",
   continueBtn: "Continue practice", endBtn: "End",
   mMute: "Emma's voice", mEnd: "End practice",
+  mTutor: "Tutor", tutorTitle: "Choose your tutor", tutorDone: "Done",
+  tutorApplyNext: "Will apply to your next practice",
   on: "On", off: "Off",
   tutorPrefix: "Tutor ",
   stLive: "Live", stListen: "Listening", stThink: "Thinking", stSpeak: "Speaking",
@@ -626,17 +640,22 @@ const menu = document.getElementById("menu");
 const menuBackdrop = document.getElementById("menuBackdrop");
 const mMute = document.getElementById("mMute");
 const mEnd = document.getElementById("mEnd");
+const mTutor = document.getElementById("mTutor");
 mMute.children[1].textContent = L.mMute;
 mEnd.children[1].textContent = L.mEnd;
+mTutor.children[1].textContent = L.mTutor;
 function renderMenu() {
   mMute.querySelector(".val").textContent = mutedFlag ? L.off : L.on;
   mMute.querySelector(".ic").innerHTML = mutedFlag ? MUTE_OFF_M : MUTE_ON_M;
+  // Current tutor name on the right of the "Tutor" row (from the live catalog).
+  mTutor.querySelector(".val").textContent = tutorName;
 }
 function toggleMenu(show) { menu.classList.toggle("show", show); menuBackdrop.classList.toggle("show", show); if (show) renderMenu(); }
 document.getElementById("gearBtn").onclick = () => toggleMenu(!menu.classList.contains("show"));
 menuBackdrop.onclick = () => toggleMenu(false);
 mMute.onclick = () => { mutedFlag = !mutedFlag; renderMenu(); };
 mEnd.onclick = () => { toggleMenu(false); openQuitSheet(); };
+mTutor.onclick = () => { toggleMenu(false); openTutorSheet(); };
 
 // ---- Text composer (UI per freeze §10; engine text turns deferred §L) --------
 const composerInput = document.getElementById("composerInput");
@@ -674,7 +693,7 @@ function openQuitSheet() {
 }
 function closeQuitSheet() { document.body.classList.remove("sheet-quit"); }
 document.getElementById("continueBtn").onclick = closeQuitSheet;
-document.getElementById("sheetBackdrop").onclick = () => { closeQuitSheet(); closeAttach(); };
+document.getElementById("sheetBackdrop").onclick = () => { closeQuitSheet(); closeAttach(); closeTutorSheet(); };
 document.getElementById("xBtn").onclick = () => {
   if (!sessionId) { notifyNative({ event: "closeRequested" }); return; }
   openQuitSheet();
@@ -1325,6 +1344,13 @@ async function openSimSheet(statusText) {
 // Tutor picker — rendered ONLY from the live catalog; removing a tutor from
 // the engine allow-list makes it disappear here without a client deploy.
 const tutorRow = document.getElementById("tutorRow");
+const tutorSheet = document.getElementById("tutorSheet");
+tutorSheet.querySelector("h3").textContent = L.tutorTitle;
+const tutorDoneBtn = document.getElementById("tutorDoneBtn");
+tutorDoneBtn.textContent = L.tutorDone;
+function openTutorSheet() { document.body.classList.add("sheet-tutor"); }
+function closeTutorSheet() { document.body.classList.remove("sheet-tutor"); }
+tutorDoneBtn.onclick = closeTutorSheet;
 let tutorList = [];
 try { selectedTutorId = localStorage.getItem("tutorId") || null; } catch (e) {}
 function renderTutorRow() {
@@ -1338,7 +1364,14 @@ function renderTutorRow() {
     b.onclick = () => {
       selectedTutorId = t.tutorId;
       try { localStorage.setItem("tutorId", t.tutorId); } catch (e) {}
-      tutorName = t.name; applyTutorName(); // header + strings switch immediately
+      if (sessionId) {
+        // Mid-practice: the running session keeps its tutor — renaming the
+        // header now would mislabel who is actually talking. The choice is
+        // saved and applies when the next practice starts.
+        showToast(L.tutorApplyNext);
+      } else {
+        tutorName = t.name; applyTutorName(); // header + strings switch immediately
+      }
       renderTutorRow();
       prefetchTutorGlb(t); // download the GLB before Live so start never waits
     };
