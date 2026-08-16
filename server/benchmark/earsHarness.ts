@@ -63,6 +63,9 @@ interface StreamOutcome {
   finals: CollectedFinal[];
   lastFrameSentAtMs: number;
   error?: string;
+  /** measurement-honesty annotations discovered during streaming (e.g.
+   * possible tail truncation) — surfaced verbatim in run notes. */
+  note?: string;
 }
 
 function nowMs(): number {
@@ -94,11 +97,15 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
   if (!key) return { finals, lastFrameSentAtMs: 0, error: "DEEPGRAM_API_KEY missing" };
   const url = buildDeepgramUrl(c.config);
   const start = nowMs();
+  // Real (unaccelerated) audio duration — Deepgram processes accelerated input
+  // at roughly REALTIME pace, so its transcript can lag the sender by minutes.
+  const audioDurationMs = Math.round((mulaw.length / 8000) * 1000);
 
   return await new Promise<StreamOutcome>((resolve) => {
     let settled = false;
     let ws: WebSocket | null = null;
     let lastFrameSentAtMs = 0;
+    let outNote: string | undefined;
     const done = (err?: string) => {
       if (settled) return;
       settled = true;
@@ -109,9 +116,13 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
       } catch {
         /* ignore */
       }
-      resolve({ finals, lastFrameSentAtMs, error: err });
+      resolve({ finals, lastFrameSentAtMs, error: err, note: outNote });
     };
-    const guardMs = streamGuardMs(mulaw.length);
+    // Guard must cover REALTIME processing of the whole call (not the
+    // accelerated send time): Deepgram keeps transcribing long after the last
+    // frame is sent. The old accelerated-duration guard + fixed 2.5s flush
+    // truncated ~60% of a 7-minute call and produced an artifact WER of ~74%.
+    const guardMs = Math.max(streamGuardMs(mulaw.length), audioDurationMs + 60_000);
     const guard = setTimeout(() => done(`timeout after ${guardMs}ms`), guardMs);
 
     try {
@@ -171,14 +182,58 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
           lastFrameSentAtMs = nowMs() - start;
           await sleep(20 / REALTIME_ACCEL);
         }
-        // v1 needs an explicit CloseStream to flush; v2 flushes on EOT timeout.
+        // DRAIN — do NOT stop after a fixed short wait. Under accelerated
+        // sending Deepgram processes at roughly REALTIME pace and lags the
+        // sender by minutes; a fixed 2.5s flush window silently truncated the
+        // tail of the call (measurement artifact WER ~74%). Two constraints:
+        //  1. Deepgram kills an idle socket after 60s without client messages
+        //     (INACTIVE_CLIENT) — so we keep feeding SILENCE frames at
+        //     realtime pace while the server catches up (KeepAlive is not
+        //     supported by Flux v2; silence audio works for both APIs).
+        //  2. We stop when the provider's reported audio offset reaches the
+        //     end of the real audio, or finals go quiet for a generous
+        //     window, bounded by the outer guard.
+        // Stop conditions: provider audio offset reaches the end of the real
+        // audio, OR we have drained for the full worst-case backlog window.
+        // NOTE: "no finals for N seconds" is NOT a valid stop condition — a
+        // per-role channel legitimately goes silent for minutes while the
+        // other party talks, and bailing early truncates the tail.
+        const silenceFrame = Buffer.alloc(FRAME_BYTES_MULAW, 0xff); // mulaw silence
+        const lastAudio = () =>
+          finals.reduce((m, f) => (typeof f.audioEndMs === "number" ? Math.max(m, f.audioEndMs) : m), 0);
+        // Worst-case backlog: server processes at ~1x, we sent in duration/ACCEL,
+        // so it can lag by duration*(1-1/ACCEL); add margin for jitter.
+        const drainBudgetMs =
+          Math.round(audioDurationMs * (1 - 1 / REALTIME_ACCEL)) + 45_000;
+        const drainStart = nowMs();
+        while (!settled) {
+          if (ws!.readyState !== WebSocket.OPEN) break;
+          ws!.send(silenceFrame); // 20ms of silence every 20ms = realtime pace
+          await sleep(20);
+          if (lastAudio() >= audioDurationMs - 2_000) break; // caught up
+          if (nowMs() - drainStart > drainBudgetMs) break; // budget exhausted
+        }
+        // CloseStream flushes any remaining buffered audio and closes the
+        // socket (both v1 and Flux v2); collect trailing finals briefly.
         try {
           ws!.send(JSON.stringify({ type: "CloseStream" }));
         } catch {
           /* ignore */
         }
-        // Wait a bounded window for trailing finals.
-        await sleep(2500);
+        {
+          const flushUntil = nowMs() + 8_000;
+          while (!settled && nowMs() < flushUntil) {
+            if (ws!.readyState === WebSocket.CLOSED) break;
+            await sleep(250);
+          }
+        }
+        // Honesty check: if the last provider audio offset falls well short of
+        // the audio we sent, the tail may still be missing — record it.
+        const lastAudioEnd = finals.reduce(
+          (m, f) => (typeof f.audioEndMs === "number" ? Math.max(m, f.audioEndMs) : m), 0);
+        if (lastAudioEnd > 0 && lastAudioEnd < audioDurationMs - 20_000) {
+          outNote = `possible tail truncation: last transcribed audio offset ${Math.round(lastAudioEnd / 1000)}s of ${Math.round(audioDurationMs / 1000)}s sent — treat WER as an upper bound for this stream.`;
+        }
         done();
       } catch (e) {
         done(`stream error: ${(e as Error).message}`);
@@ -565,6 +620,9 @@ export async function runEarsBenchmark(opts: {
   notes.push(
     `Realtime streaming accelerated ${REALTIME_ACCEL}x to bound runtime; latency figures scaled back to real time.`
   );
+  notes.push(
+    `Latency honesty: providers that process accelerated input at ~realtime pace (observed for Deepgram) accumulate a receive backlog, so their EOT/final latency figures are UPPER BOUNDS under acceleration, not production latency. Accuracy (WER) is unaffected once the stream is fully drained.`
+  );
 
   // Determine which candidates we may actually run.
   const runnable: EarsCandidate[] = [];
@@ -696,6 +754,10 @@ export async function runEarsBenchmark(opts: {
         } else {
           notes.push(`fixture ${fixture.id} / ${c.id}: unsupported provider — skipped.`);
           continue;
+        }
+
+        if (outcome.note) {
+          notes.push(`fixture ${fixture.id} / ${c.id} / ${job.label}: ${outcome.note}`);
         }
 
         const rowAcc = acc.get(c.id)!;
