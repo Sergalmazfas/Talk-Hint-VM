@@ -3149,242 +3149,249 @@ function GoalReturnTab() {
               <p className="text-sm text-gray-500">Загрузка…</p>
             )}
             {!detailQ.isLoading && detailRun && (
-              <div className="space-y-4">
-                {/* Run meta */}
-                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-400">
-                  <span>
-                    <span className="text-gray-500">Статус:</span>{" "}
-                    <StatusBadge status={detailRun.status} />
-                  </span>
-                  <span>
-                    <span className="text-gray-500">Завершён:</span> {fmtTime(detailRun.finishedAt)}
-                  </span>
-                  {(detailRun as any).results?.judgeModel && (
-                    <span>
-                      <span className="text-gray-500">Judge:</span>{" "}
-                      <span className="font-mono">{(detailRun as any).results.judgeModel}</span>
-                    </span>
-                  )}
-                </div>
-
-                {/* Error */}
-                {detailRun.error && (
-                  <div
-                    className="rounded border border-red-700 bg-red-950/30 px-3 py-2 text-red-300 text-xs whitespace-pre-wrap"
-                    data-testid="gr-error"
-                  >
-                    {detailRun.error}
-                  </div>
-                )}
-
-                {/* Per-call scorecard */}
-                {Array.isArray((detailRun.scorecard as any)?.calls) && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-300 mb-2">Scorecard</p>
-                    <div className="space-y-1">
-                      {((detailRun.scorecard as any).calls as any[]).map((c: any, i: number) => (
-                        <div
-                          key={i}
-                          className="flex flex-wrap gap-x-4 gap-y-1 text-xs bg-gray-950 rounded px-3 py-2 border border-gray-800"
-                          data-testid={`gr-scorecard-row-${i}`}
-                        >
-                          <span className="font-medium text-gray-200 truncate max-w-xs" title={c.title}>
-                            {c.title}
-                          </span>
-                          {c.unscored ? (
-                            <span className="text-gray-500">unscored</span>
-                          ) : (
-                            <>
-                              {c.onGoalPct != null && (
-                                <span>
-                                  <span className="text-gray-500">on-goal:</span>{" "}
-                                  {(c.onGoalPct * 100).toFixed(0)}%
-                                </span>
-                              )}
-                              {c.digressionCount != null && (
-                                <span>
-                                  <span className="text-gray-500">digressions:</span> {c.digressionCount}
-                                </span>
-                              )}
-                              {c.returnRate != null && (
-                                <span>
-                                  <span className="text-gray-500">return rate:</span>{" "}
-                                  {(c.returnRate * 100).toFixed(0)}%
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Per-call goal source provenance — makes it explicit in the UI */}
-                {Array.isArray((detailRun as any).results?.calls) && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-300 mb-2">Звонки и источники целей</p>
-                    <div className="space-y-1">
-                      {((detailRun as any).results.calls as any[]).map((c: any, i: number) => (
-                        <div key={i} className="text-xs text-gray-400 flex flex-wrap gap-x-3">
-                          <span className="text-gray-200 font-medium">{c.title}</span>
-                          <span>
-                            <span className="text-gray-500">цель:</span>{" "}
-                            <span className="text-cyan-300">{c.goal}</span>
-                          </span>
-                          <span>
-                            <span className="text-gray-500">источник:</span>{" "}
-                            <Badge variant="outline" className="text-xs border-gray-600 text-gray-300">
-                              {c.goalSource}
-                            </Badge>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Turn-by-turn alignment table — per call */}
-                {Array.isArray((detailRun as any).results?.calls) &&
-                  ((detailRun as any).results.calls as any[]).some(
-                    (c: any) => Array.isArray(c.labels) && c.labels.length > 0,
-                  ) && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-300 mb-2">Поворот за поворотом</p>
-                      <div className="space-y-4">
-                        {((detailRun as any).results.calls as any[]).map((c: any, ci: number) => {
-                          if (!Array.isArray(c.labels) || c.labels.length === 0) return null;
-                          // Build a lookup: idx → turn text
-                          const turnText = new Map<number, { role: string; text: string }>();
-                          if (Array.isArray(c.turns)) {
-                            for (const t of c.turns as { idx: number; role: string; text: string }[]) {
-                              turnText.set(t.idx, { role: t.role, text: t.text });
-                            }
-                          }
-                          return (
-                            <div key={ci} className="border border-gray-800 rounded overflow-hidden">
-                              <div className="bg-gray-900 px-3 py-2 text-xs font-medium text-gray-300">
-                                {c.title}
-                              </div>
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-xs">
-                                  <thead>
-                                    <tr className="border-b border-gray-800 bg-gray-950">
-                                      <th className="px-3 py-2 text-left text-gray-500 font-normal w-8">#</th>
-                                      <th className="px-3 py-2 text-left text-gray-500 font-normal w-16">Роль</th>
-                                      <th className="px-3 py-2 text-left text-gray-500 font-normal">Реплика</th>
-                                      <th className="px-3 py-2 text-left text-gray-500 font-normal w-36">Метка</th>
-                                      <th className="px-3 py-2 text-left text-gray-500 font-normal w-32">Owner move</th>
-                                      <th className="px-3 py-2 text-left text-gray-500 font-normal">Примечание судьи</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {(c.labels as any[]).map((lbl: any) => {
-                                      const turn = turnText.get(lbl.idx);
-                                      // Row colour: off_goal → amber, justified_digression → amber/muted,
-                                      // on_goal with returns_to_goal owner move → green, otherwise default
-                                      const rowClass =
-                                        lbl.segment === "off_goal"
-                                          ? "bg-amber-950/40 border-amber-800/40"
-                                          : lbl.segment === "justified_digression"
-                                          ? "bg-yellow-950/30 border-yellow-800/30"
-                                          : lbl.ownerMove === "returns_to_goal"
-                                          ? "bg-green-950/30 border-green-800/30"
-                                          : "border-gray-800/40";
-                                      // Segment badge colour
-                                      const segClass =
-                                        lbl.segment === "off_goal"
-                                          ? "text-amber-400"
-                                          : lbl.segment === "justified_digression"
-                                          ? "text-yellow-400/80"
-                                          : "text-green-400";
-                                      // Owner move badge colour
-                                      const moveClass =
-                                        lbl.ownerMove === "drifts"
-                                          ? "text-amber-400"
-                                          : lbl.ownerMove === "returns_to_goal"
-                                          ? "text-green-400"
-                                          : lbl.ownerMove === "supports_branch"
-                                          ? "text-cyan-400/80"
-                                          : "text-gray-500";
-                                      return (
-                                        <tr
-                                          key={lbl.idx}
-                                          className={`border-b last:border-0 ${rowClass}`}
-                                          data-testid={`gr-turn-row-${ci}-${lbl.idx}`}
-                                        >
-                                          <td className="px-3 py-1.5 text-gray-500">{lbl.idx}</td>
-                                          <td className="px-3 py-1.5 text-gray-400 capitalize">
-                                            {turn?.role ?? "—"}
-                                          </td>
-                                          <td className="px-3 py-1.5 text-gray-200 max-w-xs">
-                                            {turn?.text
-                                              ? <span title={turn.text}>{turn.text.length > 120 ? turn.text.slice(0, 120) + "…" : turn.text}</span>
-                                              : <span className="text-gray-600 italic">текст недоступен</span>}
-                                          </td>
-                                          <td className={`px-3 py-1.5 font-mono ${segClass}`}>
-                                            {lbl.segment}
-                                          </td>
-                                          <td className={`px-3 py-1.5 font-mono ${moveClass}`}>
-                                            {lbl.ownerMove ?? <span className="text-gray-600">—</span>}
-                                          </td>
-                                          <td className="px-3 py-1.5 text-gray-400">{lbl.note}</td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                {/* Markdown report */}
-                {typeof detailRun.report === "string" && detailRun.report && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-300 mb-2">Отчёт</p>
-                    <pre
-                      className="whitespace-pre-wrap text-xs text-gray-300 font-mono bg-gray-950 border border-gray-800 rounded p-4 max-h-[60vh] overflow-y-auto"
-                      data-testid="gr-report"
-                    >
-                      {detailRun.report}
-                    </pre>
-                  </div>
-                )}
-
-                {/* Per-call analysis notes */}
-                {Array.isArray((detailRun as any).results?.calls) &&
-                  (detailRun as any).results.calls.some((c: any) => c.notes?.length > 0) && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-300 mb-2">Примечания</p>
-                      {((detailRun as any).results.calls as any[]).map((c: any, i: number) =>
-                        c.notes?.length > 0 ? (
-                          <div key={i} className="mb-2">
-                            <p className="text-xs text-gray-400 font-medium">{c.title}</p>
-                            <ul className="list-disc ml-4 text-xs text-amber-400/80">
-                              {c.notes.map((n: string, j: number) => (
-                                <li key={j}>{n}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : null
-                      )}
-                    </div>
-                  )}
-
-                {detailRun.status === "running" && (
-                  <p className="text-sm text-amber-400 flex items-center gap-2">
-                    <span className="animate-spin inline-block w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full" />
-                    Анализ выполняется, подождите…
-                  </p>
-                )}
-              </div>
+              <GoalReturnRunDetail run={detailRun} />
             )}
           </CardContent>
         </Card>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// GoalReturnRunDetail — exported so tests can render it directly with a
+// BenchmarkRun prop without pulling in the full GoalReturnTab hook graph.
+// Renders the detail panel that GoalReturnTab shows when a run is selected.
+// ---------------------------------------------------------------------------
+
+export function GoalReturnRunDetail({ run }: { run: BenchmarkRun }) {
+  return (
+    <div className="space-y-4">
+      {/* Run meta */}
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-400">
+        <span>
+          <span className="text-gray-500">Статус:</span>{" "}
+          <StatusBadge status={run.status} />
+        </span>
+        <span>
+          <span className="text-gray-500">Завершён:</span> {fmtTime(run.finishedAt)}
+        </span>
+        {(run as any).results?.judgeModel && (
+          <span>
+            <span className="text-gray-500">Judge:</span>{" "}
+            <span className="font-mono">{(run as any).results.judgeModel}</span>
+          </span>
+        )}
+      </div>
+
+      {/* Error — shown when the run failed (e.g. no judge model reachable) */}
+      {run.error && (
+        <div
+          className="rounded border border-red-700 bg-red-950/30 px-3 py-2 text-red-300 text-xs whitespace-pre-wrap"
+          data-testid="gr-error"
+        >
+          {run.error}
+        </div>
+      )}
+
+      {/* Per-call scorecard */}
+      {Array.isArray((run.scorecard as any)?.calls) && (
+        <div>
+          <p className="text-sm font-medium text-gray-300 mb-2">Scorecard</p>
+          <div className="space-y-1">
+            {((run.scorecard as any).calls as any[]).map((c: any, i: number) => (
+              <div
+                key={i}
+                className="flex flex-wrap gap-x-4 gap-y-1 text-xs bg-gray-950 rounded px-3 py-2 border border-gray-800"
+                data-testid={`gr-scorecard-row-${i}`}
+              >
+                <span className="font-medium text-gray-200 truncate max-w-xs" title={c.title}>
+                  {c.title}
+                </span>
+                {c.unscored ? (
+                  <span className="text-gray-500">unscored</span>
+                ) : (
+                  <>
+                    {c.onGoalPct != null && (
+                      <span>
+                        <span className="text-gray-500">on-goal:</span>{" "}
+                        {(c.onGoalPct * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    {c.digressionCount != null && (
+                      <span>
+                        <span className="text-gray-500">digressions:</span> {c.digressionCount}
+                      </span>
+                    )}
+                    {c.returnRate != null && (
+                      <span>
+                        <span className="text-gray-500">return rate:</span>{" "}
+                        {(c.returnRate * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Per-call goal source provenance */}
+      {Array.isArray((run as any).results?.calls) && (
+        <div>
+          <p className="text-sm font-medium text-gray-300 mb-2">Звонки и источники целей</p>
+          <div className="space-y-1">
+            {((run as any).results.calls as any[]).map((c: any, i: number) => (
+              <div key={i} className="text-xs text-gray-400 flex flex-wrap gap-x-3">
+                <span className="text-gray-200 font-medium">{c.title}</span>
+                <span>
+                  <span className="text-gray-500">цель:</span>{" "}
+                  <span className="text-cyan-300">{c.goal}</span>
+                </span>
+                <span>
+                  <span className="text-gray-500">источник:</span>{" "}
+                  <Badge variant="outline" className="text-xs border-gray-600 text-gray-300">
+                    {c.goalSource}
+                  </Badge>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Turn-by-turn alignment table */}
+      {Array.isArray((run as any).results?.calls) &&
+        ((run as any).results.calls as any[]).some(
+          (c: any) => Array.isArray(c.labels) && c.labels.length > 0,
+        ) && (
+          <div>
+            <p className="text-sm font-medium text-gray-300 mb-2">Поворот за поворотом</p>
+            <div className="space-y-4">
+              {((run as any).results.calls as any[]).map((c: any, ci: number) => {
+                if (!Array.isArray(c.labels) || c.labels.length === 0) return null;
+                const turnText = new Map<number, { role: string; text: string }>();
+                if (Array.isArray(c.turns)) {
+                  for (const t of c.turns as { idx: number; role: string; text: string }[]) {
+                    turnText.set(t.idx, { role: t.role, text: t.text });
+                  }
+                }
+                return (
+                  <div key={ci} className="border border-gray-800 rounded overflow-hidden">
+                    <div className="bg-gray-900 px-3 py-2 text-xs font-medium text-gray-300">
+                      {c.title}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-800 bg-gray-950">
+                            <th className="px-3 py-2 text-left text-gray-500 font-normal w-8">#</th>
+                            <th className="px-3 py-2 text-left text-gray-500 font-normal w-16">Роль</th>
+                            <th className="px-3 py-2 text-left text-gray-500 font-normal">Реплика</th>
+                            <th className="px-3 py-2 text-left text-gray-500 font-normal w-36">Метка</th>
+                            <th className="px-3 py-2 text-left text-gray-500 font-normal w-32">Owner move</th>
+                            <th className="px-3 py-2 text-left text-gray-500 font-normal">Примечание судьи</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(c.labels as any[]).map((lbl: any) => {
+                            const turn = turnText.get(lbl.idx);
+                            const rowClass =
+                              lbl.segment === "off_goal"
+                                ? "bg-amber-950/40 border-amber-800/40"
+                                : lbl.segment === "justified_digression"
+                                ? "bg-yellow-950/30 border-yellow-800/30"
+                                : lbl.ownerMove === "returns_to_goal"
+                                ? "bg-green-950/30 border-green-800/30"
+                                : "border-gray-800/40";
+                            const segClass =
+                              lbl.segment === "off_goal"
+                                ? "text-amber-400"
+                                : lbl.segment === "justified_digression"
+                                ? "text-yellow-400/80"
+                                : "text-green-400";
+                            const moveClass =
+                              lbl.ownerMove === "drifts"
+                                ? "text-amber-400"
+                                : lbl.ownerMove === "returns_to_goal"
+                                ? "text-green-400"
+                                : lbl.ownerMove === "supports_branch"
+                                ? "text-cyan-400/80"
+                                : "text-gray-500";
+                            return (
+                              <tr
+                                key={lbl.idx}
+                                className={`border-b last:border-0 ${rowClass}`}
+                                data-testid={`gr-turn-row-${ci}-${lbl.idx}`}
+                              >
+                                <td className="px-3 py-1.5 text-gray-500">{lbl.idx}</td>
+                                <td className="px-3 py-1.5 text-gray-400 capitalize">
+                                  {turn?.role ?? "—"}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-200 max-w-xs">
+                                  {turn?.text
+                                    ? <span title={turn.text}>{turn.text.length > 120 ? turn.text.slice(0, 120) + "…" : turn.text}</span>
+                                    : <span className="text-gray-600 italic">текст недоступен</span>}
+                                </td>
+                                <td className={`px-3 py-1.5 font-mono ${segClass}`}>
+                                  {lbl.segment}
+                                </td>
+                                <td className={`px-3 py-1.5 font-mono ${moveClass}`}>
+                                  {lbl.ownerMove ?? <span className="text-gray-600">—</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-400">{lbl.note}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+      {/* Markdown report */}
+      {typeof run.report === "string" && run.report && (
+        <div>
+          <p className="text-sm font-medium text-gray-300 mb-2">Отчёт</p>
+          <pre
+            className="whitespace-pre-wrap text-xs text-gray-300 font-mono bg-gray-950 border border-gray-800 rounded p-4 max-h-[60vh] overflow-y-auto"
+            data-testid="gr-report"
+          >
+            {run.report}
+          </pre>
+        </div>
+      )}
+
+      {/* Per-call analysis notes */}
+      {Array.isArray((run as any).results?.calls) &&
+        (run as any).results.calls.some((c: any) => c.notes?.length > 0) && (
+          <div>
+            <p className="text-sm font-medium text-gray-300 mb-2">Примечания</p>
+            {((run as any).results.calls as any[]).map((c: any, i: number) =>
+              c.notes?.length > 0 ? (
+                <div key={i} className="mb-2">
+                  <p className="text-xs text-gray-400 font-medium">{c.title}</p>
+                  <ul className="list-disc ml-4 text-xs text-amber-400/80">
+                    {c.notes.map((n: string, j: number) => (
+                      <li key={j}>{n}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null
+            )}
+          </div>
+        )}
+
+      {run.status === "running" && (
+        <p className="text-sm text-amber-400 flex items-center gap-2">
+          <span className="animate-spin inline-block w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full" />
+          Анализ выполняется, подождите…
+        </p>
       )}
     </div>
   );
