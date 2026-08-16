@@ -3277,6 +3277,53 @@ export function GoalReturnRunDetail({ run }: { run: BenchmarkRun }) {
                     turnText.set(t.idx, { role: t.role, text: t.text });
                   }
                 }
+                // Build turnIdx → hint-label(s) map when hintLabels are present.
+                //
+                // Alignment strategy (in priority order):
+                //   1. spokenMatchTurnIdx — deterministic fuzzy match computed by
+                //      the server; this is the canonical usage-signal alignment.
+                //   2. utteranceId — a 1-based GUEST-utterance ordinal (not a turn
+                //      idx). Map it to the nearest turn FOLLOWING the Nth guest
+                //      turn in the transcript so the hint sits beside the owner
+                //      reply it was meant to influence.
+                const hasHints =
+                  Array.isArray(c.hintLabels) && c.hintLabels.length > 0;
+                const hintsByTurn = new Map<number, any[]>();
+                if (hasHints && Array.isArray(c.hintLabels)) {
+                  // Ordered guest turn idxs for utteranceId ordinal lookup.
+                  const guestTurnIdxs: number[] = Array.isArray(c.turns)
+                    ? (c.turns as any[])
+                        .filter((t: any) => t.role === "guest")
+                        .sort((a: any, b: any) => (a.idx as number) - (b.idx as number))
+                        .map((t: any) => t.idx as number)
+                    : [];
+                  const allTurnIdxs: number[] = Array.isArray(c.turns)
+                    ? (c.turns as any[]).map((t: any) => t.idx as number).sort((a, b) => a - b)
+                    : [];
+                  for (const hl of c.hintLabels as any[]) {
+                    let target: number | null = null;
+                    // 1. spokenMatchTurnIdx is the server's deterministic signal.
+                    if (hl.spokenMatchTurnIdx != null) {
+                      target = hl.spokenMatchTurnIdx as number;
+                    } else {
+                      // 2. utteranceId: 1-based guest-utterance ordinal.
+                      const hint = Array.isArray(c.hints) ? c.hints[hl.index] : null;
+                      if (hint?.utteranceId != null) {
+                        const uid = hint.utteranceId as number; // 1-based
+                        const guestTurnIdx = guestTurnIdxs[uid - 1]; // 0-based array
+                        if (guestTurnIdx != null) {
+                          // Nearest turn after that guest turn (owner's reply).
+                          target = allTurnIdxs.find((idx) => idx > guestTurnIdx) ?? guestTurnIdx;
+                        }
+                      }
+                    }
+                    if (target != null) {
+                      if (!hintsByTurn.has(target)) hintsByTurn.set(target, []);
+                      hintsByTurn.get(target)!.push(hl);
+                    }
+                  }
+                }
+
                 return (
                   <div key={ci} className="border border-gray-800 rounded overflow-hidden">
                     <div className="bg-gray-900 px-3 py-2 text-xs font-medium text-gray-300">
@@ -3291,12 +3338,16 @@ export function GoalReturnRunDetail({ run }: { run: BenchmarkRun }) {
                             <th className="px-3 py-2 text-left text-gray-500 font-normal">Реплика</th>
                             <th className="px-3 py-2 text-left text-gray-500 font-normal w-36">Метка</th>
                             <th className="px-3 py-2 text-left text-gray-500 font-normal w-32">Owner move</th>
+                            {hasHints && (
+                              <th className="px-3 py-2 text-left text-gray-500 font-normal w-36">Hint</th>
+                            )}
                             <th className="px-3 py-2 text-left text-gray-500 font-normal">Примечание судьи</th>
                           </tr>
                         </thead>
                         <tbody>
                           {(c.labels as any[]).map((lbl: any) => {
                             const turn = turnText.get(lbl.idx);
+                            const hintsForTurn = hintsByTurn.get(lbl.idx) ?? [];
                             const rowClass =
                               lbl.segment === "off_goal"
                                 ? "bg-amber-950/40 border-amber-800/40"
@@ -3340,6 +3391,36 @@ export function GoalReturnRunDetail({ run }: { run: BenchmarkRun }) {
                                 <td className={`px-3 py-1.5 font-mono ${moveClass}`}>
                                   {lbl.ownerMove ?? <span className="text-gray-600">—</span>}
                                 </td>
+                                {hasHints && (
+                                  <td className="px-3 py-1.5" data-testid={`gr-hint-cell-${ci}-${lbl.idx}`}>
+                                    {hintsForTurn.length === 0 ? (
+                                      <span className="text-gray-700">—</span>
+                                    ) : (
+                                      <div className="flex flex-col gap-0.5">
+                                        {hintsForTurn.map((hl: any, hi: number) => {
+                                          const hintClass =
+                                            hl.role === "returns_to_goal"
+                                              ? "text-green-400"
+                                              : hl.role === "drifts"
+                                              ? "text-amber-400"
+                                              : hl.role === "supports_branch"
+                                              ? "text-cyan-400/80"
+                                              : "text-gray-500";
+                                          return (
+                                            <span
+                                              key={hi}
+                                              className={`font-mono ${hintClass}`}
+                                              title={hl.note}
+                                              data-testid={`gr-hint-label-${ci}-${lbl.idx}-${hi}`}
+                                            >
+                                              {hl.role}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </td>
+                                )}
                                 <td className="px-3 py-1.5 text-gray-400">{lbl.note}</td>
                               </tr>
                             );
