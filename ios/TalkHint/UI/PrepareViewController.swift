@@ -17,6 +17,11 @@ import AVFoundation
 ///   so the next call is grounded in it).
 final class PrepareViewController: UIViewController {
 
+    /// Called on the main thread as soon as the goal is confirmed (the server
+    /// sent the opening phrase). The Calls screen uses it to switch the number
+    /// field to the compact "Goal ready ✓" badge.
+    var onGoalConfirmed: (() -> Void)?
+
     // MARK: - Stream
 
     private let stream = CallHintStream()
@@ -71,11 +76,19 @@ final class PrepareViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "Подготовка звонка"
+        title = "Prepare call"
         view.backgroundColor = .systemBackground
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: "Заново", style: .plain, target: self, action: #selector(resetTapped))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-prepare-reset"
+        if presentingViewController != nil || navigationController?.presentingViewController != nil {
+            // Presented as a bottom sheet over Calls — give it an explicit close.
+            let close = UIBarButtonItem(
+                image: UIImage(systemName: "xmark"), style: .plain,
+                target: self, action: #selector(closeTapped))
+            close.accessibilityIdentifier = "button-prepare-close"
+            navigationItem.leftBarButtonItem = close
+        }
         buildUI()
 
         stream.delegate = self
@@ -255,16 +268,16 @@ final class PrepareViewController: UIViewController {
     /// NOT active until the user confirms; "Изменить" just continues the dialog.
     private func addGoalProposal(_ goal: String) {
         let card = UIView()
-        card.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.15)
-        card.layer.cornerRadius = 14
+        card.backgroundColor = Theme.purpleBg
+        card.layer.cornerRadius = 16
         card.layer.borderWidth = 1
-        card.layer.borderColor = UIColor.systemOrange.cgColor
+        card.layer.borderColor = Theme.purple.withAlphaComponent(0.35).cgColor
         card.accessibilityIdentifier = "card-goal-proposal"
 
         let header = UILabel()
         header.text = "🎯 ЦЕЛЬ ЗВОНКА"
         header.font = .preferredFont(forTextStyle: .caption1)
-        header.textColor = .systemOrange
+        header.textColor = Theme.purple
 
         let goalLabel = UILabel()
         goalLabel.text = goal
@@ -272,16 +285,21 @@ final class PrepareViewController: UIViewController {
         goalLabel.font = .preferredFont(forTextStyle: .body)
 
         let confirmButton = UIButton(type: .system)
-        confirmButton.setTitle("✓ Всё верно", for: .normal)
+        confirmButton.setTitle("Да, верно", for: .normal)
         confirmButton.setTitleColor(.white, for: .normal)
-        confirmButton.backgroundColor = .systemGreen
-        confirmButton.layer.cornerRadius = 8
+        confirmButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        confirmButton.backgroundColor = Theme.purple
+        confirmButton.layer.cornerRadius = 20
         confirmButton.accessibilityIdentifier = "button-goal-confirm"
 
         let editButton = UIButton(type: .system)
-        editButton.setTitle("Изменить", for: .normal)
-        editButton.backgroundColor = .tertiarySystemBackground
-        editButton.layer.cornerRadius = 8
+        editButton.setTitle("Нет, уточнить", for: .normal)
+        editButton.setTitleColor(Theme.ink, for: .normal)
+        editButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        editButton.backgroundColor = .systemBackground
+        editButton.layer.cornerRadius = 20
+        editButton.layer.borderWidth = 1
+        editButton.layer.borderColor = Theme.line.cgColor
         editButton.accessibilityIdentifier = "button-goal-edit"
 
         let buttons = UIStackView(arrangedSubviews: [confirmButton, editButton])
@@ -299,7 +317,7 @@ final class PrepareViewController: UIViewController {
 
         editButton.addAction(UIAction { [weak self, weak buttons] _ in
             buttons?.removeFromSuperview()
-            self?.textField.placeholder = "Что изменить в цели?"
+            self?.textField.placeholder = "Что уточнить в цели?"
             self?.textField.becomeFirstResponder()
         }, for: .touchUpInside)
 
@@ -320,16 +338,16 @@ final class PrepareViewController: UIViewController {
     /// Opening-phrase card shown after the goal is confirmed.
     private func addOpeningPhrase(en: String, translation: String?) {
         let card = UIView()
-        card.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.12)
-        card.layer.cornerRadius = 14
+        card.backgroundColor = Theme.greenBg
+        card.layer.cornerRadius = 16
         card.layer.borderWidth = 1
-        card.layer.borderColor = UIColor.systemGreen.cgColor
+        card.layer.borderColor = Theme.green.withAlphaComponent(0.4).cgColor
         card.accessibilityIdentifier = "card-opening-phrase"
 
         let header = UILabel()
         header.text = "💬 ПЕРВАЯ ФРАЗА"
         header.font = .preferredFont(forTextStyle: .caption1)
-        header.textColor = .systemGreen
+        header.textColor = Theme.greenDark
 
         let enLabel = UILabel()
         enLabel.text = en
@@ -407,6 +425,10 @@ final class PrepareViewController: UIViewController {
             addAIMessage("⚠️ Нет соединения с сервером. Подтвердите цель ещё раз, когда связь восстановится.")
             addGoalProposal(goal)
         }
+    }
+
+    @objc private func closeTapped() {
+        dismiss(animated: true)
     }
 
     @objc private func resetTapped() {
@@ -603,6 +625,7 @@ extension PrepareViewController: CallHintStreamDelegate {
             hideThinking()
             addOpeningPhrase(en: phraseEn, translation: translation)
             addAIMessage("📞 Цель подтверждена. Начинайте звонок с этой фразы — я буду подсказывать дальше.")
+            onGoalConfirmed?()
         case .prepareError(let text):
             // The server processed (and honestly failed) the turn — restore the
             // text to the input so the user can resend without retyping.

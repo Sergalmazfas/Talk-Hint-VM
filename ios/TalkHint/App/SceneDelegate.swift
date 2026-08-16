@@ -31,44 +31,30 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
-    /// Builds the main tab bar shown after login. The Calls and Account tabs are
-    /// live (Stage 1); Numbers, Assistant and History are placeholders that later
-    /// stages replace with their real screens.
+    /// Builds the main tab bar shown after login — the redesigned three-tab
+    /// layout (Calls / Tutor / History). Settings opens from the gear on the
+    /// Calls screen; Numbers, Assistant tools and Account are reachable from
+    /// Settings ("More" section).
     private func makeMainTabController() -> UITabBarController {
         let tabController = UITabBarController()
+        tabController.tabBar.tintColor = Theme.green
 
         let calls = HomeViewController()
         calls.tabBarItem = UITabBarItem(
             title: "Calls", image: UIImage(systemName: "phone.fill"), tag: 0)
 
-        let numbers = NumbersViewController()
-        numbers.tabBarItem = UITabBarItem(
-            title: "Numbers", image: UIImage(systemName: "number"), tag: 1)
-
-        let assistant = AssistantViewController()
-        assistant.tabBarItem = UITabBarItem(
-            title: "Assistant", image: UIImage(systemName: "wand.and.stars"), tag: 2)
+        let tutor = TutorViewController()
+        tutor.tabBarItem = UITabBarItem(
+            title: "Tutor", image: UIImage(systemName: "graduationcap"), tag: 1)
 
         let history = CallHistoryViewController()
         history.tabBarItem = UITabBarItem(
-            title: "History", image: UIImage(systemName: "clock"), tag: 3)
-
-        let settings = SettingsViewController()
-        settings.tabBarItem = UITabBarItem(
-            title: "Settings", image: UIImage(systemName: "gearshape"), tag: 4)
-
-        let account = AccountViewController()
-        account.onLoggedOut = { [weak self] in self?.showRoot(loggedIn: false) }
-        account.tabBarItem = UITabBarItem(
-            title: "Account", image: UIImage(systemName: "person.crop.circle"), tag: 5)
+            title: "History", image: UIImage(systemName: "clock"), tag: 2)
 
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),
-            UINavigationController(rootViewController: numbers),
-            UINavigationController(rootViewController: assistant),
+            UINavigationController(rootViewController: tutor),
             UINavigationController(rootViewController: history),
-            UINavigationController(rootViewController: settings),
-            UINavigationController(rootViewController: account),
         ]
         return tabController
     }

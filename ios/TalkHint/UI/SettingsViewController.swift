@@ -18,6 +18,15 @@ final class SettingsViewController: UITableViewController {
         case features
         case forwarding
         case language
+        case more
+    }
+
+    /// Screens that lost their tab in the three-tab redesign (Calls / Tutor /
+    /// History) and are now reachable from Settings.
+    private enum MoreRow: Int, CaseIterable {
+        case numbers
+        case assistant
+        case account
     }
 
     private enum FeatureRow: Int, CaseIterable {
@@ -103,6 +112,7 @@ final class SettingsViewController: UITableViewController {
         case .features: return FeatureRow.allCases.count
         case .forwarding: return ForwardingRow.allCases.count
         case .language: return SessionStore.availableLanguages.count
+        case .more: return MoreRow.allCases.count
         }
     }
 
@@ -112,6 +122,7 @@ final class SettingsViewController: UITableViewController {
         case .features: return "Live call assistant"
         case .forwarding: return "Call forwarding"
         case .language: return "Hint language"
+        case .more: return "More"
         }
     }
 
@@ -125,6 +136,8 @@ final class SettingsViewController: UITableViewController {
             return "Callers are sent here when call handling is set to Forward calls. Also used for SMS call alerts."
         case .language:
             return "Language used for translations and hints during live calls."
+        case .more:
+            return nil
         }
     }
 
@@ -189,6 +202,25 @@ final class SettingsViewController: UITableViewController {
             cell.accessoryType = (SessionStore.shared.language == lang.code) ? .checkmark : .none
             cell.accessibilityIdentifier = "cell-language-\(lang.code)"
             return cell
+
+        case .more:
+            let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+            cell.accessoryType = .disclosureIndicator
+            switch MoreRow(rawValue: indexPath.row)! {
+            case .numbers:
+                cell.textLabel?.text = "Phone numbers"
+                cell.imageView?.image = UIImage(systemName: "number")
+                cell.accessibilityIdentifier = "cell-more-numbers"
+            case .assistant:
+                cell.textLabel?.text = "Assistant tools"
+                cell.imageView?.image = UIImage(systemName: "wand.and.stars")
+                cell.accessibilityIdentifier = "cell-more-assistant"
+            case .account:
+                cell.textLabel?.text = "Account"
+                cell.imageView?.image = UIImage(systemName: "person.crop.circle")
+                cell.accessibilityIdentifier = "cell-more-account"
+            }
+            return cell
         }
     }
 
@@ -211,6 +243,20 @@ final class SettingsViewController: UITableViewController {
             let code = SessionStore.availableLanguages[indexPath.row].code
             SessionStore.shared.language = code
             tableView.reloadSections(IndexSet(integer: Section.language.rawValue), with: .none)
+        case .more:
+            switch MoreRow(rawValue: indexPath.row)! {
+            case .numbers:
+                navigationController?.pushViewController(NumbersViewController(), animated: true)
+            case .assistant:
+                navigationController?.pushViewController(AssistantViewController(), animated: true)
+            case .account:
+                let account = AccountViewController()
+                account.onLoggedOut = {
+                    let scene = UIApplication.shared.connectedScenes.first
+                    (scene?.delegate as? SceneDelegate)?.showRoot(loggedIn: false)
+                }
+                navigationController?.pushViewController(account, animated: true)
+            }
         }
     }
 
