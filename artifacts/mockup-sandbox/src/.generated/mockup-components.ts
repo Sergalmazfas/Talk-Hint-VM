@@ -5,6 +5,7 @@ export const modules: ModuleMap = {
   "./components/mockups/ios-calls/GoalReady.tsx": () => import("../components/mockups/ios-calls/GoalReady.tsx"),
   "./components/mockups/ios-calls/HomeGoalBadge.tsx": () => import("../components/mockups/ios-calls/HomeGoalBadge.tsx"),
   "./components/mockups/ios-calls/InCall.tsx": () => import("../components/mockups/ios-calls/InCall.tsx"),
+  "./components/mockups/ios-calls/InCallChoiceHint.tsx": () => import("../components/mockups/ios-calls/InCallChoiceHint.tsx"),
   "./components/mockups/ios-calls/NumberEntered.tsx": () => import("../components/mockups/ios-calls/NumberEntered.tsx"),
   "./components/mockups/ios-calls/PrepareConfirm.tsx": () => import("../components/mockups/ios-calls/PrepareConfirm.tsx"),
   "./components/mockups/ios-calls/PrepareListening.tsx": () => import("../components/mockups/ios-calls/PrepareListening.tsx"),
