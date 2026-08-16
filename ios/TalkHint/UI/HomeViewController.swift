@@ -305,9 +305,11 @@ final class HomeViewController: UIViewController {
 
     @objc private func zeroHeld(_ g: UILongPressGestureRecognizer) {
         guard g.state == .began else { return }
-        suppressNextZero = true
         // "+" is only valid as the leading character of an E.164 number.
+        // Suppress the companion touchUpInside only when we actually inserted "+";
+        // otherwise a long-press mid-number would silently eat the "0" keystroke.
         if dialed.isEmpty {
+            suppressNextZero = true
             dialed = "+"
         }
     }
