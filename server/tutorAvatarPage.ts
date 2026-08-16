@@ -690,6 +690,13 @@ const api = async (path, opts={}) => {
   return r.json();
 };
 const notifyNative = (msg) => { try { window.webkit?.messageHandlers?.tutor?.postMessage(msg); } catch(_){} };
+// Lifecycle diagnostics beacon: the realtime WS goes browser→engine directly,
+// so client-side stalls (ws/auth/mic/audio) are invisible in server logs
+// without this. Fire-and-forget; failures are silent by design.
+const diag = (step, detail) => { try {
+  fetch("/api/tutor/diag", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step, detail: detail == null ? "" : String(detail).slice(0, 300), sessionId: sessionId || "" }), keepalive: true }).catch(() => {});
+} catch(_){} };
 notifyNative({ event: "needAuth" });
 
 // ---- Push-to-talk state machine (source shared with server tests) ---------
@@ -1233,9 +1240,11 @@ async function connect(simCfg) {
       state = "LOADING"; render();
       return;
     }
+    diag("create_failed", e.message);
     stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return;
   }
   sessionId = session.sessionId;
+  diag("session_created", simulation ? "simulation" : "free");
   turnOpen = false; sentAudio = false; // fresh session — reset turn bookkeeping
   // Simulation: the engine auto-starts a tutor-first opening turn right after
   // WS auth (contract §3) — gate the mic until its turn.completed.
@@ -1260,10 +1269,10 @@ async function connect(simCfg) {
   ws = sock;
   sock.binaryType = "arraybuffer";
   // Token goes in the FIRST WS MESSAGE, never in the URL.
-  sock.onopen = () => { if (gen === wsGen) sock.send(JSON.stringify({ type: "auth", token: session.realtime.token, session_id: sessionId })); };
+  sock.onopen = () => { if (gen === wsGen) { diag("ws_open_auth_sent"); sock.send(JSON.stringify({ type: "auth", token: session.realtime.token, session_id: sessionId })); } };
   sock.onmessage = (e) => { if (gen === wsGen) onWsMessage(e); };
-  sock.onclose = (e) => { if (gen !== wsGen) return; stopMic(); stopFallbackAudio(); turnOpen = false; notifyNative({ event: "wsClosed", code: e.code, reason: e.reason || "" }); if (sessionId && state !== "ENDING" && state !== "MEMORY") { stateLabel.textContent = L.closed; dispatch("error"); } };
-  sock.onerror = () => { if (gen !== wsGen) return; notifyNative({ event: "wsError" }); dispatch("error"); };
+  sock.onclose = (e) => { if (gen !== wsGen) return; diag("ws_close", "code=" + e.code + " reason=" + (e.reason || "")); stopMic(); stopFallbackAudio(); turnOpen = false; notifyNative({ event: "wsClosed", code: e.code, reason: e.reason || "" }); if (sessionId && state !== "ENDING" && state !== "MEMORY") { stateLabel.textContent = L.closed; dispatch("error"); } };
+  sock.onerror = () => { if (gen !== wsGen) return; diag("ws_error"); notifyNative({ event: "wsError" }); dispatch("error"); };
 }
 
 function onWsMessage(e) {
@@ -1282,7 +1291,7 @@ function onWsMessage(e) {
       // completion to release the mic. Play the audio, keep state as-is.
       if (state !== "READY") dispatch("tutorSpeaking"); // force-stops mic even if still RECORDING
       // lmark passed so latency is emitted AFTER decode + speakAudio (playback start).
-      speakBuffer(e.data, meta.subtitle || tutorText, tutorAudio[tutorAudio.length-1].timings, lmark).catch(err => console.error("TTS play failed", err));
+      speakBuffer(e.data, meta.subtitle || tutorText, tutorAudio[tutorAudio.length-1].timings, lmark).catch(err => { diag("audio_play_failed", err && (err.name + ": " + err.message)); console.error("TTS play failed", err); });
       if (!tutorCard) { tutorCard = addCard("tutor streaming"); }
       tutorCard.textContent = tutorText || meta.subtitle || "…";
       scrollFeed();
@@ -1291,6 +1300,7 @@ function onWsMessage(e) {
   }
   let msg; try { msg = JSON.parse(e.data); } catch { return; }
   if (msg.type === "session.ready") {
+    diag("session_ready");
     notifyNative({ event: "wsReady" });
     dispatch("ready");
   }
@@ -1313,7 +1323,7 @@ function onWsMessage(e) {
     userCard = null;
     scrollFeed();
   }
-  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; if (tutorTextFinal) return; tutorText += msg.text || msg.delta || ""; if (!tutorCard) tutorCard = addCard("tutor streaming"); tutorCard.textContent = tutorText; scrollFeed(); }
+  else if (msg.type === "tutor.text.delta") { if (latencyT0 && !latencyFirstText) latencyFirstText = performance.now() - latencyT0; if (tutorTextFinal) return; if (!tutorText && !tutorCard) diag("tutor_first_text"); tutorText += msg.text || msg.delta || ""; if (!tutorCard) tutorCard = addCard("tutor streaming"); tutorCard.textContent = tutorText; scrollFeed(); }
   else if (msg.type === "tutor.audio.chunk") pendingTtsMeta = msg;
   else if (msg.type === "turn.completed") {
     if (tutorCard) { finishTutorCard(tutorCard, tutorText || tutorCard.textContent, tutorAudio.slice()); }
@@ -1336,7 +1346,7 @@ function onWsMessage(e) {
       if (state === "RECORDING") state = "PROCESSING";
       render(); showToast(tn(L.openingWait)); return;
     }
-    console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code });
+    diag("engine_error", msg.code); console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code });
   }
   else {
     // Engine events beyond the PTT machine (task 154) — classified by the
@@ -1394,6 +1404,7 @@ async function pressDown(ev) {
     });
     if (!micAllowed(state)) stopMic(); // released before mic warmed up
   } catch (err) {
+    diag("mic_failed", err && (err.name + ": " + err.message));
     console.error("mic start failed", err);
     stateLabel.textContent = L.micDenied;
     if (state === "RECORDING") { state = "READY"; render(); }

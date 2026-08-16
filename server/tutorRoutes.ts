@@ -353,6 +353,26 @@ export function registerTutorRoutes(app: Express) {
     }
   });
 
+  // Client-side lifecycle diagnostics from the tutor page (WKWebView): the
+  // realtime WS goes browser→engine directly, so without these beacons a
+  // client-side stall (ws/auth/mic/audio) is invisible in server logs.
+  // Log-only, no storage; capped payload; simple per-user rate limit.
+  const diagHits = new Map<string, { n: number; t: number }>();
+  app.post("/api/tutor/diag", authMiddleware, (req, res) => {
+    const uid = (req as any).user?.id || "?";
+    const now = Date.now();
+    const h = diagHits.get(uid);
+    if (h && now - h.t < 60_000) {
+      if (h.n >= 120) return res.status(429).json({ error: "rate_limited" });
+      h.n++;
+    } else diagHits.set(uid, { n: 1, t: now });
+    const step = String(req.body?.step ?? "").slice(0, 64);
+    const detail = String(req.body?.detail ?? "").slice(0, 300);
+    const sid = String(req.body?.sessionId ?? "").slice(0, 64);
+    console.log(`[TutorDiag] user=${uid} session=${sid} step=${step}${detail ? " detail=" + detail : ""}`);
+    res.json({ ok: true });
+  });
+
   app.get("/api/tutor/sessions", authMiddleware, async (req, res) => {
     const user = (req as any).user;
     res.json(await listTutorSessions(user.id));
