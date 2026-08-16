@@ -31,4 +31,5 @@
 - [PREPARE stage voice goal prep](prepare-stage.md) — gpt-5.6-sol via /v1/responses only (honest error, no fallback); gpt-4o-transcribe STT; serialized per-user state w/ reset epoch; goal only on explicit confirm.
 - [Candidate pipeline experiment](candidate-pipeline.md) — per-user alt STT/Brain for live calls; label by what actually carried the call (sttEffective), guard Flux reconnect after swap, Flux lead-in unavoidable.
 - [Goal-return analysis](goal-return-analysis.md) — offline judge run needs goal + hint texts that prod calls never persist; owner turns are the honest hint proxy.
+- [Adaptive hint types (v2.1)](adaptive-hint-types.md) — one BRAIN call sacred; CHOICE compat en always server-composed canonical string; Translation OFF gates native_helper too; redaction backstop scope.
 - [Dialogue library per goal](dialogue-library-per-goal.md) — auto-built call dialogue libs keyed per-user-per-goal (own UUID id), NOT per goalType; runtime picks by goalText fuzzy match then goalType; always fall through to translateAndSuggest.
