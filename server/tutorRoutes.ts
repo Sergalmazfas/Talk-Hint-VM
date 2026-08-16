@@ -233,7 +233,13 @@ export function registerTutorRoutes(app: Express) {
         try { await completeTutorSession(engineSessionId); } catch { /* best effort */ }
         return res.status(502).json({ error: "simulation_echo_missing", message: "Движок не подтвердил параметры симуляции. Попробуйте ещё раз." });
       }
-      await createTutorSessionRow(user.id, engineSessionId, tutorId || getTutorId(), "english_free_talk");
+      // Persist the authoritative session kind: /end decides the memory policy
+      // from THIS, never from a client flag (Tutor/Calls separation).
+      await createTutorSessionRow(
+        user.id, engineSessionId, tutorId || getTutorId(),
+        sim ? "call_simulation" : "english_free_talk",
+        sim ? "simulation" : "practice",
+      );
       const wsBase = getTutorEngineBase().replace(/^http/, "ws");
       // Auth happens via the first WS message ({type:"auth", token, session_id}),
       // NOT via query string — the token never travels in a URL.
@@ -272,6 +278,17 @@ export function registerTutorRoutes(app: Express) {
       // session id (memories are keyed by engine session at the engine).
       const owned = await getTutorSessionRow(user.id, engineSessionId);
       if (!owned) return res.status(404).json({ error: "session_not_found" });
+      // Tutor/Calls separation — SERVER-authoritative policy: the persisted
+      // session mode decides whether Call Memory exists at all. Free LEARNING
+      // sessions never produce Call Memory (that belongs to Calls → Practice);
+      // a client flag can never opt a simulation out of its memory flow.
+      // (Rows predating the mode column default to "practice" = learning.)
+      if (owned.mode !== "simulation") {
+        await endTutorSessionRow(user.id, engineSessionId);
+        try { await completeTutorSession(engineSessionId); }
+        catch (e: any) { console.error("[Tutor] complete (learning) failed:", e?.message); }
+        return res.json({ callMemory: null, reason: "learning_session" });
+      }
       // Idempotent: repeated /end returns the already-saved memory, never a
       // duplicate row (also enforced by a unique (user, session) index).
       const existing = await getCallMemoryByEngineSession(user.id, engineSessionId);

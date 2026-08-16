@@ -392,6 +392,9 @@ const L = RU ? {
   quitTitle: "Завершить практику?",
   quitBody: "Из ваших реплик будет создана память разговора — проверьте и подтвердите её, чтобы использовать в реальном звонке.",
   quitBodyEmpty: "Вы ещё ничего не сказали. Память разговора не будет создана.",
+  quitBodyLesson: "Занятие будет завершено. Вернуться к практике можно в любой момент.",
+  lessonEndTitle: "Занятие завершено",
+  lessonEndSub: "Итог занятия готовится — скоро здесь появится разбор ошибок и новые слова.",
   continueBtn: "Продолжить практику", endBtn: "Завершить",
   mMute: "Звук Emma", mEnd: "Завершить практику",
   mTutor: "Репетитор", tutorTitle: "Выберите репетитора", tutorDone: "Готово",
@@ -448,6 +451,9 @@ const L = RU ? {
   quitTitle: "End the practice?",
   quitBody: "We'll build call memory from what you said — review and confirm it to use in a real call.",
   quitBodyEmpty: "You haven't said anything yet. No call memory will be created.",
+  quitBodyLesson: "This will end the lesson. You can come back and practice any time.",
+  lessonEndTitle: "Lesson finished",
+  lessonEndSub: "Your lesson summary is on its way — soon you'll see your corrections and new words here.",
   continueBtn: "Continue practice", endBtn: "End",
   mMute: "Emma's voice", mEnd: "End practice",
   mTutor: "Tutor", tutorTitle: "Choose your tutor", tutorDone: "Done",
@@ -709,7 +715,8 @@ const endBtn = document.getElementById("endBtn");
 endBtn.textContent = L.endBtn;
 let saidAnything = false;
 function openQuitSheet() {
-  quitSheet.querySelector("p").textContent = saidAnything ? L.quitBody : L.quitBodyEmpty;
+  // Free practice = learning only: never mention call memory in the quit copy.
+  quitSheet.querySelector("p").textContent = !simulation ? L.quitBodyLesson : (saidAnything ? L.quitBody : L.quitBodyEmpty);
   document.body.classList.add("sheet-quit");
 }
 function closeQuitSheet() { document.body.classList.remove("sheet-quit"); }
@@ -1241,6 +1248,26 @@ endBtn.onclick = async () => {
   stopFallbackAudio();
   try { head?.stopSpeaking?.(); } catch(_){}
   try { ws?.close(); } catch(_){}
+  // Tutor/Calls separation: FREE practice is pure learning — no Call Memory.
+  // We complete the session server-side (skipMemory) and show a simple
+  // "lesson summary is coming" card. Call Memory stays for simulation only
+  // (that path belongs to Calls → Practice).
+  if (!simulation) {
+    // Neutral overlay text — no "preparing call memory" for a lesson.
+    memPendingBox.querySelector("h3").textContent = L.ending;
+    memPendingBox.querySelector("p").textContent = "";
+    try {
+      await api("/api/tutor/sessions/" + encodeURIComponent(sessionId) + "/end", { method: "POST", body: JSON.stringify({ skipMemory: true }) });
+      document.body.classList.remove("mem-pending");
+      showLessonEnd();
+    } catch (e) {
+      document.body.classList.remove("mem-pending");
+      stateLabel.textContent = L.error + ": " + e.message;
+      notifyNative({ event: "endFailed", message: e.message });
+    }
+    sessionId = null;
+    return;
+  }
   try {
     const result = await api("/api/tutor/sessions/" + encodeURIComponent(sessionId) + "/end", { method: "POST" });
     if (result.callMemory) {
@@ -1278,6 +1305,17 @@ confirmedCard.querySelector("h2").textContent = L.confirmedTitle;
 confirmedCard.querySelector(".sub").textContent = L.confirmedSub;
 document.getElementById("backBtn").textContent = L.back;
 document.getElementById("backBtn").onclick = () => notifyNative({ event: "closeRequested" });
+// Free-practice ending: reuse the review overlay's "done" card as a plain
+// lesson-finished screen (no call memory, no form). Placeholder until the
+// engine's Session Report powers the real Lesson Summary.
+function showLessonEnd() {
+  confirmedCard.querySelector("h2").textContent = L.lessonEndTitle;
+  confirmedCard.querySelector(".sub").textContent = L.lessonEndSub;
+  confirmedCard.querySelector(".cnt").textContent = "";
+  review.classList.add("done");
+  review.style.display = "block";
+  notifyNative({ event: "lessonEnded" });
+}
 const splitLines = (id) => document.getElementById(id).value.split("\\n").map(s=>s.trim()).filter(Boolean);
 let reviewMemoryId = null;
 

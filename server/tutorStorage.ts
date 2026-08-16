@@ -11,11 +11,12 @@ export async function createTutorSessionRow(
   engineSessionId: string,
   tutorId: string,
   scenarioId: string,
+  mode: string = "practice",
 ): Promise<TutorSession | undefined> {
   if (!isDatabaseAvailable()) return undefined;
   const [row] = await db
     .insert(tutorSessions)
-    .values({ userId, engineSessionId, tutorId, scenarioId })
+    .values({ userId, engineSessionId, tutorId, scenarioId, mode })
     .returning();
   return row;
 }
