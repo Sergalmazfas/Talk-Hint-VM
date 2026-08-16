@@ -378,6 +378,7 @@ DICTS.ru = {
   ending: "Завершаем практику…",
   micDenied: "Нет доступа к микрофону", notConfigured: "Репетитор не настроен.",
   engineDown: "Движок репетитора недоступен.",
+  turnFailed: "Репетитор не смог обработать реплику (ошибка движка). Попробуйте ещё раз.",
   replay: "Повторить", copy: "Копировать", copied: "Скопировано",
   translate: "Перевод", translateFailed: "Не удалось перевести",
   memPendingTitle: "Готовлю память разговора…", memPendingSub: "Это займёт несколько секунд",
@@ -438,6 +439,7 @@ DICTS.en = {
   ending: "Finishing practice…",
   micDenied: "Microphone access denied", notConfigured: "Tutor is not configured.",
   engineDown: "Tutor engine is unavailable.",
+  turnFailed: "The tutor couldn't process that (engine error). Please try again.",
   replay: "Replay", copy: "Copy", copied: "Copied",
   translate: "Translate", translateFailed: "Translation failed",
   memPendingTitle: "Preparing your call memory…", memPendingSub: "This takes a few seconds",
@@ -498,6 +500,7 @@ DICTS.es = {
   ending: "Finalizando la práctica…",
   micDenied: "Acceso al micrófono denegado", notConfigured: "El tutor no está configurado.",
   engineDown: "El motor del tutor no está disponible.",
+  turnFailed: "El tutor no pudo procesar la frase (error del motor). Inténtalo de nuevo.",
   replay: "Repetir", copy: "Copiar", copied: "Copiado",
   translate: "Traducir", translateFailed: "Error de traducción",
   memPendingTitle: "Preparando la memoria de la llamada…", memPendingSub: "Esto tarda unos segundos",
@@ -558,6 +561,7 @@ DICTS.kk = {
   ending: "Жаттығу аяқталуда…",
   micDenied: "Микрофонға рұқсат жоқ", notConfigured: "Тәлімгер бапталмаған.",
   engineDown: "Тәлімгер қозғалтқышы қолжетімсіз.",
+  turnFailed: "Тәлімгер репликаны өңдей алмады (қозғалтқыш қатесі). Қайталап көріңіз.",
   replay: "Қайталау", copy: "Көшіру", copied: "Көшірілді",
   translate: "Аудару", translateFailed: "Аудару сәтсіз аяқталды",
   memPendingTitle: "Қоңырау жадысы дайындалуда…", memPendingSub: "Бұл бірнеше секунд алады",
@@ -618,6 +622,7 @@ DICTS.uk = {
   ending: "Завершуємо практику…",
   micDenied: "Немає доступу до мікрофона", notConfigured: "Репетитора не налаштовано.",
   engineDown: "Рушій репетитора недоступний.",
+  turnFailed: "Репетитор не зміг обробити репліку (помилка рушія). Спробуйте ще раз.",
   replay: "Повторити", copy: "Копіювати", copied: "Скопійовано",
   translate: "Переклад", translateFailed: "Не вдалося перекласти",
   memPendingTitle: "Готуємо пам'ять розмови…", memPendingSub: "Це займе кілька секунд",
@@ -1349,6 +1354,9 @@ function onWsMessage(e) {
       render(); showToast(tn(L.openingWait)); return;
     }
     diag("engine_error", msg.code); console.error("Engine error:", msg.code); notifyNative({ event: "wsEngineError", code: msg.code });
+    // A failed turn must be VISIBLE — a silent TURN_FAILED looks like "the
+    // tutor ignores me" (root cause of the Aug 2026 "tutor not responding").
+    if (msg.code === "TURN_FAILED") showToast(tn(L.turnFailed));
   }
   else {
     // Engine events beyond the PTT machine (task 154) — classified by the
