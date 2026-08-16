@@ -35,3 +35,4 @@
 - [Strategy memory (v2.2)](strategy-memory.md) — bounded per-call hint-cycle tracker; only DELIVERED hints open cycles; outcomes reuse #226 usageScore; CHOICE branch needs strict best-option win.
 - [Dialogue library per goal](dialogue-library-per-goal.md) — auto-built call dialogue libs keyed per-user-per-goal (own UUID id), NOT per goalType; runtime picks by goalText fuzzy match then goalType; always fall through to translateAndSuggest.
 - [iOS Calls mockup style rules](ios-calls-mockup-style.md) — no simulated iPhone chrome; light TalkHint style only, black legacy live-call UI is not a reference.
+- [Tutor / Calls separation](tutor-calls-separation.md) — Tutor tab = learning only (Session Report end screen); ALL call prep lives in Calls flow; Engine stays call-agnostic (MBLEx reuse).
