@@ -145,7 +145,7 @@ interface EarsTurnResult {
 
 interface BenchmarkRun {
   id: string;
-  runType: "ears" | "brain" | "availability" | "replay";
+  runType: "ears" | "brain" | "availability" | "replay" | "goal_return";
   status: "running" | "completed" | "failed";
   corpusHash: string;
   fixtureIds?: string[];
@@ -356,6 +356,7 @@ export default function AdminDiagnostics() {
             <TabsTrigger value="history" data-testid="tab-history">Benchmark History</TabsTrigger>
             <TabsTrigger value="recorded" data-testid="tab-recorded">Записанные звонки</TabsTrigger>
             <TabsTrigger value="pipeline" data-testid="tab-pipeline">Candidate Pipeline</TabsTrigger>
+            <TabsTrigger value="goalreturn" data-testid="tab-goalreturn">Goal-Return</TabsTrigger>
           </TabsList>
 
           <TabsContent value="ears"><EarsTab candidates={candidatesQ.data?.ears ?? []} /></TabsContent>
@@ -364,6 +365,7 @@ export default function AdminDiagnostics() {
           <TabsContent value="history"><HistoryTab /></TabsContent>
           <TabsContent value="recorded"><RecordedCallsTab active={tab === "recorded"} onOpenReplay={() => setTab("replay")} /></TabsContent>
           <TabsContent value="pipeline"><CandidatePipelineTab active={tab === "pipeline"} /></TabsContent>
+          <TabsContent value="goalreturn"><GoalReturnTab /></TabsContent>
         </Tabs>
       </main>
     </div>
@@ -2611,6 +2613,493 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ===========================================================================
+// GOAL-RETURN TAB
+// ===========================================================================
+
+function GoalReturnTab() {
+  const { token } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  // Source type: recorded call (by callSid) or fixture (transcript built inline)
+  const [sourceType, setSourceType] = useState<"recorded_call" | "fixture">("recorded_call");
+  const [selectedCallId, setSelectedCallId] = useState<string>("");
+  const [selectedFixtureId, setSelectedFixtureId] = useState<string>("");
+  const [goal, setGoal] = useState("");
+  const [goalSource, setGoalSource] = useState("operator-supplied");
+  const [callTitle, setCallTitle] = useState("");
+
+  // Report viewer: id of the goal_return run whose report is displayed
+  const [viewRunId, setViewRunId] = useState<string | null>(null);
+
+  // Recorded calls (only those with a transcript are useful)
+  const recordedCallsQ = useAuthedQuery<RecordedCall[]>([BASE, "recorded-calls"], !!token);
+  const callsWithTranscript = (recordedCallsQ.data ?? []).filter((c) => c.hasTranscript);
+
+  // Fixtures (pre-existing goal + reference transcript)
+  const fixturesQ = useAuthedQuery<Fixture[]>([BASE, "fixtures"], !!token);
+  const fixtures = fixturesQ.data ?? [];
+
+  // Runs list — poll while something is running
+  const runsQ = useRuns();
+  const runs = runsQ.data ?? [];
+  const goalReturnRuns = runs.filter((r) => r.runType === "goal_return");
+  const anyRunning = goalReturnRuns.some((r) => r.status === "running");
+
+  // Full run detail for the viewer
+  const detailQ = useAuthedQuery<BenchmarkRun>(
+    [BASE, "runs", viewRunId ?? undefined],
+    !!viewRunId && !!token,
+    anyRunning ? 3000 : false,
+  );
+  const detailRun = detailQ.data;
+
+  // When fixture selection changes, pre-fill goal and source
+  const selectedFixture = fixtures.find((f) => f.id === selectedFixtureId);
+  useEffect(() => {
+    if (sourceType === "fixture" && selectedFixture) {
+      setGoal(selectedFixture.goal || "");
+      setGoalSource(`frozen fixture: ${selectedFixture.title}`);
+      setCallTitle(selectedFixture.title);
+    }
+  }, [sourceType, selectedFixtureId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When recorded call changes, update default title / source
+  const selectedCall = callsWithTranscript.find((c) => c.id === selectedCallId);
+  useEffect(() => {
+    if (sourceType === "recorded_call" && selectedCall) {
+      setCallTitle(selectedCall.callSid ?? selectedCall.id);
+      setGoalSource("operator-supplied");
+    }
+  }, [sourceType, selectedCallId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-open latest completed run when it arrives
+  const latestGoalReturnRun = goalReturnRuns[0];
+  useEffect(() => {
+    if (latestGoalReturnRun?.status === "completed" && !viewRunId) {
+      setViewRunId(latestGoalReturnRun.id);
+    }
+  }, [latestGoalReturnRun?.id, latestGoalReturnRun?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runMutation = useMutation({
+    mutationFn: async () => {
+      const trimmedGoal = goal.trim();
+      if (!trimmedGoal) throw new Error("Цель звонка обязательна.");
+
+      let callEntry: Record<string, unknown>;
+      if (sourceType === "recorded_call") {
+        if (!selectedCallId) throw new Error("Выберите звонок.");
+        const call = callsWithTranscript.find((c) => c.id === selectedCallId);
+        if (!call) throw new Error("Звонок не найден.");
+        callEntry = {
+          callSid: call.callSid,
+          title: callTitle || call.callSid || call.id,
+          goal: trimmedGoal,
+          goalSource: goalSource.trim() || "operator-supplied",
+        };
+      } else {
+        if (!selectedFixtureId) throw new Error("Выберите фикстуру.");
+        if (!selectedFixture) throw new Error("Фикстура не найдена.");
+        const turns = (selectedFixture.referenceTurns ?? []) as { role: string; text: string }[];
+        if (turns.length === 0) throw new Error("Фикстура не содержит реплик для анализа.");
+        const transcript = turns.map((t) => `${t.role}: ${t.text}`).join("\n");
+        callEntry = {
+          title: callTitle || selectedFixture.title,
+          goal: trimmedGoal,
+          goalSource: goalSource.trim() || `frozen fixture: ${selectedFixture.title}`,
+          transcript,
+        };
+      }
+
+      const res = await fetch(`${BASE}/goal-return/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ calls: [callEntry] }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json() as Promise<{ runId: string }>;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: [BASE, "runs"] });
+      setViewRunId(data.runId);
+      toast({ title: "Goal-Return анализ запущен", description: "Результат появится после завершения." });
+    },
+    onError: (e: any) => toast({ title: "Ошибка", description: String(e?.message ?? e), variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* ---- Launch card ---- */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader>
+          <CardTitle className="text-base">Goal-Return Analysis</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <p className="text-sm text-gray-400">
+            Офлайн-анализ: насколько разговор придерживается цели звонка, когда отклоняется и возвращается ли обратно.
+            Цели на продакшн-звонках не сохраняются — источник цели отображается явно в отчёте.
+          </p>
+
+          {/* Source type */}
+          <div className="space-y-2">
+            <Label className="text-sm text-gray-300">Источник транскрипта</Label>
+            <div className="flex gap-6">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="gr-source"
+                  value="recorded_call"
+                  checked={sourceType === "recorded_call"}
+                  onChange={() => {
+                    setSourceType("recorded_call");
+                    setGoal("");
+                    setGoalSource("operator-supplied");
+                  }}
+                  className="accent-cyan-500"
+                  data-testid="radio-source-recorded"
+                />
+                Записанный звонок (транскрипт из БД)
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="gr-source"
+                  value="fixture"
+                  checked={sourceType === "fixture"}
+                  onChange={() => {
+                    setSourceType("fixture");
+                    setSelectedFixtureId("");
+                    setGoal("");
+                  }}
+                  className="accent-cyan-500"
+                  data-testid="radio-source-fixture"
+                />
+                Фикстура (reference transcript)
+              </label>
+            </div>
+          </div>
+
+          {/* Call / Fixture picker */}
+          {sourceType === "recorded_call" ? (
+            <div className="space-y-2">
+              <Label className="text-sm text-gray-300">Звонок</Label>
+              {recordedCallsQ.isLoading ? (
+                <p className="text-xs text-gray-500">Загрузка звонков…</p>
+              ) : callsWithTranscript.length === 0 ? (
+                <p className="text-xs text-amber-400">
+                  Нет записанных звонков с транскриптом. Перейдите во вкладку «Записанные звонки».
+                </p>
+              ) : (
+                <Select value={selectedCallId} onValueChange={setSelectedCallId}>
+                  <SelectTrigger className="bg-gray-950 border-gray-700 max-w-lg" data-testid="select-call">
+                    <SelectValue placeholder="Выберите звонок…" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-gray-700">
+                    {callsWithTranscript.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {fmtTime(c.startedAt)} · {c.callSid?.slice(0, 14) ?? c.id}
+                        {c.userEmail ? ` · ${c.userEmail}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label className="text-sm text-gray-300">Фикстура</Label>
+              {fixturesQ.isLoading ? (
+                <p className="text-xs text-gray-500">Загрузка фикстур…</p>
+              ) : fixtures.length === 0 ? (
+                <p className="text-xs text-amber-400">Фикстуры не найдены.</p>
+              ) : (
+                <Select value={selectedFixtureId} onValueChange={setSelectedFixtureId}>
+                  <SelectTrigger className="bg-gray-950 border-gray-700 max-w-lg" data-testid="select-fixture">
+                    <SelectValue placeholder="Выберите фикстуру…" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-gray-700">
+                    {fixtures.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.title}{f.goal ? ` — ${f.goal.slice(0, 50)}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
+
+          {/* Goal field */}
+          <div className="space-y-2">
+            <Label className="text-sm text-gray-300">
+              Цель звонка
+              <span className="text-gray-500 font-normal ml-2 text-xs">
+                (обязательно — цели не хранятся на продакшн-звонках)
+              </span>
+            </Label>
+            <Textarea
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="Например: продать подписку Pro, сохранить клиента, закрыть возражение по цене…"
+              className="bg-gray-950 border-gray-700 min-h-[80px] max-w-lg"
+              data-testid="input-goal"
+            />
+          </div>
+
+          {/* Goal source label */}
+          <div className="space-y-2">
+            <Label className="text-sm text-gray-300">
+              Источник цели
+              <span className="text-gray-500 font-normal ml-2 text-xs">(будет явно показан в отчёте)</span>
+            </Label>
+            <Input
+              value={goalSource}
+              onChange={(e) => setGoalSource(e.target.value)}
+              placeholder="operator-supplied"
+              className="bg-gray-950 border-gray-700 max-w-lg"
+              data-testid="input-goal-source"
+            />
+          </div>
+
+          {/* Title override */}
+          <div className="space-y-2">
+            <Label className="text-sm text-gray-300">Название звонка в отчёте</Label>
+            <Input
+              value={callTitle}
+              onChange={(e) => setCallTitle(e.target.value)}
+              placeholder="Автозаполнение из выбранного источника"
+              className="bg-gray-950 border-gray-700 max-w-lg"
+              data-testid="input-call-title"
+            />
+          </div>
+
+          <Button
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending || anyRunning}
+            className="bg-emerald-600 hover:bg-emerald-700"
+            data-testid="button-run-goal-return"
+          >
+            {runMutation.isPending
+              ? "Запуск…"
+              : anyRunning
+              ? "Идёт анализ…"
+              : "Запустить Goal-Return анализ"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* ---- Run history for goal_return ---- */}
+      <Card className="bg-gray-900/50 border-gray-800">
+        <CardHeader><CardTitle className="text-base">История Goal-Return runs</CardTitle></CardHeader>
+        <CardContent>
+          {goalReturnRuns.length === 0 ? (
+            <p className="text-sm text-gray-500">Runs ещё не запускались.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="border-gray-800">
+                  <TableHead>Время</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead>Звонков</TableHead>
+                  <TableHead>Judge</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {goalReturnRuns.map((r) => {
+                  const callCount = (r.config as any)?.calls?.length ?? "—";
+                  const judgeModel = (r as any).results?.judgeModel ?? "—";
+                  const isViewing = r.id === viewRunId;
+                  return (
+                    <TableRow
+                      key={r.id}
+                      className="border-gray-800 cursor-pointer hover:bg-gray-800/30"
+                      onClick={() => setViewRunId(isViewing ? null : r.id)}
+                      data-testid={`row-gr-run-${r.id}`}
+                    >
+                      <TableCell className="text-xs">{fmtTime(r.startedAt)}</TableCell>
+                      <TableCell><StatusBadge status={r.status} /></TableCell>
+                      <TableCell className="text-xs">{callCount}</TableCell>
+                      <TableCell className="text-xs text-gray-400 font-mono">{judgeModel}</TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                          {isViewing ? "скрыть" : "отчёт"}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ---- Report viewer ---- */}
+      {viewRunId && (
+        <Card className="bg-gray-900/50 border-gray-800">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              <span>Отчёт Goal-Return run</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setViewRunId(null)}
+              >
+                ✕ Закрыть
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {detailQ.isLoading && (
+              <p className="text-sm text-gray-500">Загрузка…</p>
+            )}
+            {!detailQ.isLoading && detailRun && (
+              <div className="space-y-4">
+                {/* Run meta */}
+                <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-400">
+                  <span>
+                    <span className="text-gray-500">Статус:</span>{" "}
+                    <StatusBadge status={detailRun.status} />
+                  </span>
+                  <span>
+                    <span className="text-gray-500">Завершён:</span> {fmtTime(detailRun.finishedAt)}
+                  </span>
+                  {(detailRun as any).results?.judgeModel && (
+                    <span>
+                      <span className="text-gray-500">Judge:</span>{" "}
+                      <span className="font-mono">{(detailRun as any).results.judgeModel}</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Error */}
+                {detailRun.error && (
+                  <div
+                    className="rounded border border-red-700 bg-red-950/30 px-3 py-2 text-red-300 text-xs whitespace-pre-wrap"
+                    data-testid="gr-error"
+                  >
+                    {detailRun.error}
+                  </div>
+                )}
+
+                {/* Per-call scorecard */}
+                {Array.isArray((detailRun.scorecard as any)?.calls) && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-300 mb-2">Scorecard</p>
+                    <div className="space-y-1">
+                      {((detailRun.scorecard as any).calls as any[]).map((c: any, i: number) => (
+                        <div
+                          key={i}
+                          className="flex flex-wrap gap-x-4 gap-y-1 text-xs bg-gray-950 rounded px-3 py-2 border border-gray-800"
+                          data-testid={`gr-scorecard-row-${i}`}
+                        >
+                          <span className="font-medium text-gray-200 truncate max-w-xs" title={c.title}>
+                            {c.title}
+                          </span>
+                          {c.unscored ? (
+                            <span className="text-gray-500">unscored</span>
+                          ) : (
+                            <>
+                              {c.onGoalPct != null && (
+                                <span>
+                                  <span className="text-gray-500">on-goal:</span>{" "}
+                                  {(c.onGoalPct * 100).toFixed(0)}%
+                                </span>
+                              )}
+                              {c.digressionCount != null && (
+                                <span>
+                                  <span className="text-gray-500">digressions:</span> {c.digressionCount}
+                                </span>
+                              )}
+                              {c.returnRate != null && (
+                                <span>
+                                  <span className="text-gray-500">return rate:</span>{" "}
+                                  {(c.returnRate * 100).toFixed(0)}%
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Per-call goal source provenance — makes it explicit in the UI */}
+                {Array.isArray((detailRun as any).results?.calls) && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-300 mb-2">Звонки и источники целей</p>
+                    <div className="space-y-1">
+                      {((detailRun as any).results.calls as any[]).map((c: any, i: number) => (
+                        <div key={i} className="text-xs text-gray-400 flex flex-wrap gap-x-3">
+                          <span className="text-gray-200 font-medium">{c.title}</span>
+                          <span>
+                            <span className="text-gray-500">цель:</span>{" "}
+                            <span className="text-cyan-300">{c.goal}</span>
+                          </span>
+                          <span>
+                            <span className="text-gray-500">источник:</span>{" "}
+                            <Badge variant="outline" className="text-xs border-gray-600 text-gray-300">
+                              {c.goalSource}
+                            </Badge>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Markdown report */}
+                {typeof detailRun.report === "string" && detailRun.report && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-300 mb-2">Отчёт</p>
+                    <pre
+                      className="whitespace-pre-wrap text-xs text-gray-300 font-mono bg-gray-950 border border-gray-800 rounded p-4 max-h-[60vh] overflow-y-auto"
+                      data-testid="gr-report"
+                    >
+                      {detailRun.report}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Per-call analysis notes */}
+                {Array.isArray((detailRun as any).results?.calls) &&
+                  (detailRun as any).results.calls.some((c: any) => c.notes?.length > 0) && (
+                    <div>
+                      <p className="text-sm font-medium text-gray-300 mb-2">Примечания</p>
+                      {((detailRun as any).results.calls as any[]).map((c: any, i: number) =>
+                        c.notes?.length > 0 ? (
+                          <div key={i} className="mb-2">
+                            <p className="text-xs text-gray-400 font-medium">{c.title}</p>
+                            <ul className="list-disc ml-4 text-xs text-amber-400/80">
+                              {c.notes.map((n: string, j: number) => (
+                                <li key={j}>{n}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null
+                      )}
+                    </div>
+                  )}
+
+                {detailRun.status === "running" && (
+                  <p className="text-sm text-amber-400 flex items-center gap-2">
+                    <span className="animate-spin inline-block w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full" />
+                    Анализ выполняется, подождите…
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
