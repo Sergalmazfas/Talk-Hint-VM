@@ -669,6 +669,204 @@ final class InCallCaptionTests: XCTestCase {
                        "status must still prompt the user to sign in after cancel")
     }
 
+    // MARK: - iPhone SE layout / keyboard-dismiss regression tests
+
+    /// The suggestion banner's primary label must resist vertical compression at
+    /// `.required` (1000) priority so it is never squashed to zero height when the
+    /// keyboard is open on a small screen (e.g. iPhone SE 375×667 pt). Before the
+    /// fix the label used the default `.defaultHigh` (750) priority, which let
+    /// Auto Layout shrink it away when the bottom stack ran out of room.
+    func testSuggestionPrimaryLabelHasRequiredVerticalCompressionResistance() {
+        // Use an SE-sized frame so any layout pressure the keyboard would cause
+        // is actually present at constraint-solve time.
+        let vc = makeLoadedViewControllerWithSize(CGSize(width: 375, height: 667))
+
+        guard let label = label(withIdentifier: "text-suggestion", in: vc.view) else {
+            return XCTFail("text-suggestion label not found in view hierarchy")
+        }
+        XCTAssertEqual(
+            label.contentCompressionResistancePriority(for: .vertical).rawValue,
+            UILayoutPriority.required.rawValue,
+            accuracy: 0.01,
+            "hint primary label must resist vertical compression at .required (1000) priority")
+    }
+
+    /// The suggestion banner's secondary (translation) label must also resist
+    /// vertical compression at `.required` priority so a long hint with a
+    /// translation is never clipped on an SE-sized screen.
+    func testSuggestionSecondaryLabelHasRequiredVerticalCompressionResistance() {
+        let vc = makeLoadedViewControllerWithSize(CGSize(width: 375, height: 667))
+
+        guard let label = label(withIdentifier: "text-suggestion-translation", in: vc.view) else {
+            return XCTFail("text-suggestion-translation label not found in view hierarchy")
+        }
+        XCTAssertEqual(
+            label.contentCompressionResistancePriority(for: .vertical).rawValue,
+            UILayoutPriority.required.rawValue,
+            accuracy: 0.01,
+            "hint translation label must resist vertical compression at .required (1000) priority")
+    }
+
+    /// When a suggestion with a translation is delivered, the primary label and
+    /// secondary (translation) label must both be non-zero height in an SE layout.
+    /// This is the layout-level regression check: if VCRP is wrong, at least one
+    /// label collapses to height 0 under constraint pressure.
+    func testSuggestionLabelsHavePositiveHeightOnSELayout() {
+        let vc = makeLoadedViewControllerWithSize(CGSize(width: 375, height: 667))
+        let stream = CallHintStream()
+
+        vc.callHintStream(stream, didReceive:
+            .suggestion(en: "Would you like to schedule a call for tomorrow afternoon?",
+                        translation: "Хотели бы вы запланировать звонок на завтра после обеда?",
+                        options: nil))
+
+        // Force a full layout pass so Auto Layout resolves all constraints.
+        vc.view.layoutIfNeeded()
+
+        guard let primary = label(withIdentifier: "text-suggestion", in: vc.view),
+              let secondary = label(withIdentifier: "text-suggestion-translation", in: vc.view) else {
+            return XCTFail("suggestion labels not found in view hierarchy")
+        }
+
+        // Convert to window coordinates so the full layout chain is resolved.
+        let primaryFrame = primary.convert(primary.bounds, to: vc.view)
+        let secondaryFrame = secondary.convert(secondary.bounds, to: vc.view)
+
+        XCTAssertGreaterThan(primaryFrame.height, 0,
+            "suggestion primary label must have positive height after a suggestion event")
+        XCTAssertFalse(secondary.isHidden,
+            "translation label must be visible when translation is non-empty")
+        XCTAssertGreaterThan(secondaryFrame.height, 0,
+            "suggestion translation label must have positive height on SE layout")
+    }
+
+    /// The root view must carry a UITapGestureRecognizer that dismisses the
+    /// keyboard, and it must have `cancelsTouchesInView == false` so tapping a
+    /// text field or button still delivers the touch to the control (rather than
+    /// the recognizer stealing it and immediately resigning first-responder).
+    func testRootViewTapGestureDoesNotCancelTouchesInView() {
+        let vc = makeLoadedViewController()
+
+        let tapRecognizers = vc.view.gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer } ?? []
+        XCTAssertFalse(tapRecognizers.isEmpty,
+            "root view must have at least one UITapGestureRecognizer for keyboard dismissal")
+
+        // Every tap recognizer on the root view must not steal touches from controls.
+        for tap in tapRecognizers {
+            XCTAssertFalse(tap.cancelsTouchesInView,
+                "tap recognizer on root view must have cancelsTouchesInView == false")
+        }
+    }
+
+    /// The root-view tap gesture must have a delegate set (the view controller
+    /// itself) so the `gestureRecognizer(_:shouldReceive:)` guard can prevent
+    /// taps on UIControl subviews from triggering the dismiss.
+    func testRootViewTapGestureHasDelegate() {
+        let vc = makeLoadedViewController()
+
+        let tapRecognizers = vc.view.gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer } ?? []
+        XCTAssertFalse(tapRecognizers.isEmpty,
+            "root view must have at least one UITapGestureRecognizer")
+
+        let recognizerWithDelegate = tapRecognizers.first { $0.delegate != nil }
+        XCTAssertNotNil(recognizerWithDelegate,
+            "the keyboard-dismiss tap recognizer must have a delegate set (the view controller)")
+    }
+
+    /// The transcript scroll view must use `.interactive` keyboard dismiss mode
+    /// so a downward drag on the transcript dismisses the keyboard — matching
+    /// the Messages-style UX described in the approved spec.
+    func testScrollViewHasInteractiveKeyboardDismissMode() {
+        let vc = makeLoadedViewController()
+
+        guard let scroll = view(withIdentifier: "scroll-incall-feed", in: vc.view) as? UIScrollView else {
+            return XCTFail("scroll-incall-feed not found in view hierarchy")
+        }
+        XCTAssertEqual(scroll.keyboardDismissMode, .interactive,
+            "transcript scroll view must use .interactive keyboard dismiss mode")
+    }
+
+    /// The gesture-recognizer delegate must pass through touches that land on
+    /// a UITextField so the user can tap into the Goal and Ask-the-assistant
+    /// fields without the recognizer immediately resigning first-responder.
+    func testGestureRecognizerDelegatePassesThroughTextFieldTouches() {
+        let vc = makeLoadedViewController()
+
+        // Find the real tap recognizer with a delegate.
+        guard let tap = vc.view.gestureRecognizers?
+            .compactMap({ $0 as? UITapGestureRecognizer })
+            .first(where: { $0.delegate != nil }),
+              let delegate = tap.delegate else {
+            return XCTFail("no tap gesture recognizer with delegate found on root view")
+        }
+
+        // Use the production text fields (already in the view hierarchy).
+        let textFields = descendants(of: vc.view).compactMap { $0 as? UITextField }
+        XCTAssertFalse(textFields.isEmpty,
+            "precondition: text fields must be present in the hierarchy")
+
+        for field in textFields {
+            let touch = MockViewTouch(targeting: field)
+            let shouldReceive = delegate.gestureRecognizer?(tap, shouldReceive: touch) ?? true
+            XCTAssertFalse(shouldReceive,
+                "delegate must return false (don't steal) for a touch on UITextField '\(field.accessibilityIdentifier ?? "?")'")
+        }
+    }
+
+    /// The gesture-recognizer delegate must pass through touches on UIButtons so
+    /// Mute, End, Ask, and Set-Goal buttons remain fully interactive while the
+    /// keyboard is open.
+    func testGestureRecognizerDelegatePassesThroughButtonTouches() {
+        let vc = makeLoadedViewController()
+
+        guard let tap = vc.view.gestureRecognizers?
+            .compactMap({ $0 as? UITapGestureRecognizer })
+            .first(where: { $0.delegate != nil }),
+              let delegate = tap.delegate else {
+            return XCTFail("no tap gesture recognizer with delegate found on root view")
+        }
+
+        let buttons = descendants(of: vc.view)
+            .compactMap { $0 as? UIButton }
+            .filter { $0.accessibilityIdentifier != nil }
+        XCTAssertFalse(buttons.isEmpty,
+            "precondition: named buttons must be present in the hierarchy")
+
+        for button in buttons {
+            let touch = MockViewTouch(targeting: button)
+            let shouldReceive = delegate.gestureRecognizer?(tap, shouldReceive: touch) ?? true
+            XCTAssertFalse(shouldReceive,
+                "delegate must return false (don't steal) for a touch on UIButton '\(button.accessibilityIdentifier ?? "?")'")
+        }
+    }
+
+    /// The gesture-recognizer delegate must accept touches that land on the plain
+    /// view background (not on a UIControl) so a tap on the transcript area or the
+    /// empty screen background correctly dismisses the keyboard.
+    func testGestureRecognizerDelegateAcceptsBackgroundTouches() {
+        let vc = makeLoadedViewController()
+
+        guard let tap = vc.view.gestureRecognizers?
+            .compactMap({ $0 as? UITapGestureRecognizer })
+            .first(where: { $0.delegate != nil }),
+              let delegate = tap.delegate else {
+            return XCTFail("no tap gesture recognizer with delegate found on root view")
+        }
+
+        // A plain UIView (not a UIControl) directly in the hierarchy — the
+        // suggestion banner's background card is a good stand-in for the kind of
+        // non-interactive surface a user would tap to dismiss the keyboard.
+        guard let banner = view(withIdentifier: "card-suggestion", in: vc.view) else {
+            return XCTFail("card-suggestion not found as a plain-view tap target")
+        }
+        let touch = MockViewTouch(targeting: banner)
+        let shouldReceive = delegate.gestureRecognizer?(tap, shouldReceive: touch) ?? false
+        XCTAssertTrue(shouldReceive,
+            "delegate must return true (accept) for a touch on a plain UIView background")
+    }
+
     // MARK: - Helpers
 
     /// Runs the main run loop for a fixed interval so presentation/dismissal
@@ -689,9 +887,13 @@ final class InCallCaptionTests: XCTestCase {
     }
 
     private func makeLoadedViewController() -> InCallViewController {
+        makeLoadedViewControllerWithSize(CGSize(width: 390, height: 844))
+    }
+
+    private func makeLoadedViewControllerWithSize(_ size: CGSize) -> InCallViewController {
         let vc = InCallViewController(callerName: "Tester")
         vc.loadViewIfNeeded()
-        vc.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        vc.view.frame = CGRect(origin: .zero, size: size)
         vc.view.layoutIfNeeded()
         return vc
     }
@@ -783,4 +985,16 @@ final class InCallCaptionTests: XCTestCase {
     private func labels(in root: UIView) -> [UILabel] {
         descendants(of: root).compactMap { $0 as? UILabel }
     }
+}
+
+// MARK: - Test helpers
+
+/// A UITouch subclass that overrides `view` to point at a specific target so
+/// `gestureRecognizer(_:shouldReceive:)` can be tested without a UIWindow or
+/// real event dispatch. The delegate's logic only reads `touch.view` and walks
+/// its superview chain — no window or screen coordinate is needed.
+private final class MockViewTouch: UITouch {
+    private let _view: UIView
+    init(targeting view: UIView) { _view = view; super.init() }
+    override var view: UIView? { _view }
 }
