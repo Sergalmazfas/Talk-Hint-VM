@@ -98,14 +98,9 @@ final class InCallViewController: UIViewController {
     }
 
     private func buildUI() {
-        let titleLabel = UILabel()
-        titleLabel.text = String(format: NSLocalizedString("incall.title", comment: ""), callerName)
-        titleLabel.font = .systemFont(ofSize: 22, weight: .bold)
-        titleLabel.textColor = Theme.ink
-        titleLabel.textAlignment = .center
-        titleLabel.numberOfLines = 0
-        titleLabel.accessibilityIdentifier = "text-incall-title"
-
+        // No "On call with <number>" title: the user already knows who they
+        // dialed — every vertical point above the chat belongs to the chat and
+        // the hint branches (user request, Aug 2026 redesign).
         statusLabel.text = NSLocalizedString("incall.status.connecting", comment: "")
         statusLabel.font = .systemFont(ofSize: 13)
         statusLabel.textColor = Theme.sub
@@ -144,10 +139,10 @@ final class InCallViewController: UIViewController {
 
         let goalCard = buildGoalCard()
 
-        let header = UIStackView(arrangedSubviews: [titleLabel, statusRow, retryButton, goalCard])
+        let header = UIStackView(arrangedSubviews: [statusRow, retryButton, goalCard])
         header.axis = .vertical
         header.spacing = 4
-        header.setCustomSpacing(12, after: retryButton)
+        header.setCustomSpacing(8, after: retryButton)
         header.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(header)
         view.addSubview(scrollView)
@@ -168,11 +163,11 @@ final class InCallViewController: UIViewController {
         let bottomConstraint = bottomStack.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -8)
         inputBottomConstraint = bottomConstraint
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: guide.topAnchor, constant: 16),
+            header.topAnchor.constraint(equalTo: guide.topAnchor, constant: 6),
             header.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
             header.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
 
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 16),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomStack.topAnchor, constant: -8),
@@ -487,16 +482,18 @@ final class InCallViewController: UIViewController {
     /// "Keypad", but DTMF isn't supported in-call; the existing audio-route
     /// control keeps that slot so no functionality is lost.
     private func buildControlsRow() -> UIView {
-        configureCircleButton(muteButton, diameter: 56)
+        // Compact controls (44/52pt, 10pt captions): the chat + hint branches
+        // are the point of this screen — the buttons only need to stay tappable.
+        configureCircleButton(muteButton, diameter: 44)
         muteButton.addTarget(self, action: #selector(muteButtonTapped), for: .touchUpInside)
         muteButton.accessibilityIdentifier = "button-mute"
-        muteCaption.font = .systemFont(ofSize: 12)
+        muteCaption.font = .systemFont(ofSize: 10)
         muteCaption.textColor = Theme.sub
         muteCaption.textAlignment = .center
         updateMuteButton()
 
         let endButton = UIButton(type: .system)
-        configureCircleButton(endButton, diameter: 68)
+        configureCircleButton(endButton, diameter: 52)
         endButton.setImage(UIImage(systemName: "phone.down.fill"), for: .normal)
         endButton.tintColor = .white
         endButton.backgroundColor = UIColor(
@@ -507,14 +504,14 @@ final class InCallViewController: UIViewController {
 
         let endCaption = UILabel()
         endCaption.text = NSLocalizedString("incall.end", comment: "")
-        endCaption.font = .systemFont(ofSize: 12)
+        endCaption.font = .systemFont(ofSize: 10)
         endCaption.textColor = Theme.sub
         endCaption.textAlignment = .center
 
-        configureCircleButton(routeButton, diameter: 56)
+        configureCircleButton(routeButton, diameter: 44)
         routeButton.addTarget(self, action: #selector(routeButtonTapped), for: .touchUpInside)
         routeButton.accessibilityIdentifier = "button-audio-route"
-        routeCaption.font = .systemFont(ofSize: 12)
+        routeCaption.font = .systemFont(ofSize: 10)
         routeCaption.textColor = Theme.sub
         routeCaption.textAlignment = .center
         routeCaption.adjustsFontSizeToFitWidth = true
@@ -548,7 +545,7 @@ final class InCallViewController: UIViewController {
     private func circleControl(button: UIButton, caption: UILabel) -> UIView {
         let stack = UIStackView(arrangedSubviews: [button, caption])
         stack.axis = .vertical
-        stack.spacing = 6
+        stack.spacing = 3
         stack.alignment = .center
         return stack
     }
@@ -769,6 +766,7 @@ final class InCallViewController: UIViewController {
             return
         }
         retryButton.isHidden = true
+        statusLabel.isHidden = false
         statusLabel.text = NSLocalizedString("incall.status.reconnecting", comment: "")
         stream.retry()
     }
@@ -803,6 +801,7 @@ final class InCallViewController: UIViewController {
         needsSignIn = false
         retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
         retryButton.isHidden = true
+        statusLabel.isHidden = false
         statusLabel.text = NSLocalizedString("incall.status.reconnecting", comment: "")
         reconnectSpinner.startAnimating()
         stream.retry()
@@ -1097,7 +1096,9 @@ extension InCallViewController: CallHintStreamDelegate {
     func callHintStreamDidConnect(_ stream: CallHintStream) {
         needsSignIn = false
         retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
-        statusLabel.text = NSLocalizedString("incall.status.connected", comment: "")
+        // Connected is the normal state — hide the status line entirely so the
+        // chat gets the space; it reappears only for reconnect/error states.
+        statusLabel.isHidden = true
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = true
     }
@@ -1111,6 +1112,7 @@ extension InCallViewController: CallHintStreamDelegate {
         retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
         // Show progress (attempt N of M) with a live spinner so the feed reads as
         // actively recovering, not frozen, until the terminal state is reached.
+        statusLabel.isHidden = false
         statusLabel.text = CallHintStream.reconnectingStatusText(attempt: attempt, of: maxAttempts)
         reconnectSpinner.startAnimating()
         retryButton.isHidden = true
@@ -1120,6 +1122,7 @@ extension InCallViewController: CallHintStreamDelegate {
         // A network/server give-up (not a missing token) — the button reconnects.
         needsSignIn = false
         retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
+        statusLabel.isHidden = false
         statusLabel.text = NSLocalizedString("incall.status.unavailable", comment: "")
         reconnectSpinner.stopAnimating()
         retryButton.isHidden = false
@@ -1131,6 +1134,7 @@ extension InCallViewController: CallHintStreamDelegate {
         // action that routes to the login screen, so the user can actually recover
         // the live assistant instead of re-hitting the same sign-in message.
         needsSignIn = true
+        statusLabel.isHidden = false
         statusLabel.text = NSLocalizedString("incall.status.sign_in", comment: "")
         reconnectSpinner.stopAnimating()
         retryButton.setTitle(NSLocalizedString("incall.sign_in", comment: ""), for: .normal)
