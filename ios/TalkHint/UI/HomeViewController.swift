@@ -78,6 +78,9 @@ final class HomeViewController: UIViewController {
         numberLabel.textColor = Theme.ink
         numberLabel.adjustsFontSizeToFitWidth = true
         numberLabel.minimumScaleFactor = 0.6
+        // When the number is still too long even after shrinking, cut off the
+        // BEGINNING (…) so the digits being typed stay visible at the end.
+        numberLabel.lineBreakMode = .byTruncatingHead
         numberLabel.accessibilityIdentifier = "input-dial-number"
 
         placeholderLabel.text = "Enter number"
