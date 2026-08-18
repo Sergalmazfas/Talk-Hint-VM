@@ -257,6 +257,10 @@ export async function registerRoutes(
   const { registerBenchmarkRoutes } = await import("./benchmark/routes");
   registerBenchmarkRoutes(app);
 
+  // Translator Realtime Spike — dev-only test stand (404 in production).
+  const { registerTranslatorSpike } = await import("./translation/spike");
+  registerTranslatorSpike(app);
+
   // TalkHint UI - serve from dist/talkhint/ui (where bundled SDK is)
   // In production, use cwd-relative path; in dev, use __dirname-relative
   const talkhintUiPath = process.env.NODE_ENV === "production"

@@ -8,6 +8,7 @@ import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
 import { getSessionUserId } from "./auth";
+import { isValidSpikeToken, handleTranslatorSpikeStream } from "./translation/spike";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
@@ -815,8 +816,22 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/honor-stream", "/ui"].includes(pathname)) {
+    if (!["/twilio-stream", "/media", "/honor-stream", "/ui", "/translator-spike-stream"].includes(pathname)) {
       socket.destroy();
+      return;
+    }
+
+    // Dev-only Translator Realtime Spike stand. Uses its own per-boot page
+    // token (not a user session); hard-rejected in production.
+    if (pathname === "/translator-spike-stream") {
+      if (!isValidSpikeToken(parsedUrl.searchParams.get("token"))) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request, pathname);
+      });
       return;
     }
 
@@ -859,6 +874,8 @@ export function setupWebSocket(server: Server) {
       handleUIConnection(ws, userId);
     } else if (pathname === "/honor-stream") {
       handleHonorStream(ws, userId);
+    } else if (pathname === "/translator-spike-stream") {
+      handleTranslatorSpikeStream(ws);
     } else if (pathname === "/twilio-stream" || pathname === "/media") {
       log(`Twilio Media Stream connected via ${pathname}`, "twilio");
       handleTwilioStream(ws);
