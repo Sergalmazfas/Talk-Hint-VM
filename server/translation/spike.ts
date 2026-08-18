@@ -221,6 +221,7 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
           : openaiRealtimeTranslationProvider;
       const caps = SPIKE_PROVIDERS[provider].capabilities;
       let started: RealtimeTranslationSession;
+      log(`[TranslatorSpike] starting session provider=${provider} in=${inputLang} out=${outputLang}`, "translator");
       try {
         started = await providerImpl.startSession({
           languages: [otherLang, outputLang],
@@ -234,6 +235,7 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
         });
       } catch (e) {
         starting = false;
+        log(`[TranslatorSpike] startSession FAILED provider=${provider}: ${(e as Error).message}`, "translator");
         send({ type: "error", message: (e as Error).message, fatal: true });
         return;
       }

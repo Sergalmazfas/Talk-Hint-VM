@@ -150,6 +150,8 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
   private dstAccum = "";
   private audioOutBytesSinceTurn = 0;
   private stopping = false;
+  private loggedFirstAudioOut = false;
+  private loggedFirstAudioIn = false;
   private closeTimer: NodeJS.Timeout | null = null;
   private readyEvent: TranslationEvent | null = null;
 
@@ -242,6 +244,7 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
         this.emitClosed();
       });
     });
+    log("[Translate] session ready (handshake ok)", "translator");
     this.readyEvent = {
       type: "ready",
       provider: "openai-realtime-translate",
@@ -258,6 +261,10 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
     switch (msg.type) {
       case "session.output_audio.delta": {
         const now = Date.now();
+        if (this.audioOutBytesSinceTurn === 0 && this.turnIndex === 0 && !this.loggedFirstAudioOut) {
+          this.loggedFirstAudioOut = true;
+          log("[Translate] first translated audio delta received", "translator");
+        }
         if (this.pending && this.pending.speechEndTs && !this.pending.firstTranslatedAudioTs) {
           this.pending.firstTranslatedAudioTs = now;
         }
@@ -282,6 +289,7 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
         break;
       }
       case "error": {
+        log(`[Translate] provider error: ${JSON.stringify(msg.error || msg).slice(0, 300)}`, "translator");
         this.emit({
           type: "error",
           message: `provider error: ${JSON.stringify(msg.error || msg)}`,
@@ -296,6 +304,10 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
 
   sendAudio(chunk: Buffer): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN || this.stopping) return;
+    if (!this.loggedFirstAudioIn) {
+      this.loggedFirstAudioIn = true;
+      log(`[Translate] first mic frame received from stand (${chunk.length} bytes)`, "translator");
+    }
     const now = Date.now();
     const durationMs = (chunk.length / 2 / this.config.inputFormat.sampleRateHz) * 1000;
     const tr = this.segmenter.feed({ rms: pcm16Rms(chunk), ts: now, durationMs });
