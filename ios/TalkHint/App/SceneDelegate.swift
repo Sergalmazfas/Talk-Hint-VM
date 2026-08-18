@@ -32,20 +32,28 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     /// Builds the main tab bar shown after login — the redesigned three-tab
-    /// layout (Calls / Tutor / History). Settings opens from the gear on the
-    /// Calls screen; Numbers, Assistant tools and Account are reachable from
-    /// Settings ("More" section).
+    /// layout (Hint / Translator / History). Settings opens from the gear on
+    /// the Hint (calls) screen; Numbers, Assistant tools and Account are
+    /// reachable from Settings ("More" section).
+    ///
+    /// The first tab is FUNCTIONALLY the same Calls flow (dialer, recents,
+    /// live-hint calls) — only its user-facing name/icon changed to "Hint".
+    /// The Tutor tab was replaced by Translator; TutorViewController and the
+    /// backend /tutor page are intentionally left in the codebase (no UI entry
+    /// points, no refactoring — see task #274 scope).
     private func makeMainTabController() -> UITabBarController {
         let tabController = UITabBarController()
         tabController.tabBar.tintColor = Theme.green
 
         let calls = HomeViewController()
         calls.tabBarItem = UITabBarItem(
-            title: NSLocalizedString("tab.calls", comment: ""), image: UIImage(systemName: "phone.fill"), tag: 0)
+            title: NSLocalizedString("tab.hint", comment: ""),
+            image: Self.tabIcon(badge: .sparkle), tag: 0)
 
-        let tutor = TutorViewController()
-        tutor.tabBarItem = UITabBarItem(
-            title: NSLocalizedString("tab.tutor", comment: ""), image: UIImage(systemName: "graduationcap"), tag: 1)
+        let translator = TranslatorViewController()
+        translator.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("tab.translator", comment: ""),
+            image: Self.tabIcon(badge: .translate), tag: 1)
 
         let history = CallHistoryViewController()
         history.tabBarItem = UITabBarItem(
@@ -53,9 +61,50 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),
-            UINavigationController(rootViewController: tutor),
+            UINavigationController(rootViewController: translator),
             UINavigationController(rootViewController: history),
         ]
         return tabController
+    }
+
+    // MARK: - Composite tab icons
+
+    private enum TabBadge {
+        /// Small sparkle over the handset — "call with live hints".
+        case sparkle
+        /// Small 文/A over the handset — "call with a translator".
+        case translate
+    }
+
+    /// Renders a phone handset with a small badge (sparkle or 文/A) as a
+    /// template image, matching the TalkHint style from the approved mockup.
+    /// SF Symbols has no combined glyph for either concept, so the icon is
+    /// composed at render time; `.alwaysTemplate` keeps normal tab tinting.
+    private static func tabIcon(badge: TabBadge) -> UIImage {
+        let size = CGSize(width: 30, height: 30)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { _ in
+            // Handset, slightly bottom-left so the badge has room top-right.
+            let phoneConfig = UIImage.SymbolConfiguration(pointSize: 17, weight: .regular)
+            if let phone = UIImage(systemName: "phone.fill", withConfiguration: phoneConfig) {
+                phone.withTintColor(.black).draw(in: CGRect(x: 1, y: 8, width: 20, height: 20))
+            }
+            switch badge {
+            case .sparkle:
+                let badgeConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                if let sparkles = UIImage(systemName: "sparkles", withConfiguration: badgeConfig) {
+                    sparkles.withTintColor(.black).draw(in: CGRect(x: 17, y: 1, width: 13, height: 13))
+                }
+            case .translate:
+                // 文 + A drawn as text (no SF Symbol below iOS 17.4 covers this).
+                let attrs: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 9, weight: .bold),
+                    .foregroundColor: UIColor.black,
+                ]
+                ("文" as NSString).draw(at: CGPoint(x: 16, y: 0), withAttributes: attrs)
+                ("A" as NSString).draw(at: CGPoint(x: 23, y: 7), withAttributes: attrs)
+            }
+        }
+        return image.withRenderingMode(.alwaysTemplate)
     }
 }

@@ -226,6 +226,12 @@
 "tab.calls" = "Llamadas";
 "tab.tutor" = "Tutora";
 "tab.history" = "Historial";
+"tab.hint" = "Sugerencias";
+"tab.translator" = "Traductor";
+"translator.title" = "Traductor";
+"translator.status.placeholder" = "La traducción en vivo aún no está conectada";
+"translator.placeholder.title" = "Llamada con traductor en vivo";
+"translator.placeholder.message" = "Usted habla en su idioma: aquí aparecen sus palabras y su traducción. La otra persona responde y usted ve sus palabras con la traducción. Muy pronto.";
 "mode.universal" = "Asistente universal";
 "mode.massage" = "Asistente de salón de masajes";
 "mode.dispatcher" = "Asistente de recepción";

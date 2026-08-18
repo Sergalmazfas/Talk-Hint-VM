@@ -226,6 +226,12 @@
 "tab.calls" = "Дзвінки";
 "tab.tutor" = "Репетитор";
 "tab.history" = "Історія";
+"tab.hint" = "Підказки";
+"tab.translator" = "Перекладач";
+"translator.title" = "Перекладач";
+"translator.status.placeholder" = "Живий переклад ще не підключено";
+"translator.placeholder.title" = "Дзвінок із живим перекладачем";
+"translator.placeholder.message" = "Ви говорите своєю мовою — тут з'являються ваші слова та їх переклад. Співрозмовник відповідає — ви бачите його слова і переклад для вас. Незабаром.";
 "mode.universal" = "Універсальний асистент";
 "mode.massage" = "Асистент масажного салону";
 "mode.dispatcher" = "Асистент-диспетчер";

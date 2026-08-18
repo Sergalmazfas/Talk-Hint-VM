@@ -6,8 +6,10 @@ import UIKit
 /// pushed to the live `/ui` socket on every call (see `CallHintStream`).
 final class AssistantViewController: UITableViewController {
 
+    // NOTE: the Tutor Emma row was removed from user navigation (task #274 —
+    // Translator replaces Tutor). TutorViewController and the backend /tutor
+    // page are intentionally kept in the codebase, just without entry points.
     private enum Section: Int, CaseIterable {
-        case tutor
         case mode
         case language
         case goal
@@ -58,7 +60,6 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
-        case .tutor: return 1
         case .mode: return modes.count
         case .language: return languages.count
         case .goal: return 1
@@ -71,7 +72,6 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
-        case .tutor: return NSLocalizedString("assistant.section.tutor", comment: "")
         case .mode: return NSLocalizedString("assistant.section.mode", comment: "")
         case .language: return NSLocalizedString("assistant.section.language", comment: "")
         case .goal: return NSLocalizedString("assistant.section.goal", comment: "")
@@ -84,7 +84,6 @@ final class AssistantViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
-        case .tutor: return NSLocalizedString("assistant.footer.tutor", comment: "")
         case .goal: return NSLocalizedString("assistant.footer.goal", comment: "")
         case .context: return NSLocalizedString("assistant.footer.context", comment: "")
         case .contacts: return NSLocalizedString("assistant.footer.contacts", comment: "")
@@ -100,11 +99,6 @@ final class AssistantViewController: UITableViewController {
         var config = cell.defaultContentConfiguration()
 
         switch Section(rawValue: indexPath.section)! {
-        case .tutor:
-            config.text = NSLocalizedString("assistant.tutor.name", comment: "")
-            config.secondaryText = NSLocalizedString("assistant.tutor.subtitle", comment: "")
-            cell.accessoryType = .disclosureIndicator
-            cell.accessibilityIdentifier = "cell-tutor"
         case .mode:
             let mode = modes[indexPath.row]
             config.text = mode.name
@@ -156,8 +150,6 @@ final class AssistantViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         switch Section(rawValue: indexPath.section)! {
-        case .tutor:
-            navigationController?.pushViewController(TutorViewController(), animated: true)
         case .mode:
             SessionStore.shared.activeMode = modes[indexPath.row].id
             tableView.reloadSections(IndexSet(integer: Section.mode.rawValue), with: .none)

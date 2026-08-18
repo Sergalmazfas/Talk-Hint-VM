@@ -21,8 +21,19 @@ final class CallManager: NSObject {
     private let callController = CXCallController()
     private let audioDevice = DefaultAudioDevice()
 
+    /// How a call is being assisted. Structural placeholder (task #274): ALL
+    /// calls — whether started from the Hint tab or, in a future stage, from
+    /// the Translator tab — share this one session/history entity. Translator
+    /// must never grow a separate, isolated call history; stage 2 will set
+    /// `.translator` on sessions started from the Translator screen.
+    enum CallMode: String {
+        case hint
+        case translator
+    }
+
     private struct CallSession {
         let uuid: UUID
+        var mode: CallMode = .hint
         let callSid: String?      // nil for outgoing calls (Twilio assigns the SID)
         let remoteLabel: String
         var twilioCall: Call?

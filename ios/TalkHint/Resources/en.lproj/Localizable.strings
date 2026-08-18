@@ -226,6 +226,12 @@
 "tab.calls" = "Calls";
 "tab.tutor" = "Tutor";
 "tab.history" = "History";
+"tab.hint" = "Hint";
+"tab.translator" = "Translator";
+"translator.title" = "Translator";
+"translator.status.placeholder" = "Live translation is not connected yet";
+"translator.placeholder.title" = "Call with a live translator";
+"translator.placeholder.message" = "You speak your language — your words and their translation appear here. The other person replies — you see their words and the translation for you. Coming soon.";
 "mode.universal" = "Universal Assistant";
 "mode.massage" = "Massage Salon Assistant";
 "mode.dispatcher" = "Dispatcher Assistant";
