@@ -440,6 +440,13 @@ const TOKEN = ${JSON.stringify(SPIKE_TOKEN)};
 const RATE = ${SAMPLE_RATE};
 let ws=null, ctx=null, workletNode=null, mediaStream=null;
 let playhead=0, running=false, restarting=false;
+// Continuous-output providers (gpt-realtime-translate) stream audio the whole
+// session INCLUDING silence between phrases. Gating the mic on "any queued
+// playback" therefore gates it FOREVER (the Run: «он вообще не реагирует»).
+// The gate must key off the last AUDIBLE (voiced) chunk instead — silence
+// chunks keep the playhead moving but must not silence the microphone.
+let voicedPlayhead=0;
+const VOICED_RMS=0.004; // normalized float RMS; digital/near silence is far below
 const turns=[];              // per-turn metrics from provider (completed + cancelled)
 const srcUtterances=[];      // evidence: every recognized source utterance
 const cancellations=[];      // forensic records
@@ -516,7 +523,7 @@ function addLine(cls, text){
   feed.appendChild(d); feed.scrollTop=feed.scrollHeight;
   return d;
 }
-function playbackActive(){ return !!ctx && playhead > ctx.currentTime + 0.05; }
+function playbackActive(){ return !!ctx && voicedPlayhead > ctx.currentTime + 0.05; }
 function isMeaningful(t){ return !!t && t.replace(/[^\\p{L}\\p{N}]/gu,'').length >= 3; }
 
 const WORKLET = \`
@@ -553,6 +560,11 @@ function playChunk(b64){
   const wasActive=playbackActive();
   const t=Math.max(ctx.currentTime+0.02, playhead);
   src.start(t); playhead=t+buf.duration;
+  // Track the scheduled end of the last AUDIBLE chunk — this (not the raw
+  // playhead) drives the mic gate, so a continuous silence stream never
+  // gates the microphone.
+  let sq=0; for(let i=0;i<n;i++) sq+=f[i]*f[i];
+  if(Math.sqrt(sq/Math.max(1,n))>VOICED_RMS) voicedPlayhead=Math.max(voicedPlayhead, t+buf.duration);
   if(!wasActive) logEv({type:'playback_start'});
   src.onended=()=>{ if(!playbackActive()){ lastPlaybackEndTs=Date.now(); logEv({type:'playback_end'}); } };
 }
@@ -837,7 +849,7 @@ async function start(){
       // (currentTime - playhead) is negative while ANY queued audio remains
       // and counts the echo tail from the true end — no leak window around
       // the last chunk.
-      const schedMs=(ctx&&playhead>0)?((ctx.currentTime-playhead)*1000):(lastPlaybackEndTs?now-lastPlaybackEndTs:null);
+      const schedMs=(ctx&&voicedPlayhead>0)?((ctx.currentTime-voicedPlayhead)*1000):(lastPlaybackEndTs?now-lastPlaybackEndTs:null);
       const g=micGate.feed({
         playbackActive:playbackActive(),
         msSinceLastPlaybackEnd:schedMs,
@@ -854,7 +866,7 @@ async function start(){
         else if(action==='silence'){ ws.send(new ArrayBuffer(e.data.byteLength)); }
       }
     };
-    running=true; stopBtn.disabled=false; playhead=0;
+    running=true; stopBtn.disabled=false; playhead=0; voicedPlayhead=0;
   }catch(e){
     addLine('err','⚠ '+e.message); startBtn.disabled=false;
   }
