@@ -44,6 +44,51 @@ const VOICES: Record<string, { name: string; gender: string }> = {
   cedar: { name: "Cedar", gender: "male" },
 };
 
+/** Echo tail after playback ends during which the mic stays gated (ms). */
+export const MIC_GATE_TAIL_MS = 350;
+
+/**
+ * Half-duplex microphone gate: while translated audio is playing (plus a
+ * short echo tail) microphone frames must NOT reach the provider, so a gated
+ * interval can never produce a committed source turn (the Run #2 feedback
+ * loop). Written as a self-contained factory so the spike page embeds the
+ * EXACT same implementation via toString() that the unit tests exercise.
+ */
+export function createMicGate(opts: { tailMs: number }) {
+  let gated = false;
+  let gateStartTs = 0;
+  return {
+    feed(input: {
+      playbackActive: boolean;
+      msSinceLastPlaybackEnd: number | null;
+      now: number;
+    }): { send: boolean; transition: "gate_start" | "gate_end" | null; gatedMs?: number } {
+      // msSinceLastPlaybackEnd may be NEGATIVE: the caller derives it from
+      // the SCHEDULED playback end (audio queued but not finished), which
+      // must gate just like audible playback. Anything below tailMs —
+      // negative (still playing) or small positive (echo tail) — stays
+      // gated, so there is no leak window between "almost done" and the
+      // actual end-of-audio callback.
+      const inTail =
+        input.msSinceLastPlaybackEnd != null &&
+        input.msSinceLastPlaybackEnd < opts.tailMs;
+      const shouldGate = input.playbackActive || inTail;
+      let transition: "gate_start" | "gate_end" | null = null;
+      let gatedMs: number | undefined;
+      if (shouldGate && !gated) {
+        gated = true;
+        gateStartTs = input.now;
+        transition = "gate_start";
+      } else if (!shouldGate && gated) {
+        gated = false;
+        transition = "gate_end";
+        gatedMs = input.now - gateStartTs;
+      }
+      return { send: !shouldGate, transition, gatedMs };
+    },
+  };
+}
+
 export function isSpikeEnabled(): boolean {
   return process.env.NODE_ENV !== "production";
 }
@@ -317,8 +362,16 @@ const turns=[];              // per-turn metrics from provider (completed + canc
 const srcUtterances=[];      // evidence: every recognized source utterance
 const cancellations=[];      // forensic records
 let review={ results:{}, ranAt:null };  // turnIndex -> {classification, reason}
+// Half-duplex mic gate (task: stop the playback→mic feedback loop): while
+// translated audio is audibly playing — plus a short echo tail — microphone
+// frames are NOT sent to the provider. The gate sits BEFORE the websocket
+// send, so a gated interval can never produce a committed source turn.
+const GATE_TAIL_MS=${MIC_GATE_TAIL_MS};
+const micGate=(${createMicGate.toString()})({tailMs:GATE_TAIL_MS});
+let gatedIntervals=0, totalGatedMs=0;
 // FULL forensic event log (Run #2 spec): every provider event + client-side
-// mic/playback lifecycle entries, each stamped with seq, client ts and the
+// mic/playback lifecycle entries, each stamped with seq, client ts and
+// the
 // playback state AT THAT MOMENT. Exported verbatim in the JSON report and
 // replayed through the server analyzer for the 5-suspicion verdict.
 const eventLog=[]; let evSeq=0;
@@ -340,6 +393,11 @@ let sessionMeta=null, sessionConfig=null, sessionStartTs=0, errors=[];
 // change archives the current run so one scorecard never mixes configs.
 const completedRuns=[];
 function archiveCurrentRun(reason){
+  // Close an in-progress gate interval INTO the run being archived, so its
+  // duration is charged to the correct scorecard and the next run never
+  // starts with an unpaired gate_end.
+  const gClose=micGate.feed({playbackActive:false,msSinceLastPlaybackEnd:Number.MAX_SAFE_INTEGER,now:Date.now()});
+  if(gClose.transition==='gate_end'){ totalGatedMs+=gClose.gatedMs||0; logEv({type:'gate_end', gatedMs:gClose.gatedMs, closedBy:'run_boundary'}); }
   if(turns.length||srcUtterances.length||cancellations.length){
     completedRuns.push({ reason, archivedAt:new Date().toISOString(),
       session:sessionMeta, sessionConfig, scorecard:computeScorecard(),
@@ -351,6 +409,7 @@ function archiveCurrentRun(reason){
   review={ results:{}, ranAt:null }; errors=[];
   sessionMeta=null; sessionConfig=null; sessionStartTs=0;
   eventLog.length=0; eventLogDropped=0; invariantViolations.length=0; evSeq=0;
+  gatedIntervals=0; totalGatedMs=0; lastPlaybackEndTs=0; lastMicLogTs=0;
   for(const k in feedbackByItem) delete feedbackByItem[k];
 }
 let lastSpeechStartTs=0, lastSpeechStopTs=0, lastPlaybackEndTs=0, lastMicLogTs=0;
@@ -551,6 +610,8 @@ function computeScorecard(){
     errors: errors.length,
     invariant_violations: invariantViolations.length,
     feedback_suspect_source_turns: srcUtterances.filter(u=>u.suspectedFeedback).length,
+    mic_gate_intervals: gatedIntervals,
+    mic_gate_total_ms: totalGatedMs,
   };
 }
 
@@ -574,6 +635,7 @@ function renderMetrics(){
     'semantic review: '+(sc.semantic_review_ran?('faithful '+sc.faithful_count+', added <b class="'+(sc.added_content_count?'err':'')+'">'+sc.added_content_count+'</b>, unsolicited <b class="'+(sc.unsolicited_response_count?'err':'')+'">'+sc.unsolicited_response_count+'</b>, uncertain '+sc.uncertain_translation_count):'not run')+'<br>'+
     'total est. cost: <b>$'+sc.total_estimated_cost_usd.toFixed(4)+'</b>, per active-audio min: '+(sc.cost_per_active_audio_minute!=null?('$'+sc.cost_per_active_audio_minute):'—')+', per wall-clock min: '+(sc.cost_per_wall_clock_minute!=null?('$'+sc.cost_per_wall_clock_minute):'—')+'<br>'+
     'invariant violations (1→1 rule): <b class="'+(sc.invariant_violations?'err':'')+'">'+sc.invariant_violations+'</b>, feedback-suspect source turns: <b class="'+(sc.feedback_suspect_source_turns?'err':'')+'">'+sc.feedback_suspect_source_turns+'</b><br>'+
+    'mic gate (half-duplex): '+sc.mic_gate_intervals+' intervals, '+(sc.mic_gate_total_ms/1000).toFixed(1)+' s gated; feedback-suspect turns: <b class="'+(sc.feedback_suspect_source_turns?'err':'')+'">'+sc.feedback_suspect_source_turns+'</b>, invariant violations: <b class="'+(sc.invariant_violations?'err':'')+'">'+sc.invariant_violations+'</b><br>'+
     'errors: '+sc.errors;
 }
 
@@ -645,12 +707,27 @@ async function start(){
     ws.onclose=()=>{ if(running&&!restarting) stopAll('connection closed'); };
     ws.onerror=()=>{ addLine('err','⚠ websocket error'); };
     workletNode.port.onmessage=(e)=>{
-      // Coarse microphone timeline: one mic_audio log entry per second keeps
-      // the export readable while still proving when the mic was capturing
-      // and whether playback was active at that moment.
       const now=Date.now();
-      if(now-lastMicLogTs>=1000){ lastMicLogTs=now; logEv({type:'mic_audio', chunkMs:40}); }
-      if(ws&&ws.readyState===1) ws.send(e.data);
+      // Half-duplex gate: never send mic audio while our own translation is
+      // playing (plus GATE_TAIL_MS echo tail). Gated intervals are logged as
+      // first-class forensic events.
+      // Gate decision uses the SCHEDULED playback end (playhead), not the
+      // onended callback: audio plays until playhead by construction, so
+      // (currentTime - playhead) is negative while ANY queued audio remains
+      // and counts the echo tail from the true end — no leak window around
+      // the last chunk.
+      const schedMs=(ctx&&playhead>0)?((ctx.currentTime-playhead)*1000):(lastPlaybackEndTs?now-lastPlaybackEndTs:null);
+      const g=micGate.feed({
+        playbackActive:playbackActive(),
+        msSinceLastPlaybackEnd:schedMs,
+        now });
+      if(g.transition==='gate_start'){ gatedIntervals++; logEv({type:'gate_start'}); }
+      if(g.transition==='gate_end'){ totalGatedMs+=g.gatedMs||0; logEv({type:'gate_end', gatedMs:g.gatedMs}); }
+      // Coarse microphone timeline: one mic_audio log entry per second keeps
+      // the export readable while still proving when the mic was capturing,
+      // whether playback was active and whether the frame was gated.
+      if(now-lastMicLogTs>=1000){ lastMicLogTs=now; logEv({type:'mic_audio', chunkMs:40, gated:!g.send}); }
+      if(g.send && ws && ws.readyState===1) ws.send(e.data);
     };
     running=true; stopBtn.disabled=false; playhead=0;
   }catch(e){

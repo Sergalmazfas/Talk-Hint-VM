@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
 import type { TranslationEvent } from "../translation/provider";
 import { analyzeForensicLog, type ForensicLogEntry } from "../translation/forensics";
+import { createMicGate, MIC_GATE_TAIL_MS } from "../translation/spike";
 
 function makeSession() {
   const session = new OpenAIRealtimeTranslationSession({
@@ -163,6 +164,112 @@ function buildRun2Log(): ForensicLogEntry[] {
     E("source_transcript", { itemId: "item_4", text: "まぐれ、千に一人。" }),
   ];
 }
+
+describe("half-duplex mic gate (playback→mic feedback fix)", () => {
+  it("blocks mic frames while playback is active and through the echo tail, then reopens", () => {
+    const gate = createMicGate({ tailMs: MIC_GATE_TAIL_MS });
+    // Before any playback: frames flow.
+    expect(gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: null, now: 1000 }).send).toBe(true);
+    // Playback starts: gate closes with a transition event.
+    const start = gate.feed({ playbackActive: true, msSinceLastPlaybackEnd: null, now: 2000 });
+    expect(start.send).toBe(false);
+    expect(start.transition).toBe("gate_start");
+    // Still playing: gated, no duplicate transition.
+    const mid = gate.feed({ playbackActive: true, msSinceLastPlaybackEnd: null, now: 2500 });
+    expect(mid.send).toBe(false);
+    expect(mid.transition).toBeNull();
+    // Playback ended 100ms ago — inside the echo tail: still gated.
+    expect(gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: 100, now: 3100 }).send).toBe(false);
+    // Tail elapsed: gate reopens and reports how long it was closed.
+    const end = gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: MIC_GATE_TAIL_MS, now: 3500 });
+    expect(end.send).toBe(true);
+    expect(end.transition).toBe("gate_end");
+    expect(end.gatedMs).toBe(1500);
+  });
+
+  it("no leak window at playback end: scheduled-end (negative msSince) keeps gating before the end callback fires", () => {
+    const gate = createMicGate({ tailMs: MIC_GATE_TAIL_MS });
+    // Playback audibly active.
+    expect(gate.feed({ playbackActive: true, msSinceLastPlaybackEnd: -400, now: 1000 }).send).toBe(false);
+    // The audible flag already dropped (its 50ms margin) but scheduled end is
+    // still 30ms in the future — the exact pre-onended boundary: must gate.
+    expect(gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: -30, now: 1370 }).send).toBe(false);
+    // Scheduled end passed 10ms ago — echo tail: still gated.
+    expect(gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: 10, now: 1410 }).send).toBe(false);
+    // Tail elapsed: reopen.
+    expect(gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: MIC_GATE_TAIL_MS + 1, now: 1800 }).send).toBe(true);
+  });
+
+  it("run-boundary close finalizes the open interval and the next run starts with a fresh gate_start", () => {
+    const gate = createMicGate({ tailMs: MIC_GATE_TAIL_MS });
+    // Gate opens mid-run.
+    expect(gate.feed({ playbackActive: true, msSinceLastPlaybackEnd: -500, now: 5000 }).transition).toBe("gate_start");
+    // Archive/control-change boundary force-closes it (as archiveCurrentRun does).
+    const close = gate.feed({ playbackActive: false, msSinceLastPlaybackEnd: Number.MAX_SAFE_INTEGER, now: 5600 });
+    expect(close.transition).toBe("gate_end");
+    expect(close.gatedMs).toBe(600);
+    // New run: no orphan gate_end; the next gating starts a paired interval.
+    const next = gate.feed({ playbackActive: true, msSinceLastPlaybackEnd: -100, now: 9000 });
+    expect(next.transition).toBe("gate_start");
+    expect(next.send).toBe(false);
+  });
+
+  it("a gated interval never produces a committed source turn", () => {
+    // The gate sits before the websocket send: only frames with send=true
+    // reach the provider adapter. Pump a playback window through gate +
+    // adapter and prove zero committed turns came from the gated interval.
+    const gate = createMicGate({ tailMs: MIC_GATE_TAIL_MS });
+    const session = new OpenAIRealtimeTranslationSession({
+      languages: ["ru", "en"],
+      sourceLangHint: "auto",
+      outputLanguage: "en",
+      inputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+      outputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+    });
+    const events: TranslationEvent[] = [];
+    session.onEvent((ev) => events.push(ev));
+    const feedProvider = (msg: any) => (session as any).handleMessage(msg);
+
+    let framesSent = 0;
+    // 25 frames (1s) while our own translation is playing — the exact
+    // feedback window from Run #2.
+    for (let i = 0; i < 25; i++) {
+      const g = gate.feed({ playbackActive: true, msSinceLastPlaybackEnd: null, now: 10000 + i * 40 });
+      if (g.send) {
+        framesSent++;
+        // If audio HAD been sent, server VAD could open a feedback turn:
+        feedProvider({ type: "input_audio_buffer.speech_started" });
+        feedProvider({ type: "input_audio_buffer.committed", item_id: "feedback_item" });
+      }
+    }
+    expect(framesSent).toBe(0);
+    expect(events.filter((e) => e.type === "speech_started")).toHaveLength(0);
+    expect(events.filter((e) => (e as any).type === "input_committed")).toHaveLength(0);
+  });
+
+  it("gate_start/gate_end entries pass through the analyzer without breaking a clean verdict", () => {
+    let seq = 0;
+    const e = (type: string, extra: Record<string, unknown> = {}): ForensicLogEntry =>
+      ({ seq: seq++, ts: 1000 + seq, type, ...extra }) as ForensicLogEntry;
+    const log: ForensicLogEntry[] = [
+      e("speech_started", { playbackActive: false, playbackActiveAtSpeechStart: false }),
+      e("speech_stopped"),
+      e("input_committed", { itemId: "i1" }),
+      e("source_transcript", { itemId: "i1", text: "Привет, как дела?" }),
+      e("response_created", { responseId: "r1", sourceItemId: "i1" }),
+      e("translated_transcript_done", { responseId: "r1", text: "Hi, how are you?" }),
+      e("playback_start"),
+      e("gate_start"),
+      e("turn_completed", { responseId: "r1", sourceItemId: "i1" }),
+      e("playback_end"),
+      e("gate_end", { gatedMs: 1200 }),
+    ];
+    const report = analyzeForensicLog(log);
+    expect(report.truncated).toBe(false);
+    expect(report.firstOneToOneBreak).toBeNull();
+    expect(report.suspicions.playbackRecapture.verdict).not.toBe("PROVEN");
+  });
+});
 
 describe("forensic analyzer on a Run #2-shaped log", () => {
   const report = analyzeForensicLog(buildRun2Log());
