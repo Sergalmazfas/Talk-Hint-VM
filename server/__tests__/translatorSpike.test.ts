@@ -72,13 +72,13 @@ describe("interpreter instructions (frozen pure-translation prompt)", () => {
 
 describe("sanitizeSpikeControls", () => {
   it("defaults to Auto → English, voice marin", () => {
-    expect(sanitizeSpikeControls({})).toEqual({ inputLang: "auto", outputLang: "en", voice: "marin" });
+    expect(sanitizeSpikeControls({})).toEqual({ inputLang: "auto", outputLang: "en", voice: "marin", provider: "openai-realtime" });
   });
   it("accepts allowed values and rejects unknown ones (fail-closed to defaults)", () => {
     expect(sanitizeSpikeControls({ inputLang: "es", outputLang: "ru", voice: "cedar" }))
-      .toEqual({ inputLang: "es", outputLang: "ru", voice: "cedar" });
-    expect(sanitizeSpikeControls({ inputLang: "de", outputLang: "kk", voice: "hasOwnProperty" }))
-      .toEqual({ inputLang: "auto", outputLang: "en", voice: "marin" });
+      .toEqual({ inputLang: "es", outputLang: "ru", voice: "cedar", provider: "openai-realtime" });
+    expect(sanitizeSpikeControls({ inputLang: "de", outputLang: "kk", voice: "hasOwnProperty", provider: "evil" }))
+      .toEqual({ inputLang: "auto", outputLang: "en", voice: "marin", provider: "openai-realtime" });
   });
 });
 

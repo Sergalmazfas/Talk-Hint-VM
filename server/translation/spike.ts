@@ -28,6 +28,11 @@ import type { Express } from "express";
 import type WebSocket from "ws";
 import { tlog as log } from "./logger";
 import { openaiRealtimeTranslationProvider } from "./openaiRealtimeTranslator";
+import {
+  openaiRealtimeTranslateProvider,
+  TRANSLATE_CAPABILITIES,
+  TRANSLATE_USD_PER_AUDIO_MINUTE,
+} from "./openaiRealtimeTranslateAdapter";
 import { runSemanticReview } from "./reviewJudge";
 import { analyzeForensicLog, type ForensicLogEntry } from "./forensics";
 import type { RealtimeTranslationSession } from "./provider";
@@ -42,6 +47,51 @@ const OUTPUT_LANGS = ["en", "ru", "es"] as const;
 const VOICES: Record<string, { name: string; gender: string }> = {
   marin: { name: "Marin", gender: "female" },
   cedar: { name: "Cedar", gender: "male" },
+};
+
+// Provider selector (task #286): the conversational realtime adapter vs the
+// purpose-built translation model. Capabilities are provider FACTS from the
+// verified API contract — the page adapts its controls to them instead of
+// showing dead selectors.
+export const SPIKE_PROVIDERS: Record<
+  string,
+  {
+    label: string;
+    capabilities: {
+      voiceSelection: boolean;
+      customPrompt: boolean;
+      sourceTranscriptBuiltIn: boolean;
+      /** Provider emits stable item/response ids (turn lifecycle). Without
+       * them, item-id-based lost-translation correlation is UNAVAILABLE —
+       * the scorecard must say so instead of counting everything lost. */
+      turnLifecycle: boolean;
+      /** Duration-based billing (USD per audio minute, silence included).
+       * When set, wall-clock cost = wall minutes × this price — per-turn
+       * token/segment estimates UNDERCOUNT billable silence. */
+      audioMinutePriceUsd: number | null;
+    };
+  }
+> = {
+  "openai-realtime": {
+    label: "Current realtime translator (gpt-realtime)",
+    capabilities: {
+      voiceSelection: true,
+      customPrompt: true,
+      sourceTranscriptBuiltIn: true,
+      turnLifecycle: true,
+      audioMinutePriceUsd: null,
+    },
+  },
+  "openai-realtime-translate": {
+    label: "OpenAI gpt-realtime-translate",
+    capabilities: {
+      voiceSelection: TRANSLATE_CAPABILITIES.voiceSelection,
+      customPrompt: TRANSLATE_CAPABILITIES.customPrompt,
+      sourceTranscriptBuiltIn: TRANSLATE_CAPABILITIES.sourceTranscriptBuiltIn,
+      turnLifecycle: TRANSLATE_CAPABILITIES.turnLifecycle,
+      audioMinutePriceUsd: TRANSLATE_USD_PER_AUDIO_MINUTE,
+    },
+  },
 };
 
 /** Echo tail after playback ends during which the mic stays gated (ms). */
@@ -89,6 +139,23 @@ export function createMicGate(opts: { tailMs: number }) {
   };
 }
 
+/**
+ * Frame policy at the mic gate. Continuous-input providers
+ * (gpt-realtime-translate) require an UNBROKEN audio timeline including
+ * silence — a gated frame must be replaced by a same-size zeroed frame,
+ * never dropped (gaps change native model behavior). Turn-based providers
+ * keep the original drop behavior (their server VAD would otherwise commit
+ * silence turns). Embedded into the page via toString() so the unit tests
+ * exercise the EXACT logic the stand runs.
+ */
+export function gatedFrameAction(input: {
+  send: boolean;
+  continuousInput: boolean;
+}): "send" | "silence" | "drop" {
+  if (input.send) return "send";
+  return input.continuousInput ? "silence" : "drop";
+}
+
 export function isSpikeEnabled(): boolean {
   return process.env.NODE_ENV !== "production";
 }
@@ -105,11 +172,15 @@ export function sanitizeSpikeControls(msg: any): {
   inputLang: string;
   outputLang: string;
   voice: string;
+  provider: string;
 } {
   const inputLang = INPUT_LANGS.includes(msg?.inputLang) ? msg.inputLang : "auto";
   const outputLang = OUTPUT_LANGS.includes(msg?.outputLang) ? msg.outputLang : "en";
   const voice = Object.prototype.hasOwnProperty.call(VOICES, msg?.voice) ? msg.voice : "marin";
-  return { inputLang, outputLang, voice };
+  const provider = Object.prototype.hasOwnProperty.call(SPIKE_PROVIDERS, msg?.provider)
+    ? msg.provider
+    : "openai-realtime";
+  return { inputLang, outputLang, voice, provider };
 }
 
 export function handleTranslatorSpikeStream(ws: WebSocket) {
@@ -138,19 +209,26 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
       // session must be cancelled exactly once, never leaked.
       if (session || starting) return;
       starting = true;
-      const { inputLang, outputLang, voice } = sanitizeSpikeControls(msg);
+      const { inputLang, outputLang, voice, provider } = sanitizeSpikeControls(msg);
       // Directed mode: everything → outputLang. The language pair drives
       // auto-detection hints; use the fixed input when given, else the pair
       // most likely to appear (ru/en/es minus the output language).
       const otherLang =
         inputLang !== "auto" ? inputLang : outputLang === "ru" ? "en" : "ru";
+      const providerImpl =
+        provider === "openai-realtime-translate"
+          ? openaiRealtimeTranslateProvider
+          : openaiRealtimeTranslationProvider;
+      const caps = SPIKE_PROVIDERS[provider].capabilities;
       let started: RealtimeTranslationSession;
       try {
-        started = await openaiRealtimeTranslationProvider.startSession({
+        started = await providerImpl.startSession({
           languages: [otherLang, outputLang],
           sourceLangHint: inputLang,
           outputLanguage: outputLang,
-          voice,
+          // Voice is a capability, not a universal control: the translation
+          // model has dynamic voice adaptation and accepts no voice param.
+          voice: caps.voiceSelection ? voice : undefined,
           inputFormat: { encoding: "pcm16", sampleRateHz: SAMPLE_RATE },
           outputFormat: { encoding: "pcm16", sampleRateHz: SAMPLE_RATE },
         });
@@ -169,10 +247,11 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
         type: "session_config",
         inputLang,
         outputLang,
-        voice_id: voice,
-        voice_name: VOICES[voice]?.name || voice,
-        voice_gender: VOICES[voice]?.gender || "unknown",
-        provider: "openai-realtime",
+        voice_id: caps.voiceSelection ? voice : null,
+        voice_name: caps.voiceSelection ? VOICES[voice]?.name || voice : "(dynamic voice adaptation)",
+        voice_gender: caps.voiceSelection ? VOICES[voice]?.gender || "unknown" : "n/a",
+        provider,
+        capabilities: caps,
       });
       session.onEvent((ev) => {
         // Provider events map 1:1 onto the stand's wire protocol.
@@ -325,6 +404,7 @@ function buildSpikePageHtml(): string {
 <h1>Translator Realtime Spike — Run #2 stand</h1>
 <div class="sub">Continuous open-mic, server VAD. Use headphones — the translated voice will otherwise feed back into the mic. Dev-only stand; no telephony, no iOS. Changing a selector while live cleanly restarts the session.</div>
 <div class="row">
+  <label>Provider <select id="providerSel"><option value="openai-realtime" selected>Current realtime translator</option><option value="openai-realtime-translate">OpenAI gpt-realtime-translate</option></select></label>
   <label>Input <select id="inLang"><option value="auto" selected>Auto</option><option value="ru">Russian</option><option value="en">English</option><option value="es">Spanish</option></select></label>
   <label>Output <select id="outLang"><option value="en" selected>English</option><option value="ru">Russian</option><option value="es">Spanish</option></select></label>
   <label>Voice <select id="voiceSel"><option value="marin" selected>Marin (female)</option><option value="cedar">Cedar (male)</option></select></label>
@@ -368,6 +448,14 @@ let review={ results:{}, ranAt:null };  // turnIndex -> {classification, reason}
 // send, so a gated interval can never produce a committed source turn.
 const GATE_TAIL_MS=${MIC_GATE_TAIL_MS};
 const micGate=(${createMicGate.toString()})({tailMs:GATE_TAIL_MS});
+const gatedFrameAction=${gatedFrameAction.toString()};
+// Continuous-input providers (no turn lifecycle) require an unbroken audio
+// timeline: capabilities from session_config are authoritative; before the
+// config arrives, fall back to the selected provider.
+function continuousInput(){
+  if(sessionConfig&&sessionConfig.capabilities) return sessionConfig.capabilities.turnLifecycle===false;
+  return document.getElementById('providerSel').value==='openai-realtime-translate';
+}
 let gatedIntervals=0, totalGatedMs=0;
 // FULL forensic event log (Run #2 spec): every provider event + client-side
 // mic/playback lifecycle entries, each stamped with seq, client ts and
@@ -579,6 +667,14 @@ function computeScorecard(){
   const cost=turns.reduce((s,t)=>s+(t.estimatedCostUsd||0),0);
   const audioMs=turns.reduce((s,t)=>s+(t.audioInMs||0)+(t.audioOutMs||0),0);
   const wallMin=sessionStartTs?((Date.now()-sessionStartTs)/60000):0;
+  // Capability-aware scoring (task #286): a provider without a turn
+  // lifecycle emits NO item ids — item-id correlation (lost translations)
+  // is UNAVAILABLE there, not "everything lost". Duration-billed providers
+  // charge for silence too, so the honest wall-clock cost is
+  // wallMin × price, not the per-turn sum (which is a partial estimate).
+  const caps=(sessionConfig&&sessionConfig.capabilities)||null;
+  const hasItemIds=!caps||caps.turnLifecycle!==false;
+  const audioMinPrice=caps&&caps.audioMinutePriceUsd!=null?caps.audioMinutePriceUsd:null;
   const cxBy=cls=>cancellations.filter(c=>c.classification===cls).length;
   const completedSrc=srcUtterances.filter(u=>u.meaningful);
   // Association is computed HERE from stable provider item ids — robust to
@@ -604,18 +700,20 @@ function computeScorecard(){
     playback_feedback_cancellations: cxBy('PLAYBACK_FEEDBACK'),
     unknown_cancellations: cxBy('UNKNOWN'),
     completed_source_turns: completedSrc.length,
-    successfully_translated_turns: translatedSrc.length,
-    lost_completed_translations: lost.length,
-    lost_translation_rate: completedSrc.length? +(lost.length/completedSrc.length).toFixed(4):0,
-    lost_turns_evidence: lost.map(u=>({index:u.index,itemId:u.itemId,text:u.text,cancellation:cancellationFor(u)?cancellationFor(u).index:null})),
+    successfully_translated_turns: hasItemIds? translatedSrc.length : completed.filter(t=>t.translatedTranscript).length,
+    lost_completed_translations: hasItemIds? lost.length : null,
+    lost_translation_rate: hasItemIds? (completedSrc.length? +(lost.length/completedSrc.length).toFixed(4):0) : null,
+    lost_turns_evidence: hasItemIds? lost.map(u=>({index:u.index,itemId:u.itemId,text:u.text,cancellation:cancellationFor(u)?cancellationFor(u).index:null})) : null,
+    correlation_methodology: hasItemIds? 'provider item ids' : 'UNAVAILABLE — provider has no turn lifecycle/item ids; turns are local FIFO segments (translated count = completed segments with a translation transcript)',
     semantic_review_ran: !!review.ranAt,
     added_content_count: cnt('ADDED_CONTENT'),
     unsolicited_response_count: cnt('UNSOLICITED_RESPONSE'),
     uncertain_translation_count: cnt('UNCERTAIN'),
     faithful_count: cnt('FAITHFUL'),
-    total_estimated_cost_usd: +cost.toFixed(4),
+    total_estimated_cost_usd: audioMinPrice!=null&&wallMin>0? +(wallMin*audioMinPrice).toFixed(4) : +cost.toFixed(4),
     cost_per_active_audio_minute: audioMs>0? +(cost/(audioMs/60000)).toFixed(4):null,
-    cost_per_wall_clock_minute: wallMin>0.2? +(cost/wallMin).toFixed(4):null,
+    cost_per_wall_clock_minute: audioMinPrice!=null? audioMinPrice : (wallMin>0.2? +(cost/wallMin).toFixed(4):null),
+    cost_methodology: audioMinPrice!=null? 'duration-billed: total = wall-clock minutes × $'+audioMinPrice+' (silence bills too); per-turn values are PARTIAL estimates of speech segments only' : 'token-based per-turn estimates summed',
     errors: errors.length,
     invariant_violations: invariantViolations.length,
     suppressed_microturns: suppressedMicroturnsCount,
@@ -641,7 +739,7 @@ function renderMetrics(){
     'turns: <b>'+sc.total_turns+'</b> (cancelled: '+sc.total_cancellations+')<br>'+
     'latency: median <b>'+(sc.latency_median_ms??'—')+'</b> ms, p95 <b>'+(sc.latency_p95_ms??'—')+'</b> ms<br>'+
     'cancellations — barge-in: '+sc.valid_barge_ins+', false/premature: <b class="'+(sc.false_premature_cancellations?'err':'')+'">'+sc.false_premature_cancellations+'</b>, feedback: <b class="'+(sc.playback_feedback_cancellations?'err':'')+'">'+sc.playback_feedback_cancellations+'</b>, unknown: '+sc.unknown_cancellations+'<br>'+
-    'source turns: '+sc.completed_source_turns+', translated: '+sc.successfully_translated_turns+', <b class="'+(sc.lost_completed_translations?'err':'')+'">lost: '+sc.lost_completed_translations+'</b> (rate '+sc.lost_translation_rate+')<br>'+
+    'source turns: '+sc.completed_source_turns+', translated: '+sc.successfully_translated_turns+', '+(sc.lost_completed_translations==null?'lost: n/a (no provider item ids — local FIFO segments)':('<b class="'+(sc.lost_completed_translations?'err':'')+'">lost: '+sc.lost_completed_translations+'</b> (rate '+sc.lost_translation_rate+')'))+'<br>'+
     'semantic review: '+(sc.semantic_review_ran?('faithful '+sc.faithful_count+', added <b class="'+(sc.added_content_count?'err':'')+'">'+sc.added_content_count+'</b>, unsolicited <b class="'+(sc.unsolicited_response_count?'err':'')+'">'+sc.unsolicited_response_count+'</b>, uncertain '+sc.uncertain_translation_count):'not run')+'<br>'+
     'total est. cost: <b>$'+sc.total_estimated_cost_usd.toFixed(4)+'</b>, per active-audio min: '+(sc.cost_per_active_audio_minute!=null?('$'+sc.cost_per_active_audio_minute):'—')+', per wall-clock min: '+(sc.cost_per_wall_clock_minute!=null?('$'+sc.cost_per_wall_clock_minute):'—')+'<br>'+
     'invariant violations (1→1 rule): <b class="'+(sc.invariant_violations?'err':'')+'">'+sc.invariant_violations+'</b>, feedback-suspect source turns: <b class="'+(sc.feedback_suspect_source_turns?'err':'')+'">'+sc.feedback_suspect_source_turns+'</b><br>'+
@@ -694,9 +792,19 @@ document.getElementById('exportBtn').onclick=async()=>{
 
 function controlsMsg(){
   return { type:'start',
+    provider:document.getElementById('providerSel').value,
     inputLang:document.getElementById('inLang').value,
     outputLang:document.getElementById('outLang').value,
     voice:document.getElementById('voiceSel').value };
+}
+
+// Capabilities-aware controls (task #286): gpt-realtime-translate has NO
+// fixed voice selection (dynamic voice adaptation) — hide the dead selector
+// instead of pretending it works. Provider limitation, not a bug.
+function syncProviderControls(){
+  const p=document.getElementById('providerSel').value;
+  const voiceLabel=document.getElementById('voiceSel').parentElement;
+  voiceLabel.style.display = (p==='openai-realtime-translate') ? 'none' : '';
 }
 
 async function start(){
@@ -738,7 +846,11 @@ async function start(){
       // the export readable while still proving when the mic was capturing,
       // whether playback was active and whether the frame was gated.
       if(now-lastMicLogTs>=1000){ lastMicLogTs=now; logEv({type:'mic_audio', chunkMs:40, gated:!g.send}); }
-      if(g.send && ws && ws.readyState===1) ws.send(e.data);
+      if(ws && ws.readyState===1){
+        const action=gatedFrameAction({send:g.send, continuousInput:continuousInput()});
+        if(action==='send'){ ws.send(e.data); }
+        else if(action==='silence'){ ws.send(new ArrayBuffer(e.data.byteLength)); }
+      }
     };
     running=true; stopBtn.disabled=false; playhead=0;
   }catch(e){
@@ -774,6 +886,8 @@ async function restartWithControls(){
 document.getElementById('inLang').onchange=restartWithControls;
 document.getElementById('outLang').onchange=restartWithControls;
 document.getElementById('voiceSel').onchange=restartWithControls;
+document.getElementById('providerSel').onchange=()=>{ syncProviderControls(); restartWithControls(); };
+syncProviderControls();
 
 startBtn.onclick=start;
 stopBtn.onclick=()=>stopAll('');
