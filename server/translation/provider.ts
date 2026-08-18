@@ -105,6 +105,22 @@ export type TranslationEvent =
       itemId?: string;
       responseId?: string;
     }
+  /**
+   * A committed source turn was detected as a micro-turn (noise / breath /
+   * fragment) and the response was cancelled before any audio was produced.
+   * Reason "audio_too_short": the captured audio was below the minimum
+   * duration threshold (MICROTURN_MIN_AUDIO_MS). Reason "transcript_empty":
+   * the input transcription arrived while the response was still in-flight
+   * and contained no meaningful text.
+   */
+  | {
+      type: "suppressed_microturn";
+      ts: number;
+      itemId?: string;
+      responseId?: string;
+      reason: "audio_too_short" | "transcript_empty";
+      audioMs?: number;
+    }
   | { type: "error"; message: string; fatal: boolean }
   | { type: "closed" };
 

@@ -19,6 +19,15 @@ import type {
 const DEFAULT_MODEL = process.env.TRANSLATOR_SPIKE_MODEL || "gpt-realtime";
 const DEFAULT_VOICE = process.env.TRANSLATOR_SPIKE_VOICE || "marin";
 
+/**
+ * Committed source turns whose captured audio is shorter than this threshold
+ * are treated as micro-turns (noise / breath / fragment). The response is
+ * cancelled before any audio is produced and a `suppressed_microturn` event
+ * is emitted. 700 ms is long enough for real one-word answers ("Да", "Okay",
+ * "Fine") to clear the gate while typical noise/intake bursts (~0.5 s) do not.
+ */
+export const MICROTURN_MIN_AUDIO_MS = 700;
+
 // FROZEN interpreter prompt (attached verbatim to the spike report).
 // Pure-translation behavior is the top acceptance gate: the model must never
 // answer, advise, converse, add fillers, or change meaning.
@@ -167,6 +176,11 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
   // item is the one the current response answers — a stable correlation the
   // evidence tooling uses instead of guessing by event order.
   private pendingUserItems: string[] = [];
+  // Per-item audio duration captured at commit time (bytes → ms). Used by
+  // the micro-turn suppression gate: at response.created time we know the
+  // exact duration of the audio that produced the turn and can cancel before
+  // any translated audio is produced.
+  private itemAudioMs = new Map<string, number>();
   // Forensic response tracking (Run #2 self-conversation investigation).
   // response.created count per pending item head detects >1 response for one
   // committed source turn; finished/cancelled response ids detect output that
@@ -175,6 +189,11 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
   private responsesForHeadItem = 0;
   private finishedResponseIds = new Set<string>();
   private outputAfterDoneFlagged = new Set<string>();
+  // Response IDs whose translation was suppressed (micro-turn gate). Audio and
+  // transcript deltas for these responses are discarded locally — do not reach
+  // the caller — so that the provider's propagation delay after `response.cancel`
+  // cannot cause hallucinated audio to play. Cleaned up at response.done.
+  private suppressedResponseIds = new Set<string>();
 
   constructor(config: RealtimeTranslationConfig) {
     this.config = config;
@@ -310,6 +329,51 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
     return Math.round((bytes / 2 / rateHz) * 1000); // pcm16 mono = 2 bytes/sample
   }
 
+  /**
+   * True when the transcript is entirely empty or whitespace. This is the
+   * ONLY criterion for the transcript gate: real answers like "Да" or "OK"
+   * must never be suppressed regardless of character count. The 3-char
+   * heuristic in forensics.ts serves forensic classification only — it is
+   * intentionally NOT used here.
+   */
+  private isEmptyTranscript(t: string | undefined): boolean {
+    return !t || t.trim().length === 0;
+  }
+
+  /**
+   * Suppress a response that answers a micro-turn: send `response.cancel` to
+   * the provider, mark the response ID for local output discard (audio and
+   * transcript deltas for suppressed responses are dropped before they reach
+   * the caller, so propagation delay after `response.cancel` cannot cause
+   * hallucinated audio to play), and emit a `suppressed_microturn` event.
+   * Idempotent: calling it twice for the same response is a no-op.
+   */
+  private suppressMicroturnResponse(opts: {
+    ts: number;
+    itemId: string | undefined;
+    responseId: string | undefined;
+    reason: "audio_too_short" | "transcript_empty";
+    audioMs: number | undefined;
+  }): void {
+    // Idempotency guard: if this response was already suppressed (e.g. both
+    // duration and transcript gates fire), do not cancel or emit again.
+    if (opts.responseId && this.suppressedResponseIds.has(opts.responseId)) return;
+    if (opts.responseId) this.suppressedResponseIds.add(opts.responseId);
+    this.sendJson({ type: "response.cancel" });
+    this.emit({
+      type: "suppressed_microturn",
+      ts: opts.ts,
+      itemId: opts.itemId,
+      responseId: opts.responseId,
+      reason: opts.reason,
+      audioMs: opts.audioMs,
+    });
+    log(
+      `[Translator] suppressed micro-turn item=${opts.itemId} reason=${opts.reason} audioMs=${opts.audioMs ?? "?"}`,
+      "translator",
+    );
+  }
+
   private handleMessage(msg: any) {
     const t = msg.type as string;
     switch (t) {
@@ -347,6 +411,13 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
         // attribution (see pendingUserItems).
         if (msg.item_id) {
           this.pendingUserItems.push(msg.item_id);
+          // Snapshot audio duration at commit time for the micro-turn gate
+          // (checked synchronously at response.created before any audio is
+          // produced — bytesToMs converts the byte accumulator).
+          const commitAudioMs = this.turnInBytes
+            ? this.bytesToMs(this.turnInBytes, this.config.inputFormat.sampleRateHz)
+            : 0;
+          this.itemAudioMs.set(msg.item_id, commitAudioMs);
           this.emit({ type: "input_committed", ts: Date.now(), itemId: msg.item_id });
         }
         break;
@@ -378,38 +449,81 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
               responseId: rid,
             });
           }
+          // Micro-turn gate (Run #3 forensic): if the committed audio is below
+          // the minimum duration threshold, cancel the response immediately —
+          // before any translated audio reaches the caller. The provider will
+          // still emit response.done (cancelled) which consumes the FIFO item.
+          const headAudioMs = this.itemAudioMs.get(head) ?? 0;
+          if (headAudioMs < MICROTURN_MIN_AUDIO_MS) {
+            this.suppressMicroturnResponse({
+              ts,
+              itemId: head,
+              responseId: rid,
+              reason: "audio_too_short",
+              audioMs: headAudioMs,
+            });
+          }
         }
         break;
       }
-      case "conversation.item.input_audio_transcription.completed":
-        if (msg.transcript) {
-          this.sourceTranscript = msg.transcript;
-          if (msg.item_id) this.transcriptsByItem.set(msg.item_id, msg.transcript);
-          this.emit({ type: "source_transcript", text: msg.transcript, itemId: msg.item_id });
+      case "conversation.item.input_audio_transcription.completed": {
+        const transcript = msg.transcript as string | undefined;
+        if (transcript) {
+          this.sourceTranscript = transcript;
+          if (msg.item_id) this.transcriptsByItem.set(msg.item_id, transcript);
+          this.emit({ type: "source_transcript", text: transcript, itemId: msg.item_id });
+        }
+        // Secondary gate: if the transcription arrives while the response is
+        // still in-flight (currentResponseId is set) and the text is completely
+        // empty / whitespace, cancel before audio playback begins. This catches
+        // short-audio turns that cleared the duration gate but produced no
+        // intelligible text (e.g. an intake breath). Criterion is ONLY
+        // empty/whitespace — NOT the 3-char heuristic — so that real one-word
+        // answers ("Да", "OK") are never suppressed through this path.
+        if (
+          this.isEmptyTranscript(transcript) &&
+          this.currentResponseId &&
+          msg.item_id &&
+          this.pendingUserItems[0] === msg.item_id
+        ) {
+          this.suppressMicroturnResponse({
+            ts: Date.now(),
+            itemId: msg.item_id,
+            responseId: this.currentResponseId,
+            reason: "transcript_empty",
+            audioMs: this.itemAudioMs.get(msg.item_id),
+          });
         }
         break;
+      }
       case "response.output_audio.delta":
       case "response.audio.delta":
         if (msg.delta) {
+          this.checkOutputAfterDone(msg.response_id);
+          // Local discard: provider propagation delay after response.cancel can
+          // deliver audio deltas that arrive before the server acknowledges the
+          // cancellation. Drop them silently — do not play hallucinated audio.
+          if (msg.response_id && this.suppressedResponseIds.has(msg.response_id)) break;
           if (!this.firstAudioTs) this.firstAudioTs = Date.now();
           this.audioOutBytes += Buffer.byteLength(msg.delta, "base64");
-          this.checkOutputAfterDone(msg.response_id);
           this.emit({ type: "translated_audio", base64: msg.delta, responseId: msg.response_id });
         }
         break;
       case "response.output_audio_transcript.delta":
       case "response.audio_transcript.delta":
         if (msg.delta) {
-          this.translatedTranscript += msg.delta;
           this.checkOutputAfterDone(msg.response_id);
+          if (msg.response_id && this.suppressedResponseIds.has(msg.response_id)) break;
+          this.translatedTranscript += msg.delta;
           this.emit({ type: "translated_transcript_delta", text: msg.delta, responseId: msg.response_id });
         }
         break;
       case "response.output_audio_transcript.done":
       case "response.audio_transcript.done":
         if (msg.transcript) {
-          this.translatedTranscript = msg.transcript;
           this.checkOutputAfterDone(msg.response_id);
+          if (msg.response_id && this.suppressedResponseIds.has(msg.response_id)) break;
+          this.translatedTranscript = msg.transcript;
           this.emit({ type: "translated_transcript_done", text: msg.transcript, responseId: msg.response_id });
         }
         break;
@@ -430,6 +544,12 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
         // utterance gets its own response later. An empty queue leaves the
         // attribution honestly undefined (e.g. a truly unsolicited response).
         const sourceItemId = this.pendingUserItems.shift();
+        // Release the audio-duration snapshot for this item (no longer needed).
+        if (sourceItemId) this.itemAudioMs.delete(sourceItemId);
+        // Release the suppression record for this response (no longer needed
+        // once response.done arrives — any stale audio deltas after this point
+        // are already caught by finishedResponseIds / OUTPUT_AFTER_RESPONSE_DONE).
+        if (responseId) this.suppressedResponseIds.delete(responseId);
         if (st && st !== "completed") {
           log(
             `[Translator] response.done status=${st} details=${JSON.stringify(details)}`,

@@ -71,6 +71,14 @@ export interface ForensicReport {
   truncationNote?: string;
   committedSourceTurns: number;
   responsesCreated: number;
+  /**
+   * Count of `suppressed_microturn` events in the log: turns whose response
+   * was cancelled before any audio was produced (audio too short or empty
+   * transcript arrived while the response was still active).
+   */
+  suppressedMicroturns: number;
+  /** seq numbers of all suppressed_microturn events (for scorecard linking). */
+  suppressedMicroturnSeqs: number[];
   suspicions: {
     playbackRecapture: SuspicionResult;
     cancelledResponseContinuedOutput: SuspicionResult;
@@ -114,6 +122,7 @@ export function analyzeForensicLog(
       evidenceSeqs: [],
       explanation: `${what}: ${note}`,
     });
+    const suppressedEntries = bySeq.filter((e) => e.type === "suppressed_microturn");
     return {
       totalEntries: bySeq.length,
       truncated: true,
@@ -121,6 +130,8 @@ export function analyzeForensicLog(
       truncationNote: note,
       committedSourceTurns: bySeq.filter((e) => e.type === "input_committed").length,
       responsesCreated: bySeq.filter((e) => e.type === "response_created").length,
+      suppressedMicroturns: suppressedEntries.length,
+      suppressedMicroturnSeqs: suppressedEntries.map((e) => e.seq),
       suspicions: {
         playbackRecapture: inc("playback recapture"),
         cancelledResponseContinuedOutput: inc("cancelled response continued output"),
@@ -381,11 +392,15 @@ export function analyzeForensicLog(
     }
   }
 
+  const suppressedEntries = bySeq.filter((e) => e.type === "suppressed_microturn");
+
   return {
     totalEntries: bySeq.length,
     truncated: false,
     committedSourceTurns: committed.length,
     responsesCreated: responsesCreated.length,
+    suppressedMicroturns: suppressedEntries.length,
+    suppressedMicroturnSeqs: suppressedEntries.map((e) => e.seq),
     suspicions: {
       playbackRecapture,
       cancelledResponseContinuedOutput,

@@ -3,7 +3,10 @@
 // No network: the adapter is driven via handleMessage, the analyzer via a
 // synthetic event log shaped like Run #2's self-conversation failure.
 import { describe, it, expect } from "vitest";
-import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
+import {
+  OpenAIRealtimeTranslationSession,
+  MICROTURN_MIN_AUDIO_MS,
+} from "../translation/openaiRealtimeTranslator";
 import type { TranslationEvent } from "../translation/provider";
 import { analyzeForensicLog, type ForensicLogEntry } from "../translation/forensics";
 import { createMicGate, MIC_GATE_TAIL_MS } from "../translation/spike";
@@ -102,6 +105,280 @@ describe("adapter hard 1→1 invariants (live detectors)", () => {
     expect(violations(events)).toHaveLength(0);
     const cancelled = events.find((e) => e.type === "response_cancelled") as any;
     expect(cancelled.responseId).toBe("resp_1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Micro-turn suppression gate (Run #3 forensic: "hallucinated phrases on noise")
+// ---------------------------------------------------------------------------
+
+/**
+ * Simulate sending audio bytes to the session without a real WebSocket.
+ * Sets totalInBytes directly (the private accumulator) so the adapter
+ * computes the right audioMs at commit time.
+ */
+function simulateAudioBytes(session: OpenAIRealtimeTranslationSession, bytes: number) {
+  (session as any).totalInBytes = ((session as any).totalInBytes ?? 0) + bytes;
+}
+
+/** PCM16 bytes for a given duration at 24 kHz. */
+function pcmBytes(ms: number, rateHz = 24000): number {
+  return Math.round((ms / 1000) * rateHz * 2);
+}
+
+/** Make a fresh session (no network). */
+function makeMicroturnSession() {
+  const session = new OpenAIRealtimeTranslationSession({
+    languages: ["ru", "en"],
+    sourceLangHint: "auto",
+    outputLanguage: "en",
+    inputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+    outputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+  });
+  const evts: TranslationEvent[] = [];
+  session.onEvent((ev) => evts.push(ev));
+  const inject = (msg: any) => (session as any).handleMessage(msg);
+  return { session, evts, inject };
+}
+
+/**
+ * Drive enough audio through totalInBytes so speech_started→speech_stopped
+ * captures exactly `ms` of turn audio (after the 300ms VAD prefix window is
+ * subtracted). With totalInBytes=0 at speech_started the prefix contributes
+ * nothing, so turnInBytes = totalInBytes_at_speech_stopped.
+ */
+function setTurnAudio(session: OpenAIRealtimeTranslationSession, ms: number) {
+  (session as any).totalInBytes = 0; // ensure no prior audio credited to prefix
+  (session as any).handleMessage({ type: "input_audio_buffer.speech_started" });
+  (session as any).totalInBytes = pcmBytes(ms);
+  (session as any).handleMessage({ type: "input_audio_buffer.speech_stopped" });
+}
+
+describe("micro-turn suppression gate (Run #3: noise → hallucinated phrases)", () => {
+  it("suppresses a response when captured audio is below MICROTURN_MIN_AUDIO_MS", () => {
+    const { evts, inject } = makeMicroturnSession();
+
+    // No audio sent → turnInBytes = 0 → audioMs = 0, which is below 700ms.
+    inject({ type: "input_audio_buffer.speech_started" });
+    inject({ type: "input_audio_buffer.speech_stopped" });
+    inject({ type: "input_audio_buffer.committed", item_id: "item_noise" });
+    inject({ type: "response.created", response: { id: "resp_noise" } });
+
+    const suppressed = evts.filter((e) => e.type === "suppressed_microturn") as any[];
+    expect(suppressed).toHaveLength(1);
+    expect(suppressed[0].reason).toBe("audio_too_short");
+    expect(suppressed[0].itemId).toBe("item_noise");
+    expect(suppressed[0].responseId).toBe("resp_noise");
+    expect(suppressed[0].audioMs).toBe(0);
+
+    // No translated audio must be forwarded to the caller before suppression.
+    expect(evts.filter((e) => e.type === "translated_audio")).toHaveLength(0);
+  });
+
+  it("audio deltas in-flight after suppression are discarded locally (post-cancel propagation)", () => {
+    // Even if the provider delivers audio deltas before it processes response.cancel,
+    // the adapter must NOT forward them to the caller.
+    const { evts, inject } = makeMicroturnSession();
+
+    inject({ type: "input_audio_buffer.speech_started" });
+    inject({ type: "input_audio_buffer.speech_stopped" });
+    inject({ type: "input_audio_buffer.committed", item_id: "item_noise" });
+    inject({ type: "response.created", response: { id: "resp_noise" } });
+    // Suppression already fired here. Now inject audio that arrived before the
+    // provider acknowledged the cancel.
+    inject({ type: "response.output_audio.delta", delta: "QUJD", response_id: "resp_noise" });
+    inject({ type: "response.output_audio_transcript.delta", delta: "What about you?", response_id: "resp_noise" });
+    inject({ type: "response.output_audio_transcript.done", transcript: "What about you?", response_id: "resp_noise" });
+
+    // None of those must reach the caller.
+    expect(evts.filter((e) => e.type === "translated_audio")).toHaveLength(0);
+    expect(evts.filter((e) => e.type === "translated_transcript_delta")).toHaveLength(0);
+    expect(evts.filter((e) => e.type === "translated_transcript_done")).toHaveLength(0);
+  });
+
+  it("does NOT suppress a response when audio is above MICROTURN_MIN_AUDIO_MS", () => {
+    const { session, evts, inject } = makeMicroturnSession();
+    // 800ms > 700ms threshold — must pass.
+    setTurnAudio(session, 800);
+    inject({ type: "input_audio_buffer.committed", item_id: "item_word" });
+    inject({ type: "response.created", response: { id: "resp_word" } });
+
+    expect(evts.filter((e) => e.type === "suppressed_microturn")).toHaveLength(0);
+    expect(evts.filter((e) => e.type === "invariant_violation")).toHaveLength(0);
+  });
+
+  it("does NOT suppress at exactly MICROTURN_MIN_AUDIO_MS (strict less-than gate)", () => {
+    // turnInBytes = pcmBytes(700) → audioMs = exactly 700ms → NOT < 700 → no suppress.
+    const { session, evts, inject } = makeMicroturnSession();
+    setTurnAudio(session, MICROTURN_MIN_AUDIO_MS); // exactly 700ms
+    inject({ type: "input_audio_buffer.committed", item_id: "item_boundary" });
+    inject({ type: "response.created", response: { id: "resp_boundary" } });
+
+    expect(evts.filter((e) => e.type === "suppressed_microturn")).toHaveLength(0);
+  });
+
+  it("does NOT suppress short but meaningful phrases 'Да' or 'OK' via the transcript gate", () => {
+    // False-positive guard: the transcript gate only fires on empty/whitespace.
+    // Short real answers must NEVER be suppressed regardless of character count.
+    for (const word of ["Да", "OK", "да", "ok"]) {
+      const { session, evts, inject } = makeMicroturnSession();
+      setTurnAudio(session, 800); // clear duration gate
+      inject({ type: "input_audio_buffer.committed", item_id: "item_word" });
+      inject({ type: "response.created", response: { id: "resp_word" } });
+      inject({
+        type: "conversation.item.input_audio_transcription.completed",
+        item_id: "item_word",
+        transcript: word,
+      });
+      expect(
+        evts.filter((e) => e.type === "suppressed_microturn"),
+        `"${word}" must not trigger suppression`,
+      ).toHaveLength(0);
+    }
+  });
+
+  it("suppresses via transcript gate when empty transcript arrives while response is active", () => {
+    const { session, evts, inject } = makeMicroturnSession();
+    // Clear duration gate with 1s of audio.
+    setTurnAudio(session, 1000);
+    inject({ type: "input_audio_buffer.committed", item_id: "item_breath" });
+    inject({ type: "response.created", response: { id: "resp_breath" } });
+
+    // Duration gate passed — no suppression yet.
+    expect(evts.filter((e) => e.type === "suppressed_microturn")).toHaveLength(0);
+
+    // Empty transcript arrives while response is still active.
+    inject({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_breath",
+      transcript: "",
+    });
+
+    const suppressed = evts.filter((e) => e.type === "suppressed_microturn") as any[];
+    expect(suppressed).toHaveLength(1);
+    expect(suppressed[0].reason).toBe("transcript_empty");
+    expect(suppressed[0].itemId).toBe("item_breath");
+    expect(suppressed[0].responseId).toBe("resp_breath");
+  });
+
+  it("whitespace-only transcript also triggers transcript gate suppression", () => {
+    const { session, evts, inject } = makeMicroturnSession();
+    setTurnAudio(session, 1000);
+    inject({ type: "input_audio_buffer.committed", item_id: "item_ws" });
+    inject({ type: "response.created", response: { id: "resp_ws" } });
+    inject({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_ws",
+      transcript: "   \n  ",
+    });
+    const suppressed = evts.filter((e) => e.type === "suppressed_microturn") as any[];
+    expect(suppressed).toHaveLength(1);
+    expect(suppressed[0].reason).toBe("transcript_empty");
+  });
+
+  it("does NOT suppress via transcript gate when transcript contains meaningful text", () => {
+    const { session, evts, inject } = makeMicroturnSession();
+    setTurnAudio(session, 1000);
+    inject({ type: "input_audio_buffer.committed", item_id: "item_real" });
+    inject({ type: "response.created", response: { id: "resp_real" } });
+    inject({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_real",
+      transcript: "Да, конечно.",
+    });
+    expect(evts.filter((e) => e.type === "suppressed_microturn")).toHaveLength(0);
+  });
+
+  it("suppression is idempotent: both gates firing for the same response emits one suppressed_microturn", () => {
+    // Duration gate fires at response.created; then empty transcript arrives too.
+    // Must emit exactly ONE suppressed_microturn for the response.
+    const { evts, inject } = makeMicroturnSession();
+    inject({ type: "input_audio_buffer.speech_started" });
+    inject({ type: "input_audio_buffer.speech_stopped" });
+    inject({ type: "input_audio_buffer.committed", item_id: "item_both" });
+    inject({ type: "response.created", response: { id: "resp_both" } });
+    // Duration gate already fired. Now transcript arrives empty too.
+    inject({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_both",
+      transcript: "",
+    });
+    expect(evts.filter((e) => e.type === "suppressed_microturn")).toHaveLength(1);
+  });
+
+  it("transcript gate only fires for the CURRENT response (head item) not a stale item", () => {
+    const { session, evts, inject } = makeMicroturnSession();
+
+    // Turn 1 — commits, gets a response, finishes.
+    setTurnAudio(session, 1000);
+    inject({ type: "input_audio_buffer.committed", item_id: "item_old" });
+    inject({ type: "response.created", response: { id: "resp_old" } });
+    inject({ type: "response.done", response: { id: "resp_old", status: "completed", usage: {} } });
+
+    // Turn 2 — new turn active.
+    setTurnAudio(session, 1000);
+    inject({ type: "input_audio_buffer.committed", item_id: "item_new" });
+    inject({ type: "response.created", response: { id: "resp_new" } });
+
+    // Late empty transcript for the OLD item — must NOT trigger suppression
+    // for the new active response.
+    inject({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "item_old",
+      transcript: "",
+    });
+
+    expect(evts.filter((e) => e.type === "suppressed_microturn")).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Forensic analyzer — suppressed_microturn events appear in report counts
+// ---------------------------------------------------------------------------
+
+describe("forensic analyzer: suppressed_microturn events in report", () => {
+  it("counts suppressed_microturn events in suppressedMicroturns field", () => {
+    seq = 0;
+    const log: ForensicLogEntry[] = [
+      E("speech_started", { playbackActiveAtSpeechStart: false }),
+      E("speech_stopped"),
+      E("input_committed", { itemId: "item_1" }),
+      E("response_created", { responseId: "resp_1", sourceItemId: "item_1" }),
+      E("suppressed_microturn", { itemId: "item_1", responseId: "resp_1", reason: "audio_too_short", audioMs: 0 }),
+      E("response_cancelled", { responseId: "resp_1", reason: "client" }),
+    ];
+    const r = analyzeForensicLog(log);
+    expect(r.suppressedMicroturns).toBe(1);
+    expect(r.suppressedMicroturnSeqs).toHaveLength(1);
+  });
+
+  it("returns suppressedMicroturns=0 on a clean log with no micro-turns", () => {
+    seq = 0;
+    const log: ForensicLogEntry[] = [
+      E("speech_started", { playbackActiveAtSpeechStart: false }),
+      E("speech_stopped"),
+      E("input_committed", { itemId: "item_1" }),
+      E("source_transcript", { itemId: "item_1", text: "Привет, как дела?" }),
+      E("response_created", { responseId: "resp_1", sourceItemId: "item_1" }),
+      E("translated_transcript_done", { responseId: "resp_1", text: "Hi, how are you?" }),
+      E("turn_completed", { itemId: "item_1", responseId: "resp_1" }),
+    ];
+    const r = analyzeForensicLog(log);
+    expect(r.suppressedMicroturns).toBe(0);
+    expect(r.suppressedMicroturnSeqs).toHaveLength(0);
+  });
+
+  it("counts suppressed_microturn in truncated logs too (without claiming verdicts)", () => {
+    seq = 0;
+    const log: ForensicLogEntry[] = [
+      E("suppressed_microturn", { itemId: "item_1", reason: "audio_too_short", audioMs: 0 }),
+      E("suppressed_microturn", { itemId: "item_2", reason: "transcript_empty" }),
+    ];
+    const r = analyzeForensicLog(log, { truncated: true, droppedEntries: 5 });
+    expect(r.truncated).toBe(true);
+    expect(r.suppressedMicroturns).toBe(2);
+    // Verdicts still INCONCLUSIVE (truncated).
+    expect(r.suspicions.playbackRecapture.verdict).toBe("INCONCLUSIVE");
   });
 });
 

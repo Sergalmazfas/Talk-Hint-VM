@@ -380,6 +380,7 @@ const eventLog=[]; let evSeq=0;
 // fail-closes on the truncated log.
 let eventLogDropped=0;
 const invariantViolations=[];
+let suppressedMicroturnsCount=0;
 let lastSpeechStartHadPlayback=false;
 const feedbackByItem={};   // itemId -> speech_started fired during playback
 function logEv(entry){
@@ -410,6 +411,7 @@ function archiveCurrentRun(reason){
   sessionMeta=null; sessionConfig=null; sessionStartTs=0;
   eventLog.length=0; eventLogDropped=0; invariantViolations.length=0; evSeq=0;
   gatedIntervals=0; totalGatedMs=0; lastPlaybackEndTs=0; lastMicLogTs=0;
+  suppressedMicroturnsCount=0;
   for(const k in feedbackByItem) delete feedbackByItem[k];
 }
 let lastSpeechStartTs=0, lastSpeechStopTs=0, lastPlaybackEndTs=0, lastMicLogTs=0;
@@ -540,6 +542,13 @@ function onMsg(ev){
     renderCancellations(); renderMetrics();
     return;
   }
+  if(m.type==='suppressed_microturn'){
+    suppressedMicroturnsCount++;
+    logEv({type:'suppressed_microturn', itemId:m.itemId||null, responseId:m.responseId||null, reason:m.reason, audioMs:m.audioMs??null});
+    addLine('cx','🔇 micro-turn suppressed ('+m.reason+(m.audioMs!=null?' '+m.audioMs+'ms':'')+') — no translation produced');
+    renderMetrics();
+    return;
+  }
   if(m.type==='turn_completed'){ logEv({type:'turn_completed', itemId:m.metrics.sourceItemId||null, responseId:m.metrics.responseId||null, cancelled:!!m.metrics.cancelled}); turns.push(m.metrics); renderMetrics(); setStatus('live — speak'); return; }
   if(m.type==='error'){ logEv({type:'error', text:m.message}); errors.push(m.message); addLine('err','⚠ '+m.message); if(m.fatal){ stopAll('provider error'); } return; }
 }
@@ -609,6 +618,7 @@ function computeScorecard(){
     cost_per_wall_clock_minute: wallMin>0.2? +(cost/wallMin).toFixed(4):null,
     errors: errors.length,
     invariant_violations: invariantViolations.length,
+    suppressed_microturns: suppressedMicroturnsCount,
     feedback_suspect_source_turns: srcUtterances.filter(u=>u.suspectedFeedback).length,
     mic_gate_intervals: gatedIntervals,
     mic_gate_total_ms: totalGatedMs,
@@ -636,6 +646,7 @@ function renderMetrics(){
     'total est. cost: <b>$'+sc.total_estimated_cost_usd.toFixed(4)+'</b>, per active-audio min: '+(sc.cost_per_active_audio_minute!=null?('$'+sc.cost_per_active_audio_minute):'—')+', per wall-clock min: '+(sc.cost_per_wall_clock_minute!=null?('$'+sc.cost_per_wall_clock_minute):'—')+'<br>'+
     'invariant violations (1→1 rule): <b class="'+(sc.invariant_violations?'err':'')+'">'+sc.invariant_violations+'</b>, feedback-suspect source turns: <b class="'+(sc.feedback_suspect_source_turns?'err':'')+'">'+sc.feedback_suspect_source_turns+'</b><br>'+
     'mic gate (half-duplex): '+sc.mic_gate_intervals+' intervals, '+(sc.mic_gate_total_ms/1000).toFixed(1)+' s gated; feedback-suspect turns: <b class="'+(sc.feedback_suspect_source_turns?'err':'')+'">'+sc.feedback_suspect_source_turns+'</b>, invariant violations: <b class="'+(sc.invariant_violations?'err':'')+'">'+sc.invariant_violations+'</b><br>'+
+    'suppressed micro-turns (noise/too-short): <b class="'+(sc.suppressed_microturns?'err':'')+'">'+sc.suppressed_microturns+'</b><br>'+
     'errors: '+sc.errors;
 }
 
