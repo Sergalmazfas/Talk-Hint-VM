@@ -62,20 +62,49 @@ export interface TranslationTurnMetrics {
    * utterance → translation/cancellation without event-order guessing.
    */
   sourceItemId?: string;
+  /** Provider response id for this turn (correlates output events). */
+  responseId?: string;
 }
+
+/**
+ * Hard 1→1 invariant violations detected live by the adapter (forensic Run #2):
+ * - RESPONSE_WITHOUT_SOURCE_TURN: a response was created with NO committed
+ *   source turn awaiting translation (self-conversation / unsolicited output).
+ * - MULTIPLE_RESPONSES_FOR_TURN: more than one response was created for one
+ *   committed source turn (breaks "one source utterance → one translation").
+ * - OUTPUT_AFTER_RESPONSE_DONE: audio/text output arrived for a response that
+ *   already finished or was cancelled (cancelled response kept talking).
+ */
+export type InvariantViolationCode =
+  | "RESPONSE_WITHOUT_SOURCE_TURN"
+  | "MULTIPLE_RESPONSES_FOR_TURN"
+  | "OUTPUT_AFTER_RESPONSE_DONE";
 
 export type TranslationEvent =
   | { type: "ready"; provider: string; model: string; voice?: string; instructions: string }
   | { type: "speech_started"; ts: number }
   | { type: "speech_stopped"; ts: number }
+  /** A user input turn was committed as a conversation item (forensic log). */
+  | { type: "input_committed"; ts: number; itemId: string }
+  /** The provider started generating a response (forensic log). */
+  | { type: "response_created"; ts: number; responseId?: string; sourceItemId?: string }
   /** Translated audio chunk in the configured outputFormat, base64. */
-  | { type: "translated_audio"; base64: string }
+  | { type: "translated_audio"; base64: string; responseId?: string }
   | { type: "source_transcript"; text: string; itemId?: string }
-  | { type: "translated_transcript_delta"; text: string }
-  | { type: "translated_transcript_done"; text: string }
+  | { type: "translated_transcript_delta"; text: string; responseId?: string }
+  | { type: "translated_transcript_done"; text: string; responseId?: string }
   | { type: "turn_completed"; metrics: TranslationTurnMetrics }
   /** A response was cancelled by the provider (forensic evidence, not fatal). */
-  | { type: "response_cancelled"; ts: number; reason: string; sourceItemId?: string }
+  | { type: "response_cancelled"; ts: number; reason: string; sourceItemId?: string; responseId?: string }
+  /** Hard 1→1 invariant broken — structured forensic evidence, never silent. */
+  | {
+      type: "invariant_violation";
+      ts: number;
+      code: InvariantViolationCode;
+      detail: string;
+      itemId?: string;
+      responseId?: string;
+    }
   | { type: "error"; message: string; fatal: boolean }
   | { type: "closed" };
 

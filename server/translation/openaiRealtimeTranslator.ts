@@ -167,6 +167,14 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
   // item is the one the current response answers — a stable correlation the
   // evidence tooling uses instead of guessing by event order.
   private pendingUserItems: string[] = [];
+  // Forensic response tracking (Run #2 self-conversation investigation).
+  // response.created count per pending item head detects >1 response for one
+  // committed source turn; finished/cancelled response ids detect output that
+  // keeps flowing after response.done (a cancelled response "kept talking").
+  private currentResponseId?: string;
+  private responsesForHeadItem = 0;
+  private finishedResponseIds = new Set<string>();
+  private outputAfterDoneFlagged = new Set<string>();
 
   constructor(config: RealtimeTranslationConfig) {
     this.config = config;
@@ -281,6 +289,23 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
     this.sendJson({ type: "input_audio_buffer.append", audio: chunk.toString("base64") });
   }
 
+  // A cancelled/finished response must never keep producing output. If it
+  // does, that is exactly suspicion #2 from the Run #2 forensic spec — flag
+  // it once per response id as a structured invariant violation.
+  private checkOutputAfterDone(responseId?: string) {
+    if (!responseId) return;
+    if (this.finishedResponseIds.has(responseId) && !this.outputAfterDoneFlagged.has(responseId)) {
+      this.outputAfterDoneFlagged.add(responseId);
+      this.emit({
+        type: "invariant_violation",
+        ts: Date.now(),
+        code: "OUTPUT_AFTER_RESPONSE_DONE",
+        detail: "output arrived for a response that already finished/was cancelled",
+        responseId,
+      });
+    }
+  }
+
   private bytesToMs(bytes: number, rateHz: number): number {
     return Math.round((bytes / 2 / rateHz) * 1000); // pcm16 mono = 2 bytes/sample
   }
@@ -320,8 +345,42 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
       case "input_audio_buffer.committed":
         // The user turn became a conversation item — queue it for response
         // attribution (see pendingUserItems).
-        if (msg.item_id) this.pendingUserItems.push(msg.item_id);
+        if (msg.item_id) {
+          this.pendingUserItems.push(msg.item_id);
+          this.emit({ type: "input_committed", ts: Date.now(), itemId: msg.item_id });
+        }
         break;
+      case "response.created": {
+        const ts = Date.now();
+        const rid = msg.response?.id as string | undefined;
+        this.currentResponseId = rid;
+        const head = this.pendingUserItems[0];
+        this.emit({ type: "response_created", ts, responseId: rid, sourceItemId: head });
+        // Hard 1→1 invariant, checked live:
+        if (!head) {
+          this.emit({
+            type: "invariant_violation",
+            ts,
+            code: "RESPONSE_WITHOUT_SOURCE_TURN",
+            detail:
+              "response created with no committed source turn pending — unsolicited/self-conversation output",
+            responseId: rid,
+          });
+        } else {
+          this.responsesForHeadItem += 1;
+          if (this.responsesForHeadItem > 1) {
+            this.emit({
+              type: "invariant_violation",
+              ts,
+              code: "MULTIPLE_RESPONSES_FOR_TURN",
+              detail: `response #${this.responsesForHeadItem} created for the same committed source turn`,
+              itemId: head,
+              responseId: rid,
+            });
+          }
+        }
+        break;
+      }
       case "conversation.item.input_audio_transcription.completed":
         if (msg.transcript) {
           this.sourceTranscript = msg.transcript;
@@ -334,27 +393,38 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
         if (msg.delta) {
           if (!this.firstAudioTs) this.firstAudioTs = Date.now();
           this.audioOutBytes += Buffer.byteLength(msg.delta, "base64");
-          this.emit({ type: "translated_audio", base64: msg.delta });
+          this.checkOutputAfterDone(msg.response_id);
+          this.emit({ type: "translated_audio", base64: msg.delta, responseId: msg.response_id });
         }
         break;
       case "response.output_audio_transcript.delta":
       case "response.audio_transcript.delta":
         if (msg.delta) {
           this.translatedTranscript += msg.delta;
-          this.emit({ type: "translated_transcript_delta", text: msg.delta });
+          this.checkOutputAfterDone(msg.response_id);
+          this.emit({ type: "translated_transcript_delta", text: msg.delta, responseId: msg.response_id });
         }
         break;
       case "response.output_audio_transcript.done":
       case "response.audio_transcript.done":
         if (msg.transcript) {
           this.translatedTranscript = msg.transcript;
-          this.emit({ type: "translated_transcript_done", text: msg.transcript });
+          this.checkOutputAfterDone(msg.response_id);
+          this.emit({ type: "translated_transcript_done", text: msg.transcript, responseId: msg.response_id });
         }
         break;
       case "response.done": {
         const st = msg.response?.status;
         const details = msg.response?.status_details || {};
         const cancelled = st === "cancelled";
+        const responseId = (msg.response?.id as string | undefined) ?? this.currentResponseId;
+        if (responseId) {
+          this.finishedResponseIds.add(responseId);
+          // Bench sessions are short; cap defensively anyway.
+          if (this.finishedResponseIds.size > 1000) this.finishedResponseIds.clear();
+        }
+        this.currentResponseId = undefined;
+        this.responsesForHeadItem = 0;
         // Attribute this response to the oldest pending user item (FIFO).
         // Cancelled responses consume their item too — the interrupting
         // utterance gets its own response later. An empty queue leaves the
@@ -374,6 +444,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
               ts: Date.now(),
               reason: String(details.reason || "unknown"),
               sourceItemId,
+              responseId,
             });
           } else {
             this.emit({
@@ -413,6 +484,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
           cancelled: cancelled || undefined,
           cancelReason: cancelled ? String(details.reason || "unknown") : undefined,
           sourceItemId,
+          responseId,
         };
         // Reset per-turn accumulators.
         this.sourceTranscript = "";

@@ -29,6 +29,7 @@ import type WebSocket from "ws";
 import { tlog as log } from "./logger";
 import { openaiRealtimeTranslationProvider } from "./openaiRealtimeTranslator";
 import { runSemanticReview } from "./reviewJudge";
+import { analyzeForensicLog, type ForensicLogEntry } from "./forensics";
 import type { RealtimeTranslationSession } from "./provider";
 
 const SPIKE_TOKEN = crypto.randomBytes(24).toString("hex");
@@ -130,7 +131,7 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
       });
       session.onEvent((ev) => {
         // Provider events map 1:1 onto the stand's wire protocol.
-        if (ev.type === "translated_audio") send({ type: "audio", data: ev.base64 });
+        if (ev.type === "translated_audio") send({ type: "audio", data: ev.base64, responseId: ev.responseId });
         else send(ev);
         if (ev.type === "closed" && !closed) {
           // Provider side dropped — tell the page honestly.
@@ -183,6 +184,55 @@ export function registerTranslatorSpike(app: Express) {
       res.status(502).json({ error: (e as Error).message });
     }
   });
+
+  // Run #2 forensic analyzer — replays the stand's full event log through the
+  // pure analyzer (5 suspicions + first 1→1 break). Dev-only, token-protected.
+  app.post("/translator-spike/analyze", (req, res) => {
+    if (!isSpikeEnabled()) return res.status(404).send("Not found");
+    const token = req.headers["x-spike-token"];
+    if (!isValidSpikeToken(typeof token === "string" ? token : null)) {
+      return res.status(403).json({ error: "invalid token" });
+    }
+    const raw = Array.isArray(req.body?.entries) ? req.body.entries : [];
+    const clientDropped = Number(req.body?.droppedEntries) || 0;
+    const { entries, truncated, droppedEntries } = prepareForensicEntries(raw, clientDropped);
+    try {
+      res.json({ forensics: analyzeForensicLog(entries, { truncated, droppedEntries }) });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
+  });
+}
+
+/**
+ * Sanitize + cap the submitted forensic log HONESTLY: if the payload exceeds
+ * the cap, or the client reports it already dropped entries, the analysis is
+ * marked truncated so the analyzer fail-closes (all INCONCLUSIVE, no
+ * first-break claim from partial evidence). Exported for tests.
+ */
+export const FORENSIC_ENTRY_CAP = 50000;
+export function prepareForensicEntries(
+  raw: any[],
+  clientDroppedEntries = 0,
+): { entries: ForensicLogEntry[]; truncated: boolean; droppedEntries: number } {
+  const overflow = Math.max(0, raw.length - FORENSIC_ENTRY_CAP);
+  const droppedEntries = overflow + Math.max(0, clientDroppedEntries);
+  const entries: ForensicLogEntry[] = raw.slice(0, FORENSIC_ENTRY_CAP).map((e: any, i: number) => ({
+      seq: typeof e?.seq === "number" ? e.seq : i,
+      ts: typeof e?.ts === "number" ? e.ts : 0,
+      type: String(e?.type || ""),
+      playbackActive: typeof e?.playbackActive === "boolean" ? e.playbackActive : undefined,
+      playbackActiveAtSpeechStart:
+        typeof e?.playbackActiveAtSpeechStart === "boolean" ? e.playbackActiveAtSpeechStart : undefined,
+      itemId: typeof e?.itemId === "string" ? e.itemId : undefined,
+      responseId: typeof e?.responseId === "string" ? e.responseId : undefined,
+      sourceItemId: typeof e?.sourceItemId === "string" ? e.sourceItemId : undefined,
+      text: typeof e?.text === "string" ? e.text.slice(0, 2000) : undefined,
+      reason: typeof e?.reason === "string" ? e.reason : undefined,
+      code: typeof e?.code === "string" ? e.code : undefined,
+      detail: typeof e?.detail === "string" ? e.detail : undefined,
+    }));
+  return { entries, truncated: droppedEntries > 0, droppedEntries };
 }
 
 function buildSpikePageHtml(): string {
@@ -267,6 +317,24 @@ const turns=[];              // per-turn metrics from provider (completed + canc
 const srcUtterances=[];      // evidence: every recognized source utterance
 const cancellations=[];      // forensic records
 let review={ results:{}, ranAt:null };  // turnIndex -> {classification, reason}
+// FULL forensic event log (Run #2 spec): every provider event + client-side
+// mic/playback lifecycle entries, each stamped with seq, client ts and the
+// playback state AT THAT MOMENT. Exported verbatim in the JSON report and
+// replayed through the server analyzer for the 5-suspicion verdict.
+const eventLog=[]; let evSeq=0;
+// Honest capture-completeness accounting: if the in-memory cap is ever hit,
+// dropped entries are COUNTED (never silently discarded) and the analyzer
+// fail-closes on the truncated log.
+let eventLogDropped=0;
+const invariantViolations=[];
+let lastSpeechStartHadPlayback=false;
+const feedbackByItem={};   // itemId -> speech_started fired during playback
+function logEv(entry){
+  entry.seq=evSeq++; entry.ts=Date.now(); entry.playbackActive=playbackActive();
+  eventLog.push(entry);
+  if(eventLog.length>200000){ eventLog.shift(); eventLogDropped++; }
+  return entry;
+}
 let sessionMeta=null, sessionConfig=null, sessionStartTs=0, errors=[];
 // Finished runs (each with its own immutable config + evidence). A control
 // change archives the current run so one scorecard never mixes configs.
@@ -276,13 +344,16 @@ function archiveCurrentRun(reason){
     completedRuns.push({ reason, archivedAt:new Date().toISOString(),
       session:sessionMeta, sessionConfig, scorecard:computeScorecard(),
       turns:turns.slice(), sourceUtterances:srcUtterances.slice(),
-      cancellations:cancellations.slice(), semanticReview:JSON.parse(JSON.stringify(review)), errors:errors.slice() });
+      cancellations:cancellations.slice(), semanticReview:JSON.parse(JSON.stringify(review)), errors:errors.slice(),
+      eventLog:eventLog.slice(), eventLogDropped, invariantViolations:invariantViolations.slice() });
   }
   turns.length=0; srcUtterances.length=0; cancellations.length=0;
   review={ results:{}, ranAt:null }; errors=[];
   sessionMeta=null; sessionConfig=null; sessionStartTs=0;
+  eventLog.length=0; eventLogDropped=0; invariantViolations.length=0; evSeq=0;
+  for(const k in feedbackByItem) delete feedbackByItem[k];
 }
-let lastSpeechStartTs=0, lastSpeechStopTs=0, lastPlaybackEndTs=0;
+let lastSpeechStartTs=0, lastSpeechStopTs=0, lastPlaybackEndTs=0, lastMicLogTs=0;
 const feed=document.getElementById('feed');
 const statusEl=document.getElementById('status');
 const startBtn=document.getElementById('startBtn');
@@ -328,37 +399,65 @@ function playChunk(b64){
   }
   const buf=ctx.createBuffer(1,n,RATE); buf.getChannelData(0).set(f);
   const src=ctx.createBufferSource(); src.buffer=buf; src.connect(ctx.destination);
+  const wasActive=playbackActive();
   const t=Math.max(ctx.currentTime+0.02, playhead);
   src.start(t); playhead=t+buf.duration;
-  src.onended=()=>{ if(!playbackActive()) lastPlaybackEndTs=Date.now(); };
+  if(!wasActive) logEv({type:'playback_start'});
+  src.onended=()=>{ if(!playbackActive()){ lastPlaybackEndTs=Date.now(); logEv({type:'playback_end'}); } };
 }
 
 let curSrcEl=null, curDstEl=null, dstAccum='';
 function onMsg(ev){
   let m; try{ m=JSON.parse(ev.data); }catch{ return; }
-  if(m.type==='audio'){ playChunk(m.data); return; }
-  if(m.type==='session_config'){ sessionConfig=m; return; }
-  if(m.type==='ready'){ sessionMeta=m; setStatus('live — speak ('+m.model+', voice '+(m.voice||'?')+')'); return; }
+  if(m.type==='audio'){ logEv({type:'translated_audio', responseId:m.responseId||null, bytes:m.data?m.data.length:0}); playChunk(m.data); return; }
+  if(m.type==='session_config'){ sessionConfig=m; logEv({type:'session_config'}); return; }
+  if(m.type==='ready'){ sessionMeta=m; logEv({type:'ready'}); setStatus('live — speak ('+m.model+', voice '+(m.voice||'?')+')'); return; }
   if(m.type==='speech_started'){
     lastSpeechStartTs=Date.now();
+    // THE feedback flag from the spec: was our own translated audio still
+    // audibly playing when VAD opened a new input turn?
+    lastSpeechStartHadPlayback=playbackActive();
+    logEv({type:'speech_started', playbackActiveAtSpeechStart:lastSpeechStartHadPlayback});
+    if(lastSpeechStartHadPlayback) addLine('cx','⚠ speech_started while translated audio was still playing (possible playback feedback)');
     setStatus('listening…'); curSrcEl=null; curDstEl=null; dstAccum='';
     return;
   }
-  if(m.type==='speech_stopped'){ lastSpeechStopTs=Date.now(); setStatus('translating…'); return; }
+  if(m.type==='speech_stopped'){ lastSpeechStopTs=Date.now(); logEv({type:'speech_stopped'}); setStatus('translating…'); return; }
+  if(m.type==='input_committed'){
+    feedbackByItem[m.itemId]=lastSpeechStartHadPlayback;
+    logEv({type:'input_committed', itemId:m.itemId, speechStartedDuringPlayback:lastSpeechStartHadPlayback});
+    return;
+  }
+  if(m.type==='response_created'){
+    logEv({type:'response_created', responseId:m.responseId||null, sourceItemId:m.sourceItemId||null});
+    return;
+  }
+  if(m.type==='invariant_violation'){
+    const rec={seq:evSeq, ts:Date.now(), code:m.code, detail:m.detail, itemId:m.itemId||null, responseId:m.responseId||null};
+    invariantViolations.push(rec);
+    logEv({type:'invariant_violation', code:m.code, detail:m.detail, itemId:m.itemId||null, responseId:m.responseId||null});
+    addLine('err','⛔ INVARIANT BROKEN: '+m.code+' — '+m.detail);
+    renderMetrics();
+    return;
+  }
   if(m.type==='source_transcript'){
     // Keyed by the provider's stable item id — association with translations
     // and cancellations happens at scorecard time via sourceItemId matching,
     // never by event arrival order (transcription events arrive async).
-    srcUtterances.push({ index:srcUtterances.length, itemId:m.itemId||null, ts:Date.now(), text:m.text, meaningful:isMeaningful(m.text) });
-    curSrcEl=addLine('src','🎙 '+m.text);
+    const suspectedFeedback=m.itemId?!!feedbackByItem[m.itemId]:false;
+    srcUtterances.push({ index:srcUtterances.length, itemId:m.itemId||null, ts:Date.now(), text:m.text, meaningful:isMeaningful(m.text), suspectedFeedback });
+    logEv({type:'source_transcript', itemId:m.itemId||null, text:m.text});
+    curSrcEl=addLine('src','🎙 '+m.text+(suspectedFeedback?'  ⚠ (turn opened during playback)':''));
     return;
   }
   if(m.type==='translated_transcript_delta'){
+    logEv({type:'translated_transcript_delta', responseId:m.responseId||null, text:m.text});
     dstAccum+=m.text;
     if(!curDstEl) curDstEl=addLine('dst','→ ');
     curDstEl.textContent='→ '+dstAccum; return;
   }
   if(m.type==='translated_transcript_done'){
+    logEv({type:'translated_transcript_done', responseId:m.responseId||null, text:m.text});
     if(!curDstEl) curDstEl=addLine('dst','');
     curDstEl.textContent='→ '+m.text; dstAccum='';
     return;
@@ -367,9 +466,10 @@ function onMsg(ev){
     // Forensic evidence captured at the moment of cancellation. The
     // sourceItemId comes from the provider's FIFO attribution — stable
     // even during barge-in, unlike "newest untranslated" guessing.
+    logEv({type:'response_cancelled', responseId:m.responseId||null, sourceItemId:m.sourceItemId||null, reason:m.reason});
     const rec={
       index:cancellations.length, ts:m.ts, reason:m.reason,
-      sourceItemId:m.sourceItemId||null,
+      sourceItemId:m.sourceItemId||null, responseId:m.responseId||null,
       playbackActiveAtCancel:playbackActive(),
       msSinceLastPlaybackEnd:lastPlaybackEndTs?Date.now()-lastPlaybackEndTs:null,
       msSinceSpeechStart:lastSpeechStartTs?Date.now()-lastSpeechStartTs:null,
@@ -381,8 +481,8 @@ function onMsg(ev){
     renderCancellations(); renderMetrics();
     return;
   }
-  if(m.type==='turn_completed'){ turns.push(m.metrics); renderMetrics(); setStatus('live — speak'); return; }
-  if(m.type==='error'){ errors.push(m.message); addLine('err','⚠ '+m.message); if(m.fatal){ stopAll('provider error'); } return; }
+  if(m.type==='turn_completed'){ logEv({type:'turn_completed', itemId:m.metrics.sourceItemId||null, responseId:m.metrics.responseId||null, cancelled:!!m.metrics.cancelled}); turns.push(m.metrics); renderMetrics(); setStatus('live — speak'); return; }
+  if(m.type==='error'){ logEv({type:'error', text:m.message}); errors.push(m.message); addLine('err','⚠ '+m.message); if(m.fatal){ stopAll('provider error'); } return; }
 }
 
 const CX_CLASSES=['UNKNOWN','VALID_BARGE_IN','FALSE_PREMATURE_CANCEL','PLAYBACK_FEEDBACK'];
@@ -449,6 +549,8 @@ function computeScorecard(){
     cost_per_active_audio_minute: audioMs>0? +(cost/(audioMs/60000)).toFixed(4):null,
     cost_per_wall_clock_minute: wallMin>0.2? +(cost/wallMin).toFixed(4):null,
     errors: errors.length,
+    invariant_violations: invariantViolations.length,
+    feedback_suspect_source_turns: srcUtterances.filter(u=>u.suspectedFeedback).length,
   };
 }
 
@@ -471,6 +573,7 @@ function renderMetrics(){
     'source turns: '+sc.completed_source_turns+', translated: '+sc.successfully_translated_turns+', <b class="'+(sc.lost_completed_translations?'err':'')+'">lost: '+sc.lost_completed_translations+'</b> (rate '+sc.lost_translation_rate+')<br>'+
     'semantic review: '+(sc.semantic_review_ran?('faithful '+sc.faithful_count+', added <b class="'+(sc.added_content_count?'err':'')+'">'+sc.added_content_count+'</b>, unsolicited <b class="'+(sc.unsolicited_response_count?'err':'')+'">'+sc.unsolicited_response_count+'</b>, uncertain '+sc.uncertain_translation_count):'not run')+'<br>'+
     'total est. cost: <b>$'+sc.total_estimated_cost_usd.toFixed(4)+'</b>, per active-audio min: '+(sc.cost_per_active_audio_minute!=null?('$'+sc.cost_per_active_audio_minute):'—')+', per wall-clock min: '+(sc.cost_per_wall_clock_minute!=null?('$'+sc.cost_per_wall_clock_minute):'—')+'<br>'+
+    'invariant violations (1→1 rule): <b class="'+(sc.invariant_violations?'err':'')+'">'+sc.invariant_violations+'</b>, feedback-suspect source turns: <b class="'+(sc.feedback_suspect_source_turns?'err':'')+'">'+sc.feedback_suspect_source_turns+'</b><br>'+
     'errors: '+sc.errors;
 }
 
@@ -494,11 +597,22 @@ document.getElementById('reviewBtn').onclick=async()=>{
   btn.disabled=false; btn.textContent='Run semantic review';
 };
 
-document.getElementById('exportBtn').onclick=()=>{
+document.getElementById('exportBtn').onclick=async()=>{
+  // Server-side forensic analysis of the full event log (5 suspicions + first
+  // 1→1 break). Analysis failure is reported honestly in the export, never
+  // silently omitted as if the run were clean.
+  let forensics=null;
+  try{
+    const r=await fetch('/translator-spike/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-spike-token':TOKEN},body:JSON.stringify({entries:eventLog,droppedEntries:eventLogDropped})});
+    if(r.ok){ forensics=(await r.json()).forensics; }
+    else { forensics={error:'analyze failed: '+r.status+' '+await r.text()}; }
+  }catch(e){ forensics={error:'analyze failed: '+e.message}; }
   const report={ generatedAt:new Date().toISOString(),
     currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeScorecard(),
       turns, sourceUtterances:srcUtterances, cancellations,
-      semanticReview:review, errors },
+      semanticReview:review, errors,
+      invariantViolations, forensics, eventLog, eventLogDropped,
+      eventLogComplete: eventLogDropped===0 },
     completedRuns };
   const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -530,7 +644,14 @@ async function start(){
     ws.onmessage=onMsg;
     ws.onclose=()=>{ if(running&&!restarting) stopAll('connection closed'); };
     ws.onerror=()=>{ addLine('err','⚠ websocket error'); };
-    workletNode.port.onmessage=(e)=>{ if(ws&&ws.readyState===1) ws.send(e.data); };
+    workletNode.port.onmessage=(e)=>{
+      // Coarse microphone timeline: one mic_audio log entry per second keeps
+      // the export readable while still proving when the mic was capturing
+      // and whether playback was active at that moment.
+      const now=Date.now();
+      if(now-lastMicLogTs>=1000){ lastMicLogTs=now; logEv({type:'mic_audio', chunkMs:40}); }
+      if(ws&&ws.readyState===1) ws.send(e.data);
+    };
     running=true; stopBtn.disabled=false; playhead=0;
   }catch(e){
     addLine('err','⚠ '+e.message); startBtn.disabled=false;
