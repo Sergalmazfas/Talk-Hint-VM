@@ -20,6 +20,12 @@ export interface RealtimeTranslationConfig {
   languages: [string, string];
   /** "auto" (default) or a hint for the expected source language. */
   sourceLangHint?: "auto" | string;
+  /**
+   * Directed mode: translate EVERY utterance into this language (ISO 639-1).
+   * Mixed-language input must yield ONE utterance in this language.
+   * When unset, the provider runs bidirectional pair mode over `languages`.
+   */
+  outputLanguage?: string;
   /** Provider-specific output voice id. Optional; provider picks a default. */
   voice?: string;
   inputFormat: AudioFormat;
@@ -46,6 +52,16 @@ export interface TranslationTurnMetrics {
   usage?: Record<string, unknown>;
   /** Estimated cost in USD for this turn (undefined if not computable). */
   estimatedCostUsd?: number;
+  /** True when the provider cancelled this response (e.g. barge-in). */
+  cancelled?: boolean;
+  /** Provider-reported cancellation reason (e.g. "turn_detected"). */
+  cancelReason?: string;
+  /**
+   * Stable correlation id of the user input item this response answered
+   * (provider conversation item id). Lets evidence tooling match source
+   * utterance → translation/cancellation without event-order guessing.
+   */
+  sourceItemId?: string;
 }
 
 export type TranslationEvent =
@@ -54,10 +70,12 @@ export type TranslationEvent =
   | { type: "speech_stopped"; ts: number }
   /** Translated audio chunk in the configured outputFormat, base64. */
   | { type: "translated_audio"; base64: string }
-  | { type: "source_transcript"; text: string }
+  | { type: "source_transcript"; text: string; itemId?: string }
   | { type: "translated_transcript_delta"; text: string }
   | { type: "translated_transcript_done"; text: string }
   | { type: "turn_completed"; metrics: TranslationTurnMetrics }
+  /** A response was cancelled by the provider (forensic evidence, not fatal). */
+  | { type: "response_cancelled"; ts: number; reason: string; sourceItemId?: string }
   | { type: "error"; message: string; fatal: boolean }
   | { type: "closed" };
 

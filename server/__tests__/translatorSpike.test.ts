@@ -1,11 +1,14 @@
 // Translator Realtime Spike — contract tests for the dev-only stand gating
 // and the OpenAI adapter's cost/prompt helpers. No network access.
 import { describe, it, expect, afterEach } from "vitest";
-import { isSpikeEnabled, isValidSpikeToken } from "../translation/spike";
+import { isSpikeEnabled, isValidSpikeToken, sanitizeSpikeControls } from "../translation/spike";
 import {
   buildInterpreterInstructions,
   estimateTurnCostUsd,
+  OpenAIRealtimeTranslationSession,
 } from "../translation/openaiRealtimeTranslator";
+import type { TranslationEvent } from "../translation/provider";
+import { parseSemanticReview, buildSemanticReviewPrompt } from "../translation/reviewJudge";
 
 const ORIGINAL_ENV = process.env.NODE_ENV;
 afterEach(() => {
@@ -40,6 +43,177 @@ describe("interpreter instructions (frozen pure-translation prompt)", () => {
     expect(p).toMatch(/filler/i);
     expect(p).toMatch(/phone numbers/i);
     expect(p).toMatch(/invent/i);
+  });
+
+  it("includes the hardening rules against unsolicited responses", () => {
+    const p = buildInterpreterInstructions(["ru", "en"]);
+    expect(p).toContain("EXACTLY ONE rendition per speaker utterance");
+    expect(p).toContain("NEVER a participant");
+    expect(p).toContain("never accept or decline invitations");
+    expect(p).toContain("ONLY to disambiguate");
+    expect(p).toContain("NEVER carry facts");
+  });
+
+  it("directed mode translates everything into the output language, mixed input as one utterance", () => {
+    const p = buildInterpreterInstructions(["ru", "en"], { inputLang: "auto", outputLang: "en" });
+    expect(p).toContain("Translate EVERY speaker utterance into English");
+    expect(p).toContain("Detect the speaker's language automatically");
+    expect(p).toContain("ONE single English rendition of the entire meaning");
+    // Hardening rules present in directed mode too.
+    expect(p).toContain("NEVER a participant");
+  });
+
+  it("directed mode with a fixed input language names it", () => {
+    const p = buildInterpreterInstructions(["es", "ru"], { inputLang: "es", outputLang: "ru" });
+    expect(p).toContain("into Russian");
+    expect(p).toContain("The speaker speaks Spanish.");
+  });
+});
+
+describe("sanitizeSpikeControls", () => {
+  it("defaults to Auto → English, voice marin", () => {
+    expect(sanitizeSpikeControls({})).toEqual({ inputLang: "auto", outputLang: "en", voice: "marin" });
+  });
+  it("accepts allowed values and rejects unknown ones (fail-closed to defaults)", () => {
+    expect(sanitizeSpikeControls({ inputLang: "es", outputLang: "ru", voice: "cedar" }))
+      .toEqual({ inputLang: "es", outputLang: "ru", voice: "cedar" });
+    expect(sanitizeSpikeControls({ inputLang: "de", outputLang: "kk", voice: "hasOwnProperty" }))
+      .toEqual({ inputLang: "auto", outputLang: "en", voice: "marin" });
+  });
+});
+
+describe("semantic review judge (parse is fail-closed)", () => {
+  const inputs = [
+    { turnIndex: 0, source: "Привет", translation: "Hello" },
+    { turnIndex: 1, source: "Пойдём с нами", translation: "Come with us. Sure, I'm coming!" },
+    { turnIndex: 2, source: "bu", translation: "" },
+  ];
+
+  it("prompt defines all four classes", () => {
+    const p = buildSemanticReviewPrompt();
+    for (const c of ["FAITHFUL", "ADDED_CONTENT", "UNSOLICITED_RESPONSE", "UNCERTAIN"]) {
+      expect(p).toContain(c);
+    }
+  });
+
+  it("maps judge results by turnIndex and fills missing/invalid turns as UNCERTAIN", () => {
+    const raw = JSON.stringify({ results: [
+      { turnIndex: 0, classification: "FAITHFUL", reason: "ok" },
+      { turnIndex: 1, classification: "UNSOLICITED_RESPONSE", reason: "answers the invitation" },
+      // turn 2 omitted by the judge
+    ]});
+    const out = parseSemanticReview(raw, inputs);
+    expect(out).toHaveLength(3);
+    expect(out[0].classification).toBe("FAITHFUL");
+    expect(out[1].classification).toBe("UNSOLICITED_RESPONSE");
+    expect(out[2].classification).toBe("UNCERTAIN");
+  });
+
+  it("garbage judge output classifies every turn UNCERTAIN, never FAITHFUL", () => {
+    const out = parseSemanticReview("not json at all", inputs);
+    expect(out.every((r) => r.classification === "UNCERTAIN")).toBe(true);
+    const out2 = parseSemanticReview(JSON.stringify({ results: [{ turnIndex: 0, classification: "GREAT" }] }), inputs);
+    expect(out2[0].classification).toBe("UNCERTAIN");
+  });
+});
+
+describe("adapter turn lifecycle (behavioral, no network)", () => {
+  function makeSession() {
+    const session = new OpenAIRealtimeTranslationSession({
+      languages: ["ru", "en"],
+      sourceLangHint: "auto",
+      outputLanguage: "en",
+      inputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+      outputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+    });
+    const events: TranslationEvent[] = [];
+    session.onEvent((ev) => events.push(ev));
+    const feed = (msg: any) => (session as any).handleMessage(msg);
+    return { session, events, feed };
+  }
+
+  it("a cancelled response is attributed to its item, resets state, and never breaks the next turn", () => {
+    const { events, feed } = makeSession();
+    // Turn 1: user speaks, item committed, transcript arrives.
+    feed({ type: "input_audio_buffer.speech_started" });
+    feed({ type: "input_audio_buffer.speech_stopped" });
+    feed({ type: "input_audio_buffer.committed", item_id: "item_1" });
+    feed({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_1", transcript: "Мы идём в баню." });
+    // Partial translation, then barge-in cancels the response.
+    feed({ type: "response.output_audio_transcript.delta", delta: "We are" });
+    feed({ type: "response.done", response: { status: "cancelled", status_details: { reason: "turn_detected" } } });
+    // Turn 2: the interrupting utterance completes normally.
+    feed({ type: "input_audio_buffer.speech_started" });
+    feed({ type: "input_audio_buffer.speech_stopped" });
+    feed({ type: "input_audio_buffer.committed", item_id: "item_2" });
+    feed({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_2", transcript: "Пойдём с нами." });
+    feed({ type: "response.output_audio_transcript.done", transcript: "Come with us." });
+    feed({ type: "response.done", response: { status: "completed", usage: {} } });
+
+    const cancelledEv = events.find((e) => e.type === "response_cancelled") as any;
+    expect(cancelledEv).toBeTruthy();
+    expect(cancelledEv.reason).toBe("turn_detected");
+    expect(cancelledEv.sourceItemId).toBe("item_1");
+
+    const completedTurns = events.filter((e) => e.type === "turn_completed") as any[];
+    expect(completedTurns).toHaveLength(2);
+    // Cancelled turn: marked cancelled, attributed to item_1.
+    expect(completedTurns[0].metrics.cancelled).toBe(true);
+    expect(completedTurns[0].metrics.sourceItemId).toBe("item_1");
+    // Next turn is clean: no state leakage from the cancelled turn.
+    expect(completedTurns[1].metrics.cancelled).toBeUndefined();
+    expect(completedTurns[1].metrics.sourceItemId).toBe("item_2");
+    expect(completedTurns[1].metrics.sourceTranscript).toBe("Пойдём с нами.");
+    expect(completedTurns[1].metrics.translatedTranscript).toBe("Come with us.");
+    // The cancelled turn never inherits the next turn's transcript.
+    expect(completedTurns[0].metrics.translatedTranscript).toBe("We are");
+    // No error event for a cancellation — it is structured evidence.
+    expect(events.some((e) => e.type === "error")).toBe(false);
+  });
+
+  it("out-of-order transcription never mis-pairs: a turn reads its transcript strictly by item id", () => {
+    const { events, feed } = makeSession();
+    // Turn 1 committed; its transcription is SLOW.
+    feed({ type: "input_audio_buffer.committed", item_id: "item_1" });
+    // Turn 2 committed; its transcription arrives FIRST (async reordering).
+    feed({ type: "input_audio_buffer.committed", item_id: "item_2" });
+    feed({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_2", transcript: "Вторая фраза." });
+    // Response for turn 1 completes while item_1's transcript is still missing.
+    feed({ type: "response.output_audio_transcript.done", transcript: "First phrase." });
+    feed({ type: "response.done", response: { status: "completed", usage: {} } });
+    // Late transcript for item_1 arrives only now.
+    feed({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_1", transcript: "Первая фраза." });
+    // Response for turn 2 completes.
+    feed({ type: "response.output_audio_transcript.done", transcript: "Second phrase." });
+    feed({ type: "response.done", response: { status: "completed", usage: {} } });
+
+    const completed = events.filter((e) => e.type === "turn_completed") as any[];
+    expect(completed).toHaveLength(2);
+    // Turn 1 must NOT steal item_2's transcript — honestly undefined instead.
+    expect(completed[0].metrics.sourceItemId).toBe("item_1");
+    expect(completed[0].metrics.sourceTranscript).toBeUndefined();
+    // Turn 2 reads its own transcript by item id, not the mutable latest one.
+    expect(completed[1].metrics.sourceItemId).toBe("item_2");
+    expect(completed[1].metrics.sourceTranscript).toBe("Вторая фраза.");
+    // The late item_1 transcript was still surfaced as evidence for the client
+    // to reconcile via sourceItemId.
+    const srcEvents = events.filter((e) => e.type === "source_transcript") as any[];
+    expect(srcEvents.map((e) => e.itemId)).toEqual(["item_2", "item_1"]);
+  });
+
+  it("source_transcript events carry the provider item id", () => {
+    const { events, feed } = makeSession();
+    feed({ type: "conversation.item.input_audio_transcription.completed", item_id: "item_9", transcript: "Привет" });
+    const src = events.find((e) => e.type === "source_transcript") as any;
+    expect(src.itemId).toBe("item_9");
+  });
+
+  it("a response with no pending user item has undefined attribution (honest unknown)", () => {
+    const { events, feed } = makeSession();
+    feed({ type: "response.output_audio_transcript.done", transcript: "Sure, I'm coming!" });
+    feed({ type: "response.done", response: { status: "completed", usage: {} } });
+    const turn = events.find((e) => e.type === "turn_completed") as any;
+    expect(turn.metrics.sourceItemId).toBeUndefined();
   });
 });
 
