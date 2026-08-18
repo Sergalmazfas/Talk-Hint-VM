@@ -259,7 +259,10 @@ describe("server wiring (source-level, mirrors goalCompassNotRails style)", () =
 
   it("only DELIVERED suggestions are recorded (recordSuggestion sits after the sent broadcast, alongside latencyRecorder.sent)", () => {
     const sentIdx = src.indexOf('latencyRecorder.sent(utteranceId, translated.suggestion.en)');
-    const recIdx = src.indexOf("strategyMemory.recordSuggestion(");
+    // The GUEST-turn recordSuggestion must sit after the sent broadcast. The
+    // ask-refine bridge (pushHint) has its own earlier recordSuggestion, which
+    // also records only after its uiBroadcast — search from sentIdx onward.
+    const recIdx = src.indexOf("strategyMemory.recordSuggestion(", sentIdx);
     expect(sentIdx).toBeGreaterThan(-1);
     expect(recIdx).toBeGreaterThan(sentIdx);
   });

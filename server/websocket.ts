@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, STRATEGY_MEMORY_RULES, buildLiveSystemPrompt } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, STRATEGY_MEMORY_RULES, buildLiveSystemPrompt, buildAskRefinePrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
@@ -418,6 +418,59 @@ Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me ch
   }
 }
 
+// Live-call "Ask" refine: the owner typed a mid-call instruction; produce ONE
+// replacement hint grounded in the live conversation + the current hint. This
+// is a SUGGESTION path — LIVE_GROUNDING_RULES are inside buildAskRefinePrompt
+// (shared/prompts.ts, unit-tested). Latency matters (the user is on the phone),
+// so this always uses an OpenAI model directly: the per-call Brain override or
+// the global model when they are OpenAI, else the fast fallback model.
+export async function refineHintFromAsk(instruction: string, opts: {
+  goal: string;
+  language: string;
+  conversationContext: string;
+  currentHint: string;
+  userContext: string;
+  contactContext: string;
+  staticCards: string;
+  tutorMemory: string;
+  translateEnabled: boolean;
+  strategyMemory: string;
+  modelOverride?: string;
+}): Promise<{ en: string; translation: string } | null> {
+  try {
+    const contextSections = buildContextProviderChain({
+      userContext: opts.userContext,
+      contactContext: opts.contactContext,
+      staticCards: opts.staticCards,
+      tutorMemory: opts.tutorMemory,
+    });
+    const systemPrompt = buildAskRefinePrompt({
+      goal: opts.goal,
+      language: opts.language,
+      conversationContext: opts.conversationContext,
+      currentHint: opts.currentHint,
+      contextSections,
+      translateEnabled: opts.translateEnabled,
+      strategyMemory: opts.strategyMemory,
+    });
+    const nonGemini = (m?: string) => (m && !m.startsWith("gemini") ? m : undefined);
+    const model = nonGemini(opts.modelOverride) ?? nonGemini(currentModel) ?? OPENAI_FALLBACK_MODEL;
+    const raw = await generateWithOpenAI(model, systemPrompt, instruction, 150);
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    const en = typeof parsed.en === "string" ? parsed.en.trim() : "";
+    if (!en) return null;
+    // Translation-OFF gate (user requirement: OFF must gate EVERY suggestion path).
+    const translation =
+      opts.translateEnabled && typeof parsed.translation === "string" ? parsed.translation.trim() : "";
+    return { en, translation };
+  } catch (err: any) {
+    log(`[AskRefine] failed: ${err?.message}`, "server");
+    return null;
+  }
+}
+
 // Fast, translation-only call for the live caption. Split out from
 // translateAndSuggest so the guest's translated caption can be shown WITHOUT
 // waiting for the (slower) suggestion generation. It uses the SAME provider
@@ -826,6 +879,27 @@ export function setupWebSocket(server: Server) {
     else goalsByUser.delete(userId);
   }
 
+  // Bridge from the /ui ask_ai handler into a user's ACTIVE Twilio call
+  // closure. The per-call state (conversation log, current hint, contexts,
+  // toggles) lives inside handleTwilioStream; a live call registers a bridge
+  // here (keyed by owner user id) so Ask can refine the current hint with
+  // real call context. Removed on stream close — no active call, no bridge.
+  type LiveAskBridge = {
+    snapshot: () => {
+      conversationContext: string;
+      currentHint: string;
+      userContext: string;
+      contactContext: string;
+      staticCards: string;
+      tutorMemory: string;
+      translateEnabled: boolean;
+      strategyMemory: string;
+      modelOverride?: string;
+    };
+    pushHint: (en: string, translation: string) => void;
+  };
+  const liveAskBridges = new Map<string, LiveAskBridge>();
+
   /// Classifies a message the user typed into the live-call assistant input:
   /// is it a NEW/CHANGED goal for the call (an outcome the user wants), or a
   /// regular question/request for a phrase? Returns the concise new goal text
@@ -1027,19 +1101,57 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           // AI answer still follows, grounded in the updated goal.
           (async () => {
             const goalSnapshot = getUserGoal(userId);
-            const updatedGoal = await detectGoalUpdate(question, goal);
-            // Compare-and-set: if the user explicitly set/changed the goal while
-            // classification was in flight, the newer explicit value wins — a
-            // late classifier result must never overwrite it.
-            if (updatedGoal && getUserGoal(userId) === goalSnapshot) {
-              setUserGoal(userId, updatedGoal);
-              log(`Goal updated via assistant input (user ${userId}): ${updatedGoal.substring(0, 50)}...`, "server");
-              if (userId) sendToUser(userId, { type: "goal_updated", goal: updatedGoal });
-              else ws.send(JSON.stringify({ type: "goal_updated", goal: updatedGoal }));
-              await handleAIQuestion(ws, question, updatedGoal);
-            } else {
-              await handleAIQuestion(ws, question, goal);
+            // Goal detection runs in PARALLEL with the hint work below (it used
+            // to be awaited first, adding up to 4s before any answer). A detected
+            // goal update still lands via CAS and grounds all FUTURE hints.
+            const goalPromise = detectGoalUpdate(question, goal).then((updatedGoal) => {
+              // Compare-and-set: if the user explicitly set/changed the goal while
+              // classification was in flight, the newer explicit value wins — a
+              // late classifier result must never overwrite it.
+              if (updatedGoal && getUserGoal(userId) === goalSnapshot) {
+                setUserGoal(userId, updatedGoal);
+                log(`Goal updated via assistant input (user ${userId}): ${updatedGoal.substring(0, 50)}...`, "server");
+                if (userId) sendToUser(userId, { type: "goal_updated", goal: updatedGoal });
+                else ws.send(JSON.stringify({ type: "goal_updated", goal: updatedGoal }));
+                return updatedGoal;
+              }
+              return null;
+            }).catch(() => null);
+
+            // ACTIVE CALL: Ask is NOT a chat — the text is an instruction to the
+            // live hint Brain. Refine the current hint with full call context and
+            // deliver it as a normal `suggestion` frame (the Hint banner), never
+            // as an ai_response feed card.
+            const bridge = userId ? liveAskBridges.get(userId) : undefined;
+            if (bridge) {
+              const t0 = Date.now();
+              const snap = bridge.snapshot();
+              const refined = await refineHintFromAsk(question, {
+                goal,
+                language: currentLanguage,
+                ...snap,
+              });
+              if (refined) {
+                // Revalidate AFTER the model await: if this call ended or a
+                // newer call replaced the bridge while the refine was in
+                // flight, the stale hint must never reach the (new) screen.
+                if (liveAskBridges.get(userId!) === bridge) {
+                  bridge.pushHint(refined.en, refined.translation);
+                  log(`[AskRefine] hint refined in ${Date.now() - t0}ms: "${refined.en.substring(0, 60)}"`, "server");
+                } else {
+                  log(`[AskRefine] call ended/replaced during refine (${Date.now() - t0}ms) — dropping stale hint`, "server");
+                }
+                return;
+              }
+              // Refine failed (model error/unparseable): report it VISIBLY as
+              // an error card — never silence, and never a normal chat answer
+              // during an active call (Ask is a hint instruction, not a chat).
+              log(`[AskRefine] no refined hint after ${Date.now() - t0}ms — reporting error to client`, "server");
+              ws.send(JSON.stringify({ type: "ai_response", text: "Не удалось обновить подсказку. Попробуйте ещё раз.", error: true }));
+              return;
             }
+            const updatedGoal = await goalPromise;
+            await handleAIQuestion(ws, question, updatedGoal || goal);
           })().catch((err) => log(`ask_ai handling error: ${err?.message}`, "server"));
         }
       } catch (err) {}
@@ -1208,11 +1320,64 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Robot callers speak in 3-5s bursts, which used to silently swallow questions.
     const hintCarryover = new HintCarryover();
 
+    // Monotonic counter for ask-refined hints (negative utteranceId namespace).
+    let askHintSeq = 0;
+
     // v2.2 Strategy Memory (Task #236): bounded per-call tracker of the last
     // few hint cycles (suggestion -> actual Owner speech -> Guest reaction).
     // Deterministic string work only — no LLM, no DB, no extra latency. Its
     // render() feeds the RECENT STRATEGY MEMORY block of the live prompt.
     const strategyMemory = new StrategyMemoryTracker();
+
+    // Ask-refine bridge for THIS call (see liveAskBridges): exposes a context
+    // snapshot for the ask_ai handler and a push that delivers the refined
+    // hint through the normal `suggestion` frame — same banner in the client,
+    // and the anti-loop / strategy-memory bookkeeping stays consistent so the
+    // next automatic hint knows what the user last saw.
+    const askBridge: LiveAskBridge = {
+      snapshot: () => ({
+        conversationContext: conversationLog.map((m) => `${m.speaker}: ${m.text}`).join("\n"),
+        currentHint: lastSuggestionText,
+        userContext: ownerContext,
+        contactContext,
+        staticCards,
+        tutorMemory: tutorMemoryBlock,
+        translateEnabled: callSettings.translationEnabled,
+        strategyMemory: strategyMemory.render(),
+        modelOverride: brainModelOverride,
+      }),
+      pushHint: (en: string, translation: string) => {
+        // Distinct negative id namespace: ask-refined hints are NOT part of the
+        // speech→hint latency chain, so their device ACKs must never attach to
+        // (or overwrite) a real guest utterance's latencyRecorder entry — the
+        // recorder has no entry for this id, so the ACK is a silent no-op.
+        askHintSeq += 1;
+        uiBroadcast({
+          type: "suggestion",
+          target: "HON",
+          eventType: "suggestion",
+          source: "ask",
+          basedOnSpeaker: "HON",
+          en,
+          translation,
+          utteranceId: -(1000 + askHintSeq),
+          callSid,
+        });
+        lastSuggestionText = en;
+        recentSuggestions.push(en);
+        if (recentSuggestions.length > RECENT_SUGGESTIONS_MAX) recentSuggestions.shift();
+        strategyMemory.recordSuggestion(en);
+        // The refined hint is now the newest thing on the user's screen: mark
+        // the current guest turn as already hinted (an in-flight automatic
+        // hint for the same turn must not immediately overwrite the phrase the
+        // user explicitly asked for) and arm the normal cooldown.
+        lastHintUtteranceId = Math.max(lastHintUtteranceId, latestGuestUtteranceId);
+        lastHintTs = Date.now();
+      },
+    };
+    const registerAskBridge = () => {
+      if (streamUserId) liveAskBridges.set(streamUserId, askBridge);
+    };
 
     // Self-overlap guard - don't suggest something the owner (HON) already said.
     // The suggestion is what HON should say next; if HON already voiced essentially
@@ -2353,6 +2518,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                 // post-close grace window; no owner => no registration (acks
                 // fail closed, matching uiBroadcast's fail-closed routing).
                 registerLatencyRecorder(callSid, streamUserId, latencyRecorder);
+                registerAskBridge();
                 ownerContextReady = loadOwnerContext(streamUserId);
               } else {
                 const sidForLookup = callSid;
@@ -2366,6 +2532,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
                       streamUserId = uid;
                       callOwners.set(sidForLookup, uid);
                       registerLatencyRecorder(sidForLookup, uid, latencyRecorder);
+                      registerAskBridge();
                       log(`[TwilioStream] Resolved owner ${uid} for ${sidForLookup} via DB`, "twilio");
                       return loadOwnerContext(uid);
                     } else {
@@ -2730,6 +2897,11 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         removeEngine(callSid);
         utteranceGate.cleanup(callSid);
         clearCallOwner(callSid);
+      }
+      // Remove this call's Ask bridge (only if it is still OURS — a newer
+      // call for the same user must not lose its bridge to a late close).
+      if (streamUserId && liveAskBridges.get(streamUserId) === askBridge) {
+        liveAskBridges.delete(streamUserId);
       }
       
       // Reset hint throttling, anti-loop guards, and wait state for next call

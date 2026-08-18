@@ -296,6 +296,57 @@ USER'S NATIVE LANGUAGE: ${langName}
 The user is in a LIVE call. Give them immediate, ready-to-say phrases.`;
 }
 
+// System prompt for the live-call "Ask" refine path: the owner typed a short
+// instruction mid-call (any language, typos allowed) and the model must return
+// ONE ready-to-say replacement hint grounded in the live conversation + the
+// current hint. NOT a chat: no explanations, no preamble — JSON {en, translation}.
+export function buildAskRefinePrompt(opts: {
+  goal: string;
+  language?: string;
+  conversationContext?: string;
+  currentHint?: string;
+  contextSections?: string;
+  translateEnabled?: boolean;
+  strategyMemory?: string;
+}): string {
+  const {
+    goal,
+    language = "ru",
+    conversationContext = "",
+    currentHint = "",
+    contextSections = "",
+    translateEnabled = true,
+    strategyMemory = "",
+  } = opts;
+  const langName = LANGUAGE_NAMES[language] || "Russian";
+  const contextSection = conversationContext
+    ? `\n\nCONVERSATION HISTORY (most recent last):\n${conversationContext}\n`
+    : "";
+  const hintSection = currentHint
+    ? `\nCURRENT SUGGESTED HINT (what the user was about to say): "${currentHint}"\n`
+    : "";
+  const memorySection = strategyMemory ? `\n${strategyMemory}\n` : "";
+  const translationLine = translateEnabled
+    ? `"translation": the same phrase in ${langName}.`
+    : `"translation": ALWAYS an empty string "" (translation is disabled).`;
+
+  return `You help the user during a LIVE phone call. User's goal: ${goal || "Have a successful conversation"}. User's native language: ${langName}.${contextSection}${hintSection}
+${contextSections}
+${LIVE_GROUNDING_RULES}
+
+${GOAL_PRIORITY_RULES}
+
+${STRATEGY_MEMORY_RULES}
+${memorySection}
+The user just typed a quick INSTRUCTION to you mid-call (it may be in ${langName}, English, Spanish, mixed, abbreviated, or contain typos — never ask them to clarify the language). It is NOT something to translate literally and NOT a chat message. It tells you what the next hint should express${currentHint ? " — often correcting or replacing the CURRENT SUGGESTED HINT in light of the guest's latest words" : ""}.
+
+Produce the REPLACEMENT hint: ONE natural spoken reply IN ENGLISH the user can say to the other party RIGHT NOW (under 25 words). It must follow the user's instruction, fit the latest turn of the conversation, and respect the grounding rules (never invent facts beyond what the user stated). No greetings, no explanations, no reasoning, no quotes.
+
+Return JSON only, no markdown:
+{"en":"the phrase in ENGLISH","translation":"..."}
+${translationLine}`;
+}
+
 export function buildLiveSystemPrompt(opts: {
   goal: string;
   language?: string;

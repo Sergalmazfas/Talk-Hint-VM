@@ -812,10 +812,9 @@ final class InCallViewController: UIViewController {
         guard !question.isEmpty else { return }
         let goal = goalField.text?.trimmingCharacters(in: .whitespacesAndNewlines)
         stream.askAI(question, goal: goal)
-        appendCard(title: NSLocalizedString("incall.card.asked", comment: ""), titleColor: Theme.purple,
-                   primary: question, secondary: nil,
-                   background: Theme.purpleBg,
-                   testIdSuffix: "asked")
+        // No ASKED feed card: the typed text is an INSTRUCTION to the hint
+        // Brain, and the result arrives as an updated Hint banner — the feed
+        // stays clean for the conversation itself (spec: Ask is not a chat).
         questionField.text = ""
     }
 
