@@ -17,16 +17,41 @@ import { eq } from "drizzle-orm";
 import { parseTranscriptText } from "../airatomaWebhook";
 
 // ---------------------------------------------------------------------------
-// Recording notification / consent policy.
-// Twilio does NOT automatically announce recording; we play a configurable
-// notice ourselves. Text + version are backend-configured (env override), not
-// hardcoded in clients, and the version used is persisted with the recording.
+// Recording notification / consent policies.
+// Twilio does NOT announce recording automatically. Explicitly approved
+// diagnostic users can record their own test phones silently. Recording is
+// never enabled by a global switch; the per-user admin capability is the only
+// recording authority. The chosen policy is persisted with each recording.
 // ---------------------------------------------------------------------------
 export const RECORDING_NOTICE_TEXT =
   process.env.RECORDING_NOTICE_TEXT ||
   "This call may be recorded for quality and diagnostic purposes.";
 export const RECORDING_POLICY_VERSION =
   process.env.RECORDING_NOTICE_POLICY_VERSION || "notice-v1";
+export const SILENT_TEST_RECORDING_POLICY_VERSION = "silent-test-v1";
+export type RecordingPolicy = "notice" | "silent-test";
+
+/**
+ * Silent recording is deliberately narrower than the diagnostic capability:
+ * one explicitly approved test user and that user's designated phone numbers.
+ * Missing/malformed configuration fails closed to "notice required".
+ */
+export function isSilentDiagnosticTestCall(
+  userId: string | null | undefined,
+  counterpartNumber: string | null | undefined,
+): boolean {
+  const approvedUserId = process.env.DIAGNOSTIC_SILENT_TEST_USER_ID?.trim();
+  if (!approvedUserId || !userId || userId !== approvedUserId || !counterpartNumber) {
+    return false;
+  }
+  const counterpart = counterpartNumber.trim();
+  if (!/^\+[1-9]\d{6,14}$/.test(counterpart)) return false;
+  const approvedNumbers = (process.env.DIAGNOSTIC_SILENT_TEST_PHONE_NUMBERS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^\+[1-9]\d{6,14}$/.test(value));
+  return approvedNumbers.includes(counterpart);
+}
 
 // Fail-closed capability check: any error (DB down, missing user) means "do
 // not record" — never break the call path. This runs inside Twilio webhook
@@ -79,17 +104,23 @@ export async function isDiagnosticRecordingUser(userId: string | null | undefine
   }
 }
 
-// Persist which consent policy version was in effect when recording started.
+// Persist which recording policy was in effect when recording started.
 // Fire-and-forget: metadata bookkeeping must never affect the call.
-export async function stampRecordingPolicy(callSid: string): Promise<void> {
+export async function stampRecordingPolicy(
+  callSid: string,
+  policy: RecordingPolicy = "notice",
+): Promise<void> {
   try {
     const [call] = await db.select().from(calls).where(eq(calls.callSid, callSid)).limit(1);
     if (!call) return;
+    const silentTest = policy === "silent-test";
     const metadata = {
       ...((call.metadata as any) ?? {}),
-      diagnosticRecording: true,
-      recordingPolicyVersion: RECORDING_POLICY_VERSION,
-      recordingNoticeText: RECORDING_NOTICE_TEXT,
+      diagnosticRecording: silentTest,
+      benchmarkRecording: !silentTest,
+      recordingPolicyVersion:
+        silentTest ? SILENT_TEST_RECORDING_POLICY_VERSION : RECORDING_POLICY_VERSION,
+      recordingNoticeText: silentTest ? null : RECORDING_NOTICE_TEXT,
     };
     await db.update(calls).set({ metadata }).where(eq(calls.id, call.id));
   } catch (e: any) {

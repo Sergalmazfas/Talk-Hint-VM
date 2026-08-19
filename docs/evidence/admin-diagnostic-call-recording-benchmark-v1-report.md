@@ -18,14 +18,13 @@ Date: 2026-08-14. Status: **BLOCKED — awaiting the first real phone call** (al
 - Separate backend capability `users.diagnostic_recording_enabled` (default **false** for everyone). NOT tied to admin role.
 - Enabled initially only for the approved admin/test account (`sergalmazfas@gmail.com`, Replit-auth login).
 - Capability check is fail-closed: any DB/lookup error → "do not record"; a recording failure can never stop or degrade the call (all bookkeeping is try/caught, callbacks always answer 200).
-- Global `BENCHMARK_CALL_RECORDING=1` env toggle from #172 still works independently.
+- Recording is not enabled by a global environment toggle; the per-user admin capability is the only authority.
 
-## Consent / notification mechanism
-- Twilio does not announce recording automatically; TalkHint plays a backend-configured notice itself:
-  - Outbound: whisper TwiML (`POST /twilio/recording-notice`) played to the called party before bridging.
-  - Incoming: `<Say>` of the notice to the caller before "Connecting you now."
-- Text via `RECORDING_NOTICE_TEXT`, version via `RECORDING_NOTICE_POLICY_VERSION` (default `notice-v1`); nothing hardcoded in clients.
-- The policy version + notice text in effect are stamped into the call's metadata alongside the recording.
+## Diagnostic recording policy
+- Twilio does not announce recording automatically.
+- Diagnostic calls from the approved test account to its own phones are recorded silently: no outbound whisper or incoming recording notice is played.
+- Recording is controlled only by the per-user `diagnostic_recording_enabled` admin capability. The legacy global benchmark toggle cannot enable recording.
+- Call metadata distinguishes `silent-test-v1` diagnostic recordings (`recordingNoticeText: null`) from diagnostic recordings that retain the configured notice (`notice-v1` by default).
 
 ## Stored metadata (per recorded call)
 TalkHint call id ↔ CallSid ↔ RecordingSid, recording status, channels, duration, completion timestamp, consent policy version, diagnostic flag, plus (after intake) benchmark fixture id / Gold Call status.

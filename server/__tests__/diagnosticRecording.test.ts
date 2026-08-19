@@ -8,6 +8,8 @@ import {
   transcriptToReferenceTurns,
   RECORDING_NOTICE_TEXT,
   RECORDING_POLICY_VERSION,
+  SILENT_TEST_RECORDING_POLICY_VERSION,
+  isSilentDiagnosticTestCall,
 } from "../benchmark/diagnosticRecording";
 
 describe("transcriptToReferenceTurns", () => {
@@ -45,9 +47,36 @@ describe("transcriptToReferenceTurns", () => {
 });
 
 describe("recording consent policy", () => {
-  it("has a non-empty backend-configured notice text and version", () => {
+  it("keeps distinct policies for global and approved diagnostic recordings", () => {
     expect(RECORDING_NOTICE_TEXT.length).toBeGreaterThan(10);
-    expect(RECORDING_POLICY_VERSION).toMatch(/\S/);
+    expect(RECORDING_POLICY_VERSION).toBe("notice-v1");
+    expect(SILENT_TEST_RECORDING_POLICY_VERSION).toBe("silent-test-v1");
+  });
+
+  it("allows silent recording only for the configured user and exact test number", () => {
+    process.env.DIAGNOSTIC_SILENT_TEST_USER_ID = "approved-user";
+    process.env.DIAGNOSTIC_SILENT_TEST_PHONE_NUMBERS = "+15550001111,+15550002222";
+
+    expect(isSilentDiagnosticTestCall("approved-user", "+15550001111")).toBe(true);
+    expect(isSilentDiagnosticTestCall("another-user", "+15550001111")).toBe(false);
+    expect(isSilentDiagnosticTestCall("approved-user", "+15559999999")).toBe(false);
+    expect(isSilentDiagnosticTestCall("approved-user", "5550001111")).toBe(false);
+
+    delete process.env.DIAGNOSTIC_SILENT_TEST_USER_ID;
+    delete process.env.DIAGNOSTIC_SILENT_TEST_PHONE_NUMBERS;
+  });
+
+  it("fails closed when the silent-test allowlist is absent or malformed", () => {
+    delete process.env.DIAGNOSTIC_SILENT_TEST_USER_ID;
+    delete process.env.DIAGNOSTIC_SILENT_TEST_PHONE_NUMBERS;
+    expect(isSilentDiagnosticTestCall("approved-user", "+15550001111")).toBe(false);
+
+    process.env.DIAGNOSTIC_SILENT_TEST_USER_ID = "approved-user";
+    process.env.DIAGNOSTIC_SILENT_TEST_PHONE_NUMBERS = "not-a-number";
+    expect(isSilentDiagnosticTestCall("approved-user", "+15550001111")).toBe(false);
+
+    delete process.env.DIAGNOSTIC_SILENT_TEST_USER_ID;
+    delete process.env.DIAGNOSTIC_SILENT_TEST_PHONE_NUMBERS;
   });
 });
 
