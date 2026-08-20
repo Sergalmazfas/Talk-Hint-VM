@@ -168,7 +168,7 @@ export function generateReport(inp: ReportInput): string {
   if (!inp.earsHadRealAudio) {
     lines.push(`**No winner can be declared.** No real audio fixtures exist yet (TalkHint has never recorded call audio). ` +
       `Availability of every STT candidate was verified with real API calls (see above), but accuracy/latency comparison requires real dual-channel call audio. ` +
-      `Next step: enable the opt-in recording toggle (BENCHMARK_CALL_RECORDING=1) for a few benchmark calls, or upload audio fixtures in the admin UI.`);
+      `Next step: enable diagnostic recording for the approved test account for a few benchmark calls, or upload audio fixtures in the admin UI.`);
   } else {
     lines.push(`See EARS scorecard in the run results.`);
   }

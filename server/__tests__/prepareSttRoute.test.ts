@@ -134,7 +134,6 @@ vi.mock("../benchmark/diagnosticRecording", () => ({
   isDiagnosticRecordingUser: vi.fn(() => false),
   stampRecordingPolicy: vi.fn(async () => {}),
   scheduleAutoBenchmark: vi.fn(),
-  RECORDING_NOTICE_TEXT: "",
 }));
 
 vi.mock("drizzle-orm", async (orig) => {

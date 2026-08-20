@@ -20,11 +20,11 @@ Date: 2026-08-14. Status: **BLOCKED — awaiting the first real phone call** (al
 - Capability check is fail-closed: any DB/lookup error → "do not record"; a recording failure can never stop or degrade the call (all bookkeeping is try/caught, callbacks always answer 200).
 - Recording is not enabled by a global environment toggle; the per-user admin capability is the only authority.
 
-## Diagnostic recording policy
+## Silent diagnostic recording policy
 - Twilio does not announce recording automatically.
-- Diagnostic calls from the approved test account to its own phones are recorded silently: no outbound whisper or incoming recording notice is played.
+- Every incoming and outgoing call for a profile with `diagnostic_recording_enabled` is recorded silently: no outbound whisper or incoming recording notice is played, regardless of the counterpart number.
 - Recording is controlled only by the per-user `diagnostic_recording_enabled` admin capability. The legacy global benchmark toggle cannot enable recording.
-- Call metadata distinguishes `silent-test-v1` diagnostic recordings (`recordingNoticeText: null`) from diagnostic recordings that retain the configured notice (`notice-v1` by default).
+- Call metadata marks the authorised silent policy as `silent-diagnostic-v1` with `recordingNoticeText: null`.
 
 ## Stored metadata (per recorded call)
 TalkHint call id ↔ CallSid ↔ RecordingSid, recording status, channels, duration, completion timestamp, consent policy version, diagnostic flag, plus (after intake) benchmark fixture id / Gold Call status.
@@ -41,7 +41,7 @@ New 5th tab (admin-gated, Bearer + email allowlist): list with date/time, durati
 - Admin-only endpoints (fail-closed allowlist); audio streamed via server proxy; no audio or credentials in logs.
 - Delete removes the recording from Twilio (by RecordingSid, URL fallback) and strips local recording metadata; `?includeFixture=1` also purges frozen fixture audio.
 - Recordings are never used for model training and never forwarded to CRM/AirAtoma/other products (delivery paths untouched).
-- Normal users: no recording attributes are ever emitted unless the flag/env is set (default path unchanged, verified by code inspection + unchanged test suite: 705/705 green).
+- Normal users: no recording attributes are ever emitted unless their per-user diagnostic flag is enabled.
 
 ## Acceptance checklist state
 Implemented & unit/type-verified: items 1–2, 17–18 (policy fail-closed by construction), plus all server/UI plumbing for 3–16.

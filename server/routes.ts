@@ -34,8 +34,6 @@ import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
   scheduleAutoBenchmark,
-  RECORDING_NOTICE_TEXT,
-  isSilentDiagnosticTestCall,
 } from "./benchmark/diagnosticRecording";
 
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -995,14 +993,8 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         // Fail-closed helper — any error means "don't record"; a recording
         // failure can never stop or degrade the call.
         const diagRecording = await isDiagnosticRecordingUser(pendingCall.userId);
-        const silentDiagnosticTest =
-          diagRecording &&
-          isSilentDiagnosticTestCall(pendingCall.userId, pendingCall.fromNumber);
         if (diagRecording) {
-          if (!silentDiagnosticTest) {
-            twimlResponse.say({ voice: "alice" }, RECORDING_NOTICE_TEXT);
-          }
-          void stampRecordingPolicy(callSid, silentDiagnosticTest ? "silent-test" : "notice");
+          void stampRecordingPolicy(callSid);
         }
         const recordingCallbackUrl = `https://${host}/twilio/recording-status`;
 
@@ -1486,20 +1478,10 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // legacy global env toggle is intentionally ignored so no other user or
       // line can turn recording on.
       const shouldRecord = diagnosticTestRecording;
-      const userId = fromNumber?.startsWith("client:user-")
-        ? fromNumber.replace("client:user-", "")
-        : null;
-      const silentDiagnosticTest =
-        diagnosticTestRecording &&
-        isSilentDiagnosticTestCall(userId, toNumber);
       if (shouldRecord) {
-        // Explicit diagnostic users may test their own phones silently only
-        // when the server-side test-number allowlist matches. Other calls
-        // made by that diagnostic user retain the recording notice.
-        void stampRecordingPolicy(
-          callSid,
-          silentDiagnosticTest ? "silent-test" : "notice",
-        );
+        // The admin-enabled diagnostic profile records silently regardless of
+        // the counterpart number. No global or line-based switch can enable it.
+        void stampRecordingPolicy(callSid);
       }
       const dial = twimlResponse.dial({ 
         callerId: userCallerId,
@@ -1514,14 +1496,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
           recordingStatusCallbackMethod: "POST" as const,
         } : {}),
       });
-      // Only explicitly approved diagnostic users get silent recording.
-      // Global benchmark recording keeps the pre-bridge notice.
-      dial.number(
-        shouldRecord && !silentDiagnosticTest
-          ? { url: `https://${host}/twilio/recording-notice`, method: "POST" as const }
-          : {},
-        toNumber,
-      );
+      dial.number(toNumber);
       console.log("[TwiML Voice] Dialing:", toNumber, "with stream:", streamUrl);
     } else {
       twimlResponse.say("Sorry, this call cannot be connected.");
@@ -1531,15 +1506,6 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     const twimlXml = twimlResponse.toString();
     console.log("[TwiML Voice] Generated TwiML:", twimlXml);
     res.type("text/xml").send(twimlXml);
-  });
-
-  // Recording notice for diagnostic calls whose counterpart is not on the
-  // approved silent-test number allowlist.
-  app.post("/twilio/recording-notice", validateTwilioSignature, (_req, res) => {
-    const VoiceResponse = twilio.twiml.VoiceResponse;
-    const notice = new VoiceResponse();
-    notice.say({ voice: "alice" }, RECORDING_NOTICE_TEXT);
-    res.type("text/xml").send(notice.toString());
   });
 
   // Stores the native Twilio recording (URL/SID/duration/channels) in call

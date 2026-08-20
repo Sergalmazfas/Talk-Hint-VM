@@ -59,7 +59,7 @@ Fixture: Gold Call #1 â€” bank payment-plan dispute (synthetic, de-identified) Â
 }
 
 ## EARS WINNER
-**No winner can be declared.** No real audio fixtures exist yet (TalkHint has never recorded call audio). Availability of every STT candidate was verified with real API calls (see above), but accuracy/latency comparison requires real dual-channel call audio. Next step: enable the opt-in recording toggle (BENCHMARK_CALL_RECORDING=1) for a few benchmark calls, or upload audio fixtures in the admin UI.
+**No winner can be declared.** No real audio fixtures exist yet (TalkHint has never recorded call audio). Availability of every STT candidate was verified with real API calls (see above), but accuracy/latency comparison requires real dual-channel call audio. Next step: enable diagnostic recording for the approved test account for a few benchmark calls, or upload audio fixtures in the admin UI.
 - note: EARS accuracy run skipped: no real audio fixtures yet (TalkHint has never recorded call audio; recording toggle is opt-in and OFF).
 
 ## BRAIN WINNER

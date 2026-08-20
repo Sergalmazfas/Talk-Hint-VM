@@ -87,7 +87,7 @@ export function registerBenchmarkRoutes(app: Express) {
     }
   });
 
-  // Import a benchmark recording (made with BENCHMARK_CALL_RECORDING=1) as an
+  // Import a diagnostic call recording as an
   // EARS audio fixture: downloads the dual-channel audio from Twilio using the
   // recording URL stored in the call's metadata, and requires the admin to
   // supply the frozen reference transcript (turns) for scoring.

@@ -16,7 +16,6 @@ const h = vi.hoisted(() => {
   const store: { rows: any[] } = { rows: [] };
   const recording = {
     diagnosticUsers: new Set<string>(),
-    silentNumbersByUser: new Map<string, Set<string>>(),
   };
 
   // drizzle columns expose a snake_case `.name`; our rows use camelCase keys.
@@ -191,12 +190,8 @@ vi.mock("../benchmark/diagnosticRecording", () => ({
   isDiagnosticRecordingUser: vi.fn(async (userId: string) =>
     h.recording.diagnosticUsers.has(userId)
   ),
-  isSilentDiagnosticTestCall: vi.fn((userId: string, counterpart: string) =>
-    h.recording.silentNumbersByUser.get(userId)?.has(counterpart) ?? false
-  ),
   stampRecordingPolicy: vi.fn().mockResolvedValue(undefined),
   scheduleAutoBenchmark: vi.fn(),
-  RECORDING_NOTICE_TEXT: "This call may be recorded for quality and diagnostic purposes.",
 }));
 vi.mock("../training", () => ({
   startTrainingSession: vi.fn(),
@@ -249,7 +244,6 @@ let app: express.Express;
 beforeEach(async () => {
   h.store.rows = [];
   h.recording.diagnosticUsers.clear();
-  h.recording.silentNumbersByUser.clear();
   delete process.env.BENCHMARK_CALL_RECORDING;
   vi.mocked(stampRecordingPolicy).mockClear();
   app = await makeApp();
@@ -397,9 +391,8 @@ describe("/api/twilio/hold browser bridge (regression)", () => {
     expect(holdRes.text).not.toContain("<Client>");
   });
 
-  it("keeps the notice for an arbitrary inbound caller to a diagnostic user", async () => {
+  it("silently records an arbitrary inbound caller to a diagnostic user", async () => {
     h.recording.diagnosticUsers.add(OWNER);
-    h.recording.silentNumbersByUser.set(OWNER, new Set(["+15550001111"]));
     seedPendingCall({
       userId: OWNER,
       fromNumber: "+15559998888",
@@ -413,8 +406,25 @@ describe("/api/twilio/hold browser bridge (regression)", () => {
 
     expect(holdRes.status).toBe(200);
     expect(holdRes.text).toContain('record="record-from-answer-dual"');
-    expect(holdRes.text).toContain("This call may be recorded");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID, "notice");
+    expect(holdRes.text).not.toContain("This call may be recorded");
+    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
+  });
+
+  it("does not record an inbound caller when the owner's diagnostic flag is off", async () => {
+    seedPendingCall({
+      userId: OWNER,
+      fromNumber: "+15559998888",
+      status: "accepted",
+      clientType: "browser",
+    });
+
+    const holdRes = await request(app).post(
+      `/api/twilio/hold?callSid=${CALL_SID}&userId=${OWNER}`,
+    );
+
+    expect(holdRes.status).toBe(200);
+    expect(holdRes.text).not.toContain('record="record-from-answer-dual"');
+    expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 });
 
@@ -457,9 +467,8 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(setCallOwner).not.toHaveBeenCalled();
   });
 
-  it("records an approved diagnostic user's own test call silently", async () => {
+  it("silently records an approved diagnostic user's outbound call to any destination", async () => {
     h.recording.diagnosticUsers.add(OWNER);
-    h.recording.silentNumbersByUser.set(OWNER, new Set(["+15559998888"]));
 
     const res = await request(app)
       .post("/twilio/voice")
@@ -473,7 +482,7 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain('record="record-from-answer-dual"');
     expect(res.text).not.toContain("/twilio/recording-notice");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID, "silent-test");
+    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
   });
 
   it("does not let the legacy global toggle enable recording", async () => {
@@ -494,9 +503,8 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 
-  it("keeps the notice for a diagnostic user calling a non-approved number", async () => {
+  it("does not restore the notice when a diagnostic user calls a different number", async () => {
     h.recording.diagnosticUsers.add(OWNER);
-    h.recording.silentNumbersByUser.set(OWNER, new Set(["+15550001111"]));
 
     const res = await request(app)
       .post("/twilio/voice")
@@ -509,14 +517,13 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).toContain('record="record-from-answer-dual"');
-    expect(res.text).toContain("/twilio/recording-notice");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID, "notice");
+    expect(res.text).not.toContain("/twilio/recording-notice");
+    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
   });
 
   it("keeps the admin capability as the only recording authority", async () => {
     process.env.BENCHMARK_CALL_RECORDING = "1";
     h.recording.diagnosticUsers.add(OWNER);
-    h.recording.silentNumbersByUser.set(OWNER, new Set(["+15559998888"]));
 
     const res = await request(app)
       .post("/twilio/voice")
@@ -529,7 +536,7 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).not.toContain("/twilio/recording-notice");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID, "silent-test");
+    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
   });
 
   it("does not record or announce ordinary calls", async () => {

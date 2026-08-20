@@ -1142,7 +1142,7 @@ function ImportRecordingDialog({ open, onOpenChange }: { open: boolean; onOpenCh
       if (res.status === 404) {
         toast({
           title: "Запись не найдена",
-          description: "Для этого звонка нет benchmark-записи. Убедитесь, что звонок был сделан с BENCHMARK_CALL_RECORDING=1.",
+          description: "Для этого звонка нет benchmark-записи. Убедитесь, что для владельца звонка была включена диагностическая запись.",
           variant: "destructive",
         });
         return;
@@ -1165,7 +1165,7 @@ function ImportRecordingDialog({ open, onOpenChange }: { open: boolean; onOpenCh
         <DialogHeader>
           <DialogTitle>Импортировать запись звонка</DialogTitle>
           <DialogDescription className="text-gray-400">
-            Скачивает dual-channel запись из Twilio (звонок с BENCHMARK_CALL_RECORDING=1) и сохраняет как wav-фикстуру.
+            Скачивает доступную dual-channel запись диагностического звонка из Twilio и сохраняет как wav-фикстуру.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
