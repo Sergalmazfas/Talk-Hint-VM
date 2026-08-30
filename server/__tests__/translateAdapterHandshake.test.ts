@@ -57,6 +57,26 @@ describe("gpt-realtime-translate connect handshake (fake server)", () => {
     closer.close();
   });
 
+  it("preserves the provider error when the handshake fails", async () => {
+    const errorServer = new WebSocketServer({ port: 0 });
+    errorServer.on("connection", (ws) => {
+      ws.send(JSON.stringify({
+        type: "error",
+        error: {
+          type: "insufficient_quota",
+          code: "credit_balance_exhausted",
+          message: "You have no credits remaining.",
+        },
+      }));
+      ws.close();
+    });
+    await new Promise<void>((r) => errorServer.on("listening", () => r()));
+    const url = `ws://127.0.0.1:${(errorServer.address() as any).port}`;
+    const s = new OpenAIRealtimeTranslateSession(config, { url, handshakeTimeoutMs: 2000 });
+    await expect(s.connect()).rejects.toThrow(/credit_balance_exhausted/);
+    errorServer.close();
+  });
+
   it("rejects with a connection error for an unreachable server", async () => {
     const s = new OpenAIRealtimeTranslateSession(config, {
       url: "ws://127.0.0.1:1",

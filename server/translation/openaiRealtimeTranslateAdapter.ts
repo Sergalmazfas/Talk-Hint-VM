@@ -183,6 +183,7 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
         headers: { Authorization: `Bearer ${key}` },
       });
       let settled = false;
+      let handshakeProviderError: Error | null = null;
       // Bounded handshake: if the server accepts the socket but never sends
       // session.updated, startSession() must still settle (and the socket
       // must be torn down) — a pending-forever start leaks the upstream
@@ -228,6 +229,11 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
         } catch {
           return;
         }
+        if (!settled && msg.type === "error") {
+          const detail = JSON.stringify(msg.error || msg);
+          handshakeProviderError = new Error(`provider error: ${detail}`);
+          fail(handshakeProviderError);
+        }
         if (!settled && msg.type === "session.updated") {
           settled = true;
           clearTimeout(handshakeTimer);
@@ -240,7 +246,7 @@ export class OpenAIRealtimeTranslateSession implements RealtimeTranslationSessio
         this.emit({ type: "error", message: (err as Error).message, fatal: true });
       });
       ws.on("close", () => {
-        fail(new Error("translation socket closed before session.updated"));
+        fail(handshakeProviderError || new Error("translation socket closed before session.updated"));
         this.emitClosed();
       });
     });
