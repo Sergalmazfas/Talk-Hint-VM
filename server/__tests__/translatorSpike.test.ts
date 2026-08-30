@@ -1,7 +1,14 @@
 // Translator Realtime Spike — contract tests for the dev-only stand gating
 // and the OpenAI adapter's cost/prompt helpers. No network access.
 import { describe, it, expect, afterEach } from "vitest";
-import { isSpikeEnabled, isValidSpikeToken, sanitizeSpikeControls } from "../translation/spike";
+import {
+  archiveCurrentRun,
+  computeScorecard,
+  isSpikeEnabled,
+  isValidSpikeToken,
+  sanitizeSpikeControls,
+  type SpikeArchiveState,
+} from "../translation/spike";
 import {
   buildInterpreterInstructions,
   estimateTurnCostUsd,
@@ -79,6 +86,148 @@ describe("sanitizeSpikeControls", () => {
       .toEqual({ inputLang: "es", outputLang: "ru", voice: "cedar", provider: "openai-realtime" });
     expect(sanitizeSpikeControls({ inputLang: "de", outputLang: "kk", voice: "hasOwnProperty", provider: "evil" }))
       .toEqual({ inputLang: "auto", outputLang: "en", voice: "marin", provider: "openai-realtime" });
+  });
+});
+
+describe("translator spike run scorecard isolation", () => {
+  function runState(
+    overrides: Partial<SpikeArchiveState> = {},
+  ): SpikeArchiveState {
+    return {
+      session: { model: "gpt-realtime" },
+      sessionConfig: {
+        capabilities: {
+          turnLifecycle: true,
+          audioMinutePriceUsd: null,
+        },
+      },
+      turns: [
+        {
+          latencyMs: 400,
+          estimatedCostUsd: 0.12,
+          audioInMs: 1000,
+          audioOutMs: 1000,
+          translatedTranscript: "Hello",
+          sourceItemId: "item-1",
+        },
+      ],
+      sourceUtterances: [
+        {
+          index: 0,
+          itemId: "item-1",
+          text: "Привет",
+          meaningful: true,
+        },
+      ],
+      cancellations: [],
+      review: { results: {}, ranAt: null },
+      sessionStartTs: 1_000_000,
+      now: 1_120_000,
+      errors: [],
+      invariantViolations: [],
+      suppressedMicroturnsCount: 0,
+      gatedIntervals: 0,
+      totalGatedMs: 0,
+      eventLog: [],
+      eventLogDropped: 0,
+      ...overrides,
+    };
+  }
+
+  it("archives each provider with its own capabilities and scoring rules", () => {
+    const realtimeState = runState();
+    const realtimeRun = archiveCurrentRun(
+      realtimeState,
+      "controls changed",
+      "2026-08-30T10:00:00.000Z",
+    )!;
+
+    // Simulate the provider selector changing after the first run was
+    // archived. The prior export must remain immutable.
+    realtimeState.sessionConfig!.capabilities!.turnLifecycle = false;
+    realtimeState.sessionConfig!.capabilities!.audioMinutePriceUsd = 0.034;
+
+    const translateRun = archiveCurrentRun(
+      runState({
+        session: { model: "gpt-realtime-translate" },
+        sessionConfig: {
+          capabilities: {
+            turnLifecycle: false,
+            audioMinutePriceUsd: 0.034,
+          },
+        },
+        turns: [
+          {
+            latencyMs: 300,
+            estimatedCostUsd: 0.001,
+            audioInMs: 1000,
+            audioOutMs: 1000,
+            translatedTranscript: "Hello",
+          },
+        ],
+        sourceUtterances: [
+          { index: 0, itemId: null, text: "Привет", meaningful: true },
+        ],
+      }),
+      "controls changed",
+      "2026-08-30T10:02:00.000Z",
+    )!;
+
+    const exported = JSON.parse(
+      JSON.stringify({ completedRuns: [realtimeRun, translateRun] }),
+    ).completedRuns;
+
+    expect(exported[0].capabilities).toEqual({
+      turnLifecycle: true,
+      audioMinutePriceUsd: null,
+    });
+    expect(exported[0].sessionConfig.capabilities).toEqual(
+      exported[0].capabilities,
+    );
+    expect(exported[0].scorecard).toMatchObject({
+      lost_completed_translations: 0,
+      correlation_methodology: "provider item ids",
+      total_estimated_cost_usd: 0.12,
+      cost_methodology: "token-based per-turn estimates summed",
+    });
+
+    expect(exported[1].capabilities).toEqual({
+      turnLifecycle: false,
+      audioMinutePriceUsd: 0.034,
+    });
+    expect(exported[1].sessionConfig.capabilities).toEqual(
+      exported[1].capabilities,
+    );
+    expect(exported[1].scorecard.lost_completed_translations).toBeNull();
+    expect(exported[1].scorecard.correlation_methodology).toMatch(
+      /^UNAVAILABLE/,
+    );
+    expect(exported[1].scorecard.total_estimated_cost_usd).toBe(0.068);
+    expect(exported[1].scorecard.cost_methodology).toContain(
+      "wall-clock minutes × $0.034",
+    );
+  });
+
+  it("uses legacy item-id and token-cost rules when capabilities are absent", () => {
+    const legacy = computeScorecard(
+      runState({
+        sessionConfig: {},
+        turns: [
+          {
+            estimatedCostUsd: 0.12,
+            translatedTranscript: "Hello",
+            sourceItemId: "different-item",
+          },
+        ],
+      }),
+    );
+
+    expect(legacy.lost_completed_translations).toBe(1);
+    expect(legacy.correlation_methodology).toBe("provider item ids");
+    expect(legacy.total_estimated_cost_usd).toBe(0.12);
+    expect(legacy.cost_methodology).toBe(
+      "token-based per-turn estimates summed",
+    );
   });
 });
 

@@ -183,6 +183,222 @@ export function sanitizeSpikeControls(msg: any): {
   return { inputLang, outputLang, voice, provider };
 }
 
+type ScorecardTurn = {
+  cancelled?: boolean;
+  latencyMs?: number | null;
+  estimatedCostUsd?: number | null;
+  audioInMs?: number | null;
+  audioOutMs?: number | null;
+  translatedTranscript?: string | null;
+  sourceItemId?: string | null;
+};
+
+type ScorecardSourceUtterance = {
+  index: number;
+  itemId?: string | null;
+  text: string;
+  meaningful: boolean;
+};
+
+type ScorecardCancellation = {
+  index: number;
+  sourceItemId?: string | null;
+  classification: string;
+};
+
+type ScorecardReview = {
+  results: Record<string, { classification?: string }>;
+  ranAt?: string | null;
+};
+
+export type SpikeScorecardState = {
+  turns: ScorecardTurn[];
+  sourceUtterances: ScorecardSourceUtterance[];
+  cancellations: ScorecardCancellation[];
+  review: ScorecardReview;
+  sessionConfig: {
+    capabilities?: {
+      turnLifecycle?: boolean;
+      audioMinutePriceUsd?: number | null;
+    } | null;
+  } | null;
+  sessionStartTs: number;
+  now: number;
+  errors: string[];
+  invariantViolations: unknown[];
+  suppressedMicroturnsCount: number;
+  gatedIntervals: number;
+  totalGatedMs: number;
+};
+
+/**
+ * Compute a run scorecard from an explicit state snapshot.
+ *
+ * The browser stand embeds this function with toString(), so tests and the
+ * live export exercise the same capability-aware rules. In particular, a
+ * missing capabilities object is the legacy scorecard mode, while the
+ * translate provider opts into unavailable item-id correlation and
+ * wall-clock duration billing.
+ */
+export function computeScorecard(state: SpikeScorecardState) {
+  const completed = state.turns.filter((t) => !t.cancelled);
+  const lat = completed
+    .map((t) => t.latencyMs)
+    .filter((v): v is number => v != null)
+    .sort((a, b) => a - b);
+  const cost = state.turns.reduce((s, t) => s + (t.estimatedCostUsd || 0), 0);
+  const audioMs = state.turns.reduce(
+    (s, t) => s + (t.audioInMs || 0) + (t.audioOutMs || 0),
+    0,
+  );
+  const wallMin = state.sessionStartTs
+    ? (state.now - state.sessionStartTs) / 60000
+    : 0;
+  const caps = state.sessionConfig?.capabilities || null;
+  const hasItemIds = !caps || caps.turnLifecycle !== false;
+  const audioMinPrice =
+    caps && caps.audioMinutePriceUsd != null ? caps.audioMinutePriceUsd : null;
+  const pct = (sorted: number[], p: number) =>
+    sorted.length
+      ? sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]
+      : null;
+  const cxBy = (cls: string) =>
+    state.cancellations.filter((c) => c.classification === cls).length;
+  const completedSrc = state.sourceUtterances.filter((u) => u.meaningful);
+  const isTranslated = (u: ScorecardSourceUtterance) =>
+    u.itemId != null &&
+    state.turns.some(
+      (t) =>
+        t.sourceItemId === u.itemId &&
+        !t.cancelled &&
+        !!t.translatedTranscript,
+    );
+  const cancellationFor = (u: ScorecardSourceUtterance) =>
+    u.itemId != null
+      ? state.cancellations.find((c) => c.sourceItemId === u.itemId)
+      : undefined;
+  const translatedSrc = completedSrc.filter(isTranslated);
+  const lost = completedSrc.filter((u) => {
+    if (isTranslated(u)) return false;
+    const cx = cancellationFor(u);
+    return !(cx && cx.classification === "VALID_BARGE_IN");
+  });
+  const rev = Object.values(state.review.results);
+  const cnt = (cls: string) =>
+    rev.filter((r) => r.classification === cls).length;
+
+  return {
+    total_turns: completed.length,
+    latency_median_ms: pct(lat, 50),
+    latency_p95_ms: pct(lat, 95),
+    total_cancellations: state.cancellations.length,
+    valid_barge_ins: cxBy("VALID_BARGE_IN"),
+    false_premature_cancellations: cxBy("FALSE_PREMATURE_CANCEL"),
+    playback_feedback_cancellations: cxBy("PLAYBACK_FEEDBACK"),
+    unknown_cancellations: cxBy("UNKNOWN"),
+    completed_source_turns: completedSrc.length,
+    successfully_translated_turns: hasItemIds
+      ? translatedSrc.length
+      : completed.filter((t) => t.translatedTranscript).length,
+    lost_completed_translations: hasItemIds ? lost.length : null,
+    lost_translation_rate: hasItemIds
+      ? completedSrc.length
+        ? +(lost.length / completedSrc.length).toFixed(4)
+        : 0
+      : null,
+    lost_turns_evidence: hasItemIds
+      ? lost.map((u) => ({
+          index: u.index,
+          itemId: u.itemId,
+          text: u.text,
+          cancellation: cancellationFor(u)?.index ?? null,
+        }))
+      : null,
+    correlation_methodology: hasItemIds
+      ? "provider item ids"
+      : "UNAVAILABLE — provider has no turn lifecycle/item ids; turns are local FIFO segments (translated count = completed segments with a translation transcript)",
+    semantic_review_ran: !!state.review.ranAt,
+    added_content_count: cnt("ADDED_CONTENT"),
+    unsolicited_response_count: cnt("UNSOLICITED_RESPONSE"),
+    uncertain_translation_count: cnt("UNCERTAIN"),
+    faithful_count: cnt("FAITHFUL"),
+    total_estimated_cost_usd:
+      audioMinPrice != null && wallMin > 0
+        ? +(wallMin * audioMinPrice).toFixed(4)
+        : +cost.toFixed(4),
+    cost_per_active_audio_minute:
+      audioMs > 0 ? +(cost / (audioMs / 60000)).toFixed(4) : null,
+    cost_per_wall_clock_minute:
+      audioMinPrice != null
+        ? audioMinPrice
+        : wallMin > 0.2
+          ? +(cost / wallMin).toFixed(4)
+          : null,
+    cost_methodology:
+      audioMinPrice != null
+        ? "duration-billed: total = wall-clock minutes × $" +
+          audioMinPrice +
+          " (silence bills too); per-turn values are PARTIAL estimates of speech segments only"
+        : "token-based per-turn estimates summed",
+    errors: state.errors.length,
+    invariant_violations: state.invariantViolations.length,
+    suppressed_microturns: state.suppressedMicroturnsCount,
+    feedback_suspect_source_turns: state.sourceUtterances.filter(
+      (u) => (u as ScorecardSourceUtterance & { suspectedFeedback?: boolean }).suspectedFeedback,
+    ).length,
+    mic_gate_intervals: state.gatedIntervals,
+    mic_gate_total_ms: state.totalGatedMs,
+  };
+}
+
+export type SpikeArchiveState = SpikeScorecardState & {
+  session: unknown;
+  eventLog: unknown[];
+  eventLogDropped: number;
+  invariantViolations: unknown[];
+};
+
+/**
+ * Create an immutable completed-run export from one run's state.
+ *
+ * Config and capabilities are copied before the next provider can start. The
+ * scorecard is computed from that same copied config, never from a later
+ * session's mutable state.
+ */
+export function archiveCurrentRun(
+  state: SpikeArchiveState,
+  reason: string,
+  archivedAt = new Date().toISOString(),
+) {
+  if (
+    !state.turns.length &&
+    !state.sourceUtterances.length &&
+    !state.cancellations.length
+  ) {
+    return null;
+  }
+  const sessionConfig = state.sessionConfig
+    ? JSON.parse(JSON.stringify(state.sessionConfig))
+    : null;
+  const snapshotState = { ...state, sessionConfig };
+  return {
+    reason,
+    archivedAt,
+    session: state.session == null ? null : JSON.parse(JSON.stringify(state.session)),
+    sessionConfig,
+    capabilities: sessionConfig?.capabilities || null,
+    scorecard: computeScorecard(snapshotState),
+    turns: state.turns.slice(),
+    sourceUtterances: state.sourceUtterances.slice(),
+    cancellations: state.cancellations.slice(),
+    semanticReview: JSON.parse(JSON.stringify(state.review)),
+    errors: state.errors.slice(),
+    eventLog: state.eventLog.slice(),
+    eventLogDropped: state.eventLogDropped,
+    invariantViolations: state.invariantViolations.slice(),
+  };
+}
+
 export function handleTranslatorSpikeStream(ws: WebSocket) {
   let session: RealtimeTranslationSession | null = null;
   let starting = false;
@@ -490,19 +706,26 @@ let sessionMeta=null, sessionConfig=null, sessionStartTs=0, errors=[];
 // Finished runs (each with its own immutable config + evidence). A control
 // change archives the current run so one scorecard never mixes configs.
 const completedRuns=[];
+const computeScorecard=${computeScorecard.toString()};
+const archiveRunSnapshot=${archiveCurrentRun.toString()};
+function currentRunState(now){
+  return {
+    session:sessionMeta, sessionConfig, turns, sourceUtterances, cancellations,
+    review, sessionStartTs, now, errors, invariantViolations,
+    suppressedMicroturnsCount, gatedIntervals, totalGatedMs, eventLog,
+    eventLogDropped
+  };
+}
+function computeCurrentScorecard(){ return computeScorecard(currentRunState(Date.now())); }
 function archiveCurrentRun(reason){
   // Close an in-progress gate interval INTO the run being archived, so its
   // duration is charged to the correct scorecard and the next run never
   // starts with an unpaired gate_end.
-  const gClose=micGate.feed({playbackActive:false,msSinceLastPlaybackEnd:Number.MAX_SAFE_INTEGER,now:Date.now()});
+  const now=Date.now();
+  const gClose=micGate.feed({playbackActive:false,msSinceLastPlaybackEnd:Number.MAX_SAFE_INTEGER,now});
   if(gClose.transition==='gate_end'){ totalGatedMs+=gClose.gatedMs||0; logEv({type:'gate_end', gatedMs:gClose.gatedMs, closedBy:'run_boundary'}); }
-  if(turns.length||srcUtterances.length||cancellations.length){
-    completedRuns.push({ reason, archivedAt:new Date().toISOString(),
-      session:sessionMeta, sessionConfig, scorecard:computeScorecard(),
-      turns:turns.slice(), sourceUtterances:srcUtterances.slice(),
-      cancellations:cancellations.slice(), semanticReview:JSON.parse(JSON.stringify(review)), errors:errors.slice(),
-      eventLog:eventLog.slice(), eventLogDropped, invariantViolations:invariantViolations.slice() });
-  }
+  const archived=archiveRunSnapshot(currentRunState(now),reason,new Date(now).toISOString());
+  if(archived) completedRuns.push(archived);
   turns.length=0; srcUtterances.length=0; cancellations.length=0;
   review={ results:{}, ranAt:null }; errors=[];
   sessionMeta=null; sessionConfig=null; sessionStartTs=0;
@@ -673,70 +896,6 @@ function renderCancellations(){
   }
 }
 
-function pct(sorted,p){ if(!sorted.length) return null; return sorted[Math.min(sorted.length-1, Math.ceil(p/100*sorted.length)-1)]; }
-
-function computeScorecard(){
-  const completed=turns.filter(t=>!t.cancelled);
-  const lat=completed.map(t=>t.latencyMs).filter(v=>v!=null).sort((a,b)=>a-b);
-  const cost=turns.reduce((s,t)=>s+(t.estimatedCostUsd||0),0);
-  const audioMs=turns.reduce((s,t)=>s+(t.audioInMs||0)+(t.audioOutMs||0),0);
-  const wallMin=sessionStartTs?((Date.now()-sessionStartTs)/60000):0;
-  // Capability-aware scoring (task #286): a provider without a turn
-  // lifecycle emits NO item ids — item-id correlation (lost translations)
-  // is UNAVAILABLE there, not "everything lost". Duration-billed providers
-  // charge for silence too, so the honest wall-clock cost is
-  // wallMin × price, not the per-turn sum (which is a partial estimate).
-  const caps=(sessionConfig&&sessionConfig.capabilities)||null;
-  const hasItemIds=!caps||caps.turnLifecycle!==false;
-  const audioMinPrice=caps&&caps.audioMinutePriceUsd!=null?caps.audioMinutePriceUsd:null;
-  const cxBy=cls=>cancellations.filter(c=>c.classification===cls).length;
-  const completedSrc=srcUtterances.filter(u=>u.meaningful);
-  // Association is computed HERE from stable provider item ids — robust to
-  // any event arrival order (async transcription, barge-in reordering).
-  const isTranslated=u=>u.itemId!=null && turns.some(t=>t.sourceItemId===u.itemId && !t.cancelled && t.translatedTranscript);
-  const cancellationFor=u=>u.itemId!=null ? cancellations.find(c=>c.sourceItemId===u.itemId) : undefined;
-  const translatedSrc=completedSrc.filter(isTranslated);
-  // LOST_TRANSLATION: meaningful completed source utterance with no delivered
-  // translation, unless its cancellation is classified VALID_BARGE_IN.
-  const lost=completedSrc.filter(u=>{
-    if(isTranslated(u)) return false;
-    const cx=cancellationFor(u);
-    return !(cx && cx.classification==='VALID_BARGE_IN');
-  });
-  const rev=Object.values(review.results);
-  const cnt=cls=>rev.filter(r=>r.classification===cls).length;
-  return {
-    total_turns: completed.length,
-    latency_median_ms: pct(lat,50), latency_p95_ms: pct(lat,95),
-    total_cancellations: cancellations.length,
-    valid_barge_ins: cxBy('VALID_BARGE_IN'),
-    false_premature_cancellations: cxBy('FALSE_PREMATURE_CANCEL'),
-    playback_feedback_cancellations: cxBy('PLAYBACK_FEEDBACK'),
-    unknown_cancellations: cxBy('UNKNOWN'),
-    completed_source_turns: completedSrc.length,
-    successfully_translated_turns: hasItemIds? translatedSrc.length : completed.filter(t=>t.translatedTranscript).length,
-    lost_completed_translations: hasItemIds? lost.length : null,
-    lost_translation_rate: hasItemIds? (completedSrc.length? +(lost.length/completedSrc.length).toFixed(4):0) : null,
-    lost_turns_evidence: hasItemIds? lost.map(u=>({index:u.index,itemId:u.itemId,text:u.text,cancellation:cancellationFor(u)?cancellationFor(u).index:null})) : null,
-    correlation_methodology: hasItemIds? 'provider item ids' : 'UNAVAILABLE — provider has no turn lifecycle/item ids; turns are local FIFO segments (translated count = completed segments with a translation transcript)',
-    semantic_review_ran: !!review.ranAt,
-    added_content_count: cnt('ADDED_CONTENT'),
-    unsolicited_response_count: cnt('UNSOLICITED_RESPONSE'),
-    uncertain_translation_count: cnt('UNCERTAIN'),
-    faithful_count: cnt('FAITHFUL'),
-    total_estimated_cost_usd: audioMinPrice!=null&&wallMin>0? +(wallMin*audioMinPrice).toFixed(4) : +cost.toFixed(4),
-    cost_per_active_audio_minute: audioMs>0? +(cost/(audioMs/60000)).toFixed(4):null,
-    cost_per_wall_clock_minute: audioMinPrice!=null? audioMinPrice : (wallMin>0.2? +(cost/wallMin).toFixed(4):null),
-    cost_methodology: audioMinPrice!=null? 'duration-billed: total = wall-clock minutes × $'+audioMinPrice+' (silence bills too); per-turn values are PARTIAL estimates of speech segments only' : 'token-based per-turn estimates summed',
-    errors: errors.length,
-    invariant_violations: invariantViolations.length,
-    suppressed_microturns: suppressedMicroturnsCount,
-    feedback_suspect_source_turns: srcUtterances.filter(u=>u.suspectedFeedback).length,
-    mic_gate_intervals: gatedIntervals,
-    mic_gate_total_ms: totalGatedMs,
-  };
-}
-
 function renderMetrics(){
   const tb=document.querySelector('#mtable tbody'); tb.innerHTML='';
   for(const t of turns){
@@ -748,7 +907,7 @@ function renderMetrics(){
     tr.innerHTML='<td>'+t.turnIndex+'</td><td class="'+cls+'">'+(lag??'—')+'</td><td>'+(t.audioInMs??'—')+'</td><td>'+(t.audioOutMs??'—')+'</td><td>'+(t.estimatedCostUsd!=null?t.estimatedCostUsd.toFixed(4):'—')+'</td><td>'+rlabel+'</td>';
     tb.appendChild(tr);
   }
-  const sc=computeScorecard();
+  const sc=computeCurrentScorecard();
   document.getElementById('summary').innerHTML=
     'turns: <b>'+sc.total_turns+'</b> (cancelled: '+sc.total_cancellations+')<br>'+
     'latency: median <b>'+(sc.latency_median_ms??'—')+'</b> ms, p95 <b>'+(sc.latency_p95_ms??'—')+'</b> ms<br>'+
@@ -793,7 +952,7 @@ document.getElementById('exportBtn').onclick=async()=>{
     else { forensics={error:'analyze failed: '+r.status+' '+await r.text()}; }
   }catch(e){ forensics={error:'analyze failed: '+e.message}; }
   const report={ generatedAt:new Date().toISOString(),
-    currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeScorecard(),
+    currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeCurrentScorecard(),
       turns, sourceUtterances:srcUtterances, cancellations,
       semanticReview:review, errors,
       invariantViolations, forensics, eventLog, eventLogDropped,
