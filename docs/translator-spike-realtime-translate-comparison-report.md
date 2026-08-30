@@ -99,9 +99,20 @@ language + whisper transcription; `session.closed` arrives after
 | Full vitest suite + tsc | PASS (1035/1035) |
 | Stand page serves with provider selector | PASS (HTTP 200) |
 
-## 5. Head-to-head scorecard — PENDING LIVE RUNS
+## 5. Head-to-head scorecard — live evidence received (incomplete)
 
-Only a human with a real microphone can produce honest comparison data.
+Two exports and the user's live observation were received on 2026-08-30.
+They do **not** yet form a valid head-to-head: the non-empty export identifies
+itself as `openai-realtime` / `gpt-realtime` (Marin), while the export captured
+for the selected `gpt-realtime-translate` session has `session: null`, zero
+turns, and zero event-log entries. The screenshot shows the translate option
+selected, but the export metadata is authoritative for attribution; it must
+not be relabeled as a translate run.
+
+The non-empty run is also a partial live run (8 completed source turns, not
+the planned 30–40), so the numbers below are evidence from the run, not a
+statistically complete benchmark.
+
 Methodology (same as Run #2/#3):
 
 1. Open `/translator-spike` (dev), pick provider, run 30–40 turns RU→EN:
@@ -116,22 +127,50 @@ Methodology (same as Run #2/#3):
    voice quality/gender behavior (dynamic adaptation vs fixed voice),
    cost per minute.
 
-| Criterion | Current (gpt-realtime) | gpt-realtime-translate |
+### 5.1 Evidence from the received exports
+
+| Criterion | Current (`gpt-realtime`) | `gpt-realtime-translate` |
 |---|---|---|
-| Contract forensic | PASS | PASS |
-| Adapter + stand integration | PASS | PASS |
-| Live fidelity run | PASS (Run #3) | **pending user run** |
-| Noise/hallucination behavior | PASS after #282 gate | **pending — measure native behavior** |
-| Latency (speech-end→first audio) | median 291 ms / p95 362 ms (Run #3) | 671–751 ms on synthetic smoke — needs real speech run |
-| Verdict | baseline | **BLOCKED on live run** |
+| Export identity | **Confirmed**: `openai-realtime`, `gpt-realtime`, Marin | **Not confirmed**: export has `session: null`; no provider metadata |
+| Live sample | 8 completed source turns; 10 source-transcript entries (2 marked non-meaningful) | 0 turns, 0 source entries, 0 events |
+| Successful translations | 6/8; 2 completed source turns lost (`lost_translation_rate: 0.25`) | Not measurable |
+| Fidelity | Several normal phrases were faithful; one feedback-suspect STT fragment was rendered as “We'll load up the tires…”, and a Chinese fragment was rendered as an unrelated English question | Not measurable; user reports no output |
+| Noise / added content | Native forensic result: `noiseMicroturnsCommittedMultilingual = PROVEN`; 1 suppressed microturn and 1 feedback-suspect source turn | Not measurable |
+| Cancellations | 6, all classified `UNKNOWN`; 1 occurred while playback was active | No provider session to inspect |
+| Latency, speech-end → first audio | median **361 ms**, p95 **402 ms** (7 turns with latency) | Not measurable; synthetic adapter smoke was 671–751 ms, not a live result |
+| Cost | Estimated **$0.0788 / active audio min**, **$0.0689 / wall-clock min** for this token-based run | Not measurable; published duration price remains **$0.034 / audio min** |
+| Voice behavior | Fixed Marin voice confirmed | Dynamic adaptation not observed |
+| **Verdict** | **BLOCKED** for a clean translator use case: fast, but loses 25% of completed turns and has proven noise/fragment hallucination | **BLOCKED**: no valid live output/export; requires a correctly attributed run |
 
-## 6. Preliminary recommendation
+The user's observation matches the current-provider evidence: it is quick,
+but it can hear playback/other speech and produce a response that is not a
+translation. The forensic log does not prove every such event was playback
+feedback (`playbackRecapture` is `INCONCLUSIVE`), but it does prove that
+noise/fragment input produced multilingual hallucinated source text and an
+unrelated translation.
 
-Defer the provider decision until the live head-to-head. Notable a-priori
-trade-offs: gpt-realtime-translate removes our two biggest failure classes by
-construction (no conversational replies — it cannot "answer" the speaker; no
-turn machinery to mis-fire) and is dramatically cheaper ($0.034/min vs
-token pricing), but gives up the custom interpreter prompt, fixed voice,
-barge-in/cancellation, and any server-side turn semantics — and its smoke
-latency looked higher than the tuned current pipeline. If live runs show
-clean fidelity and acceptable latency, it is the structurally safer choice.
+## 6. Verdict and recommendation
+
+**No provider passes the live comparison yet.**
+
+1. **Do not select `gpt-realtime` for production translation based on speed
+   alone.** This run's 361 ms median is attractive, but 2/8 completed turns
+   were lost, six cancellations were unexplained by the classifier, and the
+   forensic analyzer marked noise-induced multilingual hallucination as
+   **PROVEN**.
+2. **Do not select `gpt-realtime-translate` yet.** Its export is empty and
+   cannot establish either success or failure. The screenshot/export
+   mismatch is itself a test-integrity failure: a fresh run must be exported
+   only after the JSON's `session.provider` and `session.model` identify
+   `openai-realtime-translate` / `gpt-realtime-translate`.
+3. The next required comparison is one fresh, correctly attributed
+   `gpt-realtime-translate` run with 30–40 utterances and the same script.
+   Record whether it emits audio, source/translated transcripts, and whether
+   dynamic voice adaptation is acceptable. Only then can latency
+   distributions, fidelity, noise behavior, and cost be compared.
+
+Until that run exists, the recommendation is **BLOCKED / no production
+provider decision**. Structurally, translate remains the safer candidate if
+it works as documented (it cannot answer conversationally and has no
+server-side turn machinery), but this has not been demonstrated on the live
+microphone stand.
