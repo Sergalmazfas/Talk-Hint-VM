@@ -7,6 +7,22 @@ import XCTest
 ///   -destination 'platform=iOS Simulator,name=iPhone 15'
 @MainActor
 final class TranslatorModeTests: XCTestCase {
+    func testTranslatorVoiceDefaultsInvalidStoredValueToFemale() {
+        let key = "talkhint.translator.voice"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.set("cedar", forKey: key)
+        XCTAssertEqual(SessionStore.shared.translatorVoice, .female)
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertEqual(SessionStore.shared.translatorVoice, .female)
+    }
+
     func testDialInputAcceptsPastedFormattedPhoneNumber() {
         XCTAssertEqual(
             HomeViewController.normalizedDialInput("+1 (909) 991-2111"),
@@ -20,7 +36,19 @@ final class TranslatorModeTests: XCTestCase {
             "To": "+14155550100",
             "GuestTo": "+14155550100",
             "TranslatorMode": "ru_en",
+            "TranslatorVoice": "female",
         ])
+    }
+
+    func testTranslatorVoicePreferenceIsPassedAsClosedValue() {
+        XCTAssertEqual(
+            CallManager.connectParameters(to: "+14155550100", mode: .translator, translatorVoice: .male)["TranslatorVoice"],
+            "male"
+        )
+        XCTAssertEqual(
+            CallManager.connectParameters(to: "+14155550100", mode: .translator, translatorVoice: .female)["TranslatorVoice"],
+            "female"
+        )
     }
 
     func testTranslatorMetadataParsesStructuredConversation() throws {

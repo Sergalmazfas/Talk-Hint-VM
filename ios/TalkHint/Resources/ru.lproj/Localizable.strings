@@ -11,6 +11,10 @@
 "settings.title" = "Настройки";
 "settings.section.hint_language" = "Язык подсказок";
 "settings.section.live_call" = "Во время звонка";
+"settings.section.translator" = "Переводчик";
+"settings.translator.my_voice" = "Мой голос";
+"settings.translator.voice.male" = "Мужской";
+"settings.translator.voice.female" = "Женский";
 "settings.section.phone" = "Телефон";
 "settings.section.account" = "Аккаунт";
 "settings.footer.language" = "Язык, используемый для переводов и подсказок во время звонков в реальном времени.";

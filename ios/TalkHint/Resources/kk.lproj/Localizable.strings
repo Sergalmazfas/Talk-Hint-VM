@@ -11,6 +11,10 @@
 "settings.title" = "Параметрлер";
 "settings.section.hint_language" = "Кеңес тілі";
 "settings.section.live_call" = "Қоңырау кезінде";
+"settings.section.translator" = "Аудармашы";
+"settings.translator.my_voice" = "Менің дауысым";
+"settings.translator.voice.male" = "Ер";
+"settings.translator.voice.female" = "Әйел";
 "settings.section.phone" = "Телефон";
 "settings.section.account" = "Тіркелгі";
 "settings.footer.language" = "Тікелей қоңыраулар кезінде аудармалар мен кеңестер үшін пайдаланылатын тіл.";

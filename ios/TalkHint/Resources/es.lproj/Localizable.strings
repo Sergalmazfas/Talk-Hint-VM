@@ -11,6 +11,10 @@
 "settings.title" = "Ajustes";
 "settings.section.hint_language" = "Idioma de las sugerencias";
 "settings.section.live_call" = "Durante la llamada";
+"settings.section.translator" = "Traductor";
+"settings.translator.my_voice" = "Mi voz";
+"settings.translator.voice.male" = "Masculina";
+"settings.translator.voice.female" = "Femenina";
 "settings.section.phone" = "Teléfono";
 "settings.section.account" = "Cuenta";
 "settings.footer.language" = "Idioma usado para traducciones y sugerencias durante las llamadas en vivo.";

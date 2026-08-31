@@ -11,6 +11,10 @@
 "settings.title" = "Settings";
 "settings.section.hint_language" = "Hint language";
 "settings.section.live_call" = "Live call";
+"settings.section.translator" = "Translator";
+"settings.translator.my_voice" = "My Voice";
+"settings.translator.voice.male" = "Male";
+"settings.translator.voice.female" = "Female";
 "settings.section.phone" = "Phone";
 "settings.section.account" = "Account";
 "settings.footer.language" = "Language used for translations and hints during live calls.";

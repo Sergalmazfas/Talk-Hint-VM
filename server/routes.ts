@@ -31,7 +31,7 @@ import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
-import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall } from "./translation/twilioBridge";
+import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices } from "./translation/twilioBridge";
 import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
@@ -1204,6 +1204,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     // Translator calls are opt-in only through explicit iOS Twilio params.
     // These values are available only after Twilio signature validation.
     const translatorMode = String(req.body.TranslatorMode || req.query.TranslatorMode || "");
+    const translatorVoice = String(req.body.TranslatorVoice || req.query.TranslatorVoice || "");
     const translatorCallId = String(req.body.TranslatorCallId || req.query.TranslatorCallId || "");
     const translatorLeg = String(req.body.TranslatorLeg || req.query.TranslatorLeg || "");
     
@@ -1242,6 +1243,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       }
       const ownerId = ownerMatch[1];
       const ownerCallId = crypto.randomUUID();
+      const resolvedVoice = resolveTranslatorVoices(translatorVoice);
       let callerId = TWILIO_PHONE_NUMBER || "";
       try {
         const numbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, ownerId)).limit(1);
@@ -1252,7 +1254,11 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         return res.type("text/xml").send(twimlResponse.toString());
       }
       const protocol = req.get("x-forwarded-proto") || "https";
-      registerTranslatorCall({ id: ownerCallId, ownerId, ownerCallSid: callSid, guestNumber: guestTo, callerId, baseUrl: `${protocol}://${host}` });
+      registerTranslatorCall({
+        id: ownerCallId, ownerId, ownerCallSid: callSid, guestNumber: guestTo,
+        callerId, baseUrl: `${protocol}://${host}`,
+        voicePreference: resolvedVoice.preference, voices: resolvedVoice.voices,
+      });
       setCallOwner(callSid, ownerId);
       try {
         if (!(await storage.getCallByCallSid(callSid))) {

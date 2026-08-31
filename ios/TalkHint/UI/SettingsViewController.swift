@@ -21,6 +21,7 @@ final class SettingsViewController: UITableViewController {
     private enum Section: Int, CaseIterable {
         case language
         case features
+        case translator
         case phone
         case account
     }
@@ -85,6 +86,7 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: section)! {
         case .language: return SessionStore.availableLanguages.count
         case .features: return FeatureRow.allCases.count
+        case .translator: return 1
         case .phone: return 1
         case .account: return 1
         }
@@ -94,6 +96,7 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: section)! {
         case .language: return NSLocalizedString("settings.section.hint_language", comment: "")
         case .features: return NSLocalizedString("settings.section.live_call", comment: "")
+        case .translator: return NSLocalizedString("settings.section.translator", comment: "")
         case .phone: return NSLocalizedString("settings.section.phone", comment: "")
         case .account: return NSLocalizedString("settings.section.account", comment: "")
         }
@@ -105,7 +108,7 @@ final class SettingsViewController: UITableViewController {
             return NSLocalizedString("settings.footer.language", comment: "")
         case .features:
             return NSLocalizedString("settings.footer.features", comment: "")
-        case .phone, .account:
+        case .translator, .phone, .account:
             return nil
         }
     }
@@ -133,6 +136,20 @@ final class SettingsViewController: UITableViewController {
                                    identifier: "switch-translation",
                                    action: #selector(translationChanged(_:)))
             }
+
+        case .translator:
+            let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+            cell.selectionStyle = .none
+            cell.textLabel?.text = NSLocalizedString("settings.translator.my_voice", comment: "")
+            let voice = UISegmentedControl(items: [
+                NSLocalizedString("settings.translator.voice.male", comment: ""),
+                NSLocalizedString("settings.translator.voice.female", comment: ""),
+            ])
+            voice.selectedSegmentIndex = SessionStore.shared.translatorVoice == .male ? 0 : 1
+            voice.accessibilityIdentifier = "segmented-translator-voice"
+            voice.addTarget(self, action: #selector(translatorVoiceChanged(_:)), for: .valueChanged)
+            cell.accessoryView = voice
+            return cell
 
         case .phone:
             let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
@@ -165,6 +182,8 @@ final class SettingsViewController: UITableViewController {
             tableView.reloadSections(IndexSet(integer: Section.language.rawValue), with: .none)
         case .features:
             break // handled by the UISwitch valueChanged action
+        case .translator:
+            break // handled by the segmented control
         case .phone:
             navigationController?.pushViewController(NumbersViewController(), animated: true)
         case .account:
@@ -202,6 +221,10 @@ final class SettingsViewController: UITableViewController {
         updateFeature(translation: sender.isOn, sender: sender, previous: translationEnabled) {
             self.translationEnabled = sender.isOn
         }
+    }
+
+    @objc private func translatorVoiceChanged(_ sender: UISegmentedControl) {
+        SessionStore.shared.translatorVoice = sender.selectedSegmentIndex == 0 ? .male : .female
     }
 
     /// Persists a single toggle, reverting the switch on failure.

@@ -39,6 +39,7 @@ final class CallManager: NSObject {
         var twilioCall: Call?
         var answered: Bool
         let isOutgoing: Bool
+        let translatorVoice: TranslatorVoicePreference
     }
 
     private var sessions: [UUID: CallSession] = [:]
@@ -66,7 +67,7 @@ final class CallManager: NSObject {
     /// PushKit completion handler must run only after `reportNewIncomingCall`.
     func reportIncomingCall(callSid: String, fromNumber: String, completion: @escaping () -> Void) {
         let uuid = UUID()
-        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false)
+        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false, translatorVoice: .female)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -113,8 +114,12 @@ final class CallManager: NSObject {
     /// the outbound dial.
     func startOutgoingCall(to number: String, mode: CallMode) {
         let uuid = UUID()
+        // Snapshot before CallKit/Twilio starts. A Settings change after this
+        // point affects only the next Translator call.
+        let translatorVoice = SessionStore.shared.translatorVoice
         sessions[uuid] = CallSession(uuid: uuid, mode: mode, callSid: nil, remoteLabel: number,
-                                     twilioCall: nil, answered: false, isOutgoing: true)
+                                     twilioCall: nil, answered: false, isOutgoing: true,
+                                     translatorVoice: translatorVoice)
 
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
@@ -128,14 +133,20 @@ final class CallManager: NSObject {
 
     /// Kept as a pure seam so mode tagging is covered without initiating a
     /// CallKit transaction.
-    static func connectParameters(to number: String, mode: CallMode) -> [String: String] {
+    static func connectParameters(to number: String, mode: CallMode,
+                                  translatorVoice: TranslatorVoicePreference = .female) -> [String: String] {
         switch mode {
         case .hint:
             return ["To": number]
         case .translator:
             // `To` preserves the Twilio Voice SDK dial contract, while the
             // bridge explicitly consumes GuestTo and TranslatorMode.
-            return ["To": number, "GuestTo": number, "TranslatorMode": "ru_en"]
+            return [
+                "To": number,
+                "GuestTo": number,
+                "TranslatorMode": "ru_en",
+                "TranslatorVoice": translatorVoice.rawValue,
+            ]
         }
     }
 
@@ -298,7 +309,8 @@ extension CallManager: CXProviderDelegate {
                 }
 
                 let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
-                    builder.params = Self.connectParameters(to: number, mode: session.mode)
+                    builder.params = Self.connectParameters(to: number, mode: session.mode,
+                                                            translatorVoice: session.translatorVoice)
                     builder.uuid = uuid
                 }
                 let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)

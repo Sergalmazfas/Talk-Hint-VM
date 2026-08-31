@@ -1,5 +1,10 @@
 import Foundation
 
+enum TranslatorVoicePreference: String {
+    case male
+    case female
+}
+
 /// Holds the authenticated session (Bearer token + user id) used for all
 /// backend calls. The token is stored in the Keychain; the user id (not
 /// sensitive) in UserDefaults.
@@ -16,6 +21,7 @@ final class SessionStore {
     private let callGoalKey = "talkhint.assistant.goal"
     private let activePromptIdKey = "talkhint.assistant.prompt.id"
     private let userContextKey = "talkhint.user.context"
+    private let translatorVoiceKey = "talkhint.translator.voice"
 
     /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
     /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
@@ -65,6 +71,17 @@ final class SessionStore {
     var language: String {
         get { UserDefaults.standard.string(forKey: languageKey) ?? "ru" }
         set { UserDefaults.standard.set(newValue, forKey: languageKey) }
+    }
+
+    /// Voice representing the Owner in Translator calls. Invalid or missing
+    /// persisted values fail safely to the existing production voice.
+    var translatorVoice: TranslatorVoicePreference {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: translatorVoiceKey),
+                  let value = TranslatorVoicePreference(rawValue: raw) else { return .female }
+            return value
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: translatorVoiceKey) }
     }
 
     /// How incoming calls are handled, persisted to the backend via
@@ -123,5 +140,6 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: callGoalKey)
         UserDefaults.standard.removeObject(forKey: activePromptIdKey)
         UserDefaults.standard.removeObject(forKey: userContextKey)
+        UserDefaults.standard.removeObject(forKey: translatorVoiceKey)
     }
 }

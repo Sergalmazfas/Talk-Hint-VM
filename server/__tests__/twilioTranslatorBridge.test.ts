@@ -4,6 +4,7 @@ import {
   handleTranslatorTwilioStream, mulawToPcm24, translatorAudioDestinations, registerTranslatorCall,
   configureTranslatorDialer, subscribeTranslatorFeed,
   expireTranslatorCall, getTranslatorBridgeSnapshot, handleTranslatorGuestStatus,
+  getTranslatorCall, resolveTranslatorVoices,
 } from "../translation/twilioBridge";
 import type { RealtimeTranslationProvider } from "../translation/provider";
 
@@ -37,6 +38,38 @@ function fakeProvider(sessions: any[], configs: any[] = []): RealtimeTranslation
 }
 
 describe("PSTN translator bridge routing", () => {
+  it("maps the closed preference to fixed opposite voices and defaults invalid input to Female", () => {
+    expect(resolveTranslatorVoices("male")).toEqual({
+      preference: "male",
+      voices: { owner: "cedar", guest: "marin" },
+    });
+    expect(resolveTranslatorVoices("female")).toEqual({
+      preference: "female",
+      voices: { owner: "marin", guest: "cedar" },
+    });
+    expect(resolveTranslatorVoices("cedar")).toEqual({
+      preference: "female",
+      voices: { owner: "marin", guest: "cedar" },
+    });
+    expect(resolveTranslatorVoices(undefined)).toEqual({
+      preference: "female",
+      voices: { owner: "marin", guest: "cedar" },
+    });
+  });
+
+  it("snapshots resolved voices when the call is registered", () => {
+    const id = "immutable-voice";
+    const voices = { owner: "cedar", guest: "marin" } as const;
+    registerTranslatorCall({
+      id, ownerId: "owner", ownerCallSid: "CAvoice", guestNumber: "+15551234567",
+      callerId: "+15557654321", baseUrl: "https://example.test",
+      voicePreference: "male", voices,
+    });
+    (voices as any).owner = "marin";
+    expect(getTranslatorCall(id)?.voices).toEqual({ owner: "cedar", guest: "marin" });
+    expireTranslatorCall(id);
+  });
+
   it("declares the complete asymmetric eight-route matrix", () => {
     expect(translatorAudioDestinations("guest", "original")).toEqual(["owner"]);
     expect(translatorAudioDestinations("guest", "translation")).toEqual(["owner"]);
@@ -57,6 +90,7 @@ describe("PSTN translator bridge routing", () => {
     await new Promise(resolve => setImmediate(resolve));
 
     expect(configs.map(c => [c.sourceLangHint, c.outputLanguage])).toEqual([["ru", "en"], ["en", "ru"]]);
+    expect(configs.map(c => c.voice)).toEqual(["marin", "cedar"]);
 
     const original = Buffer.from([0xff, 0x7f]).toString("base64");
     guest.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: original } })));

@@ -18,6 +18,16 @@ export function oppositeTranslatorLeg(leg: TranslatorLeg): TranslatorLeg {
   return leg === "owner" ? "guest" : "owner";
 }
 export type TranslatorAudioKind = "original" | "translation";
+export type TranslatorVoicePreference = "male" | "female";
+export interface TranslatorVoices { owner: "cedar" | "marin"; guest: "cedar" | "marin" }
+const FEMALE_TRANSLATOR_VOICES: TranslatorVoices = { owner: "marin", guest: "cedar" };
+export function resolveTranslatorVoices(value: unknown): {
+  preference: TranslatorVoicePreference;
+  voices: TranslatorVoices;
+} {
+  if (value === "male") return { preference: "male", voices: { owner: "cedar", guest: "marin" } };
+  return { preference: "female", voices: { ...FEMALE_TRANSLATOR_VOICES } };
+}
 /**
  * Production PSTN routing is intentionally asymmetric. Owner monitors the
  * exact English translation delivered to Guest; Guest never hears either
@@ -33,12 +43,18 @@ export function translatorAudioDestinations(
 export interface TranslatorCall {
   id: string; ownerId: string; ownerCallSid: string; guestNumber: string;
   callerId: string; baseUrl: string;
+  voicePreference?: TranslatorVoicePreference;
+  voices?: TranslatorVoices;
 }
 export interface TranslatorDialer {
   createGuestLeg(call: TranslatorCall): Promise<{ sid: string }>;
   hangup?(callSid: string): Promise<void>;
 }
-const calls = new Map<string, TranslatorCall>();
+type RegisteredTranslatorCall = TranslatorCall & {
+  voicePreference: TranslatorVoicePreference;
+  voices: TranslatorVoices;
+};
+const calls = new Map<string, RegisteredTranslatorCall>();
 type ActiveLeg = { ws: WebSocket; streamSid: string; session?: RealtimeTranslationSession };
 type BridgeState = {
   legs: Map<TranslatorLeg, ActiveLeg>;
@@ -80,7 +96,14 @@ export function expireTranslatorCall(id: string): boolean {
   return calls.delete(id);
 }
 export function registerTranslatorCall(call: TranslatorCall) {
-  calls.set(call.id, call);
+  const resolved = call.voices && call.voicePreference
+    ? { preference: call.voicePreference, voices: { ...call.voices } }
+    : resolveTranslatorVoices(call.voicePreference);
+  calls.set(call.id, {
+    ...call,
+    voicePreference: resolved.preference,
+    voices: { ...resolved.voices },
+  });
   const timer: any = setTimeout(() => {
     const state = activeCalls.get(call.id);
     if (state && state.expiresAt <= Date.now()) {
@@ -130,7 +153,7 @@ export function handleTranslatorTwilioStream(
   provider: RealtimeTranslationProvider = openaiRealtimeTranslationProvider,
 ) {
   let session: RealtimeTranslationSession | null = null;
-  let streamSid = "", call: TranslatorCall | undefined, leg: TranslatorLeg | undefined;
+  let streamSid = "", call: RegisteredTranslatorCall | undefined, leg: TranslatorLeg | undefined;
   let socketClosed = false;
   const persist = (snapshot?: BridgeState) => {
     if (!call) return;
@@ -206,6 +229,7 @@ export function handleTranslatorTwilioStream(
           languages: ["ru", "en"],
           sourceLangHint: leg === "owner" ? "ru" : "en",
           outputLanguage: leg === "owner" ? "en" : "ru",
+          voice: call.voices[leg],
           inputFormat: { encoding: "pcm16", sampleRateHz: RATE },
           outputFormat: { encoding: "pcm16", sampleRateHz: RATE },
         });
