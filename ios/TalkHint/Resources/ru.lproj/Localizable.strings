@@ -104,6 +104,7 @@
 "call_detail.value.unknown" = "Неизвестно";
 "call_detail.transcript.header" = "РАСШИФРОВКА";
 "call_detail.copy_transcript" = "Копировать расшифровку";
+"call_detail.copy_number" = "Копировать номер телефона";
 "call_detail.no_transcript" = "Для этого звонка нет доступной расшифровки.";
 "history.title" = "История";
 "history.direction.outgoing" = "Исходящий";

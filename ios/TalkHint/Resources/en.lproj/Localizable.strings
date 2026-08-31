@@ -104,6 +104,7 @@
 "call_detail.value.unknown" = "Unknown";
 "call_detail.transcript.header" = "TRANSCRIPT";
 "call_detail.copy_transcript" = "Copy transcript";
+"call_detail.copy_number" = "Copy phone number";
 "call_detail.no_transcript" = "No transcript available for this call.";
 "history.title" = "History";
 "history.direction.outgoing" = "Outgoing";

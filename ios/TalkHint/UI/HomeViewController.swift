@@ -23,7 +23,7 @@ final class HomeViewController: UIViewController {
 
     // MARK: - UI
 
-    private let numberLabel = UILabel()
+    private let numberLabel = UITextField()
     private let placeholderLabel = UILabel()
     private let goalBadge = UIButton(type: .system)
     private let prepareButton = UIButton(type: .system)
@@ -58,7 +58,7 @@ final class HomeViewController: UIViewController {
         let titleLabel = UILabel()
         titleLabel.text = NSLocalizedString(callMode == .hint ? "home.title" : "translator.title", comment: "")
         titleLabel.font = .systemFont(ofSize: 32, weight: .bold)
-        titleLabel.textColor = Theme.ink
+        titleLabel.textColor = .label
 
         let gear = UIButton(type: .system)
         gear.setImage(UIImage(systemName: "gearshape"), for: .normal)
@@ -109,12 +109,18 @@ final class HomeViewController: UIViewController {
         phoneIcon.setContentHuggingPriority(.required, for: .horizontal)
 
         numberLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        numberLabel.textColor = Theme.ink
+        numberLabel.textColor = .label
+        numberLabel.tintColor = Theme.green
+        numberLabel.keyboardType = .phonePad
+        numberLabel.textContentType = .telephoneNumber
+        numberLabel.autocorrectionType = .no
+        numberLabel.spellCheckingType = .no
+        numberLabel.clearButtonMode = .never
+        numberLabel.addTarget(self, action: #selector(numberFieldChanged), for: .editingChanged)
         numberLabel.adjustsFontSizeToFitWidth = true
-        numberLabel.minimumScaleFactor = 0.6
+        numberLabel.minimumFontSize = 12
         // When the number is still too long even after shrinking, cut off the
         // BEGINNING (…) so the digits being typed stay visible at the end.
-        numberLabel.lineBreakMode = .byTruncatingHead
         numberLabel.accessibilityIdentifier = "input-dial-number"
 
         placeholderLabel.text = NSLocalizedString("home.enter_number", comment: "")
@@ -336,6 +342,25 @@ final class HomeViewController: UIViewController {
         guard dialed.count < 17 else { return }
         UIDevice.current.playInputClick()
         dialed += digit
+    }
+
+    /// Keeps hardware-keyboard and pasted input in the same E.164-friendly
+    /// representation used by the on-screen keypad.
+    static func normalizedDialInput(_ value: String) -> String {
+        var result = ""
+        for character in value {
+            if character.isNumber {
+                result.append(character)
+            } else if character == "+", result.isEmpty {
+                result.append(character)
+            }
+            if result.count == 17 { break }
+        }
+        return result
+    }
+
+    @objc private func numberFieldChanged() {
+        dialed = Self.normalizedDialInput(numberLabel.text ?? "")
     }
 
     /// Set when a long-press on "0" was recognized, so the button's normal

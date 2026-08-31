@@ -158,6 +158,23 @@ final class CallDetailViewController: UITableViewController {
         }
     }
 
+    private func copyNumberButton(for number: String) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
+        button.accessibilityIdentifier = "button-copy-phone-number"
+        button.accessibilityLabel = NSLocalizedString("call_detail.copy_number", comment: "")
+        button.addAction(UIAction { [weak button] _ in
+            UIPasteboard.general.string = number
+            button?.setImage(UIImage(systemName: "checkmark"), for: .normal)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak button] in
+                button?.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
+            }
+        }, for: .touchUpInside)
+        button.frame.size = CGSize(width: 44, height: 36)
+        return button
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section) {
         case .details: return detailRows.count
@@ -178,8 +195,12 @@ final class CallDetailViewController: UITableViewController {
             config.secondaryText = row.value
             cell.accessibilityIdentifier = "text-detail-\(row.key)"
             cell.contentConfiguration = config
+            let isPhoneRow = row.key == "number"
+                || (row.key == "with" && call.contactName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false)
+            cell.accessoryView = isPhoneRow && !otherParty.isEmpty ? copyNumberButton(for: otherParty) : nil
 
         case .transcript:
+            cell.accessoryView = nil
             var config = cell.defaultContentConfiguration()
             let transcript: String
             if call.mode == .translator, !call.translationTurns.isEmpty {

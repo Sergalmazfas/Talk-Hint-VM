@@ -104,6 +104,7 @@
 "call_detail.value.unknown" = "Белгісіз";
 "call_detail.transcript.header" = "ТРАНСКРИПТ";
 "call_detail.copy_transcript" = "Транскриптті көшіру";
+"call_detail.copy_number" = "Телефон нөмірін көшіру";
 "call_detail.no_transcript" = "Бұл қоңырау үшін қолжетімді транскрипт жоқ.";
 "history.title" = "Тарих";
 "history.direction.outgoing" = "Шығыс";

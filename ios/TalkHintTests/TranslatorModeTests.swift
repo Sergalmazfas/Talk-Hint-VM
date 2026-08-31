@@ -7,6 +7,13 @@ import XCTest
 ///   -destination 'platform=iOS Simulator,name=iPhone 15'
 @MainActor
 final class TranslatorModeTests: XCTestCase {
+    func testDialInputAcceptsPastedFormattedPhoneNumber() {
+        XCTAssertEqual(
+            HomeViewController.normalizedDialInput("+1 (909) 991-2111"),
+            "+19099912111"
+        )
+        XCTAssertEqual(HomeViewController.normalizedDialInput("++1 23abc"), "+123")
+    }
     func testTranslatorOutgoingCallIsExplicitlyModeTagged() {
         let params = CallManager.connectParameters(to: "+14155550100", mode: .translator)
         XCTAssertEqual(params, [
