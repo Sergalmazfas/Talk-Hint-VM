@@ -5,6 +5,7 @@ import {
   configureTranslatorDialer, subscribeTranslatorFeed,
   expireTranslatorCall, getTranslatorBridgeSnapshot, handleTranslatorGuestStatus,
   getTranslatorCall, resolveTranslatorVoices,
+  resolveTranslatorPlayback,
 } from "../translation/twilioBridge";
 import type { RealtimeTranslationProvider } from "../translation/provider";
 
@@ -57,6 +58,109 @@ describe("PSTN translator bridge routing", () => {
     });
   });
 
+  it("accepts only the closed text playback value and defaults everything else to Voice", () => {
+    expect(resolveTranslatorPlayback("text")).toBe("text");
+    expect(resolveTranslatorPlayback("voice")).toBe("voice");
+    expect(resolveTranslatorPlayback("audio")).toBe("voice");
+    expect(resolveTranslatorPlayback(undefined)).toBe("voice");
+  });
+
+  it("uses text output only for Guest→RU and never changes Owner→EN audio", async () => {
+    const id = "text-only-output", sessions: any[] = [], configs: any[] = [];
+    registerTranslatorCall({
+      id, ownerId: "owner", ownerCallSid: "CAowner", guestNumber: "+15551234567",
+      callerId: "+15557654321", baseUrl: "https://example.test", playbackPreference: "text",
+    });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions, configs);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(configs.map(c => [c.sourceLangHint, c.outputMode])).toEqual([
+      ["ru", "audio"],
+      ["en", "text"],
+    ]);
+
+    sessions[1].emit({ type: "translated_transcript_delta", text: "При", responseId: "guest-r1" });
+    sessions[1].emit({ type: "translated_transcript_done", text: "Привет", responseId: "guest-r1" });
+    sessions[1].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, translatedTranscript: "Привет", provider: "test", model: "test", responseId: "guest-r1",
+    } });
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "mark" && m.mark.name.startsWith("translation-"))).toHaveLength(0);
+
+    const english = Buffer.alloc(12, 100).toString("base64");
+    sessions[0].emit({ type: "translated_audio", base64: english, responseId: "owner-r1" });
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(1);
+    expect(guest.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(1);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")[0].media.payload)
+      .toBe(guest.sent.map(JSON.parse).filter(m => m.event === "media")[0].media.payload);
+  });
+
+  it("rejects unexpected Guest audio at the bridge boundary in Text only", async () => {
+    const id = "text-only-reject-audio", sessions: any[] = [];
+    registerTranslatorCall({
+      id, ownerId: "owner", ownerCallSid: "CAowner", guestNumber: "+15551234567",
+      callerId: "+15557654321", baseUrl: "https://example.test", playbackPreference: "text",
+    });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), feed = new FakeSocket();
+    subscribeTranslatorFeed("owner", feed as any);
+    const provider = fakeProvider(sessions);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+
+    sessions[1].emit({ type: "translated_audio", base64: Buffer.alloc(12).toString("base64") });
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    expect(feed.sent.map(JSON.parse)).toContainEqual(expect.objectContaining({
+      type: "error", fatal: true, message: "Text-only Translator received unexpected Guest audio",
+    }));
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+  });
+
+  it("replays a coherent completed turn when source transcription arrives after text output", async () => {
+    const id = "late-source-text", sessions: any[] = [];
+    registerTranslatorCall({
+      id, ownerId: "late-owner", ownerCallSid: "CAowner", guestNumber: "+15551234567",
+      callerId: "+15557654321", baseUrl: "https://example.test", playbackPreference: "text",
+    });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), feed = new FakeSocket();
+    subscribeTranslatorFeed("late-owner", feed as any);
+    const provider = fakeProvider(sessions);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+
+    sessions[1].emit({ type: "translated_transcript_done", text: "Привет", responseId: "r-late" });
+    sessions[1].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, translatedTranscript: "Привет", provider: "test", model: "test",
+      sourceItemId: "item-late", responseId: "r-late",
+    } });
+    sessions[1].emit({ type: "source_transcript", text: "Hello", itemId: "item-late" });
+
+    const messages = feed.sent.map(JSON.parse);
+    const sourceIndex = messages.findIndex(m => m.type === "source_transcript" && m.itemId === "item-late");
+    expect(messages[sourceIndex]).toEqual(expect.objectContaining({
+      text: "Hello", translatedTranscript: "Привет",
+    }));
+    expect(messages[sourceIndex + 1]).toEqual(expect.objectContaining({
+      type: "turn_completed", leg: "guest",
+    }));
+  });
+
   it("snapshots resolved voices when the call is registered", () => {
     const id = "immutable-voice";
     const voices = { owner: "cedar", guest: "marin" } as const;
@@ -90,6 +194,7 @@ describe("PSTN translator bridge routing", () => {
     await new Promise(resolve => setImmediate(resolve));
 
     expect(configs.map(c => [c.sourceLangHint, c.outputLanguage])).toEqual([["ru", "en"], ["en", "ru"]]);
+    expect(configs.map(c => c.outputMode)).toEqual(["audio", "audio"]);
     expect(configs.map(c => c.voice)).toEqual(["marin", "cedar"]);
 
     const original = Buffer.from([0xff, 0x7f]).toString("base64");

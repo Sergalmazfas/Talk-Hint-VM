@@ -157,6 +157,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
   private speechStartTs?: number;
   private speechEndTs?: number;
   private firstAudioTs?: number;
+  private firstTextTs?: number;
   private sourceTranscript = "";
   // item_id → source transcript. Input transcription is asynchronous and can
   // arrive after the response it belongs to (or around a later turn), so
@@ -270,28 +271,31 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
   private sendSessionUpdate() {
     // GA session shape. If the server rejects it we surface the error event
     // honestly — no silent downgrade.
+    const audio: any = {
+      input: {
+        format: { type: "audio/pcm", rate: this.config.inputFormat.sampleRateHz },
+        transcription: { model: "gpt-4o-mini-transcribe" },
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+        },
+      },
+    };
+    if ((this.config.outputMode ?? "audio") === "audio") {
+      audio.output = {
+        format: { type: "audio/pcm", rate: this.config.outputFormat.sampleRateHz },
+        voice: this.voice,
+      };
+    }
     this.sendJson({
       type: "session.update",
       session: {
         type: "realtime",
-        output_modalities: ["audio"],
+        output_modalities: [this.config.outputMode ?? "audio"],
         instructions: this.instructions,
-        audio: {
-          input: {
-            format: { type: "audio/pcm", rate: this.config.inputFormat.sampleRateHz },
-            transcription: { model: "gpt-4o-mini-transcribe" },
-            turn_detection: {
-              type: "server_vad",
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
-            },
-          },
-          output: {
-            format: { type: "audio/pcm", rate: this.config.outputFormat.sampleRateHz },
-            voice: this.voice,
-          },
-        },
+        audio,
       },
     });
   }
@@ -393,6 +397,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
         this.speechStartTs = ts;
         this.speechEndTs = undefined;
         this.firstAudioTs = undefined;
+        this.firstTextTs = undefined;
         // Attribute from the VAD prefix window (300ms) before speech_started.
         const prefixBytes = Math.round((300 / 1000) * this.config.inputFormat.sampleRateHz) * 2;
         this.turnInStartBytes = Math.max(0, this.totalInBytes - prefixBytes);
@@ -499,6 +504,14 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
       case "response.output_audio.delta":
       case "response.audio.delta":
         if (msg.delta) {
+          if ((this.config.outputMode ?? "audio") === "text") {
+            this.emit({
+              type: "error",
+              message: "Text-only Translator received unexpected audio output",
+              fatal: true,
+            });
+            break;
+          }
           this.checkOutputAfterDone(msg.response_id);
           // Local discard: provider propagation delay after response.cancel can
           // deliver audio deltas that arrive before the server acknowledges the
@@ -511,22 +524,30 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
         break;
       case "response.output_audio_transcript.delta":
       case "response.audio_transcript.delta":
+      case "response.output_text.delta":
+      case "response.text.delta":
         if (msg.delta) {
           this.checkOutputAfterDone(msg.response_id);
           if (msg.response_id && this.suppressedResponseIds.has(msg.response_id)) break;
           this.translatedTranscript += msg.delta;
+          if (!this.firstTextTs) this.firstTextTs = Date.now();
           this.emit({ type: "translated_transcript_delta", text: msg.delta, responseId: msg.response_id });
         }
         break;
       case "response.output_audio_transcript.done":
       case "response.audio_transcript.done":
-        if (msg.transcript) {
+      case "response.output_text.done":
+      case "response.text.done": {
+        const text = msg.transcript || msg.text;
+        if (text) {
           this.checkOutputAfterDone(msg.response_id);
           if (msg.response_id && this.suppressedResponseIds.has(msg.response_id)) break;
-          this.translatedTranscript = msg.transcript;
-          this.emit({ type: "translated_transcript_done", text: msg.transcript, responseId: msg.response_id });
+          this.translatedTranscript = text;
+          if (!this.firstTextTs) this.firstTextTs = Date.now();
+          this.emit({ type: "translated_transcript_done", text, responseId: msg.response_id });
         }
         break;
+      }
       case "response.done": {
         const st = msg.response?.status;
         const details = msg.response?.status_details || {};
@@ -574,14 +595,28 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
             });
           }
         }
+        if (
+          (this.config.outputMode ?? "audio") === "text" &&
+          st === "completed" &&
+          !this.translatedTranscript.trim()
+        ) {
+          this.emit({
+            type: "error",
+            message: "Text-only Translator response completed without translated text",
+            fatal: true,
+          });
+        }
         const usage = msg.response?.usage;
         const metrics: TranslationTurnMetrics = {
           turnIndex: this.turnIndex++,
           speechStartTs: this.speechStartTs,
           speechEndTs: this.speechEndTs,
           firstTranslatedAudioTs: this.firstAudioTs,
+          firstTranslatedTextTs: this.firstTextTs,
           latencyMs:
             this.speechEndTs && this.firstAudioTs ? this.firstAudioTs - this.speechEndTs : undefined,
+          textLatencyMs:
+            this.speechEndTs && this.firstTextTs ? this.firstTextTs - this.speechEndTs : undefined,
           // Attributed turns read strictly by item id; if the transcription
           // has not arrived yet this is honestly undefined (the client
           // reconciles late transcripts via sourceItemId). Only unattributed

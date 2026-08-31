@@ -15,6 +15,9 @@
 "settings.translator.my_voice" = "Мій голос";
 "settings.translator.voice.male" = "Чоловічий";
 "settings.translator.voice.female" = "Жіночий";
+"settings.translator.playback" = "Відтворення перекладу";
+"settings.translator.playback.voice" = "Голос";
+"settings.translator.playback.text" = "Лише текст";
 "settings.section.phone" = "Телефон";
 "settings.section.account" = "Обліковий запис";
 "settings.footer.language" = "Мова, що використовується для перекладів і підказок під час дзвінків у реальному часі.";

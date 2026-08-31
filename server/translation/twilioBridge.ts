@@ -19,6 +19,7 @@ export function oppositeTranslatorLeg(leg: TranslatorLeg): TranslatorLeg {
 }
 export type TranslatorAudioKind = "original" | "translation";
 export type TranslatorVoicePreference = "male" | "female";
+export type TranslatorPlaybackPreference = "voice" | "text";
 export interface TranslatorVoices { owner: "cedar" | "marin"; guest: "cedar" | "marin" }
 const FEMALE_TRANSLATOR_VOICES: TranslatorVoices = { owner: "marin", guest: "cedar" };
 export function resolveTranslatorVoices(value: unknown): {
@@ -27,6 +28,9 @@ export function resolveTranslatorVoices(value: unknown): {
 } {
   if (value === "male") return { preference: "male", voices: { owner: "cedar", guest: "marin" } };
   return { preference: "female", voices: { ...FEMALE_TRANSLATOR_VOICES } };
+}
+export function resolveTranslatorPlayback(value: unknown): TranslatorPlaybackPreference {
+  return value === "text" ? "text" : "voice";
 }
 /**
  * Production PSTN routing is intentionally asymmetric. Owner monitors the
@@ -45,6 +49,7 @@ export interface TranslatorCall {
   callerId: string; baseUrl: string;
   voicePreference?: TranslatorVoicePreference;
   voices?: TranslatorVoices;
+  playbackPreference?: TranslatorPlaybackPreference;
 }
 export interface TranslatorDialer {
   createGuestLeg(call: TranslatorCall): Promise<{ sid: string }>;
@@ -53,6 +58,7 @@ export interface TranslatorDialer {
 type RegisteredTranslatorCall = TranslatorCall & {
   voicePreference: TranslatorVoicePreference;
   voices: TranslatorVoices;
+  playbackPreference: TranslatorPlaybackPreference;
 };
 const calls = new Map<string, RegisteredTranslatorCall>();
 type ActiveLeg = { ws: WebSocket; streamSid: string; session?: RealtimeTranslationSession };
@@ -103,6 +109,7 @@ export function registerTranslatorCall(call: TranslatorCall) {
     ...call,
     voicePreference: resolved.preference,
     voices: { ...resolved.voices },
+    playbackPreference: resolveTranslatorPlayback(call.playbackPreference),
   });
   const timer: any = setTimeout(() => {
     const state = activeCalls.get(call.id);
@@ -229,6 +236,7 @@ export function handleTranslatorTwilioStream(
           languages: ["ru", "en"],
           sourceLangHint: leg === "owner" ? "ru" : "en",
           outputLanguage: leg === "owner" ? "en" : "ru",
+          outputMode: leg === "guest" && call.playbackPreference === "text" ? "text" : "audio",
           voice: call.voices[leg],
           inputFormat: { encoding: "pcm16", sampleRateHz: RATE },
           outputFormat: { encoding: "pcm16", sampleRateHz: RATE },
@@ -244,6 +252,14 @@ export function handleTranslatorTwilioStream(
           const state = call ? activeCalls.get(call.id) : undefined;
           if (!state || state.failed || state.finalized) return;
           if (ev.type === "translated_audio" && call && leg) {
+            if (leg === "guest" && call.playbackPreference === "text") {
+              const message = "Text-only Translator received unexpected Guest audio";
+              state.errors.push(message);
+              persist();
+              sendFeed(call.ownerId, { type: "error", callSid: call.ownerCallSid, message, fatal: true });
+              finishBridge(true, message);
+              return;
+            }
             // Convert once, then fan out this exact output payload. Owner
             // monitoring never causes a second provider request/synthesis.
             const payload = pcm24ToMulaw(Buffer.from(ev.base64, "base64"));
@@ -279,12 +295,24 @@ export function handleTranslatorTwilioStream(
             }
             state.guestOriginal.playbackToken = undefined;
           } else if (ev.type === "source_transcript" && call && leg) {
+            let completed: (TranslationTurnMetrics & { leg: TranslatorLeg }) | undefined;
             if (ev.itemId) {
               state?.transcriptsByItem.set(ev.itemId, ev.text);
-              const completed = state?.turns.find(t => t.sourceItemId === ev.itemId);
+              completed = state?.turns.find(t => t.sourceItemId === ev.itemId);
               if (completed) { completed.sourceTranscript = ev.text; persist(); }
             }
-            sendFeed(call.ownerId, { type: "source_transcript", callSid: call.ownerCallSid, leg, text: ev.text, itemId: ev.itemId });
+            sendFeed(call.ownerId, {
+              type: "source_transcript", callSid: call.ownerCallSid, leg, text: ev.text,
+              translatedTranscript: completed?.translatedTranscript, itemId: ev.itemId,
+            });
+            // Text output can finish before asynchronous input transcription.
+            // Replay completion after the coherent source+translation card so
+            // iOS does not leave a late source card open indefinitely.
+            if (completed) {
+              sendFeed(call.ownerId, {
+                type: "turn_completed", callSid: call.ownerCallSid, leg, metrics: completed,
+              });
+            }
           } else if ((ev.type === "translated_transcript_delta" || ev.type === "translated_transcript_done") && call && leg) {
             sendFeed(call.ownerId, { type: ev.type, callSid: call.ownerCallSid, leg, text: ev.text, responseId: ev.responseId });
           } else if (ev.type === "turn_completed" && leg && state && call) {
@@ -302,7 +330,12 @@ export function handleTranslatorTwilioStream(
           } else if (ev.type === "invariant_violation" && call) {
             finishBridge(true, `Translator invariant violation: ${ev.code}`);
           } else if (ev.type === "error" && call) {
-            if (ev.fatal) finishBridge(true, ev.message);
+            if (ev.fatal) {
+              state?.errors.push(ev.message);
+              persist();
+              sendFeed(call.ownerId, { type: "error", callSid: call.ownerCallSid, message: ev.message, fatal: true });
+              finishBridge(true, ev.message);
+            }
             else { state?.errors.push(ev.message); persist(); sendFeed(call.ownerId, { type: "error", callSid: call.ownerCallSid, message: ev.message, fatal: false }); }
           }
         });

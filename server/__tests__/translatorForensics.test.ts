@@ -25,10 +25,81 @@ function makeSession() {
   return { events, feed };
 }
 
+function makeTextSession() {
+  const session = new OpenAIRealtimeTranslationSession({
+    languages: ["ru", "en"],
+    sourceLangHint: "en",
+    outputLanguage: "ru",
+    outputMode: "text",
+    inputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+    outputFormat: { encoding: "pcm16", sampleRateHz: 24000 },
+  });
+  const events: TranslationEvent[] = [];
+  session.onEvent((ev) => events.push(ev));
+  const feed = (msg: any) => (session as any).handleMessage(msg);
+  return { session, events, feed };
+}
+
 const violations = (events: TranslationEvent[]) =>
   events.filter((e) => e.type === "invariant_violation") as any[];
 
 describe("adapter hard 1→1 invariants (live detectors)", () => {
+  it("sends a real text-only session update without an audio output configuration", () => {
+    const { session } = makeTextSession();
+    const sent: any[] = [];
+    (session as any).sendJson = (message: any) => sent.push(message);
+    (session as any).sendSessionUpdate();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].session.output_modalities).toEqual(["text"]);
+    expect(sent[0].session.audio.input.format).toEqual({ type: "audio/pcm", rate: 24000 });
+    expect(sent[0].session.audio.output).toBeUndefined();
+  });
+
+  it("normalizes text output deltas/done and reports honest text-only metrics", () => {
+    const { session, events, feed } = makeTextSession();
+    setTurnAudio(session, 700);
+    feed({ type: "input_audio_buffer.committed", item_id: "item_text" });
+    feed({ type: "response.created", response: { id: "resp_text" } });
+    feed({ type: "response.output_text.delta", delta: "При", response_id: "resp_text" });
+    feed({ type: "response.output_text.done", text: "Привет", response_id: "resp_text" });
+    feed({ type: "response.done", response: { id: "resp_text", status: "completed", usage: {} } });
+
+    expect(events.some(e => e.type === "translated_audio")).toBe(false);
+    expect(events).toContainEqual({ type: "translated_transcript_delta", text: "При", responseId: "resp_text" });
+    expect(events).toContainEqual({ type: "translated_transcript_done", text: "Привет", responseId: "resp_text" });
+    const completed = events.find(e => e.type === "turn_completed") as any;
+    expect(completed.metrics.translatedTranscript).toBe("Привет");
+    expect(completed.metrics.firstTranslatedAudioTs).toBeUndefined();
+    expect(completed.metrics.audioOutMs).toBeUndefined();
+    expect(completed.metrics.firstTranslatedTextTs).toBeTypeOf("number");
+    expect(completed.metrics.textLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(events.some(e => e.type === "error")).toBe(false);
+  });
+
+  it("fails closed when a completed text-only response has no translation", () => {
+    const { events, feed } = makeTextSession();
+    feed({ type: "input_audio_buffer.committed", item_id: "item_empty" });
+    feed({ type: "response.created", response: { id: "resp_empty" } });
+    feed({ type: "response.done", response: { id: "resp_empty", status: "completed", usage: {} } });
+    expect(events).toContainEqual({
+      type: "error",
+      message: "Text-only Translator response completed without translated text",
+      fatal: true,
+    });
+    expect(events.some(e => e.type === "translated_audio")).toBe(false);
+  });
+
+  it("fails closed without emitting audio if a provider violates text-only modality", () => {
+    const { events, feed } = makeTextSession();
+    feed({ type: "response.output_audio.delta", delta: "QUJD", response_id: "resp_bad_audio" });
+    expect(events).toContainEqual({
+      type: "error",
+      message: "Text-only Translator received unexpected audio output",
+      fatal: true,
+    });
+    expect(events.some(e => e.type === "translated_audio")).toBe(false);
+  });
+
   it("a clean turn (commit → one response → done) raises no violation", () => {
     const { events, feed } = makeSession();
     feed({ type: "input_audio_buffer.speech_started" });

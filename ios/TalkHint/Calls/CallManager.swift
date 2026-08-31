@@ -40,6 +40,7 @@ final class CallManager: NSObject {
         var answered: Bool
         let isOutgoing: Bool
         let translatorVoice: TranslatorVoicePreference
+        let translatorPlayback: TranslatorPlaybackPreference
     }
 
     private var sessions: [UUID: CallSession] = [:]
@@ -67,7 +68,7 @@ final class CallManager: NSObject {
     /// PushKit completion handler must run only after `reportNewIncomingCall`.
     func reportIncomingCall(callSid: String, fromNumber: String, completion: @escaping () -> Void) {
         let uuid = UUID()
-        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false, translatorVoice: .female)
+        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false, translatorVoice: .female, translatorPlayback: .voice)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -117,9 +118,11 @@ final class CallManager: NSObject {
         // Snapshot before CallKit/Twilio starts. A Settings change after this
         // point affects only the next Translator call.
         let translatorVoice = SessionStore.shared.translatorVoice
+        let translatorPlayback = SessionStore.shared.translatorPlayback
         sessions[uuid] = CallSession(uuid: uuid, mode: mode, callSid: nil, remoteLabel: number,
                                      twilioCall: nil, answered: false, isOutgoing: true,
-                                     translatorVoice: translatorVoice)
+                                      translatorVoice: translatorVoice,
+                                      translatorPlayback: translatorPlayback)
 
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
@@ -134,7 +137,8 @@ final class CallManager: NSObject {
     /// Kept as a pure seam so mode tagging is covered without initiating a
     /// CallKit transaction.
     static func connectParameters(to number: String, mode: CallMode,
-                                  translatorVoice: TranslatorVoicePreference = .female) -> [String: String] {
+                                  translatorVoice: TranslatorVoicePreference = .female,
+                                  translatorPlayback: TranslatorPlaybackPreference = .voice) -> [String: String] {
         switch mode {
         case .hint:
             return ["To": number]
@@ -146,6 +150,7 @@ final class CallManager: NSObject {
                 "GuestTo": number,
                 "TranslatorMode": "ru_en",
                 "TranslatorVoice": translatorVoice.rawValue,
+                "TranslatorPlayback": translatorPlayback.rawValue,
             ]
         }
     }
@@ -310,7 +315,8 @@ extension CallManager: CXProviderDelegate {
 
                 let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
                     builder.params = Self.connectParameters(to: number, mode: session.mode,
-                                                            translatorVoice: session.translatorVoice)
+                                                            translatorVoice: session.translatorVoice,
+                                                            translatorPlayback: session.translatorPlayback)
                     builder.uuid = uuid
                 }
                 let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)

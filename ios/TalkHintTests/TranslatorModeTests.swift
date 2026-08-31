@@ -30,6 +30,19 @@ final class TranslatorModeTests: XCTestCase {
         )
         XCTAssertEqual(HomeViewController.normalizedDialInput("++1 23abc"), "+123")
     }
+
+    func testTranslatorPlaybackDefaultsInvalidStoredValueToVoice() {
+        let key = "talkhint.translator.playback"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.set("mute", forKey: key)
+        XCTAssertEqual(SessionStore.shared.translatorPlayback, .voice)
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertEqual(SessionStore.shared.translatorPlayback, .voice)
+    }
     func testTranslatorOutgoingCallIsExplicitlyModeTagged() {
         let params = CallManager.connectParameters(to: "+14155550100", mode: .translator)
         XCTAssertEqual(params, [
@@ -37,6 +50,7 @@ final class TranslatorModeTests: XCTestCase {
             "GuestTo": "+14155550100",
             "TranslatorMode": "ru_en",
             "TranslatorVoice": "female",
+            "TranslatorPlayback": "voice",
         ])
     }
 
@@ -48,6 +62,17 @@ final class TranslatorModeTests: XCTestCase {
         XCTAssertEqual(
             CallManager.connectParameters(to: "+14155550100", mode: .translator, translatorVoice: .female)["TranslatorVoice"],
             "female"
+        )
+    }
+
+    func testTranslatorPlaybackPreferenceIsPassedAsClosedValue() {
+        XCTAssertEqual(
+            CallManager.connectParameters(to: "+14155550100", mode: .translator, translatorPlayback: .voice)["TranslatorPlayback"],
+            "voice"
+        )
+        XCTAssertEqual(
+            CallManager.connectParameters(to: "+14155550100", mode: .translator, translatorPlayback: .text)["TranslatorPlayback"],
+            "text"
         )
     }
 

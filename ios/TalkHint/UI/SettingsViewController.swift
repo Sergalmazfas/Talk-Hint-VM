@@ -31,6 +31,11 @@ final class SettingsViewController: UITableViewController {
         case translation
     }
 
+    private enum TranslatorRow: Int, CaseIterable {
+        case voice
+        case playback
+    }
+
     // Per-user live-call toggles, mirrored locally for instant display. Default ON
     // to match the backend; refreshed from the server on appear.
     private var liveHintsEnabled = true
@@ -86,7 +91,7 @@ final class SettingsViewController: UITableViewController {
         switch Section(rawValue: section)! {
         case .language: return SessionStore.availableLanguages.count
         case .features: return FeatureRow.allCases.count
-        case .translator: return 1
+        case .translator: return TranslatorRow.allCases.count
         case .phone: return 1
         case .account: return 1
         }
@@ -140,15 +145,28 @@ final class SettingsViewController: UITableViewController {
         case .translator:
             let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
             cell.selectionStyle = .none
-            cell.textLabel?.text = NSLocalizedString("settings.translator.my_voice", comment: "")
-            let voice = UISegmentedControl(items: [
-                NSLocalizedString("settings.translator.voice.male", comment: ""),
-                NSLocalizedString("settings.translator.voice.female", comment: ""),
-            ])
-            voice.selectedSegmentIndex = SessionStore.shared.translatorVoice == .male ? 0 : 1
-            voice.accessibilityIdentifier = "segmented-translator-voice"
-            voice.addTarget(self, action: #selector(translatorVoiceChanged(_:)), for: .valueChanged)
-            cell.accessoryView = voice
+            switch TranslatorRow(rawValue: indexPath.row)! {
+            case .voice:
+                cell.textLabel?.text = NSLocalizedString("settings.translator.my_voice", comment: "")
+                let control = UISegmentedControl(items: [
+                    NSLocalizedString("settings.translator.voice.male", comment: ""),
+                    NSLocalizedString("settings.translator.voice.female", comment: ""),
+                ])
+                control.selectedSegmentIndex = SessionStore.shared.translatorVoice == .male ? 0 : 1
+                control.accessibilityIdentifier = "segmented-translator-voice"
+                control.addTarget(self, action: #selector(translatorVoiceChanged(_:)), for: .valueChanged)
+                cell.accessoryView = control
+            case .playback:
+                cell.textLabel?.text = NSLocalizedString("settings.translator.playback", comment: "")
+                let control = UISegmentedControl(items: [
+                    NSLocalizedString("settings.translator.playback.voice", comment: ""),
+                    NSLocalizedString("settings.translator.playback.text", comment: ""),
+                ])
+                control.selectedSegmentIndex = SessionStore.shared.translatorPlayback == .voice ? 0 : 1
+                control.accessibilityIdentifier = "segmented-translator-playback"
+                control.addTarget(self, action: #selector(translatorPlaybackChanged(_:)), for: .valueChanged)
+                cell.accessoryView = control
+            }
             return cell
 
         case .phone:
@@ -225,6 +243,10 @@ final class SettingsViewController: UITableViewController {
 
     @objc private func translatorVoiceChanged(_ sender: UISegmentedControl) {
         SessionStore.shared.translatorVoice = sender.selectedSegmentIndex == 0 ? .male : .female
+    }
+
+    @objc private func translatorPlaybackChanged(_ sender: UISegmentedControl) {
+        SessionStore.shared.translatorPlayback = sender.selectedSegmentIndex == 0 ? .voice : .text
     }
 
     /// Persists a single toggle, reverting the switch on failure.

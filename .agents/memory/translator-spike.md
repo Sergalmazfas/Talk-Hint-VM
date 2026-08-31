@@ -36,6 +36,11 @@ The native Translator has two isolated transports: the standalone authenticated 
 Translator voice selection is a device-local, call-snapshotted `male|female` preference. Male maps Owner to cedar and Guest to marin; Female/default maps Owner to marin and Guest to cedar. OpenAI voice IDs never cross the UI boundary, and both fixed session voices are resolved before either provider session starts.
 **Why:** the two translated roles need to remain distinguishable by ear without allowing Settings changes to mutate an active call or widening the provider-facing configuration surface.
 **How to apply:** keep Female as the fallback for missing/invalid values, send only the closed preference through signed Twilio parameters, copy the resolved pair into call registration, and never alter routing or synthesize a second Owner-monitoring payload.
+
+## Translator incoming playback preference
+Incoming Guest→RU delivery is a device-local, call-snapshotted `voice|text` preference with Voice as the safe default. Text means a true text-output Guest session, never generated-and-muted audio; Owner→EN remains audio and keeps exact-payload monitoring.
+**Why:** Voice demonstrates the product without onboarding, while Text removes local translated playback latency and audio-output cost for users who prefer speed. A runtime fallback could unexpectedly start speaking mid-call.
+**How to apply:** modality is immutable for the call. Missing/invalid values become Voice. Empty completed text or any Guest audio in Text mode is fatal and fail-closed; never switch the active call to Voice or another pipeline.
 ## Translator candidate decision
 For the current translator effort, the conversational `gpt-realtime` adapter is the selected candidate: it has demonstrated faithful RU↔EN behavior and should be integrated only through the separate Translator surface. The dedicated continuous translator is deprioritized.
 **Why:** the live stand showed good quality and reverse-direction potential for `gpt-realtime`, while the continuous model emitted premature fragments and was not useful for the immediate deadline.

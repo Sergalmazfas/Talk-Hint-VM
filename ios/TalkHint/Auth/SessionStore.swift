@@ -5,6 +5,11 @@ enum TranslatorVoicePreference: String {
     case female
 }
 
+enum TranslatorPlaybackPreference: String {
+    case voice
+    case text
+}
+
 /// Holds the authenticated session (Bearer token + user id) used for all
 /// backend calls. The token is stored in the Keychain; the user id (not
 /// sensitive) in UserDefaults.
@@ -22,6 +27,7 @@ final class SessionStore {
     private let activePromptIdKey = "talkhint.assistant.prompt.id"
     private let userContextKey = "talkhint.user.context"
     private let translatorVoiceKey = "talkhint.translator.voice"
+    private let translatorPlaybackKey = "talkhint.translator.playback"
 
     /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
     /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
@@ -84,6 +90,17 @@ final class SessionStore {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: translatorVoiceKey) }
     }
 
+    /// How Guest translations are delivered to the Owner. Invalid or missing
+    /// persisted values preserve the existing voice playback behavior.
+    var translatorPlayback: TranslatorPlaybackPreference {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: translatorPlaybackKey),
+                  let value = TranslatorPlaybackPreference(rawValue: raw) else { return .voice }
+            return value
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: translatorPlaybackKey) }
+    }
+
     /// How incoming calls are handled, persisted to the backend via
     /// `POST /api/user/call-mode` (enum live / forwarding / training). The
     /// backend exposes no GET for it, so this local copy is the display source
@@ -141,5 +158,6 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: activePromptIdKey)
         UserDefaults.standard.removeObject(forKey: userContextKey)
         UserDefaults.standard.removeObject(forKey: translatorVoiceKey)
+        UserDefaults.standard.removeObject(forKey: translatorPlaybackKey)
     }
 }

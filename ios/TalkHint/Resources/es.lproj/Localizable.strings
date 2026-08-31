@@ -15,6 +15,9 @@
 "settings.translator.my_voice" = "Mi voz";
 "settings.translator.voice.male" = "Masculina";
 "settings.translator.voice.female" = "Femenina";
+"settings.translator.playback" = "Reproducción de traducción";
+"settings.translator.playback.voice" = "Voz";
+"settings.translator.playback.text" = "Solo texto";
 "settings.section.phone" = "Teléfono";
 "settings.section.account" = "Cuenta";
 "settings.footer.language" = "Idioma usado para traducciones y sugerencias durante las llamadas en vivo.";

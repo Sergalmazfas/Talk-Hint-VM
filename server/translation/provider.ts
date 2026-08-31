@@ -26,6 +26,8 @@ export interface RealtimeTranslationConfig {
    * When unset, the provider runs bidirectional pair mode over `languages`.
    */
   outputLanguage?: string;
+  /** Immutable output modality for the lifetime of this session. Defaults to audio. */
+  outputMode?: "audio" | "text";
   /** Provider-specific output voice id. Optional; provider picks a default. */
   voice?: string;
   inputFormat: AudioFormat;
@@ -38,8 +40,11 @@ export interface TranslationTurnMetrics {
   speechStartTs?: number;
   speechEndTs?: number;
   firstTranslatedAudioTs?: number;
+  firstTranslatedTextTs?: number;
   /** speechEnd -> first translated audio, ms (the headline latency metric). */
   latencyMs?: number;
+  /** speechEnd -> first translated text delta, ms. */
+  textLatencyMs?: number;
   sourceTranscript?: string;
   translatedTranscript?: string;
   provider: string;
