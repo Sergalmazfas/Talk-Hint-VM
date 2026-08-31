@@ -183,6 +183,11 @@ export function sanitizeSpikeControls(msg: any): {
   return { inputLang, outputLang, voice, provider };
 }
 
+/** Direction is separate from the legacy output-language controls. */
+export function sanitizeSpikeDirection(msg: any): "directed" | "bidirectional" {
+  return msg?.direction === "bidirectional" ? "bidirectional" : "directed";
+}
+
 type ScorecardTurn = {
   cancelled?: boolean;
   latencyMs?: number | null;
@@ -426,6 +431,16 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
       if (session || starting) return;
       starting = true;
       const { inputLang, outputLang, voice, provider } = sanitizeSpikeControls(msg);
+      const direction = sanitizeSpikeDirection(msg);
+      if (direction === "bidirectional" && provider !== "openai-realtime") {
+        starting = false;
+        send({
+          type: "error",
+          message: "Bidirectional mode is available only for the current gpt-realtime translator",
+          fatal: true,
+        });
+        return;
+      }
       // Directed mode: everything → outputLang. The language pair drives
       // auto-detection hints; use the fixed input when given, else the pair
       // most likely to appear (ru/en/es minus the output language).
@@ -437,12 +452,18 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
           : openaiRealtimeTranslationProvider;
       const caps = SPIKE_PROVIDERS[provider].capabilities;
       let started: RealtimeTranslationSession;
-      log(`[TranslatorSpike] starting session provider=${provider} in=${inputLang} out=${outputLang}`, "translator");
+      const languages: [string, string] =
+        direction === "bidirectional" ? ["ru", "en"] : [otherLang, outputLang];
+      const effectiveInputLang = direction === "bidirectional" ? "auto" : inputLang;
+      log(
+        `[TranslatorSpike] starting session provider=${provider} direction=${direction} in=${effectiveInputLang} out=${direction === "bidirectional" ? "pair" : outputLang}`,
+        "translator",
+      );
       try {
         started = await providerImpl.startSession({
-          languages: [otherLang, outputLang],
-          sourceLangHint: inputLang,
-          outputLanguage: outputLang,
+          languages,
+          sourceLangHint: effectiveInputLang,
+          outputLanguage: direction === "bidirectional" ? undefined : outputLang,
           // Voice is a capability, not a universal control: the translation
           // model has dynamic voice adaptation and accepts no voice param.
           voice: caps.voiceSelection ? voice : undefined,
@@ -465,6 +486,8 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
         type: "session_config",
         inputLang,
         outputLang,
+        direction,
+        languages,
         voice_id: caps.voiceSelection ? voice : null,
         voice_name: caps.voiceSelection ? VOICES[voice]?.name || voice : "(dynamic voice adaptation)",
         voice_gender: caps.voiceSelection ? VOICES[voice]?.gender || "unknown" : "n/a",
@@ -624,6 +647,7 @@ function buildSpikePageHtml(): string {
 <div class="sub">Continuous open-mic, server VAD. Use headphones — the translated voice will otherwise feed back into the mic. Dev-only stand; no telephony, no iOS. Changing a selector while live cleanly restarts the session.</div>
 <div class="row">
   <label>Provider <select id="providerSel"><option value="openai-realtime" selected>Current realtime translator</option><option value="openai-realtime-translate">OpenAI gpt-realtime-translate</option></select></label>
+  <label>Mode <select id="directionSel"><option value="bidirectional" selected>Bidirectional Russian ↔ English</option><option value="directed">One-way output language</option></select></label>
   <label>Input <select id="inLang"><option value="auto" selected>Auto</option><option value="ru">Russian</option><option value="en">English</option><option value="es">Spanish</option></select></label>
   <label>Output <select id="outLang"><option value="en" selected>English</option><option value="ru">Russian</option><option value="es">Spanish</option></select></label>
   <label>Voice <select id="voiceSel"><option value="marin" selected>Marin (female)</option><option value="cedar">Cedar (male)</option></select></label>
@@ -1031,6 +1055,7 @@ document.getElementById('exportBtn').onclick=async()=>{
 function controlsMsg(){
   return { type:'start',
     provider:document.getElementById('providerSel').value,
+    direction:document.getElementById('directionSel').value,
     inputLang:document.getElementById('inLang').value,
     outputLang:document.getElementById('outLang').value,
     voice:document.getElementById('voiceSel').value };
@@ -1041,8 +1066,20 @@ function controlsMsg(){
 // instead of pretending it works. Provider limitation, not a bug.
 function syncProviderControls(){
   const p=document.getElementById('providerSel').value;
+  const directionSel=document.getElementById('directionSel');
+  const pairOption=directionSel.querySelector('option[value="bidirectional"]');
+  const inputSel=document.getElementById('inLang');
+  const outputSel=document.getElementById('outLang');
   const voiceLabel=document.getElementById('voiceSel').parentElement;
   voiceLabel.style.display = (p==='openai-realtime-translate') ? 'none' : '';
+  pairOption.disabled = p!=='openai-realtime';
+  if(p==='openai-realtime-translate' && directionSel.value==='bidirectional'){
+    directionSel.value='directed';
+  }
+  const pair=directionSel.value==='bidirectional';
+  if(pair) inputSel.value='auto';
+  inputSel.disabled=pair;
+  outputSel.disabled=pair;
 }
 
 async function start(){
@@ -1124,6 +1161,7 @@ async function restartWithControls(){
 document.getElementById('inLang').onchange=restartWithControls;
 document.getElementById('outLang').onchange=restartWithControls;
 document.getElementById('voiceSel').onchange=restartWithControls;
+document.getElementById('directionSel').onchange=()=>{ syncProviderControls(); restartWithControls(); };
 document.getElementById('providerSel').onchange=()=>{ syncProviderControls(); restartWithControls(); };
 syncProviderControls();
 

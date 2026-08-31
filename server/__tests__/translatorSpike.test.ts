@@ -7,6 +7,7 @@ import {
   isSpikeEnabled,
   isValidSpikeToken,
   sanitizeSpikeControls,
+  sanitizeSpikeDirection,
   type SpikeArchiveState,
 } from "../translation/spike";
 import {
@@ -86,6 +87,17 @@ describe("sanitizeSpikeControls", () => {
       .toEqual({ inputLang: "es", outputLang: "ru", voice: "cedar", provider: "openai-realtime" });
     expect(sanitizeSpikeControls({ inputLang: "de", outputLang: "kk", voice: "hasOwnProperty", provider: "evil" }))
       .toEqual({ inputLang: "auto", outputLang: "en", voice: "marin", provider: "openai-realtime" });
+  });
+});
+
+describe("sanitizeSpikeDirection", () => {
+  it("defaults to directed mode", () => {
+    expect(sanitizeSpikeDirection({})).toBe("directed");
+  });
+
+  it("accepts only the explicit bidirectional mode", () => {
+    expect(sanitizeSpikeDirection({ direction: "bidirectional" })).toBe("bidirectional");
+    expect(sanitizeSpikeDirection({ direction: "anything-else" })).toBe("directed");
   });
 });
 
