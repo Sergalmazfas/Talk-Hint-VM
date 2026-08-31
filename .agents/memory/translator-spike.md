@@ -24,4 +24,4 @@ gpt-realtime-translate streams output audio CONTINUOUSLY, including silence betw
 ## iPhone browser audio and report export
 The browser stand must not assume `AudioContext({sampleRate:24000})` is honored. Resample microphone audio from the actual context rate to provider-native 24 kHz, and resample returned 24 kHz PCM back to the device rate for playback.
 **Why:** iOS Safari commonly runs its audio graph at 48 kHz; labeling unconverted device PCM as 24 kHz corrupts timing, recognition, pitch, and playback/gate duration.
-**How to apply:** use the runtime `AudioContext.sampleRate` at both boundaries. For report export on iOS, prefer the native Share sheet and retain a visible file link fallback; synthetic Blob-link clicks can silently do nothing.
+**How to apply:** use the runtime `AudioContext.sampleRate` at both boundaries. On iOS, invoke Share directly from the tap before any awaited analysis (or Safari discards user activation), and retain a visible file-link fallback.

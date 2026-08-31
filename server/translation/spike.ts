@@ -978,17 +978,16 @@ document.getElementById('reviewBtn').onclick=async()=>{
 
 document.getElementById('exportBtn').onclick=async()=>{
   const exportStatus=document.getElementById('exportStatus');
-  const setExportStatus=(text,cls='sub')=>{ exportStatus.className=cls; exportStatus.textContent=text; };
-  setExportStatus('Preparing JSON…');
-  // Server-side forensic analysis of the full event log (5 suspicions + first
-  // 1→1 break). Analysis failure is reported honestly in the export, never
-  // silently omitted as if the run were clean.
-  let forensics=null;
-  try{
-    const r=await fetch('/translator-spike/analyze',{method:'POST',headers:{'Content-Type':'application/json','x-spike-token':TOKEN},body:JSON.stringify({entries:eventLog,droppedEntries:eventLogDropped})});
-    if(r.ok){ forensics=(await r.json()).forensics; }
-    else { forensics={error:'analyze failed: '+r.status+' '+await r.text()}; }
-  }catch(e){ forensics={error:'analyze failed: '+e.message}; }
+  exportStatus.className='sub';
+  exportStatus.textContent='Preparing JSON…';
+  // Export must remain a direct result of the user's tap. Awaiting the
+  // server-side forensic request first both delayed large reports and caused
+  // iOS Safari to discard the transient user gesture required by Share.
+  // Raw evidence is already included and can be analyzed from the export.
+  const forensics={
+    status:'DEFERRED_TO_REPORT_ANALYSIS',
+    reason:'Browser export intentionally does not wait for forensic analysis'
+  };
   const report={ generatedAt:new Date().toISOString(),
     currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeCurrentScorecard(),
       turns, sourceUtterances:srcUtterances, cancellations,
@@ -999,30 +998,34 @@ document.getElementById('exportBtn').onclick=async()=>{
   const json=JSON.stringify(report,null,2);
   const filename='translator-spike-run2-report.json';
   const blob=new Blob([json],{type:'application/json'});
-  const file=new File([json],filename,{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const hint=document.createElement('span');
+  hint.textContent='JSON ready. ';
+  const a=document.createElement('a');
+  a.href=url; a.download=filename; a.textContent='Tap here to save the JSON report';
+  a.className='smallbtn'; a.style.display='inline-block'; a.style.marginTop='4px';
+  // Keep a real link visible before opening Share. It remains usable even if
+  // Safari's Share promise stalls or the user dismisses it.
+  exportStatus.replaceChildren(hint,a);
   // iOS Safari often ignores Blob + a.click() without any visible error.
   // Prefer its native Share sheet, where the report can be saved to Files.
   try{
+    const file=new File([json],filename,{type:'application/json'});
     const canShareFiles=!!navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}));
     if(canShareFiles){
+      hint.textContent='Opening Share… ';
       await navigator.share({title:'TalkHint translator report',files:[file]});
-      setExportStatus('JSON готов — выбери «Сохранить в Файлы» в меню Share.','lag-ok');
+      hint.textContent='JSON готов. ';
+      exportStatus.className='lag-ok';
       return;
     }
   }catch(e){
     if(e&&e.name==='AbortError'){
-      setExportStatus('Сохранение отменено. Нажми Export ещё раз.');
+      hint.textContent='Share закрыт. Файл можно сохранить по ссылке: ';
       return;
     }
   }
-  // Keep a visible link instead of relying on a blocked synthetic click.
-  // Safari can open it and then save/share the JSON from its own toolbar.
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download=filename; a.textContent='Tap here to save the JSON report';
-  a.className='smallbtn'; a.style.display='inline-block'; a.style.marginTop='4px';
-  exportStatus.replaceChildren(a);
-  try{ window.open(url,'_blank'); }catch{}
+  hint.textContent='Share недоступен. Сохрани файл по ссылке: ';
 };
 
 function controlsMsg(){
