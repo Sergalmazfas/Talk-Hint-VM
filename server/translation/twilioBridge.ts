@@ -17,6 +17,19 @@ export type TranslatorLeg = "owner" | "guest";
 export function oppositeTranslatorLeg(leg: TranslatorLeg): TranslatorLeg {
   return leg === "owner" ? "guest" : "owner";
 }
+export type TranslatorAudioKind = "original" | "translation";
+/**
+ * Production PSTN routing is intentionally asymmetric. Owner monitors the
+ * exact English translation delivered to Guest; Guest never hears either
+ * Russian source audio or their own Russian translation.
+ */
+export function translatorAudioDestinations(
+  sourceLeg: TranslatorLeg,
+  kind: TranslatorAudioKind,
+): TranslatorLeg[] {
+  if (kind === "original") return sourceLeg === "guest" ? ["owner"] : [];
+  return sourceLeg === "owner" ? ["guest", "owner"] : ["owner"];
+}
 export interface TranslatorCall {
   id: string; ownerId: string; ownerCallSid: string; guestNumber: string;
   callerId: string; baseUrl: string;
@@ -38,6 +51,10 @@ type BridgeState = {
   guestStartRequested: boolean;
   guestCallSid?: string;
   transcriptsByItem: Map<string, string>;
+  ownerPlaybackTokens: Set<string>;
+  translationPlaybackTokenByLeg: Map<TranslatorLeg, string>;
+  guestOriginal: { speaking: boolean; preRoll: string[]; playbackToken?: string };
+  playbackSequence: number;
 };
 const activeCalls = new Map<string, BridgeState>();
 const terminationHandlers = new Map<string, (failed: boolean, reason?: string) => void>();
@@ -107,7 +124,7 @@ function pcm24ToMulaw(pcm: Buffer): string {
   return out.toString("base64");
 }
 
-/** Pair two independently-streamed Twilio legs; audio is never echoed locally. */
+/** Pair two independently-streamed Twilio legs with explicit asymmetric routing. */
 export function handleTranslatorTwilioStream(
   ws: WebSocket,
   provider: RealtimeTranslationProvider = openaiRealtimeTranslationProvider,
@@ -175,7 +192,9 @@ export function handleTranslatorTwilioStream(
       }
       if (!state) {
         state = { legs: new Map(), turns: [], errors: [], failed: false, finalized: false,
-          expiresAt: Date.now() + CALL_TTL_MS, startedLegs: new Set(), guestStartRequested: false, transcriptsByItem: new Map() };
+          expiresAt: Date.now() + CALL_TTL_MS, startedLegs: new Set(), guestStartRequested: false, transcriptsByItem: new Map(),
+          ownerPlaybackTokens: new Set(), translationPlaybackTokenByLeg: new Map(),
+          guestOriginal: { speaking: false, preRoll: [] }, playbackSequence: 0 };
         activeCalls.set(call.id, state);
       }
       if (!terminationHandlers.has(call.id)) {
@@ -184,7 +203,9 @@ export function handleTranslatorTwilioStream(
       state.startedLegs.add(leg);
       try {
         session = await provider.startSession({
-          languages: ["ru", "en"], sourceLangHint: "auto",
+          languages: ["ru", "en"],
+          sourceLangHint: leg === "owner" ? "ru" : "en",
+          outputLanguage: leg === "owner" ? "en" : "ru",
           inputFormat: { encoding: "pcm16", sampleRateHz: RATE },
           outputFormat: { encoding: "pcm16", sampleRateHz: RATE },
         });
@@ -199,12 +220,40 @@ export function handleTranslatorTwilioStream(
           const state = call ? activeCalls.get(call.id) : undefined;
           if (!state || state.failed || state.finalized) return;
           if (ev.type === "translated_audio" && call && leg) {
-            // Never return a translation to its source.  A missing opposite
-            // leg means drop audio (not a fallback/echo).
-            const target = activeCalls.get(call.id)?.legs.get(oppositeTranslatorLeg(leg));
-            if (target && target.ws.readyState === target.ws.OPEN) {
-              target.ws.send(JSON.stringify({ event: "media", streamSid: target.streamSid, media: { payload: pcm24ToMulaw(Buffer.from(ev.base64, "base64")) } }));
+            // Convert once, then fan out this exact output payload. Owner
+            // monitoring never causes a second provider request/synthesis.
+            const payload = pcm24ToMulaw(Buffer.from(ev.base64, "base64"));
+            for (const destination of translatorAudioDestinations(leg, "translation")) {
+              const target = state.legs.get(destination);
+              if (!target || target.ws.readyState !== target.ws.OPEN) continue;
+              target.ws.send(JSON.stringify({ event: "media", streamSid: target.streamSid, media: { payload } }));
+              if (destination === "owner" && !state.translationPlaybackTokenByLeg.has(leg)) {
+                const token = `translation-${leg}-${++state.playbackSequence}`;
+                state.translationPlaybackTokenByLeg.set(leg, token);
+                state.ownerPlaybackTokens.add(token);
+              }
             }
+          } else if (ev.type === "speech_started" && leg === "guest") {
+            state.guestOriginal.speaking = true;
+            const target = state.legs.get("owner");
+            if (target && target.ws.readyState === target.ws.OPEN) {
+              const token = `original-guest-${++state.playbackSequence}`;
+              state.guestOriginal.playbackToken = token;
+              state.ownerPlaybackTokens.add(token);
+              for (const payload of state.guestOriginal.preRoll) {
+                target.ws.send(JSON.stringify({ event: "media", streamSid: target.streamSid, media: { payload } }));
+              }
+            }
+            state.guestOriginal.preRoll = [];
+          } else if (ev.type === "speech_stopped" && leg === "guest") {
+            state.guestOriginal.speaking = false;
+            state.guestOriginal.preRoll = [];
+            const token = state.guestOriginal.playbackToken;
+            const target = state.legs.get("owner");
+            if (token && target && target.ws.readyState === target.ws.OPEN) {
+              target.ws.send(JSON.stringify({ event: "mark", streamSid: target.streamSid, mark: { name: token } }));
+            }
+            state.guestOriginal.playbackToken = undefined;
           } else if (ev.type === "source_transcript" && call && leg) {
             if (ev.itemId) {
               state?.transcriptsByItem.set(ev.itemId, ev.text);
@@ -215,6 +264,12 @@ export function handleTranslatorTwilioStream(
           } else if ((ev.type === "translated_transcript_delta" || ev.type === "translated_transcript_done") && call && leg) {
             sendFeed(call.ownerId, { type: ev.type, callSid: call.ownerCallSid, leg, text: ev.text, responseId: ev.responseId });
           } else if (ev.type === "turn_completed" && leg && state && call) {
+            const playbackToken = state.translationPlaybackTokenByLeg.get(leg);
+            const ownerTarget = state.legs.get("owner");
+            if (playbackToken && ownerTarget && ownerTarget.ws.readyState === ownerTarget.ws.OPEN) {
+              ownerTarget.ws.send(JSON.stringify({ event: "mark", streamSid: ownerTarget.streamSid, mark: { name: playbackToken } }));
+            }
+            state.translationPlaybackTokenByLeg.delete(leg);
             if (ev.metrics.sourceItemId && state.transcriptsByItem.has(ev.metrics.sourceItemId)) {
               ev.metrics.sourceTranscript = state.transcriptsByItem.get(ev.metrics.sourceItemId);
             }
@@ -254,8 +309,29 @@ export function handleTranslatorTwilioStream(
           try { ws.close(1011, "translator unavailable"); } catch {}
         }
       }
-    } else if (msg.event === "media" && session && msg.media?.payload) {
-      session.sendAudio(mulawToPcm24(msg.media.payload));
+    } else if (msg.event === "media" && session && msg.media?.payload && call && leg) {
+      const state = activeCalls.get(call.id);
+      if (!state) return;
+      // Owner-bound playback is output-only. While Twilio has not acknowledged
+      // its playback marks, discard Owner inbound media so acoustic speaker
+      // bleed cannot create a false source turn or re-enter either provider.
+      if (leg !== "owner" || state.ownerPlaybackTokens.size === 0) {
+        session.sendAudio(mulawToPcm24(msg.media.payload));
+      }
+      if (leg === "guest") {
+        if (state.guestOriginal.speaking) {
+          const target = state.legs.get("owner");
+          if (target && target.ws.readyState === target.ws.OPEN) {
+            target.ws.send(JSON.stringify({ event: "media", streamSid: target.streamSid, media: { payload: msg.media.payload } }));
+          }
+        } else {
+          // Match provider VAD's 300 ms prefix window (20 ms Twilio frames).
+          state.guestOriginal.preRoll.push(msg.media.payload);
+          if (state.guestOriginal.preRoll.length > 15) state.guestOriginal.preRoll.shift();
+        }
+      }
+    } else if (msg.event === "mark" && call && leg === "owner" && msg.mark?.name) {
+      activeCalls.get(call.id)?.ownerPlaybackTokens.delete(msg.mark.name);
     }
   });
   ws.on("close", () => {

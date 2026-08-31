@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import {
-  handleTranslatorTwilioStream, mulawToPcm24, oppositeTranslatorLeg, registerTranslatorCall,
+  handleTranslatorTwilioStream, mulawToPcm24, translatorAudioDestinations, registerTranslatorCall,
   configureTranslatorDialer, subscribeTranslatorFeed,
   expireTranslatorCall, getTranslatorBridgeSnapshot, handleTranslatorGuestStatus,
 } from "../translation/twilioBridge";
@@ -18,13 +18,15 @@ class FakeSocket extends EventEmitter {
 const start = (id: string, leg: string, callSid = leg === "owner" ? "CAowner" : "CAguest") => Buffer.from(JSON.stringify({
   event: "start", start: { streamSid: `${leg}-stream`, callSid, customParameters: { translatorCallId: id, translatorLeg: leg } },
 }));
-function fakeProvider(sessions: any[]): RealtimeTranslationProvider {
+function fakeProvider(sessions: any[], configs: any[] = []): RealtimeTranslationProvider {
   return {
     name: "test",
-    async startSession() {
+    async startSession(config) {
+      configs.push(config);
       let listener: any;
       const session = {
-        sendAudio() {}, async stop() {}, cancel() {},
+        audio: [] as Buffer[],
+        sendAudio(chunk: Buffer) { this.audio.push(chunk); }, async stop() {}, cancel() {},
         onEvent(cb: any) { listener = cb; },
         emit(ev: any) { listener(ev); },
       };
@@ -35,9 +37,113 @@ function fakeProvider(sessions: any[]): RealtimeTranslationProvider {
 }
 
 describe("PSTN translator bridge routing", () => {
-  it("always targets the other leg, never the speaker's leg", () => {
-    expect(oppositeTranslatorLeg("owner")).toBe("guest");
-    expect(oppositeTranslatorLeg("guest")).toBe("owner");
+  it("declares the complete asymmetric eight-route matrix", () => {
+    expect(translatorAudioDestinations("guest", "original")).toEqual(["owner"]);
+    expect(translatorAudioDestinations("guest", "translation")).toEqual(["owner"]);
+    expect(translatorAudioDestinations("owner", "original")).toEqual([]);
+    expect(translatorAudioDestinations("owner", "translation")).toEqual(["guest", "owner"]);
+  });
+
+  it("uses directed languages, relays Guest original first, and fans one Owner translation payload to both legs", async () => {
+    const id = "asymmetric-matrix", sessions: any[] = [], configs: any[] = [];
+    registerTranslatorCall({ id, ownerId: "owner", ownerCallSid: "CAowner", guestNumber: "+15551234567", callerId: "+15557654321", baseUrl: "https://example.test" });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions, configs);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(configs.map(c => [c.sourceLangHint, c.outputLanguage])).toEqual([["ru", "en"], ["en", "ru"]]);
+
+    const original = Buffer.from([0xff, 0x7f]).toString("base64");
+    guest.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: original } })));
+    sessions[1].emit({ type: "speech_started", ts: 1 });
+    guest.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: original } })));
+    sessions[1].emit({ type: "speech_stopped", ts: 2 });
+    const ownerBeforeTranslation = owner.sent.map(JSON.parse);
+    expect(ownerBeforeTranslation.filter(m => m.event === "media").map(m => m.media.payload)).toEqual([original, original]);
+    expect(guest.sent).toEqual([]);
+    expect(sessions[1].audio).toHaveLength(2);
+
+    const ownerPcm = Buffer.alloc(12, 100).toString("base64");
+    const guestPcm = Buffer.alloc(12, 500).toString("base64");
+    sessions[0].emit({ type: "translated_audio", base64: ownerPcm, responseId: "owner-r1" });
+    const ownerTranslation = owner.sent.map(JSON.parse).filter(m => m.event === "media").at(-1).media.payload;
+    const guestTranslation = guest.sent.map(JSON.parse).filter(m => m.event === "media").at(-1).media.payload;
+    expect(ownerTranslation).toBe(guestTranslation);
+
+    sessions[1].emit({ type: "translated_audio", base64: guestPcm, responseId: "guest-r1" });
+    expect(guest.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(1);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(4);
+    const ownerEvents = owner.sent.map(JSON.parse);
+    const originalMarkIndex = ownerEvents.findIndex(m => m.event === "mark" && m.mark.name.startsWith("original-guest-"));
+    const guestTranslationIndex = ownerEvents.findIndex(
+      (m, index) => index > originalMarkIndex && m.event === "media" && m.media.payload !== original && m.media.payload !== ownerTranslation,
+    );
+    expect(originalMarkIndex).toBeGreaterThan(1);
+    expect(guestTranslationIndex).toBeGreaterThan(originalMarkIndex);
+
+    const guestMediaBeforeOwnerSpeech = guest.sent.length;
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: original } })));
+    expect(guest.sent).toHaveLength(guestMediaBeforeOwnerSpeech);
+  });
+
+  it("keeps Owner playback output-only until Twilio acknowledges its mark", async () => {
+    const id = "owner-playback-gate", sessions: any[] = [];
+    registerTranslatorCall({ id, ownerId: "owner", ownerCallSid: "CAowner", guestNumber: "+15551234567", callerId: "+15557654321", baseUrl: "https://example.test" });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+
+    const pcm = Buffer.alloc(12, 100).toString("base64");
+    sessions[0].emit({ type: "translated_audio", base64: pcm, responseId: "r1" });
+    const source = Buffer.from([0xff]).toString("base64");
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: source } })));
+    expect(sessions[0].audio).toHaveLength(0);
+
+    sessions[0].emit({ type: "turn_completed", metrics: { turnIndex: 0, provider: "test", model: "test", responseId: "r1" } });
+    const mark = owner.sent.map(JSON.parse).find(m => m.event === "mark");
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "mark", mark: { name: mark.mark.name } })));
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: source } })));
+    expect(sessions[0].audio).toHaveLength(1);
+    expect(sessions[1].audio).toHaveLength(0);
+  });
+
+  it("does not reopen Owner input until every overlapping playback stream is acknowledged", async () => {
+    const id = "overlapping-playback-gate", sessions: any[] = [];
+    registerTranslatorCall({ id, ownerId: "owner", ownerCallSid: "CAowner", guestNumber: "+15551234567", callerId: "+15557654321", baseUrl: "https://example.test" });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+
+    const source = Buffer.from([0xff]).toString("base64");
+    sessions[0].emit({ type: "translated_audio", base64: Buffer.alloc(12, 100).toString("base64"), responseId: "owner-r1" });
+    sessions[1].emit({ type: "translated_audio", base64: Buffer.alloc(12, 500).toString("base64"), responseId: "guest-r1" });
+    sessions[0].emit({ type: "turn_completed", metrics: { turnIndex: 0, provider: "test", model: "test", responseId: "owner-r1" } });
+    sessions[1].emit({ type: "turn_completed", metrics: { turnIndex: 0, provider: "test", model: "test", responseId: "guest-r1" } });
+    const marks = owner.sent.map(JSON.parse).filter(m => m.event === "mark");
+    expect(marks).toHaveLength(2);
+
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "mark", mark: { name: marks[0].mark.name } })));
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: source } })));
+    expect(sessions[0].audio).toHaveLength(0);
+
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "mark", mark: { name: marks[1].mark.name } })));
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: source } })));
+    expect(sessions[0].audio).toHaveLength(1);
   });
 
   it("converts Twilio 8k μ-law input into PCM16 24k for gpt-realtime", () => {
