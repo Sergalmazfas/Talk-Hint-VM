@@ -20,3 +20,8 @@ description: Dev-only bench for realtime RU↔EN voice translation behind a prov
 gpt-realtime-translate streams output audio CONTINUOUSLY, including silence between phrases (~5x more audio out than speech in). Any mic gate keyed on "queued playback exists" therefore gates the mic FOREVER — the model never hears the user and the stand looks completely dead. The gate must key off the scheduled end of the last AUDIBLE (voiced, RMS-checked) chunk, never the raw playhead.
 **Why:** live bug «он вообще не реагирует» — server logs showed mic frames + translated deltas flowing while the user heard/saw nothing: the client was substituting zeroed frames for every mic frame.
 **How to apply:** any client playing a continuous-output translation stream (stand, future iOS/app integration) must use voiced-playback tracking for echo gating, or rely on device echo cancellation instead of half-duplex gating.
+
+## iPhone browser audio and report export
+The browser stand must not assume `AudioContext({sampleRate:24000})` is honored. Resample microphone audio from the actual context rate to provider-native 24 kHz, and resample returned 24 kHz PCM back to the device rate for playback.
+**Why:** iOS Safari commonly runs its audio graph at 48 kHz; labeling unconverted device PCM as 24 kHz corrupts timing, recognition, pitch, and playback/gate duration.
+**How to apply:** use the runtime `AudioContext.sampleRate` at both boundaries. For report export on iOS, prefer the native Share sheet and retain a visible file link fallback; synthetic Blob-link clicks can silently do nothing.

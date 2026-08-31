@@ -612,6 +612,7 @@ function buildSpikePageHtml(): string {
   #summary { font-size:13px; line-height:1.7; }
   .lag-ok { color:var(--ok); } .lag-warn { color:#d97706; } .lag-bad { color:var(--err); }
   .smallbtn { background:#e5e7eb; font-size:13px; padding:6px 12px; }
+  #exportStatus { min-height:18px; margin-top:6px; }
   .cls-FAITHFUL { color:var(--ok); } .cls-ADDED_CONTENT,.cls-UNSOLICITED_RESPONSE { color:var(--err); font-weight:600; }
   .cls-UNCERTAIN { color:#d97706; }
   .evrow { font-size:12px; border-bottom:1px solid #eee; padding:5px 0; }
@@ -643,6 +644,7 @@ function buildSpikePageHtml(): string {
         <button id="reviewBtn" class="smallbtn">Run semantic review</button>
         <button id="exportBtn" class="smallbtn">Export report JSON</button>
       </h2>
+      <div id="exportStatus" class="sub" aria-live="polite"></div>
       <table id="mtable"><thead><tr>
         <th>#</th><th>latency ms</th><th>in ms</th><th>out ms</th><th>cost $</th><th>review</th>
       </tr></thead><tbody></tbody></table>
@@ -751,24 +753,54 @@ function isMeaningful(t){ return !!t && t.replace(/[^\\p{L}\\p{N}]/gu,'').length
 
 const WORKLET = \`
 class CaptureProcessor extends AudioWorkletProcessor {
-  constructor(){ super(); this.buf=[]; this.len=0; }
+  constructor(){
+    super();
+    this.pending=new Float32Array(0);
+    this.readPos=0;
+    this.out=[];
+    this.step=sampleRate/${SAMPLE_RATE};
+  }
   process(inputs){
     const ch = inputs[0] && inputs[0][0];
     if (ch){
-      this.buf.push(new Float32Array(ch)); this.len += ch.length;
-      if (this.len >= 960){ // ~40ms @24k
-        const all = new Float32Array(this.len); let o=0;
-        for (const b of this.buf){ all.set(b,o); o+=b.length; }
-        const pcm = new Int16Array(all.length);
-        for (let i=0;i<all.length;i++){ const s=Math.max(-1,Math.min(1,all[i])); pcm[i]=s<0?s*0x8000:s*0x7FFF; }
+      // Safari commonly ignores AudioContext({sampleRate:24000}) and runs at
+      // the device rate (usually 48 kHz). Resample the continuous microphone
+      // timeline here so the provider always receives honest 24 kHz PCM.
+      const all=new Float32Array(this.pending.length+ch.length);
+      all.set(this.pending); all.set(ch,this.pending.length);
+      while(this.readPos+1<all.length){
+        const left=Math.floor(this.readPos), frac=this.readPos-left;
+        this.out.push(all[left]+(all[left+1]-all[left])*frac);
+        this.readPos+=this.step;
+      }
+      const consumed=Math.floor(this.readPos);
+      this.pending=all.slice(consumed);
+      this.readPos-=consumed;
+      while (this.out.length >= 960){ // exactly 40 ms @24 kHz
+        const frame=this.out.splice(0,960);
+        const pcm = new Int16Array(frame.length);
+        for (let i=0;i<frame.length;i++){ const s=Math.max(-1,Math.min(1,frame[i])); pcm[i]=s<0?s*0x8000:s*0x7FFF; }
         this.port.postMessage(pcm.buffer,[pcm.buffer]);
-        this.buf=[]; this.len=0;
       }
     }
     return true;
   }
 }
 registerProcessor('capture-processor', CaptureProcessor);\`;
+
+function resamplePcmFloat32(input,fromRate,toRate){
+  if(fromRate===toRate) return input;
+  const outLen=Math.max(1,Math.round(input.length*toRate/fromRate));
+  const out=new Float32Array(outLen);
+  const step=fromRate/toRate;
+  for(let i=0;i<outLen;i++){
+    const pos=i*step, left=Math.floor(pos), frac=pos-left;
+    const a=input[Math.min(left,input.length-1)];
+    const b=input[Math.min(left+1,input.length-1)];
+    out[i]=a+(b-a)*frac;
+  }
+  return out;
+}
 
 function playChunk(b64){
   const bin=atob(b64); const n=bin.length/2;
@@ -778,7 +810,10 @@ function playChunk(b64){
     if(v>=0x8000)v-=0x10000;
     f[i]=v/0x8000;
   }
-  const buf=ctx.createBuffer(1,n,RATE); buf.getChannelData(0).set(f);
+  // The provider returns 24 kHz PCM. Resample for the device AudioContext so
+  // iPhone playback keeps the correct speed, pitch and gate duration.
+  const playback=resamplePcmFloat32(f,RATE,ctx.sampleRate);
+  const buf=ctx.createBuffer(1,playback.length,ctx.sampleRate); buf.getChannelData(0).set(playback);
   const src=ctx.createBufferSource(); src.buffer=buf; src.connect(ctx.destination);
   const wasActive=playbackActive();
   const t=Math.max(ctx.currentTime+0.02, playhead);
@@ -797,7 +832,7 @@ function onMsg(ev){
   let m; try{ m=JSON.parse(ev.data); }catch{ return; }
   if(m.type==='audio'){ logEv({type:'translated_audio', responseId:m.responseId||null, bytes:m.data?m.data.length:0}); playChunk(m.data); return; }
   if(m.type==='session_config'){ sessionConfig=m; logEv({type:'session_config'}); return; }
-  if(m.type==='ready'){ sessionMeta=m; logEv({type:'ready'}); setStatus('live — speak ('+m.model+', voice '+(m.voice||'?')+')'); return; }
+  if(m.type==='ready'){ sessionMeta=m; logEv({type:'ready'}); setStatus('live — speak ('+m.model+', voice '+(m.voice||'?')+', mic '+(ctx?ctx.sampleRate:'?')+' Hz → '+RATE+' Hz)'); return; }
   if(m.type==='speech_started'){
     lastSpeechStartTs=Date.now();
     // THE feedback flag from the spec: was our own translated audio still
@@ -942,6 +977,9 @@ document.getElementById('reviewBtn').onclick=async()=>{
 };
 
 document.getElementById('exportBtn').onclick=async()=>{
+  const exportStatus=document.getElementById('exportStatus');
+  const setExportStatus=(text,cls='sub')=>{ exportStatus.className=cls; exportStatus.textContent=text; };
+  setExportStatus('Preparing JSON…');
   // Server-side forensic analysis of the full event log (5 suspicions + first
   // 1→1 break). Analysis failure is reported honestly in the export, never
   // silently omitted as if the run were clean.
@@ -958,9 +996,33 @@ document.getElementById('exportBtn').onclick=async()=>{
       invariantViolations, forensics, eventLog, eventLogDropped,
       eventLogComplete: eventLogDropped===0 },
     completedRuns };
-  const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='translator-spike-run2-report.json'; a.click();
+  const json=JSON.stringify(report,null,2);
+  const filename='translator-spike-run2-report.json';
+  const blob=new Blob([json],{type:'application/json'});
+  const file=new File([json],filename,{type:'application/json'});
+  // iOS Safari often ignores Blob + a.click() without any visible error.
+  // Prefer its native Share sheet, where the report can be saved to Files.
+  try{
+    const canShareFiles=!!navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}));
+    if(canShareFiles){
+      await navigator.share({title:'TalkHint translator report',files:[file]});
+      setExportStatus('JSON готов — выбери «Сохранить в Файлы» в меню Share.','lag-ok');
+      return;
+    }
+  }catch(e){
+    if(e&&e.name==='AbortError'){
+      setExportStatus('Сохранение отменено. Нажми Export ещё раз.');
+      return;
+    }
+  }
+  // Keep a visible link instead of relying on a blocked synthetic click.
+  // Safari can open it and then save/share the JSON from its own toolbar.
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename; a.textContent='Tap here to save the JSON report';
+  a.className='smallbtn'; a.style.display='inline-block'; a.style.marginTop='4px';
+  exportStatus.replaceChildren(a);
+  try{ window.open(url,'_blank'); }catch{}
 };
 
 function controlsMsg(){
