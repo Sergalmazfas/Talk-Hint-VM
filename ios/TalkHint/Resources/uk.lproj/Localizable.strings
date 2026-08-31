@@ -123,6 +123,10 @@
 "home.enter_number" = "Введіть номер";
 "home.goal_ready" = "Мета готова ✓";
 "home.call" = "Подзвонити";
+"home.connecting" = "З’єднання…";
+"home.call_failed.title" = "Не вдалося зателефонувати";
+"home.call_failed.message" = "Не вдалося встановити з’єднання. Спробуйте ще раз.";
+"common.done" = "Готово";
 "home.recent_calls" = "НЕЩОДАВНІ ДЗВІНКИ";
 "home.see_all" = "Показати всі";
 "home.outgoing" = "Вихідний";

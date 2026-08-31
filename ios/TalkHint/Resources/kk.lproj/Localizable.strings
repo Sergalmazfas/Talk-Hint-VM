@@ -123,6 +123,10 @@
 "home.enter_number" = "Нөмірді енгізіңіз";
 "home.goal_ready" = "Мақсат дайын ✓";
 "home.call" = "Қоңырау шалу";
+"home.connecting" = "Қосылуда…";
+"home.call_failed.title" = "Қоңырау шалынбады";
+"home.call_failed.message" = "Байланыс орнатылмады. Қайталап көріңіз.";
+"common.done" = "Дайын";
 "home.recent_calls" = "СОҢҒЫ ҚОҢЫРАУЛАР";
 "home.see_all" = "Барлығын көру";
 "home.outgoing" = "Шығыс";

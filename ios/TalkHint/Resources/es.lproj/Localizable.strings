@@ -123,6 +123,10 @@
 "home.enter_number" = "Introduce un número";
 "home.goal_ready" = "Objetivo listo ✓";
 "home.call" = "Llamar";
+"home.connecting" = "Conectando…";
+"home.call_failed.title" = "No se pudo llamar";
+"home.call_failed.message" = "No se pudo establecer la conexión. Inténtalo de nuevo.";
+"common.done" = "Listo";
 "home.recent_calls" = "LLAMADAS RECIENTES";
 "home.see_all" = "Ver todas";
 "home.outgoing" = "Saliente";

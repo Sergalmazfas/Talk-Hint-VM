@@ -13,6 +13,7 @@ final class HomeViewController: UIViewController {
     private var dialed = "" { didSet { renderNumber() } }
     private var recents: [APIClient.CallRecord] = []
     private let callMode: CallManager.CallMode
+    private var outgoingCallUUID: UUID?
 
     init(mode: CallManager.CallMode = .hint) {
         callMode = mode
@@ -30,12 +31,18 @@ final class HomeViewController: UIViewController {
     private let deleteButton = UIButton(type: .system)
     private let recentsStack = UIStackView()
     private let recentsHeader = UIStackView()
+    private let callButton = UIButton(type: .system)
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         navigationController?.setNavigationBarHidden(true, animated: false)
         buildUI()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(outgoingCallStateChanged(_:)),
+            name: CallManager.outgoingCallStateDidChange,
+            object: CallManager.shared)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -116,12 +123,24 @@ final class HomeViewController: UIViewController {
         numberLabel.autocorrectionType = .no
         numberLabel.spellCheckingType = .no
         numberLabel.clearButtonMode = .never
+        numberLabel.delegate = self
         numberLabel.addTarget(self, action: #selector(numberFieldChanged), for: .editingChanged)
         numberLabel.adjustsFontSizeToFitWidth = true
         numberLabel.minimumFontSize = 12
         // When the number is still too long even after shrinking, cut off the
         // BEGINNING (…) so the digits being typed stay visible at the end.
         numberLabel.accessibilityIdentifier = "input-dial-number"
+        let keyboardBar = UIToolbar()
+        keyboardBar.sizeToFit()
+        keyboardBar.items = [
+            UIBarButtonItem(systemItem: .flexibleSpace),
+            UIBarButtonItem(
+                title: NSLocalizedString("common.done", comment: ""),
+                style: .done,
+                target: self,
+                action: #selector(dismissDialKeyboard)),
+        ]
+        numberLabel.inputAccessoryView = keyboardBar
 
         placeholderLabel.text = NSLocalizedString("home.enter_number", comment: "")
         placeholderLabel.font = .systemFont(ofSize: 16)
@@ -175,7 +194,6 @@ final class HomeViewController: UIViewController {
         let keypad = buildKeypad()
 
         // Call button.
-        let callButton = UIButton(type: .system)
         var callConfig = UIButton.Configuration.filled()
         callConfig.cornerStyle = .capsule
         callConfig.baseBackgroundColor = Theme.green
@@ -188,6 +206,10 @@ final class HomeViewController: UIViewController {
         callButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
         callButton.accessibilityIdentifier = "button-start-call"
         callButton.addTarget(self, action: #selector(callTapped), for: .touchUpInside)
+
+        let dismissKeyboardTap = UITapGestureRecognizer(target: self, action: #selector(dismissDialKeyboard))
+        dismissKeyboardTap.cancelsTouchesInView = false
+        view.addGestureRecognizer(dismissKeyboardTap)
 
         let callRow = UIStackView(arrangedSubviews: [callButton])
         callRow.axis = .vertical
@@ -545,7 +567,56 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func callTapped() {
+        dismissDialKeyboard()
+        guard outgoingCallUUID == nil else { return }
         startCall(to: dialed)
+    }
+
+    @objc private func dismissDialKeyboard() {
+        view.endEditing(true)
+    }
+
+    @objc private func outgoingCallStateChanged(_ notification: Notification) {
+        guard
+            let uuid = notification.userInfo?["uuid"] as? UUID,
+            uuid == outgoingCallUUID,
+            let rawState = notification.userInfo?["state"] as? String,
+            let state = CallManager.OutgoingCallState(rawValue: rawState)
+        else { return }
+
+        switch state {
+        case .connecting:
+            renderCallButtonConnecting()
+        case .connected:
+            break // The in-call screen immediately takes over.
+        case .failed, .ended:
+            outgoingCallUUID = nil
+            renderCallButtonIdle()
+            if state == .failed, presentedViewController == nil {
+                let alert = UIAlertController(
+                    title: NSLocalizedString("home.call_failed.title", comment: ""),
+                    message: NSLocalizedString("home.call_failed.message", comment: ""),
+                    preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
+
+    private func renderCallButtonConnecting() {
+        callButton.isEnabled = false
+        callButton.configuration?.showsActivityIndicator = true
+        callButton.configuration?.image = nil
+        callButton.configuration?.title = NSLocalizedString("home.connecting", comment: "")
+        callButton.accessibilityIdentifier = "button-start-call-connecting"
+    }
+
+    private func renderCallButtonIdle() {
+        callButton.isEnabled = true
+        callButton.configuration?.showsActivityIndicator = false
+        callButton.configuration?.image = UIImage(systemName: "phone.fill")
+        callButton.configuration?.title = NSLocalizedString("home.call", comment: "")
+        callButton.accessibilityIdentifier = "button-start-call"
     }
 
     private func startCall(to raw: String) {
@@ -560,7 +631,17 @@ final class HomeViewController: UIViewController {
             present(alert, animated: true)
             return
         }
-        CallManager.shared.startOutgoingCall(to: cleaned, mode: callMode)
+        renderCallButtonConnecting()
+        outgoingCallUUID = CallManager.shared.startOutgoingCall(to: cleaned, mode: callMode)
+    }
+}
+
+extension HomeViewController: UITextFieldDelegate {
+    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        if string.count > 1 {
+            DispatchQueue.main.async { [weak self] in self?.dismissDialKeyboard() }
+        }
+        return true
     }
 }
 

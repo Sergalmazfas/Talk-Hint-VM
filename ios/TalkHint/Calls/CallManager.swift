@@ -15,6 +15,14 @@ import TwilioVoice
 ///   3. User declines -> `POST /api/call/reject`.
 @MainActor
 final class CallManager: NSObject {
+    static let outgoingCallStateDidChange = Notification.Name("CallManager.outgoingCallStateDidChange")
+
+    enum OutgoingCallState: String {
+        case connecting
+        case connected
+        case failed
+        case ended
+    }
     static let shared = CallManager()
 
     private let provider: CXProvider
@@ -113,7 +121,8 @@ final class CallManager: NSObject {
     ///
     /// `number` must be E.164 (leading "+"), which the backend requires to route
     /// the outbound dial.
-    func startOutgoingCall(to number: String, mode: CallMode) {
+    @discardableResult
+    func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
         // Snapshot before CallKit/Twilio starts. A Settings change after this
         // point affects only the next Translator call.
@@ -127,11 +136,23 @@ final class CallManager: NSObject {
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
         let transaction = CXTransaction(action: startAction)
+        postOutgoingCallState(.connecting, uuid: uuid)
         callController.request(transaction) { [weak self] error in
             guard let error = error else { return }
             print("[CallManager] startOutgoingCall request failed: \(error.localizedDescription)")
-            Task { @MainActor in self?.sessions[uuid] = nil }
+            Task { @MainActor in
+                self?.sessions[uuid] = nil
+                self?.postOutgoingCallState(.failed, uuid: uuid)
+            }
         }
+        return uuid
+    }
+
+    private func postOutgoingCallState(_ state: OutgoingCallState, uuid: UUID) {
+        NotificationCenter.default.post(
+            name: Self.outgoingCallStateDidChange,
+            object: self,
+            userInfo: ["uuid": uuid, "state": state.rawValue])
     }
 
     /// Kept as a pure seam so mode tagging is covered without initiating a
@@ -280,6 +301,9 @@ extension CallManager: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
         for session in sessions.values {
             session.twilioCall?.disconnect()
+            if session.isOutgoing {
+                postOutgoingCallState(.failed, uuid: session.uuid)
+            }
         }
         sessions.removeAll()
         answerActions.removeAll()
@@ -329,6 +353,7 @@ extension CallManager: CXProviderDelegate {
             } catch {
                 action.fail()
                 self.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+                self.postOutgoingCallState(.failed, uuid: uuid)
                 self.endSession(uuid)
             }
         }
@@ -390,6 +415,9 @@ extension CallManager: CXProviderDelegate {
             Task { try? await APIClient.shared.rejectCall(callSid: callSid) }
         }
 
+        if session.isOutgoing {
+            postOutgoingCallState(.ended, uuid: action.callUUID)
+        }
         endSession(action.callUUID)
         action.fulfill()
     }
@@ -422,6 +450,7 @@ extension CallManager: CallDelegate {
         answerActions[uuid] = nil
         if sessions[uuid]?.isOutgoing == true {
             provider.reportOutgoingCall(with: uuid, connectedAt: Date())
+            postOutgoingCallState(.connected, uuid: uuid)
         }
         presentInCallScreen(for: uuid)
     }
@@ -431,6 +460,9 @@ extension CallManager: CallDelegate {
         answerActions[uuid]?.fail()
         answerActions[uuid] = nil
         provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+        if sessions[uuid]?.isOutgoing == true {
+            postOutgoingCallState(.failed, uuid: uuid)
+        }
         endSession(uuid)
     }
 
@@ -438,6 +470,9 @@ extension CallManager: CallDelegate {
         guard let uuid = call.uuid else { return }
         let reason: CXCallEndedReason = (error == nil) ? .remoteEnded : .failed
         provider.reportCall(with: uuid, endedAt: Date(), reason: reason)
+        if sessions[uuid]?.isOutgoing == true {
+            postOutgoingCallState(error == nil ? .ended : .failed, uuid: uuid)
+        }
         endSession(uuid)
     }
 }
