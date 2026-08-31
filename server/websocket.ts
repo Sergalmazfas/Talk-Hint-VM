@@ -9,6 +9,7 @@ import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
 import { getSessionUserId } from "./auth";
 import { isValidSpikeToken, handleTranslatorSpikeStream } from "./translation/spike";
+import { handleIOSTranslatorStream } from "./translation/iosTranslator";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
@@ -816,7 +817,7 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/honor-stream", "/ui", "/translator-spike-stream"].includes(pathname)) {
+    if (!["/twilio-stream", "/media", "/honor-stream", "/ui", "/translator", "/translator-spike-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -839,7 +840,7 @@ export function setupWebSocket(server: Server) {
     // live call transcripts and AI hints, so they MUST authenticate as a user.
     // The Twilio media channels (/twilio-stream, /media) are machine-to-machine
     // from Twilio and are not user-authenticated here.
-    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream";
+    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream" || pathname === "/translator";
     if (requiresAuth) {
       const token = parsedUrl.searchParams.get("token");
       if (!token) {
@@ -874,6 +875,8 @@ export function setupWebSocket(server: Server) {
       handleUIConnection(ws, userId);
     } else if (pathname === "/honor-stream") {
       handleHonorStream(ws, userId);
+    } else if (pathname === "/translator") {
+      if (userId) handleIOSTranslatorStream(ws, userId);
     } else if (pathname === "/translator-spike-stream") {
       handleTranslatorSpikeStream(ws);
     } else if (pathname === "/twilio-stream" || pathname === "/media") {

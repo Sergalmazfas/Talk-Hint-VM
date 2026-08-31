@@ -26,6 +26,11 @@ The browser stand must not assume `AudioContext({sampleRate:24000})` is honored.
 **Why:** iOS Safari commonly runs its audio graph at 48 kHz; labeling unconverted device PCM as 24 kHz corrupts timing, recognition, pitch, and playback/gate duration.
 **How to apply:** use the runtime `AudioContext.sampleRate` at both boundaries. On iOS, invoke Share directly from the tap before any awaited analysis (or Safari discards user activation), and retain a visible file-link fallback.
 
+
+## Native iOS Translator isolation
+The native Translator is a standalone authenticated RU↔EN channel with PCM16 mono at 24 kHz. It uses the provider boundary and must remain separate from `/ui`, Deepgram, Hint models/prompts, and Twilio media.
+**Why:** translation was deliberately introduced as an independently testable mode so realtime audio behavior cannot regress the established phone/Hint path. Server-side direction is fixed so a client cannot silently select a different model or mode.
+**How to apply:** translator start/stop on both iOS and server must be generation-guarded because delayed WebSocket/provider callbacks can otherwise tear down a restarted session or leak a late provider session. Gate mic capture during translated playback to prevent feedback.
 ## Translator candidate decision
 For the current translator effort, the conversational `gpt-realtime` adapter is the selected candidate: it has demonstrated faithful RU↔EN behavior and should be integrated only through the separate Translator surface. The dedicated continuous translator is deprioritized.
 **Why:** the live stand showed good quality and reverse-direction potential for `gpt-realtime`, while the continuous model emitted premature fragments and was not useful for the immediate deadline.
