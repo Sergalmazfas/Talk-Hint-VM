@@ -293,6 +293,10 @@ final class APIClient {
 
     /// A finished/recorded call as stored in the backend `calls` table.
     struct CallRecord {
+        struct TranslationTurn: Equatable {
+            let original: String
+            let translation: String
+        }
         let id: String
         let userId: String?
         let callSid: String
@@ -305,6 +309,10 @@ final class APIClient {
         let transcript: String?
         /// Saved friendly name for the other party (from contact memory), when set.
         let contactName: String?
+        /// The server marks translator calls in call metadata. Keep this
+        /// optional-compatible with historical Hint call records.
+        let mode: CallManager.CallMode
+        let translationTurns: [TranslationTurn]
     }
 
     /// Fetches the signed-in user's past calls, newest first. The backend
@@ -337,9 +345,13 @@ final class APIClient {
         return call
     }
 
-    private static func parseCall(_ item: [String: Any]) -> CallRecord? {
+    static func parseCall(_ item: [String: Any]) -> CallRecord? {
         guard let id = item["id"] as? String,
               let callSid = item["callSid"] as? String else { return nil }
+        let metadata = item["metadata"] as? [String: Any]
+        let rawMode = (item["mode"] as? String) ?? (item["callMode"] as? String)
+            ?? (metadata?["mode"] as? String) ?? (metadata?["callMode"] as? String)
+        let mode = CallManager.CallMode(rawValue: rawMode ?? "") ?? .hint
         return CallRecord(
             id: id,
             userId: item["userId"] as? String,
@@ -351,8 +363,27 @@ final class APIClient {
             startedAt: parseDate(item["startedAt"]),
             endedAt: parseDate(item["endedAt"]),
             transcript: item["transcript"] as? String,
-            contactName: item["contactName"] as? String
+            contactName: item["contactName"] as? String,
+            mode: mode,
+            translationTurns: parseTranslationTurns(metadata)
         )
+    }
+
+    /// Parses the persisted structured translator conversation without
+    /// imposing it on legacy transcript-only Hint records.
+    private static func parseTranslationTurns(_ metadata: [String: Any]?) -> [CallRecord.TranslationTurn] {
+        let turns = (metadata?["translationTurns"] as? [[String: Any]])
+            ?? (metadata?["translations"] as? [[String: Any]]) ?? []
+        return turns.compactMap { turn in
+            let original = (turn["original"] as? String) ?? (turn["sourceTranscript"] as? String)
+                ?? (turn["source"] as? String)
+                ?? (turn["text"] as? String) ?? ""
+            let translation = (turn["translation"] as? String)
+                ?? (turn["translatedTranscript"] as? String)
+                ?? (turn["translated"] as? String) ?? ""
+            guard !original.isEmpty || !translation.isEmpty else { return nil }
+            return CallRecord.TranslationTurn(original: original, translation: translation)
+        }
     }
 
     private static let isoFormatter: ISO8601DateFormatter = {

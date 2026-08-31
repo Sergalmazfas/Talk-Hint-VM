@@ -44,6 +44,7 @@ final class CallManager: NSObject {
     private var sessions: [UUID: CallSession] = [:]
     private var answerActions: [UUID: CXAnswerCallAction] = [:]
     private var inCallScreen: InCallViewController?
+    private var translatorScreen: TranslatorViewController?
 
     private override init() {
         let config = CXProviderConfiguration()
@@ -110,9 +111,9 @@ final class CallManager: NSObject {
     ///
     /// `number` must be E.164 (leading "+"), which the backend requires to route
     /// the outbound dial.
-    func startOutgoingCall(to number: String) {
+    func startOutgoingCall(to number: String, mode: CallMode) {
         let uuid = UUID()
-        sessions[uuid] = CallSession(uuid: uuid, callSid: nil, remoteLabel: number,
+        sessions[uuid] = CallSession(uuid: uuid, mode: mode, callSid: nil, remoteLabel: number,
                                      twilioCall: nil, answered: false, isOutgoing: true)
 
         let handle = CXHandle(type: .phoneNumber, value: number)
@@ -122,6 +123,19 @@ final class CallManager: NSObject {
             guard let error = error else { return }
             print("[CallManager] startOutgoingCall request failed: \(error.localizedDescription)")
             Task { @MainActor in self?.sessions[uuid] = nil }
+        }
+    }
+
+    /// Kept as a pure seam so mode tagging is covered without initiating a
+    /// CallKit transaction.
+    static func connectParameters(to number: String, mode: CallMode) -> [String: String] {
+        switch mode {
+        case .hint:
+            return ["To": number]
+        case .translator:
+            // `To` preserves the Twilio Voice SDK dial contract, while the
+            // bridge explicitly consumes GuestTo and TranslatorMode.
+            return ["To": number, "GuestTo": number, "TranslatorMode": "ru_en"]
         }
     }
 
@@ -190,12 +204,29 @@ final class CallManager: NSObject {
         setMuted(!isMuted)
     }
 
+    /// Routes the active CallKit call through the built-in speaker or receiver.
+    /// This deliberately belongs here rather than a translator-specific audio
+    /// engine: Twilio/CallKit remains the only owner of phone-call audio.
+    func setSpeakerEnabled(_ enabled: Bool) {
+        do {
+            try AVAudioSession.sharedInstance().overrideOutputAudioPort(enabled ? .speaker : .none)
+        } catch {
+            print("[CallManager] set speaker failed: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - In-call assistant screen
 
     /// Presents the live transcript/hint screen once a call connects.
     private func presentInCallScreen(for uuid: UUID) {
-        guard inCallScreen == nil, let session = sessions[uuid] else { return }
+        guard inCallScreen == nil, translatorScreen == nil, let session = sessions[uuid] else { return }
         guard let top = Self.topViewController() else { return }
+        if session.mode == .translator {
+            let screen = TranslatorViewController(callerName: session.remoteLabel)
+            translatorScreen = screen
+            top.present(screen, animated: true)
+            return
+        }
         let screen = InCallViewController(callerName: session.remoteLabel)
         inCallScreen = screen
         top.present(screen, animated: true)
@@ -203,9 +234,14 @@ final class CallManager: NSObject {
 
     /// Closes the live assistant screen when the call ends.
     private func tearDownInCallScreen() {
-        guard let screen = inCallScreen else { return }
-        inCallScreen = nil
-        screen.teardown()
+        if let screen = inCallScreen {
+            inCallScreen = nil
+            screen.teardown()
+        }
+        if let screen = translatorScreen {
+            translatorScreen = nil
+            screen.teardown()
+        }
     }
 
     private static func topViewController() -> UIViewController? {
@@ -262,7 +298,7 @@ extension CallManager: CXProviderDelegate {
                 }
 
                 let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
-                    builder.params = ["To": number]
+                    builder.params = Self.connectParameters(to: number, mode: session.mode)
                     builder.uuid = uuid
                 }
                 let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
@@ -347,6 +383,7 @@ extension CallManager: CXProviderDelegate {
         sessions[action.callUUID]?.twilioCall?.isMuted = action.isMuted
         action.fulfill()
         inCallScreen?.refreshMuteButton()
+        translatorScreen?.refreshMuteButton()
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {

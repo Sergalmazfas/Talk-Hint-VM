@@ -1,63 +1,73 @@
 import XCTest
-import AVFoundation
 @testable import TalkHint
 
-/// Simulator-level contract checks for the standalone translator path.
+/// Contract checks for Translator phone calls.
 /// Run on macOS with:
 /// xcodebuild test -scheme TalkHint \
 ///   -destination 'platform=iOS Simulator,name=iPhone 15'
+@MainActor
 final class TranslatorModeTests: XCTestCase {
-    func testTranslatorUsesItsOwnAuthenticatedWebSocketPath() throws {
-        let base = try XCTUnwrap(URL(string: "wss://example.test/root"))
-        let url = try XCTUnwrap(TranslatorStream.websocketURL(baseURL: base, token: "session token"))
-        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
-
-        XCTAssertEqual(components.path, "/root/translator")
-        XCTAssertEqual(components.queryItems?.first?.name, "token")
-        XCTAssertEqual(components.queryItems?.first?.value, "session token")
-        XCTAssertNotEqual(components.path, "/ui")
+    func testTranslatorOutgoingCallIsExplicitlyModeTagged() {
+        let params = CallManager.connectParameters(to: "+14155550100", mode: .translator)
+        XCTAssertEqual(params, [
+            "To": "+14155550100",
+            "GuestTo": "+14155550100",
+            "TranslatorMode": "ru_en",
+        ])
     }
 
-    func testTranslatorDecodesBothTranscriptAndAudioEvents() throws {
-        guard case .sourceTranscript(let source)? =
-                TranslatorStream.decode(#"{"type":"source_transcript","text":"Привет"}"#) else {
-            return XCTFail("Expected source transcript")
+    func testTranslatorMetadataParsesStructuredConversation() throws {
+        let record = try XCTUnwrap(APIClient.parseCall([
+            "id": "call-1", "callSid": "CA1", "metadata": [
+                "mode": "translator",
+                "translationTurns": [[
+                    "leg": "owner",
+                    "sourceTranscript": "Привет",
+                    "translatedTranscript": "Hello",
+                ]],
+            ],
+        ]))
+        XCTAssertEqual(record.mode, .translator)
+        XCTAssertEqual(record.translationTurns, [
+            .init(original: "Привет", translation: "Hello"),
+        ])
+    }
+
+    func testHintCallRemainsModeTaggedAsHint() {
+        XCTAssertEqual(CallManager.connectParameters(to: "+14155550100", mode: .hint), [
+            "To": "+14155550100",
+        ])
+    }
+
+    func testTranslatorPhoneFeedKeepsSourceTurnOpenUntilCompletion() {
+        guard case let .transcript(leg, source, translation, isFinal)? =
+                TranslatorPhoneFeedStream.decode(#"{"type":"source_transcript","leg":"guest","sourceTranscript":"Привет"}"#) else {
+            return XCTFail("Expected translator turn")
         }
+        XCTAssertEqual(leg, "guest")
         XCTAssertEqual(source, "Привет")
+        XCTAssertNil(translation)
+        XCTAssertFalse(isFinal, "Source cards must stay available for translation updates")
 
-        guard case .translatedTranscriptDone(let translated)? =
-                TranslatorStream.decode(#"{"type":"translated_transcript_done","text":"Hello"}"#) else {
-            return XCTFail("Expected translated transcript")
+        guard case let .translationDelta(leg, text)? =
+                TranslatorPhoneFeedStream.decode(#"{"type":"translation_delta","leg":"guest","translatedTranscript":"Hel"}"#) else {
+            return XCTFail("Expected translation delta")
         }
-        XCTAssertEqual(translated, "Hello")
+        XCTAssertEqual(leg, "guest")
+        XCTAssertEqual(text, "Hel")
 
-        guard case .audio(let audio)? =
-                TranslatorStream.decode(#"{"type":"audio","data":"AQI="}"#) else {
-            return XCTFail("Expected translated audio")
+        guard case let .translation(doneLeg, doneText, isFinal)? =
+                TranslatorPhoneFeedStream.decode(#"{"type":"translated_transcript_done","leg":"guest","translatedTranscript":"Hello"}"#) else {
+            return XCTFail("Expected completed translation")
         }
-        XCTAssertEqual(audio, Data([1, 2]))
-    }
+        XCTAssertEqual(doneLeg, "guest")
+        XCTAssertEqual(doneText, "Hello")
+        XCTAssertTrue(isFinal)
 
-    func testMicrophoneAudioIsDownsampledToPCM16Mono24k() throws {
-        let format = try XCTUnwrap(AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 48_000,
-            channels: 1,
-            interleaved: false
-        ))
-        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
-        buffer.frameLength = 480
-        let samples = try XCTUnwrap(buffer.floatChannelData?[0])
-        for index in 0..<480 {
-            samples[index] = 0.5
+        guard case let .turnCompleted(completedLeg)? =
+                TranslatorPhoneFeedStream.decode(#"{"type":"turn_completed","leg":"guest"}"#) else {
+            return XCTFail("Expected turn completion")
         }
-
-        let output = try XCTUnwrap(TranslatorViewController.makePCM16Mono24k(buffer: buffer))
-        XCTAssertEqual(output.count, 240 * MemoryLayout<Int16>.size)
-        var first: Int16 = 0
-        withUnsafeMutableBytes(of: &first) { destination in
-            output.copyBytes(to: destination, count: MemoryLayout<Int16>.size)
-        }
-        XCTAssertEqual(Int(first), Int(Float(Int16.max) * 0.5), accuracy: 1)
+        XCTAssertEqual(completedLeg, "guest")
     }
 }

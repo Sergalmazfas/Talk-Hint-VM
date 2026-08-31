@@ -690,7 +690,7 @@ let playhead=0, running=false, restarting=false;
 let voicedPlayhead=0;
 const VOICED_RMS=0.004; // normalized float RMS; digital/near silence is far below
 const turns=[];              // per-turn metrics from provider (completed + cancelled)
-const srcUtterances=[];      // evidence: every recognized source utterance
+const sourceUtterances=[];   // evidence: every recognized source utterance
 const cancellations=[];      // forensic records
 let review={ results:{}, ranAt:null };  // turnIndex -> {classification, reason}
 // Half-duplex mic gate (task: stop the playback→mic feedback loop): while
@@ -752,7 +752,7 @@ function archiveCurrentRun(reason){
   if(gClose.transition==='gate_end'){ totalGatedMs+=gClose.gatedMs||0; logEv({type:'gate_end', gatedMs:gClose.gatedMs, closedBy:'run_boundary'}); }
   const archived=archiveRunSnapshot(currentRunState(now),reason,new Date(now).toISOString());
   if(archived) completedRuns.push(archived);
-  turns.length=0; srcUtterances.length=0; cancellations.length=0;
+  turns.length=0; sourceUtterances.length=0; cancellations.length=0;
   review={ results:{}, ranAt:null }; errors=[];
   sessionMeta=null; sessionConfig=null; sessionStartTs=0;
   eventLog.length=0; eventLogDropped=0; invariantViolations.length=0; evSeq=0;
@@ -890,7 +890,7 @@ function onMsg(ev){
     // and cancellations happens at scorecard time via sourceItemId matching,
     // never by event arrival order (transcription events arrive async).
     const suspectedFeedback=m.itemId?!!feedbackByItem[m.itemId]:false;
-    srcUtterances.push({ index:srcUtterances.length, itemId:m.itemId||null, ts:Date.now(), text:m.text, meaningful:isMeaningful(m.text), suspectedFeedback });
+    sourceUtterances.push({ index:sourceUtterances.length, itemId:m.itemId||null, ts:Date.now(), text:m.text, meaningful:isMeaningful(m.text), suspectedFeedback });
     logEv({type:'source_transcript', itemId:m.itemId||null, text:m.text});
     curSrcEl=addLine('src','🎙 '+m.text+(suspectedFeedback?'  ⚠ (turn opened during playback)':''));
     return;
@@ -948,7 +948,7 @@ function renderCancellations(){
     const sel=document.createElement('select');
     for(const cls of CX_CLASSES){ const o=document.createElement('option'); o.value=cls; o.textContent=cls; if(cls===c.classification)o.selected=true; sel.appendChild(o); }
     sel.onchange=()=>{ c.classification=sel.value; renderMetrics(); };
-    const srcU=c.sourceItemId?srcUtterances.find(u=>u.itemId===c.sourceItemId):null;
+    const srcU=c.sourceItemId?sourceUtterances.find(u=>u.itemId===c.sourceItemId):null;
     d.append('#'+c.index+' '+new Date(c.ts).toLocaleTimeString()+' reason='+c.reason+' | playback@cancel='+c.playbackActiveAtCancel+' | src: '+(srcU?('«'+srcU.text.slice(0,60)+'»'):'(transcript pending/unknown)')+' | '+c.heuristic+' ');
     d.appendChild(sel);
     box.appendChild(d);
@@ -985,7 +985,7 @@ document.getElementById('reviewBtn').onclick=async()=>{
   // Source text reconciled by stable item id (handles input transcription
   // arriving after its response); adapter transcript is only a fallback for
   // unattributed turns.
-  const srcFor=t=>{ const u=t.sourceItemId?srcUtterances.find(u=>u.itemId===t.sourceItemId):null; return (u&&u.text)||t.sourceTranscript||''; };
+  const srcFor=t=>{ const u=t.sourceItemId?sourceUtterances.find(u=>u.itemId===t.sourceItemId):null; return (u&&u.text)||t.sourceTranscript||''; };
   const payload=turns.filter(t=>!t.cancelled&&(srcFor(t)||t.translatedTranscript)).map(t=>({turnIndex:t.turnIndex,source:srcFor(t),translation:t.translatedTranscript||''}));
   if(!payload.length){ alert('no completed turns to review yet'); return; }
   btn.disabled=true; btn.textContent='reviewing…';
@@ -1013,7 +1013,7 @@ document.getElementById('exportBtn').onclick=()=>{
     };
     const report={ generatedAt:new Date().toISOString(),
       currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeCurrentScorecard(),
-        turns, sourceUtterances:srcUtterances, cancellations,
+        turns, sourceUtterances, cancellations,
         semanticReview:review, errors,
         invariantViolations, forensics, eventLog, eventLogDropped,
         eventLogComplete: eventLogDropped===0 },

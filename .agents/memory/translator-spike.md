@@ -28,9 +28,9 @@ The browser stand must not assume `AudioContext({sampleRate:24000})` is honored.
 
 
 ## Native iOS Translator isolation
-The native Translator is a standalone authenticated RU↔EN channel with PCM16 mono at 24 kHz. It uses the provider boundary and must remain separate from `/ui`, Deepgram, Hint models/prompts, and Twilio media.
-**Why:** translation was deliberately introduced as an independently testable mode so realtime audio behavior cannot regress the established phone/Hint path. Server-side direction is fixed so a client cannot silently select a different model or mode.
-**How to apply:** translator start/stop on both iOS and server must be generation-guarded because delayed WebSocket/provider callbacks can otherwise tear down a restarted session or leak a late provider session. Gate mic capture during translated playback to prevent feedback.
+The native Translator now has two isolated transports: the standalone authenticated 24 kHz PCM channel used for direct testing, and a dedicated Twilio phone bridge. The phone bridge owns two independently bound media legs, translates each through the provider boundary, and sends generated audio only to the opposite leg. Its authenticated feed is read-only UI telemetry; it never carries audio.
+**Why:** real PSTN translation needs independent Owner/Guest audio ownership and fail-closed teardown, while the established Hint/Deepgram route must remain untouched. A shared or ambiguously bound media stream can echo translations back to their source or silently enter the Hint path.
+**How to apply:** select Translator before dialing and explicitly tag the call. Keep its Twilio stream and feed endpoints separate from `/ui` and the Hint stream. Bind both expected CallSids, reject duplicate/expired starts, terminate both legs on fatal errors, and persist structured turns in the existing call History.
 ## Translator candidate decision
 For the current translator effort, the conversational `gpt-realtime` adapter is the selected candidate: it has demonstrated faithful RU↔EN behavior and should be integrated only through the separate Translator surface. The dedicated continuous translator is deprioritized.
 **Why:** the live stand showed good quality and reverse-direction potential for `gpt-realtime`, while the continuous model emitted premature fragments and was not useful for the immediate deadline.

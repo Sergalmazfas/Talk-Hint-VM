@@ -50,7 +50,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.hint", comment: ""),
             image: Self.tabIcon(badge: .sparkle), tag: 0)
 
-        let translator = TranslatorViewController()
+        let translator = HomeViewController(mode: .translator)
         translator.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)

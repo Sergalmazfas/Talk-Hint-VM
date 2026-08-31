@@ -89,7 +89,8 @@ final class CallHistoryViewController: UITableViewController {
         // When a saved name is shown as the title, surface the raw number here so
         // it's still visible.
         let number = contactName(call) != nil ? otherParty(call) : ""
-        return [number, direction, status, time].filter { !$0.isEmpty }.joined(separator: " · ")
+        let mode = call.mode == .translator ? NSLocalizedString("translator.title", comment: "") : ""
+        return [number, mode, direction, status, time].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private func isOutgoing(_ call: APIClient.CallRecord) -> Bool {

@@ -12,6 +12,14 @@ final class HomeViewController: UIViewController {
     /// The number being dialed, kept in E.164-friendly raw form ("+1800…").
     private var dialed = "" { didSet { renderNumber() } }
     private var recents: [APIClient.CallRecord] = []
+    private let callMode: CallManager.CallMode
+
+    init(mode: CallManager.CallMode = .hint) {
+        callMode = mode
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     // MARK: - UI
 
@@ -33,7 +41,7 @@ final class HomeViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
-        renderGoalState()
+        if callMode == .hint { renderGoalState() }
         loadRecents()
     }
 
@@ -48,7 +56,7 @@ final class HomeViewController: UIViewController {
     private func buildUI() {
         // Header: "Calls" + gear.
         let titleLabel = UILabel()
-        titleLabel.text = NSLocalizedString("home.title", comment: "")
+        titleLabel.text = NSLocalizedString(callMode == .hint ? "home.title" : "translator.title", comment: "")
         titleLabel.font = .systemFont(ofSize: 32, weight: .bold)
         titleLabel.textColor = Theme.ink
 
@@ -86,6 +94,7 @@ final class HomeViewController: UIViewController {
         // Equal-width spacers keep the pill visually centered between the
         // title and the gear (a plain .fill stack splits them arbitrarily).
         spacerL.widthAnchor.constraint(equalTo: spacerR.widthAnchor).isActive = true
+        headerPrepare.isHidden = callMode != .hint
 
         // Number field card.
         let fieldCard = UIView()
@@ -153,6 +162,8 @@ final class HomeViewController: UIViewController {
         fieldStack.spacing = 8
         fieldStack.translatesAutoresizingMaskIntoConstraints = false
         fieldCard.addSubview(fieldStack)
+        goalBadge.isHidden = callMode != .hint
+        prepareButton.isHidden = callMode != .hint
 
         // Keypad.
         let keypad = buildKeypad()
@@ -524,7 +535,7 @@ final class HomeViewController: UIViewController {
             present(alert, animated: true)
             return
         }
-        CallManager.shared.startOutgoingCall(to: cleaned)
+        CallManager.shared.startOutgoingCall(to: cleaned, mode: callMode)
     }
 }
 

@@ -10,6 +10,7 @@ import { UtteranceGate } from "./utteranceGate";
 import { getSessionUserId } from "./auth";
 import { isValidSpikeToken, handleTranslatorSpikeStream } from "./translation/spike";
 import { handleIOSTranslatorStream } from "./translation/iosTranslator";
+import { handleTranslatorTwilioStream, subscribeTranslatorFeed } from "./translation/twilioBridge";
 import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
@@ -817,7 +818,7 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/honor-stream", "/ui", "/translator", "/translator-spike-stream"].includes(pathname)) {
+    if (!["/twilio-stream", "/media", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -840,7 +841,7 @@ export function setupWebSocket(server: Server) {
     // live call transcripts and AI hints, so they MUST authenticate as a user.
     // The Twilio media channels (/twilio-stream, /media) are machine-to-machine
     // from Twilio and are not user-authenticated here.
-    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream" || pathname === "/translator";
+    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream" || pathname === "/translator" || pathname === "/translator-feed";
     if (requiresAuth) {
       const token = parsedUrl.searchParams.get("token");
       if (!token) {
@@ -877,8 +878,15 @@ export function setupWebSocket(server: Server) {
       handleHonorStream(ws, userId);
     } else if (pathname === "/translator") {
       if (userId) handleIOSTranslatorStream(ws, userId);
+    } else if (pathname === "/translator-feed") {
+      // Read-only owner-scoped call telemetry; unlike /translator this never
+      // starts a provider session and unlike /ui it cannot receive hints.
+      if (userId) subscribeTranslatorFeed(userId, ws);
     } else if (pathname === "/translator-spike-stream") {
       handleTranslatorSpikeStream(ws);
+    } else if (pathname === "/translator-twilio-stream") {
+      // Deliberately separate from handleTwilioStream (Hint/Deepgram).
+      handleTranslatorTwilioStream(ws);
     } else if (pathname === "/twilio-stream" || pathname === "/media") {
       log(`Twilio Media Stream connected via ${pathname}`, "twilio");
       handleTwilioStream(ws);

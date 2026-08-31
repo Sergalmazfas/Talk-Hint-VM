@@ -12,6 +12,7 @@ import express from "express";
 import fs from "fs";
 import twilio from "twilio";
 import crypto from "crypto";
+import { handleTranslatorGuestStatus } from "./translation/twilioBridge";
 import { registerUser, loginUser, createSession, authMiddleware, deleteSession, getSessionUserId } from "./auth";
 import { stripeService } from "./stripeService";
 import { getStripePublishableKey } from "./stripeClient";
@@ -30,6 +31,7 @@ import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
+import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall } from "./translation/twilioBridge";
 import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
@@ -252,6 +254,27 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   setupWebSocket(httpServer);
+  // The translator PSTN guest is deliberately originated server-side. Its
+  // callback carries only a generated pairing id; it cannot enter normal
+  // incoming/outgoing Hint routing.
+  configureTranslatorDialer({
+    async createGuestLeg(call) {
+      if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) throw new Error("Twilio credentials are not configured");
+      const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+      const url = new URL("/twilio/voice", call.baseUrl);
+      url.searchParams.set("TranslatorCallId", call.id);
+      url.searchParams.set("TranslatorLeg", "guest");
+      const created = await client.calls.create({
+        to: call.guestNumber, from: call.callerId, url: url.toString(), method: "POST",
+        statusCallback: new URL("/twilio/status", call.baseUrl).toString(),
+        statusCallbackMethod: "POST",
+      });
+      return { sid: created.sid };
+    },
+    async hangup(callSid) {
+      await twilio(TWILIO_ACCOUNT_SID!, TWILIO_AUTH_TOKEN!).calls(callSid).update({ status: "completed" });
+    },
+  });
 
   // AI Tutor (external Tutor Engine) — practice sessions + Call Memory.
   registerTutorRoutes(app);
@@ -1178,6 +1201,11 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     const direction = req.body.Direction || "unknown";
     // Custom param from a client outbound connect() to join a call conference (iOS path)
     const joinConferenceRoom = req.body.conferenceRoom as string | undefined;
+    // Translator calls are opt-in only through explicit iOS Twilio params.
+    // These values are available only after Twilio signature validation.
+    const translatorMode = String(req.body.TranslatorMode || req.query.TranslatorMode || "");
+    const translatorCallId = String(req.body.TranslatorCallId || req.query.TranslatorCallId || "");
+    const translatorLeg = String(req.body.TranslatorLeg || req.query.TranslatorLeg || "");
     
     const timestamp = new Date().toISOString();
     console.log(`[TwiML Voice] ===== CALL ${callSid} @ ${timestamp} =====`);
@@ -1189,6 +1217,59 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
 
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twimlResponse = new VoiceResponse();
+
+    if (translatorLeg === "guest") {
+      const paired = getTranslatorCall(translatorCallId);
+      if (!paired) {
+        twimlResponse.hangup();
+        return res.type("text/xml").send(twimlResponse.toString());
+      }
+      const connect = twimlResponse.connect();
+      const stream = connect.stream({ url: `wss://${host}/translator-twilio-stream` });
+      stream.parameter({ name: "translatorCallId", value: paired.id });
+      stream.parameter({ name: "translatorLeg", value: "guest" });
+      return res.type("text/xml").send(twimlResponse.toString());
+    }
+
+    if (translatorMode === "ru_en") {
+      // Only an authenticated iOS/device owner identity may originate this
+      // mode. A PSTN request with these fields is never treated as translator.
+      const ownerMatch = /^client:user-([A-Za-z0-9-]+)$/.exec(String(fromNumber || ""));
+      const guestTo = String(req.body.GuestTo || req.body.guestTo || "");
+      if (!ownerMatch || !/^\+[1-9]\d{7,14}$/.test(guestTo)) {
+        twimlResponse.hangup();
+        return res.type("text/xml").send(twimlResponse.toString());
+      }
+      const ownerId = ownerMatch[1];
+      const ownerCallId = crypto.randomUUID();
+      let callerId = TWILIO_PHONE_NUMBER || "";
+      try {
+        const numbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, ownerId)).limit(1);
+        callerId = numbers[0]?.twilioNumber || callerId;
+      } catch { /* no caller id is a closed failure below */ }
+      if (!callerId) {
+        twimlResponse.hangup();
+        return res.type("text/xml").send(twimlResponse.toString());
+      }
+      const protocol = req.get("x-forwarded-proto") || "https";
+      registerTranslatorCall({ id: ownerCallId, ownerId, ownerCallSid: callSid, guestNumber: guestTo, callerId, baseUrl: `${protocol}://${host}` });
+      setCallOwner(callSid, ownerId);
+      try {
+        if (!(await storage.getCallByCallSid(callSid))) {
+          await storage.createCall({ userId: ownerId, callSid, fromNumber: callerId, toNumber: guestTo, direction: "outgoing", status: "active",
+            metadata: { mode: "translator", direction: "ru_en_bidirectional", provider: "openai-realtime", model: process.env.TRANSLATOR_SPIKE_MODEL || "gpt-realtime", translatorCallId: ownerCallId, translatorTurns: [] } });
+        }
+      } catch (error: any) {
+        // Do not establish paid PSTN work without an auditable owner record.
+        twimlResponse.hangup();
+        return res.type("text/xml").send(twimlResponse.toString());
+      }
+      const connect = twimlResponse.connect();
+      const stream = connect.stream({ url: `wss://${host}/translator-twilio-stream` });
+      stream.parameter({ name: "translatorCallId", value: ownerCallId });
+      stream.parameter({ name: "translatorLeg", value: "owner" });
+      return res.type("text/xml").send(twimlResponse.toString());
+    }
 
     // Check if this is an INCOMING call (someone calling our Twilio number)
     // When incoming: To = our Twilio number, From = external caller (NOT a client: identity)
@@ -1556,6 +1637,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     // endedAt so the History tab shows when the call finished.
     if (callSid && callStatus) {
       const terminal = ["completed", "busy", "failed", "no-answer", "canceled"];
+      handleTranslatorGuestStatus(callSid, callStatus);
       try {
         const call = await storage.getCallByCallSid(callSid);
         if (call) {

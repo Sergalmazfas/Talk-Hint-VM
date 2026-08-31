@@ -139,6 +139,10 @@ final class CallDetailViewController: UITableViewController {
 
     private var copyableTranscript: String? {
         guard !loadingTranscript else { return nil }
+        if call.mode == .translator, !call.translationTurns.isEmpty {
+            return call.translationTurns.map { "\($0.original)\n\($0.translation)" }
+                .joined(separator: "\n\n")
+        }
         let text = call.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return text.isEmpty ? nil : text
     }
@@ -177,7 +181,14 @@ final class CallDetailViewController: UITableViewController {
 
         case .transcript:
             var config = cell.defaultContentConfiguration()
-            let transcript = call.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let transcript: String
+            if call.mode == .translator, !call.translationTurns.isEmpty {
+                transcript = call.translationTurns.map { turn in
+                    [turn.original, turn.translation].filter { !$0.isEmpty }.joined(separator: "\n")
+                }.joined(separator: "\n\n")
+            } else {
+                transcript = call.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
             if loadingTranscript {
                 config.text = NSLocalizedString("common.loading", comment: "")
                 config.textProperties.color = .secondaryLabel
