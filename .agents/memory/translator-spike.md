@@ -25,3 +25,8 @@ gpt-realtime-translate streams output audio CONTINUOUSLY, including silence betw
 The browser stand must not assume `AudioContext({sampleRate:24000})` is honored. Resample microphone audio from the actual context rate to provider-native 24 kHz, and resample returned 24 kHz PCM back to the device rate for playback.
 **Why:** iOS Safari commonly runs its audio graph at 48 kHz; labeling unconverted device PCM as 24 kHz corrupts timing, recognition, pitch, and playback/gate duration.
 **How to apply:** use the runtime `AudioContext.sampleRate` at both boundaries. On iOS, invoke Share directly from the tap before any awaited analysis (or Safari discards user activation), and retain a visible file-link fallback.
+
+## Translator candidate decision
+For the current translator effort, the conversational `gpt-realtime` adapter is the selected candidate: it has demonstrated faithful RU↔EN behavior and should be integrated only through the separate Translator surface. The dedicated continuous translator is deprioritized.
+**Why:** the live stand showed good quality and reverse-direction potential for `gpt-realtime`, while the continuous model emitted premature fragments and was not useful for the immediate deadline.
+**How to apply:** preserve the existing Deepgram, hints, hint-model, and ordinary telephony paths; translator work must remain isolated until the iOS reverse-direction check is complete.

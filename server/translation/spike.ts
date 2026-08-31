@@ -1000,56 +1000,51 @@ document.getElementById('reviewBtn').onclick=async()=>{
   btn.disabled=false; btn.textContent='Run semantic review';
 };
 
-document.getElementById('exportBtn').onclick=async()=>{
+document.getElementById('exportBtn').onclick=()=>{
   const exportStatus=document.getElementById('exportStatus');
   exportStatus.className='sub';
   exportStatus.textContent='Preparing JSON…';
-  // Export must remain a direct result of the user's tap. Awaiting the
-  // server-side forensic request first both delayed large reports and caused
-  // iOS Safari to discard the transient user gesture required by Share.
-  // Raw evidence is already included and can be analyzed from the export.
-  const forensics={
-    status:'DEFERRED_TO_REPORT_ANALYSIS',
-    reason:'Browser export intentionally does not wait for forensic analysis'
-  };
-  const report={ generatedAt:new Date().toISOString(),
-    currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeCurrentScorecard(),
-      turns, sourceUtterances:srcUtterances, cancellations,
-      semanticReview:review, errors,
-      invariantViolations, forensics, eventLog, eventLogDropped,
-      eventLogComplete: eventLogDropped===0 },
-    completedRuns };
-  const json=JSON.stringify(report,null,2);
-  const filename='translator-spike-run2-report.json';
-  const blob=new Blob([json],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const hint=document.createElement('span');
-  hint.textContent='JSON ready. ';
-  const a=document.createElement('a');
-  a.href=url; a.download=filename; a.textContent='Tap here to save the JSON report';
-  a.className='smallbtn'; a.style.display='inline-block'; a.style.marginTop='4px';
-  // Keep a real link visible before opening Share. It remains usable even if
-  // Safari's Share promise stalls or the user dismisses it.
-  exportStatus.replaceChildren(hint,a);
-  // iOS Safari often ignores Blob + a.click() without any visible error.
-  // Prefer its native Share sheet, where the report can be saved to Files.
   try{
+    // Raw evidence is already included and can be analyzed from the export.
+    // Keep analysis out of the user gesture and out of the save path.
+    const forensics={
+      status:'DEFERRED_TO_REPORT_ANALYSIS',
+      reason:'Browser export intentionally does not wait for forensic analysis'
+    };
+    const report={ generatedAt:new Date().toISOString(),
+      currentRun:{ session:sessionMeta, sessionConfig, scorecard:computeCurrentScorecard(),
+        turns, sourceUtterances:srcUtterances, cancellations,
+        semanticReview:review, errors,
+        invariantViolations, forensics, eventLog, eventLogDropped,
+        eventLogComplete: eventLogDropped===0 },
+      completedRuns };
+    const json=JSON.stringify(report);
+    const filename='translator-spike-run2-report.json';
+    const blob=new Blob([json],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const hint=document.createElement('span');
+    hint.textContent='JSON готов — нажми ссылку: ';
+    const a=document.createElement('a');
+    a.href=url; a.download=filename; a.target='_blank'; a.rel='noopener';
+    a.textContent='Open / save JSON report';
+    a.className='smallbtn'; a.style.display='inline-block'; a.style.marginTop='4px';
+    // The visible link is the primary iOS fallback. If Safari ignores the
+    // download attribute, it opens the JSON and the user can use Safari Share.
+    exportStatus.replaceChildren(hint,a);
+    exportStatus.className='lag-ok';
+
+    // Best-effort native Share, deliberately not awaited: a stalled or
+    // unsupported Share implementation must never hide the working link.
     const file=new File([json],filename,{type:'application/json'});
     const canShareFiles=!!navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}));
     if(canShareFiles){
-      hint.textContent='Opening Share… ';
-      await navigator.share({title:'TalkHint translator report',files:[file]});
-      hint.textContent='JSON готов. ';
-      exportStatus.className='lag-ok';
-      return;
+      navigator.share({title:'TalkHint translator report',files:[file]}).catch(()=>{});
     }
   }catch(e){
-    if(e&&e.name==='AbortError'){
-      hint.textContent='Share закрыт. Файл можно сохранить по ссылке: ';
-      return;
-    }
+    exportStatus.className='err';
+    exportStatus.textContent='Export failed: '+(e&&e.message?e.message:String(e));
+    addLine('err','⚠ JSON export failed: '+(e&&e.message?e.message:String(e)));
   }
-  hint.textContent='Share недоступен. Сохрани файл по ссылке: ';
 };
 
 function controlsMsg(){
