@@ -13,9 +13,12 @@
 //   - GET /v1/capabilities consumed fields;
 //   - GET /v1/tutors catalog shape;
 //   - practice session create (exact HTTP 201 + shape) + VERIFIED completion;
-//   - Call Memory endpoints (Task #161): GET pre-generation → 404
-//     CALL_MEMORY_NOT_GENERATED, POST → 409 NO_COMPLETED_TURNS on a turn-less
-//     probe session; if generation exists anyway, bounded GET poll validates
+//   - Call Memory endpoints immediately after completion, POST FIRST:
+//     POST → 409 NO_COMPLETED_TURNS, then GET → 404
+//     CALL_MEMORY_NOT_GENERATED on a turn-less probe session. POST-first is the
+//     deterministic sequence: a GET-first sequence gives the completion
+//     trigger time to race the explicit POST. If generation exists anyway,
+//     bounded GET poll validates
 //     the pending|ready|failed status enum, content categories, and reports
 //     the observed group_id/version field names (still unconfirmed — see
 //     docs/tutor-goal-contract-open-question.md);
@@ -73,6 +76,11 @@ function requireField(where: string, obj: any, field: string, type: string) {
   return true;
 }
 
+function responseBody(json: any): string {
+  const body = JSON.stringify(json ?? null);
+  return body.length > 500 ? `${body.slice(0, 500)}…` : body;
+}
+
 // Bounded, status-preserving Engine request. A timeout or non-JSON body is a
 // contract failure surfaced by the caller — the probe can never hang.
 async function engineRequest(
@@ -110,14 +118,20 @@ async function engineRequest(
 async function completeSession(where: string, sessionId: string): Promise<void> {
   const r = await engineRequest("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/complete`);
   if ("error" in r) { missing.push(`${where}: session completion (${r.error})`); return; }
-  if (r.status < 200 || r.status >= 300) { typeMismatch.push(`${where}: POST /sessions/:id/complete expected 2xx, got ${r.status}`); return; }
+  if (r.status < 200 || r.status >= 300) {
+    typeMismatch.push(`${where}: POST /sessions/:id/complete expected 2xx, got ${r.status} (body ${responseBody(r.json)})`);
+    return;
+  }
   verified.push(`${where}: probe session terminated cleanly (HTTP ${r.status})`);
 }
 
 async function checkCapabilities() {
   const r = await engineRequest("GET", "/api/v1/capabilities");
   if ("error" in r) { missing.push(`GET /v1/capabilities (${r.error})`); return; }
-  if (r.status !== 200) { typeMismatch.push(`GET /v1/capabilities expected 200, got ${r.status}`); return; }
+  if (r.status !== 200) {
+    typeMismatch.push(`GET /v1/capabilities expected 200, got ${r.status} (body ${responseBody(r.json)})`);
+    return;
+  }
   requireField("capabilities", r.json, "realtime_audio", "boolean");
   requireField("capabilities", r.json, "avatar", "boolean");
   requireField("capabilities", r.json, "call_memory", "boolean");
@@ -153,7 +167,10 @@ async function checkCapabilities() {
 async function checkCatalog() {
   const r = await engineRequest("GET", "/api/v1/tutors");
   if ("error" in r) { missing.push(`GET /v1/tutors (${r.error})`); return; }
-  if (r.status !== 200) { typeMismatch.push(`GET /v1/tutors expected 200, got ${r.status}`); return; }
+  if (r.status !== 200) {
+    typeMismatch.push(`GET /v1/tutors expected 200, got ${r.status} (body ${responseBody(r.json)})`);
+    return;
+  }
   const list = Array.isArray(r.json) ? r.json : Array.isArray(r.json?.tutors) ? r.json.tutors : [];
   if (list.length === 0) { missing.push("GET /v1/tutors → non-empty tutor list"); return; }
   const t = list[0];
@@ -178,7 +195,10 @@ function checkSessionShape(where: string, s: any): boolean {
 async function createSession(where: string, sim?: TutorSimulationParams): Promise<any | null> {
   const r = await engineRequest("POST", "/api/v1/sessions", buildSessionPayload(PROBE_USER, sim));
   if ("error" in r) { missing.push(`${where} (${r.error})`); return null; }
-  if (r.status !== 201) { typeMismatch.push(`${where} expected HTTP 201, got ${r.status}${r.json?.error ? ` (${JSON.stringify(r.json.error).slice(0, 120)})` : ""}`); return null; }
+  if (r.status !== 201) {
+    typeMismatch.push(`${where} expected HTTP 201, got ${r.status} (body ${responseBody(r.json)})`);
+    return null;
+  }
   return r.json;
 }
 
@@ -189,20 +209,27 @@ async function checkPractice() {
     if (checkSessionShape("practice 201", s)) verified.push("POST /v1/sessions mode:practice (exact 201 + shape)");
     if (s.simulation) typeMismatch.push("practice 201 must not carry a simulation echo");
   } finally {
-    if (s.session_id) await completeSession("practice", s.session_id);
+    if (s.session_id) {
+      await completeSession("practice", s.session_id);
+      // No unrelated request belongs between completion and POST call-memory:
+      // completion may enqueue automatic generation asynchronously.
+      await checkCallMemory(s.session_id);
+    }
   }
-  if (s.session_id) await checkCallMemory(s.session_id);
 }
 
 // --- Call Memory (contract doc §call-memory) ---------------------------------
-// The probe session has NO completed turns, so the deterministic live paths are
-// ASSERTED STRICTLY:
-//   GET  before generation → 404 CALL_MEMORY_NOT_GENERATED (not_started);
-//   POST → 409 NO_COMPLETED_TURNS ("no memory", not an error).
+// The probe session is completed but has NO completed turns. The deterministic
+// live paths are ASSERTED STRICTLY, in this order:
+//   POST immediately after completion → 409 NO_COMPLETED_TURNS ("no memory");
+//   GET after the rejected POST → 404 CALL_MEMORY_NOT_GENERATED (not_started).
+// POST must come first. Completion can asynchronously trigger generation, so
+// placing GET between completion and POST creates the exact race this probe is
+// meant to catch rather than testing the explicit-generation contract.
 // ANY other POST outcome (2xx, generation-exists conflict, other status) is a
-// contract failure: the engine must not generate memory for a turn-less
-// session that GET just reported as not generated. If that failure mode is
-// observed, a bounded NON-ASSERTING diagnostic poll additionally reports the
+// contract failure: the engine must not explicitly generate memory for a
+// turn-less session. If that failure mode is observed, a bounded NON-ASSERTING
+// diagnostic poll additionally reports the
 // status/categories/reference field names the Engine sends (group_id/version
 // names are still unconfirmed — see docs/tutor-goal-contract-open-question.md)
 // so the mismatch report carries maximum information; the diagnostic never
@@ -237,37 +264,43 @@ function describeCallMemoryReady(json: any): string {
 async function checkCallMemory(sessionId: string) {
   const path = `/api/v1/sessions/${encodeURIComponent(sessionId)}/call-memory`;
 
-  // 1) GET before generation — must be 404 CALL_MEMORY_NOT_GENERATED.
-  const pre = await engineRequest("GET", path);
-  if ("error" in pre) { missing.push(`GET /sessions/:id/call-memory pre-generation (${pre.error})`); return; }
-  if (pre.status === 404 && JSON.stringify(pre.json ?? "").includes("CALL_MEMORY_NOT_GENERATED")) {
-    verified.push("GET /sessions/:id/call-memory pre-generation (404 CALL_MEMORY_NOT_GENERATED)");
-  } else if (pre.status === 404) {
-    renamed.push(`GET call-memory 404 without CALL_MEMORY_NOT_GENERATED code (body ${JSON.stringify(pre.json).slice(0, 120)})`);
-  } else {
-    typeMismatch.push(`GET call-memory pre-generation expected 404 CALL_MEMORY_NOT_GENERATED, got ${pre.status}`);
-  }
-
-  // 2) POST — the probe session has no completed turns, so the ONLY correct
+  // 1) POST — the probe session has no completed turns, so the ONLY correct
   // response is 409 NO_COMPLETED_TURNS. Anything else (2xx, generation-exists
-  // conflict, other status) is a contract failure: the engine must not have a
-  // generation for a session GET just reported as not generated.
+  // conflict, other status) is a contract failure.
   const post = await engineRequest("POST", path);
   if ("error" in post) { missing.push(`POST /sessions/:id/call-memory (${post.error})`); return; }
   const postBody = JSON.stringify(post.json ?? "");
   if (post.status === 409 && postBody.includes("NO_COMPLETED_TURNS")) {
     verified.push("POST /sessions/:id/call-memory (409 NO_COMPLETED_TURNS for turn-less session)");
+  } else {
+    typeMismatch.push(
+      `POST call-memory on a turn-less session expected 409 NO_COMPLETED_TURNS, got ${post.status} (body ${responseBody(post.json)})`,
+    );
+
+    // Failure already recorded — run a bounded NON-ASSERTING diagnostic poll
+    // so the mismatch report shows what the engine actually did. Adds context
+    // to notes only; never verified, never a pass.
+    if (post.status === 409 || (post.status >= 200 && post.status < 300)) {
+      await diagnoseUnexpectedCallMemoryGeneration(path);
+    }
     return;
   }
-  typeMismatch.push(
-    `POST call-memory on a turn-less session expected 409 NO_COMPLETED_TURNS, got ${post.status}` +
-    (postBody && postBody !== '""' ? ` (body ${postBody.slice(0, 120)})` : ""),
-  );
 
-  // 3) Failure already recorded — run a bounded NON-ASSERTING diagnostic poll
-  // so the mismatch report shows what the engine actually did. Adds context
-  // to notes only; never verified, never a pass.
-  if (post.status !== 409 && (post.status < 200 || post.status >= 300)) return; // nothing to poll
+  // 2) The rejected POST must not have started generation.
+  const pre = await engineRequest("GET", path);
+  if ("error" in pre) { missing.push(`GET /sessions/:id/call-memory after NO_COMPLETED_TURNS (${pre.error})`); return; }
+  if (pre.status === 404 && JSON.stringify(pre.json ?? "").includes("CALL_MEMORY_NOT_GENERATED")) {
+    verified.push("GET /sessions/:id/call-memory after rejected generation (404 CALL_MEMORY_NOT_GENERATED)");
+  } else if (pre.status === 404) {
+    renamed.push(`GET call-memory expected CALL_MEMORY_NOT_GENERATED code, got ${pre.status} (body ${responseBody(pre.json)})`);
+  } else {
+    typeMismatch.push(
+      `GET call-memory after NO_COMPLETED_TURNS expected 404 CALL_MEMORY_NOT_GENERATED, got ${pre.status} (body ${responseBody(pre.json)})`,
+    );
+  }
+}
+
+async function diagnoseUnexpectedCallMemoryGeneration(path: string) {
   for (let attempt = 1; attempt <= CALL_MEMORY_POLL_ATTEMPTS; attempt++) {
     const r = await engineRequest("GET", path);
     if ("error" in r || r.status !== 200) {

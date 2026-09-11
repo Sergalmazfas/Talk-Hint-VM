@@ -89,6 +89,13 @@ Canonical endpoint list (removal/incompatible change of any = MAJOR):
 | `POST /v1/call-memories/:groupId/corrections`, `…/confirm`, `…/handoff` | confirmation flow / handoff |
 | `GET /v1/handoffs/:id`, `POST /v1/handoffs/:id/consume` | handoff consumption |
 
+For deterministic empty-session checks, consumers MUST call the explicit Call
+Memory POST immediately after `POST /sessions/:id/complete`, before its GET.
+Completion may trigger declared Call Memory asynchronously, so placing GET
+between completion and the explicit POST introduces a race. On a turn-less
+session the POST deterministically returns `409 NO_COMPLETED_TURNS`; the
+following GET returns `404 CALL_MEMORY_NOT_GENERATED`.
+
 Session-creation error codes clients must handle: `SCENARIO_NOT_FOUND` (404),
 `TUTOR_NOT_ALLOWED` / `LANGUAGE_NOT_SUPPORTED_BY_TUTOR` / `CALL_MEMORY_DISABLED`
 (403), `SIMULATION_REQUIRED` / `SIMULATION_NOT_ALLOWED_FOR_MODE` /

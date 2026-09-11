@@ -122,8 +122,9 @@ simulation with `source:"call_memory"`.
 > **OPEN QUESTION** (docs/tutor-goal-contract-open-question.md §1): the exact
 > group id/version field names are NOT yet confirmed by the Engine owner —
 > TalkHint accepts all candidates above. The live probe STRICTLY asserts the
-> deterministic paths on its turn-less probe session (GET pre-generation →
-> 404 `CALL_MEMORY_NOT_GENERATED`; POST → exactly 409 `NO_COMPLETED_TURNS` —
+> deterministic paths on its completed, turn-less probe session in the
+> contract-safe order: POST immediately after completion → exactly 409
+> `NO_COMPLETED_TURNS`, then GET → 404 `CALL_MEMORY_NOT_GENERATED` —
 > any other POST outcome is a contract failure). If the engine misbehaves and
 > a generation exists anyway, a bounded NON-ASSERTING diagnostic poll reports
 > the observed status/categories/reference field names alongside the failure
@@ -173,7 +174,9 @@ WS command to request a hint).
    short probe sessions against the real Engine, verifies protocol shapes
    only (never teaching quality or wording) — capabilities, catalog,
    practice/simulation session create, the simulation opening turn, and the
-   Call Memory endpoints (deterministic 404/409 paths + bounded ready poll) —
+   Call Memory endpoints POST-first immediately after session completion
+   (deterministic 409/404 paths, isolated from the completion-trigger race,
+   + bounded ready poll) —
    cleans up, and prints a
    structured MISSING / RENAMED-UNEXPECTED / TYPE MISMATCH report.
    **ENFORCED pre-publish gate** for TalkHint: the production build

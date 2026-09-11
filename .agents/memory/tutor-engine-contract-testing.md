@@ -9,3 +9,6 @@ description: Durable policy for freezing/verifying the Tutor Engine public API c
 - **Version reporting:** GET /v1/capabilities (unauthenticated) is the authoritative handshake — returns engine_version + contract{name,version,major,hash} + realtime{protocol_version}; the live probe must require all these fields, pin major=1 + tutor-realtime/1.0, and print the Engine-reported version it validated against on every run.
 - Engine contract doc is NOT reachable over HTTP (SPA fallback for unknown paths) — get it from the user/Engine project when it changes.
 - **How to apply:** live probes must bound every network phase, assert exact HTTP status codes, and treat cleanup/session-completion failure as a contract failure; probes check protocol only — never wording or teaching quality.
+- **Call Memory ordering rule:** on a completed zero-turn probe session, call explicit generation POST immediately before GET; expect `409 NO_COMPLETED_TURNS`, then `404 CALL_MEMORY_NOT_GENERATED`.
+- **Why:** completion asynchronously enqueues automatic memory work. A GET-first sequence opens a race where that job can appear between GET and POST and randomly block publishing.
+- **How to apply:** keep completion → POST → GET adjacent, with no diagnostic/read request between completion and POST; unexpected responses remain fatal and must print status plus body.
