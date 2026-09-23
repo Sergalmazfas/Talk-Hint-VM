@@ -10,26 +10,6 @@ deploymentTarget = "vm"
 build = ["npm", "run", "build"]
 run = ["node", "./dist/index.cjs"]
 
-[[ports]]
-localPort = 5000
-externalPort = 80
-
-[[ports]]
-localPort = 5099
-externalPort = 3002
-
-[[ports]]
-localPort = 8081
-externalPort = 8081
-
-[[ports]]
-localPort = 8082
-externalPort = 3001
-
-[[ports]]
-localPort = 23636
-externalPort = 3000
-
 [env]
 PORT = "5000"
 
@@ -103,3 +83,11 @@ DISABLE_TWILIO_SIGNATURE_CHECK = "true"
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 120000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 23636
+externalPort = 3001
