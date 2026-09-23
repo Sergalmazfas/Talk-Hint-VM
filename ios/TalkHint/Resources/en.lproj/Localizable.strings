@@ -123,6 +123,7 @@
 "home.enter_number" = "Enter number";
 "home.goal_ready" = "Goal ready ✓";
 "home.call" = "Call";
+"home.paste" = "Paste";
 "home.connecting" = "Connecting…";
 "home.call_failed.title" = "Call failed";
 "home.call_failed.message" = "The call could not connect. Please try again.";

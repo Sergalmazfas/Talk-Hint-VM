@@ -24,7 +24,7 @@ final class HomeViewController: UIViewController {
 
     // MARK: - UI
 
-    private let numberLabel = UITextField()
+    private let numberLabel = UILabel()
     private let placeholderLabel = UILabel()
     private let goalBadge = UIButton(type: .system)
     private let prepareButton = UIButton(type: .system)
@@ -117,30 +117,17 @@ final class HomeViewController: UIViewController {
 
         numberLabel.font = .systemFont(ofSize: 20, weight: .semibold)
         numberLabel.textColor = .label
-        numberLabel.tintColor = Theme.green
-        numberLabel.keyboardType = .phonePad
-        numberLabel.textContentType = .telephoneNumber
-        numberLabel.autocorrectionType = .no
-        numberLabel.spellCheckingType = .no
-        numberLabel.clearButtonMode = .never
-        numberLabel.delegate = self
-        numberLabel.addTarget(self, action: #selector(numberFieldChanged), for: .editingChanged)
         numberLabel.adjustsFontSizeToFitWidth = true
-        numberLabel.minimumFontSize = 12
+        numberLabel.minimumScaleFactor = 0.6
+        numberLabel.lineBreakMode = .byTruncatingHead
         // When the number is still too long even after shrinking, cut off the
         // BEGINNING (…) so the digits being typed stay visible at the end.
         numberLabel.accessibilityIdentifier = "input-dial-number"
-        let keyboardBar = UIToolbar()
-        keyboardBar.sizeToFit()
-        keyboardBar.items = [
-            UIBarButtonItem(systemItem: .flexibleSpace),
-            UIBarButtonItem(
-                title: NSLocalizedString("common.done", comment: ""),
-                style: .done,
-                target: self,
-                action: #selector(dismissDialKeyboard)),
-        ]
-        numberLabel.inputAccessoryView = keyboardBar
+        let pasteButton = UIButton(type: .system)
+        pasteButton.setTitle(NSLocalizedString("home.paste", comment: ""), for: .normal)
+        pasteButton.accessibilityIdentifier = "button-paste-number"
+        pasteButton.addTarget(self, action: #selector(pasteNumber), for: .touchUpInside)
+        pasteButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         placeholderLabel.text = NSLocalizedString("home.enter_number", comment: "")
         placeholderLabel.font = .systemFont(ofSize: 16)
@@ -181,7 +168,7 @@ final class HomeViewController: UIViewController {
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         numberLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let fieldStack = UIStackView(arrangedSubviews: [phoneIcon, numberWrap, deleteButton, goalBadge, prepareButton])
+        let fieldStack = UIStackView(arrangedSubviews: [phoneIcon, numberWrap, pasteButton, deleteButton])
         fieldStack.axis = .horizontal
         fieldStack.alignment = .center
         fieldStack.spacing = 8
@@ -238,11 +225,12 @@ final class HomeViewController: UIViewController {
         recentsStack.axis = .vertical
         recentsStack.spacing = 4
 
-        let root = UIStackView(arrangedSubviews: [header, fieldCard, keypad, callRow, recentsHeader, recentsStack, UIView()])
+        let goalRow = UIStackView(arrangedSubviews: [UIView(), goalBadge])
+        goalRow.isHidden = callMode != .hint
+        let root = UIStackView(arrangedSubviews: [header, fieldCard, goalRow, keypad, recentsHeader, recentsStack])
         root.axis = .vertical
         root.spacing = 16
         root.setCustomSpacing(20, after: keypad)
-        root.setCustomSpacing(20, after: callRow)
         root.setCustomSpacing(8, after: recentsHeader)
         root.translatesAutoresizingMaskIntoConstraints = false
 
@@ -252,12 +240,18 @@ final class HomeViewController: UIViewController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(root)
         view.addSubview(scroll)
+        view.addSubview(callRow)
+        callRow.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: callRow.topAnchor, constant: -12),
+            callRow.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            callRow.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            callRow.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            callButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
 
             root.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 8),
             root.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 20),
@@ -381,8 +375,12 @@ final class HomeViewController: UIViewController {
         return result
     }
 
-    @objc private func numberFieldChanged() {
-        dialed = Self.normalizedDialInput(numberLabel.text ?? "")
+    @objc private func pasteNumber() {
+        // Read the clipboard only after the user's explicit Paste action.
+        guard let text = UIPasteboard.general.string else { return }
+        let number = Self.normalizedDialInput(text)
+        guard !number.isEmpty else { return }
+        dialed = number
     }
 
     /// Set when a long-press on "0" was recognized, so the button's normal
@@ -620,6 +618,8 @@ final class HomeViewController: UIViewController {
     }
 
     private func startCall(to raw: String) {
+        guard outgoingCallUUID == nil else { return }
+        dismissDialKeyboard()
         let cleaned = raw.components(separatedBy: CharacterSet(charactersIn: " -()")).joined()
         // The backend only routes outbound dials to E.164 numbers (leading "+").
         guard cleaned.range(of: "^\\+[1-9]\\d{6,14}$", options: .regularExpression) != nil else {
@@ -633,15 +633,6 @@ final class HomeViewController: UIViewController {
         }
         renderCallButtonConnecting()
         outgoingCallUUID = CallManager.shared.startOutgoingCall(to: cleaned, mode: callMode)
-    }
-}
-
-extension HomeViewController: UITextFieldDelegate {
-    func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
-        if string.count > 1 {
-            DispatchQueue.main.async { [weak self] in self?.dismissDialKeyboard() }
-        }
-        return true
     }
 }
 

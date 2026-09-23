@@ -123,6 +123,7 @@
 "home.enter_number" = "Введите номер";
 "home.goal_ready" = "Цель готова ✓";
 "home.call" = "Позвонить";
+"home.paste" = "Вставить";
 "home.connecting" = "Соединение…";
 "home.call_failed.title" = "Не удалось позвонить";
 "home.call_failed.message" = "Не удалось установить соединение. Попробуйте ещё раз.";

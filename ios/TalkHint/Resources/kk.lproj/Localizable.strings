@@ -123,6 +123,7 @@
 "home.enter_number" = "Нөмірді енгізіңіз";
 "home.goal_ready" = "Мақсат дайын ✓";
 "home.call" = "Қоңырау шалу";
+"home.paste" = "Қою";
 "home.connecting" = "Қосылуда…";
 "home.call_failed.title" = "Қоңырау шалынбады";
 "home.call_failed.message" = "Байланыс орнатылмады. Қайталап көріңіз.";
