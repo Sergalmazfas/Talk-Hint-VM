@@ -173,3 +173,17 @@ mtime_ms = 1790234225319
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bd69a643-32c3-40eb-ad54-c7a68de37c38/263939e9-354e-4732-8cc2-36c353ba3370"
 storage_version_token = "1790234282830330"
 content_type = "text/html"
+
+[[outputs]]
+id = "38RusHDnmv6XvAHgNqBMz"
+uri = "file://reports/copilot-iphone-audio-report.html"
+type = "html"
+title = "Отчёт: Copilot для звонков на iPhone"
+description = "Проверенная архитектура Twilio custom AudioDevice, нерешённые риски и условия испытаний приватного аудио."
+logical_id = "35fdfc45-3c3e-406b-bd1a-309c9cfd003b"
+content_hash = "sha256:bed56ede49c2da17b4ffb30b6628a877023143e8ab0d5365365856a99e208489"
+size = 14379
+mtime_ms = 1790236355883
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/35fdfc45-3c3e-406b-bd1a-309c9cfd003b/3c1af0cf-a168-47ab-99d6-b931cc056ca7"
+storage_version_token = "1790236367150674"
+content_type = "text/html"

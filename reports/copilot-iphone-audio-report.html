@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Copilot для iPhone — отчёт по аудиоархитектуре</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172321; background: #f5f7f5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    main { max-width: 850px; margin: 0 auto; padding: 28px 20px 80px; }
+    h1 { font-size: clamp(29px, 5vw, 42px); line-height: 1.12; letter-spacing: -.035em; margin: 12px 0; }
+    h2 { font-size: 21px; margin: 0 0 14px; }
+    h3 { font-size: 16px; margin: 20px 0 8px; }
+    p, li { line-height: 1.62; }
+    .eyebrow { color: #18765a; font-size: 12px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+    .lead { font-size: 18px; color: #465551; margin-bottom: 22px; }
+    .meta { color: #61716a; font-size: 13px; margin-bottom: 28px; }
+    section { background: white; border: 1px solid #e1e9e3; border-radius: 18px; padding: 22px 24px; margin: 15px 0; }
+    .status { background: #fff9e9; border-color: #f2ddb1; }
+    .status strong { color: #76520c; }
+    .diagram { border-radius: 12px; padding: 16px; margin: 12px 0; background: #f1f6f3; font: 14px/1.75 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    ul, ol { padding-left: 22px; margin: 10px 0; }
+    .tag { display: inline-block; border-radius: 99px; background: #e6f3eb; color: #176947; padding: 4px 9px; font-size: 12px; font-weight: 700; }
+    .tag.open { background: #fff0d6; color: #835313; }
+    a { color: #006e50; font-weight: 600; overflow-wrap: anywhere; }
+    .sources a { display: block; margin: 10px 0; padding: 12px 14px; border-radius: 11px; background: #eff6f1; text-decoration: none; }
+    .sources a:focus-visible, a:focus-visible { outline: 3px solid #338f68; outline-offset: 3px; }
+    small { color: #65746d; }
+    @media (max-width: 520px) { main { padding: 20px 14px 48px; } section { padding: 18px; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">TalkHint · технический отчёт</div>
+  <h1>Copilot для звонков на iPhone</h1>
+  <p class="lead">Проверка архитектуры отдельного телефонного pipeline и возможности действительно приватной кнопки «удерживать, чтобы перевести».</p>
+  <p class="meta">24 сентября 2026 · Исследование SDK и существующего проекта; не отчёт об испытаниях готовой функции</p>
+
+  <section class="status">
+    <h2>Короткий вывод</h2>
+    <p><strong>Подход реален, но безопасность ещё не доказана.</strong> У стандартного аудиоустройства Twilio нет публичного перехвата микрофонных кадров. Зато официальный интерфейс <code>TVOAudioDevice</code> и пример Twilio позволяют создать собственное устройство с отдельными callback для записи и воспроизведения. Это подходящий уровень, чтобы блокировать звук до передачи в Twilio, не выключая голос Guest.</p>
+    <p><strong>Состояние сейчас:</strong> Copilot не включён в приложении; действующие Hint и Translator не изменены. Отдельный серверный pipeline, аудиоустройство, UI и проверки на физическом iPhone ещё не реализованы как законченная функция. Попытки черновой интеграции не оставлены в рабочем коде. Задачу нельзя считать завершённой.</p>
+  </section>
+
+  <section>
+    <h2>Как должен работать Copilot</h2>
+    <p>Это <strong>третий независимый сценарий звонка</strong>, а не режим Hint и не изменение существующего телефонного Translator. Повторно используется только утверждённый низкоуровневый переводчик Realtime и его переводческая логика. По умолчанию в коде указан <code>gpt-realtime</code>; фактическую модель необходимо сверить с настройкой среды при реализации.</p>
+    <div class="diagram">Обычный телефонный разговор: Owner ⇄ Guest (голоса слышны как прежде)
+
+Guest → отдельная копия удалённого аудио → Realtime EN→выбранный язык → крупный текст Owner
+
+Owner удерживает PRIVATE:
+микрофон → отдельный Realtime язык Owner→EN → текст Owner
+микрофон ✕ телефонный uplink Guest
+
+Owner отпускает кнопку → обычный микрофон восстановлен → сам произносит английскую фразу Guest</div>
+    <p>Hint, GoalEngine, советы, TTS, генерация ответа, сохранение приватных реплик в историю или CRM здесь не участвуют. Подготовленная до звонка фраза — только одна произносимая первая реплика, не «цель звонка».</p>
+  </section>
+
+  <section>
+    <h2>Что проверено по Twilio</h2>
+    <ul>
+      <li><span class="tag">Подтверждено</span> Проект запрашивает Swift Package <code>twilio-voice-ios</code> начиная с версии <code>6.11.0</code>, не фиксируя конкретный разрешённый релиз. <code>CallManager</code> устанавливает <code>DefaultAudioDevice</code> до звонков и включает его при активации CallKit.</li>
+      <li><span class="tag">Подтверждено</span> Публичный API <code>DefaultAudioDevice</code> не предоставляет callback с PCM микрофона. Обёртка над ним не может безопасно перехватить кадры до его внутренней отправки в Twilio. Обычная кнопка mute также не доказывает, что другой локальный потребитель получит приватное аудио и что Guest не услышит начало фразы.</li>
+      <li><span class="tag">Подтверждено</span> В официальном <code>ExampleAVAudioEngineDevice.m</code> захват микрофона завершается вызовом <code>TVOAudioDeviceWriteCaptureData</code> (примерно строки 703–755). Именно перед этим вызовом можно расположить кадро́вый затвор. Отдельный callback читает удалённые PCM-данные из Twilio через <code>TVOAudioDeviceReadRenderData</code> (примерно строки 327–332), прежде чем пример смешивает их для локального воспроизведения.</li>
+      <li><span class="tag open">Не доказано</span> Наличие удалённых PCM в renderer не гарантирует, что при каждом варианте входящего/конференц-звонка это <em>строго один Guest</em>. В примере capture может содержать обработку VoiceProcessingIO и локальное смешивание; это не обещание «сырого» микрофона.</li>
+      <li><span class="tag open">Не испытано</span> Совместимость конкретной разрешённой версии SDK, текущих CallKit-маршрутов, Bluetooth/AirPods, прерываний и восстановления после смены устройства. Официальный пример — около 1100 строк Objective-C/Core Audio, а не готовый переключатель для Swift-приложения.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Предлагаемая реализация</h2>
+    <ol>
+      <li>Зафиксировать и собрать конкретную версию Twilio Voice SDK на Mac. Взять официальный MIT-лицензированный AudioDeviceExample как основу, сохранив лицензионное уведомление. Сначала проверить, что он без Copilot воспроизводит существующие Hint/Translator-звонки.</li>
+      <li>Установить <strong>одно</strong> Copilot-aware аудиоустройство до <code>connect</code>/<code>accept</code>. Не менять <code>TwilioVoiceSDK.audioDevice</code> при нажатии кнопки. В capture callback: обычные кадры передавать в Twilio; при подтверждённом PRIVATE направлять их только в приватный сеанс и подавать в Twilio тишину с правильным размером кадров. Renderer продолжает играть Guest.</li>
+      <li>При входе в PRIVATE сначала закрыть uplink на границе аудиокадра, подтвердить состояние локального затвора и готовность приватного сеанса, затем включить индикацию записи. При отпускании завершить хвост перевода, восстановить прежнее пользовательское mute-состояние. При сбое, прерывании или потере соединения во время удержания оставлять uplink закрытым до явного безопасного выхода.</li>
+      <li>Создать отдельные сеансы text-only перевода Guest→выбранный язык и Owner→английский. Выбор источника Guest и привязку ответов к звонку/удержанию проверить для обоих направлений вызова; не запускать Hint как fallback. Не писать приватное содержание в обычные transcript, запись или CRM.</li>
+      <li>Только после этого подключить вкладку, короткую подготовку первой фразы и экран Copilot. Без подтверждённого затвора кнопка PRIVATE недоступна, а ошибка перевода не разрывает обычный разговор.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Условия, без которых нельзя заявлять «Guest не слышит»</h2>
+    <ul>
+      <li>На физическом iPhone проверить запись Guest leg при контролируемой произнесённой PRIVATE-фразе: отсутствие первого, последнего и промежуточных кадров, в том числе при быстрых повторных удержаниях.</li>
+      <li>Проверить исходящий и входящий звонки, CallKit answer/end, ранее включённый mute, динамик/разговорный динамик, проводную гарнитуру и AirPods, переподключение, звонок/Siri-прерывание и фон/возврат.</li>
+      <li>Проверить, что Guest слышен Owner, пока кнопка удерживается; что перевод берёт нужного собеседника, а не Owner/эхо; что обычные Hint/Translator-звонки не изменились.</li>
+      <li>Убедиться, что ни отдельный диагностический поток, ни серверный transcript/CRM не получают приватные кадры. Реальный контрольный звонок и запись собеседника проводить только с необходимым согласием.</li>
+    </ul>
+    <p><strong>Ограничение среды:</strong> текущий Linux-хост не содержит Xcode, iOS SDK, симулятора или физического iPhone. Здесь нельзя собрать Objective-C/Swift-приложение и проверить физическую утечку звука. Анализ исходников не заменяет такой тест.</p>
+  </section>
+
+  <section class="sources">
+    <h2>Первоисточники</h2>
+    <a href="https://github.com/twilio/voice-quickstart-ios/tree/master/AudioDeviceExample">Официальный Twilio Voice iOS Quickstart — AudioDeviceExample ↗</a>
+    <a href="https://github.com/twilio/voice-quickstart-ios/blob/master/AudioDeviceExample/AudioDevices/ExampleAVAudioEngineDevice.m">Исходник ExampleAVAudioEngineDevice.m: capture и render callbacks ↗</a>
+    <a href="https://github.com/twilio/voice-quickstart-ios/blob/master/AudioDeviceExample/README.md">README примера: аудиоархитектура и требования ↗</a>
+    <a href="https://github.com/twilio/voice-quickstart-ios/blob/master/LICENSE">Лицензия официального примера ↗</a>
+    <small>Номера строк относятся к просмотренной версии ветки master; при обновлении репозитория они могут измениться. Локальные точки интеграции: ios/project.yml и ios/TalkHint/Calls/CallManager.swift.</small>
+  </section>
+</main>
+</body>
+</html>
