@@ -131,3 +131,17 @@ mtime_ms = 1790224819733
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/729ad288-b40f-4159-8fd0-81c86e2380b9/5f583d5e-3671-4e53-a952-d6e285a6a177"
 storage_version_token = "1790224884297065"
 content_type = "text/html"
+
+[[outputs]]
+id = "K3NppoYzcFvKnIZgGT6Jv"
+uri = "file://reports/translator-copilot-research.html"
+type = "html"
+title = "Translator → Copilot: исследование и архитектура V1"
+description = "Реальный phone pipeline, ограничения измерений скорости, сравнение с Hint и предложение отдельного Copilot с приватным выбором."
+logical_id = "ff3e7cef-818f-45d6-80cf-1949ec71ec96"
+content_hash = "sha256:4163ec649fa3907aeb5d712e70a131b64a24945a464abba8f1a307c6811782ea"
+size = 42019
+mtime_ms = 1790227093896
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ff3e7cef-818f-45d6-80cf-1949ec71ec96/f3696725-ab0f-49d1-915d-24c9cd21ad89"
+storage_version_token = "1790227138201389"
+content_type = "text/html"
