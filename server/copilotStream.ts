@@ -12,6 +12,9 @@ const MAX_AUDIO_BYTES = 512 * 1024;
 const MAX_SECONDS = 60 * 60 * 2;
 // Must exceed the provider's server_vad silence_duration_ms (500ms).
 const SILENCE_MS = 600;
+const SOURCE_WAIT_MS = 8_000;
+const MAX_PENDING_TRANSLATIONS = 32;
+const MAX_BUFFERED_TEXT = 16_384;
 const activeUsers = new Set<string>();
 
 type Direction = "guest" | "private" | "owner";
@@ -89,15 +92,96 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   const responseHolds = new Map<string, string>();
   const privateItems = new Map<string, string>();
   const responseItems = new Map<string, string>();
+  const sourcedItems = new Set<string>();
+  type PendingText = {
+    direction: Direction;
+    responseId: string;
+    itemId?: string;
+    holdId?: string;
+    frames: object[];
+    length: number;
+    done: boolean;
+    timeout?: ReturnType<typeof setTimeout>;
+  };
+  const pendingText = new Map<string, PendingText>();
+  const finishedResponses = new Set<string>();
+  const responseKey = (direction: Direction, responseId: string) => `${direction}|${responseId}`;
+  const itemKey = (direction: Direction, itemId: string) => `${direction}|${itemId}`;
   const startedAt = Date.now();
 
   const shutdown = () => {
     if (closed) return;
     closed = true;
     activeUsers.delete(_userId);
+    pendingText.forEach(pending => clearTimeout(pending.timeout));
+    pendingText.clear();
+    sourcedItems.clear();
+    finishedResponses.clear();
+    responseHolds.clear();
+    responseItems.clear();
+    privateItems.clear();
     for (const session of Object.values(sessions)) {
       try { session?.cancel(); } catch {}
     }
+  };
+  const sourceUnavailable = () => {
+    if (closed) return;
+    // Never publish a plausible-looking translation with no attributable
+    // source. The phone call stays up; only Copilot's translation fails.
+    fail(ws, "source_unavailable", "Copilot could not match the translation to source speech");
+    shutdown();
+    ws.close();
+  };
+  const releaseResponse = (key: string) => {
+    const pending = pendingText.get(key);
+    if (pending) clearTimeout(pending.timeout);
+    pendingText.delete(key);
+    responseHolds.delete(key);
+    responseItems.delete(key);
+    finishedResponses.add(key);
+    if (finishedResponses.size > 512) finishedResponses.delete(finishedResponses.values().next().value!);
+  };
+  const flush = (key: string) => {
+    const pending = pendingText.get(key);
+    if (!pending?.itemId || !sourcedItems.has(itemKey(pending.direction, pending.itemId))) return;
+    for (const frame of pending.frames) send(ws, frame);
+    pending.frames.length = 0;
+    pending.length = 0;
+    clearTimeout(pending.timeout);
+    pending.timeout = undefined;
+    if (pending.done) releaseResponse(key);
+  };
+  const translation = (
+    direction: Direction,
+    ev: Extract<TranslationEvent, { type: "translated_transcript_delta" | "translated_transcript_done" }>,
+  ) => {
+    if (direction === "owner") return;
+    if (!ev.responseId) { sourceUnavailable(); return; }
+    const key = responseKey(direction, ev.responseId);
+    if (finishedResponses.has(key)) return;
+    const itemId = responseItems.get(key);
+    const holdId = direction === "private" ? responseHolds.get(key) : undefined;
+    if (direction === "private" && !holdId) return;
+    const frame = {
+      type: ev.type === "translated_transcript_done" ? "text_done" : "text_delta",
+      direction, text: ev.text, responseId: ev.responseId, itemId, holdId,
+    };
+    if (itemId && sourcedItems.has(itemKey(direction, itemId))) {
+      send(ws, frame);
+      if (ev.type === "translated_transcript_done") releaseResponse(key);
+      return;
+    }
+    let pending = pendingText.get(key);
+    if (!pending) {
+      if (pendingText.size >= MAX_PENDING_TRANSLATIONS) { sourceUnavailable(); return; }
+      pending = { direction, responseId: ev.responseId, itemId, holdId, frames: [], length: 0, done: false };
+      pending.timeout = setTimeout(sourceUnavailable, SOURCE_WAIT_MS);
+      pendingText.set(key, pending);
+    }
+    pending.length += ev.text.length;
+    if (pending.length > MAX_BUFFERED_TEXT) { sourceUnavailable(); return; }
+    pending.frames.push(frame);
+    if (ev.type === "translated_transcript_done") pending.done = true;
   };
   const event = (direction: Direction, ev: TranslationEvent) => {
     if (closed) return;
@@ -106,7 +190,14 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       if (holdId) privateItems.set(ev.itemId, holdId);
     }
     if (ev.type === "response_created" && ev.responseId && ev.sourceItemId) {
-      responseItems.set(ev.responseId, ev.sourceItemId);
+      const key = responseKey(direction, ev.responseId);
+      responseItems.set(key, ev.sourceItemId);
+      const pending = pendingText.get(key);
+      if (pending) {
+        pending.itemId = ev.sourceItemId;
+        pending.frames.forEach(frame => (frame as { itemId?: string }).itemId = ev.sourceItemId);
+        flush(key);
+      }
     }
     if (ev.type === "response_created" && direction === "private" && ev.responseId) {
       // The provider may report response.created after the UI has released
@@ -114,32 +205,33 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       const holdId = (ev.sourceItemId ? privateItems.get(ev.sourceItemId) : undefined)
         ?? ((activeHoldHasAudio ? activeHold : undefined) ?? endedHoldCandidate);
       if (holdId) {
-        responseHolds.set(ev.responseId, holdId);
+        responseHolds.set(responseKey(direction, ev.responseId), holdId);
         endedHoldCandidate = undefined;
       }
     } else if (ev.type === "source_transcript") {
+      if (!ev.itemId || !ev.text.trim()) return;
       if (direction === "private") {
-        const holdId = ev.itemId ? privateItems.get(ev.itemId) : undefined;
-        if (holdId) send(ws, { type: "source_text", direction, text: ev.text, holdId });
+        const holdId = privateItems.get(ev.itemId);
+        if (!holdId) return;
+        send(ws, { type: "source_text", direction, text: ev.text, itemId: ev.itemId, holdId });
       } else {
         send(ws, { type: "source_text", direction, text: ev.text, itemId: ev.itemId });
       }
+      sourcedItems.add(itemKey(direction, ev.itemId));
+      if (sourcedItems.size > 512) sourcedItems.delete(sourcedItems.values().next().value!);
+      pendingText.forEach((pending, key) => {
+        if (pending.direction === direction && pending.itemId === ev.itemId) flush(key);
+      });
     } else if (ev.type === "translated_transcript_delta") {
-      if (direction === "owner") return;
-      const holdId = direction === "private" ? (ev.responseId ? responseHolds.get(ev.responseId) : undefined) : undefined;
-      if (direction === "private" && !holdId) return;
-      send(ws, { type: "text_delta", direction, text: ev.text, responseId: ev.responseId,
-        itemId: ev.responseId ? responseItems.get(ev.responseId) : undefined, holdId });
+      translation(direction, ev);
     } else if (ev.type === "translated_transcript_done") {
-      if (direction === "owner") return;
-      const holdId = direction === "private" ? (ev.responseId ? responseHolds.get(ev.responseId) : undefined) : undefined;
-      if (direction === "private" && !holdId) return;
-      send(ws, { type: "text_done", direction, text: ev.text, responseId: ev.responseId,
-        itemId: ev.responseId ? responseItems.get(ev.responseId) : undefined, holdId });
-      if (ev.responseId) {
-        responseHolds.delete(ev.responseId);
-        responseItems.delete(ev.responseId);
-      }
+      translation(direction, ev);
+    } else if (ev.type === "turn_completed" && ev.metrics.cancelled && ev.metrics.responseId) {
+      releaseResponse(responseKey(direction, ev.metrics.responseId));
+    } else if (ev.type === "invariant_violation") {
+      // The provider has detected a broken source→response relationship.
+      // Continuing would allow an unrelated translation onto the call screen.
+      sourceUnavailable();
     } else if (ev.type === "ready") {
       ready.add(direction);
       if (ready.size === (wantsConversationFeed ? 3 : 2) && !readySent) {
@@ -216,6 +308,11 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       if (typeof msg.holdId !== "string" || msg.holdId.length < 1 || msg.holdId.length > 128) { fail(ws, "hold_id", "Invalid holdId"); return; }
       if (activeHold) { fail(ws, "hold", "A hold is already active"); return; }
       activeHold = msg.holdId; activeHoldHasAudio = false; endedHoldCandidate = undefined;
+      // A new private draft supersedes incomplete output from the previous
+      // hold. Never let delayed text appear on the new hold's card.
+      pendingText.forEach((pending, key) => {
+        if (pending.direction === "private" && pending.holdId !== activeHold) releaseResponse(key);
+      });
       // Close the previous public utterance without mixing it into the
       // private translator's input. Both sessions remain isolated.
       sessions.owner?.sendAudio(Buffer.alloc(Math.round(24000 * SILENCE_MS / 1000) * 2));

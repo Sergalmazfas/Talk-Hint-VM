@@ -165,8 +165,11 @@ describe("authenticated Copilot stream contract", () => {
     ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "delayed-hold" })));
     // response.created can arrive after hold_end; the ended-hold candidate
     // remains valid until a newer hold starts.
-    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "r1" });
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "delayed-item" });
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "r1", sourceItemId: "delayed-item" });
     privateSession.emit({ type: "translated_transcript_delta", text: "PRIVATE SECRET", responseId: "r1" });
+    expect(ws.frames.some(f => f.type === "text_delta")).toBe(false);
+    privateSession.emit({ type: "source_transcript", text: "my private words", itemId: "delayed-item" });
     expect(ws.frames.at(-1)).toMatchObject({ type: "text_delta", direction: "private", holdId: "delayed-hold" });
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("PRIVATE SECRET"));
     log.mockRestore(); ws.close();
@@ -197,8 +200,80 @@ describe("authenticated Copilot stream contract", () => {
     expect(ws.frames.some(frame => frame.text === "unattributed secret")).toBe(false);
     privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "private-item" });
     privateSession.emit({ type: "source_transcript", text: "my private words", itemId: "private-item" });
-    expect(ws.frames).toContainEqual({ type: "source_text", direction: "private", text: "my private words", holdId: "private-hold" });
+    expect(ws.frames).toContainEqual({ type: "source_text", direction: "private", text: "my private words", holdId: "private-hold", itemId: "private-item" });
     ws.close();
+  });
+
+  it("holds guest deltas and final text until the matching source transcript arrives", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-source-order", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    guest.emit({ type: "input_committed", ts: Date.now(), itemId: "item-a" });
+    guest.emit({ type: "response_created", ts: Date.now(), responseId: "response-a", sourceItemId: "item-a" });
+    guest.emit({ type: "translated_transcript_delta", text: "Wrong if shown alone", responseId: "response-a" });
+    guest.emit({ type: "translated_transcript_done", text: "Correct translation", responseId: "response-a" });
+    guest.emit({ type: "source_transcript", text: "Other turn", itemId: "item-b" });
+    expect(ws.frames.some(f => f.type.startsWith("text_"))).toBe(false);
+    guest.emit({ type: "source_transcript", text: "Actual source", itemId: "item-a" });
+    expect(ws.frames.slice(-3)).toEqual([
+      { type: "source_text", direction: "guest", text: "Actual source", itemId: "item-a" },
+      { type: "text_delta", direction: "guest", text: "Wrong if shown alone", responseId: "response-a", itemId: "item-a" },
+      { type: "text_done", direction: "guest", text: "Correct translation", responseId: "response-a", itemId: "item-a" },
+    ]);
+    ws.close();
+  });
+
+  it("withholds private translation until its own hold's source text, then preserves attribution", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-private-order", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "h1" })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "private", holdId: "h1", pcm16: Buffer.alloc(320).toString("base64") })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "h1" })));
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "private-1" });
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "private-response", sourceItemId: "private-1" });
+    privateSession.emit({ type: "translated_transcript_done", text: "No, not earlier.", responseId: "private-response" });
+    expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
+    privateSession.emit({ type: "source_transcript", text: "Нет, не раньше.", itemId: "private-1" });
+    expect(ws.frames.slice(-2)).toEqual([
+      { type: "source_text", direction: "private", text: "Нет, не раньше.", itemId: "private-1", holdId: "h1" },
+      { type: "text_done", direction: "private", text: "No, not earlier.", responseId: "private-response", itemId: "private-1", holdId: "h1" },
+    ]);
+    ws.close();
+  });
+
+  it("does not publish a provider response without source and fails explicitly after a bounded wait", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-no-source", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    vi.useFakeTimers();
+    try {
+      guest.emit({ type: "response_created", ts: Date.now(), responseId: "unattributed" });
+      guest.emit({ type: "translated_transcript_done", text: "幻覚", responseId: "unattributed" });
+      expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
+      await vi.advanceTimersByTimeAsync(8_100);
+      expect(ws.frames).toContainEqual(expect.objectContaining({ type: "error", code: "source_unavailable" }));
+      expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
+    } finally { ws.close(); vi.useRealTimers(); }
+  });
+
+  it("discards a cancelled noise turn and stops on a broken provider attribution", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-cancelled", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    vi.useFakeTimers();
+    try {
+      guest.emit({ type: "response_created", ts: Date.now(), responseId: "noise", sourceItemId: "noise-item" });
+      guest.emit({ type: "translated_transcript_delta", text: "invented", responseId: "noise" });
+      guest.emit({ type: "response_cancelled", ts: Date.now(), responseId: "noise", reason: "turn_detected" });
+      guest.emit({ type: "turn_completed", metrics: { cancelled: true, responseId: "noise" } });
+      guest.emit({ type: "source_transcript", text: "Noise", itemId: "noise-item" });
+      await vi.advanceTimersByTimeAsync(8_100);
+      expect(ws.frames.some(f => f.type.startsWith("text_") || f.code === "source_unavailable")).toBe(false);
+      guest.emit({ type: "invariant_violation", ts: Date.now(), code: "MULTIPLE_RESPONSES_FOR_TURN", detail: "unsafe" });
+      expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "source_unavailable" });
+      expect(ws.closed).toBe(true);
+    } finally { ws.close(); vi.useRealTimers(); }
   });
 
   it("drops an uncertain old response once a distinct hold starts", async () => {
