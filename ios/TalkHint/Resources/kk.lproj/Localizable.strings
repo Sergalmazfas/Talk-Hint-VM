@@ -243,6 +243,8 @@
 "tab.translator" = "Аудармашы";
 "tab.copilot" = "Copilot";
 "copilot.title" = "Copilot";
+"copilot.translation" = "Аударма";
+"copilot.preparing" = "Жеке микрофон дайындалуда…";
 "copilot.guest_waiting" = "Қонақты күту…";
 "copilot.owner_waiting" = "Жеке аудармаңыз осында көрінеді";
 "copilot.connecting" = "Қосылуда…";

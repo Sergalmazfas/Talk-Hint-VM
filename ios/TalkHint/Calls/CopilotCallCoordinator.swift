@@ -11,6 +11,10 @@ private final class CopilotCallbackGate {
         lock.lock(); defer { lock.unlock() }
         return !stopped && epoch == value
     }
+    func allowsPublic(_ value: UInt64) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !stopped && epoch == 0 && value == 0
+    }
     func allowsRemote() -> Bool {
         lock.lock(); defer { lock.unlock() }
         return !stopped
@@ -68,7 +72,9 @@ final class CopilotCallCoordinator {
         let gate = callbackGate
         device.capturedPCM = { bytes, count, _, _, epoch in
             let copy = Data(bytes: bytes, count: Int(count))
-            if gate.allows(epoch) {
+            if gate.allowsPublic(epoch) {
+                transport.sendAudio(pcm16Base64: copy.base64EncodedString(), direction: "owner")
+            } else if epoch != 0 && gate.allows(epoch) {
                 transport.sendAudio(pcm16Base64: copy.base64EncodedString(), direction: "private")
             }
         }

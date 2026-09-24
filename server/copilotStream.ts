@@ -14,7 +14,7 @@ const MAX_SECONDS = 60 * 60 * 2;
 const SILENCE_MS = 600;
 const activeUsers = new Set<string>();
 
-type Direction = "guest" | "private";
+type Direction = "guest" | "private" | "owner";
 type ClientMessage = { type: string; [key: string]: unknown };
 
 export function authorizeCopilotCall(userId: string, call: any, pending: any): boolean {
@@ -85,7 +85,10 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   const sessions: Partial<Record<Direction, RealtimeTranslationSession>> = {};
   const ready = new Set<Direction>();
   let readySent = false;
+  let wantsConversationFeed = false;
   const responseHolds = new Map<string, string>();
+  const privateItems = new Map<string, string>();
+  const responseItems = new Map<string, string>();
   const startedAt = Date.now();
 
   const shutdown = () => {
@@ -98,26 +101,53 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   };
   const event = (direction: Direction, ev: TranslationEvent) => {
     if (closed) return;
+    if (ev.type === "input_committed" && direction === "private" && ev.itemId) {
+      const holdId = (activeHoldHasAudio ? activeHold : undefined) ?? endedHoldCandidate;
+      if (holdId) privateItems.set(ev.itemId, holdId);
+    }
+    if (ev.type === "response_created" && ev.responseId && ev.sourceItemId) {
+      responseItems.set(ev.responseId, ev.sourceItemId);
+    }
     if (ev.type === "response_created" && direction === "private" && ev.responseId) {
       // The provider may report response.created after the UI has released
       // PTT. A candidate is safe only when no newer hold has started.
-      const holdId = (activeHoldHasAudio ? activeHold : undefined) ?? endedHoldCandidate;
+      const holdId = (ev.sourceItemId ? privateItems.get(ev.sourceItemId) : undefined)
+        ?? ((activeHoldHasAudio ? activeHold : undefined) ?? endedHoldCandidate);
       if (holdId) {
         responseHolds.set(ev.responseId, holdId);
         endedHoldCandidate = undefined;
       }
+    } else if (ev.type === "source_transcript") {
+      if (direction === "private") {
+        const holdId = ev.itemId ? privateItems.get(ev.itemId) : undefined;
+        if (holdId) send(ws, { type: "source_text", direction, text: ev.text, holdId });
+      } else {
+        send(ws, { type: "source_text", direction, text: ev.text, itemId: ev.itemId });
+      }
     } else if (ev.type === "translated_transcript_delta") {
+      if (direction === "owner") return;
       const holdId = direction === "private" ? (ev.responseId ? responseHolds.get(ev.responseId) : undefined) : undefined;
       if (direction === "private" && !holdId) return;
-      send(ws, { type: "text_delta", direction, text: ev.text, responseId: ev.responseId, holdId });
+      send(ws, { type: "text_delta", direction, text: ev.text, responseId: ev.responseId,
+        itemId: ev.responseId ? responseItems.get(ev.responseId) : undefined, holdId });
     } else if (ev.type === "translated_transcript_done") {
+      if (direction === "owner") return;
       const holdId = direction === "private" ? (ev.responseId ? responseHolds.get(ev.responseId) : undefined) : undefined;
       if (direction === "private" && !holdId) return;
-      send(ws, { type: "text_done", direction, text: ev.text, responseId: ev.responseId, holdId });
-      if (direction === "private" && ev.responseId) responseHolds.delete(ev.responseId);
+      send(ws, { type: "text_done", direction, text: ev.text, responseId: ev.responseId,
+        itemId: ev.responseId ? responseItems.get(ev.responseId) : undefined, holdId });
+      if (ev.responseId) {
+        responseHolds.delete(ev.responseId);
+        responseItems.delete(ev.responseId);
+      }
     } else if (ev.type === "ready") {
       ready.add(direction);
-      if (ready.size === 2 && !readySent) { readySent = true; send(ws, { type: "ready" }); }
+      if (ready.size === (wantsConversationFeed ? 3 : 2) && !readySent) {
+        readySent = true;
+        send(ws, wantsConversationFeed
+          ? { type: "ready", capabilities: ["owner_transcript", "conversation_source"] }
+          : { type: "ready" });
+      }
     } else if (ev.type === "error" && ev.fatal) {
       // Translation failure is isolated: it must not tear down the ordinary call.
       fail(ws, "provider_error", "Copilot translation is unavailable");
@@ -149,21 +179,28 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       if (closed) return;
       authorizing = false;
       started = true; rate = msg.sampleRateHz;
+      wantsConversationFeed = msg.conversationFeed === true;
       const language = msg.language as string;
       let guest: RealtimeTranslationSession | undefined;
       let privateSession: RealtimeTranslationSession | undefined;
+      let owner: RealtimeTranslationSession | undefined;
       try {
         const results = await Promise.allSettled([
           openaiRealtimeTranslationProvider.startSession({ languages: ["en", language], outputLanguage: language, outputMode: "text", inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
           openaiRealtimeTranslationProvider.startSession({ languages: [language, "en"], outputLanguage: "en", outputMode: "text", inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
+          wantsConversationFeed
+            ? openaiRealtimeTranslationProvider.startSession({ languages: ["en", "en"], outputLanguage: "en", outputMode: "text", inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } })
+            : Promise.resolve(undefined),
         ]);
         if (results[0].status === "fulfilled") guest = results[0].value;
         if (results[1].status === "fulfilled") privateSession = results[1].value;
-        if (!guest || !privateSession) throw new Error("provider session startup failed");
-        sessions.guest = guest; sessions.private = privateSession;
+        if (results[2].status === "fulfilled") owner = results[2].value;
+        if (!guest || !privateSession || (wantsConversationFeed && !owner)) throw new Error("provider session startup failed");
+        sessions.guest = guest; sessions.private = privateSession; sessions.owner = owner;
         guest.onEvent(ev => event("guest", ev)); privateSession.onEvent(ev => event("private", ev));
+        owner?.onEvent(ev => event("owner", ev));
       } catch {
-        for (const session of [guest, privateSession]) {
+        for (const session of [guest, privateSession, owner]) {
           try { session?.cancel(); } catch {}
         }
         fail(ws, "provider_error", "Copilot translation is unavailable");
@@ -176,6 +213,9 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       if (typeof msg.holdId !== "string" || msg.holdId.length < 1 || msg.holdId.length > 128) { fail(ws, "hold_id", "Invalid holdId"); return; }
       if (activeHold) { fail(ws, "hold", "A hold is already active"); return; }
       activeHold = msg.holdId; activeHoldHasAudio = false; endedHoldCandidate = undefined;
+      // Close the previous public utterance without mixing it into the
+      // private translator's input. Both sessions remain isolated.
+      sessions.owner?.sendAudio(Buffer.alloc(Math.round(24000 * SILENCE_MS / 1000) * 2));
       send(ws, { type: "hold_ready", holdId: activeHold }); return;
     }
     if (msg.type === "hold_end") {
@@ -186,11 +226,14 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       send(ws, { type: "hold_end_ack", holdId: activeHold }); activeHold = undefined; return;
     }
     if (msg.type === "audio") {
-      if (msg.direction !== "guest" && msg.direction !== "private") { fail(ws, "direction", "Invalid direction"); return; }
+      if (msg.direction !== "guest" && msg.direction !== "private" && msg.direction !== "owner") { fail(ws, "direction", "Invalid direction"); return; }
       if (!validBase64(msg.pcm16) || !Buffer.from(msg.pcm16, "base64").length) { fail(ws, "audio", "Invalid PCM16"); return; }
       const source = Buffer.from(msg.pcm16, "base64");
       if (source.length % 2) { fail(ws, "audio", "PCM16 must contain whole samples"); return; }
       if (msg.direction === "private" && (!activeHold || msg.holdId !== activeHold)) { fail(ws, "hold", "Private audio requires the matching hold"); return; }
+      // A pre-hold public frame can already be queued behind hold_start.
+      // Drop it rather than sending it to either translation session.
+      if (msg.direction === "owner" && activeHold) return;
       if (msg.direction === "private") {
         endedHoldCandidate = undefined;
         activeHoldHasAudio = true;

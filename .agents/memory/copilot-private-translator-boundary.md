@@ -13,3 +13,9 @@ Private PTT must be gated before Twilio capture writes, not by changing screens 
 **Why:** A partial Copilot UI or unsecured server stream could misrepresent privacy; the official example is substantial Core Audio code, and the development host cannot compile or verify iPhone audio routes.
 
 **How to apply:** Preserve existing Hint/Translator behavior; do not ship a PRIVATE-ready button until exact SDK/Xcode compilation, CallKit/route/interruption tests, and controlled Guest-leg leakage tests prove the gate. Never replace DefaultAudioDevice globally merely on paper without regression testing existing calls.
+
+Copilot's visual contract is a scrolling, Translator-style conversation above a pinned card styled like the Hint card, but explicitly labelled as **translation**, never a hint or advice. The private Russian phrase stays between Owner and Copilot; the Owner reads its English translation and then speaks English to Guest through the regular call.
+
+**Why:** The user explicitly distinguished the translation card from a hint and asked to see both sides of the actual conversation without the oversized full-screen text.
+
+**How to apply:** Keep private phrases out of the public conversation and Guest audio. Distinguish public Owner speech from private drafts; do not present a private draft as something already said to Guest. Keep the English translation visible while the Owner reads it aloud. Preserve the established Translator card layout rather than introducing a separate Copilot design.

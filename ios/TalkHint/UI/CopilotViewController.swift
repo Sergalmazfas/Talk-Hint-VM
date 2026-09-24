@@ -1,7 +1,7 @@
 import UIKit
 
-/// Minimal Copilot call surface. CallManager owns the phone call; closures are
-/// the integration seam for its audio gate, mute, route, and end actions.
+/// Translator-style conversation feed with a pinned private translation card.
+/// CallManager owns the phone call and the private microphone gate.
 final class CopilotViewController: UIViewController {
     let stream: CopilotStream
     /// Main's callback must close Owner→Guest before calling completion(true).
@@ -14,10 +14,25 @@ final class CopilotViewController: UIViewController {
     var onMute: (() -> Void)?
     var onEnd: (() -> Void)?
 
-    private let guestLabel = UILabel()
-    private let ownerLabel = UILabel()
-    private let ptt = UIButton(type: .system)
     private let status = UILabel()
+    private let scrollView = UIScrollView()
+    private let feedStack = UIStackView()
+    private let translationCard = UIView()
+    private let translationLabel = UILabel()
+    private let privateSourceLabel = UILabel()
+    private let ptt = UIButton(type: .system)
+    private let muteButton = UIButton(type: .system)
+    private let routeButton = UIButton(type: .system)
+    private var speakerEnabled = false
+    private var cards: [String: ConversationCard] = [:]
+    private final class ConversationCard {
+        let original: UILabel
+        let translation: UILabel
+        init(original: UILabel, translation: UILabel) {
+            self.original = original
+            self.translation = translation
+        }
+    }
     private var holdId: String?
     private var privateActive = false
     private var failed = false
@@ -45,61 +60,207 @@ final class CopilotViewController: UIViewController {
         title = NSLocalizedString("copilot.title", comment: "")
         buildUI()
         stream.onReady = { [weak self] in self?.setReady() }
-        stream.onGuestText = { [weak self] text in self?.guestLabel.text = text }
-        stream.onPrivateText = { [weak self] text in self?.ownerLabel.text = text }
+        stream.onGuestText = { [weak self] text, itemId in
+            self?.upsertConversation(direction: "guest", itemId: itemId, translation: text)
+        }
+        stream.onPrivateText = { [weak self] text in
+            self?.translationLabel.text = text
+            self?.translationCard.isHidden = text.isEmpty
+        }
+        stream.onSourceText = { [weak self] direction, text, itemId in
+            if direction == "private" {
+                self?.privateSourceLabel.text = text
+                self?.privateSourceLabel.isHidden = text.isEmpty
+            } else {
+                self?.upsertConversation(direction: direction, itemId: itemId, source: text)
+            }
+        }
         stream.onHoldReady = { [weak self] holdId in self?.serverHoldReady(holdId) }
         stream.onFailure = { [weak self] _ in self?.streamFailed() }
         stream.start()
     }
 
     private func buildUI() {
-        guestLabel.font = .systemFont(ofSize: 30, weight: .semibold)
-        guestLabel.numberOfLines = 0
-        guestLabel.textAlignment = .center
-        guestLabel.text = NSLocalizedString("copilot.guest_waiting", comment: "")
-        ownerLabel.font = .systemFont(ofSize: 22, weight: .medium)
-        ownerLabel.numberOfLines = 0
-        ownerLabel.textAlignment = .center
-        ownerLabel.textColor = .secondaryLabel
-        ownerLabel.text = NSLocalizedString("copilot.owner_waiting", comment: "")
+        let title = UILabel()
+        title.text = NSLocalizedString("copilot.title", comment: "")
+        title.font = .systemFont(ofSize: 24, weight: .bold)
+        title.textColor = Theme.ink
+        title.textAlignment = .center
+        status.font = .systemFont(ofSize: 13)
         status.textAlignment = .center
-        status.textColor = .secondaryLabel
+        status.textColor = Theme.sub
         status.text = NSLocalizedString("copilot.connecting", comment: "")
+        status.accessibilityIdentifier = "text-copilot-status"
+        let header = UIStackView(arrangedSubviews: [title, status])
+        header.axis = .vertical; header.spacing = 3
+        header.translatesAutoresizingMaskIntoConstraints = false
+
+        feedStack.axis = .vertical
+        feedStack.spacing = 10
+        feedStack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(feedStack)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.alwaysBounceVertical = true
+        scrollView.accessibilityIdentifier = "scroll-copilot-feed"
+
+        buildTranslationCard()
 
         ptt.setImage(UIImage(systemName: "mic.fill"), for: .normal)
         ptt.setTitle("  " + NSLocalizedString("copilot.hold_to_talk", comment: ""), for: .normal)
-        ptt.titleLabel?.font = .systemFont(ofSize: 20, weight: .bold)
+        ptt.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
         ptt.tintColor = .white
         ptt.setTitleColor(.white, for: .normal)
-        ptt.backgroundColor = .systemBlue
-        ptt.layer.cornerRadius = 64
+        ptt.backgroundColor = Theme.purple
+        ptt.layer.cornerRadius = 24
         ptt.isEnabled = false
+        ptt.setContentCompressionResistancePriority(.required, for: .vertical)
         ptt.accessibilityIdentifier = "copilot-ptt"
         ptt.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(pttChanged(_:))))
 
-        let speaker = control("speaker.wave.2", action: #selector(speakerTapped))
-        let mute = control("mic.slash", action: #selector(muteTapped))
-        let end = control("phone.down.fill", action: #selector(endTapped))
-        end.tintColor = .systemRed
-        let controls = UIStackView(arrangedSubviews: [speaker, mute, end])
-        controls.axis = .horizontal; controls.distribution = .equalCentering
-        let stack = UIStackView(arrangedSubviews: [guestLabel, ownerLabel, status, ptt, controls])
-        stack.axis = .vertical; stack.alignment = .fill; stack.spacing = 22
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        let bottom = UIStackView(arrangedSubviews: [translationCard, ptt, controlsRow()])
+        bottom.axis = .vertical; bottom.spacing = 10
+        bottom.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(header)
+        view.addSubview(scrollView)
+        view.addSubview(bottom)
+        let guide = view.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-            stack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
-            ptt.heightAnchor.constraint(equalToConstant: 128)
+            header.topAnchor.constraint(equalTo: guide.topAnchor, constant: 12),
+            header.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
+            header.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 12),
+            scrollView.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottom.topAnchor, constant: -10),
+            bottom.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
+            bottom.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            bottom.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -8),
+            ptt.heightAnchor.constraint(equalToConstant: 48),
+            feedStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 8),
+            feedStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -8),
+            feedStack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 16),
+            feedStack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -16)
         ])
     }
 
-    private func control(_ image: String, action: Selector) -> UIButton {
-        let button = UIButton(type: .system)
+    private func buildTranslationCard() {
+        translationCard.backgroundColor = Theme.purpleBg
+        translationCard.layer.cornerRadius = 16
+        translationCard.layer.borderWidth = 1
+        translationCard.layer.borderColor = UIColor(
+            red: 0xC9 / 255.0, green: 0xBC / 255.0, blue: 0xFF / 255.0, alpha: 1).cgColor
+        translationCard.accessibilityIdentifier = "card-copilot-translation"
+        translationCard.isHidden = true
+        let icon = UIImageView(image: UIImage(systemName: "character.bubble"))
+        icon.tintColor = Theme.purple
+        icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        let tag = UILabel()
+        tag.text = NSLocalizedString("copilot.translation", comment: "")
+        tag.font = .systemFont(ofSize: 13, weight: .semibold)
+        tag.textColor = Theme.purple
+        let tagRow = UIStackView(arrangedSubviews: [icon, tag, UIView()])
+        tagRow.axis = .horizontal; tagRow.spacing = 6; tagRow.alignment = .center
+        translationLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        translationLabel.textColor = Theme.ink
+        translationLabel.numberOfLines = 0
+        translationLabel.accessibilityIdentifier = "text-copilot-translation"
+        translationLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        privateSourceLabel.font = .systemFont(ofSize: 14)
+        privateSourceLabel.textColor = Theme.sub
+        privateSourceLabel.numberOfLines = 0
+        privateSourceLabel.isHidden = true
+        let content = UIStackView(arrangedSubviews: [tagRow, translationLabel, privateSourceLabel])
+        content.axis = .vertical; content.spacing = 4
+        content.translatesAutoresizingMaskIntoConstraints = false
+        translationCard.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: translationCard.topAnchor, constant: 10),
+            content.bottomAnchor.constraint(equalTo: translationCard.bottomAnchor, constant: -10),
+            content.leadingAnchor.constraint(equalTo: translationCard.leadingAnchor, constant: 12),
+            content.trailingAnchor.constraint(equalTo: translationCard.trailingAnchor, constant: -12)
+        ])
+    }
+
+    private func controlsRow() -> UIView {
+        configure(muteButton, image: "mic.fill", id: "button-copilot-mute", diameter: 44)
+        muteButton.addTarget(self, action: #selector(muteTapped), for: .touchUpInside)
+        let end = UIButton(type: .system)
+        configure(end, image: "phone.down.fill", id: "button-copilot-end", diameter: 52)
+        end.tintColor = .white; end.backgroundColor = .systemRed; end.layer.borderWidth = 0
+        end.addTarget(self, action: #selector(endTapped), for: .touchUpInside)
+        configure(routeButton, image: "speaker.wave.2.fill", id: "button-copilot-audio-route", diameter: 44)
+        routeButton.addTarget(self, action: #selector(speakerTapped), for: .touchUpInside)
+        let row = UIStackView(arrangedSubviews: [
+            control(muteButton, NSLocalizedString("incall.mute", comment: "")),
+            control(end, NSLocalizedString("incall.end", comment: "")),
+            control(routeButton, NSLocalizedString("incall.route.speaker", comment: ""))
+        ])
+        row.axis = .horizontal; row.distribution = .fillEqually; row.alignment = .bottom
+        return row
+    }
+
+    private func configure(_ button: UIButton, image: String, id: String, diameter: CGFloat) {
         button.setImage(UIImage(systemName: image), for: .normal)
-        button.addTarget(self, action: action, for: .touchUpInside)
-        return button
+        button.tintColor = Theme.ink
+        button.backgroundColor = Theme.fill
+        button.layer.cornerRadius = diameter / 2
+        button.layer.borderWidth = 1
+        button.layer.borderColor = Theme.line.cgColor
+        button.accessibilityIdentifier = id
+        button.widthAnchor.constraint(equalToConstant: diameter).isActive = true
+        button.heightAnchor.constraint(equalToConstant: diameter).isActive = true
+    }
+
+    private func control(_ button: UIButton, _ text: String) -> UIView {
+        let label = UILabel()
+        label.text = text
+        label.font = .systemFont(ofSize: 10)
+        label.textColor = Theme.sub
+        label.textAlignment = .center
+        let stack = UIStackView(arrangedSubviews: [button, label])
+        stack.axis = .vertical; stack.spacing = 3; stack.alignment = .center
+        return stack
+    }
+
+    private func upsertConversation(direction: String, itemId: String?,
+                                    source: String? = nil, translation: String? = nil) {
+        let key = "\(direction)|\(itemId ?? "current")"
+        if cards[key] == nil {
+            let color = direction == "guest" ? Theme.greenDark : Theme.purple
+            let container = UIView()
+            container.backgroundColor = color.withAlphaComponent(0.12)
+            container.layer.cornerRadius = 14
+            let tag = UILabel()
+            tag.text = NSLocalizedString(direction == "guest" ? "incall.card.caller" : "incall.card.you", comment: "")
+            tag.font = .systemFont(ofSize: 11, weight: .semibold)
+            tag.textColor = color
+            let original = UILabel()
+            original.font = .systemFont(ofSize: 16)
+            original.numberOfLines = 0
+            original.isHidden = true
+            let translated = UILabel()
+            translated.font = .systemFont(ofSize: 14)
+            translated.textColor = Theme.sub
+            translated.numberOfLines = 0
+            translated.isHidden = true
+            let labels = UIStackView(arrangedSubviews: [tag, original, translated])
+            labels.axis = .vertical; labels.spacing = 3
+            labels.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(labels)
+            NSLayoutConstraint.activate([
+                labels.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+                labels.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+                labels.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+                labels.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12)
+            ])
+            feedStack.addArrangedSubview(container)
+            cards[key] = ConversationCard(original: original, translation: translated)
+        }
+        if let source { cards[key]?.original.text = source; cards[key]?.original.isHidden = false }
+        if let translation { cards[key]?.translation.text = translation; cards[key]?.translation.isHidden = false }
+        view.layoutIfNeeded()
+        let bottom = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        scrollView.setContentOffset(CGPoint(x: 0, y: bottom), animated: true)
     }
 
     private func setReady() {
@@ -130,20 +291,28 @@ final class CopilotViewController: UIViewController {
         guard !failed, !releasePending, stream.state == .ready else { return }
         if gesture.state == .began {
             pressed = true
+            status.text = NSLocalizedString("copilot.preparing", comment: "")
             intentGeneration += 1
             releaseDeliveredGeneration = nil
             let generation = intentGeneration
             let id = UUID().uuidString
             requestPrivateGate { [weak self] granted in
                 DispatchQueue.main.async {
-                    guard let self, granted, !self.failed,
-                          self.pressed, self.intentGeneration == generation else {
+                    guard let self, self.pressed, self.intentGeneration == generation else {
                         // Release is delivered synchronously by the gesture
                         // handler exactly once. A late gate result never
                         // emits a second release request.
                         return
                     }
+                    guard granted, !self.failed else {
+                        self.status.text = NSLocalizedString("copilot.unavailable", comment: "")
+                        return
+                    }
                     self.holdId = id
+                    self.translationLabel.text = nil
+                    self.privateSourceLabel.text = nil
+                    self.privateSourceLabel.isHidden = true
+                    self.translationCard.isHidden = true
                     // UI remains non-private until the server's hold_ready arrives.
                     self.stream.holdStart(holdId: id)
                 }
@@ -162,7 +331,7 @@ final class CopilotViewController: UIViewController {
         // Do not send hold_end or reopen audio here. The coordinator must
         // drain device frames first, then queue hold_end, then reopen.
         onReleaseHold?(id)
-        status.text = NSLocalizedString("copilot.ready", comment: "")
+        status.text = NSLocalizedString(failed ? "copilot.unavailable" : "copilot.ready", comment: "")
     }
 
     /// Coordinator calls this after private frames have drained, hold_end has
@@ -183,8 +352,17 @@ final class CopilotViewController: UIViewController {
         status.text = NSLocalizedString("copilot.private", comment: "")
     }
 
-    @objc private func speakerTapped() { onSpeaker?(true) }
-    @objc private func muteTapped() { onMute?() }
+    @objc private func speakerTapped() {
+        speakerEnabled.toggle()
+        onSpeaker?(speakerEnabled)
+        routeButton.setImage(UIImage(systemName: speakerEnabled ? "speaker.wave.2.fill" : "iphone"), for: .normal)
+    }
+    @objc private func muteTapped() {
+        onMute?()
+        let muted = CallManager.shared.isMuted
+        muteButton.setImage(UIImage(systemName: muted ? "mic.slash.fill" : "mic.fill"), for: .normal)
+        muteButton.tintColor = muted ? .systemRed : Theme.ink
+    }
     @objc private func endTapped() { onEnd?() }
 
     override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {

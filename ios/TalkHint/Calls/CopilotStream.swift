@@ -7,12 +7,16 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
     enum State { case idle, connecting, ready, stopped }
 
     var onReady: (() -> Void)?
-    var onGuestText: ((String) -> Void)?
+    var onGuestText: ((String, String?) -> Void)?
     var onPrivateText: ((String) -> Void)?
+    /// Final speech recognition for the scrolling conversation (or the
+    /// private draft). Private source text is never sent to the public feed.
+    var onSourceText: ((String, String, String?) -> Void)?
     /// Called only after the server has acknowledged a particular hold.
     var onHoldReady: ((String) -> Void)?
     var onFailure: ((Error?) -> Void)?
     private var currentState: State = .idle
+    private var ownerTranscriptSupported = false
     private let stateLock = NSLock()
     private let sendQueue = DispatchQueue(label: "app.talkhint.copilot.socket.send")
     var state: State {
@@ -70,6 +74,12 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
     /// Frames must be PCM16 little-endian and base64 encoded by the caller.
     func sendAudio(pcm16Base64: String, direction: String, holdId: String? = nil) {
         guard state == .ready else { return }
+        if direction == "owner" {
+            stateLock.lock()
+            let supported = ownerTranscriptSupported
+            stateLock.unlock()
+            guard supported else { return }
+        }
         var message: [String: Any] = ["type": "audio", "direction": direction, "pcm16": pcm16Base64]
         if direction == "private" {
             guard let holdId = holdId ?? currentCaptureHoldId() else { return }
@@ -135,17 +145,32 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
     private func consume(_ json: [String: Any]) {
         switch json["type"] as? String {
         case "ready":
+            stateLock.lock()
+            ownerTranscriptSupported = (json["capabilities"] as? [String])?.contains("owner_transcript") == true
+            stateLock.unlock()
             setState(.ready)
             emit { $0.onReady?() }
         case "hold_ready":
             if let holdId = json["holdId"] as? String {
                 emit { $0.onHoldReady?(holdId) }
             }
+        case "source_text":
+            if let direction = json["direction"] as? String,
+               let text = json["text"] as? String {
+                let hold = holdId(in: json)
+                if direction == "private" {
+                    guard hold == currentDisplayHoldId() else { return }
+                }
+                if direction == "guest" || direction == "owner" || direction == "private" {
+                    let item = json["itemId"] as? String
+                    emit { $0.onSourceText?(direction, text, item) }
+                }
+            }
         case "guest_text", "text":
             if json["direction"] as? String == "private" {
                 if let text = json["text"] as? String { emit { $0.onPrivateText?(text) } }
             } else if let text = json["text"] as? String {
-                emit { $0.onGuestText?(text) }
+                emit { $0.onGuestText?(text, nil) }
             }
         case "text_delta":
             consumeTextDelta(json)
@@ -176,7 +201,8 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
             emit { $0.onPrivateText?(text) }
         } else {
             latestGuestResponseId = responseId
-            emit { $0.onGuestText?(text) }
+            let item = json["itemId"] as? String
+            emit { $0.onGuestText?(text, item) }
         }
     }
 
@@ -193,7 +219,8 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
         if direction == "private" {
             emit { $0.onPrivateText?(text) }
         } else {
-            emit { $0.onGuestText?(text) }
+            let item = json["itemId"] as? String
+            emit { $0.onGuestText?(text, item) }
         }
     }
 
@@ -236,7 +263,8 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
-        send(["type": "start", "callSid": callSid, "language": language, "sampleRateHz": sampleRateHz])
+        send(["type": "start", "callSid": callSid, "language": language,
+              "sampleRateHz": sampleRateHz, "conversationFeed": true])
         receiveNext()
     }
 

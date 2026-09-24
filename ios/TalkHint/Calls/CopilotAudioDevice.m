@@ -444,8 +444,14 @@ static OSStatus CopilotCaptureCallback(void *refCon, AudioUnitRenderActionFlags 
     uint64_t epoch = atomic_load_explicit(&device->_closeToken, memory_order_acquire);
     bool finishing = atomic_load_explicit(&device->_finishRequested, memory_order_acquire) &&
         epoch >= atomic_load_explicit(&device->_finishEpoch, memory_order_acquire);
-    // Private PCM is enqueued only after the gate was already observed closed.
-    // Normal microphone frames never enter the Copilot ring.
+    // Public microphone PCM is transcribed in a separate Owner session. Its
+    // ring epoch is zero; the Swift gate drops any queued public frames once
+    // the private close has been acknowledged.
+    if (!closed && atomic_load_explicit(&device->_enabled, memory_order_acquire) &&
+        atomic_load_explicit(&device->_captureTapEnabled, memory_order_acquire)) {
+        CopilotRingPush(&device->_capturedRing, device->_captureBytes, bytes, frames, 0);
+    }
+    // Private PCM is enqueued only after the uplink is closed.
     if (atomic_load_explicit(&device->_ownerUplinkClosed, memory_order_acquire) &&
         !finishing && !interrupted && epoch != 0 &&
         atomic_load_explicit(&device->_enabled, memory_order_acquire) &&

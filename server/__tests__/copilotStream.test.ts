@@ -52,10 +52,12 @@ describe("authenticated Copilot stream contract", () => {
 
   let guest: ReturnType<typeof session>;
   let privateSession: ReturnType<typeof session>;
+  let owner: ReturnType<typeof session>;
   beforeEach(() => {
     vi.clearAllMocks();
-    guest = session(); privateSession = session();
+    guest = session(); privateSession = session(); owner = session();
     startSession.mockImplementation(async (config: any) =>
+      config.languages[0] === "en" && config.outputLanguage === "en" ? owner.value :
       config.outputLanguage === "en" ? privateSession.value : guest.value);
   });
 
@@ -71,12 +73,14 @@ describe("authenticated Copilot stream contract", () => {
     expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "not_started" });
     ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 11025 })));
     expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "rate" });
-    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 16_000 })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 16_000, conversationFeed: true })));
     await tick();
     guest.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
     privateSession.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
-    expect(startSession).toHaveBeenCalledTimes(2);
-    expect(ws.frames).toContainEqual({ type: "ready" });
+    expect(ws.frames).not.toContainEqual({ type: "ready" });
+    owner.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
+    expect(startSession).toHaveBeenCalledTimes(3);
+    expect(ws.frames).toContainEqual({ type: "ready", capabilities: ["owner_transcript", "conversation_source"] });
     ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 16_000 })));
     expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "replay" });
     ws.close();
@@ -88,6 +92,8 @@ describe("authenticated Copilot stream contract", () => {
     await tick();
     guest.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
     privateSession.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
+    expect(ws.frames).toContainEqual({ type: "ready" });
+    expect(startSession).toHaveBeenCalledTimes(2);
     const pcm = Buffer.alloc(320).toString("base64");
     ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "private", pcm16: pcm, holdId: "h" })));
     expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "hold" });
@@ -119,6 +125,35 @@ describe("authenticated Copilot stream contract", () => {
     expect(ws.frames.at(-1)).toMatchObject({ type: "text_delta", direction: "private", holdId: "delayed-hold" });
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("PRIVATE SECRET"));
     log.mockRestore(); ws.close();
+  });
+
+  it("shows public conversation source text but keeps private source scoped to its hold", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-conversation", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000, conversationFeed: true })));
+    await tick();
+    guest.emit({ type: "source_transcript", text: "Hello", itemId: "guest-1" });
+    guest.emit({ type: "response_created", ts: Date.now(), responseId: "guest-response", sourceItemId: "guest-1" });
+    guest.emit({ type: "translated_transcript_done", text: "Привет", responseId: "guest-response" });
+    owner.emit({ type: "source_transcript", text: "Hello again", itemId: "owner-1" });
+    owner.emit({ type: "translated_transcript_done", text: "ignored", responseId: "owner-response" });
+    expect(ws.frames).toContainEqual({ type: "source_text", direction: "guest", text: "Hello", itemId: "guest-1" });
+    expect(ws.frames).toContainEqual({ type: "text_done", direction: "guest", text: "Привет", responseId: "guest-response", itemId: "guest-1" });
+    expect(ws.frames).toContainEqual({ type: "source_text", direction: "owner", text: "Hello again", itemId: "owner-1" });
+    expect(ws.frames.some(frame => frame.text === "ignored")).toBe(false);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "private-hold" })));
+    expect(owner.value.sendAudio).toHaveBeenCalledOnce();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "owner",
+      pcm16: Buffer.alloc(320).toString("base64") })));
+    // Queued public audio is discarded after private hold_start.
+    expect(owner.value.sendAudio).toHaveBeenCalledOnce();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "private",
+      pcm16: Buffer.alloc(320).toString("base64"), holdId: "private-hold" })));
+    privateSession.emit({ type: "source_transcript", text: "unattributed secret", itemId: "unknown" });
+    expect(ws.frames.some(frame => frame.text === "unattributed secret")).toBe(false);
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "private-item" });
+    privateSession.emit({ type: "source_transcript", text: "my private words", itemId: "private-item" });
+    expect(ws.frames).toContainEqual({ type: "source_text", direction: "private", text: "my private words", holdId: "private-hold" });
+    ws.close();
   });
 
   it("drops an uncertain old response once a distinct hold starts", async () => {

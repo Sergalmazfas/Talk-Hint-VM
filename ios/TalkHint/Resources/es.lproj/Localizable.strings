@@ -243,6 +243,8 @@
 "tab.translator" = "Traductor";
 "tab.copilot" = "Copilot";
 "copilot.title" = "Copilot";
+"copilot.translation" = "Traducción";
+"copilot.preparing" = "Preparando el micrófono privado…";
 "copilot.guest_waiting" = "Esperando al invitado…";
 "copilot.owner_waiting" = "Aquí aparecerá tu traducción privada";
 "copilot.connecting" = "Conectando…";

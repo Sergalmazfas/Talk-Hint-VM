@@ -243,6 +243,8 @@
 "tab.translator" = "Translator";
 "tab.copilot" = "Copilot";
 "copilot.title" = "Copilot";
+"copilot.translation" = "Translation";
+"copilot.preparing" = "Preparing private microphone…";
 "copilot.guest_waiting" = "Waiting for the guest…";
 "copilot.owner_waiting" = "Your private translation will appear here";
 "copilot.connecting" = "Connecting…";
