@@ -75,3 +75,17 @@ mtime_ms = 1790211229288
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/473e8bdb-efce-4534-b7df-7c2a41cc4fee/bbea750e-d95d-43ea-9f94-734f487ba72c"
 storage_version_token = "1790211230490022"
 content_type = "text/html"
+
+[[outputs]]
+id = "NvTDnMZ7QKlr9iRDWzaTJ"
+uri = "file://reports/live-hint-full-prompt.html"
+type = "html"
+title = "Полный текущий LIVE Hint prompt"
+description = "Обе версии SYSTEM, USER-инструкция, все статические блоки и динамические контексты. Дословно из исходников; без изменений приложения."
+logical_id = "23611144-c205-49a0-a6d0-a07001d93a1c"
+content_hash = "sha256:80fb4a0315fba336585bec7e745d72eedb2dcac238b4bd5d016b406e7490d4aa"
+size = 44226
+mtime_ms = 1790214730227
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/23611144-c205-49a0-a6d0-a07001d93a1c/29e0555e-11e5-456d-b2b8-da6a8613f5b6"
+storage_version_token = "1790214731121397"
+content_type = "text/html"
