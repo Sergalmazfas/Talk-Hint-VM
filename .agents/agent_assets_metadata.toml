@@ -159,3 +159,17 @@ mtime_ms = 1790233363356
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2afe4ba0-39e9-4416-b314-dd6aca962ca2/5843caf2-1940-4f40-b9fb-efa6b35142d1"
 storage_version_token = "1790233384178384"
 content_type = "text/html"
+
+[[outputs]]
+id = "6AKWsoVKCSrG8jweIV1O3"
+uri = "file://reports/copilot-bidirectional-translator-design.html"
+type = "html"
+title = "Copilot — двусторонний приватный перевод"
+description = "Обновлённая схема: Guest EN→RU, private Owner RU→EN, без Brain в V1 и V2. Маршруты, границы приватности, ограничения скорости и проверки перед реализацией."
+logical_id = "bd69a643-32c3-40eb-ad54-c7a68de37c38"
+content_hash = "sha256:293205e10860db397ac7f41b8ee929b88295d7aa6a5735613d037236bd492479"
+size = 33255
+mtime_ms = 1790234225319
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bd69a643-32c3-40eb-ad54-c7a68de37c38/263939e9-354e-4732-8cc2-36c353ba3370"
+storage_version_token = "1790234282830330"
+content_type = "text/html"

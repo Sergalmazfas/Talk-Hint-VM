@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Copilot V1 — двусторонний приватный переводчик</title>
+  <style>
+    :root{--ink:#172821;--muted:#587066;--paper:#f4f6f2;--card:#fff;--line:#d8e2dc;--green:#12634c;--pale:#e6f1eb;--warn:#fff1cf;--risk:#fde7e2}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.52 system-ui,-apple-system,sans-serif}
+    main{max-width:1040px;margin:auto;padding:28px 18px 56px}h1{font-size:clamp(2rem,6vw,3.25rem);line-height:1.05;margin:.3em 0}h2{margin:2.2rem 0 .8rem;font-size:1.55rem}h3{margin:1.35rem 0 .5rem;font-size:1.05rem}p,li{max-width:900px}small,.muted{color:var(--muted)}a{color:var(--green)}code{font-size:.88em;overflow-wrap:anywhere}
+    nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0}nav a,.tag{border:1px solid var(--line);border-radius:999px;padding:7px 11px;background:var(--card);text-decoration:none;font-size:.9rem}
+    .hero,.card,.note,.risk{border:1px solid var(--line);border-radius:14px;padding:18px;background:var(--card)}.hero{border-left:5px solid var(--green)}.note{background:var(--warn)}.risk{background:var(--risk)}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.wide{grid-column:1/-1}
+    pre{margin:12px 0;white-space:pre-wrap;overflow-wrap:anywhere;background:#e7eee9;padding:16px;border-radius:11px;font:13px/1.55 ui-monospace,SFMono-Regular,monospace}
+    table{width:100%;border-collapse:collapse;background:var(--card);font-size:.93rem}th,td{padding:10px;border:1px solid var(--line);text-align:left;vertical-align:top}th{background:var(--pale)}
+    details{border-top:1px solid var(--line);padding:9px 0}summary{cursor:pointer;font-weight:700}.ok{color:#0b6949}.no{color:#a13b2c}
+    @media(max-width:720px){main{padding:20px 12px 42px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}table{display:block;overflow-x:auto}h2{margin-top:1.8rem}}
+  </style>
+</head>
+<body><main>
+  <p><small>Read-only проектирование • компактное предложение для отдельного согласования • тесты и звонки не запускались</small></p>
+  <h1>Copilot V1: два перевода, обычный звонок</h1>
+  <div class="hero">
+    <p><b>Решение:</b> V1 — два независимых text-only Realtime-сеанса. Непрерывный Guest EN → RU получает копию <b>outbound track родительской Owner-leg</b> на новом изолированном Twilio Media Stream. Owner RU → EN получает PCM только при удержании private PTT через gate в единственном custom AudioDevice. Оригинальный Guest звучит как обычно; AI ничего не произносит и не советует.</p>
+    <p><b>Граница:</b> только исходящий двухсторонний Copilot-звонок. Входящий caller-leg имеет зеркальные роли и остаётся будущим дизайном, а не заявленной поддержкой. Реализация ещё не одобрена.</p>
+  </div>
+  <nav>
+    <a href="#paths">Маршруты</a><a href="#guest">Guest source</a><a href="#gate">Private gate</a>
+    <a href="#stream">Streaming</a><a href="#contract">Контракты</a><a href="#ui">Экран</a>
+    <a href="#privacy">Приватность</a><a href="#proof">Доказательства</a><a href="#proposal">Предложение</a>
+  </nav>
+
+  <section id="paths">
+    <h2>1. Одна телефония, два «уха» переводчика</h2>
+    <pre>                         ОБЫЧНАЯ ТЕЛЕФОНИЯ — не перестраивается
+Owner custom AudioDevice ── NORMAL PCM ──→ Twilio owner leg ── &lt;Dial&gt; ──→ Guest
+          ↑ render                                             │
+          └──────────────── оригинальный голос Guest ──────────┘
+
+КОПИЯ GUEST (не bridge): parent owner-leg &lt;Start&gt;&lt;Stream track="outbound_track"&gt;
+Guest audio ──→ isolated /copilot-twilio-stream ──→ EN→RU text-only ──→ owner feed
+
+PRIVATE HOLD: тот же capture callback переключает назначение реального PCM
+Owner mic ──X──→ Twilio (туда корректная тишина)   PCM ──→ /copilot-private
+                                                     └─→ RU→EN text-only ──→ owner feed</pre>
+    <p>Copilot выбирается явным call mode на старте. Для него сервер выдаёт отдельный stream вместо Hint <code>/twilio-stream</code>; это не параллельный Hint и не существующий асимметричный Translator bridge. <code>&lt;Dial&gt;</code> остаётся нормальным voice path: отказ любого переводчика прекращает лишь соответствующий перевод, не голосовой звонок.</p>
+    <div class="grid">
+      <div class="card"><b class="ok">В звонке остаётся</b><ul><li>Owner сам говорит Guest.</li><li>Guest playback слышен и в NORMAL, и в PRIVATE.</li><li>Обычные end/mute/speaker controls.</li><li>Никакой перестройки на press/release.</li></ul></div>
+      <div class="card"><b class="no">Не включается</b><ul><li><code>twilioBridge.ts</code> и Translator audio playback.</li><li>Hint, Flux/Terra/Brain, SAY/CHOOSE/NO_ACTION.</li><li>TTS, Secretary, автоответ или автоматически созданные spoken-label.</li><li>Remote-render tap: серверная Guest-копия делает его лишним.</li></ul></div>
+    </div>
+  </section>
+
+  <section id="guest">
+    <h2>2. Точный Guest source: parent outbound track</h2>
+    <p><code>routes.ts:1496–1589</code> показывает исходящий owner/client leg: owner регистрируется по parent <code>CallSid</code>, затем <code>&lt;Start&gt;&lt;Stream&gt;</code> идёт <em>до</em> обычного <code>&lt;Dial&gt;</code>. Для Copilot предлагается отдельная ветка:</p>
+    <pre>&lt;Start&gt;
+  &lt;Stream url="wss://…/copilot-twilio-stream" track="outbound_track"&gt;
+    &lt;Parameter name="pairing" value="server-issued-one-time-nonce" /&gt;
+  &lt;/Stream&gt;
+&lt;/Start&gt;
+&lt;Dial …&gt;&lt;Number statusCallbackEvent="answered completed" … /&gt;&lt;/Dial&gt;</pre>
+    <p><code>speakerRoles.ts:4–55</code> подтверждает семантику: на <b>owner-leg исходящего</b> <code>outbound = Guest</code>, <code>inbound = Owner</code>. Поэтому основной источник — outgoing-first server-side Guest copy: он не содержит private capture и не требует tap на playback iPhone. <b>Но это не абсолютная speaker-purity гарантия:</b> far-end echo может вернуть Owner, а stream, стартующий до <code>&lt;Dial&gt;</code>, может нести prompts/ringing audio.</p>
+    <div class="note"><b>Answer-bound filter обязателен.</b> Сервер связывает stream start с parent <code>CallSid</code>, а child dial leg — с parent через новый подписанный Twilio status callback. Аудио до подтверждённого <code>answered</code> исключается; при <code>completed/remote-ended</code> обработка сразу прекращается и буферы очищаются. Существующий <code>/twilio/dial-status</code> — подписанный финальный parent callback, но сам по себе не доказывает момент ответа child leg.</div>
+    <p>Новый WSS нельзя просто добавить в публичный список <code>websocket.ts:815–891</code>: там user-auth применяется только к клиентским путям, а Twilio endpoints проходят отдельно. На HTTP upgrade новый endpoint проверяет <code>X-Twilio-Signature</code> по точному внешнему URL в канонической форме, требуемой Twilio для WebSocket handshake, с проверенной обработкой trusted proxy; угадывать схему по внутреннему request нельзя. После upgrade проверяются одноразовый server-issued pairing nonce, ожидаемый parent/account, срок и размер. Nonce передаётся через <code>&lt;Parameter&gt;</code>, не query string: Stream URL не поддерживает query parameters. Никакого доверия <code>CallSid</code> из сообщения без registry-binding. Raw SID/nonce/токены не отправляются в owner UI и не логируются.</p>
+    <p>Answer callback может прийти позже первых слов Guest. Безусловное отбрасывание всего до получения callback способно потерять приветствие. Предлагается краткий bounded staging buffer с привязкой к подтверждённому answer timing; если timestamp alignment не подтверждён, не выдавать полноту за доказанный факт и явно учитывать startup gap. Проверка первых слов входит в будущий smoke test. Копия μ-law mono 8 kHz преобразуется в PCM16 mono 24 kHz существующим codec pattern; upsampling не улучшает исходное телефонное качество.</p>
+    <p><b>Входящий звонок — не V1.</b> На caller-leg роли зеркальны: <code>inbound = Guest</code>, <code>outbound = Owner</code>. Будущая поддержка должна отдельно выбрать stream leg и доказать mapping; V1 не переносит outgoing mapping на incoming автоматически.</p>
+  </section>
+
+  <section id="gate">
+    <h2>3. Owner private gate: границы, а не UI mute</h2>
+    <p><code>CallManager.swift:28–31,69–71</code> глобально устанавливает <code>DefaultAudioDevice</code> до звонков; SDK device нельзя безопасно заменить во время активного lifecycle. Минимальная будущая общая инфраструктура — один custom AudioDevice, установленный до calls: для не-Copilot режимов он работает как pass-through, для Copilot переключает capture destination. Это целевое поведение, не доказанная byte-for-byte эквивалентность DefaultAudioDevice: нужны сохранение echo cancellation/voice processing, проверка sample rate и регрессии. Guest original может акустически попадать в private microphone на speakerphone; разделение transports само по себе не устраняет это эхо. Это общая зона риска, поэтому «один screen flag» не даёт изоляции.</p>
+    <h3>Press → PRIVATE-ready</h3>
+    <ol>
+      <li>Запомнить native mute prior state и новый <code>epoch/holdId</code>. Gate переходит в PREPARING: реальные кадры уже не идут в Twilio, callbacks получают корректную тишину; Guest render не трогается.</li>
+      <li>Audio callback подтверждает boundary/sample sequence. Одновременно отдельный text-only сеанс должен прислать <b>применённый config/ready ACK</b>; WebSocket open и нынешний <code>session_config</code> недостаточны.</li>
+      <li>Только после обоих ACK UI показывает «Только Copilot». До этого пользователь не должен начинать приватную речь.</li>
+      <li>В PRIVATE реальный PCM идёт только в owner translator; normal owner uplink остаётся muted. Перевод Guest продолжается независимо.</li>
+    </ol>
+    <h3>Release → безопасный NORMAL</h3>
+    <ol>
+      <li>В capture callback закрыть private boundary с <code>lastSeq</code>; хвост до границы остаётся только переводчику.</li>
+      <li>Очистить/разделить resampler и route buffers. Новые кадры разрешить Twilio только после подтверждённого reset; при неопределённом route — fail closed/видимый mute.</li>
+      <li>Восстановить <b>предыдущее native mute state</b>, а не безусловно «unmute». Если пользователь был muted до PTT, он остаётся muted.</li>
+      <li>Normal voice не ждёт финального текста. Перевод последнего private сегмента завершается асинхронно.</li>
+    </ol>
+    <div class="risk"><b>Ошибка никогда не открывает микрофон во время hold.</b> Ошибка/таймаут/no-audio останавливает failing translator и показывает состояние, но не завершает voice call и не снимает gate. Только явный безопасный release/cancel с подтверждённым route restore возвращает prior mute state. Interruption, background, CallKit mute и Bluetooth route-change требуют того же fail-closed автомата.</div>
+  </section>
+
+  <section id="stream">
+    <h2>4. Два directed text-only Realtime-сеанса</h2>
+    <table>
+      <thead><tr><th>Сеанс</th><th>Вход</th><th>Выход/UI</th><th>Жизнь</th></tr></thead>
+      <tbody>
+        <tr><td>Guest</td><td>EN, <code>outbound_track</code>, только после answer</td><td>RU text deltas → «Гость по-русски»</td><td>Непрерывно до end/ошибки</td></tr>
+        <tr><td>Owner private</td><td>RU PCM только внутри hold boundaries</td><td>EN text deltas → «Ваш перевод на английский»</td><td>Подготовлен per-call; операции по hold</td></tr>
+      </tbody>
+    </table>
+    <p>Переиспользуется provider boundary и OpenAI Realtime adapter, но нужны две фиксированные directed configs (<code>sourceLangHint/outputLanguage/outputMode:"text"</code>), не один смешанный bidirectional audio channel. В коде default — <code>gpt-realtime</code> (<code>openaiRealtimeTranslator.ts:19</code>), однако deploy/runtime override не исследован: default не выдаётся за production configuration. Native audio response запрещён; unexpected audio — fatal для <em>этого translation session</em>, не для звонка. Нет цепочки STT-final → Brain: source transcription служит корреляции/диагностике операции и может прийти позже текста.</p>
+    <h3>Честное ограничение одновременности</h3>
+    <p>Нынешний adapter использует server VAD с <code>silence_duration_ms: 500</code> (<code>openaiRealtimeTranslator.ts:271–300</code>). Поэтому текст может появляться по готовности сегментов во время пауз, но длинная речь <b>без паузы будет ждать её конца</b>. Запрошенный перевод «до конца длинной реплики» существующим механизмом не доказан; одновременный перевод не гарантируется.</p>
+    <p>Перед реализацией нужно isolated-исследование source segmentation в том же provider: без новой модели, без скрытого STT→Brain и без silent provider switch. Для private release кандидат — ограниченный synthetic-silence tail, чтобы вызвать VAD; он не доказан. Не смешивать его с manual commit, иначе возможен двойной response. Альтернатива — manual commit/create ровно после release; она требует отдельного одобрения, потому что меняет UX на «текст после отпускания». Существующий 700 ms micro-turn gate нельзя переносить автоматически: короткие «да/нет» могут исчезнуть.</p>
+    <p>Один hold может породить несколько <code>itemId/responseId</code>; UI собирает их по source-item order внутри hold. Source transcript асинхронен и <b>не задерживает</b> открытие/streaming целевого текста. Пустой/no-audio hold не создаёт фразу; ошибка остаётся локальной переводчику.</p>
+  </section>
+
+  <section id="contract">
+    <h2>5. Registry, транспорт и гонки</h2>
+    <pre>server call-mode registry (оперативный, TTL):
+  opaqueCallId → ownerUser + COPILOT_OUTGOING + parentSid + childSid/answered/end
+                 + one-time Twilio pairing + bounds + active epochs
+
+copilot-private (session-auth owner):
+  bind/ready: callId, epoch, direction=OWNER_RU_EN, applied text-only config
+  press/audio/release: callId, epoch, direction, holdId, seq, lastSeq
+  delta/done/error: callId, epoch, direction, holdId, itemId, responseId, seq
+
+copilot-twilio-stream (Twilio-auth machine channel):
+  start/media/stop + verified pairing; server adds callId, epoch,
+  direction=GUEST_EN_RU, itemId/responseId/seq to owner-feed events</pre>
+    <p>Registry создаётся только для явного Copilot mode, связан с authenticated owner и parent call до выдачи TwiML, принимает ровно ожидаемый account/call/nonce и уничтожается при terminal call status или call TTL. Epoch — отдельный для каждого направления: сбой Guest transport не сбрасывает Owner hold. Разрыв отдельного translation/feed transport закрывает его epoch, но не уничтожает активный телефонный звонок и не мешает reconnect. Owner feed — отдельный session-auth канал; ownership и активный call mode проверяются на bind и каждом reconnect. Item/response IDs в UI — непрозрачные app IDs с server-side mapping к provider IDs; секреты и raw Twilio identifiers клиенту не нужны.</p>
+    <div class="grid">
+      <div class="card"><h3>Backpressure</h3><p>Очередь аудио ограничена, например 1 секундой. При превышении — не молча queue/drop: послать явный <code>gap</code>, сбросить translation operation, увеличить epoch и пометить/закрыть partial. Не воспроизводить аудио повторно.</p></div>
+      <div class="card"><h3>Reconnect</h3><p>Поздние события старого epoch не обновляют текущую карточку. Допустим transient replay только последнего bounded text state; audio не replay. Guest reconnect не стирает private intent/result, а private reconnect не отменяет Guest translation.</p></div>
+      <div class="card"><h3>Stale ≠ смысловое veto</h3><p>Drop применяется по закрытым call/epoch/hold/response IDs. Новая Guest-реплика не делает намерение Owner недействительным и не удаляет его private перевод.</p></div>
+      <div class="card"><h3>Lifecycle</h3><p>Remote ended немедленно закрывает intake/provider/buffers. Translator disconnect не вызывает hangup. Duplicate release/stop идемпотентны; bounds действуют на frame, seq gap, hold duration и rate.</p></div>
+    </div>
+  </section>
+
+  <section id="ui">
+    <h2>6. Минимальный экран</h2>
+    <pre>┌ Гость по-русски ───────────────────────────────┐
+│ Они не смогут разгрузить вас до завтра…        │  streaming text
+└────────────────────────────────────────────────┘
+┌ Ваш перевод на английский ─────────────────────┐
+│ I can’t wait until tomorrow…                   │  private hold result
+└────────────────────────────────────────────────┘
+       [ удерживать 🎙 Только Copilot ]   [mute] [speaker] [end]</pre>
+    <p>Только описательные подписи направления, PTT/status и обычные call controls. Нет SAY, CHOOSE, advice, обязательного полного transcript, TTS и признака «Spoken»: показ/ACK/release не означает, что Owner произнёс фразу Guest.</p>
+    <h3>«Скажи, что…» — нужен выбор</h3>
+    <p>Strict translator может буквально перевести вводную. <b>Рекомендуемый baseline:</b> Owner диктует готовое сообщение — «Я не могу ждать…». Альтернатива после отдельного одобрения: ограниченное Copilot-only правило в <em>том же</em> Realtime translator, которое удаляет только распознанную вводную-команду и переводит её объект. Это не существующий default prompt, не дополнительный AI/Brain и не изменение production Translator prompts. До выбора UI должен обучать прямой диктовке, а не обещать command semantics.</p>
+  </section>
+
+  <section id="privacy">
+    <h2>7. Privacy и V2</h2>
+    <p><b>OWNER_PRIVATE audio/text не попадает</b> в call transcript, CRM, recordings, БД, analytics content, debug logs, cards, long-term memory или обычный Hint context. Guest translation также transient для экрана V1, если отдельное хранение не одобрено. Operational audio/text buffers ограничены call/hold/TTL и очищаются на close/error/end. В логах — только redacted IDs, state, counts и timings без содержания.</p>
+    <p>Аудио обрабатывает внешний Realtime provider. Документ не обещает provider zero retention: политика/настройки обработки и retention требуют отдельной проверки и пользовательского согласия. Любая запись или новое хранение — отдельное разрешение.</p>
+    <div class="note"><b>V2 — только качество контекста перевода, не Brain.</b> Будущий bounded per-call role-tagged context может использовать фактически услышанные <code>GUEST_SPOKEN</code>/<code>OWNER_SPOKEN</code> для разрешения «that / it / the second one». <code>OWNER_PRIVATE</code> не считается услышанным Guest и не входит туда автоматически. Нет summarizer, выбора ответа, SAY/CHOOSE/NO_ACTION, советов, retrieval или долгой памяти. Состояния Heard / Private / Translated / Spoken различны.</div>
+  </section>
+
+  <section id="proof">
+    <h2>8. Latency, проверки и уровень доказательств</h2>
+    <p>Измерять четыре независимые цепочки с коррелированными monotonic clocks и IDs:</p>
+    <ul>
+      <li><b>Guest:</b> first eligible Guest audio / VAD boundary → first RU text delta → UI rendered.</li>
+      <li><b>Owner:</b> first private audio / VAD boundary → first EN text delta → UI rendered.</li>
+      <li><b>Gate:</b> press → audio-boundary + config-ready → PRIVATE-ready.</li>
+      <li><b>Release:</b> last private sample → route reset → prior NORMAL/mute state restored.</li>
+    </ul>
+    <p>Старые ≈300 ms и <code>firstTranslatedAudio</code> из mic spike — не iPhone text latency и не SLA. До исследования segmentation нет обещания «практически одновременно» или p95.</p>
+    <p>Часы iPhone, нашего сервера и provider нельзя напрямую вычитать друг из друга: внутри каждого процесса нужны monotonic durations, а end-to-end — client measurements/ACK и оценка синхронизации с погрешностью. Время server receipt события VAD не равно физическому концу произнесённой фразы.</p>
+    <table>
+      <thead><tr><th>Подтверждено чтением</th><th>Остаётся доказать после отдельного разрешения</th></tr></thead>
+      <tbody>
+        <tr><td>Owner-leg role mapping; stream сейчас до Dial; signed HTTP callback pattern; text deltas/IDs; VAD 500 ms; global DefaultAudioDevice.</td><td>Exact resolved Twilio SDK/API headers: <code>Package.resolved</code> не найден, <code>project.yml</code> даёт лишь lower bound <code>from: 6.11.0</code>.</td></tr>
+        <tr><td>Text-only config может исключить audio output; default модели в коде — <code>gpt-realtime</code>, runtime override не проверен.</td><td>Custom device на реальном iPhone: CallKit activation, receiver/speaker/Bluetooth, route changes, interruptions, background/lock.</td></tr>
+        <tr><td>Текущие user-auth paths не защищают Twilio machine endpoints; нужен отдельный upgrade verifier.</td><td>Ни одного private frame у Guest; tail без потери/дубля; echo/prompt exclusion; translator failure не ломает voice.</td></tr>
+      </tbody>
+    </table>
+    <h3>Будущая проверка — не выполнена</h3>
+    <p>Сначала автоматические unit/protocol tests: role+answer gate, forged signature/nonce, registry ownership/mode/TTL, seq/gap/backpressure, multi-item hold, stale epochs, reconnect text replay, no-audio/unexpected-audio isolation, prior-mute restore и route-reset fail-closed. Затем device regressions отдельно для non-Copilot pass-through, Hint и Translator. И лишь по отдельному разрешению — <b>один consented реальный двухсторонний smoke call</b> с Guest-side leakage check и отказом переводчика. Он подтверждает сценарий, но не p95 и не production SLA. Никакие leakage-тесты в рамках этого отчёта не запускались.</p>
+  </section>
+
+  <section id="proposal">
+    <h2>9. Минимальное предложение на следующее одобрение</h2>
+    <ol>
+      <li>Только outgoing two-party Copilot mode; обычный <code>&lt;Dial&gt;</code> и Guest playback неизменны.</li>
+      <li>Новый owner-leg <code>outbound_track</code> на <code>/copilot-twilio-stream</code>, Twilio upgrade signature + nonce registry + child-answer/end gate.</li>
+      <li>Один глобальный custom AudioDevice с pass-through default и boundary-ACK private gate; отдельный session-auth <code>/copilot-private</code>.</li>
+      <li>Два directed text-only Realtime-сеанса и transient owner feed; никакого Brain, TTS, bridge или persistence.</li>
+      <li>Сначала protocol/device evidence; затем отдельно согласовать реализацию UI и один consented smoke call.</li>
+    </ol>
+    <div class="risk"><b>Блокеры одобрения:</b> (1) выбрать baseline «диктуй готовую мысль» либо Copilot-only правило «скажи, что»; (2) принять VAD 500 ms с паузами или одобрить отдельное segmentation/release исследование; (3) подтвердить право менять общий AudioDevice и обязательный regression scope; (4) утвердить Twilio pairing/status-callback контракт и external provider privacy review. До этого кодировать V1 нельзя.</div>
+    <p><b>Статус документа:</b> эта схема заменяет прежние Copilot proposals с Brain, SAY/CHOOSE/NO_ACTION. <code>reports/copilot-private-mic-design.html</code>, <code>reports/translator-copilot-research.html</code> и ранние attachments — исторические источники технических фактов, не текущие product approvals.</p>
+  </section>
+
+  <section>
+    <h2>Ссылки и проверенные anchors</h2>
+    <details open><summary>Локальные исходники</summary>
+      <ul>
+        <li><code>server/routes.ts:93–122, 1496–1589, 1679–1723</code> — signature middleware, owner outbound TwiML и Dial terminal callback.</li>
+        <li><code>server/speakerRoles.ts:4–55</code> — owner-leg/caller-leg track mapping.</li>
+        <li><code>server/websocket.ts:554–566, 815–891</code> — owner registry и upgrade/auth split.</li>
+        <li><code>ios/TalkHint/Calls/CallManager.swift:28–31, 69–71, 204–252, 425–440</code> — global device, mute и CallKit lifecycle.</li>
+        <li><code>server/translation/openaiRealtimeTranslator.ts:19, 52–104, 271–313, 381–650</code>; <code>provider.ts:14–35, 88–139</code> — model default, strict translation, VAD, ready/text deltas/correlation.</li>
+        <li><code>server/translation/iosTranslator.ts:11–18, 40–47, 63–168</code>; <code>TranslatorPhoneFeedStream.swift:3–18</code> — полезные patterns, но не готовые Copilot endpoints.</li>
+        <li><code>ios/project.yml:15–18</code> — SDK lower bound; resolved package file не найден.</li>
+      </ul>
+    </details>
+    <details open><summary>Официальные спецификации: Media Streams проверены здесь, остальные — в предыдущем исследовании</summary>
+      <ul>
+        <li><a href="https://www.twilio.com/docs/voice/twiml/stream">Twilio Media Streams: &lt;Stream&gt;, tracks и custom parameters</a></li>
+        <li><a href="https://www.twilio.com/docs/usage/security#validating-requests">Twilio: validating requests / exact URL signature</a></li>
+        <li><a href="https://twilio.github.io/twilio-voice-ios/docs/latest/Classes/TwilioVoiceSDK.html">Twilio Voice iOS: audioDevice lifecycle</a></li>
+        <li><a href="https://github.com/twilio/voice-quickstart-ios/blob/master/Docs/new-features-3.0.md">Twilio: custom capture/render AudioDevice</a></li>
+        <li><a href="https://developers.openai.com/docs/guides/realtime-conversations">OpenAI Realtime: conversations, VAD и manual PTT</a></li>
+      </ul>
+    </details>
+    <p><small>Метод: только чтение назначенного плана, предыдущего отчёта, приложенной коррекции и указанных исходников. Не проводились model calls, workflows, сборка, тесты, реальные звонки, запись, deployment или изменения runtime.</small></p>
+  </section>
+</main></body></html>
