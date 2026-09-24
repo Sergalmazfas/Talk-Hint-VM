@@ -1,10 +1,12 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { RealtimeTranslationSession } from "../translation/provider";
+import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
 import { authorizeCopilotCall, createCopilotStream, resamplePcm16Mono } from "../copilotStream";
 
 const { startSession } = vi.hoisted(() => ({ startSession: vi.fn() }));
-vi.mock("../translation/openaiRealtimeTranslator", () => ({
+vi.mock("../translation/openaiRealtimeTranslator", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../translation/openaiRealtimeTranslator")>(),
   openaiRealtimeTranslationProvider: { startSession },
 }));
 
@@ -67,6 +69,48 @@ describe("authenticated Copilot stream contract", () => {
     expect(resamplePcm16Mono(Buffer.alloc(24_000 * 2), 24_000)).toHaveLength(24_000 * 2);
   });
 
+  it("keeps brief Copilot speech while preserving the default voice-Translator noise gate", () => {
+    const config = {
+      languages: ["ru", "en"] as [string, string],
+      outputLanguage: "en",
+      outputMode: "text" as const,
+      inputFormat: { encoding: "pcm16" as const, sampleRateHz: 24_000 },
+      outputFormat: { encoding: "pcm16" as const, sampleRateHz: 24_000 },
+    };
+    function briefTurn(microturnMinAudioMs?: number) {
+      const provider = new OpenAIRealtimeTranslationSession({ ...config, microturnMinAudioMs });
+      const events: any[] = [];
+      const sent: any[] = [];
+      provider.onEvent(event => events.push(event));
+      (provider as any).sendJson = (message: any) => sent.push(message);
+      (provider as any).turnInBytes = 500 * 24_000 * 2 / 1000;
+      const feed = (message: any) => (provider as any).handleMessage(message);
+      feed({ type: "input_audio_buffer.committed", item_id: "brief" });
+      feed({ type: "response.created", response: { id: "brief-response" } });
+      return { events, sent, feed };
+    }
+    const normalTranslator = briefTurn();
+    expect(normalTranslator.sent).toContainEqual({ type: "response.cancel" });
+    expect(normalTranslator.events).toContainEqual(expect.objectContaining({
+      type: "suppressed_microturn", reason: "audio_too_short",
+    }));
+
+    const copilot = briefTurn(0);
+    expect(copilot.sent).not.toContainEqual({ type: "response.cancel" });
+    copilot.feed({ type: "response.output_text.done", text: "Yes.", response_id: "brief-response" });
+    expect(copilot.events).toContainEqual({
+      type: "translated_transcript_done", text: "Yes.", responseId: "brief-response",
+    });
+
+    const silentCopilot = briefTurn(0);
+    silentCopilot.feed({ type: "conversation.item.input_audio_transcription.completed",
+      item_id: "brief", transcript: "" });
+    expect(silentCopilot.sent).toContainEqual({ type: "response.cancel" });
+    expect(silentCopilot.events).toContainEqual(expect.objectContaining({
+      type: "suppressed_microturn", reason: "transcript_empty",
+    }));
+  });
+
   it("requires a valid start, rejects replay and malformed/rate-invalid audio", async () => {
     const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-auth-format", async () => true);
     ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "guest", pcm16: "AAAA" })));
@@ -80,6 +124,7 @@ describe("authenticated Copilot stream contract", () => {
     expect(ws.frames).not.toContainEqual({ type: "ready" });
     owner.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
     expect(startSession).toHaveBeenCalledTimes(3);
+    expect(startSession.mock.calls.map(([config]) => config.microturnMinAudioMs)).toEqual([0, 0, 0]);
     expect(ws.frames).toContainEqual({ type: "ready", capabilities: ["owner_transcript", "conversation_source"] });
     ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 16_000 })));
     expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "replay" });

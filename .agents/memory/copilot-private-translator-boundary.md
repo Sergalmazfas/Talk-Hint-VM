@@ -20,6 +20,12 @@ Copilot's Ready state after Hold is a claim about the public call microphone, no
 
 **How to apply:** Review any changes to audio gates, interruption handling, or call status against multiple consecutive Hold/Release cycles. Device-side acknowledgment is necessary but not proof of guest audibility; validate 5–10 cycles on two physical phones before claiming the behavior is verified.
 
+In Copilot's text-only translation, a deliberate short utterance must not disappear solely because it is under the voice Translator's minimum audio duration. Keep the voice Translator's noise protection separate; empty/unintelligible Copilot transcripts should still be suppressed.
+
+**Why:** Brief words such as “Да” are valid call responses, and a shared duration gate could cancel their text translation before it reached the Copilot screen.
+
+**How to apply:** When changing shared realtime-provider gates, test Copilot's guest, private, and public-text sessions separately from the voice Translator. A duration exemption is not evidence that the model translates accurately; confirm content in a real call.
+
 Copilot's visual contract is a scrolling, Translator-style conversation above a pinned card styled like the Hint card, but explicitly labelled as **translation**, never a hint or advice. The private Russian phrase stays between Owner and Copilot; the Owner reads its English translation and then speaks English to Guest through the regular call.
 
 **Why:** The user explicitly distinguished the translation card from a hint and asked to see both sides of the actual conversation without the oversized full-screen text.

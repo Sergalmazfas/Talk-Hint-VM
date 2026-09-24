@@ -464,7 +464,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
           // before any translated audio reaches the caller. The provider will
           // still emit response.done (cancelled) which consumes the FIFO item.
           const headAudioMs = this.itemAudioMs.get(head) ?? 0;
-          if (headAudioMs < MICROTURN_MIN_AUDIO_MS) {
+          if (headAudioMs < (this.config.microturnMinAudioMs ?? MICROTURN_MIN_AUDIO_MS)) {
             this.suppressMicroturnResponse({
               ts,
               itemId: head,

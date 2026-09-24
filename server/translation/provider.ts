@@ -28,6 +28,12 @@ export interface RealtimeTranslationConfig {
   outputLanguage?: string;
   /** Immutable output modality for the lifetime of this session. Defaults to audio. */
   outputMode?: "audio" | "text";
+  /**
+   * Minimum input duration for a translated response. Defaults to the
+   * Translator noise gate (700ms); 0 disables only the duration gate.
+   * The empty-transcript gate remains active.
+   */
+  microturnMinAudioMs?: number;
   /** Provider-specific output voice id. Optional; provider picks a default. */
   voice?: string;
   inputFormat: AudioFormat;

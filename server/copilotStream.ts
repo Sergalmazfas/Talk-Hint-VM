@@ -186,10 +186,13 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       let owner: RealtimeTranslationSession | undefined;
       try {
         const results = await Promise.allSettled([
-          openaiRealtimeTranslationProvider.startSession({ languages: ["en", language], outputLanguage: language, outputMode: "text", inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
-          openaiRealtimeTranslationProvider.startSession({ languages: [language, "en"], outputLanguage: "en", outputMode: "text", inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
+          // Copilot shows text only: a deliberate short reply ("Да", "No")
+          // must not be cancelled by the shared voice-Translator duration
+          // gate. Empty transcripts are still suppressed by the provider.
+          openaiRealtimeTranslationProvider.startSession({ languages: ["en", language], outputLanguage: language, outputMode: "text", microturnMinAudioMs: 0, inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
+          openaiRealtimeTranslationProvider.startSession({ languages: [language, "en"], outputLanguage: "en", outputMode: "text", microturnMinAudioMs: 0, inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
           wantsConversationFeed
-            ? openaiRealtimeTranslationProvider.startSession({ languages: ["en", "en"], outputLanguage: "en", outputMode: "text", inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } })
+            ? openaiRealtimeTranslationProvider.startSession({ languages: ["en", "en"], outputLanguage: "en", outputMode: "text", microturnMinAudioMs: 0, inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } })
             : Promise.resolve(undefined),
         ]);
         if (results[0].status === "fulfilled") guest = results[0].value;
