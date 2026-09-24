@@ -89,3 +89,17 @@ mtime_ms = 1790214730227
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/23611144-c205-49a0-a6d0-a07001d93a1c/29e0555e-11e5-456d-b2b8-da6a8613f5b6"
 storage_version_token = "1790214731121397"
 content_type = "text/html"
+
+[[outputs]]
+id = "ErVV29w_g9cBn2TmwXZHq"
+uri = "file://reports/interactive-copilot-research.html"
+type = "html"
+title = "CHOOSE → SAY: исследование и план"
+description = "Что уже работает, два пути после выбора, защита от устаревших ответов и план первой версии."
+logical_id = "3be3d901-1632-41a3-a914-4d38a20b1bbc"
+content_hash = "sha256:fc694a670dada51665505f544dc83e18ac24eb99452986139af44c33ea511923"
+size = 30195
+mtime_ms = 1790223501372
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3be3d901-1632-41a3-a914-4d38a20b1bbc/e835eec5-6feb-4b7e-94d9-ceef1a270b21"
+storage_version_token = "1790223523446845"
+content_type = "text/html"
