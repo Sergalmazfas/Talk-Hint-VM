@@ -27,7 +27,9 @@ final class CallManager: NSObject {
 
     private let provider: CXProvider
     private let callController = CXCallController()
-    private let audioDevice = DefaultAudioDevice()
+    // Installed before every Twilio connection and never swapped mid-call.
+    // With taps disabled this remains the ordinary Hint/Translator device.
+    private let audioDevice = CopilotAudioDevice()
 
     /// How a call is being assisted. Structural placeholder (task #274): ALL
     /// calls — whether started from the Hint tab or, in a future stage, from
@@ -37,6 +39,7 @@ final class CallManager: NSObject {
     enum CallMode: String {
         case hint
         case translator
+        case copilot
     }
 
     private struct CallSession {
@@ -55,6 +58,8 @@ final class CallManager: NSObject {
     private var answerActions: [UUID: CXAnswerCallAction] = [:]
     private var inCallScreen: InCallViewController?
     private var translatorScreen: TranslatorViewController?
+    private var copilotCoordinator: CopilotCallCoordinator?
+    private var disconnectingCalls: Set<UUID> = []
 
     private override init() {
         let config = CXProviderConfiguration()
@@ -76,7 +81,11 @@ final class CallManager: NSObject {
     /// PushKit completion handler must run only after `reportNewIncomingCall`.
     func reportIncomingCall(callSid: String, fromNumber: String, completion: @escaping () -> Void) {
         let uuid = UUID()
-        sessions[uuid] = CallSession(uuid: uuid, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false, translatorVoice: .female, translatorPlayback: .voice)
+        if sessions.isEmpty, disconnectingCalls.isEmpty { audioDevice.prepareForNewCall() }
+        // The ringing tab is the explicit incoming-mode selection. Do not
+        // turn every incoming call into Copilot.
+        let selectedMode: CallMode = Self.selectedIncomingMode()
+        sessions[uuid] = CallSession(uuid: uuid, mode: selectedMode, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false, translatorVoice: .female, translatorPlayback: .voice)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -124,6 +133,7 @@ final class CallManager: NSObject {
     @discardableResult
     func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
+        if sessions.isEmpty, disconnectingCalls.isEmpty { audioDevice.prepareForNewCall() }
         // Snapshot before CallKit/Twilio starts. A Settings change after this
         // point affects only the next Translator call.
         let translatorVoice = SessionStore.shared.translatorVoice
@@ -173,6 +183,8 @@ final class CallManager: NSObject {
                 "TranslatorVoice": translatorVoice.rawValue,
                 "TranslatorPlayback": translatorPlayback.rawValue,
             ]
+        case .copilot:
+            return ["To": number, "CopilotMode": "v1"]
         }
     }
 
@@ -255,13 +267,23 @@ final class CallManager: NSObject {
     // MARK: - In-call assistant screen
 
     /// Presents the live transcript/hint screen once a call connects.
-    private func presentInCallScreen(for uuid: UUID) {
+    private func presentInCallScreen(for uuid: UUID, twilioCallSid: String? = nil) {
         guard inCallScreen == nil, translatorScreen == nil, let session = sessions[uuid] else { return }
         guard let top = Self.topViewController() else { return }
         if session.mode == .translator {
             let screen = TranslatorViewController(callerName: session.remoteLabel)
             translatorScreen = screen
             top.present(screen, animated: true)
+            return
+        }
+        if session.mode == .copilot {
+            guard let callSid = sessions[uuid]?.callSid ?? twilioCallSid else { return }
+            let coordinator = CopilotCallCoordinator(callSid: callSid, device: audioDevice)
+            copilotCoordinator = coordinator
+            coordinator.present(callerName: session.remoteLabel, from: top,
+                                onMute: { [weak self] in self?.toggleMute() },
+                                onSpeaker: { [weak self] enabled in self?.setSpeakerEnabled(enabled) },
+                                onEnd: { [weak self] in self?.endCall() })
             return
         }
         let screen = InCallViewController(callerName: session.remoteLabel)
@@ -279,6 +301,8 @@ final class CallManager: NSObject {
             translatorScreen = nil
             screen.teardown()
         }
+        copilotCoordinator?.stop()
+        copilotCoordinator = nil
     }
 
     private static func topViewController() -> UIViewController? {
@@ -292,6 +316,18 @@ final class CallManager: NSObject {
             top = presented
         }
         return top
+    }
+
+    private static func selectedIncomingMode() -> CallMode {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        var root = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
+            ?? scene?.windows.first?.rootViewController
+        while let presented = root?.presentedViewController { root = presented }
+        let tab = (root as? UITabBarController) ?? root?.tabBarController
+        return tab?.selectedIndex == 2 ? .copilot : .hint
     }
 }
 
@@ -307,6 +343,7 @@ extension CallManager: CXProviderDelegate {
         }
         sessions.removeAll()
         answerActions.removeAll()
+        disconnectingCalls.removeAll()
         audioDevice.isEnabled = false
         tearDownInCallScreen()
     }
@@ -379,11 +416,14 @@ extension CallManager: CXProviderDelegate {
 
         Task { @MainActor in
             do {
-                let conference = try await APIClient.shared.acceptCall(callSid: callSid)
+                let conference = try await APIClient.shared.acceptCall(
+                    callSid: callSid, copilot: session.mode == .copilot)
                 let accessToken = try await APIClient.shared.fetchTwilioAccessToken()
 
                 let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
-                    builder.params = ["conferenceRoom": conference]
+                    builder.params = session.mode == .copilot
+                        ? ["conferenceRoom": conference, "CopilotMode": "v1"]
+                        : ["conferenceRoom": conference]
                     builder.uuid = uuid
                 }
                 let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
@@ -409,6 +449,7 @@ extension CallManager: CXProviderDelegate {
 
         if let call = session.twilioCall {
             // Active call (incoming or outgoing) -> hang up the Twilio leg.
+            if let uuid = call.uuid { disconnectingCalls.insert(uuid) }
             call.disconnect()
         } else if !session.answered, !session.isOutgoing, let callSid = session.callSid {
             // User declined an incoming call before answering -> reject on the backend.
@@ -452,11 +493,12 @@ extension CallManager: CallDelegate {
             provider.reportOutgoingCall(with: uuid, connectedAt: Date())
             postOutgoingCallState(.connected, uuid: uuid)
         }
-        presentInCallScreen(for: uuid)
+        presentInCallScreen(for: uuid, twilioCallSid: call.sid)
     }
 
     func callDidFailToConnect(call: Call, error: Error) {
         guard let uuid = call.uuid else { return }
+        disconnectingCalls.remove(uuid)
         answerActions[uuid]?.fail()
         answerActions[uuid] = nil
         provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
@@ -468,6 +510,7 @@ extension CallManager: CallDelegate {
 
     func callDidDisconnect(call: Call, error: Error?) {
         guard let uuid = call.uuid else { return }
+        disconnectingCalls.remove(uuid)
         let reason: CXCallEndedReason = (error == nil) ? .remoteEnded : .failed
         provider.reportCall(with: uuid, endedAt: Date(), reason: reason)
         if sessions[uuid]?.isOutgoing == true {

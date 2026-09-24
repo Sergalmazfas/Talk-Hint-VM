@@ -22,6 +22,7 @@ final class SessionStore {
     private let activeNumberIdKey = "talkhint.active.number.id"
     private let activeModeKey = "talkhint.assistant.mode"
     private let languageKey = "talkhint.assistant.language"
+    private let copilotLanguageKey = "talkhint.copilot.language"
     private let callModeKey = "talkhint.user.call.mode"
     private let callGoalKey = "talkhint.assistant.goal"
     private let activePromptIdKey = "talkhint.assistant.prompt.id"
@@ -77,6 +78,19 @@ final class SessionStore {
     var language: String {
         get { UserDefaults.standard.string(forKey: languageKey) ?? "ru" }
         set { UserDefaults.standard.set(newValue, forKey: languageKey) }
+    }
+
+    /// Copilot's owner-facing translation language. Kept separate from the
+    /// Hint language so selecting Copilot never changes live Hint behavior.
+    var copilotLanguage: String {
+        get {
+            let value = UserDefaults.standard.string(forKey: copilotLanguageKey) ?? "ru"
+            return ["ru", "es", "uk", "kk"].contains(value) ? value : "ru"
+        }
+        set {
+            let value = ["ru", "es", "uk", "kk"].contains(newValue) ? newValue : "ru"
+            UserDefaults.standard.set(value, forKey: copilotLanguageKey)
+        }
     }
 
     /// Voice representing the Owner in Translator calls. Invalid or missing
@@ -153,6 +167,7 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: activeNumberIdKey)
         UserDefaults.standard.removeObject(forKey: activeModeKey)
         UserDefaults.standard.removeObject(forKey: languageKey)
+        UserDefaults.standard.removeObject(forKey: copilotLanguageKey)
         UserDefaults.standard.removeObject(forKey: callModeKey)
         UserDefaults.standard.removeObject(forKey: callGoalKey)
         UserDefaults.standard.removeObject(forKey: activePromptIdKey)

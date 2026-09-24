@@ -145,6 +145,7 @@ export function estimateTurnCostUsd(model: string, usage: any): number | undefin
 export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSession {
   private ws: WebSocket | null = null;
   private listeners: Array<(ev: TranslationEvent) => void> = [];
+  private readyEvent?: Extract<TranslationEvent, { type: "ready" }>;
   private connected = false;
   private closedEmitted = false;
   private model = DEFAULT_MODEL;
@@ -207,6 +208,9 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
 
   onEvent(cb: (ev: TranslationEvent) => void): void {
     this.listeners.push(cb);
+    // startSession() resolves when the socket opens, while session.updated
+    // can race that resolution. Replay readiness to late subscribers.
+    if (this.readyEvent) cb(this.readyEvent);
   }
 
   private emit(ev: TranslationEvent) {
@@ -384,13 +388,14 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
       case "session.created":
         break;
       case "session.updated":
-        this.emit({
+        this.readyEvent = {
           type: "ready",
           provider: "openai-realtime",
           model: this.model,
           voice: this.voice,
           instructions: this.instructions,
-        });
+        };
+        this.emit(this.readyEvent);
         break;
       case "input_audio_buffer.speech_started": {
         const ts = Date.now();

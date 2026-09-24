@@ -32,6 +32,14 @@ final class HomeViewController: UIViewController {
     private let recentsStack = UIStackView()
     private let recentsHeader = UIStackView()
     private let callButton = UIButton(type: .system)
+    private let copilotLanguageButton = UIButton(type: .system)
+
+    private static let copilotLanguages: [(code: String, key: String)] = [
+        ("ru", "copilot.language.ru"),
+        ("es", "copilot.language.es"),
+        ("uk", "copilot.language.uk"),
+        ("kk", "copilot.language.kk"),
+    ]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -63,7 +71,8 @@ final class HomeViewController: UIViewController {
     private func buildUI() {
         // Header: "Calls" + gear.
         let titleLabel = UILabel()
-        titleLabel.text = NSLocalizedString(callMode == .hint ? "home.title" : "translator.title", comment: "")
+        titleLabel.text = NSLocalizedString(callMode == .hint ? "home.title" :
+                                            (callMode == .copilot ? "copilot.title" : "translator.title"), comment: "")
         titleLabel.font = .systemFont(ofSize: 32, weight: .bold)
         titleLabel.textColor = .label
 
@@ -180,6 +189,14 @@ final class HomeViewController: UIViewController {
         // Keypad.
         let keypad = buildKeypad()
 
+        copilotLanguageButton.setTitle(copilotLanguageTitle(), for: .normal)
+        copilotLanguageButton.setImage(UIImage(systemName: "globe"), for: .normal)
+        copilotLanguageButton.tintColor = Theme.green
+        copilotLanguageButton.accessibilityIdentifier = "copilot-language-picker"
+        copilotLanguageButton.contentHorizontalAlignment = .leading
+        copilotLanguageButton.addTarget(self, action: #selector(copilotLanguageTapped), for: .touchUpInside)
+        copilotLanguageButton.isHidden = callMode != .copilot
+
         // Call button.
         var callConfig = UIButton.Configuration.filled()
         callConfig.cornerStyle = .capsule
@@ -227,7 +244,9 @@ final class HomeViewController: UIViewController {
 
         let goalRow = UIStackView(arrangedSubviews: [UIView(), goalBadge])
         goalRow.isHidden = callMode != .hint
-        let root = UIStackView(arrangedSubviews: [header, fieldCard, goalRow, keypad, recentsHeader, recentsStack])
+        let root = UIStackView(arrangedSubviews: [
+            header, fieldCard, goalRow, copilotLanguageButton, keypad, recentsHeader, recentsStack
+        ])
         root.axis = .vertical
         root.spacing = 16
         root.setCustomSpacing(20, after: keypad)
@@ -546,6 +565,36 @@ final class HomeViewController: UIViewController {
         navigationController?.pushViewController(SettingsViewController(), animated: true)
     }
 
+    private func copilotLanguageTitle() -> String {
+        let code = SessionStore.shared.copilotLanguage
+        let name = Self.copilotLanguages.first(where: { $0.code == code })
+            .map { NSLocalizedString($0.key, comment: "") } ?? NSLocalizedString("copilot.language.ru", comment: "")
+        return NSLocalizedString("copilot.language.selected", comment: "").replacingOccurrences(of: "%@", with: name)
+    }
+
+    @objc private func copilotLanguageTapped() {
+        guard callMode == .copilot else { return }
+        let sheet = UIAlertController(
+            title: NSLocalizedString("copilot.language.title", comment: ""),
+            message: nil,
+            preferredStyle: .actionSheet)
+        for option in Self.copilotLanguages {
+            let title = NSLocalizedString(option.key, comment: "")
+            let action = UIAlertAction(title: title, style: .default) { [weak self] _ in
+                SessionStore.shared.copilotLanguage = option.code
+                self?.copilotLanguageButton.setTitle(self?.copilotLanguageTitle(), for: .normal)
+            }
+            sheet.addAction(action)
+        }
+        sheet.addAction(UIAlertAction(
+            title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = copilotLanguageButton
+            popover.sourceRect = copilotLanguageButton.bounds
+        }
+        present(sheet, animated: true)
+    }
+
     @objc private func prepareTapped() {
         let prepare = PrepareViewController()
         prepare.onGoalConfirmed = { [weak self] in
@@ -561,7 +610,7 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func seeAllTapped() {
-        tabBarController?.selectedIndex = 2 // History
+        tabBarController?.selectedIndex = 3 // History
     }
 
     @objc private func callTapped() {

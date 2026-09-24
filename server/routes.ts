@@ -58,6 +58,11 @@ if (SIGNATURE_CHECK_DISABLE_REQUESTED && IS_PRODUCTION) {
   );
 }
 
+/** Conference routing is shared by normal iOS and no-Hint Copilot calls. */
+export function isIosConferenceClientType(clientType: string | null | undefined): boolean {
+  return clientType === "ios" || clientType === "ios_copilot";
+}
+
 // Call timeout in seconds - prevents early disconnect during silence/pauses
 const CALL_TIMEOUT = parseInt(process.env.TALKHINT_CALL_TIMEOUT || "90", 10);
 // Maximum call duration in seconds - safety limit to prevent runaway charges
@@ -201,6 +206,17 @@ async function recoverAirAtomaDeliveryIfMissing(
 
   const call = await storage.getCallByCallSid(callSid);
   if (!call || !call.userId) return;
+  // Copilot calls intentionally have no transcript/CRM delivery. Their call
+  // record still receives normal status and duration updates.
+  if ((call.metadata as any)?.mode === "copilot") return;
+  // Incoming Copilot acceptance persists its mode on pendingCalls in the same
+  // update that marks it accepted. Consult that durable gate as a fail-closed
+  // fallback if the separate history metadata write was interrupted.
+  const [pending] = await db.select({ clientType: pendingCalls.clientType })
+    .from(pendingCalls)
+    .where(eq(pendingCalls.callSid, callSid))
+    .limit(1);
+  if (pending?.clientType === "ios_copilot") return;
 
   // An empty transcript is fine: we still send a minimal record (caller name/number
   // + duration) so a sub-5s call or a Deepgram miss is never silently dropped.
@@ -898,9 +914,15 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     try {
       const user = (req as any).user;
       const { callSid } = req.body;
-      // clientType tells the hold loop how to bridge: "browser" (default) -> <Dial><Client>,
-      // "ios" -> caller joins a conference that the iOS app connects into outbound.
-      const clientType = req.body.clientType === "ios" ? "ios" : "browser";
+      // clientType tells the hold loop how to bridge: "browser" (default) ->
+      // <Dial><Client>, "ios"/"ios_copilot" -> conference joining.
+      // Never accept arbitrary client types.
+      const clientType: "browser" | "ios" | "ios_copilot" =
+        req.body.clientType === "ios_copilot"
+          ? "ios_copilot"
+          : req.body.clientType === "ios"
+            ? "ios"
+            : "browser";
 
       if (!callSid) {
         return res.status(400).json({ error: "callSid required" });
@@ -920,6 +942,14 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // Bind this call to its owner so the Twilio media stream routes live
       // transcripts/hints only to this user's UI clients.
       setCallOwner(callSid, user.id);
+      if (clientType === "ios_copilot") {
+        const call = await storage.getCallByCallSid(callSid);
+        if (call) {
+          await storage.updateCall(call.id, {
+            metadata: { ...((call.metadata as any) || {}), mode: "copilot" },
+          });
+        }
+      }
 
       const timestamp = new Date().toISOString();
       console.log(`[Call] ${callSid} @ ${timestamp} - Accept received (clientType=${clientType}), status changed to 'accepted'`);
@@ -1001,21 +1031,24 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       if (pendingCall.status === "accepted") {
         const host = req.get("host") || "talkhint.app";
         const streamUrl = `wss://${host}/twilio-stream`;
+        const copilotCall = pendingCall.clientType === "ios_copilot";
         
         // Start media stream for transcription. The caller leg with both_tracks
         // captures the caller's audio plus whatever is played to the caller (the
         // bridged agent), so transcription works for both client and conference paths.
-        const start = twimlResponse.start();
-        start.stream({
-          url: streamUrl,
-          track: "both_tracks"
-        }).parameter({ name: "callType", value: "incoming_answered" });
+        if (!copilotCall) {
+          const start = twimlResponse.start();
+          start.stream({
+            url: streamUrl,
+            track: "both_tracks"
+          }).parameter({ name: "callType", value: "incoming_answered" });
+        }
         
         // Diagnostic recording (Task #173): incoming calls answered by a
         // diagnostic-flagged owner are recorded via native Twilio recording.
         // Fail-closed helper — any error means "don't record"; a recording
         // failure can never stop or degrade the call.
-        const diagRecording = await isDiagnosticRecordingUser(pendingCall.userId);
+        const diagRecording = !copilotCall && await isDiagnosticRecordingUser(pendingCall.userId);
         if (diagRecording) {
           void stampRecordingPolicy(callSid);
         }
@@ -1023,7 +1056,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
 
         twimlResponse.say({ voice: "alice" }, "Connecting you now.");
         
-        if (pendingCall.clientType === "ios") {
+        if (isIosConferenceClientType(pendingCall.clientType)) {
           // iOS path: caller joins a per-call conference and waits. The iOS app
           // connects into the same conference via an outbound Twilio connect()
           // (handled in /twilio/voice), bridging the two legs.
@@ -1208,6 +1241,11 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     const translatorPlayback = String(req.body.TranslatorPlayback || req.query.TranslatorPlayback || "");
     const translatorCallId = String(req.body.TranslatorCallId || req.query.TranslatorCallId || "");
     const translatorLeg = String(req.body.TranslatorLeg || req.query.TranslatorLeg || "");
+    // Copilot is enabled only by this explicit, signed Twilio app parameter.
+    // The client identity is checked again below; arbitrary caller legs cannot
+    // select this routing mode.
+    const copilotParam = String(req.body.CopilotMode || req.query.CopilotMode || "");
+    const copilotRequested = copilotParam.length > 0;
     
     const timestamp = new Date().toISOString();
     console.log(`[TwiML Voice] ===== CALL ${callSid} @ ${timestamp} =====`);
@@ -1348,7 +1386,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
           joinAuthorized = !!pending
             && pending.userId === joiningUserId
             && pending.status === "accepted"
-            && pending.clientType === "ios";
+            && isIosConferenceClientType(pending.clientType);
           if (!joinAuthorized) {
             console.warn(`[TwiML Voice] CONFERENCE JOIN denied for ${fromNumber} -> ${joinConferenceRoom} (pending owner/status/type mismatch)`);
           }
@@ -1469,6 +1507,14 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // Try to get caller ID based on client identity
       let userCallerId = TWILIO_PHONE_NUMBER;
       let outboundLineId: number | null = null;
+      const userIdentity = /^client:user-([A-Za-z0-9-]+)$/.exec(String(fromNumber || ""));
+      const validE164 = /^\+[1-9]\d{7,14}$/.test(String(toNumber));
+      if (copilotRequested && (!userIdentity || copilotParam !== "v1" || !validE164)) {
+        console.warn(`[TwiML Voice] Rejecting invalid Copilot request from ${fromNumber} to ${toNumber}`);
+        twimlResponse.hangup();
+        return res.type("text/xml").send(twimlResponse.toString());
+      }
+      const copilotMode = copilotParam === "v1" && !!userIdentity && validE164;
       
       // Support both formats:
       // - Line-based: "client:line_X" (from /twilio/access-token with line auth)
@@ -1493,7 +1539,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         } catch (e: any) {
           console.error(`[TwiML Voice] Line lookup failed, using default:`, e.message);
         }
-      } else if (fromNumber && fromNumber.startsWith("client:user-")) {
+      } else if (userIdentity) {
         // User-based identity: lookup from phoneNumbers
         const userId = fromNumber.replace("client:user-", "");
         // Register this outbound call's owner so its live transcripts/hints are
@@ -1522,7 +1568,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // Record this outbound call in history, scoped to the placing user. Only
       // user-based outbound calls have a known owner; line-based calls don't, so
       // we skip those. Final status/endedAt come later via /twilio/status.
-      if (fromNumber && fromNumber.startsWith("client:user-")) {
+      if (userIdentity) {
         const placingUserId = fromNumber.replace("client:user-", "");
         try {
           const existing = await storage.getCallByCallSid(callSid);
@@ -1534,6 +1580,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
               toNumber: String(toNumber),
               direction: "outgoing",
               status: "active",
+              ...(copilotMode ? { metadata: { mode: "copilot" } } : {}),
             });
             console.log("[TwiML Voice] Created outgoing call record:", callSid);
           }
@@ -1542,12 +1589,15 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         }
       }
       
-      // Start media stream for transcription
-      const start = twimlResponse.start();
-      start.stream({
-        url: streamUrl,
-        track: "both_tracks"
-      });
+      // Copilot is normal voice only: preserve the Dial and call history, but
+      // do not start Hint media processing.
+      if (!copilotMode) {
+        const start = twimlResponse.start();
+        start.stream({
+          url: streamUrl,
+          track: "both_tracks"
+        });
+      }
       
       // action fires when the <Dial> completes, on the PARENT (client) leg, so its
       // CallSid matches the record created above and DialCallStatus gives the final
@@ -1567,7 +1617,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // Recording is controlled only by the per-user admin capability. The
       // legacy global env toggle is intentionally ignored so no other user or
       // line can turn recording on.
-      const shouldRecord = diagnosticTestRecording;
+      const shouldRecord = !copilotMode && diagnosticTestRecording;
       if (shouldRecord) {
         // The admin-enabled diagnostic profile records silently regardless of
         // the counterpart number. No global or line-based switch can enable it.

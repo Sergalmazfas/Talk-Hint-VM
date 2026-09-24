@@ -44,6 +44,7 @@ import { handlePrepareConfirmGoal } from "./prepareConfirm";
 import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
+import { createCopilotStream } from "./copilotStream";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -816,7 +817,7 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream"].includes(pathname)) {
+    if (!["/twilio-stream", "/media", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -839,7 +840,7 @@ export function setupWebSocket(server: Server) {
     // live call transcripts and AI hints, so they MUST authenticate as a user.
     // The Twilio media channels (/twilio-stream, /media) are machine-to-machine
     // from Twilio and are not user-authenticated here.
-    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream" || pathname === "/translator" || pathname === "/translator-feed";
+    const requiresAuth = pathname === "/ui" || pathname === "/honor-stream" || pathname === "/translator" || pathname === "/translator-feed" || pathname === "/copilot-stream";
     if (requiresAuth) {
       const token = parsedUrl.searchParams.get("token");
       if (!token) {
@@ -880,6 +881,8 @@ export function setupWebSocket(server: Server) {
       // Read-only owner-scoped call telemetry; unlike /translator this never
       // starts a provider session and unlike /ui it cannot receive hints.
       if (userId) subscribeTranslatorFeed(userId, ws);
+    } else if (pathname === "/copilot-stream") {
+      if (userId) createCopilotStream(ws, userId);
     } else if (pathname === "/translator-spike-stream") {
       handleTranslatorSpikeStream(ws);
     } else if (pathname === "/translator-twilio-stream") {

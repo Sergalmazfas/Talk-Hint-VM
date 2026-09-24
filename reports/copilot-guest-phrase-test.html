@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Copilot guest phrase test</title>
+  <style>
+    body { max-width: 34rem; margin: 3rem auto; padding: 0 1rem; font: 18px/1.5 system-ui, sans-serif; color: #142238; }
+    button { border: 0; border-radius: 12px; background: #1763d5; color: white; font: inherit; padding: .8rem 1.2rem; margin: .5rem .5rem .5rem 0; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    small { display: block; color: #485669; }
+  </style>
+</head>
+<body>
+  <h1>Guest-side English phrase</h1>
+  <p>Play this on a <strong>second device near the Guest phone’s microphone</strong> during a consenting Copilot test call. Do not play it beside the Owner phone.</p>
+  <p id="phrase" aria-live="polite">I would like to confirm the meeting time for tomorrow.</p>
+  <button id="play">Play phrase</button>
+  <button id="next">Next phrase</button>
+  <small id="status">Uses your browser’s English text-to-speech voice. No microphone, upload, or app audio path is involved.</small>
+  <script>
+    const phrases = [
+      "I would like to confirm the meeting time for tomorrow.",
+      "Could you please tell me where the entrance is?",
+      "The address is twenty five Market Street."
+    ];
+    let index = 0;
+    const phrase = document.getElementById("phrase");
+    const status = document.getElementById("status");
+    document.getElementById("next").addEventListener("click", () => {
+      speechSynthesis.cancel();
+      phrase.textContent = phrases[index = (index + 1) % phrases.length];
+    });
+    document.getElementById("play").addEventListener("click", () => {
+      if (!("speechSynthesis" in window)) {
+        status.textContent = "This browser has no built-in speech synthesis. Read the sentence aloud instead.";
+        return;
+      }
+      speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(phrases[index]);
+      utterance.lang = "en-US";
+      utterance.rate = 0.88;
+      utterance.onerror = () => { status.textContent = "Playback failed. Try another browser or read the sentence aloud."; };
+      speechSynthesis.speak(utterance);
+    });
+  </script>
+</body>
+</html>

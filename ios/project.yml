@@ -31,6 +31,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_BITCODE: NO
+        SWIFT_OBJC_BRIDGING_HEADER: TalkHint/TalkHint-Bridging-Header.h
     dependencies:
       - package: TwilioVoice
         product: TwilioVoice

@@ -55,13 +55,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
+        let copilot = HomeViewController(mode: .copilot)
+        copilot.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("tab.copilot", comment: ""),
+            image: UIImage(systemName: "mic.circle"), tag: 2)
+
         let history = CallHistoryViewController()
         history.tabBarItem = UITabBarItem(
-            title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 2)
+            title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 3)
 
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),
             UINavigationController(rootViewController: translator),
+            UINavigationController(rootViewController: copilot),
             UINavigationController(rootViewController: history),
         ]
         return tabController

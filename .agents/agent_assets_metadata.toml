@@ -187,3 +187,17 @@ mtime_ms = 1790236355883
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/35fdfc45-3c3e-406b-bd1a-309c9cfd003b/3c1af0cf-a168-47ab-99d6-b931cc056ca7"
 storage_version_token = "1790236367150674"
 content_type = "text/html"
+
+[[outputs]]
+id = "aN3dNkIZJDIYQ20UHCBhG"
+uri = "file://reports/copilot-guest-phrase-test.html"
+type = "html"
+title = "Copilot: тестовые фразы Guest"
+description = "Откройте на втором устройстве рядом с телефоном Guest; браузер произнесёт английские фразы без участия другого человека."
+logical_id = "0fcc91b2-26c7-4e03-9ad3-feb074db1e4e"
+content_hash = "sha256:ee5c8949100876cbde0a7a216f8aca86682c40f56c7431c1b2cdc79fe1f605f3"
+size = 2256
+mtime_ms = 1790237722363
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0fcc91b2-26c7-4e03-9ad3-feb074db1e4e/b3ea8ec1-4818-451a-a7a9-3c82254ea6e5"
+storage_version_token = "1790237968170377"
+content_type = "text/html"

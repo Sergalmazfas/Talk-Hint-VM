@@ -105,8 +105,11 @@ final class APIClient {
 
     /// Accepts a pending call as an iOS client. Returns the conference room name
     /// (e.g. "call-{callSid}") that the outbound Twilio connect() must join.
-    func acceptCall(callSid: String) async throws -> String {
-        let body: [String: Any] = ["callSid": callSid, "clientType": "ios"]
+    func acceptCall(callSid: String, copilot: Bool = false) async throws -> String {
+        let body: [String: Any] = [
+            "callSid": callSid,
+            "clientType": copilot ? "ios_copilot" : "ios"
+        ]
         let data = try await request("/api/call/accept", method: "POST", json: body, authenticated: true)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let conference = obj["conference"] as? String else {
