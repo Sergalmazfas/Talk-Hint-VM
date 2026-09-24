@@ -67,13 +67,13 @@ final class CopilotCallCoordinator {
         let transport = stream
         let gate = callbackGate
         device.capturedPCM = { bytes, count, _, _, epoch in
-            let copy = Data(bytes: bytes, count: count)
+            let copy = Data(bytes: bytes, count: Int(count))
             if gate.allows(epoch) {
                 transport.sendAudio(pcm16Base64: copy.base64EncodedString(), direction: "private")
             }
         }
         device.remotePCM = { bytes, count, _, _, _ in
-            let copy = Data(bytes: bytes, count: count)
+            let copy = Data(bytes: bytes, count: Int(count))
             if gate.allowsRemote() {
                 transport.sendAudio(pcm16Base64: copy.base64EncodedString(), direction: "guest")
             }
@@ -101,7 +101,7 @@ final class CopilotCallCoordinator {
         pendingEpoch = token
         gateClosed = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let acknowledged = self?.device.waitForOwnerUplinkClosed(token, timeout: 0.5) ?? false
+            let acknowledged = self?.device.wait(forOwnerUplinkClosed: token, timeout: 0.5) ?? false
             DispatchQueue.main.async {
                 guard let self, !self.stopped, self.gateClosed else {
                     completion(false)
@@ -144,10 +144,10 @@ final class CopilotCallCoordinator {
         // uplink after the user's hold ends.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            self.device.finishPrivateCaptureAtFrameBoundary(epoch)
-            let drained = self.device.waitForPrivateDrain(epoch, timeout: 0.5)
+            self.device.finishPrivateCapture(atFrameBoundary: epoch)
+            let drained = self.device.wait(forPrivateDrain: epoch, timeout: 0.5)
             DispatchQueue.main.async {
-                guard let self, !self.stopped else { return }
+                guard !self.stopped else { return }
                 guard drained else {
                     // Leave the device closed and stop the transport; the UI
                     // intentionally remains disabled until the call ends.

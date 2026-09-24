@@ -59,11 +59,14 @@ NS_CLASS_AVAILABLE(NA, 11_0)
 /// acknowledged only after a subsequent capture callback has applied silence.
 - (uint64_t)closeOwnerUplinkAtFrameBoundary;
 - (BOOL)isOwnerUplinkClosed;
-- (BOOL)waitForOwnerUplinkClosed:(uint64_t)token timeout:(NSTimeInterval)timeout;
-- (BOOL)waitForPrivateDrain:(uint64_t)token timeout:(NSTimeInterval)timeout;
+- (BOOL)waitForOwnerUplinkClosed:(uint64_t)token timeout:(NSTimeInterval)timeout
+    NS_SWIFT_NAME(wait(forOwnerUplinkClosed:timeout:));
+- (BOOL)waitForPrivateDrain:(uint64_t)token timeout:(NSTimeInterval)timeout
+    NS_SWIFT_NAME(wait(forPrivateDrain:timeout:));
 /// Stops accepting private frames for this epoch at the next capture
 /// boundary. The uplink remains silent; this never opens the gate.
-- (void)finishPrivateCaptureAtFrameBoundary:(uint64_t)epoch;
+- (void)finishPrivateCaptureAtFrameBoundary:(uint64_t)epoch
+    NS_SWIFT_NAME(finishPrivateCapture(atFrameBoundary:));
 - (void)openOwnerUplink;
 /// Resets per-call privacy state. Call only before a new call is connected.
 - (void)prepareForNewCall;
