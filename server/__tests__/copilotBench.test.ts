@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { Script } from "node:vm";
 import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
 import { buildCopilotBenchPage, copilotBenchConfig, handleCopilotBenchStream } from "../translation/copilotBench";
+import { COPILOT_GUIDED_CASES } from "../translation/copilotGuidedCases";
 
 const startSession = vi.hoisted(() => vi.fn());
 vi.mock("../translation/openaiRealtimeTranslator", async (importOriginal) => ({
@@ -57,12 +58,23 @@ describe("Copilot translation comparison (no phone calls)", () => {
     expect(html).toContain("/copilot-bench-stream?token=");
     expect(html).toContain("Guest EN → RU");
     expect(html).toContain("Owner private RU → EN");
-    expect(html).toContain("No phone call");
-    expect(html).toContain("Download JSON evidence");
+    expect(html).toContain("без телефонного звонка");
+    expect(html).toContain("Скачать JSON с результатами и аудио");
+    expect(html).toContain("runGuidedAll");
+    expect(html).toContain("readAsDataURL(c.blob)");
     expect(html).not.toContain("OPENAI_API_KEY");
     const js = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     expect(js).toBeTruthy();
     expect(() => new Script(js!)).not.toThrow();
+  });
+
+  it("offers 15 distinct guided speech cases for both call directions without a real caller's number", () => {
+    expect(COPILOT_GUIDED_CASES).toHaveLength(15);
+    expect(new Set(COPILOT_GUIDED_CASES.map(c => c.id)).size).toBe(15);
+    expect(COPILOT_GUIDED_CASES.filter(c => c.direction === "private").length).toBeGreaterThan(10);
+    expect(COPILOT_GUIDED_CASES.filter(c => c.direction === "guest").length).toBeGreaterThan(1);
+    expect(COPILOT_GUIDED_CASES.map(c => c.phrase).join(" ")).toContain("не раньше");
+    expect(COPILOT_GUIDED_CASES.map(c => c.phrase).join(" ")).not.toContain("954-218-7485");
   });
 
   it("validates candidate, relays text evidence, never relays voice audio and cancels on close", async () => {
