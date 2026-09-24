@@ -145,3 +145,17 @@ mtime_ms = 1790227093896
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ff3e7cef-818f-45d6-80cf-1949ec71ec96/f3696725-ab0f-49d1-915d-24c9cd21ad89"
 storage_version_token = "1790227138201389"
 content_type = "text/html"
+
+[[outputs]]
+id = "rpQeqSZE-pr4xIErRouwm"
+uri = "file://reports/copilot-private-mic-design.html"
+type = "html"
+title = "Copilot V1: приватный микрофон — схема для согласования"
+description = "Точный предлагаемый аудиомаршрут, переиспользование Realtime text mode, границы приватности, незакрытые технические проверки и отдельное направление V2."
+logical_id = "2afe4ba0-39e9-4416-b314-dd6aca962ca2"
+content_hash = "sha256:af1350ccb8121fa96106e4bd75a30ff2fc8d9bacf44c0fa45edb1341171e3bc1"
+size = 21024
+mtime_ms = 1790233363356
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2afe4ba0-39e9-4416-b314-dd6aca962ca2/5843caf2-1940-4f40-b9fb-efa6b35142d1"
+storage_version_token = "1790233384178384"
+content_type = "text/html"
