@@ -106,7 +106,7 @@ final class CopilotViewController: UIViewController {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.ptt.isEnabled = !self.releasePending
-            self?.status.text = NSLocalizedString("copilot.ready", comment: "")
+            self.status.text = NSLocalizedString("copilot.ready", comment: "")
         }
     }
 
@@ -148,6 +148,7 @@ final class CopilotViewController: UIViewController {
                     self.stream.holdStart(holdId: id)
                 }
             }
+        }
     }
 
     private func deliverReleaseIfNeeded() {
