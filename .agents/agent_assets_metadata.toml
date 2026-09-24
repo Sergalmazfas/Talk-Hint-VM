@@ -6,18 +6,21 @@ id = "JmNOu1_JtTeADCutOEgIp"
 uri = "file://TRAINING_PIPELINE_AUDIT.md"
 type = "text"
 title = "TalkHint Training Pipeline Audit (May 2026)"
+logical_id = "76d26a49-e7d7-4967-b495-967ac3f9b15f"
 
 [[outputs]]
 id = "7bf4U6LErR6ZBcMcH6KDe"
 uri = "file://LIVE_PIPELINE_AUDIT.md"
 type = "text"
 title = "TalkHint LIVE Call Pipeline Audit (May 2026)"
+logical_id = "e1ec5a03-5f04-457d-8a7c-d4e3d5c1a4f5"
 
 [[outputs]]
 id = "bYjmkFJ0fZJzg9eD92oHt"
 uri = "file://docs/TalkHint-AirAtom-Status-Audit.md"
 type = "text"
 title = "TalkHint + AirAtom — Status Audit"
+logical_id = "900f94cc-a4ff-432a-a3be-c7fd78fe91d6"
 
 [[outputs]]
 id = "WRFcdI-BzcwNX6gxT7Alw"
@@ -25,6 +28,7 @@ uri = "file://docs/emma-tutor-ui-baseline.md"
 type = "text"
 title = "Emma Tutor — дизайн-снимок (as-built baseline)"
 description = "Полное описание текущего дизайна Emma: 16 экранов, визуальные параметры, таблицы компонентов и состояний."
+logical_id = "09cb856f-6468-4f0e-ba72-d5685f4d4cea"
 
 [[outputs]]
 id = "wc4Mhg8_flvYRa1zuxlJ_"
@@ -32,6 +36,7 @@ uri = "file://docs/emma-tutor-v4-design-spec.md"
 type = "text"
 title = "Emma Tutor v4 — дизайн-пакет (спецификация)"
 description = "Спецификация нового дизайна: сравнение, размеры/цвета, инвентарь компонентов, что сохранено, что потребует разработки. Продакшен-код не менялся."
+logical_id = "e2cf2c46-31db-4059-b022-3e2110b1aadf"
 
 [[outputs]]
 id = "2WufFvJXc6AqHsXqwn7Os"
@@ -39,6 +44,7 @@ uri = "file://docs/emma-tutor-v4-design-freeze.md"
 type = "text"
 title = "Emma Tutor v4 — FINAL Design Package"
 description = "Полный финальный дизайн-пакет: каталог 19 состояний, матрица состояний, инвентарь компонентов, потоки взаимодействия, локализация, скролл/перевод/подсказки/вложения, допущения по анимации 3D Emma, дельта реализации и отложенные фичи. Production-код не менялся."
+logical_id = "8914a666-86d3-49c6-94c6-fd6f6a5b6833"
 
 [[outputs]]
 id = "cjhKYYAcH2c_VdZwOr-fI"
@@ -46,6 +52,7 @@ uri = "file://docs/talkhint-status-report.md"
 type = "text"
 title = "TalkHint Status Report для Engine"
 description = "Полный отчёт о текущем состоянии TalkHint (10 разделов, VERIFIED/UNKNOWN, без секретов) — для передачи агенту движка."
+logical_id = "6a77c2b6-f5e8-40d7-9387-3f1f8aaa141d"
 
 [[outputs]]
 id = "WkQrJo1VJWASUEQZ3wFZP"
@@ -53,3 +60,18 @@ uri = "file://docs/tutor-current-ux-reference.md"
 type = "text"
 title = "Tutor UX — справочный документ"
 description = "Полное описание текущего Tutor UX (выбор репетитора, живой урок, Call Memory) для Engine Workbench."
+logical_id = "d9b95f67-4af7-455b-b1e7-188ff2eac2dc"
+
+[[outputs]]
+id = "PkuUJXgFeSiQ7k5FMqAin"
+uri = "file://reports/latest-call-diagnostic.html"
+type = "html"
+title = "Диагностика последнего звонка TalkHint"
+description = "Полный отчёт: 27 событий, 15 точных подсказок, все задержки и пропуски, транскрипт и доказательства. Только анализ, без изменений приложения."
+logical_id = "473e8bdb-efce-4534-b7df-7c2a41cc4fee"
+content_hash = "sha256:98a41926f345136e3c758c88488c5aa83743994eeb13132819853aca28906013"
+size = 38940
+mtime_ms = 1790211229288
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/473e8bdb-efce-4534-b7df-7c2a41cc4fee/bbea750e-d95d-43ea-9f94-734f487ba72c"
+storage_version_token = "1790211230490022"
+content_type = "text/html"
