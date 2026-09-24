@@ -276,6 +276,37 @@ describe("authenticated Copilot stream contract", () => {
     } finally { ws.close(); vi.useRealTimers(); }
   });
 
+  it("discards cancelled partial text before late STT even without turn_completed", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-cancel-first", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    vi.useFakeTimers();
+    try {
+      guest.emit({ type: "input_committed", ts: Date.now(), itemId: "first" });
+      guest.emit({ type: "response_created", ts: Date.now(), responseId: "cancelled", sourceItemId: "first" });
+      guest.emit({ type: "translated_transcript_delta", text: "incomplete question", responseId: "cancelled" });
+      guest.emit({ type: "response_cancelled", ts: Date.now(), responseId: "cancelled", reason: "turn_detected" });
+      guest.emit({ type: "source_transcript", text: "Complete source question", itemId: "first" });
+      guest.emit({ type: "translated_transcript_done", text: "stale translation", responseId: "cancelled" });
+      await vi.advanceTimersByTimeAsync(8_100);
+      expect(ws.frames.some(f => f.type.startsWith("text_") || f.code === "source_unavailable")).toBe(false);
+      expect(ws.closed).toBe(false);
+    } finally { ws.close(); vi.useRealTimers(); }
+  });
+
+  it("does not attach an uncommitted private response to a newer active hold", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-unknown-private", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "new-hold" })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "private", holdId: "new-hold", pcm16: Buffer.alloc(320).toString("base64") })));
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "old-response", sourceItemId: "old-uncommitted-item" });
+    privateSession.emit({ type: "source_transcript", text: "Old secret", itemId: "old-uncommitted-item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "Old translation", responseId: "old-response" });
+    expect(ws.frames.some(f => f.type.startsWith("text_") || f.text === "Old secret")).toBe(false);
+    ws.close();
+  });
+
   it("drops an uncertain old response once a distinct hold starts", async () => {
     const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-old-response", async () => true);
     ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
@@ -300,6 +331,18 @@ describe("authenticated Copilot stream contract", () => {
     await tick();
     expect(third.frames.at(-1)).toMatchObject({ type: "error", code: "provider_error" });
     third.close();
+  });
+
+  it("closes only the Copilot socket and cancels all translator sessions on a fatal provider error", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-fatal", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000, conversationFeed: true })));
+    await tick();
+    guest.emit({ type: "error", fatal: true, message: "model unavailable" });
+    expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "provider_error" });
+    expect(ws.closed).toBe(true);
+    expect(guest.value.cancel).toHaveBeenCalledOnce();
+    expect(privateSession.value.cancel).toHaveBeenCalledOnce();
+    expect(owner.value.cancel).toHaveBeenCalledOnce();
   });
 
   it("handles authorization errors and does not start providers after disconnect during authorization", async () => {

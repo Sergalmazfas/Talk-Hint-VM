@@ -37,3 +37,9 @@ Choose any future Copilot translation-model changes from isolated, identical rec
 **Why:** The dedicated live-translation model previously performed worse than the constrained Translator configuration; initial controlled Copilot comparisons showed both useful translations and subtle differences in meaning. Production behavior should not be switched on model branding or one smoke test.
 
 **How to apply:** Test both directions, short answers, names/numbers, consecutive turns, real noisy calls and repeatability; retain provider failures and unavailable source transcripts in evidence. Keep comparison sessions isolated from routing, private mic gating and production settings until a configuration has enough evidence to win.
+
+The guided web stand is sufficient for the current stage; prioritize debugging the actual iPhone Copilot audio/event path rather than polishing the stand or comparing models by default.
+
+**Why:** The user redirected work after the guided run: its speed and general accuracy were good enough to proceed, while the remaining concern is real-call behavior in ordinary noisy places and PRIVATE mic safety.
+
+**How to apply:** Only return to the stand if a specific production Copilot failure needs reproduction. Evaluate Guest and private Owner streams, noisy audio, stale/cancelled responses, public mic restoration, and call continuity on real devices before claiming real-call reliability.

@@ -200,13 +200,13 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       }
     }
     if (ev.type === "response_created" && direction === "private" && ev.responseId) {
-      // The provider may report response.created after the UI has released
-      // PTT. A candidate is safe only when no newer hold has started.
-      const holdId = (ev.sourceItemId ? privateItems.get(ev.sourceItemId) : undefined)
-        ?? ((activeHoldHasAudio ? activeHold : undefined) ?? endedHoldCandidate);
+      // Only a committed item attributed to a real hold can create private
+      // output. The current hold is not evidence that an older item belongs
+      // to it when provider events arrive late.
+      const holdId = ev.sourceItemId ? privateItems.get(ev.sourceItemId) : undefined;
       if (holdId) {
         responseHolds.set(responseKey(direction, ev.responseId), holdId);
-        endedHoldCandidate = undefined;
+        if (endedHoldCandidate === holdId) endedHoldCandidate = undefined;
       }
     } else if (ev.type === "source_transcript") {
       if (!ev.itemId || !ev.text.trim()) return;
@@ -226,6 +226,10 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       translation(direction, ev);
     } else if (ev.type === "translated_transcript_done") {
       translation(direction, ev);
+    } else if (ev.type === "response_cancelled" && ev.responseId) {
+      // A cancelled response may have buffered partial text awaiting STT.
+      // Discard it immediately, even if turn_completed is delayed or absent.
+      releaseResponse(responseKey(direction, ev.responseId));
     } else if (ev.type === "turn_completed" && ev.metrics.cancelled && ev.metrics.responseId) {
       releaseResponse(responseKey(direction, ev.metrics.responseId));
     } else if (ev.type === "invariant_violation") {
@@ -243,6 +247,8 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     } else if (ev.type === "error" && ev.fatal) {
       // Translation failure is isolated: it must not tear down the ordinary call.
       fail(ws, "provider_error", "Copilot translation is unavailable");
+      shutdown();
+      ws.close();
     }
   };
 
