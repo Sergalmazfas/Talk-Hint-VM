@@ -117,3 +117,17 @@ mtime_ms = 1790224385716
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/993b80d8-21ce-4077-9839-77d54a0a7eb8/f35ecd92-333c-4a8e-b782-5cfa3e7f9633"
 storage_version_token = "1790224483377618"
 content_type = "text/html"
+
+[[outputs]]
+id = "WPtXxQbKOw8__jtC8TbEg"
+uri = "file://reports/incoming-copilot-proposal.html"
+type = "html"
+title = "Входящий Copilot: предложение для согласования"
+description = "Что уже есть, один экран «Обо мне», безопасный импорт резюме, сценарии проверки и решения перед реализацией."
+logical_id = "729ad288-b40f-4159-8fd0-81c86e2380b9"
+content_hash = "sha256:8d01f50e10ee4aa872bd98365c6ab515c0423ebe460babdca5fa71d0787e8e8f"
+size = 30951
+mtime_ms = 1790224819733
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/729ad288-b40f-4159-8fd0-81c86e2380b9/5f583d5e-3671-4e53-a952-d6e285a6a177"
+storage_version_token = "1790224884297065"
+content_type = "text/html"
