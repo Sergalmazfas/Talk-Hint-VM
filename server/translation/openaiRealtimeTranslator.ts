@@ -199,6 +199,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
 
   constructor(config: RealtimeTranslationConfig) {
     this.config = config;
+    this.model = config.model || DEFAULT_MODEL;
     this.voice = config.voice || DEFAULT_VOICE;
     this.instructions = buildInterpreterInstructions(config.languages, {
       inputLang: config.sourceLangHint,

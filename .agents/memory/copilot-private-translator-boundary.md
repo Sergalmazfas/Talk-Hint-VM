@@ -31,3 +31,9 @@ Copilot's visual contract is a scrolling, Translator-style conversation above a 
 **Why:** The user explicitly distinguished the translation card from a hint and asked to see both sides of the actual conversation without the oversized full-screen text.
 
 **How to apply:** Keep private phrases out of the public conversation and Guest audio. Distinguish public Owner speech from private drafts; do not present a private draft as something already said to Guest. Keep the English translation visible while the Owner reads it aloud. Preserve the established Translator card layout rather than introducing a separate Copilot design.
+
+Choose any future Copilot translation-model changes from isolated, identical recorded-audio comparisons before changing the live phone flow. A clean synthetic phrase or absence of output on pure silence is not proof against real-call noise, multilingual hallucinations, or segmentation errors.
+
+**Why:** The dedicated live-translation model previously performed worse than the constrained Translator configuration; initial controlled Copilot comparisons showed both useful translations and subtle differences in meaning. Production behavior should not be switched on model branding or one smoke test.
+
+**How to apply:** Test both directions, short answers, names/numbers, consecutive turns, real noisy calls and repeatability; retain provider failures and unavailable source transcripts in evidence. Keep comparison sessions isolated from routing, private mic gating and production settings until a configuration has enough evidence to win.

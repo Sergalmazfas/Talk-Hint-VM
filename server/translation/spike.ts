@@ -36,6 +36,8 @@ import {
 import { runSemanticReview } from "./reviewJudge";
 import { analyzeForensicLog, type ForensicLogEntry } from "./forensics";
 import type { RealtimeTranslationSession } from "./provider";
+import { buildCopilotBenchPage, handleCopilotBenchStream } from "./copilotBench";
+export { handleCopilotBenchStream };
 
 const SPIKE_TOKEN = crypto.randomBytes(24).toString("hex");
 const SAMPLE_RATE = 24000;
@@ -518,6 +520,11 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
 }
 
 export function registerTranslatorSpike(app: Express) {
+  app.get("/translator-spike/copilot", (_req, res) => {
+    if (!isSpikeEnabled()) return res.status(404).send("Not found");
+    res.setHeader("Cache-Control", "no-store");
+    res.type("html").send(buildCopilotBenchPage(SPIKE_TOKEN));
+  });
   app.get("/translator-spike", (_req, res) => {
     if (!isSpikeEnabled()) return res.status(404).send("Not found");
     res.setHeader("Cache-Control", "no-store");
@@ -644,6 +651,7 @@ function buildSpikePageHtml(): string {
 </head>
 <body>
 <h1>Translator Realtime Spike — Run #2 stand</h1>
+<p><a href="/translator-spike/copilot">Open Copilot translation comparison →</a></p>
 <div class="sub">Continuous open-mic, server VAD. Use headphones — the translated voice will otherwise feed back into the mic. Dev-only stand; no telephony, no iOS. Changing a selector while live cleanly restarts the session.</div>
 <div class="row">
   <label>Provider <select id="providerSel"><option value="openai-realtime" selected>Current realtime translator</option><option value="openai-realtime-translate">OpenAI gpt-realtime-translate</option></select></label>

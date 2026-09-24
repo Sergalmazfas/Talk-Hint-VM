@@ -34,6 +34,8 @@ export interface RealtimeTranslationConfig {
    * The empty-transcript gate remains active.
    */
   microturnMinAudioMs?: number;
+  /** Optional model for isolated benchmark sessions; normal sessions use the provider default. */
+  model?: string;
   /** Provider-specific output voice id. Optional; provider picks a default. */
   voice?: string;
   inputFormat: AudioFormat;
