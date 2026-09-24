@@ -40,3 +40,4 @@
 - [Tutor page WKWebView caching](tutor-page-caching.md) — /tutor must be no-store + iOS ignores cache; stale cached page caused «5 deploys didn't help»; diag beacons need Bearer auth.
 - [Tutor / Calls separation](tutor-calls-separation.md) — Tutor tab = learning only (Session Report end screen); ALL call prep lives in Calls flow; Engine stays call-agnostic (MBLEx reuse).
 - [Translator realtime architecture](translator-spike.md) — RU↔EN uses isolated transports; PSTN routing is asymmetric so Owner hears Guest original and monitors both translations.
+- [LIVE prompt evaluation](live-prompt-evaluation.md) — compare both message roles and normalized output; reconstructed requests and single-turn success are not end-to-end proof.

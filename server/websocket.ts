@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, STRATEGY_MEMORY_RULES, buildLiveSystemPrompt, buildAskRefinePrompt } from "@shared/prompts";
+import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, STRATEGY_MEMORY_RULES, buildLiveSystemPrompt, buildLiveUserPrompt, buildAskRefinePrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
@@ -310,9 +310,7 @@ async function translateAndSuggest(text: string, goal: string, language: string 
       strategyMemory,
     });
 
-    const userPrompt = `Guest said: "${text}"
-
-Remember: Your suggestion must ADVANCE the user's goal. If guest said "let me check" or similar - just acknowledge once, don't push with new questions.`;
+    const userPrompt = buildLiveUserPrompt(text);
 
     // Parse a model's JSON reply into our hint shape (or null if unparseable).
     const parseHint = (raw: string) => {

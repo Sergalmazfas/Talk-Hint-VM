@@ -103,3 +103,17 @@ mtime_ms = 1790223501372
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3be3d901-1632-41a3-a914-4d38a20b1bbc/e835eec5-6feb-4b7e-94d9-ceef1a270b21"
 storage_version_token = "1790223523446845"
 content_type = "text/html"
+
+[[outputs]]
+id = "mfHW08Shmaimbn3iyzYBI"
+uri = "file://reports/live-conversation-experiment.html"
+type = "html"
+title = "LIVE-подсказки: сравнение до и после"
+description = "Шесть сценариев, два дополнительных контроля, реальные ответы модели и ограничения проверки."
+logical_id = "993b80d8-21ce-4077-9839-77d54a0a7eb8"
+content_hash = "sha256:509dae0235e25207040705f2944bfb889bb04559282b817b01cd2cbb6eb446c4"
+size = 373586
+mtime_ms = 1790224385716
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/993b80d8-21ce-4077-9839-77d54a0a7eb8/f35ecd92-333c-4a8e-b782-5cfa3e7f9633"
+storage_version_token = "1790224483377618"
+content_type = "text/html"
