@@ -8,7 +8,9 @@
 //
 
 #import "CopilotAudioDevice.h"
+#import "CopilotHoldGate.h"
 #import <AudioToolbox/AudioToolbox.h>
+#import <time.h>
 #import <unistd.h>
 
 static const UInt32 kBusOutput = 0;
@@ -97,6 +99,8 @@ static void CopilotRingRelease(CopilotAudioRing *ring) {
     _Atomic(uint64_t) _finishEpoch;
     _Atomic(uint64_t) _finishAckEpoch;
     _Atomic(UInt32) _finishFenceWriteIndex;
+    _Atomic(uint64_t) _openPendingEpoch;
+    _Atomic(uint64_t) _openAckEpoch;
     _Atomic(bool) _interrupted;
     _Atomic(bool) _forcedFailClosed;
     _Atomic(bool) _enabled;
@@ -115,6 +119,20 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
                                        const AudioTimeStamp *, UInt32, UInt32,
                                        AudioBufferList *);
 
+static uint64_t CopilotMonotonicNanoseconds(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+}
+static BOOL CopilotWaitUntil(NSTimeInterval timeout, BOOL (^condition)(void)) {
+    uint64_t deadline = CopilotMonotonicNanoseconds() + (uint64_t)(timeout * 1000000000.0);
+    for (;;) {
+        if (condition()) return YES;
+        if (CopilotMonotonicNanoseconds() >= deadline) return NO;
+        usleep(1000);
+    }
+}
+
 @implementation CopilotAudioDevice
 
 - (instancetype)init {
@@ -130,6 +148,8 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
         atomic_init(&_finishEpoch, 0);
         atomic_init(&_finishAckEpoch, 0);
         atomic_init(&_finishFenceWriteIndex, 0);
+        atomic_init(&_openPendingEpoch, 0);
+        atomic_init(&_openAckEpoch, 0);
         atomic_init(&_interrupted, false);
         atomic_init(&_forcedFailClosed, false);
         atomic_init(&_enabled, true);
@@ -200,6 +220,8 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
     atomic_store_explicit(&_finishEpoch, 0, memory_order_release);
     atomic_store_explicit(&_finishAckEpoch, 0, memory_order_release);
     atomic_store_explicit(&_finishFenceWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&_openPendingEpoch, 0, memory_order_release);
+    atomic_store_explicit(&_openAckEpoch, 0, memory_order_release);
 }
 
 - (TVOAudioFormat *)captureFormat { return [self currentFormat]; }
@@ -246,8 +268,9 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
 }
 
 - (uint64_t)closeOwnerUplinkAtFrameBoundary {
-    uint64_t token = atomic_fetch_add_explicit(&_closeToken, 1, memory_order_acq_rel) + 1;
-    atomic_store_explicit(&_ownerUplinkClosed, true, memory_order_release);
+    atomic_store_explicit(&_openPendingEpoch, 0, memory_order_release);
+    uint64_t token = CopilotHoldBegin(&_closeToken, &_finishRequested,
+                                       &_finishEpoch, &_ownerUplinkClosed);
     // The callback stores this token only after it has written a silent frame.
     return token;
 }
@@ -256,36 +279,49 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
 }
 - (BOOL)waitForOwnerUplinkClosed:(uint64_t)token timeout:(NSTimeInterval)timeout {
     if (token == 0) return NO;
-    uint64_t deadline = (uint64_t)(timeout * 1000000.0);
-    while (atomic_load_explicit(&_ackToken, memory_order_acquire) < token && deadline--) {
-        usleep(1);
-    }
-    return atomic_load_explicit(&_ackToken, memory_order_acquire) >= token;
+    return CopilotWaitUntil(timeout, ^BOOL {
+        return atomic_load_explicit(&self->_ackToken, memory_order_acquire) >= token;
+    });
 }
 - (BOOL)waitForPrivateDrain:(uint64_t)token timeout:(NSTimeInterval)timeout {
     if (token == 0) return NO;
-    uint64_t remaining = (uint64_t)(timeout * 1000000.0);
-    while (remaining--) {
+    return CopilotWaitUntil(timeout, ^BOOL {
         if (atomic_load_explicit(&_finishAckEpoch, memory_order_acquire) >= token) {
             UInt32 fence = atomic_load_explicit(&_finishFenceWriteIndex, memory_order_acquire);
             UInt32 read = atomic_load_explicit(&_capturedRing.readIndex, memory_order_acquire);
             if ((int32_t)(read - fence) >= 0) return YES;
         }
-        usleep(1);
-    }
-    return NO;
+        return NO;
+    });
 }
 - (void)finishPrivateCaptureAtFrameBoundary:(uint64_t)epoch {
     if (epoch == 0) return;
-    atomic_store_explicit(&_finishEpoch, epoch, memory_order_release);
-    atomic_store_explicit(&_finishRequested, true, memory_order_release);
+    CopilotHoldFinish(&_finishEpoch, &_finishRequested, epoch);
 }
-- (void)openOwnerUplink {
+- (BOOL)openOwnerUplink {
+    if (atomic_load_explicit(&_interrupted, memory_order_acquire) ||
+        atomic_load_explicit(&_forcedFailClosed, memory_order_acquire) ||
+        !atomic_load_explicit(&_enabled, memory_order_acquire)) return NO;
+    atomic_store_explicit(&_openPendingEpoch,
+                          atomic_load_explicit(&_closeToken, memory_order_acquire),
+                          memory_order_release);
     atomic_store_explicit(&_ownerUplinkClosed, false, memory_order_release);
+    return YES;
+}
+- (BOOL)waitForOwnerUplinkOpen:(uint64_t)epoch timeout:(NSTimeInterval)timeout {
+    if (epoch == 0) return NO;
+    return CopilotWaitUntil(timeout, ^BOOL {
+        return atomic_load_explicit(&self->_openAckEpoch, memory_order_acquire) >= epoch &&
+               !atomic_load_explicit(&self->_ownerUplinkClosed, memory_order_acquire) &&
+               !atomic_load_explicit(&self->_interrupted, memory_order_acquire) &&
+               !atomic_load_explicit(&self->_forcedFailClosed, memory_order_acquire) &&
+               atomic_load_explicit(&self->_enabled, memory_order_acquire);
+    });
 }
 - (void)audioInterrupted {
     atomic_store_explicit(&_interrupted, true, memory_order_release);
     atomic_store_explicit(&_ownerUplinkClosed, true, memory_order_release);
+    atomic_store_explicit(&_openPendingEpoch, 0, memory_order_release);
 }
 
 - (void)scheduleDrain {
@@ -363,6 +399,7 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
     AVAudioSessionInterruptionType type = [note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
     if (type == AVAudioSessionInterruptionTypeBegan) {
         [self audioInterrupted];
+        if (_formatDidChange) _formatDidChange([self currentFormat]);
     } else {
         atomic_store(&_interrupted, false);
         atomic_store(&_forcedFailClosed, false);
@@ -396,6 +433,7 @@ static OSStatus CopilotCaptureCallback(void *, AudioUnitRenderActionFlags *,
             TVOAudioDeviceReinitialize(context);
         });
     }
+    if (_formatDidChange) _formatDidChange([self currentFormat]);
 }
 @end
 
@@ -432,30 +470,38 @@ static OSStatus CopilotCaptureCallback(void *refCon, AudioUnitRenderActionFlags 
     OSStatus status = AudioUnitRender(device->_audioUnit, flags, timestamp, kBusInput, frames,
                                       &device->_captureBuffer);
     UInt32 bytes = device->_captureBuffer.mBuffers[0].mDataByteSize;
-    if (status != noErr || !device->_captureBytes || bytes == 0 ||
-        bytes > kMaxFrames * kChannels * kBytesPerSample) {
+    bool validCapture = status == noErr && device->_captureBytes && bytes > 0 &&
+                        bytes <= kMaxFrames * kChannels * kBytesPerSample;
+    if (!validCapture) {
         memset(device->_captureBytes, 0, frames * kChannels * kBytesPerSample);
         bytes = frames * kChannels * kBytesPerSample;
     }
-    bool closed = atomic_load_explicit(&device->_ownerUplinkClosed, memory_order_acquire) ||
-                  atomic_load_explicit(&device->_forcedFailClosed, memory_order_acquire) ||
-                  atomic_load_explicit(&device->_interrupted, memory_order_acquire);
+    bool forcedClosed = atomic_load_explicit(&device->_forcedFailClosed, memory_order_acquire);
     bool interrupted = atomic_load_explicit(&device->_interrupted, memory_order_acquire);
+    // One gate snapshot governs BOTH Twilio output and the private tap.
+    // A second read after a close request could otherwise route the same
+    // unsilenced frame privately while also handing it to the guest.
+    bool uplinkClosed = atomic_load_explicit(&device->_ownerUplinkClosed, memory_order_acquire);
+    bool closed = CopilotHoldSilencesUplink(
+        uplinkClosed, forcedClosed, interrupted);
     uint64_t epoch = atomic_load_explicit(&device->_closeToken, memory_order_acquire);
-    bool finishing = atomic_load_explicit(&device->_finishRequested, memory_order_acquire) &&
-        epoch >= atomic_load_explicit(&device->_finishEpoch, memory_order_acquire);
+    bool finishing = CopilotHoldIsFinishing(
+        atomic_load_explicit(&device->_finishRequested, memory_order_acquire),
+        atomic_load_explicit(&device->_finishEpoch, memory_order_acquire), epoch);
     // Public microphone PCM is transcribed in a separate Owner session. Its
     // ring epoch is zero; the Swift gate drops any queued public frames once
     // the private close has been acknowledged.
-    if (!closed && atomic_load_explicit(&device->_enabled, memory_order_acquire) &&
+    if (!closed && validCapture &&
+        atomic_load_explicit(&device->_enabled, memory_order_acquire) &&
         atomic_load_explicit(&device->_captureTapEnabled, memory_order_acquire)) {
         CopilotRingPush(&device->_capturedRing, device->_captureBytes, bytes, frames, 0);
     }
     // Private PCM is enqueued only after the uplink is closed.
-    if (atomic_load_explicit(&device->_ownerUplinkClosed, memory_order_acquire) &&
-        !finishing && !interrupted && epoch != 0 &&
-        atomic_load_explicit(&device->_enabled, memory_order_acquire) &&
-        atomic_load_explicit(&device->_captureTapEnabled, memory_order_acquire)) {
+    if (CopilotHoldRoutesPrivate(
+        uplinkClosed,
+        finishing, interrupted, forcedClosed,
+        atomic_load_explicit(&device->_enabled, memory_order_acquire),
+        atomic_load_explicit(&device->_captureTapEnabled, memory_order_acquire), epoch)) {
         CopilotRingPush(&device->_capturedRing, device->_captureBytes, bytes, frames, epoch);
     }
     if (closed) {
@@ -463,6 +509,12 @@ static OSStatus CopilotCaptureCallback(void *refCon, AudioUnitRenderActionFlags 
         atomic_store_explicit(&device->_ackToken, epoch, memory_order_release);
     }
     TVOAudioDeviceWriteCaptureData(device->_capturingContext, device->_captureBytes, bytes);
+    if (CopilotHoldCanAcknowledgeOpen(
+        closed, validCapture,
+        atomic_load_explicit(&device->_enabled, memory_order_acquire),
+        atomic_load_explicit(&device->_openPendingEpoch, memory_order_acquire), epoch)) {
+        atomic_store_explicit(&device->_openAckEpoch, epoch, memory_order_release);
+    }
     if (closed && finishing &&
         atomic_load_explicit(&device->_finishAckEpoch, memory_order_acquire) < epoch) {
         // The marker is published only after the silent frame was handed to

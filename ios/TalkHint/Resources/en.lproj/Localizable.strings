@@ -249,6 +249,8 @@
 "copilot.owner_waiting" = "Your private translation will appear here";
 "copilot.connecting" = "Connecting…";
 "copilot.ready" = "Ready";
+"copilot.restoring" = "Restoring call microphone…";
+"copilot.audio_unavailable" = "Call microphone unavailable — end this call";
 "copilot.private" = "Private — hold to talk";
 "copilot.unavailable" = "Copilot unavailable";
 "copilot.hold_to_talk" = "Hold to talk";

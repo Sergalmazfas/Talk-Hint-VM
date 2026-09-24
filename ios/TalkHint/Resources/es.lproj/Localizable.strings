@@ -249,6 +249,8 @@
 "copilot.owner_waiting" = "Aquí aparecerá tu traducción privada";
 "copilot.connecting" = "Conectando…";
 "copilot.ready" = "Listo";
+"copilot.restoring" = "Restableciendo el micrófono de la llamada…";
+"copilot.audio_unavailable" = "Micrófono de llamada no disponible — termina la llamada";
 "copilot.private" = "Privado — mantén pulsado";
 "copilot.unavailable" = "Copilot no disponible";
 "copilot.hold_to_talk" = "Mantén pulsado para hablar";

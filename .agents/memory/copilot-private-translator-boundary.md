@@ -14,6 +14,12 @@ Private PTT must be gated before Twilio capture writes, not by changing screens 
 
 **How to apply:** Preserve existing Hint/Translator behavior; do not ship a PRIVATE-ready button until exact SDK/Xcode compilation, CallKit/route/interruption tests, and controlled Guest-leg leakage tests prove the gate. Never replace DefaultAudioDevice globally merely on paper without regression testing existing calls.
 
+Copilot's Ready state after Hold is a claim about the public call microphone, not merely the translation socket. If the private finish fence or restored public frame cannot be confirmed, remain fail-closed and show an actionable call-audio failure instead of Ready.
+
+**Why:** A real call exposed a mismatch: the screen said Ready while the guest could not hear the Owner, and repeated Hold stopped capturing. A misleading Ready conceals both a broken call and the privacy boundary.
+
+**How to apply:** Review any changes to audio gates, interruption handling, or call status against multiple consecutive Hold/Release cycles. Device-side acknowledgment is necessary but not proof of guest audibility; validate 5–10 cycles on two physical phones before claiming the behavior is verified.
+
 Copilot's visual contract is a scrolling, Translator-style conversation above a pinned card styled like the Hint card, but explicitly labelled as **translation**, never a hint or advice. The private Russian phrase stays between Owner and Copilot; the Owner reads its English translation and then speaks English to Guest through the regular call.
 
 **Why:** The user explicitly distinguished the translation card from a hint and asked to see both sides of the actual conversation without the oversized full-screen text.

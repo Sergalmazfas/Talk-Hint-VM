@@ -249,6 +249,8 @@
 "copilot.owner_waiting" = "Жеке аудармаңыз осында көрінеді";
 "copilot.connecting" = "Қосылуда…";
 "copilot.ready" = "Дайын";
+"copilot.restoring" = "Қоңырау микрофоны қалпына келтірілуде…";
+"copilot.audio_unavailable" = "Қоңырау микрофоны қолжетімсіз — қоңырауды аяқтаңыз";
 "copilot.private" = "Жеке режим — ұстап тұрыңыз";
 "copilot.unavailable" = "Copilot қолжетімсіз";
 "copilot.hold_to_talk" = "Сөйлеу үшін ұстап тұрыңыз";

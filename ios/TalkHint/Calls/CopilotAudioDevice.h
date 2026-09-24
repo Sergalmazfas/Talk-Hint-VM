@@ -67,7 +67,11 @@ NS_CLASS_AVAILABLE(NA, 11_0)
 /// boundary. The uplink remains silent; this never opens the gate.
 - (void)finishPrivateCaptureAtFrameBoundary:(uint64_t)epoch
     NS_SWIFT_NAME(finishPrivateCapture(atFrameBoundary:));
-- (void)openOwnerUplink;
+- (BOOL)openOwnerUplink;
+/// True only after a valid public capture frame was handed to Twilio following
+/// this hold's drain. A timeout must fail closed, not display Ready.
+- (BOOL)waitForOwnerUplinkOpen:(uint64_t)epoch timeout:(NSTimeInterval)timeout
+    NS_SWIFT_NAME(wait(forOwnerUplinkOpen:timeout:));
 /// Resets per-call privacy state. Call only before a new call is connected.
 - (void)prepareForNewCall;
 

@@ -35,6 +35,8 @@ final class CopilotCallCoordinator {
     private var pendingEpoch: UInt64 = 0
     private var gateClosed = false
     private var releaseRequested = false
+    private var gateFailure = false
+    private var restoringEpoch: UInt64 = 0
     private var stopped = false
     private weak var screen: CopilotViewController?
 
@@ -90,16 +92,18 @@ final class CopilotCallCoordinator {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 _ = format
-                self.device.audioInterrupted()
-                self.callbackGate.stop()
-                self.gateClosed = true
-                self.stream.stop()
+                self.failClosed()
             }
         }
     }
 
     private func requestPrivateGate(_ completion: @escaping (Bool) -> Void) {
-        guard !stopped, stream.state == .ready, !gateClosed else {
+        guard !stopped, !gateFailure, stream.state == .ready, !gateClosed else {
+            completion(false)
+            return
+        }
+        guard device.isEnabled else {
+            failClosed()
             completion(false)
             return
         }
@@ -109,24 +113,20 @@ final class CopilotCallCoordinator {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let acknowledged = self?.device.wait(forOwnerUplinkClosed: token, timeout: 0.5) ?? false
             DispatchQueue.main.async {
-                guard let self, !self.stopped, self.gateClosed else {
+                guard let self, !self.stopped, !self.gateFailure,
+                      self.gateClosed, self.pendingEpoch == token else {
                     completion(false)
                     return
                 }
                 guard acknowledged else {
-                    self.pendingEpoch = 0
-                    self.device.openOwnerUplink()
-                    self.gateClosed = false
-                    self.screen?.gateRestored()
+                    self.failClosed()
                     completion(false)
                     return
                 }
                 self.pendingEpoch = 0
                 if self.releaseRequested {
                     self.releaseRequested = false
-                    self.device.openOwnerUplink()
-                    self.gateClosed = false
-                    self.screen?.gateRestored()
+                    self.restoreUplink(after: token)
                     completion(false)
                     return
                 }
@@ -138,6 +138,7 @@ final class CopilotCallCoordinator {
     }
 
     private func releasePrivateGate(holdId: String?) {
+        guard !stopped, !gateFailure else { return }
         let epoch = activeEpoch
         if epoch == 0 {
             if pendingEpoch == 0 && !gateClosed { return }
@@ -153,11 +154,10 @@ final class CopilotCallCoordinator {
             self.device.finishPrivateCapture(atFrameBoundary: epoch)
             let drained = self.device.wait(forPrivateDrain: epoch, timeout: 0.5)
             DispatchQueue.main.async {
-                guard !self.stopped else { return }
+                guard !self.stopped, !self.gateFailure else { return }
                 guard drained else {
-                    // Leave the device closed and stop the transport; the UI
-                    // intentionally remains disabled until the call ends.
-                    self.stream.stop()
+                    // An unacknowledged finish fence cannot safely reopen.
+                    self.failClosed()
                     return
                 }
                 // Keep activeEpoch set until all callback-delivered frames
@@ -168,11 +168,43 @@ final class CopilotCallCoordinator {
                 self.callbackGate.activate(0)
                 self.activeEpoch = 0
                 self.releaseRequested = false
-                self.device.openOwnerUplink()
+                self.restoreUplink(after: epoch)
+            }
+        }
+    }
+
+    private func restoreUplink(after epoch: UInt64) {
+        guard !stopped, !gateFailure, gateClosed else { return }
+        restoringEpoch = epoch
+        guard device.openOwnerUplink() else {
+            failClosed()
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let opened = self?.device.wait(forOwnerUplinkOpen: epoch, timeout: 0.5) ?? false
+            DispatchQueue.main.async {
+                guard let self, !self.stopped, !self.gateFailure,
+                      self.restoringEpoch == epoch else { return }
+                guard opened else {
+                    self.failClosed()
+                    return
+                }
+                self.restoringEpoch = 0
                 self.gateClosed = false
                 self.screen?.gateRestored()
             }
         }
+    }
+
+    private func failClosed() {
+        guard !stopped, !gateFailure else { return }
+        gateFailure = true
+        gateClosed = true
+        restoringEpoch = 0
+        device.audioInterrupted()
+        callbackGate.stop()
+        stream.stop()
+        screen?.gateFailed()
     }
 
     func stop() {

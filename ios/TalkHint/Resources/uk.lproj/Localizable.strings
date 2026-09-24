@@ -249,6 +249,8 @@
 "copilot.owner_waiting" = "Ваш приватний переклад з’явиться тут";
 "copilot.connecting" = "Підключення…";
 "copilot.ready" = "Готово";
+"copilot.restoring" = "Відновлюємо мікрофон дзвінка…";
+"copilot.audio_unavailable" = "Мікрофон дзвінка недоступний — завершіть дзвінок";
 "copilot.private" = "Приватний режим — утримуйте";
 "copilot.unavailable" = "Copilot недоступний";
 "copilot.hold_to_talk" = "Утримуйте, щоб говорити";

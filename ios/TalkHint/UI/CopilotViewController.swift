@@ -36,6 +36,7 @@ final class CopilotViewController: UIViewController {
     private var holdId: String?
     private var privateActive = false
     private var failed = false
+    private var audioFailed = false
     private var pressed = false
     private var intentGeneration = 0
     private var releaseDeliveredGeneration: Int?
@@ -115,7 +116,12 @@ final class CopilotViewController: UIViewController {
         ptt.isEnabled = false
         ptt.setContentCompressionResistancePriority(.required, for: .vertical)
         ptt.accessibilityIdentifier = "copilot-ptt"
-        ptt.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(pttChanged(_:))))
+        let holdGesture = UILongPressGestureRecognizer(target: self, action: #selector(pttChanged(_:)))
+        // Close the uplink on touch-down rather than waiting for UIKit's
+        // default half-second long-press delay. Short taps use the same
+        // acknowledged close/release path and never start private capture.
+        holdGesture.minimumPressDuration = 0
+        ptt.addGestureRecognizer(holdGesture)
 
         let bottom = UIStackView(arrangedSubviews: [translationCard, ptt, controlsRow()])
         bottom.axis = .vertical; bottom.spacing = 10
@@ -265,8 +271,9 @@ final class CopilotViewController: UIViewController {
 
     private func setReady() {
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, !self.failed else { return }
             self.ptt.isEnabled = !self.releasePending
+            if self.releasePending { return }
             self.status.text = NSLocalizedString("copilot.ready", comment: "")
         }
     }
@@ -277,7 +284,9 @@ final class CopilotViewController: UIViewController {
             // Keep the control receiving touch-up while a press is in flight;
             // the release event is what safely hands the audio gate back.
             if self?.pressed == true { self?.ptt.isEnabled = true }
-            self?.status.text = NSLocalizedString("copilot.unavailable", comment: "")
+            if self?.audioFailed != true {
+                self?.status.text = NSLocalizedString("copilot.unavailable", comment: "")
+            }
         }
     }
 
@@ -305,7 +314,9 @@ final class CopilotViewController: UIViewController {
                         return
                     }
                     guard granted, !self.failed else {
-                        self.status.text = NSLocalizedString("copilot.unavailable", comment: "")
+                        if !self.failed {
+                            self.status.text = NSLocalizedString("copilot.unavailable", comment: "")
+                        }
                         return
                     }
                     self.holdId = id
@@ -331,7 +342,7 @@ final class CopilotViewController: UIViewController {
         // Do not send hold_end or reopen audio here. The coordinator must
         // drain device frames first, then queue hold_end, then reopen.
         onReleaseHold?(id)
-        status.text = NSLocalizedString(failed ? "copilot.unavailable" : "copilot.ready", comment: "")
+        if !failed { status.text = NSLocalizedString("copilot.restoring", comment: "") }
     }
 
     /// Coordinator calls this after private frames have drained, hold_end has
@@ -343,7 +354,23 @@ final class CopilotViewController: UIViewController {
             return
         }
         releasePending = false
-        if !failed, stream.state == .ready { ptt.isEnabled = true }
+        if !failed, stream.state == .ready {
+            ptt.isEnabled = true
+            status.text = NSLocalizedString("copilot.ready", comment: "")
+        }
+    }
+
+    /// The uplink cannot be proven restored. Never display Ready or allow a
+    /// second Hold on this call; the end-call control remains available.
+    func gateFailed() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.gateFailed() }
+            return
+        }
+        failed = true
+        audioFailed = true
+        ptt.isEnabled = pressed // Preserve touch-up for an in-flight press.
+        status.text = NSLocalizedString("copilot.audio_unavailable", comment: "")
     }
 
     private func serverHoldReady(_ id: String) {
