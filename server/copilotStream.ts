@@ -7,6 +7,21 @@ import { pendingCalls } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 
 export const COPILOT_LANGUAGES = ["ru", "es", "uk", "kk"] as const;
+const COPILOT_SOURCE_NAMES: Record<string, string> = {
+  ru: "Russian", es: "Spanish", uk: "Ukrainian", kk: "Kazakh",
+};
+export function copilotSpokenReplyInstructions(language: string): string {
+  return [
+    `The caller is speaking to a private assistant in ${COPILOT_SOURCE_NAMES[language]}.`,
+    "Produce ONLY the short, natural English sentence the caller wants the other person on the phone to hear.",
+    "The output will be spoken verbatim into the live phone call. Speak as the caller in first person.",
+    'Interpret commands like "Say that I will arrive in twenty minutes" as "I will arrive in about twenty minutes", not "Tell them that I will arrive in twenty minutes".',
+    'Interpret "Ask if I can come earlier" as "Would it be okay if I arrived earlier?", not "Ask them if I can come earlier".',
+    "Preserve the caller's intended facts, names, numbers, negation, and question exactly; do not invent an answer or use earlier turns to fill gaps.",
+    "No preamble, explanation, quotation marks, advice, or third-person relay. Output one English reply for one intelligible utterance, then stop.",
+    "For silence, noise, unintelligible or incomplete speech, output nothing. Never speak a guessed reply.",
+  ].join("\n");
+}
 const RATES = new Set([8000, 16000, 24000, 44100, 48000]);
 const MAX_AUDIO_BYTES = 512 * 1024;
 const MAX_SECONDS = 60 * 60 * 2;
@@ -105,6 +120,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   };
   const pendingText = new Map<string, PendingText>();
   const finishedResponses = new Set<string>();
+  const verifiedPrivateResponses = new Set<string>();
   const responseKey = (direction: Direction, responseId: string) => `${direction}|${responseId}`;
   const itemKey = (direction: Direction, itemId: string) => `${direction}|${itemId}`;
   const startedAt = Date.now();
@@ -117,6 +133,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     pendingText.clear();
     sourcedItems.clear();
     finishedResponses.clear();
+    verifiedPrivateResponses.clear();
     responseHolds.clear();
     responseItems.clear();
     privateItems.clear();
@@ -138,12 +155,17 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     pendingText.delete(key);
     responseHolds.delete(key);
     responseItems.delete(key);
+    verifiedPrivateResponses.delete(key);
     finishedResponses.add(key);
     if (finishedResponses.size > 512) finishedResponses.delete(finishedResponses.values().next().value!);
   };
   const flush = (key: string) => {
     const pending = pendingText.get(key);
     if (!pending?.itemId || !sourcedItems.has(itemKey(pending.direction, pending.itemId))) return;
+    // A text.done event is not proof of a successful response: the provider
+    // may subsequently mark response.done as cancelled. Never enable iPhone
+    // auto-speak until that result is known.
+    if (pending.direction === "private" && pending.done && !verifiedPrivateResponses.has(key)) return;
     for (const frame of pending.frames) send(ws, frame);
     pending.frames.length = 0;
     pending.length = 0;
@@ -166,7 +188,9 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       type: ev.type === "translated_transcript_done" ? "text_done" : "text_delta",
       direction, text: ev.text, responseId: ev.responseId, itemId, holdId,
     };
-    if (itemId && sourcedItems.has(itemKey(direction, itemId))) {
+    if (itemId && sourcedItems.has(itemKey(direction, itemId)) &&
+        (direction !== "private" || ev.type !== "translated_transcript_done" ||
+          verifiedPrivateResponses.has(key))) {
       send(ws, frame);
       if (ev.type === "translated_transcript_done") releaseResponse(key);
       return;
@@ -230,6 +254,17 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       // A cancelled response may have buffered partial text awaiting STT.
       // Discard it immediately, even if turn_completed is delayed or absent.
       releaseResponse(responseKey(direction, ev.responseId));
+    } else if (ev.type === "turn_completed" && direction === "private" && ev.metrics.responseId) {
+      const key = responseKey(direction, ev.metrics.responseId);
+      if (ev.metrics.responseStatus === "completed" && !finishedResponses.has(key)) {
+        verifiedPrivateResponses.add(key);
+        if (verifiedPrivateResponses.size > 512) verifiedPrivateResponses.delete(verifiedPrivateResponses.values().next().value!);
+        flush(key);
+      } else {
+        // Failed/incomplete turns are terminal too. Drop their pending text
+        // rather than eventually treating a successful STT as a timeout.
+        releaseResponse(key);
+      }
     } else if (ev.type === "turn_completed" && ev.metrics.cancelled && ev.metrics.responseId) {
       releaseResponse(responseKey(direction, ev.metrics.responseId));
     } else if (ev.type === "invariant_violation") {
@@ -288,7 +323,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
           // must not be cancelled by the shared voice-Translator duration
           // gate. Empty transcripts are still suppressed by the provider.
           openaiRealtimeTranslationProvider.startSession({ languages: ["en", language], outputLanguage: language, outputMode: "text", microturnMinAudioMs: 0, inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
-          openaiRealtimeTranslationProvider.startSession({ languages: [language, "en"], outputLanguage: "en", outputMode: "text", microturnMinAudioMs: 0, inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
+          openaiRealtimeTranslationProvider.startSession({ languages: [language, "en"], outputLanguage: "en", outputMode: "text", microturnMinAudioMs: 0, instructionsOverride: copilotSpokenReplyInstructions(language), inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } }),
           wantsConversationFeed
             ? openaiRealtimeTranslationProvider.startSession({ languages: ["en", "en"], outputLanguage: "en", outputMode: "text", microturnMinAudioMs: 0, inputFormat: { encoding: "pcm16", sampleRateHz: 24000 }, outputFormat: { encoding: "pcm16", sampleRateHz: 24000 } })
             : Promise.resolve(undefined),

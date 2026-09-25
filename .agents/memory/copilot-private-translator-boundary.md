@@ -1,12 +1,12 @@
 ---
 name: Copilot private translator boundary
-description: Copilot is only a simple two-way screen translator for incoming and outgoing calls; no V2 or Brain.
+description: Copilot private audio boundary and Auto-Speak V1, separate from Translator and Hint.
 ---
-Copilot is a third independent phone pipeline for BOTH incoming and outgoing calls: Guest speech → large text in the user's selected language (not hardcoded Russian), and private push-to-talk Owner speech in their language → English text that Owner reads aloud themselves. Reuse the existing realtime translator and its translation-only prompt; no V2, separate Brain, SAY/CHOOSE, advice, TTS or Hint extension. This supersedes earlier V2/context-roadmap and outgoing-only scope proposals.
+Copilot is a third independent phone pipeline for BOTH incoming and outgoing calls: Guest speech → text in the user's selected language, and private push-to-talk Owner speech → a short English first-person spoken reply. In Auto-Speak V1, that reply is shown on the existing card and played to Guest automatically via the active call using built-in speech synthesis. This supersedes the earlier text-only/read-aloud interpretation; it does NOT authorize a V2 voice-cloning or external TTS provider.
 
-**Why:** The user rejected typing as the primary realtime input and rejected adding Terra/reasoning to simple translation. Owner dictates the actual desired message privately, then speaks its English translation to Guest themselves.
+**Why:** The user explicitly moved from reading the English card aloud to hands-free speech in the real Copilot call, while limiting V1 to the built-in/default voice and leaving Hint/Translator unchanged.
 
-**How to apply:** Do not add a V2 roadmap or exclude incoming calls. Never equate private/generated/displayed content with speech Guest heard. A later Guest utterance must not by itself erase the Owner’s private intention; distinguish technical stale responses from semantic intent cancellation. No private content persistence beyond operational necessity without separate approval. The example “скажи, что…” needs an explicit translation convention, not an assumed command Brain. Read the current user request before using older Copilot proposals.
+**How to apply:** Never equate generated/displayed content with speech Guest actually heard; validate delivery and privacy with a two-phone call. Keep the private source audio out of Guest uplink, and expose only a verified completed English reply to speech synthesis. Preserve names and facts in “скажи, что…” while making the result first-person, not a literal command. No private content persistence without separate approval.
 
 Private PTT must be gated before Twilio capture writes, not by changing screens or ordinary mute. Twilio's DefaultAudioDevice exposes no public PCM tap; the official MIT-licensed custom AudioDevice example provides separate capture-write and remote-render callbacks. One custom device would need to be installed before all calls, then route capture frames internally without swapping devices during a call. The render callback exposes remote SDK PCM before local playback mixing, but is not automatically proof of Guest-only audio in every conference configuration.
 
@@ -26,11 +26,11 @@ In Copilot's text-only translation, a deliberate short utterance must not disapp
 
 **How to apply:** When changing shared realtime-provider gates, test Copilot's guest, private, and public-text sessions separately from the voice Translator. A duration exemption is not evidence that the model translates accurately; confirm content in a real call.
 
-Copilot's visual contract is a scrolling, Translator-style conversation above a pinned card styled like the Hint card, but explicitly labelled as **translation**, never a hint or advice. The private Russian phrase stays between Owner and Copilot; the Owner reads its English translation and then speaks English to Guest through the regular call.
+Copilot's visual contract is a scrolling, Translator-style conversation above a pinned card styled like the Hint card, never a hint or advice. The private Owner phrase stays between Owner and Copilot; only its finished first-person English rendition is deliberately spoken to Guest through the active phone call.
 
 **Why:** The user explicitly distinguished the translation card from a hint and asked to see both sides of the actual conversation without the oversized full-screen text.
 
-**How to apply:** Keep private phrases out of the public conversation and Guest audio. Distinguish public Owner speech from private drafts; do not present a private draft as something already said to Guest. Keep the English translation visible while the Owner reads it aloud. Preserve the established Translator card layout rather than introducing a separate Copilot design.
+**How to apply:** Keep private source phrases out of the public conversation and Guest audio. Distinguish public Owner speech from private drafts; never claim Guest heard an English reply merely because synthesis started. Keep the English card visible and preserve the established layout.
 
 Choose any future Copilot translation-model changes from isolated, identical recorded-audio comparisons before changing the live phone flow. A clean synthetic phrase or absence of output on pure silence is not proof against real-call noise, multilingual hallucinations, or segmentation errors.
 

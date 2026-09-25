@@ -253,6 +253,7 @@
 "copilot.audio_unavailable" = "Мікрофон дзвінка недоступний — завершіть дзвінок";
 "copilot.private" = "Приватний режим — утримуйте";
 "copilot.unavailable" = "Copilot недоступний";
+"copilot.speech_unavailable" = "Не вдалося озвучити відповідь — дзвінок триває";
 "copilot.hold_to_talk" = "Утримуйте, щоб говорити";
 "copilot.language.title" = "Мова власника";
 "copilot.language.selected" = "Мова: %@";

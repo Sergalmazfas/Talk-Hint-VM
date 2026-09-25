@@ -12,6 +12,8 @@ export interface AudioFormat {
 }
 
 export interface RealtimeTranslationConfig {
+  /** Copilot-only instruction-to-spoken-reply prompt; omitted for Translator. */
+  instructionsOverride?: string;
   /**
    * Bidirectional language pair (ISO 639-1), e.g. ["ru", "en"].
    * The provider auto-detects which side is being spoken and translates
@@ -67,6 +69,8 @@ export interface TranslationTurnMetrics {
   estimatedCostUsd?: number;
   /** True when the provider cancelled this response (e.g. barge-in). */
   cancelled?: boolean;
+  /** Provider terminal status; only "completed" is safe to expose for auto-speak. */
+  responseStatus?: string;
   /** Provider-reported cancellation reason (e.g. "turn_detected"). */
   cancelReason?: string;
   /**

@@ -75,6 +75,13 @@ NS_CLASS_AVAILABLE(NA, 11_0)
 /// Resets per-call privacy state. Call only before a new call is connected.
 - (void)prepareForNewCall;
 
+/// Plays pre-synthesized mono PCM16 through Twilio's capture path, replacing
+/// the Owner microphone while active. The data is copied/resampled before the
+/// realtime callback; playback is bounded and callbacks are delivered off it.
+- (BOOL)startCopilotPlayback:(NSData *)pcm16 sampleRate:(double)sampleRate firstAudio:(void (^)(void))firstAudio completion:(void (^)(BOOL))completion
+    NS_SWIFT_NAME(startCopilotPlayback(_:sampleRate:firstAudio:completion:));
+- (void)stopCopilotPlayback;
+
 /// Marks the device safe without waiting for a potentially interrupted audio
 /// callback.  Private mode must remain closed until the caller explicitly
 /// opens it.

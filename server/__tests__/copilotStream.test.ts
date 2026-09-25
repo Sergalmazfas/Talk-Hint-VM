@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { RealtimeTranslationSession } from "../translation/provider";
 import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
-import { authorizeCopilotCall, createCopilotStream, resamplePcm16Mono } from "../copilotStream";
+import { authorizeCopilotCall, copilotSpokenReplyInstructions, createCopilotStream, resamplePcm16Mono } from "../copilotStream";
 
 const { startSession } = vi.hoisted(() => ({ startSession: vi.fn() }));
 vi.mock("../translation/openaiRealtimeTranslator", async (importOriginal) => ({
@@ -125,6 +125,10 @@ describe("authenticated Copilot stream contract", () => {
     owner.emit({ type: "ready", provider: "test", model: "test", instructions: "" });
     expect(startSession).toHaveBeenCalledTimes(3);
     expect(startSession.mock.calls.map(([config]) => config.microturnMinAudioMs)).toEqual([0, 0, 0]);
+    expect(startSession.mock.calls[0][0].instructionsOverride).toBeUndefined();
+    expect(startSession.mock.calls[1][0].instructionsOverride).toBe(copilotSpokenReplyInstructions("ru"));
+    expect(startSession.mock.calls[2][0].instructionsOverride).toBeUndefined();
+    expect(copilotSpokenReplyInstructions("ru")).toContain("first person");
     expect(ws.frames).toContainEqual({ type: "ready", capabilities: ["owner_transcript", "conversation_source"] });
     ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 16_000 })));
     expect(ws.frames.at(-1)).toMatchObject({ type: "error", code: "replay" });
@@ -235,6 +239,8 @@ describe("authenticated Copilot stream contract", () => {
     privateSession.emit({ type: "translated_transcript_done", text: "No, not earlier.", responseId: "private-response" });
     expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
     privateSession.emit({ type: "source_transcript", text: "Нет, не раньше.", itemId: "private-1" });
+    expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
+    privateSession.emit({ type: "turn_completed", metrics: { responseId: "private-response", responseStatus: "completed" } });
     expect(ws.frames.slice(-2)).toEqual([
       { type: "source_text", direction: "private", text: "Нет, не раньше.", itemId: "private-1", holdId: "h1" },
       { type: "text_done", direction: "private", text: "No, not earlier.", responseId: "private-response", itemId: "private-1", holdId: "h1" },
@@ -304,6 +310,41 @@ describe("authenticated Copilot stream contract", () => {
     privateSession.emit({ type: "source_transcript", text: "Old secret", itemId: "old-uncommitted-item" });
     privateSession.emit({ type: "translated_transcript_done", text: "Old translation", responseId: "old-response" });
     expect(ws.frames.some(f => f.type.startsWith("text_") || f.text === "Old secret")).toBe(false);
+    ws.close();
+  });
+
+  it("never authorizes auto-speak from a private text.done that is later cancelled", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-cancelled-private-done", async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "h" })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "private", holdId: "h", pcm16: Buffer.alloc(320).toString("base64") })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "h" })));
+    privateSession.emit({ type: "input_committed", itemId: "item" });
+    privateSession.emit({ type: "response_created", responseId: "response", sourceItemId: "item" });
+    privateSession.emit({ type: "source_transcript", text: "Скажи, что я буду скоро.", itemId: "item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "I'll be there soon.", responseId: "response" });
+    expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
+    privateSession.emit({ type: "response_cancelled", responseId: "response" });
+    privateSession.emit({ type: "turn_completed", metrics: { responseId: "response", cancelled: true } });
+    expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
+    expect(ws.closed).toBe(false);
+    ws.close();
+  });
+
+  it.each(["failed", "incomplete"])("never authorizes auto-speak from a %s provider response", async (responseStatus) => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, `copilot-private-${responseStatus}`, async () => true);
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid: "CA1234567890abcdef1234567890abcdef", language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "h" })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "audio", direction: "private", holdId: "h", pcm16: Buffer.alloc(320).toString("base64") })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "h" })));
+    privateSession.emit({ type: "input_committed", itemId: "item" });
+    privateSession.emit({ type: "response_created", responseId: "response", sourceItemId: "item" });
+    privateSession.emit({ type: "source_transcript", text: "Скажи, что я буду скоро.", itemId: "item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "I'll be there soon.", responseId: "response" });
+    privateSession.emit({ type: "turn_completed", metrics: { responseId: "response", responseStatus } });
+    expect(ws.frames.some(f => f.type === "text_done")).toBe(false);
     ws.close();
   });
 

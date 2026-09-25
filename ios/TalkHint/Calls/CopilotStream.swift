@@ -9,6 +9,9 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
     var onReady: (() -> Void)?
     var onGuestText: ((String, String?) -> Void)?
     var onPrivateText: ((String) -> Void)?
+    /// Only completed, hold-scoped private replies may be spoken into the call.
+    var onPrivateFinal: ((String, String, String) -> Void)?
+    var onPrivateSourceComplete: ((String) -> Void)?
     /// Final speech recognition for the scrolling conversation (or the
     /// private draft). Private source text is never sent to the public feed.
     var onSourceText: ((String, String, String?) -> Void)?
@@ -38,6 +41,7 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
     private var responseDeltas: [String: String] = [:]
     private var latestGuestResponseId: String?
     private var latestPrivateResponseId: String?
+    private var deliveredPrivateFinals = Set<String>()
 
     /// `sampleRateHz` must be measured from the active audio device. There is
     /// intentionally no guessed/default hardware rate.
@@ -95,6 +99,7 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
         // from the previous hold can never overwrite this phrase.
         responseDeltas = responseDeltas.filter { !$0.key.hasPrefix("private|") }
         latestPrivateResponseId = nil
+        deliveredPrivateFinals.removeAll()
         send(["type": "hold_start", "holdId": holdId])
     }
 
@@ -164,6 +169,9 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
                 if direction == "guest" || direction == "owner" || direction == "private" {
                     let item = json["itemId"] as? String
                     emit { $0.onSourceText?(direction, text, item) }
+                    if direction == "private", let hold {
+                        emit { $0.onPrivateSourceComplete?(hold) }
+                    }
                 }
             }
         case "guest_text", "text":
@@ -218,6 +226,12 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
         // the response currently being streamed.
         if direction == "private" {
             emit { $0.onPrivateText?(text) }
+            if let holdId = holdId(in: json), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let key = "\(holdId)|\(responseId)"
+                if deliveredPrivateFinals.insert(key).inserted {
+                    emit { $0.onPrivateFinal?(holdId, responseId, text) }
+                }
+            }
         } else {
             let item = json["itemId"] as? String
             emit { $0.onGuestText?(text, item) }

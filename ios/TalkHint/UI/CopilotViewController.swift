@@ -10,6 +10,8 @@ final class CopilotViewController: UIViewController {
     /// uplink. This is called synchronously on every release/cancel; a nil
     /// hold ID means the local gate request was still in flight.
     var onReleaseHold: ((String?) -> Void)?
+    var onPressHold: ((String) -> Void)?
+    var onStreamFailed: (() -> Void)?
     var onSpeaker: ((Bool) -> Void)?
     var onMute: (() -> Void)?
     var onEnd: (() -> Void)?
@@ -77,7 +79,10 @@ final class CopilotViewController: UIViewController {
             }
         }
         stream.onHoldReady = { [weak self] holdId in self?.serverHoldReady(holdId) }
-        stream.onFailure = { [weak self] _ in self?.streamFailed() }
+        stream.onFailure = { [weak self] _ in
+            self?.onStreamFailed?()
+            self?.streamFailed()
+        }
         stream.start()
     }
 
@@ -305,6 +310,7 @@ final class CopilotViewController: UIViewController {
             releaseDeliveredGeneration = nil
             let generation = intentGeneration
             let id = UUID().uuidString
+            onPressHold?(id)
             requestPrivateGate { [weak self] granted in
                 DispatchQueue.main.async {
                     guard let self, self.pressed, self.intentGeneration == generation else {
@@ -371,6 +377,16 @@ final class CopilotViewController: UIViewController {
         audioFailed = true
         ptt.isEnabled = pressed // Preserve touch-up for an in-flight press.
         status.text = NSLocalizedString("copilot.audio_unavailable", comment: "")
+    }
+
+    /// Speech synthesis/playback failed without ending the underlying call.
+    func speechFailed() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.speechFailed() }
+            return
+        }
+        guard !failed else { return }
+        status.text = NSLocalizedString("copilot.speech_unavailable", comment: "")
     }
 
     private func serverHoldReady(_ id: String) {

@@ -253,6 +253,7 @@
 "copilot.audio_unavailable" = "Call microphone unavailable — end this call";
 "copilot.private" = "Private — hold to talk";
 "copilot.unavailable" = "Copilot unavailable";
+"copilot.speech_unavailable" = "Couldn't play the reply — call continues";
 "copilot.hold_to_talk" = "Hold to talk";
 "copilot.language.title" = "Owner language";
 "copilot.language.selected" = "Language: %@";

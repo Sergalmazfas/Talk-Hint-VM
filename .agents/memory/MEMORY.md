@@ -41,4 +41,4 @@
 - [Tutor / Calls separation](tutor-calls-separation.md) — Tutor tab = learning only (Session Report end screen); ALL call prep lives in Calls flow; Engine stays call-agnostic (MBLEx reuse).
 - [Translator realtime architecture](translator-spike.md) — RU↔EN uses isolated transports; PSTN routing is asymmetric so Owner hears Guest original and monitors both translations.
 - [LIVE prompt evaluation](live-prompt-evaluation.md) — compare both message roles and normalized output; reconstructed requests and single-turn success are not end-to-end proof.
-- [Copilot private translator](copilot-private-translator-boundary.md) — Translator-style conversation + pinned translation (not hint); private Owner phrase never reaches Guest.
+- [Copilot private audio boundary](copilot-private-translator-boundary.md) — Auto-Speak V1 speaks verified English reply via built-in TTS; private Owner source never reaches Guest.

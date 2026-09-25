@@ -39,6 +39,39 @@ final class CopilotCallCoordinator {
     private var restoringEpoch: UInt64 = 0
     private var stopped = false
     private weak var screen: CopilotViewController?
+    private var speech: CopilotSpeechOutput?
+    private var releasedHoldId: String?
+    private var restoredHoldId: String?
+    private var pendingReply: (hold: String, response: String, text: String)?
+    private var spokenHolds = Set<String>()
+    private var speechGeneration = 0
+    private struct Timing {
+        let press: TimeInterval
+        var release: TimeInterval? = nil
+        var transcript: TimeInterval? = nil
+        var response: TimeInterval? = nil
+        var ttsStart: TimeInterval? = nil
+        var firstAudio: TimeInterval? = nil
+    }
+    private var timings: [String: Timing] = [:]
+    private func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+    private func mark(_ event: String, hold: String) {
+        #if DEBUG
+        let t = timings[hold]
+        let ms = t.flatMap { $0.release }.map { Int((now() - $0) * 1000) }
+        print("[CopilotAutoSpeak] \(event) hold=\(hold.prefix(8)) since_release_ms=\(ms.map { String($0) } ?? "n/a")")
+        #endif
+    }
+    private func logTimings(_ hold: String) {
+        #if DEBUG
+        guard let t = timings[hold], let release = t.release else { return }
+        func ms(_ a: TimeInterval?, _ b: TimeInterval?) -> String {
+            guard let a, let b else { return "n/a" }
+            return String(Int((b - a) * 1000))
+        }
+        print("[CopilotAutoSpeak] hold=\(hold.prefix(8)) release_to_transcription_ms=\(ms(release, t.transcript)) transcription_to_response_ms=\(ms(t.transcript, t.response)) response_to_tts_first_audio_ms=\(ms(t.response, t.firstAudio)) release_to_tts_first_audio_ms=\(ms(release, t.firstAudio))")
+        #endif
+    }
 
     init(callSid: String, device: CopilotAudioDevice) {
         self.callSid = callSid
@@ -63,6 +96,32 @@ final class CopilotCallCoordinator {
         viewController.onReleaseHold = { [weak self] holdId in
             self?.releasePrivateGate(holdId: holdId)
         }
+        viewController.onPressHold = { [weak self] holdId in
+            guard let self else { return }
+            self.releasedHoldId = nil
+            self.restoredHoldId = nil
+            self.pendingReply = nil
+            self.timings[holdId] = Timing(press: self.now())
+            self.mark("copilot_press", hold: holdId)
+        }
+        stream.onPrivateSourceComplete = { [weak self] holdId in
+            guard let self, var timing = self.timings[holdId], timing.transcript == nil else { return }
+            timing.transcript = self.now()
+            self.timings[holdId] = timing
+            self.mark("transcription_complete", hold: holdId)
+        }
+        stream.onPrivateFinal = { [weak self] holdId, responseId, text in
+            guard let self, !self.stopped, !self.gateFailure,
+                  self.timings[holdId] != nil, !self.spokenHolds.contains(holdId) else { return }
+            var timing = self.timings[holdId]!
+            timing.response = self.now()
+            self.timings[holdId] = timing
+            self.mark("copilot_response_complete", hold: holdId)
+            self.pendingReply = (holdId, responseId, text)
+            self.maybeSpeak()
+        }
+        viewController.onStreamFailed = { [weak self] in self?.cancelSpeech() }
+        speech = CopilotSpeechOutput(device: device)
         viewController.onMute = onMute
         viewController.onSpeaker = onSpeaker
         viewController.onEnd = onEnd
@@ -123,6 +182,9 @@ final class CopilotCallCoordinator {
                     completion(false)
                     return
                 }
+                // The closed-frame ACK ensures a capture callback can no
+                // longer expose the microphone when speech replacement stops.
+                self.cancelSpeech()
                 self.pendingEpoch = 0
                 if self.releaseRequested {
                     self.releaseRequested = false
@@ -139,6 +201,12 @@ final class CopilotCallCoordinator {
 
     private func releasePrivateGate(holdId: String?) {
         guard !stopped, !gateFailure else { return }
+        if let holdId, var timing = timings[holdId], timing.release == nil {
+            timing.release = now()
+            timings[holdId] = timing
+            releasedHoldId = holdId
+            mark("copilot_release", hold: holdId)
+        }
         let epoch = activeEpoch
         if epoch == 0 {
             if pendingEpoch == 0 && !gateClosed { return }
@@ -192,12 +260,17 @@ final class CopilotCallCoordinator {
                 self.restoringEpoch = 0
                 self.gateClosed = false
                 self.screen?.gateRestored()
+                if let hold = self.releasedHoldId {
+                    self.restoredHoldId = hold
+                    self.maybeSpeak()
+                }
             }
         }
     }
 
     private func failClosed() {
         guard !stopped, !gateFailure else { return }
+        cancelSpeech()
         gateFailure = true
         gateClosed = true
         restoringEpoch = 0
@@ -208,6 +281,7 @@ final class CopilotCallCoordinator {
     }
 
     func stop() {
+        cancelSpeech()
         stopped = true
         activeEpoch = 0
         pendingEpoch = 0
@@ -221,5 +295,46 @@ final class CopilotCallCoordinator {
         stream.stop()
         screen?.dismiss(animated: true)
         screen = nil
+    }
+
+    private func maybeSpeak() {
+        guard let reply = pendingReply, let releasedHoldId,
+              reply.hold == releasedHoldId, restoredHoldId == releasedHoldId,
+              !stopped, !gateFailure, !gateClosed, !spokenHolds.contains(reply.hold),
+              stream.state == .ready, let speech else { return }
+        spokenHolds.insert(reply.hold)
+        pendingReply = nil
+        // CallKit/Twilio mute suppresses even injected capture audio. Never
+        // report a spoken reply when the Guest cannot receive it.
+        if CallManager.shared.isMuted {
+            mark("tts_muted", hold: reply.hold)
+            screen?.speechFailed()
+            timings.removeValue(forKey: reply.hold)
+            return
+        }
+        let generation = speechGeneration
+        var timing = timings[reply.hold]!
+        timing.ttsStart = now()
+        timings[reply.hold] = timing
+        mark("tts_request_start", hold: reply.hold)
+        speech.speak(reply.text, firstAudio: { [weak self] in
+            guard let self, !self.stopped, self.speechGeneration == generation,
+                  var timing = self.timings[reply.hold] else { return }
+            timing.firstAudio = self.now()
+            self.timings[reply.hold] = timing
+            self.mark("tts_first_audio", hold: reply.hold)
+            self.logTimings(reply.hold)
+        }, completion: { [weak self] success in
+            guard let self, !self.stopped, self.speechGeneration == generation else { return }
+            let delivered = success && !CallManager.shared.isMuted
+            self.mark(delivered ? "tts_playback_complete" : "tts_failed", hold: reply.hold)
+            if !delivered { self.screen?.speechFailed() }
+            self.timings.removeValue(forKey: reply.hold)
+        })
+    }
+
+    private func cancelSpeech() {
+        speechGeneration += 1
+        speech?.cancel()
     }
 }

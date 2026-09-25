@@ -253,6 +253,7 @@
 "copilot.audio_unavailable" = "Micrófono de llamada no disponible — termina la llamada";
 "copilot.private" = "Privado — mantén pulsado";
 "copilot.unavailable" = "Copilot no disponible";
+"copilot.speech_unavailable" = "No se pudo reproducir la respuesta — la llamada continúa";
 "copilot.hold_to_talk" = "Mantén pulsado para hablar";
 "copilot.language.title" = "Idioma del propietario";
 "copilot.language.selected" = "Idioma: %@";

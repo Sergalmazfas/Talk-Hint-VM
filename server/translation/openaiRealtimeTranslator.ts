@@ -201,7 +201,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
     this.config = config;
     this.model = config.model || DEFAULT_MODEL;
     this.voice = config.voice || DEFAULT_VOICE;
-    this.instructions = buildInterpreterInstructions(config.languages, {
+    this.instructions = config.instructionsOverride ?? buildInterpreterInstructions(config.languages, {
       inputLang: config.sourceLangHint,
       outputLang: config.outputLanguage,
     });
@@ -643,6 +643,7 @@ export class OpenAIRealtimeTranslationSession implements RealtimeTranslationSess
           usage: usage || undefined,
           estimatedCostUsd: estimateTurnCostUsd(this.model, usage),
           cancelled: cancelled || undefined,
+          responseStatus: st,
           cancelReason: cancelled ? String(details.reason || "unknown") : undefined,
           sourceItemId,
           responseId,

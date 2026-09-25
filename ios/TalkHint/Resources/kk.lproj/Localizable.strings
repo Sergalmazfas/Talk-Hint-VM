@@ -253,6 +253,7 @@
 "copilot.audio_unavailable" = "Қоңырау микрофоны қолжетімсіз — қоңырауды аяқтаңыз";
 "copilot.private" = "Жеке режим — ұстап тұрыңыз";
 "copilot.unavailable" = "Copilot қолжетімсіз";
+"copilot.speech_unavailable" = "Жауапты дыбыстау мүмкін болмады — қоңырау жалғасуда";
 "copilot.hold_to_talk" = "Сөйлеу үшін ұстап тұрыңыз";
 "copilot.language.title" = "Иесінің тілі";
 "copilot.language.selected" = "Тіл: %@";
