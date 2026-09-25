@@ -300,6 +300,8 @@ export async function registerRoutes(
   const { registerBenchmarkRoutes } = await import("./benchmark/routes");
   registerBenchmarkRoutes(app);
 
+  await import("./voiceLab/routes").then(({ registerVoiceLabRoutes }) => registerVoiceLabRoutes(app));
+
   // Translator Realtime Spike — dev-only test stand (404 in production).
   const { registerTranslatorSpike } = await import("./translation/spike");
   registerTranslatorSpike(app);
@@ -1977,7 +1979,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const token = await createSession(user.id);
       
       res.json({ 
-        user: { id: user.id, email: user.email, language: user.language, plan: user.plan },
+        user: { id: user.id, email: user.email, language: user.language, plan: user.plan, isAdmin: isBenchmarkAdmin(user.email) },
         token 
       });
     } catch (error: any) {
@@ -1996,7 +1998,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const token = await createSession(user.id);
       
       res.json({ 
-        user: { id: user.id, email: user.email, language: user.language, plan: user.plan },
+        user: { id: user.id, email: user.email, language: user.language, plan: user.plan, isAdmin: isBenchmarkAdmin(user.email) },
         token 
       });
     } catch (error: any) {

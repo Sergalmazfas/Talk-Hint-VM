@@ -10,6 +10,7 @@ import Onboarding from "@/pages/onboarding";
 import Dashboard from "@/pages/dashboard";
 import SelectNumber from "@/pages/select-number";
 import AdminDiagnostics from "@/pages/admin-diagnostics";
+import VoiceLab from "@/pages/voice-lab";
 
 function Router() {
   return (
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/select-number" component={SelectNumber} />
       <Route path="/admin/diagnostics" component={AdminDiagnostics} />
+      <Route path="/voice-lab" component={VoiceLab} />
       <Route component={NotFound} />
     </Switch>
   );

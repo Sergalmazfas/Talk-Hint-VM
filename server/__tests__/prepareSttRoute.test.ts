@@ -128,6 +128,7 @@ vi.mock("../benchmark/routes", () => ({
 
 vi.mock("../benchmark/adminGate", () => ({
   isBenchmarkAdmin: vi.fn(() => false),
+  requireBenchmarkAdmin: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
 }));
 
 vi.mock("../benchmark/diagnosticRecording", () => ({

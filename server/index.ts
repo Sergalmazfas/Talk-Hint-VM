@@ -206,7 +206,8 @@ app.use((req, res, next) => {
     // Log all non-static requests
     if (reqPath.startsWith("/api") || reqPath.includes("twilio") || reqPath.includes("media")) {
       let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      // Voice Lab replies include private utterances and cloned voice IDs.
+      if (capturedJsonResponse && !reqPath.startsWith("/api/admin/voice-lab")) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
       log(logLine);

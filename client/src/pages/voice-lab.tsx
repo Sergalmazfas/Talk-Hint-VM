@@ -1,0 +1,707 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "wouter";
+import { useAuth } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+interface VoiceClone {
+  voiceId: string;
+  status: string;
+  durationMs: number;
+  createdAt: string;
+}
+
+interface VoiceLabRun {
+  id: string;
+  transcript: string;
+  english: string;
+  voiceId: string;
+  provider: string;
+  timings: {
+    micRelease: number;
+    transcriptionComplete: number;
+    englishReady: number;
+    elevenlabsRequest?: number | null;
+    firstAudio?: number | null;
+  };
+  firstAudioMs?: number | null;
+  playResult?: string;
+  createdAt?: string;
+}
+
+const API = "/api/admin/voice-lab";
+const MAX_SAMPLE_DURATION_MS = 180_000;
+
+interface RunLatency {
+  releaseTranscript: number;
+  transcriptEnglish: number;
+  englishRequest: number | null;
+  requestFirstAudio: number | null;
+  releaseFirstAudio: number | null;
+}
+
+function formatDuration(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function audioBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Не удалось прочитать аудиозапись."));
+        return;
+      }
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(new Error("Не удалось прочитать аудиозапись."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export default function VoiceLab() {
+  const [, setLocation] = useLocation();
+  const { user, token, isLoading } = useAuth();
+  const [clone, setClone] = useState<VoiceClone | null>(null);
+  const [runs, setRuns] = useState<VoiceLabRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [statusRefreshError, setStatusRefreshError] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [sample, setSample] = useState<Blob | null>(null);
+  const [sampleUrl, setSampleUrl] = useState("");
+  const [sampleDuration, setSampleDuration] = useState(0);
+  const [sampleElapsedMs, setSampleElapsedMs] = useState(0);
+  const [sampleOverLimit, setSampleOverLimit] = useState(false);
+  const [recordingSample, setRecordingSample] = useState(false);
+  const [creatingClone, setCreatingClone] = useState(false);
+  const [cloneAttemptUncertain, setCloneAttemptUncertain] = useState(false);
+  const [recordingSpeech, setRecordingSpeech] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [currentRun, setCurrentRun] = useState<VoiceLabRun | null>(null);
+  const [latency, setLatency] = useState<RunLatency | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const [playbackMode, setPlaybackMode] = useState<"streaming" | "buffered" | null>(null);
+
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
+  const mediaStream = useRef<MediaStream | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const recordingStartedAt = useRef(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const sampleUrlRef = useRef("");
+  const pointerHeldRef = useRef(false);
+  const releaseAtRef = useRef<number | null>(null);
+  const sampleLimitHitRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  const stopTracks = useCallback(() => {
+    mediaStream.current?.getTracks().forEach((track) => track.stop());
+    mediaStream.current = null;
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      pointerHeldRef.current = false;
+      if (mediaRecorder.current?.state === "recording") mediaRecorder.current.stop();
+      stopTracks();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = "";
+      }
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      if (sampleUrlRef.current) URL.revokeObjectURL(sampleUrlRef.current);
+      window.speechSynthesis?.cancel();
+    };
+  }, [stopTracks]);
+
+  useEffect(() => {
+    if (!isLoading && !user) setLocation("/");
+  }, [isLoading, user, setLocation]);
+
+  const loadLab = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch(API, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось загрузить Voice Lab (${response.status}).`);
+      setClone(data.clone || null);
+      setRuns(Array.isArray(data.runs) ? data.runs : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось загрузить Voice Lab.");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  async function refreshCloneStatus() {
+    if (!token) return;
+    setStatusRefreshError("");
+    try {
+      const response = await fetch(API, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось обновить статус (${response.status}).`);
+      setClone(data.clone || null);
+      if (Array.isArray(data.runs)) setRuns(data.runs);
+    } catch (err) {
+      setStatusRefreshError(err instanceof Error ? err.message : "Не удалось обновить статус клона.");
+    }
+  }
+
+  useEffect(() => {
+    if (!isLoading && user?.isAdmin && token) void loadLab();
+  }, [isLoading, user?.isAdmin, token, loadLab]);
+
+  useEffect(() => {
+    if (!recordingSample) return;
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - recordingStartedAt.current;
+      setSampleElapsedMs(elapsed);
+      if (elapsed >= MAX_SAMPLE_DURATION_MS && !sampleLimitHitRef.current) {
+        sampleLimitHitRef.current = true;
+        setSampleOverLimit(true);
+        setError("Запись образца превысила лимит 3 минуты и не будет загружена. Запишите более короткий образец.");
+        stopRecorder();
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [recordingSample]);
+
+  useEffect(() => {
+    const releaseOnBlur = () => {
+      if (pointerHeldRef.current) endSpeech();
+    };
+    const releaseWhenHidden = () => {
+      if (document.visibilityState === "hidden") releaseOnBlur();
+    };
+    window.addEventListener("blur", releaseOnBlur);
+    document.addEventListener("visibilitychange", releaseWhenHidden);
+    return () => {
+      window.removeEventListener("blur", releaseOnBlur);
+      document.removeEventListener("visibilitychange", releaseWhenHidden);
+    };
+  }, []);
+
+  function setAudioSource(url: string) {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = url.startsWith("blob:") ? url : null;
+    audio.src = url;
+    audio.load();
+  }
+
+  function startRecorder(onComplete: (blob: Blob, durationMs: number) => void, onState: (recording: boolean) => void, stopIfPointerReleased = false) {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setError("Запись звука не поддерживается этим браузером.");
+      return;
+    }
+    setError("");
+    void navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      mediaStream.current = stream;
+      chunks.current = [];
+      const options = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? { mimeType: "audio/webm;codecs=opus" }
+        : undefined;
+      const recorder = new MediaRecorder(stream, options);
+      mediaRecorder.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        if (mountedRef.current) setError("Ошибка записи. Проверьте доступ к микрофону и попробуйте снова.");
+        stopTracks();
+        if (mountedRef.current) onState(false);
+      };
+      recorder.onstop = () => {
+        const durationMs = Math.max(0, Date.now() - recordingStartedAt.current);
+        const blob = new Blob(chunks.current, { type: recorder.mimeType || "audio/webm" });
+        chunks.current = [];
+        stopTracks();
+        if (mountedRef.current) {
+          onState(false);
+          if (blob.size) onComplete(blob, durationMs);
+        }
+      };
+      recordingStartedAt.current = Date.now();
+      recorder.start(250);
+      onState(true);
+      if (stopIfPointerReleased && !pointerHeldRef.current) {
+        releaseAtRef.current = releaseAtRef.current || Date.now();
+        window.setTimeout(stopRecorder, 0);
+      }
+    }).catch((err: unknown) => {
+      setError(err instanceof Error ? `Не удалось получить доступ к микрофону: ${err.message}` : "Не удалось получить доступ к микрофону.");
+      stopTracks();
+      onState(false);
+    });
+  }
+
+  function stopRecorder() {
+    if (mediaRecorder.current?.state === "recording") mediaRecorder.current.stop();
+  }
+
+  function recordSample() {
+    setSampleElapsedMs(0);
+    setSampleOverLimit(false);
+    sampleLimitHitRef.current = false;
+    startRecorder((blob, durationMs) => {
+      if (sampleLimitHitRef.current || durationMs >= MAX_SAMPLE_DURATION_MS) {
+        setSampleOverLimit(true);
+        setError("Запись образца превысила лимит 3 минуты и не будет загружена. Запишите более короткий образец.");
+        return;
+      }
+      setSample(blob);
+      setSampleDuration(durationMs);
+      setSampleElapsedMs(durationMs);
+      const url = URL.createObjectURL(blob);
+      sampleUrlRef.current = url;
+      setSampleUrl((previous) => {
+        if (previous) URL.revokeObjectURL(previous);
+        return url;
+      });
+    }, (recording) => {
+      if (recording) sampleLimitHitRef.current = false;
+      setRecordingSample(recording);
+    });
+  }
+
+  function deleteSample() {
+    if (sampleUrl) URL.revokeObjectURL(sampleUrl);
+    sampleUrlRef.current = "";
+    setSample(null);
+    setSampleUrl("");
+    setSampleDuration(0);
+    setSampleElapsedMs(0);
+    setSampleOverLimit(false);
+    sampleLimitHitRef.current = false;
+    setConsent(false);
+  }
+
+  async function createClone() {
+    if (!sample || !consent || !token || recordingSample || sampleOverLimit || sampleDuration >= MAX_SAMPLE_DURATION_MS || (cloneAttemptUncertain && !/retryable/i.test(clone?.status || ""))) return;
+    setCreatingClone(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ audioBase64: await audioBase64(sample), mimeType: sample.type || "audio/webm", durationMs: sampleDuration, consent: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось создать голос (${response.status}).`);
+      setClone(data.clone);
+      setCloneAttemptUncertain(false);
+      await loadLab();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать голос.");
+      setCloneAttemptUncertain(true);
+      await refreshCloneStatus();
+    } finally {
+      setCreatingClone(false);
+    }
+  }
+
+  async function notePlayback(run: VoiceLabRun, elevenlabsRequestMs: number, firstAudioMs: number | null, playResult: string) {
+    const runId = run.id;
+    const updatedRun: VoiceLabRun = {
+      ...run,
+      timings: {
+        ...run.timings,
+        elevenlabsRequest: run.timings.micRelease + elevenlabsRequestMs,
+        firstAudio: firstAudioMs === null ? null : run.timings.micRelease + firstAudioMs,
+      },
+      firstAudioMs,
+      playResult,
+    };
+    setRuns((previous) => previous.map((item) => item.id === runId ? updatedRun : item));
+    setCurrentRun((previous) => previous?.id === runId ? updatedRun : previous);
+    if (!token) return;
+    try {
+      const response = await fetch(`${API}/runs/${encodeURIComponent(runId)}/play`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ elevenlabsRequestMs, firstAudioMs, playResult }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.run) {
+        const mergedRun = { ...updatedRun, ...data.run, timings: { ...updatedRun.timings, ...data.run.timings } };
+        setRuns((previous) => previous.map((item) => item.id === runId ? mergedRun : item));
+        setCurrentRun((previous) => previous?.id === runId ? mergedRun : previous);
+      }
+    } catch {
+      // Playback remains useful even if telemetry cannot be saved.
+    }
+  }
+
+  async function streamAudio(run: VoiceLabRun) {
+    if (!token) throw new Error("Сессия завершена. Войдите снова.");
+    const releaseAt = run.timings?.micRelease || Date.now();
+    const path = `${API}/runs/${encodeURIComponent(run.id)}/audio`;
+    setAutoplayBlocked(false);
+    setPlaybackMode(null);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.onplaying = null;
+    }
+    const requestAt = Date.now();
+    const elevenlabsRequestMs = Math.max(0, requestAt - releaseAt);
+    setLatency((previous) => previous ? {
+      ...previous,
+      englishRequest: Math.max(0, requestAt - run.timings.englishReady),
+    } : previous);
+    const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const message = data.error || `Не удалось загрузить аудио (${response.status}).`;
+      void notePlayback(run, elevenlabsRequestMs, null, `failed: ${message}`);
+      throw new Error(message);
+    }
+    const audio = audioRef.current;
+    if (!audio) throw new Error("Аудиоплеер недоступен.");
+    let audibleAt: number | null = null;
+    let failureHandled = false;
+    let resolveStarted!: () => void;
+    let rejectStarted!: (error: Error) => void;
+    const started = new Promise<void>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    let startSettled = false;
+    const failPlayback = (error: Error) => {
+      if (failureHandled) return;
+      failureHandled = true;
+      setPlaying(false);
+      if (audibleAt === null) {
+        const blocked = error.name === "NotAllowedError";
+        if (blocked) {
+          setAutoplayBlocked(true);
+          setError("Автовоспроизведение заблокировано браузером. Запустите звук кнопкой аудиоплеера.");
+        }
+        void notePlayback(run, elevenlabsRequestMs, null, blocked ? "autoplay_blocked" : `failed: ${error.message}`);
+      } else {
+        void notePlayback(run, elevenlabsRequestMs, audibleAt - releaseAt, `interrupted: ${error.message}`);
+      }
+      if (!startSettled) {
+        startSettled = true;
+        rejectStarted(error);
+      } else {
+        setError(error.message);
+      }
+    };
+    audio.onplaying = () => {
+      setPlaying(true);
+      if (audibleAt === null) {
+        audibleAt = Date.now();
+        const firstAudioMs = Math.max(0, audibleAt - releaseAt);
+        setLatency((previous) => previous ? {
+          ...previous,
+          requestFirstAudio: Math.max(0, audibleAt! - requestAt),
+          releaseFirstAudio: firstAudioMs,
+        } : previous);
+        void notePlayback(run, elevenlabsRequestMs, firstAudioMs, "played");
+      }
+      if (!startSettled) {
+        startSettled = true;
+        resolveStarted();
+      }
+    };
+    audio.onended = () => setPlaying(false);
+    audio.onerror = () => failPlayback(new Error("Не удалось воспроизвести аудио."));
+    const beginPlayback = () => {
+      void audio.play().catch((reason: unknown) => {
+        const error = reason instanceof Error ? reason : new Error("Не удалось начать воспроизведение.");
+        failPlayback(error);
+      });
+    };
+    setPlaying(false);
+
+    const canStream = typeof MediaSource !== "undefined" && MediaSource.isTypeSupported("audio/mpeg") && !!response.body;
+    setPlaybackMode(canStream ? "streaming" : "buffered");
+    if (canStream) {
+      const mediaSource = new MediaSource();
+      const url = URL.createObjectURL(mediaSource);
+      setAudioSource(url);
+      void new Promise<void>((resolve, reject) => {
+        mediaSource.addEventListener("sourceopen", async () => {
+          try {
+            const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+            const reader = response.body!.getReader();
+            let firstChunk = true;
+            const append = (buffer: SourceBuffer, chunk: Uint8Array) => new Promise<void>((done, fail) => {
+              const ended = () => { buffer.removeEventListener("updateend", ended); buffer.removeEventListener("error", failed); done(); };
+              const failed = () => { buffer.removeEventListener("updateend", ended); buffer.removeEventListener("error", failed); fail(new Error("Ошибка потокового воспроизведения.")); };
+              buffer.addEventListener("updateend", ended, { once: true });
+              buffer.addEventListener("error", failed, { once: true });
+              buffer.appendBuffer(chunk);
+            });
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              await append(sourceBuffer, value);
+              if (firstChunk) {
+                firstChunk = false;
+                beginPlayback();
+              }
+            }
+            if (mediaSource.readyState === "open") mediaSource.endOfStream();
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        }, { once: true });
+      }).catch((err: unknown) => {
+        const error = err instanceof Error ? err : new Error("Ошибка потокового воспроизведения.");
+        failPlayback(error);
+      });
+    } else {
+      try {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setAudioSource(url);
+        beginPlayback();
+      } catch (err) {
+        failPlayback(err instanceof Error ? err : new Error("Не удалось загрузить аудио."));
+      }
+    }
+    await started;
+  }
+
+  async function playRun(run: VoiceLabRun) {
+    try {
+      setLatency({
+        releaseTranscript: Math.max(0, run.timings.transcriptionComplete - run.timings.micRelease),
+        transcriptEnglish: Math.max(0, run.timings.englishReady - run.timings.transcriptionComplete),
+        englishRequest: run.timings.elevenlabsRequest == null ? null : Math.max(0, run.timings.elevenlabsRequest - run.timings.englishReady),
+        requestFirstAudio: null,
+        releaseFirstAudio: run.timings.firstAudio == null ? null : Math.max(0, run.timings.firstAudio - run.timings.micRelease),
+      });
+      await streamAudio(run);
+    } catch (err) {
+      setPlaying(false);
+      const message = err instanceof Error ? err.message : "Не удалось воспроизвести ElevenLabs.";
+      setError(err instanceof Error && err.name === "NotAllowedError"
+        ? "Автовоспроизведение заблокировано браузером. Запустите звук кнопкой аудиоплеера."
+        : message);
+    }
+  }
+
+  async function submitSpeech(blob: Blob, durationMs: number, releasedAt: number) {
+    if (!token) return;
+    setWorking(true);
+    setError("");
+    setLatency(null);
+    setCurrentRun(null);
+    try {
+      const response = await fetch(`${API}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ audioBase64: await audioBase64(blob), mimeType: blob.type || "audio/webm", durationMs, releasedAtMs: releasedAt }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось обработать речь (${response.status}).`);
+      const run: VoiceLabRun = data.run;
+      setCurrentRun(run);
+      const timings = run.timings || { micRelease: releasedAt, transcriptionComplete: releasedAt, englishReady: releasedAt };
+      const metrics = {
+        releaseTranscript: Math.max(0, timings.transcriptionComplete - timings.micRelease),
+        transcriptEnglish: Math.max(0, timings.englishReady - timings.transcriptionComplete),
+        englishRequest: null as number | null,
+        requestFirstAudio: null as number | null,
+        releaseFirstAudio: null as number | null,
+      };
+      setLatency(metrics);
+      setRuns((previous) => [run, ...previous.filter((item) => item.id !== run.id)].slice(0, 20));
+      await streamAudio(run);
+    } catch (err) {
+      setPlaying(false);
+      setError(err instanceof Error && err.name === "NotAllowedError"
+        ? "Автовоспроизведение заблокировано браузером. Запустите звук кнопкой аудиоплеера."
+        : err instanceof Error ? err.message : "Не удалось выполнить Voice Lab.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function beginSpeech(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (recordingSpeech || working || pointerHeldRef.current) return;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Window blur and pointer-up handlers still release the mic if capture is unavailable.
+    }
+    pointerHeldRef.current = true;
+    releaseAtRef.current = null;
+    startRecorder((blob, durationMs) => {
+      const release = releaseAtRef.current || Date.now();
+      void submitSpeech(blob, durationMs, release);
+    }, setRecordingSpeech, true);
+  }
+
+  function endSpeech() {
+    pointerHeldRef.current = false;
+    if (releaseAtRef.current === null) releaseAtRef.current = Date.now();
+    stopRecorder();
+  }
+
+  function playDefaultVoice(text: string) {
+    if (!window.speechSynthesis) {
+      setError("Браузер не поддерживает синтез речи.");
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.onstart = () => setPlaying(true);
+    utterance.onend = () => setPlaying(false);
+    utterance.onerror = () => setPlaying(false);
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function intervalLabel(ms: number | null | undefined) {
+    return ms == null ? "—" : `${Math.max(0, ms)} ms`;
+  }
+
+  if (isLoading || (user?.isAdmin && loading)) {
+    return <div className="min-h-screen flex items-center justify-center bg-gray-900"><div className="animate-spin w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full" /></div>;
+  }
+  if (!user?.isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4">
+        <Card className="bg-gray-800/60 border-red-700 max-w-md w-full"><CardContent className="py-10 text-center">
+          <h1 className="text-2xl font-bold text-red-400 mb-2">403 — admin only</h1>
+          <p className="text-gray-400 mb-6">Voice Lab доступен только администраторам.</p>
+          <Button variant="outline" onClick={() => setLocation("/")}>На главную</Button>
+        </CardContent></Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
+      <header className="border-b border-gray-700 bg-gray-900/50">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div><h1 className="text-2xl font-bold text-cyan-400">Voice Lab</h1><p className="text-sm text-gray-400">Административная лаборатория голоса</p></div>
+          <Button variant="outline" onClick={() => setLocation("/dashboard")}>← Dashboard</Button>
+        </div>
+      </header>
+      <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+        {error && <div role="alert" className="rounded-md border border-red-700 bg-red-950/40 px-4 py-3 text-red-300">{error}<button className="float-right" onClick={() => setError("")} aria-label="Закрыть">×</button></div>}
+
+        <Card className="bg-gray-800/50 border-gray-700"><CardContent className="p-5 sm:p-6 space-y-5">
+          <div><h2 className="text-xl font-semibold">1. Образец голоса</h2>
+            <p className="text-sm text-gray-400 mt-1">Запишите 1–2 минуты естественной разговорной речи. Говорите ровно и в обычном темпе.</p>
+          </div>
+          <div className="rounded-md bg-gray-900/70 p-4 space-y-2 text-sm">
+            <p className="text-gray-300"><strong className="text-cyan-300">Текст для чтения:</strong> «Привет! Сегодня я хочу рассказать о том, как проходит мой обычный день. Утром я просыпаюсь, готовлю кофе и планирую дела. Иногда день бывает спокойным, а иногда всё меняется в последнюю минуту. Мне нравится встречаться с друзьями, обсуждать новости и делиться интересными историями. Самое важное — говорить естественно, как в обычном разговоре, не торопиться и делать небольшие паузы».</p>
+            <p className="text-gray-400">Записывайтесь в тихом помещении, близко к микрофону; избегайте музыки, эха, шума и обработки звука.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {!recordingSample ? <Button onClick={recordSample} className="bg-cyan-600 hover:bg-cyan-700">{sample ? "Записать снова" : "Record"}</Button> : <Button onClick={stopRecorder} className="bg-red-600 hover:bg-red-700">Stop</Button>}
+            {sampleUrl && <Button variant="outline" onClick={() => { if (audioRef.current) { audioRef.current.src = sampleUrl; void audioRef.current.play(); } }}>Play</Button>}
+            {sample && <Button variant="outline" onClick={deleteSample}>Delete</Button>}
+            {(sample || recordingSample) && <span className="text-sm text-gray-300">{recordingSample ? "Записано:" : "Длительность:"} {formatDuration(recordingSample ? sampleElapsedMs : sampleDuration)}</span>}
+            {recordingSample && <span className="text-sm text-red-300 animate-pulse">Идёт запись…</span>}
+          </div>
+          {sampleOverLimit && <p role="alert" className="text-sm text-red-300">Образец превысил лимит 3 минуты и не может быть загружен. Запишите новый короткий образец.</p>}
+        </CardContent></Card>
+
+        <Card className="bg-gray-800/50 border-gray-700"><CardContent className="p-5 sm:p-6 space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold">2. Клон голоса ElevenLabs</h2>
+            <p className="text-sm text-gray-400 mt-1">Создайте клон из записанного выше образца. Голос доступен только в этой административной лаборатории.</p>
+          </div>
+          <label className="flex items-start gap-3 text-sm text-gray-300">
+            <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1 accent-cyan-500" />
+            <span>Я подтверждаю, что это мой голос или у меня есть разрешение на его использование и клонирование.</span>
+          </label>
+          <Button disabled={!sample || !consent || creatingClone || recordingSample || sampleOverLimit || sampleDuration >= MAX_SAMPLE_DURATION_MS || (clone && clone.status !== "retryable") || (cloneAttemptUncertain && !/retryable/i.test(clone?.status || ""))} onClick={createClone} className="bg-gradient-to-r from-cyan-600 to-purple-600">
+            {creatingClone ? "Создание голоса…" : "Create ElevenLabs Voice"}
+          </Button>
+          {cloneAttemptUncertain && <div className="rounded-md border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-200">
+            <p>Статус предыдущего запроса: {clone?.status || "неизвестен"}. Повторная отправка отключена, пока статус не станет retryable.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => void refreshCloneStatus()}>Обновить статус</Button>
+            {statusRefreshError && <p role="alert" className="mt-2 text-red-300">{statusRefreshError}</p>}
+          </div>}
+          {clone && <div className="rounded-md border border-gray-700 bg-gray-900/60 p-4 text-sm">
+            <p className="text-green-300 font-medium">Клон: {clone.status}</p>
+            <p className="text-gray-300 break-all">Voice ID: {clone.voiceId}</p>
+            <p className="text-gray-400">Длительность: {formatDuration(clone.durationMs)} · Создан: {new Date(clone.createdAt).toLocaleString()}</p>
+          </div>}
+        </CardContent></Card>
+
+        <Card className="bg-gray-800/50 border-gray-700"><CardContent className="p-5 sm:p-6 space-y-4">
+          <div><h2 className="text-xl font-semibold">3. Русский → английский</h2>
+            <p className="text-sm text-gray-400 mt-1">Нажмите и удерживайте кнопку, произнесите фразу по-русски и отпустите.</p>
+          </div>
+          <Button
+            disabled={working || clone?.status !== "ready"}
+            onPointerDown={beginSpeech}
+            onPointerUp={endSpeech}
+            onPointerCancel={endSpeech}
+            onLostPointerCapture={endSpeech}
+            className={`w-full sm:w-auto min-w-56 h-14 text-base touch-none ${recordingSpeech ? "bg-red-600 hover:bg-red-700" : "bg-cyan-600 hover:bg-cyan-700"}`}
+          >
+            {working ? "Обработка…" : recordingSpeech ? "● Идёт запись — отпустите для отправки" : "Удерживайте и говорите"}
+          </Button>
+          {clone?.status !== "ready" && <p className="text-amber-300 text-sm">Сначала создайте ElevenLabs Voice.</p>}
+          {currentRun && <div className="space-y-4 rounded-md bg-gray-900/60 p-4">
+            <div><p className="text-xs uppercase tracking-wide text-gray-500">Распознано · русский</p><p className="text-gray-100">{currentRun.transcript}</p></div>
+            <div><p className="text-xs uppercase tracking-wide text-gray-500">Перевод · English</p><p className="text-gray-100">{currentRun.english}</p></div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void playRun(currentRun)} disabled={playing} variant="outline">Play ElevenLabs</Button>
+              <Button onClick={() => playDefaultVoice(currentRun.english)} variant="outline">Play browser default voice</Button>
+            </div>
+            <p className="text-xs text-gray-500">Browser default voice uses this device’s speech engine and may sound different from the iOS default voice.</p>
+          </div>}
+          {latency && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+            <div className="rounded bg-gray-900/60 p-3"><span className="text-gray-400">Release → transcript</span><p className="text-cyan-300 font-semibold">{intervalLabel(latency.releaseTranscript)}</p></div>
+            <div className="rounded bg-gray-900/60 p-3"><span className="text-gray-400">Transcript → English</span><p className="text-cyan-300 font-semibold">{intervalLabel(latency.transcriptEnglish)}</p></div>
+            <div className="rounded bg-gray-900/60 p-3"><span className="text-gray-400">English → ElevenLabs request</span><p className="text-cyan-300 font-semibold">{intervalLabel(latency.englishRequest)}</p></div>
+            <div className="rounded bg-gray-900/60 p-3"><span className="text-gray-400">Request → first audible audio</span><p className="text-cyan-300 font-semibold">{intervalLabel(latency.requestFirstAudio)}</p></div>
+            <div className="rounded bg-gray-900/60 p-3"><span className="text-gray-400">Release → first audible audio</span><p className="text-cyan-300 font-semibold">{intervalLabel(latency.releaseFirstAudio)}</p></div>
+          </div>}
+          {playbackMode === "buffered" && <p className="text-sm text-amber-300">Потоковое воспроизведение недоступно в этом браузере. Здесь MP3 сначала загружается целиком, поэтому Request → first audible audio включает полное время загрузки; для настоящего потокового воспроизведения нужен браузер с поддержкой MediaSource и audio/mpeg.</p>}
+        </CardContent></Card>
+
+        <Card className="bg-gray-800/50 border-gray-700"><CardContent className="p-5 sm:p-6">
+          <h2 className="text-xl font-semibold mb-4">Недавние прогоны</h2>
+          {runs.length === 0 ? <p className="text-gray-400 text-sm">Сохранённых прогонов пока нет.</p> : <div className="space-y-3">
+            {runs.slice(0, 10).map((run) => <div key={run.id} className="border-t border-gray-700 pt-3">
+              <p className="text-gray-200">{run.transcript}</p>
+              <p className="text-gray-400 text-sm">{run.english}</p>
+              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500">
+                <span>voice_id: {run.voiceId || "—"}</span>
+                <span>Play result: {run.playResult || "not played"}</span>
+                <span>Release → transcript: {intervalLabel(run.timings.transcriptionComplete - run.timings.micRelease)}</span>
+                <span>Transcript → English: {intervalLabel(run.timings.englishReady - run.timings.transcriptionComplete)}</span>
+                <span>English → request: {intervalLabel(run.timings.elevenlabsRequest == null ? null : run.timings.elevenlabsRequest - run.timings.englishReady)}</span>
+                <span>Request → first audio: {intervalLabel(run.timings.firstAudio == null || run.timings.elevenlabsRequest == null ? null : run.timings.firstAudio - run.timings.elevenlabsRequest)}</span>
+                <span>Release → first audio: {intervalLabel(run.timings.firstAudio == null ? null : run.timings.firstAudio - run.timings.micRelease)}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <Button variant="outline" size="sm" onClick={() => void playRun(run)} disabled={playing}>Play ElevenLabs</Button>
+                <Button variant="outline" size="sm" onClick={() => playDefaultVoice(run.english)} disabled={playing}>Play browser default voice</Button>
+                <span className="text-xs text-gray-500">{run.provider}{run.createdAt ? ` · ${new Date(run.createdAt).toLocaleString()}` : ""}</span>
+              </div>
+            </div>)}
+          </div>}
+        </CardContent></Card>
+        {loading && <p className="text-gray-500 text-sm">Обновление…</p>}
+      </main>
+      <audio ref={audioRef} controls={autoplayBlocked} className={autoplayBlocked ? "w-full max-w-4xl mx-auto px-4 pb-4" : "hidden"} />
+    </div>
+  );
+}

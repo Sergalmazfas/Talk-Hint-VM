@@ -146,15 +146,26 @@ export default function Dashboard() {
               </Button>
             )}
             {user?.isAdmin && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLocation("/admin/diagnostics")}
-                className="border-cyan-600 text-cyan-400 hover:text-cyan-300"
-                data-testid="button-admin"
-              >
-                Админ
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLocation("/admin/diagnostics")}
+                  className="border-cyan-600 text-cyan-400 hover:text-cyan-300"
+                  data-testid="button-admin"
+                >
+                  Админ
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLocation("/voice-lab")}
+                  className="border-purple-600 text-purple-400 hover:text-purple-300"
+                  data-testid="button-voice-lab"
+                >
+                  Voice Lab
+                </Button>
+              </>
             )}
             <span className="text-gray-400 text-sm hidden sm:inline">{user?.email}</span>
             <Button

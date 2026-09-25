@@ -469,3 +469,27 @@ export type BenchmarkFixture = typeof benchmarkFixtures.$inferSelect;
 export type InsertBenchmarkFixture = typeof benchmarkFixtures.$inferInsert;
 export type BenchmarkRun = typeof benchmarkRuns.$inferSelect;
 export type InsertBenchmarkRun = typeof benchmarkRuns.$inferInsert;
+
+// Admin-only Voice Lab data. Audio samples and generated audio are deliberately
+// never persisted; only the provider voice id and experiment metadata survive.
+export const voiceLabClones = pgTable("voice_lab_clones", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  voiceId: text("voice_id"),
+  status: text("status").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const voiceLabRuns = pgTable("voice_lab_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  transcript: text("transcript").notNull(),
+  english: text("english").notNull(),
+  voiceId: text("voice_id").notNull(),
+  provider: text("provider").notNull(),
+  timings: jsonb("timings").notNull().default(sql`'{}'::jsonb`),
+  playResult: text("play_result"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => ({
+  userCreatedIdx: index("voice_lab_runs_user_created_idx").on(t.userId, t.createdAt),
+}));
