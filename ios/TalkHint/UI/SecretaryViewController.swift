@@ -340,9 +340,9 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
     @objc private func continueTapped() {
         view.endEditing(true)
         let phone = SecretaryPhoneNumber.normalized(phoneField.text ?? "")
-        let typedInstruction = instructionView.text == NSLocalizedString("secretary.instruction.placeholder", comment: "")
-            ? "" : instructionView.text
-        let instruction = typedInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typedInstruction = instructionView.text ?? ""
+        let instruction = typedInstruction == NSLocalizedString("secretary.instruction.placeholder", comment: "")
+            ? "" : typedInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let phone else {
             showError(NSLocalizedString("secretary.phone.invalid", comment: ""))
             return
@@ -352,7 +352,7 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
             return
         }
         let prepare = PrepareViewController(mode: .secretary, initialMessage: instruction)
-        prepare.onSecretaryTaskConfirmed = { [weak self] confirmedInstruction, confirmationToken in
+        prepare.onSecretaryTaskConfirmed = { [weak self] (confirmedInstruction: String, confirmationToken: String) in
             guard let self else { return }
             self.navigationController?.pushViewController(
                 SecretaryTaskReviewViewController(
