@@ -28,6 +28,7 @@ private final class CopilotCallbackGate {
 final class CopilotCallCoordinator {
     private let device: CopilotAudioDevice
     private let callSid: String
+    private let voiceProvider: VoiceProviderPreference
     private let stream: CopilotStream
     private let language: String
     private let callbackGate = CopilotCallbackGate()
@@ -48,9 +49,11 @@ final class CopilotCallCoordinator {
     private var cloneRequestActive = false
     private var shownReplyHoldId: String?
 
-    init(callSid: String, device: CopilotAudioDevice) {
+    init(callSid: String, device: CopilotAudioDevice,
+         voiceProvider: VoiceProviderPreference = .elevenlabs) {
         self.callSid = callSid
         self.device = device
+        self.voiceProvider = voiceProvider
         let configuredLanguage = SessionStore.shared.copilotLanguage.lowercased()
         language = ["ru", "es", "uk", "kk"].contains(configuredLanguage) ? configuredLanguage : "ru"
         let rate = max(1, Int(AVAudioSession.sharedInstance().sampleRate))
@@ -91,7 +94,7 @@ final class CopilotCallCoordinator {
             self.maybeShowVerifiedReply()
         }
         viewController.onStreamFailed = { [weak self] in self?.cloneSpeech?.cancel() }
-        cloneSpeech = CopilotCloneSpeechOutput(device: device)
+        cloneSpeech = CopilotCloneSpeechOutput(device: device, provider: voiceProvider)
         viewController.onCloneSpeechTapped = { [weak self] holdId, responseId in
             self?.playVerifiedReply(holdId: holdId, responseId: responseId)
         }

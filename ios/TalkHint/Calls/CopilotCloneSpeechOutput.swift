@@ -22,6 +22,7 @@ enum CopilotCloneSpeechOutcome: Equatable {
 @MainActor
 final class CopilotCloneSpeechOutput {
     private let device: CopilotAudioDevice
+    private let provider: VoiceProviderPreference
     private var generation: UInt64 = 0
     private var requestTask: Task<Void, Never>?
     private var playbackWatchdog: Task<Void, Never>?
@@ -29,8 +30,9 @@ final class CopilotCloneSpeechOutput {
     private var activeReplyKey: (holdId: String, responseId: String)?
     private var cachedReply: (holdId: String, responseId: String, audio: CopilotDecodedSpeech)?
 
-    init(device: CopilotAudioDevice) {
+    init(device: CopilotAudioDevice, provider: VoiceProviderPreference = .elevenlabs) {
         self.device = device
+        self.provider = provider
     }
 
     func play(callSid: String, holdId: String, responseId: String, text: String,
@@ -52,7 +54,8 @@ final class CopilotCloneSpeechOutput {
             guard let self else { return }
             do {
                 let mp3 = try await APIClient.shared.copilotCloneSpeech(
-                    callSid: callSid, holdId: holdId, responseId: responseId, text: text)
+                    callSid: callSid, holdId: holdId, responseId: responseId, text: text,
+                    provider: provider)
                 guard self.generation == attempt, !Task.isCancelled else { return }
                 guard mp3.count <= cloneSpeechMaximumBytes else {
                     self.finish(attempt, outcome: .failed)

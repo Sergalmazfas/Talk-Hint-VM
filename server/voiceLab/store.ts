@@ -40,6 +40,20 @@ export async function failCartesiaClone(userId: string, status: "retryable" | "u
     .where(and(eq(voiceLabCartesiaClones.userId, userId), eq(voiceLabCartesiaClones.status, "creating")));
 }
 
+export async function reserveExistingCartesiaClone(userId: string, voiceId: string) {
+  const [row] = await db.insert(voiceLabCartesiaClones).values({
+    userId, voiceId, status: "ready", durationMs: 0,
+  }).onConflictDoNothing().returning();
+  if (row) return row;
+  // Link only after a definite rejection. The conditional update prevents
+  // racing links from replacing a ready, creating, or uncertain clone.
+  const [retry] = await db.update(voiceLabCartesiaClones).set({
+    voiceId, status: "ready", durationMs: 0, createdAt: new Date(),
+  }).where(and(eq(voiceLabCartesiaClones.userId, userId), eq(voiceLabCartesiaClones.status, "retryable")))
+    .returning();
+  return retry ?? null;
+}
+
 export async function reserveClone(userId: string, durationMs: number) {
   const [row] = await db.insert(voiceLabClones).values({
     userId, status: "creating", durationMs,

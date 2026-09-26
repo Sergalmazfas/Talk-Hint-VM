@@ -8,6 +8,7 @@ import {
 
 const state = vi.hoisted(() => ({
   clone: null as any,
+  cartesiaClone: null as any,
   authorized: true,
 }));
 
@@ -24,11 +25,13 @@ vi.mock("../copilotStream", () => ({
 }));
 vi.mock("../voiceLab/store", () => ({
   getClone: vi.fn(async (userId: string) => state.clone?.userId === userId ? state.clone : null),
+  getCartesiaClone: vi.fn(async (userId: string) => state.cartesiaClone?.userId === userId ? state.cartesiaClone : null),
 }));
 
 const { registerCopilotSpeechRoute } = await import("../copilotSpeech");
 const originalFetch = global.fetch;
 const originalKey = process.env.ELEVENLABS_API_KEY;
+const originalCartesiaKey = process.env.CARTESIA_API_KEY;
 let callSequence = 0;
 let callSid = "CA1234567890abcdef1234567890abcdef";
 const holdId = "hold-a";
@@ -54,8 +57,10 @@ beforeEach(() => {
   clearVerifiedCopilotRepliesForTests();
   callSid = `CA${(++callSequence).toString(16).padStart(32, "0")}`;
   state.clone = { userId: "user-a", voiceId: "own-voice", status: "ready" };
+  state.cartesiaClone = { userId: "user-a", voiceId: "own-cartesia-voice", status: "ready" };
   state.authorized = true;
   process.env.ELEVENLABS_API_KEY = "test-key";
+  process.env.CARTESIA_API_KEY = "test-cartesia-key";
   app = express();
   app.use(express.json());
   registerCopilotSpeechRoute(app);
@@ -65,6 +70,8 @@ afterEach(() => {
   global.fetch = originalFetch;
   if (originalKey === undefined) delete process.env.ELEVENLABS_API_KEY;
   else process.env.ELEVENLABS_API_KEY = originalKey;
+  if (originalCartesiaKey === undefined) delete process.env.CARTESIA_API_KEY;
+  else process.env.CARTESIA_API_KEY = originalCartesiaKey;
 });
 
 describe("Copilot OWN clone speech route", () => {
@@ -95,7 +102,7 @@ describe("Copilot OWN clone speech route", () => {
     state.clone = null;
     const absent = await send();
     expect(absent.status).toBe(409);
-    expect(absent.body.error).toMatch(/No ready OWN voice clone/);
+    expect(absent.body.error).toMatch(/No ready OWN ElevenLabs voice clone/);
     state.clone = { userId: "other-user", voiceId: "other-voice", status: "ready" };
     expect((await send()).status).toBe(409);
   });
@@ -117,6 +124,74 @@ describe("Copilot OWN clone speech route", () => {
       "https://api.elevenlabs.io/v1/text-to-speech/own-voice/stream?output_format=mp3_44100_128",
     );
     expect((await send()).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults older clients to ElevenLabs and rejects unknown providers", async () => {
+    const fetchMock = vi.fn(async () => new Response(Buffer.from("eleven-mp3"), { status: 200 }));
+    global.fetch = fetchMock as any;
+    verified("user-a", "legacy-client");
+    const legacy = await send({ responseId: "legacy-client" });
+    expect(legacy.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("api.elevenlabs.io");
+
+    verified("user-a", "invalid-provider");
+    const invalid = await send({ provider: "openai", responseId: "invalid-provider" });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error).toMatch(/provider must be elevenlabs or cartesia/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses only the authenticated user's Cartesia clone and synthesizes the exact verified text", async () => {
+    verified("user-a", "cartesia-reply");
+    const fetchMock = vi.fn(async (url: any, init: any) => {
+      expect(String(url)).toBe("https://api.cartesia.ai/tts/bytes");
+      expect(init.headers).toMatchObject({
+        Authorization: "Bearer test-cartesia-key", "Cartesia-Version": "2026-08-14",
+      });
+      expect(JSON.parse(init.body)).toMatchObject({
+        model_id: "sonic-3.6", transcript: phrase,
+        voice: { mode: "id", id: "own-cartesia-voice" }, locale: "en",
+      });
+      return new Response(Buffer.from("cartesia-mp3"), { status: 200 });
+    });
+    global.fetch = fetchMock as any;
+    const audio = await send({ provider: "cartesia", responseId: "cartesia-reply" });
+    expect(audio.status).toBe(200);
+    expect(audio.headers["content-type"]).toMatch(/audio\/mpeg/);
+    expect(audio.body.toString()).toBe("cartesia-mp3");
+    expect((await send({ provider: "cartesia", responseId: "cartesia-reply" })).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back to ElevenLabs for a missing, unowned, or unavailable Cartesia clone", async () => {
+    const fetchMock = vi.fn(async () => new Response(Buffer.from("mp3"), { status: 200 }));
+    global.fetch = fetchMock as any;
+    verified("user-a", "cartesia-no-clone");
+    state.cartesiaClone = null;
+    expect((await send({ provider: "cartesia", responseId: "cartesia-no-clone" })).status).toBe(409);
+    state.cartesiaClone = { userId: "user-b", voiceId: "other-cartesia-voice", status: "ready" };
+    expect((await send({ provider: "cartesia", responseId: "cartesia-no-clone" })).status).toBe(409);
+    state.cartesiaClone = { userId: "user-a", voiceId: "own-cartesia-voice", status: "creating" };
+    expect((await send({ provider: "cartesia", responseId: "cartesia-no-clone" })).status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+    state.cartesiaClone = { userId: "user-a", voiceId: "own-cartesia-voice", status: "ready" };
+    expect((await send({ provider: "cartesia", responseId: "cartesia-no-clone" })).status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://api.cartesia.ai/tts/bytes");
+  });
+
+  it("fails before consuming a verified reply if the selected provider key is missing", async () => {
+    verified("user-a", "cartesia-no-key");
+    delete process.env.CARTESIA_API_KEY;
+    const missingKey = await send({ provider: "cartesia", responseId: "cartesia-no-key" });
+    expect(missingKey.status).toBe(503);
+    expect(missingKey.body.error).toMatch(/Cartesia speech service is not configured/);
+
+    process.env.CARTESIA_API_KEY = "test-cartesia-key";
+    const fetchMock = vi.fn(async () => new Response(Buffer.from("mp3"), { status: 200 }));
+    global.fetch = fetchMock as any;
+    const retrySameVerifiedReply = await send({ provider: "cartesia", responseId: "cartesia-no-key" });
+    expect(retrySameVerifiedReply.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

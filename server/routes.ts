@@ -32,8 +32,8 @@ import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
 import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices, resolveTranslatorPlayback } from "./translation/twilioBridge";
-import { getClone } from "./voiceLab/store";
-import { requireReadyOwnerClone } from "./translation/cloneSpeech";
+import { getClone, getCartesiaClone } from "./voiceLab/store";
+import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
 import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
@@ -1286,14 +1286,22 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         return res.type("text/xml").send(twimlResponse.toString());
       }
       const ownerId = ownerMatch[1];
-      // Owner→English is spoken exclusively with that account's ready clone.
-      // Do this before registering the bridge or creating any paid guest leg.
-      const ownerClone = await getClone(ownerId).catch(() => null);
+      // Provider is an allowlisted, signed Twilio parameter from the
+      // authenticated owner call. Unknown values preserve the ElevenLabs
+      // default; the client never supplies a voice ID.
+      const cloneProvider = resolveTranslatorCloneProvider(req.body.TranslatorProvider);
+      // Owner→English is spoken exclusively with this account's ready clone.
+      // Validate clone ownership and its provider key before creating any paid
+      // guest leg. Never silently fall back to another provider.
+      const ownerClone = await (cloneProvider === "cartesia" ? getCartesiaClone(ownerId) : getClone(ownerId))
+        .catch(() => null);
       let cloneVoiceId: string;
       try {
-        cloneVoiceId = requireReadyOwnerClone(ownerClone, process.env.ELEVENLABS_API_KEY);
+        const apiKey = cloneProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY;
+        cloneVoiceId = requireReadyTranslatorClone(cloneProvider, ownerClone, apiKey);
       } catch {
-        twimlResponse.say("Translator is unavailable: your cloned voice is not ready or voice synthesis is not configured.");
+        const providerName = cloneProvider === "cartesia" ? "Cartesia" : "ElevenLabs";
+        twimlResponse.say(`Translator is unavailable: your ${providerName} voice clone is not ready or voice synthesis is not configured.`);
         twimlResponse.hangup();
         return res.type("text/xml").send(twimlResponse.toString());
       }
@@ -1314,6 +1322,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         id: ownerCallId, ownerId, ownerCallSid: callSid, guestNumber: guestTo,
         callerId, baseUrl: `${protocol}://${host}`,
         cloneVoiceId,
+        cloneProvider,
         voicePreference: resolvedVoice.preference, voices: resolvedVoice.voices,
         playbackPreference: resolvedPlayback,
       });

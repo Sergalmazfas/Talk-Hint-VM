@@ -4,7 +4,10 @@ import type WebSocket from "ws";
 import { openaiRealtimeTranslationProvider } from "./openaiRealtimeTranslator";
 import type { RealtimeTranslationProvider, RealtimeTranslationSession, TranslationTurnMetrics } from "./provider";
 import { storage } from "../storage";
-import { isSafeEnglishTranslation, synthesizeCloneSpeech } from "./cloneSpeech";
+import {
+  isSafeEnglishTranslation, synthesizeCloneSpeech, synthesizeCartesiaCloneSpeech,
+  type TranslatorCloneProvider,
+} from "./cloneSpeech";
 
 const RATE = 24_000;
 const MODEL = process.env.TRANSLATOR_SPIKE_MODEL || "gpt-realtime";
@@ -50,6 +53,8 @@ export interface TranslatorCall {
   callerId: string; baseUrl: string;
   /** Server-only immutable owner clone selected by the signed Twilio route. */
   cloneVoiceId?: string;
+  /** Server-selected provider, snapshotted before the guest leg is created. */
+  cloneProvider?: TranslatorCloneProvider;
   voicePreference?: TranslatorVoicePreference;
   voices?: TranslatorVoices;
   playbackPreference?: TranslatorPlaybackPreference;
@@ -62,6 +67,7 @@ type RegisteredTranslatorCall = TranslatorCall & {
   voicePreference: TranslatorVoicePreference;
   voices: TranslatorVoices;
   playbackPreference: TranslatorPlaybackPreference;
+  cloneProvider: TranslatorCloneProvider;
 };
 const calls = new Map<string, RegisteredTranslatorCall>();
 type ActiveLeg = { ws: WebSocket; streamSid: string; session?: RealtimeTranslationSession };
@@ -94,10 +100,16 @@ const activeCalls = new Map<string, BridgeState>();
 const terminationHandlers = new Map<string, (failed: boolean, reason?: string) => void>();
 const feedSubscribers = new Map<string, Set<WebSocket>>();
 let cloneSynthesizer = synthesizeCloneSpeech;
+let cartesiaCloneSynthesizer = synthesizeCartesiaCloneSpeech;
 export function configureTranslatorCloneSynthesizer(
   synthesizer: typeof synthesizeCloneSpeech | undefined,
 ) {
   cloneSynthesizer = synthesizer || synthesizeCloneSpeech;
+}
+export function configureTranslatorCartesiaCloneSynthesizer(
+  synthesizer: typeof synthesizeCartesiaCloneSpeech | undefined,
+) {
+  cartesiaCloneSynthesizer = synthesizer || synthesizeCartesiaCloneSpeech;
 }
 export function subscribeTranslatorFeed(userId: string, ws: WebSocket) {
   const set = feedSubscribers.get(userId) || new Set<WebSocket>();
@@ -128,6 +140,7 @@ export function registerTranslatorCall(call: TranslatorCall) {
     voicePreference: resolved.preference,
     voices: { ...resolved.voices },
     playbackPreference: resolveTranslatorPlayback(call.playbackPreference),
+    cloneProvider: call.cloneProvider === "cartesia" ? "cartesia" : "elevenlabs",
   });
   const timer: any = setTimeout(() => {
     const state = activeCalls.get(call.id);
@@ -228,7 +241,8 @@ async function drainCloneQueue(call: RegisteredTranslatorCall, state: BridgeStat
       state.cloneCurrentResponseId = turn.responseId;
       const controller = new AbortController();
       state.cloneAbortController = controller;
-      const pcm = await cloneSynthesizer(call.cloneVoiceId!, turn.text, controller.signal);
+      const synthesize = call.cloneProvider === "cartesia" ? cartesiaCloneSynthesizer : cloneSynthesizer;
+      const pcm = await synthesize(call.cloneVoiceId!, turn.text, controller.signal);
       if (controller.signal.aborted || state.finalized || state.failed ||
         activeCalls.get(call.id) !== state || state.cloneCurrentResponseId !== turn.responseId) continue;
       if (owner.ws.readyState !== owner.ws.OPEN || guest.ws.readyState !== guest.ws.OPEN) {

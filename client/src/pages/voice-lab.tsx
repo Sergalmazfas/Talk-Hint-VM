@@ -128,6 +128,10 @@ export default function VoiceLab() {
   const [creatingCartesiaClone, setCreatingCartesiaClone] = useState(false);
   const [cartesiaAttemptUncertain, setCartesiaAttemptUncertain] = useState(false);
   const [cartesiaFailure, setCartesiaFailure] = useState("");
+  const [cartesiaLinkVoiceId, setCartesiaLinkVoiceId] = useState("");
+  const [cartesiaLinkConsent, setCartesiaLinkConsent] = useState(false);
+  const [linkingCartesiaVoice, setLinkingCartesiaVoice] = useState(false);
+  const [cartesiaVoiceIdCopied, setCartesiaVoiceIdCopied] = useState(false);
   const [linkVoiceId, setLinkVoiceId] = useState("");
   const [linkConsent, setLinkConsent] = useState(false);
   const [linkingVoice, setLinkingVoice] = useState(false);
@@ -443,6 +447,43 @@ export default function VoiceLab() {
       }
     } finally {
       setCreatingCartesiaClone(false);
+    }
+  }
+
+  async function linkExistingCartesiaVoice() {
+    if (!cartesiaLinkVoiceId.trim() || !cartesiaLinkConsent || !token || linkingCartesiaVoice ||
+        cartesiaError || (cartesiaClone && cartesiaClone.status !== "retryable")) return;
+    setLinkingCartesiaVoice(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/cartesia/link-existing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ voiceId: cartesiaLinkVoiceId.trim(), consent: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось связать голос Cartesia (${response.status}).`);
+      setCartesiaClone(data.cartesiaClone);
+      setCartesiaLinkVoiceId("");
+      setCartesiaLinkConsent(false);
+      setCartesiaAttemptUncertain(false);
+      setCartesiaFailure("");
+      await loadLab();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось связать существующий голос Cartesia.");
+    } finally {
+      setLinkingCartesiaVoice(false);
+    }
+  }
+
+  async function copyCartesiaVoiceId() {
+    if (!cartesiaClone?.voiceId) return;
+    try {
+      await navigator.clipboard.writeText(cartesiaClone.voiceId);
+      setCartesiaVoiceIdCopied(true);
+      window.setTimeout(() => setCartesiaVoiceIdCopied(false), 2_000);
+    } catch {
+      setError("Не удалось скопировать Cartesia Voice ID. Выделите и скопируйте его вручную.");
     }
   }
 
@@ -911,9 +952,45 @@ export default function VoiceLab() {
             <p className={cartesiaClone.status === "ready" ? "font-medium text-green-300" : "font-medium text-amber-300"}>Cartesia: {{
               ready: "клон готов", retryable: "запрос отклонён", creating: "создаётся", uncertain: "результат неизвестен",
             }[cartesiaClone.status] || cartesiaClone.status}</p>
-            {cartesiaClone.voiceId && <p className="break-all text-gray-300">Voice ID: {cartesiaClone.voiceId}</p>}
+            {cartesiaClone.voiceId && <div className="mt-1 flex flex-wrap items-center gap-2">
+              <p className="break-all text-gray-300">Voice ID: {cartesiaClone.voiceId}</p>
+              <Button variant="outline" size="sm" onClick={() => void copyCartesiaVoiceId()}>
+                {cartesiaVoiceIdCopied ? "Скопировано" : "Скопировать ID"}
+              </Button>
+            </div>}
             <p className="text-gray-400">Длительность образца: {cartesiaClone.durationMs ? formatDuration(cartesiaClone.durationMs) : "—"}{cartesiaClone.createdAt ? ` · Создан: ${new Date(cartesiaClone.createdAt).toLocaleString()}` : ""}</p>
           </div>}
+          {(!cartesiaClone || cartesiaClone.status === "retryable") && (
+            <div className="space-y-3 rounded-md border border-gray-700 bg-gray-900/60 p-4">
+              <div>
+                <h3 className="font-medium text-gray-200">Связать уже созданный Cartesia-клон</h3>
+                <p className="mt-1 text-sm text-gray-400">После публикации dev- и production-базы раздельные. На стенде разработки нажмите «Скопировать ID», затем вставьте его здесь в production. Это только связывает готовый клон: аудиозапись не отправляется, повторное клонирование и оплата не выполняются.</p>
+              </div>
+              <label className="block text-sm text-gray-300">
+                Cartesia Voice ID
+                <input
+                  value={cartesiaLinkVoiceId}
+                  onChange={(event) => setCartesiaLinkVoiceId(event.target.value)}
+                  placeholder="550e8400-e29b-41d4-a716-446655440000"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="mt-1 w-full rounded-md border border-gray-600 bg-gray-950 px-3 py-2 text-white"
+                />
+              </label>
+              <label className="flex items-start gap-3 text-sm text-gray-300">
+                <input type="checkbox" checked={cartesiaLinkConsent} onChange={(event) => setCartesiaLinkConsent(event.target.checked)} className="mt-1 accent-purple-500" />
+                <span>Подтверждаю, что это мой существующий частный голос Cartesia и разрешаю связать его с этим аккаунтом.</span>
+              </label>
+              <Button
+                variant="outline"
+                disabled={!cartesiaLinkVoiceId.trim() || !cartesiaLinkConsent || linkingCartesiaVoice || Boolean(cartesiaError)}
+                onClick={() => void linkExistingCartesiaVoice()}
+              >
+                {linkingCartesiaVoice ? "Проверка и привязка…" : "Связать существующий клон"}
+              </Button>
+            </div>
+          )}
           {cartesiaAttemptUncertain && <div className="rounded-md border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-200">
             <p>{cartesiaClone?.status === "retryable"
               ? "Cartesia отклонила запрос. Причиной может быть тариф, лимит аккаунта или формат записи. Не перезаписывайте образец, пока не выяснена причина."

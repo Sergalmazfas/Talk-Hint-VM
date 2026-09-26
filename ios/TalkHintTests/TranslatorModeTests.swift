@@ -43,6 +43,31 @@ final class TranslatorModeTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: key)
         XCTAssertEqual(SessionStore.shared.translatorPlayback, .voice)
     }
+
+    func testVoiceProviderDefaultsToElevenLabsAndRejectsInvalidStoredValues() {
+        let key = "talkhint.voice.provider"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.set("cartesia-like", forKey: key)
+        XCTAssertEqual(SessionStore.shared.voiceProvider, .elevenlabs)
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertEqual(SessionStore.shared.voiceProvider, .elevenlabs)
+    }
+
+    func testVoiceProviderPersistsCartesia() {
+        let key = "talkhint.voice.provider"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        SessionStore.shared.voiceProvider = .cartesia
+        XCTAssertEqual(UserDefaults.standard.string(forKey: key), "cartesia")
+    }
+
     func testTranslatorOutgoingCallIsExplicitlyModeTagged() {
         let params = CallManager.connectParameters(to: "+14155550100", mode: .translator)
         XCTAssertEqual(params, [
@@ -51,6 +76,7 @@ final class TranslatorModeTests: XCTestCase {
             "TranslatorMode": "ru_en",
             "TranslatorVoice": "female",
             "TranslatorPlayback": "voice",
+            "TranslatorProvider": "elevenlabs",
         ])
     }
 
@@ -74,6 +100,20 @@ final class TranslatorModeTests: XCTestCase {
             CallManager.connectParameters(to: "+14155550100", mode: .translator, translatorPlayback: .text)["TranslatorPlayback"],
             "text"
         )
+    }
+
+    func testVoiceProviderIsPassedOnlyToTranslatorCall() {
+        let translator = CallManager.connectParameters(
+            to: "+14155550100", mode: .translator, voiceProvider: .cartesia)
+        XCTAssertEqual(translator["TranslatorProvider"], "cartesia")
+        XCTAssertEqual(
+            CallManager.connectParameters(
+                to: "+14155550100", mode: .translator, voiceProvider: .elevenlabs)["TranslatorProvider"],
+            "elevenlabs")
+        XCTAssertNil(CallManager.connectParameters(
+            to: "+14155550100", mode: .hint, voiceProvider: .cartesia)["TranslatorProvider"])
+        XCTAssertNil(CallManager.connectParameters(
+            to: "+14155550100", mode: .copilot, voiceProvider: .cartesia)["TranslatorProvider"])
     }
 
     func testTranslatorMetadataParsesStructuredConversation() throws {

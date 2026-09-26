@@ -627,7 +627,7 @@ final class APIClient {
     /// Requests cloned speech for one verified Copilot reply. Success is
     /// bounded MP3; failures are explicit JSON errors from the service.
     func copilotCloneSpeech(callSid: String, holdId: String, responseId: String,
-                            text: String) async throws -> Data {
+                            text: String, provider: VoiceProviderPreference = .elevenlabs) async throws -> Data {
         let maxAudioBytes = 8 * 1024 * 1024
         guard let token = SessionStore.shared.token else { throw APIError.notAuthenticated }
         var req = URLRequest(url: AppConfig.baseURL.appendingPathComponent("/api/copilot/clone-speech"))
@@ -636,7 +636,8 @@ final class APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "callSid": callSid, "holdId": holdId, "responseId": responseId, "text": text
+            "callSid": callSid, "holdId": holdId, "responseId": responseId, "text": text,
+            "provider": provider.rawValue,
         ])
 
         let (bytes, response) = try await session.bytes(for: req)

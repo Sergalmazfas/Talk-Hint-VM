@@ -281,3 +281,7 @@
 "mode.dispatcher" = "Asistente de recepción";
 "common.edit" = "Editar";
 "common.error.title" = "Algo salió mal";
+"settings.voice_provider.title" = "Proveedor de voz";
+"settings.voice_provider.elevenlabs" = "ElevenLabs";
+"settings.voice_provider.cartesia" = "Cartesia";
+"settings.footer.voice_provider" = "Se aplica a su voz clonada en inglés en Translator y Copilot desde la próxima llamada. No cambia la voz del invitado ni la del sistema. Cartesia requiere que su clon esté listo en el servidor.";

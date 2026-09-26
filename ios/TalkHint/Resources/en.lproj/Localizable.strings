@@ -281,3 +281,7 @@
 "mode.dispatcher" = "Dispatcher Assistant";
 "common.edit" = "Edit";
 "common.error.title" = "Something went wrong";
+"settings.voice_provider.title" = "Voice provider";
+"settings.voice_provider.elevenlabs" = "ElevenLabs";
+"settings.voice_provider.cartesia" = "Cartesia";
+"settings.footer.voice_provider" = "This setting applies to your cloned English voice in Translator and Copilot, starting with the next call. Guest and system voices are unchanged. Cartesia requires your own ready Cartesia clone on the server.";

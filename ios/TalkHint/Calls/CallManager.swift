@@ -52,6 +52,7 @@ final class CallManager: NSObject {
         let isOutgoing: Bool
         let translatorVoice: TranslatorVoicePreference
         let translatorPlayback: TranslatorPlaybackPreference
+        let voiceProvider: VoiceProviderPreference
     }
 
     private var sessions: [UUID: CallSession] = [:]
@@ -85,7 +86,11 @@ final class CallManager: NSObject {
         // The ringing tab is the explicit incoming-mode selection. Do not
         // turn every incoming call into Copilot.
         let selectedMode: CallMode = Self.selectedIncomingMode()
-        sessions[uuid] = CallSession(uuid: uuid, mode: selectedMode, callSid: callSid, remoteLabel: fromNumber, twilioCall: nil, answered: false, isOutgoing: false, translatorVoice: .female, translatorPlayback: .voice)
+        sessions[uuid] = CallSession(uuid: uuid, mode: selectedMode, callSid: callSid,
+                                      remoteLabel: fromNumber, twilioCall: nil, answered: false,
+                                      isOutgoing: false, translatorVoice: .female,
+                                      translatorPlayback: .voice,
+                                      voiceProvider: SessionStore.shared.voiceProvider)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -134,14 +139,16 @@ final class CallManager: NSObject {
     func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
         if sessions.isEmpty, disconnectingCalls.isEmpty { audioDevice.prepareForNewCall() }
-        // Snapshot before CallKit/Twilio starts. A Settings change after this
-        // point affects only the next Translator call.
+        // Snapshot before CallKit/Twilio starts. Later Settings changes apply
+        // to the next call, including owner clone speech in Copilot.
         let translatorVoice = SessionStore.shared.translatorVoice
         let translatorPlayback = SessionStore.shared.translatorPlayback
+        let voiceProvider = SessionStore.shared.voiceProvider
         sessions[uuid] = CallSession(uuid: uuid, mode: mode, callSid: nil, remoteLabel: number,
                                      twilioCall: nil, answered: false, isOutgoing: true,
                                       translatorVoice: translatorVoice,
-                                      translatorPlayback: translatorPlayback)
+                                      translatorPlayback: translatorPlayback,
+                                      voiceProvider: voiceProvider)
 
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
@@ -169,7 +176,8 @@ final class CallManager: NSObject {
     /// CallKit transaction.
     static func connectParameters(to number: String, mode: CallMode,
                                   translatorVoice: TranslatorVoicePreference = .female,
-                                  translatorPlayback: TranslatorPlaybackPreference = .voice) -> [String: String] {
+                                  translatorPlayback: TranslatorPlaybackPreference = .voice,
+                                  voiceProvider: VoiceProviderPreference = .elevenlabs) -> [String: String] {
         switch mode {
         case .hint:
             return ["To": number]
@@ -182,6 +190,7 @@ final class CallManager: NSObject {
                 "TranslatorMode": "ru_en",
                 "TranslatorVoice": translatorVoice.rawValue,
                 "TranslatorPlayback": translatorPlayback.rawValue,
+                "TranslatorProvider": voiceProvider.rawValue,
             ]
         case .copilot:
             return ["To": number, "CopilotMode": "v1"]
@@ -278,7 +287,8 @@ final class CallManager: NSObject {
         }
         if session.mode == .copilot {
             guard let callSid = sessions[uuid]?.callSid ?? twilioCallSid else { return }
-            let coordinator = CopilotCallCoordinator(callSid: callSid, device: audioDevice)
+            let coordinator = CopilotCallCoordinator(callSid: callSid, device: audioDevice,
+                                                      voiceProvider: session.voiceProvider)
             copilotCoordinator = coordinator
             coordinator.present(callerName: session.remoteLabel, from: top,
                                 onMute: { [weak self] in self?.toggleMute() },
@@ -377,7 +387,8 @@ extension CallManager: CXProviderDelegate {
                 let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
                     builder.params = Self.connectParameters(to: number, mode: session.mode,
                                                             translatorVoice: session.translatorVoice,
-                                                            translatorPlayback: session.translatorPlayback)
+                                                            translatorPlayback: session.translatorPlayback,
+                                                            voiceProvider: session.voiceProvider)
                     builder.uuid = uuid
                 }
                 let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)

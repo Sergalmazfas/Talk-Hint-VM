@@ -34,4 +34,16 @@ final class DialerLayoutTests: XCTestCase {
             }
         }
     }
+
+    func testVoiceProviderSettingUsesStableAccessibleSegmentedControl() {
+        let controller = SettingsViewController()
+        controller.loadViewIfNeeded()
+        let indexPath = IndexPath(row: 2, section: 2)
+        let cell = controller.tableView(controller.tableView, cellForRowAt: indexPath)
+        let control = cell.accessoryView as? UISegmentedControl
+        XCTAssertEqual(control?.accessibilityIdentifier, "segmented-voice-provider")
+        XCTAssertEqual(control?.numberOfSegments, 2)
+        XCTAssertEqual(control?.titleForSegment(at: 0), NSLocalizedString("settings.voice_provider.elevenlabs", comment: ""))
+        XCTAssertEqual(control?.titleForSegment(at: 1), NSLocalizedString("settings.voice_provider.cartesia", comment: ""))
+    }
 }

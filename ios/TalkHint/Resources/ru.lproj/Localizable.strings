@@ -281,3 +281,7 @@
 "mode.dispatcher" = "Ассистент-диспетчер";
 "common.edit" = "Изменить";
 "common.error.title" = "Что-то пошло не так";
+"settings.voice_provider.title" = "Провайдер голоса";
+"settings.voice_provider.elevenlabs" = "ElevenLabs";
+"settings.voice_provider.cartesia" = "Cartesia";
+"settings.footer.voice_provider" = "Для вашего клонированного английского голоса в Translator и Copilot, начиная со следующего звонка. Голос собеседника и системный голос не меняются. Для Cartesia ваш клон должен быть готов на сервере.";

@@ -34,6 +34,7 @@ final class SettingsViewController: UITableViewController {
     private enum TranslatorRow: Int, CaseIterable {
         case voice
         case playback
+        case provider
     }
 
     // Per-user live-call toggles, mirrored locally for instant display. Default ON
@@ -113,7 +114,9 @@ final class SettingsViewController: UITableViewController {
             return NSLocalizedString("settings.footer.language", comment: "")
         case .features:
             return NSLocalizedString("settings.footer.features", comment: "")
-        case .translator, .phone, .account:
+        case .translator:
+            return NSLocalizedString("settings.footer.voice_provider", comment: "")
+        case .phone, .account:
             return nil
         }
     }
@@ -165,6 +168,16 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = SessionStore.shared.translatorPlayback == .voice ? 0 : 1
                 control.accessibilityIdentifier = "segmented-translator-playback"
                 control.addTarget(self, action: #selector(translatorPlaybackChanged(_:)), for: .valueChanged)
+                cell.accessoryView = control
+            case .provider:
+                cell.textLabel?.text = NSLocalizedString("settings.voice_provider.title", comment: "")
+                let control = UISegmentedControl(items: [
+                    NSLocalizedString("settings.voice_provider.elevenlabs", comment: ""),
+                    NSLocalizedString("settings.voice_provider.cartesia", comment: ""),
+                ])
+                control.selectedSegmentIndex = SessionStore.shared.voiceProvider == .elevenlabs ? 0 : 1
+                control.accessibilityIdentifier = "segmented-voice-provider"
+                control.addTarget(self, action: #selector(voiceProviderChanged(_:)), for: .valueChanged)
                 cell.accessoryView = control
             }
             return cell
@@ -247,6 +260,10 @@ final class SettingsViewController: UITableViewController {
 
     @objc private func translatorPlaybackChanged(_ sender: UISegmentedControl) {
         SessionStore.shared.translatorPlayback = sender.selectedSegmentIndex == 0 ? .voice : .text
+    }
+
+    @objc private func voiceProviderChanged(_ sender: UISegmentedControl) {
+        SessionStore.shared.voiceProvider = sender.selectedSegmentIndex == 1 ? .cartesia : .elevenlabs
     }
 
     /// Persists a single toggle, reverting the switch on failure.

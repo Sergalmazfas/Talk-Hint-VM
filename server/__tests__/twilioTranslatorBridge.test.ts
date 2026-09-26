@@ -6,7 +6,7 @@ import {
   expireTranslatorCall, getTranslatorBridgeSnapshot, handleTranslatorGuestStatus,
   getTranslatorCall, resolveTranslatorVoices,
   resolveTranslatorPlayback,
-  configureTranslatorCloneSynthesizer,
+  configureTranslatorCloneSynthesizer, configureTranslatorCartesiaCloneSynthesizer,
 } from "../translation/twilioBridge";
 import type { RealtimeTranslationProvider } from "../translation/provider";
 
@@ -423,6 +423,79 @@ describe("PSTN translator bridge routing", () => {
     (voices as any).owner = "marin";
     expect(getTranslatorCall(id)?.voices).toEqual({ owner: "cedar", guest: "marin" });
     expireTranslatorCall(id);
+  });
+
+  it("snapshots Cartesia provider and voice and never falls back to ElevenLabs", async () => {
+    const id = "cartesia-clone-provider", sessions: any[] = [];
+    let cartesiaCalls = 0, elevenCalls = 0;
+    registerTranslatorCall({
+      id, ownerId: "owner-cartesia", ownerCallSid: "CAowner", guestNumber: "+15551234567",
+      callerId: "+15557654321", baseUrl: "https://example.test", cloneProvider: "cartesia",
+      cloneVoiceId: "cartesia-owner-voice",
+    });
+    expect(getTranslatorCall(id)).toMatchObject({ cloneProvider: "cartesia", cloneVoiceId: "cartesia-owner-voice" });
+    configureTranslatorCloneSynthesizer(async () => { elevenCalls++; return Buffer.alloc(12); });
+    configureTranslatorCartesiaCloneSynthesizer(async (voiceId, text, signal) => {
+      cartesiaCalls++;
+      expect(voiceId).toBe("cartesia-owner-voice");
+      expect(text).toBe("Hello from Cartesia.");
+      expect(signal).toBeInstanceOf(AbortSignal);
+      return Buffer.alloc(12, 7);
+    });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start(id, "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start(id, "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+    sessions[0].emit({ type: "response_created", responseId: "r1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello from Cartesia.", responseId: "r1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      translatedTranscript: "Hello from Cartesia.", sourceItemId: "item-1", responseId: "r1",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(cartesiaCalls).toBe(1);
+    expect(elevenCalls).toBe(0);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(1);
+    expect(guest.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(1);
+    owner.emit("close");
+    configureTranslatorCloneSynthesizer(undefined);
+    configureTranslatorCartesiaCloneSynthesizer(undefined);
+  });
+
+  it("does not fall back to ElevenLabs if selected Cartesia synthesis fails", async () => {
+    const sessions: any[] = [];
+    let elevenCalls = 0;
+    registerTranslatorCall({
+      id: "cartesia-no-fallback", ownerId: "owner-cartesia", ownerCallSid: "CAowner",
+      guestNumber: "+15551234567", callerId: "+15557654321", baseUrl: "https://example.test",
+      cloneProvider: "cartesia", cloneVoiceId: "cartesia-owner-voice",
+    });
+    configureTranslatorCloneSynthesizer(async () => { elevenCalls++; return Buffer.alloc(12); });
+    configureTranslatorCartesiaCloneSynthesizer(async () => { throw new Error("Cartesia unavailable"); });
+    configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+    const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions);
+    handleTranslatorTwilioStream(owner as any, provider);
+    handleTranslatorTwilioStream(guest as any, provider);
+    owner.emit("message", start("cartesia-no-fallback", "owner"));
+    await new Promise(resolve => setImmediate(resolve));
+    guest.emit("message", start("cartesia-no-fallback", "guest"));
+    await new Promise(resolve => setImmediate(resolve));
+    sessions[0].emit({ type: "response_created", responseId: "r1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello.", responseId: "r1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      translatedTranscript: "Hello.", sourceItemId: "item-1", responseId: "r1",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(elevenCalls).toBe(0);
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+    configureTranslatorCloneSynthesizer(undefined);
+    configureTranslatorCartesiaCloneSynthesizer(undefined);
   });
 
   it("declares the complete asymmetric eight-route matrix", () => {

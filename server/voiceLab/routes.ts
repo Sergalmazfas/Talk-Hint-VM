@@ -4,7 +4,7 @@ import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import {
   failClone, finishClone, getClone, getRun, insertRun, listVoiceLab, reserveExistingClone,
   recordPlayback, reserveClone, toPublicClone, toPublicRun,
-  getCartesiaClone, reserveCartesiaClone, finishCartesiaClone, failCartesiaClone,
+  getCartesiaClone, reserveCartesiaClone, finishCartesiaClone, failCartesiaClone, reserveExistingCartesiaClone,
 } from "./store";
 import {
   createClonedVoice, createCartesiaClonedVoice, CartesiaProvider, CartesiaHttpError,
@@ -15,6 +15,7 @@ import {
 import { withAbsolutePlaybackTimings } from "./timings";
 
 const base = "/api/admin/voice-lab";
+const CARTESIA_VERSION = "2026-08-14";
 const RUN_LIMIT = 6;
 const WINDOW_MS = 60_000;
 const RELEASE_MAX_AGE_MS = 10 * 60_000;
@@ -126,6 +127,57 @@ export function registerVoiceLabRoutes(app: Express) {
       }
     } finally {
       controller.abort();
+    }
+  });
+
+  app.post(`${base}/cartesia/link-existing`, requireBenchmarkAdmin, async (req, res) => {
+    const uid = userId(req);
+    const voiceId = req.body?.voiceId;
+    if (req.body?.consent !== true) {
+      return res.status(400).json({ error: "Explicit consent to link this existing Cartesia voice is required" });
+    }
+    if (typeof voiceId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(voiceId)) {
+      return res.status(400).json({ error: "Cartesia voiceId must be a UUID" });
+    }
+    const apiKey = process.env.CARTESIA_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: "Cartesia API key is not configured" });
+
+    try {
+      const upstream = await fetch(`https://api.cartesia.ai/voices/${encodeURIComponent(voiceId)}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": CARTESIA_VERSION },
+      });
+      if (!upstream.ok) {
+        await upstream.body?.cancel().catch(() => undefined);
+        return res.status(403).json({ error: "Cartesia could not verify access to this private voice" });
+      }
+      const voice = await upstream.json();
+      // The Cartesia key belongs to the application, not an individual
+      // TalkHint user. Match the name assigned by our original clone request
+      // to prevent one admin linking another admin's private voice.
+      if (!voice || voice.id !== voiceId || voice.access !== "private" ||
+          voice.name !== `TalkHint Cartesia Voice Lab ${uid.slice(0, 8)}`) {
+        return res.status(403).json({ error: "Only your own private TalkHint Cartesia clone can be linked" });
+      }
+    } catch {
+      return res.status(502).json({ error: "Could not verify the existing voice with Cartesia" });
+    }
+
+    try {
+      const clone = await reserveExistingCartesiaClone(uid, voiceId);
+      if (!clone) {
+        const existing = await getCartesiaClone(uid);
+        return res.status(409).json({
+          error: "A Cartesia clone is already ready, being created, or has an uncertain outcome; it cannot be replaced",
+          cartesiaClone: toPublicClone(existing),
+        });
+      }
+      return res.json({ cartesiaClone: toPublicClone(clone) });
+    } catch (error: any) {
+      if (error?.code === "23505" || error?.cause?.code === "23505") {
+        return res.status(409).json({ error: "This Cartesia voice is already linked to another account" });
+      }
+      return res.status(500).json({ error: "Could not link the existing Cartesia voice" });
     }
   });
 

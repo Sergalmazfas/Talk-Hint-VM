@@ -2,8 +2,8 @@ import type { Express, Request, Response as ExpressResponse, NextFunction } from
 import { authMiddleware } from "./auth";
 import { lookupAuthorizedCopilotCall } from "./copilotStream";
 import { consumeVerifiedCopilotReply, isLatinCopilotReply } from "./copilotVerifiedReplies";
-import { ElevenLabsProvider } from "./voiceLab/providers";
-import { getClone } from "./voiceLab/store";
+import { CartesiaProvider, ElevenLabsProvider } from "./voiceLab/providers";
+import { getCartesiaClone, getClone } from "./voiceLab/store";
 
 const MAX_TEXT_LENGTH = 1_000;
 const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
@@ -12,7 +12,8 @@ const REQUEST_LIMIT = 8;
 const REQUEST_WINDOW_MS = 60_000;
 
 const requestsByCall = new Map<string, number[]>();
-const provider = new ElevenLabsProvider();
+const elevenLabsProvider = new ElevenLabsProvider();
+const cartesiaProvider = new CartesiaProvider();
 
 function allowCallRequest(userId: string, callSid: string) {
   const now = Date.now();
@@ -75,11 +76,15 @@ export function registerCopilotSpeechRoute(app: Express) {
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const { callSid, holdId, responseId, text } = req.body ?? {};
+    const providerName = req.body?.provider === undefined ? "elevenlabs" : req.body.provider;
     if (typeof callSid !== "string" || !/^CA[0-9a-f]{32}$/i.test(callSid) ||
         typeof holdId !== "string" || holdId.length < 1 || holdId.length > 128 ||
         typeof responseId !== "string" || responseId.length < 1 || responseId.length > 256 ||
         typeof text !== "string" || !text.trim() || text.length > MAX_TEXT_LENGTH) {
       return res.status(400).json({ error: "callSid, holdId, responseId, and text are required and must be valid" });
+    }
+    if (providerName !== "elevenlabs" && providerName !== "cartesia") {
+      return res.status(400).json({ error: "provider must be elevenlabs or cartesia" });
     }
     if (!isLatinCopilotReply(text)) {
       return res.status(409).json({ error: "Copilot speech is available only for verified English text" });
@@ -98,19 +103,28 @@ export function registerCopilotSpeechRoute(app: Express) {
     }
     let clone;
     try {
-      clone = await getClone(userId);
+      clone = providerName === "cartesia"
+        ? await getCartesiaClone(userId)
+        : await getClone(userId);
     } catch {
-      return res.status(409).json({ error: "Voice clone metadata is unavailable; create an OWN voice clone before using Copilot speech" });
+      return res.status(409).json({
+        error: `${providerName === "cartesia" ? "Cartesia" : "ElevenLabs"} voice clone metadata is unavailable`,
+      });
     }
     if (!clone || clone.userId !== userId || clone.status !== "ready" ||
         typeof clone.voiceId !== "string" || !clone.voiceId.trim()) {
-      return res.status(409).json({ error: "No ready OWN voice clone is available for this account" });
+      return res.status(409).json({
+        error: `No ready OWN ${providerName === "cartesia" ? "Cartesia" : "ElevenLabs"} voice clone is available for this account`,
+      });
+    }
+    const apiKey = providerName === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({
+        error: `${providerName === "cartesia" ? "Cartesia" : "ElevenLabs"} speech service is not configured`,
+      });
     }
     if (!consumeVerifiedCopilotReply(userId, callSid, holdId, responseId, text)) {
       return res.status(409).json({ error: "Text does not match an available verified Copilot reply" });
-    }
-    if (!process.env.ELEVENLABS_API_KEY) {
-      return res.status(503).json({ error: "ElevenLabs speech service is not configured" });
     }
 
     const controller = new AbortController();
@@ -126,10 +140,11 @@ export function registerCopilotSpeechRoute(app: Express) {
     }, UPSTREAM_TIMEOUT_MS);
     timeout.unref?.();
     try {
-      const upstream = await provider.streamSpeech(clone.voiceId, text, controller.signal);
+      const upstream = await (providerName === "cartesia" ? cartesiaProvider : elevenLabsProvider)
+        .streamSpeech(clone.voiceId, text, controller.signal);
       if (!upstream.ok) {
         await upstream.body?.cancel().catch(() => undefined);
-        return res.status(502).json({ error: `ElevenLabs speech generation failed (HTTP ${upstream.status})` });
+        return res.status(502).json({ error: `${providerName === "cartesia" ? "Cartesia" : "ElevenLabs"} speech generation failed (HTTP ${upstream.status})` });
       }
       const audio = await boundedAudio(upstream);
       res.status(200)
@@ -143,9 +158,11 @@ export function registerCopilotSpeechRoute(app: Express) {
     } catch (error) {
       if (!res.headersSent && !res.destroyed) {
         if (timedOut) {
-          res.status(504).json({ error: "ElevenLabs speech generation timed out" });
+          res.status(504).json({ error: `${providerName === "cartesia" ? "Cartesia" : "ElevenLabs"} speech generation timed out` });
         } else if (!controller.signal.aborted) {
-          const message = error instanceof Error ? error.message : "ElevenLabs speech generation failed";
+          const message = error instanceof Error
+            ? error.message
+            : `${providerName === "cartesia" ? "Cartesia" : "ElevenLabs"} speech generation failed`;
           res.status(502).json({ error: message });
         }
       }

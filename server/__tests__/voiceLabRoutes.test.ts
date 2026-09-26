@@ -40,6 +40,21 @@ vi.mock("../voiceLab/store", async () => {
     testState.cartesiaClones.set(userId, row);
     return row;
   }),
+  reserveExistingCartesiaClone: vi.fn(async (userId: string, voiceId: string) => {
+    if ([...testState.cartesiaClones.values()].some(clone =>
+      clone.userId !== userId && clone.voiceId === voiceId)) {
+      throw Object.assign(new Error("Voice already linked to another user"), { code: "23505" });
+    }
+    const existing = testState.cartesiaClones.get(userId);
+    if (existing?.status === "retryable") {
+      Object.assign(existing, { voiceId, status: "ready", durationMs: 0, createdAt: new Date() });
+      return existing;
+    }
+    if (existing) return null;
+    const row = { userId, voiceId, status: "ready", durationMs: 0, createdAt: new Date() };
+    testState.cartesiaClones.set(userId, row);
+    return row;
+  }),
   finishCartesiaClone: vi.fn(async (userId: string, voiceId: string) => {
     const row = testState.cartesiaClones.get(userId);
     if (row?.status !== "creating") return null;
@@ -264,6 +279,78 @@ describe("admin Voice Lab routes", () => {
       providerRequestId: "550e8400-e29b-41d4-a716-446655440000",
     });
     expect(response.body.error).toContain("Voice cloning requires a Pro plan or above.");
+  });
+
+  it("links an existing private Cartesia voice without creating or replacing a paid clone", async () => {
+    const voiceId = "550e8400-e29b-41d4-a716-446655440000";
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe(`https://api.cartesia.ai/voices/${voiceId}`);
+      expect(init.headers).toMatchObject({
+        Authorization: "Bearer test-cartesia-key", "Cartesia-Version": "2026-08-14",
+      });
+      return new Response(JSON.stringify({
+        id: voiceId, access: "private", name: "TalkHint Cartesia Voice Lab admin-1",
+      }), { status: 200 });
+    });
+    global.fetch = fetchMock as any;
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/link-existing")
+      .send({ voiceId, consent: true })).status).toBe(401);
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/link-existing").set(admin())
+      .send({ voiceId: "not-a-uuid", consent: true })).status).toBe(400);
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/link-existing").set(admin())
+      .send({ voiceId, consent: false })).status).toBe(400);
+
+    const linked = await request(app).post("/api/admin/voice-lab/cartesia/link-existing").set(admin())
+      .send({ voiceId, consent: true });
+    expect(linked.status).toBe(200);
+    expect(linked.body.cartesiaClone).toMatchObject({
+      voiceId, status: "ready", durationMs: 0,
+    });
+    expect(testState.clones.size).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("/voices/clone");
+
+    const duplicate = await request(app).post("/api/admin/voice-lab/cartesia/link-existing").set(admin())
+      .send({ voiceId, consent: true });
+    expect(duplicate.status).toBe(409);
+    expect(testState.cartesiaClones.get("admin-1").voiceId).toBe(voiceId);
+  });
+
+  it("rejects a public/inaccessible Cartesia voice rather than linking another account's voice", async () => {
+    const voiceId = "550e8400-e29b-41d4-a716-446655440000";
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ id: voiceId, access: "public" }), { status: 200 })) as any;
+    const response = await request(app).post("/api/admin/voice-lab/cartesia/link-existing").set(admin())
+      .send({ voiceId, consent: true });
+    expect(response.status).toBe(403);
+    expect(testState.cartesiaClones.size).toBe(0);
+  });
+
+  it("rejects another TalkHint user's private voice even with the shared provider key", async () => {
+    const voiceId = "550e8400-e29b-41d4-a716-446655440000";
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        id: voiceId, access: "private", name: "TalkHint Cartesia Voice Lab admin-2",
+      }), { status: 200 })) as any;
+    const response = await request(app).post("/api/admin/voice-lab/cartesia/link-existing").set(admin())
+      .send({ voiceId, consent: true });
+    expect(response.status).toBe(403);
+    expect(testState.cartesiaClones.size).toBe(0);
+  });
+
+  it("does not let two accounts with the same legacy name prefix link one voice", async () => {
+    const voiceId = "550e8400-e29b-41d4-a716-446655440000";
+    testState.cartesiaClones.set("12345678-aa", {
+      userId: "12345678-aa", voiceId, status: "ready",
+    });
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({
+        id: voiceId, access: "private", name: "TalkHint Cartesia Voice Lab 12345678",
+      }), { status: 200 })) as any;
+    const response = await request(app).post("/api/admin/voice-lab/cartesia/link-existing")
+      .set({ ...admin(), "x-test-user-id": "12345678-bb" }).send({ voiceId, consent: true });
+    expect(response.status).toBe(409);
+    expect(testState.cartesiaClones.size).toBe(1);
   });
 
   it("gates every endpoint and makes no provider calls just by loading the lab", async () => {

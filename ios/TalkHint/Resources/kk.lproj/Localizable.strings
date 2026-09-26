@@ -281,3 +281,7 @@
 "mode.dispatcher" = "Диспетчер ассистенті";
 "common.edit" = "Өңдеу";
 "common.error.title" = "Бірдеңе дұрыс болмады";
+"settings.voice_provider.title" = "Дауыс провайдері";
+"settings.voice_provider.elevenlabs" = "ElevenLabs";
+"settings.voice_provider.cartesia" = "Cartesia";
+"settings.footer.voice_provider" = "Бұл баптау келесі қоңыраудан бастап Translator және Copilot жүйелеріндегі клондалған ағылшын дауысыңызға қолданылады. Қонақтың және жүйелік дауыстар өзгермейді. Cartesia серверде дайын жеке клоныңызды қажет етеді.";

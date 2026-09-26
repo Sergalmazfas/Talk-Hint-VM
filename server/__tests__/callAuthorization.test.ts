@@ -204,6 +204,7 @@ vi.mock("../training", () => ({
 const { registerRoutes } = await import("../routes");
 const { setCallOwner } = await import("../websocket");
 const { stampRecordingPolicy } = await import("../benchmark/diagnosticRecording");
+const { getTranslatorCall, expireTranslatorCall } = await import("../translation/twilioBridge");
 
 const OWNER = "owner-user-1";
 const ATTACKER = "attacker-user-2";
@@ -242,6 +243,7 @@ async function makeApp() {
 let app: express.Express;
 
 beforeEach(async () => {
+  vi.unstubAllEnvs();
   h.store.rows = [];
   h.recording.diagnosticUsers.clear();
   delete process.env.BENCHMARK_CALL_RECORDING;
@@ -553,5 +555,73 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(res.text).not.toContain('record="record-from-answer-dual"');
     expect(res.text).not.toContain("/twilio/recording-notice");
     expect(stampRecordingPolicy).not.toHaveBeenCalled();
+  });
+
+  async function startTranslator(provider?: string, ownerId = OWNER) {
+    return request(app)
+      .post("/twilio/voice")
+      .type("form")
+      .send({
+        From: `client:user-${ownerId}`,
+        GuestTo: "+15559998888",
+        TranslatorMode: "ru_en",
+        TranslatorProvider: provider,
+        CallSid: CALL_SID,
+      });
+  }
+
+  it("uses the authenticated owner's Cartesia clone only when explicitly selected", async () => {
+    vi.stubEnv("CARTESIA_API_KEY", "test-cartesia-key");
+    h.store.rows = [
+      { userId: OWNER, voiceId: "cartesia-owner-clone", status: "ready", twilioNumber: "+15557654321" },
+    ];
+    const response = await startTranslator("cartesia");
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("<Stream");
+    const callId = /<Parameter name="translatorCallId" value="([^"]+)"/.exec(response.text)?.[1];
+    expect(callId).toBeTruthy();
+    expect(getTranslatorCall(callId!)).toMatchObject({
+      ownerId: OWNER, cloneProvider: "cartesia", cloneVoiceId: "cartesia-owner-clone",
+    });
+    expireTranslatorCall(callId!);
+  });
+
+  it("defaults missing and unknown provider parameters to the ElevenLabs clone", async () => {
+    vi.stubEnv("ELEVENLABS_API_KEY", "test-elevenlabs-key");
+    h.store.rows = [
+      { userId: OWNER, voiceId: "eleven-owner-clone", status: "ready", twilioNumber: "+15557654321" },
+    ];
+    for (const parameter of [undefined, "other-provider"]) {
+      const response = await startTranslator(parameter);
+      expect(response.status).toBe(200);
+      expect(response.text).toContain("<Stream");
+      const callId = /<Parameter name="translatorCallId" value="([^"]+)"/.exec(response.text)?.[1];
+      expect(callId).toBeTruthy();
+      expect(getTranslatorCall(callId!)).toMatchObject({
+        ownerId: OWNER, cloneProvider: "elevenlabs", cloneVoiceId: "eleven-owner-clone",
+      });
+      expireTranslatorCall(callId!);
+    }
+  });
+
+  it("hangs up before streaming when Cartesia clone/key is unavailable or belongs to another user", async () => {
+    h.store.rows = [
+      { userId: OWNER, voiceId: "cartesia-owner-clone", status: "ready" },
+      { userId: ATTACKER, twilioNumber: "+15557654321" },
+    ];
+    vi.stubEnv("CARTESIA_API_KEY", "test-cartesia-key");
+    const crossUser = await startTranslator("cartesia", ATTACKER);
+    expect(crossUser.status).toBe(200);
+    expect(crossUser.text).toContain("<Hangup");
+    expect(crossUser.text).not.toContain("<Stream");
+
+    h.store.rows = [
+      { userId: OWNER, voiceId: "cartesia-owner-clone", status: "ready", twilioNumber: "+15557654321" },
+    ];
+    vi.stubEnv("CARTESIA_API_KEY", "");
+    const noKey = await startTranslator("cartesia");
+    expect(noKey.text).toContain("Cartesia voice clone is not ready or voice synthesis is not configured");
+    expect(noKey.text).toContain("<Hangup");
+    expect(noKey.text).not.toContain("<Stream");
   });
 });
