@@ -110,14 +110,17 @@ export function registerVoiceLabRoutes(app: Express) {
       if (!res.headersSent) res.json({ cartesiaClone: toPublicClone(clone) });
     } catch (error) {
       const rejected = error instanceof CartesiaHttpError && error.status >= 400 && error.status < 500;
+      const providerError = error instanceof CartesiaHttpError ? error : null;
       let saved = true;
       try { await failCartesiaClone(uid, rejected ? "retryable" : "uncertain"); } catch { saved = false; }
       if (!res.headersSent && !res.destroyed) {
         const clone = await getCartesiaClone(uid).catch(() => null);
         res.status(502).json({
           error: !saved ? "Clone safety status could not be saved; do not retry" :
-            rejected ? `Cartesia rejected the voice sample (HTTP ${error.status}); you can explicitly retry` :
+            rejected ? `Cartesia rejected the clone request (HTTP ${providerError?.status}${providerError?.code ? `, ${providerError.code}` : ""})${providerError?.detail ? `: ${providerError.detail}` : ""}` :
               "Cartesia clone creation outcome is uncertain; do not retry or pay for a duplicate",
+          providerErrorCode: rejected ? providerError?.code : null,
+          providerRequestId: providerError?.requestId ?? null,
           cartesiaClone: toPublicClone(clone),
         });
       }

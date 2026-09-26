@@ -248,6 +248,24 @@ describe("admin Voice Lab routes", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("shows Cartesia's structured rejection reason instead of guessing that the sample is bad", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      error_code: "plan_upgrade_required",
+      title: "Plan upgrade required",
+      message: "Voice cloning requires a Pro plan or above.",
+      request_id: "550e8400-e29b-41d4-a716-446655440000",
+    }), { status: 403, headers: { "Content-Type": "application/json" } })) as any;
+    const response = await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin())
+      .send({ ...validAudio, durationMs: 12_000, consent: true });
+    expect(response.status).toBe(502);
+    expect(response.body).toMatchObject({
+      cartesiaClone: { status: "retryable" },
+      providerErrorCode: "plan_upgrade_required",
+      providerRequestId: "550e8400-e29b-41d4-a716-446655440000",
+    });
+    expect(response.body.error).toContain("Voice cloning requires a Pro plan or above.");
+  });
+
   it("gates every endpoint and makes no provider calls just by loading the lab", async () => {
     const fetchMock = vi.fn();
     global.fetch = fetchMock;

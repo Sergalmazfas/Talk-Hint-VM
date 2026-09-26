@@ -127,6 +127,7 @@ export default function VoiceLab() {
   const [cartesiaConsent, setCartesiaConsent] = useState(false);
   const [creatingCartesiaClone, setCreatingCartesiaClone] = useState(false);
   const [cartesiaAttemptUncertain, setCartesiaAttemptUncertain] = useState(false);
+  const [cartesiaFailure, setCartesiaFailure] = useState("");
   const [linkVoiceId, setLinkVoiceId] = useState("");
   const [linkConsent, setLinkConsent] = useState(false);
   const [linkingVoice, setLinkingVoice] = useState(false);
@@ -411,8 +412,11 @@ export default function VoiceLab() {
         (cartesiaAttemptUncertain && !/retryable/i.test(cartesiaClone?.status || ""))) return;
     setCreatingCartesiaClone(true);
     setError("");
+    setCartesiaFailure("");
+    let sent = false;
     try {
       const prepared = await cartesiaCompatibleSample(sample);
+      sent = true;
       const response = await fetch(`${API}/cartesia/clone`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -427,11 +431,16 @@ export default function VoiceLab() {
       if (!response.ok) throw new Error(data.error || `Не удалось создать голос Cartesia (${response.status}).`);
       setCartesiaClone(data.cartesiaClone);
       setCartesiaAttemptUncertain(false);
+      setCartesiaFailure("");
       await loadLab();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось создать голос Cartesia.");
-      setCartesiaAttemptUncertain(true);
-      await refreshCloneStatus();
+      const message = err instanceof Error ? err.message : "Не удалось создать голос Cartesia.";
+      setError(message);
+      setCartesiaFailure(message);
+      if (sent) {
+        setCartesiaAttemptUncertain(true);
+        await refreshCloneStatus();
+      }
     } finally {
       setCreatingCartesiaClone(false);
     }
@@ -873,6 +882,7 @@ export default function VoiceLab() {
           <div className="rounded-md border border-purple-900/70 bg-purple-950/20 p-3 text-sm text-gray-300">
             <p>Запись будет отправлена Cartesia только после отдельного согласия и нажатия кнопки ниже. Она не отправляется автоматически ни при записи, ни при загрузке страницы.</p>
             <p className="mt-2 text-gray-400">Cartesia принимает образец от 10 до 60 секунд. Если текущий образец длиннее, перезапишите короткий; для наиболее честного сравнения используйте одну и ту же запись при создании обоих голосов.</p>
+            <p className="mt-2 text-gray-400">Cartesia разрешает клонирование только на тарифе Pro или выше. Бесплатный тариф позволяет проверять API и синтез речи, но не создавать клон. <a className="text-purple-300 underline" href="https://play.cartesia.ai/subscription" target="_blank" rel="noopener noreferrer">Проверить тариф Cartesia</a></p>
             <p className="mt-2 text-gray-400">Запись iPhone в MP4 перед отправкой преобразуется в WAV прямо в браузере.</p>
             <p className="mt-2 text-gray-400">Образец на русском: при озвучивании английского может сохраниться акцент. Оцените его на слух рядом с ElevenLabs.</p>
           </div>
@@ -898,14 +908,17 @@ export default function VoiceLab() {
             <p className="text-sm text-amber-300">Запишите и прослушайте образец длительностью 10–60 секунд, затем установите отдельное согласие. Текущий лимит исходной записи Voice Lab — 3 минуты.</p>
           )}
           {cartesiaClone && <div className="rounded-md border border-gray-700 bg-gray-900/60 p-4 text-sm">
-            <p className={cartesiaClone.status === "ready" ? "font-medium text-green-300" : "font-medium text-amber-300"}>Cartesia: {cartesiaClone.status}</p>
+            <p className={cartesiaClone.status === "ready" ? "font-medium text-green-300" : "font-medium text-amber-300"}>Cartesia: {{
+              ready: "клон готов", retryable: "запрос отклонён", creating: "создаётся", uncertain: "результат неизвестен",
+            }[cartesiaClone.status] || cartesiaClone.status}</p>
             {cartesiaClone.voiceId && <p className="break-all text-gray-300">Voice ID: {cartesiaClone.voiceId}</p>}
             <p className="text-gray-400">Длительность образца: {cartesiaClone.durationMs ? formatDuration(cartesiaClone.durationMs) : "—"}{cartesiaClone.createdAt ? ` · Создан: ${new Date(cartesiaClone.createdAt).toLocaleString()}` : ""}</p>
           </div>}
           {cartesiaAttemptUncertain && <div className="rounded-md border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-200">
             <p>{cartesiaClone?.status === "retryable"
-              ? "Cartesia отклонила запрос. Исправьте образец и отправьте повторно только по своему выбору."
+              ? "Cartesia отклонила запрос. Причиной может быть тариф, лимит аккаунта или формат записи. Не перезаписывайте образец, пока не выяснена причина."
               : "Результат запроса клонирования пока неизвестен. Повторная отправка отключена, чтобы не создавать платный дубликат."}</p>
+            {cartesiaFailure && <p className="mt-2 break-words">Ответ: {cartesiaFailure}</p>}
             <Button variant="outline" size="sm" className="mt-2" onClick={() => void refreshCloneStatus()}>Обновить статус</Button>
             {statusRefreshError && <p role="alert" className="mt-2 text-red-300">{statusRefreshError}</p>}
           </div>}

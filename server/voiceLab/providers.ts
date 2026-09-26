@@ -46,9 +46,33 @@ export class CartesiaProvider implements VoiceProvider {
 }
 
 export class CartesiaHttpError extends Error {
-  constructor(readonly status: number) {
-    super(`Cartesia voice creation failed (HTTP ${status})`);
+  constructor(
+    readonly status: number,
+    readonly code: string | null = null,
+    readonly detail: string | null = null,
+    readonly requestId: string | null = null,
+  ) {
+    super(`Cartesia voice creation failed (HTTP ${status}${code ? `, ${code}` : ""})`);
   }
+}
+
+async function cartesiaCloneError(response: Response) {
+  let error: unknown;
+  try {
+    // Never log the provider response or the uploaded audio. Its structured
+    // error fields are only returned to the authenticated Voice Lab admin.
+    const text = await response.text();
+    if (text.length <= 8192) error = JSON.parse(text);
+  } catch {
+    // Even if Cartesia returns non-JSON, retain the HTTP status.
+  }
+  const fields = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const code = typeof fields.error_code === "string" && /^[a-z_]{1,64}$/.test(fields.error_code)
+    ? fields.error_code : null;
+  const detail = typeof fields.message === "string" ? fields.message.slice(0, 300) : null;
+  const requestId = typeof fields.request_id === "string" && /^[a-zA-Z0-9:_-]{1,128}$/.test(fields.request_id)
+    ? fields.request_id : null;
+  return new CartesiaHttpError(response.status, code, detail, requestId);
 }
 
 export function supportsCartesiaCloneMime(mimeType: SupportedMime) {
@@ -68,8 +92,7 @@ export async function createCartesiaClonedVoice(audio: Buffer, mimeType: Support
     method: "POST", headers: cartesiaHeaders(), body: form, signal,
   });
   if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new CartesiaHttpError(response.status);
+    throw await cartesiaCloneError(response);
   }
   const data = await response.json() as { id?: unknown };
   if (typeof data.id !== "string" || !data.id) throw new Error("Cartesia returned no voice ID");

@@ -9,4 +9,6 @@ Keep cloned-voice experiments in the internal Voice Lab, separate from live Tran
 
 **How to apply:** For future voice-provider work, offer a same-text comparison in the lab and wait for explicit user approval before changing the live audio path. Consent to clone with ElevenLabs (or the presence of a Cartesia API key) is not consent to send a voice sample to Cartesia; require a fresh, provider-specific action.
 
+Cartesia TTS success or a valid API key does not establish voice-cloning entitlement. Cartesia currently requires Pro or above for Instant Voice Clone; a free-tier key can synthesize a public voice but returns `plan_upgrade_required` for cloning. Verify provider error codes before blaming or resending the user's sample.
+
 The owner confirmed after hands-on testing that the ElevenLabs clone resembles him and speaks excellent English; he likes the result. Treat ElevenLabs as the proven quality baseline, not an untested candidate. This is approval of the Voice Lab result, **not** approval to change the live Translator/Copilot pipeline.
