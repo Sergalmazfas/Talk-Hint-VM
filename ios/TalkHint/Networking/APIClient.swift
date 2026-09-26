@@ -642,6 +642,20 @@ final class APIClient {
         return ((obj["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Extracts the user's instruction from a photo for the PREPARE conversation.
+    func prepareImage(image: Data, mimeType: String = "image/jpeg") async throws -> String {
+        let body: [String: Any] = [
+            "image": image.base64EncodedString(),
+            "mimeType": mimeType,
+        ]
+        let data = try await request("/api/prepare/image", method: "POST", json: body, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = obj["text"] as? String else {
+            throw APIError.decoding
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Secretary tasks
 
     struct SecretaryTask: Equatable {

@@ -103,6 +103,13 @@ const prepareDedup = new Map<string, Map<string, DedupEntry<PrepareReply>>>();
 // Kept separate from prepareDedup because the success path of the opening
 // itself clears the conversation state — the replay cache must survive that.
 const openingDedup = new Map<string, Map<string, DedupEntry<OpeningPhrase>>>();
+// A Secretary proposal can only be confirmed while it is the current proposal
+// for the current PREPARE conversation. This state is deliberately keyed by
+// the server-side PREPARE user id (the websocket uses a separate
+// `${owner}:secretary` conversation).
+const secretaryProposals = new Map<string, { goal: string; version: number; claimed: boolean }>();
+const secretaryProposalVersions = new Map<string, number>();
+const openingGoals = new Map<string, Map<string, string>>();
 const MAX_DEDUP_IDS = 20;
 // Replay entries live long enough to cover a reconnect window, then expire —
 // otherwise every user who ever finished PREPARE would retain a per-user map
@@ -171,12 +178,45 @@ export function hasOpeningEntry(userId: string, clientMessageId: unknown): boole
   return !!key && !!openingDedup.get(userId)?.has(key);
 }
 
+export function hasCompletedOpeningEntry(userId: string, clientMessageId: unknown): boolean {
+  const key = normalizeDedupKey(clientMessageId);
+  return !!key && !!openingDedup.get(userId)?.get(key)?.settled;
+}
+
 /// Explicit reset (prepare_reset): forget the confirmation replay cache too.
 /// NOT called from the opening success path — that is exactly the moment the
 /// replay cache must survive so a late duplicate confirm gets the same result.
 export function clearOpeningDedup(userId: string | undefined) {
   if (!userId) return;
   openingDedup.delete(userId);
+  openingGoals.delete(userId);
+}
+
+export function getOpeningGoal(userId: string, clientMessageId: unknown): string | null {
+  const key = normalizeDedupKey(clientMessageId);
+  return key && hasOpeningEntry(userId, key) ? openingGoals.get(userId)?.get(key) ?? null : null;
+}
+
+export function claimSecretaryProposal(userId: string, goal: string): number | null {
+  const proposal = secretaryProposals.get(userId);
+  if (!proposal || proposal.goal !== goal || proposal.claimed) return null;
+  proposal.claimed = true;
+  return proposal.version;
+}
+
+export function isCurrentSecretaryProposalClaim(userId: string, goal: string, version: number): boolean {
+  const proposal = secretaryProposals.get(userId);
+  return !!proposal && proposal.goal === goal && proposal.version === version && proposal.claimed;
+}
+
+export function getClaimedSecretaryProposalVersion(userId: string, goal: string): number | null {
+  const proposal = secretaryProposals.get(userId);
+  return proposal?.goal === goal && proposal.claimed ? proposal.version : null;
+}
+
+export function releaseSecretaryProposalClaim(userId: string, goal: string, version: number): void {
+  const proposal = secretaryProposals.get(userId);
+  if (proposal?.goal === goal && proposal.version === version) proposal.claimed = false;
 }
 
 export function getPrepareHistory(userId: string): PrepareTurn[] {
@@ -190,6 +230,8 @@ export function clearPrepareState(userId: string | undefined) {
   prepareStates.delete(userId);
   prepareDedup.delete(userId);
   prepareEpochs.set(userId, (prepareEpochs.get(userId) ?? 0) + 1);
+  secretaryProposalVersions.set(userId, (secretaryProposalVersions.get(userId) ?? 0) + 1);
+  secretaryProposals.delete(userId);
 }
 
 function runSerialized<T>(userId: string, fn: () => Promise<T>): Promise<T> {
@@ -261,7 +303,13 @@ function parseJsonLoose(text: string): any {
 /// `clientMessageId` (optional) makes retries idempotent: a resend with the same
 /// id returns the original result instead of committing a duplicate user turn.
 export function prepareMessage(userId: string, text: string, clientMessageId?: string, mode: "hint" | "secretary" = "hint"): Promise<PrepareReply> {
-  return dedupRun(prepareDedup, userId, normalizeDedupKey(clientMessageId), () => runSerialized(userId, async () => {
+  const key = normalizeDedupKey(clientMessageId);
+  const existing = key ? prepareDedup.get(userId)?.get(key) : undefined;
+  if (existing) return existing.promise;
+  const proposalVersion = (secretaryProposalVersions.get(userId) ?? 0) + 1;
+  secretaryProposalVersions.set(userId, proposalVersion);
+  secretaryProposals.delete(userId);
+  return dedupRun(prepareDedup, userId, key, () => runSerialized(userId, async () => {
     const epoch = prepareEpochs.get(userId) ?? 0;
     const history = getPrepareHistory(userId);
     const request = [...history, { role: "user", content: text } as PrepareTurn];
@@ -291,6 +339,9 @@ export function prepareMessage(userId: string, text: string, clientMessageId?: s
     const live = getPrepareHistory(userId);
     live.push({ role: "user", content: text }, { role: "assistant", content: storedRaw });
     if (live.length > MAX_TURNS) live.splice(0, live.length - MAX_TURNS);
+    if (mode === "secretary" && proposedGoal && secretaryProposalVersions.get(userId) === proposalVersion) {
+      secretaryProposals.set(userId, { goal: proposedGoal, version: proposalVersion, claimed: false });
+    }
     return { reply, proposedGoal };
   }));
 }
@@ -299,9 +350,28 @@ export function prepareMessage(userId: string, text: string, clientMessageId?: s
 /// `clientMessageId` makes confirmation retries idempotent: a duplicate confirm
 /// replays the ORIGINAL opening phrase instead of generating a second one
 /// (the replay cache survives the state clearing done on success).
-export function prepareOpeningPhrase(userId: string, confirmedGoal: string, clientMessageId?: string, mode: "hint" | "secretary" = "hint"): Promise<OpeningPhrase> {
-  return dedupRun(openingDedup, userId, normalizeDedupKey(clientMessageId), () => runSerialized(userId, async () => {
+export function prepareOpeningPhrase(
+  userId: string,
+  confirmedGoal: string,
+  clientMessageId?: string,
+  mode: "hint" | "secretary" = "hint",
+  confirmationIsCurrent?: () => boolean,
+): Promise<OpeningPhrase> {
+  const key = normalizeDedupKey(clientMessageId);
+  let recordedOpeningGoal = false;
+  if (key) {
+    let goals = openingGoals.get(userId);
+    if (!goals) { goals = new Map(); openingGoals.set(userId, goals); }
+    if (!goals.has(key)) {
+      goals.set(key, confirmedGoal);
+      recordedOpeningGoal = true;
+    }
+  }
+  const result = dedupRun(openingDedup, userId, key, () => runSerialized(userId, async () => {
     if (mode === "secretary") {
+      if (confirmationIsCurrent && !confirmationIsCurrent()) {
+        throw new PrepareUnavailableError("Подготовка была сброшена или обновлена. Подтвердите актуальное задание заново.");
+      }
       clearPrepareState(userId);
       // Ack the same PREPARE confirmation protocol without inventing an
       // opening phrase: the owner is not going to speak on this call.
@@ -323,4 +393,19 @@ export function prepareOpeningPhrase(userId: string, confirmedGoal: string, clie
       translation: typeof parsed.translation === "string" ? parsed.translation.trim() : "",
     };
   }));
+  if (!key || !recordedOpeningGoal) return result;
+  return result.then((opening) => {
+    const timer = setTimeout(() => {
+      const goals = openingGoals.get(userId);
+      goals?.delete(key);
+      if (goals?.size === 0) openingGoals.delete(userId);
+    }, DEDUP_TTL_MS);
+    (timer as any).unref?.();
+    return opening;
+  }, (error) => {
+    const goals = openingGoals.get(userId);
+    goals?.delete(key);
+    if (goals?.size === 0) openingGoals.delete(userId);
+    throw error;
+  });
 }

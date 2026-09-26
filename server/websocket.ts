@@ -40,7 +40,7 @@ import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLib
 import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
 import { HintCarryover } from "./hintCarryover";
 import { prepareMessage, clearPrepareState, clearOpeningDedup, PrepareUnavailableError } from "./prepare";
-import { handlePrepareConfirmGoal } from "./prepareConfirm";
+import { authorizeSecretaryConfirmation, handlePrepareConfirmGoal, isSecretaryConfirmationCurrent, releaseSecretaryConfirmation } from "./prepareConfirm";
 import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
@@ -1137,15 +1137,36 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           if (!userId) return;
           const secretary = message.mode === "secretary";
           const prepareUserId = secretary ? `${userId}:secretary` : userId;
+          let confirmedGoal = String(message.goal || "").trim();
+          let secretaryAuthorization: ReturnType<typeof authorizeSecretaryConfirmation> = null;
+          if (secretary) {
+            secretaryAuthorization = authorizeSecretaryConfirmation(prepareUserId, confirmedGoal, message.clientMessageId);
+            if (!secretaryAuthorization) {
+              ws.send(JSON.stringify({ type: "prepare_error", text: "Подтвердите актуальное задание Secretary в подготовке." }));
+              return;
+            }
+            confirmedGoal = secretaryAuthorization.goal;
+          }
           // Idempotent lost-ack handling lives in handlePrepareConfirmGoal
           // (unit-tested): duplicates replay goal_set + the original opening.
-          void handlePrepareConfirmGoal(prepareUserId, message.goal, message.clientMessageId, {
+          void handlePrepareConfirmGoal(prepareUserId, confirmedGoal, message.clientMessageId, {
             sendFrame: (obj) => {
               const frame = secretary && obj.type === "prepare_opening"
-                ? { ...obj, confirmationToken: signSecretaryConfirmation(userId, String(message.goal || "")) }
+                ? { ...obj, confirmationToken: signSecretaryConfirmation(userId, confirmedGoal) }
                 : obj;
+              if (secretary && obj.type === "prepare_error" && secretaryAuthorization?.generation !== null && secretaryAuthorization?.generation !== undefined) {
+                releaseSecretaryConfirmation(prepareUserId, confirmedGoal, secretaryAuthorization.generation);
+              }
               ws.send(JSON.stringify(frame));
             },
+            ...(secretaryAuthorization ? {
+              isConfirmationCurrent: () => isSecretaryConfirmationCurrent(
+                prepareUserId,
+                confirmedGoal,
+                secretaryAuthorization!.generation,
+                message.clientMessageId,
+              ),
+            } : {}),
             activateGoal: (goal) => {
               if (secretary) {
                 // Secretary's assignment is not the owner's Hint goal. Only

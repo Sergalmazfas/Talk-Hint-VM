@@ -11,6 +11,7 @@ import { startAirAtomaRetryWorker, stopAirAtomaRetryWorker } from "./airatomaRet
 import { bootstrapAdminPasswordOnStartup } from "./bootstrapAdminPassword";
 import { provisionUserOnStartup } from "./provisionUser";
 import { checkTutorEngineAppIdConfigured } from "./tutorEngine";
+import { createRequestLoggingMiddleware } from "./requestLogging";
 
 const app = express();
 app.set('trust proxy', true);
@@ -164,6 +165,9 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "Request body too large (maximum 10 MB)" });
+  }
   if (err instanceof SyntaxError && 'body' in err) {
     console.warn(`[Server] JSON Parse Error on ${req.method} ${req.path} - client may have disconnected`);
     return res.status(400).json({ error: "Invalid JSON" });
@@ -182,40 +186,8 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
-// Log ALL incoming requests for debugging
-app.use((req, res, next) => {
-  const start = Date.now();
-  const reqPath = req.path;
-  
-  // Log every request immediately for debugging Twilio webhooks
-  if (reqPath.includes("twilio") || reqPath.includes("media")) {
-    log(`>>> INCOMING: ${req.method} ${reqPath} from ${req.ip}`, "request");
-    log(`>>> Headers: ${JSON.stringify(req.headers)}`, "request");
-  }
-  
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    // Log all non-static requests
-    if (reqPath.startsWith("/api") || reqPath.includes("twilio") || reqPath.includes("media")) {
-      let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
-      // Voice Lab replies include private utterances and cloned voice IDs.
-      if (capturedJsonResponse && !reqPath.startsWith("/api/admin/voice-lab")) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-      log(logLine);
-    }
-  });
-
-  next();
-});
+// Keep useful request diagnostics while never logging bodies, headers, or IPs.
+app.use(createRequestLoggingMiddleware(log));
 
 (async () => {
   // Try to connect to database, but don't block server startup

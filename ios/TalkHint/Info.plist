@@ -43,6 +43,10 @@
         <true/>
         <key>NSMicrophoneUsageDescription</key>
         <string>TalkHint needs the microphone so you can talk during phone calls.</string>
+        <key>NSCameraUsageDescription</key>
+        <string>TalkHint uses the camera so you can photograph a task for the Secretary to understand.</string>
+        <key>NSPhotoLibraryUsageDescription</key>
+        <string>TalkHint uses selected photos to help the Secretary understand your task.</string>
         <key>UIBackgroundModes</key>
         <array>
                 <string>voip</string>

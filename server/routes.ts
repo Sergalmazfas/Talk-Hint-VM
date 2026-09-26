@@ -3148,13 +3148,16 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     try {
       const { audio, mimeType } = req.body;
       if (!audio) return res.status(400).json({ error: "No audio data provided" });
+      const MAX_AUDIO_BYTES = 7 * 1024 * 1024;
+      if (typeof audio !== "string" || audio.length > Math.ceil(MAX_AUDIO_BYTES / 3) * 4) {
+        return res.status(413).json({ error: "Audio too large (maximum 7 MB)" });
+      }
+      const audioBuffer = Buffer.from(audio, "base64");
+      if (audioBuffer.length > MAX_AUDIO_BYTES) {
+        return res.status(413).json({ error: "Audio too large (maximum 7 MB)" });
+      }
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) return res.status(500).json({ error: "OpenAI API key not configured" });
-
-      const audioBuffer = Buffer.from(audio, "base64");
-      if (audioBuffer.length > 24 * 1024 * 1024) {
-        return res.status(413).json({ error: "Audio too long — keep it under a couple of minutes" });
-      }
       const contentType = typeof mimeType === "string" && mimeType ? mimeType : "audio/webm";
       const ext = contentType.includes("mp4") || contentType.includes("m4a") ? "m4a"
         : contentType.includes("ogg") ? "ogg"
@@ -3170,17 +3173,95 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         body: form,
       });
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        console.error("[PrepareSTT] OpenAI error:", response.status, errorText.slice(0, 300));
+        console.error("[PrepareSTT] OpenAI error status:", response.status);
         return res.status(502).json({ error: `Распознавание речи недоступно (HTTP ${response.status})` });
       }
       const result = await response.json() as any;
       const text = (result.text || "").trim();
-      console.log("[PrepareSTT] Transcribed:", text.substring(0, 60) + (text.length > 60 ? "..." : ""));
       res.json({ text });
     } catch (error: any) {
       console.error("[PrepareSTT] Error:", error);
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Extract factual OCR and a concise description from a user-selected image
+  // for the PREPARE conversation. The image is sent directly to OpenAI and is
+  // never stored or used to initiate a call.
+  app.post("/api/prepare/image", authMiddleware, async (req, res) => {
+    const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+    try {
+      const { image, mimeType } = req.body ?? {};
+      if (typeof image !== "string" || !image) {
+        return res.status(400).json({ error: "No image data provided" });
+      }
+      if (mimeType !== "image/jpeg" && mimeType !== "image/png") {
+        return res.status(400).json({ error: "Image must be JPEG or PNG" });
+      }
+      // Check encoded length before decoding so oversized payloads do not
+      // trigger an additional large allocation.
+      if (image.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) {
+        return res.status(413).json({ error: "Image is too large (maximum 6 MB)" });
+      }
+      const imageBuffer = Buffer.from(image, "base64");
+      if (imageBuffer.length > MAX_IMAGE_BYTES) {
+        return res.status(413).json({ error: "Image is too large (maximum 6 MB)" });
+      }
+      if (imageBuffer.toString("base64") !== image) {
+        return res.status(400).json({ error: "Image data must be valid base64" });
+      }
+      const isPng = imageBuffer.length >= 8 && imageBuffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      const isJpeg = imageBuffer.length >= 3 && imageBuffer[0] === 0xff && imageBuffer[1] === 0xd8 && imageBuffer[2] === 0xff;
+      if ((mimeType === "image/png" && !isPng) || (mimeType === "image/jpeg" && !isJpeg)) {
+        return res.status(400).json({ error: "Image data does not match its JPEG/PNG mime type" });
+      }
+
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "OpenAI API key not configured" });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      let response: Response;
+      try {
+        response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [{
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Accurately inspect this user-selected photo or document for a call-preparation assistant. Transcribe all clearly legible text faithfully, preserving names, dates, amounts, and relevant identifiers; briefly describe relevant visible facts if it is a photo. Do not infer or invent missing details. Mark unclear text as illegible/uncertain. Return concise plain text for the assistant to use as context.",
+                },
+                { type: "image_url", image_url: { url: `data:${mimeType};base64,${image}`, detail: "high" } },
+              ],
+            }],
+            max_tokens: 1200,
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!response.ok) {
+        console.error("[PrepareImage] OpenAI error status:", response.status);
+        return res.status(502).json({ error: `Image analysis is unavailable (HTTP ${response.status})` });
+      }
+      const result = await response.json() as any;
+      const text = typeof result.choices?.[0]?.message?.content === "string"
+        ? result.choices[0].message.content.trim() : "";
+      if (!text) {
+        return res.status(502).json({ error: "Image analysis returned no text" });
+      }
+      return res.json({ text });
+    } catch (error: any) {
+      console.error("[PrepareImage] Error:", error);
+      return res.status(502).json({
+        error: error?.name === "AbortError"
+          ? "Image analysis timed out. Please try again."
+          : "Could not analyze image. Please try again.",
+      });
     }
   });
 

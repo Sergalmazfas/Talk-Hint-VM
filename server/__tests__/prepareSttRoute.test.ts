@@ -155,16 +155,24 @@ const USER_ID = "user-prepare-stt-test";
 
 async function makeApp() {
   const app = express();
-  app.use(express.json({ limit: "50mb" }));
+  app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: false }));
   const httpServer = createServer(app);
   await registerRoutes(httpServer, app);
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.type === "entity.too.large") {
+      return res.status(413).json({ error: "Request body too large (maximum 10 MB)" });
+    }
+    next(err);
+  });
   return app;
 }
 
 // A tiny valid base64 webm blob (>2 KB so the size gate passes)
 const FAKE_AUDIO_B64 = Buffer.alloc(3000, 0).toString("base64");
 const VALID_BODY = { audio: FAKE_AUDIO_B64, mimeType: "audio/webm" };
+const FAKE_PNG_B64 = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]).toString("base64");
+const VALID_IMAGE_BODY = { image: FAKE_PNG_B64, mimeType: "image/png" };
 
 const originalFetch = global.fetch;
 const originalKey = process.env.OPENAI_API_KEY;
@@ -199,6 +207,30 @@ describe("POST /api/prepare/stt — input validation", () => {
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty("error");
     expect(res.body.error).toBeTruthy();
+  });
+
+  it("accepts audio at the 7 MB decoded limit", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({ text: "recognized" }),
+    });
+    const audio = Buffer.alloc(7 * 1024 * 1024).toString("base64");
+    const res = await request(app)
+      .post("/api/prepare/stt").set("x-test-user-id", USER_ID)
+      .send({ audio, mimeType: "audio/webm" });
+    expect(res.status).toBe(200);
+    expect(res.body.text).toBe("recognized");
+  });
+
+  it("returns a clear 413 above the 7 MB decoded audio limit", async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+    const audio = Buffer.alloc(7 * 1024 * 1024 + 1).toString("base64");
+    const res = await request(app)
+      .post("/api/prepare/stt").set("x-test-user-id", USER_ID)
+      .send({ audio, mimeType: "audio/webm" });
+    expect(res.status).toBe(413);
+    expect(res.body.error).toMatch(/7 MB/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -303,5 +335,117 @@ describe("POST /api/prepare/stt — missing API key", () => {
     expect(res.status).toBe(500);
     expect(res.body).toHaveProperty("error");
     expect(res.body.error).toBeTruthy();
+  });
+});
+
+describe("POST /api/prepare/image", () => {
+  it("requires authentication", async () => {
+    const res = await request(app).post("/api/prepare/image").send(VALID_IMAGE_BODY);
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects missing, malformed, and unsupported image inputs explicitly", async () => {
+    const missing = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID).send({ mimeType: "image/png" });
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toBeTruthy();
+
+    const malformed = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID)
+      .send({ image: "not base64!", mimeType: "image/png" });
+    expect(malformed.status).toBe(400);
+    expect(malformed.body.error).toBeTruthy();
+
+    const unsupported = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID)
+      .send({ image: FAKE_PNG_B64, mimeType: "image/gif" });
+    expect(unsupported.status).toBe(400);
+    expect(unsupported.body.error).toBeTruthy();
+  });
+
+  it("accepts an image at the 6 MB decoded limit", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ message: { content: "Image description." } }] }),
+    });
+    const image = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.alloc(6 * 1024 * 1024 - 8),
+    ]).toString("base64");
+    const res = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID)
+      .send({ image, mimeType: "image/png" });
+    expect(res.status).toBe(200);
+    expect(res.body.text).toBe("Image description.");
+  });
+
+  it("returns a clear 413 for images larger than 6 MB decoded", async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+    const oversized = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.alloc(6 * 1024 * 1024 - 8 + 1),
+    ]).toString("base64");
+    const res = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID)
+      .send({ image: oversized, mimeType: "image/png" });
+
+    expect(res.status).toBe(413);
+    expect(res.body.error).toMatch(/6 MB/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a clear 413 for request bodies above the global 10 MB JSON limit", async () => {
+    const res = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID)
+      .send({ image: "A".repeat(10 * 1024 * 1024), mimeType: "image/png" });
+    expect(res.status).toBe(413);
+    expect(res.body.error).toMatch(/Request body too large/);
+  });
+
+  it("returns factual analysis text and sends the image to OpenAI vision", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "Invoice dated May 12; total $42.00." } }] }),
+    });
+    const res = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID).send(VALID_IMAGE_BODY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ text: "Invoice dated May 12; total $42.00." });
+    expect(global.fetch).toHaveBeenCalledOnce();
+    const [url, options] = vi.mocked(global.fetch).mock.calls[0] as any;
+    expect(url).toBe("https://api.openai.com/v1/chat/completions");
+    const payload = JSON.parse(options.body);
+    expect(payload.model).toBe("gpt-4o");
+    expect(payload.messages[0].content[1].image_url.url).toBe(`data:image/png;base64,${FAKE_PNG_B64}`);
+  });
+
+  it("returns an explicit error for network and upstream failures", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("network unavailable"));
+    const networkFailure = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID).send(VALID_IMAGE_BODY);
+    expect(networkFailure.status).toBe(502);
+    expect(networkFailure.body.error).toBeTruthy();
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false, status: 503, text: async () => "Unavailable",
+    });
+    const upstreamFailure = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID).send(VALID_IMAGE_BODY);
+    expect(upstreamFailure.status).toBe(502);
+    expect(upstreamFailure.body.error).toMatch(/503/);
+  });
+
+  it("reports a missing OpenAI API key without making an upstream request", async () => {
+    delete process.env.OPENAI_API_KEY;
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+    const res = await request(app)
+      .post("/api/prepare/image").set("x-test-user-id", USER_ID).send(VALID_IMAGE_BODY);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,35 @@
 import UIKit
 import AVFoundation
 
+/// Exact, deliberately short confirmations only. Used solely while a Secretary
+/// proposal is awaiting confirmation; never interpret ordinary task text as consent.
+enum SecretaryAffirmativeRecognition {
+    private static let accepted: Set<String> = [
+        "yes", "yes please", "i confirm", "yes i confirm", "confirmed", "thats right", "correct", "ok", "okay",
+        "да", "да подтверждаю", "подтверждаю", "верно", "все верно",
+        "si", "si confirmo", "confirmo", "correcto", "de acuerdo",
+        "иә", "иә растаймын", "растаймын", "дұрыс",
+        "так", "так підтверджую", "підтверджую", "правильно", "вірно",
+    ]
+
+    static func isAffirmative(_ text: String) -> Bool {
+        let folded = text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased()
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "’", with: "")
+        let separators = CharacterSet.whitespacesAndNewlines
+            .union(.punctuationCharacters)
+            .union(.symbols)
+        let normalized = folded
+            .components(separatedBy: separators)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !normalized.isEmpty, normalized.split(separator: " ").count <= 3 else { return false }
+        return accepted.contains(normalized)
+    }
+}
+
 /// PREPARE stage — shared by live Hint goal preparation and Secretary task
 /// preparation, ported from the web `/app` UI. The user explains the call/task
 /// by voice or text; GPT-5.6 Sol (one
@@ -50,12 +79,14 @@ final class PrepareViewController: UIViewController {
     private let sendButton = UIButton(type: .system)
     private let micButton = UIButton(type: .system)
     private let statusLabel = UILabel()
+    private let secretarySpeechSynthesizer = AVSpeechSynthesizer()
 
     /// The transient "…" thinking bubble shown while Sol is working.
     private var thinkingBubble: UIView?
     /// The button row of the currently pending goal-proposal card (removed once
     /// the user confirms or asks for changes, like the web card).
     private weak var pendingGoalButtons: UIStackView?
+    private var pendingProposalGoal: String?
 
     // MARK: - Pending retry state (parity with the web outbox, Task #197)
 
@@ -83,11 +114,18 @@ final class PrepareViewController: UIViewController {
 
     private var recorder: AVAudioRecorder?
     private var isRecording = false
+    private var isStartingRecording = false
+    private var isScreenActive = false
     private var recordingURL: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent("prepare-utterance.m4a")
     }
 
     // MARK: - Lifecycle
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        isScreenActive = true
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -129,6 +167,9 @@ final class PrepareViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        isScreenActive = false
+        isStartingRecording = false
+        stopSecretarySpeech()
         // Sheet is being swiped down or closed: stop the recorder immediately so
         // the iOS microphone indicator clears without waiting for deinit.
         if isRecording {
@@ -140,6 +181,9 @@ final class PrepareViewController: UIViewController {
     }
 
     deinit {
+        if mode == .secretary {
+            secretarySpeechSynthesizer.stopSpeaking(at: .immediate)
+        }
         stream.disconnect()
         recorder?.stop()
     }
@@ -172,7 +216,14 @@ final class PrepareViewController: UIViewController {
         inputBar.addSubview(statusLabel)
 
         micButton.setImage(UIImage(systemName: "mic.fill"), for: .normal)
+        micButton.setPreferredSymbolConfiguration(
+            UIImage.SymbolConfiguration(pointSize: mode == .secretary ? 24 : 18, weight: .semibold),
+            forImageIn: .normal)
         micButton.tintColor = .systemBlue
+        if mode == .secretary {
+            micButton.backgroundColor = .systemBlue.withAlphaComponent(0.12)
+            micButton.layer.cornerRadius = 27
+        }
         micButton.accessibilityIdentifier = "button-prepare-mic"
         micButton.addTarget(self, action: #selector(micTapped), for: .touchUpInside)
         micButton.translatesAutoresizingMaskIntoConstraints = false
@@ -218,8 +269,8 @@ final class PrepareViewController: UIViewController {
 
             micButton.leadingAnchor.constraint(equalTo: inputBar.leadingAnchor, constant: 12),
             micButton.centerYAnchor.constraint(equalTo: textField.centerYAnchor),
-            micButton.widthAnchor.constraint(equalToConstant: 36),
-            micButton.heightAnchor.constraint(equalToConstant: 36),
+            micButton.widthAnchor.constraint(equalToConstant: mode == .secretary ? 54 : 36),
+            micButton.heightAnchor.constraint(equalToConstant: mode == .secretary ? 54 : 36),
 
             textField.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 4),
             textField.leadingAnchor.constraint(equalTo: micButton.trailingAnchor, constant: 8),
@@ -323,6 +374,13 @@ final class PrepareViewController: UIViewController {
         goalLabel.numberOfLines = 0
         goalLabel.font = .preferredFont(forTextStyle: .body)
 
+        let confirmationQuestion = UILabel()
+        confirmationQuestion.text = NSLocalizedString("secretary.prepare.confirm_question", comment: "")
+        confirmationQuestion.numberOfLines = 0
+        confirmationQuestion.font = .preferredFont(forTextStyle: .subheadline)
+        confirmationQuestion.textColor = .secondaryLabel
+        confirmationQuestion.accessibilityIdentifier = "label-secretary-confirm-question"
+
         let confirmButton = UIButton(type: .system)
         confirmButton.setTitle(NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_confirm" : "prepare.goal_confirm", comment: ""), for: .normal)
         confirmButton.setTitleColor(.white, for: .normal)
@@ -347,21 +405,29 @@ final class PrepareViewController: UIViewController {
         buttons.spacing = 8
         buttons.heightAnchor.constraint(equalToConstant: 40).isActive = true
         pendingGoalButtons = buttons
+        pendingProposalGoal = goal
 
         confirmButton.addAction(UIAction { [weak self, weak buttons] _ in
             guard let self = self else { return }
+            self.stopSecretarySpeech()
             buttons?.removeFromSuperview()
+            self.pendingProposalGoal = nil
             self.confirmGoal(goal)
         }, for: .touchUpInside)
 
         editButton.addAction(UIAction { [weak self, weak buttons] _ in
+            self?.stopSecretarySpeech()
             buttons?.removeFromSuperview()
+            self?.pendingProposalGoal = nil
             self?.textField.placeholder = NSLocalizedString(
                 self?.mode == .secretary ? "secretary.prepare.goal_edit.placeholder" : "prepare.goal_edit.placeholder", comment: "")
             self?.textField.becomeFirstResponder()
         }, for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [header, goalLabel, buttons])
+        var proposalViews: [UIView] = [header, goalLabel]
+        if mode == .secretary { proposalViews.append(confirmationQuestion) }
+        proposalViews.append(buttons)
+        let stack = UIStackView(arrangedSubviews: proposalViews)
         stack.axis = .vertical
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -426,8 +492,23 @@ final class PrepareViewController: UIViewController {
         textField.text = ""
         textField.placeholder = NSLocalizedString(
             mode == .secretary ? "secretary.prepare.input.placeholder" : "prepare.input.placeholder", comment: "")
-        addUserMessage(text)
-        sendPrepareText(text, clientMessageId: UUID().uuidString)
+        submitUserTurn(text, clientMessageId: UUID().uuidString)
+    }
+
+    private func submitUserTurn(_ text: String, clientMessageId: String) {
+        var messageAlreadyAdded = false
+        if mode == .secretary, let proposedGoal = pendingProposalGoal {
+            pendingGoalButtons?.removeFromSuperview()
+            pendingProposalGoal = nil
+            addUserMessage(text)
+            messageAlreadyAdded = true
+            if SecretaryAffirmativeRecognition.isAffirmative(text) {
+                confirmGoal(proposedGoal)
+                return
+            }
+        }
+        if !messageAlreadyAdded { addUserMessage(text) }
+        sendPrepareText(text, clientMessageId: clientMessageId)
     }
 
     /// Sends one PREPARE turn with an idempotency key, keeping it pending until
@@ -512,6 +593,7 @@ final class PrepareViewController: UIViewController {
     }
 
     @objc private func resetTapped() {
+        stopSecretarySpeech()
         stream.resetPrepare(mode: mode)
         hideThinking()
         pendingMessage = nil
@@ -519,6 +601,7 @@ final class PrepareViewController: UIViewController {
         pendingConfirm = nil
         acknowledgedGoal = nil
         pendingGoalButtons?.removeFromSuperview()
+        pendingProposalGoal = nil
         feedStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         initialMessage = nil
         addAIMessage(NSLocalizedString(mode == .secretary ? "secretary.prepare.reset.intro" : "prepare.reset.intro", comment: ""))
@@ -527,6 +610,7 @@ final class PrepareViewController: UIViewController {
     // MARK: - Voice input (tap-to-record → /api/prepare/stt)
 
     @objc private func micTapped() {
+        stopSecretarySpeech()
         if isRecording {
             stopRecordingAndTranscribe()
         } else {
@@ -534,11 +618,48 @@ final class PrepareViewController: UIViewController {
         }
     }
 
+    /// Speak only assistant-authored Secretary replies and the visible proposal.
+    /// User turns (including photo OCR) and error paths are never narrated.
+    private func speakSecretaryResponse(reply: String, proposedGoal: String?) {
+        guard mode == .secretary, isScreenActive, !isRecording, !isStartingRecording else { return }
+        secretarySpeechSynthesizer.stopSpeaking(at: .immediate)
+
+        let cleanReply = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowerReply = cleanReply.lowercased()
+        let isErrorText = cleanReply.hasPrefix("⚠️") ||
+            lowerReply.hasPrefix("error") ||
+            lowerReply.hasPrefix("ошибка") ||
+            lowerReply.hasPrefix("помилка") ||
+            lowerReply.hasPrefix("қате")
+        if !cleanReply.isEmpty, cleanReply.count <= 280, !isErrorText {
+            enqueueSecretarySpeech(cleanReply)
+        }
+        if let proposedGoal {
+            enqueueSecretarySpeech(proposedGoal)
+            enqueueSecretarySpeech(NSLocalizedString("secretary.prepare.confirm_question", comment: ""))
+        }
+    }
+
+    private func enqueueSecretarySpeech(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        let language = Bundle.main.preferredLocalizations.first ?? "en"
+        utterance.voice = AVSpeechSynthesisVoice(language: language)
+        secretarySpeechSynthesizer.speak(utterance)
+    }
+
+    private func stopSecretarySpeech() {
+        guard mode == .secretary else { return }
+        secretarySpeechSynthesizer.stopSpeaking(at: .immediate)
+    }
+
     private func startRecording() {
         let session = AVAudioSession.sharedInstance()
+        isStartingRecording = true
         session.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                self.isStartingRecording = false
+                guard self.isScreenActive else { return }
                 guard granted else {
                     self.addAIMessage(NSLocalizedString("prepare.mic.no_permission", comment: ""))
                     return
@@ -554,7 +675,12 @@ final class PrepareViewController: UIViewController {
                     ]
                     try? FileManager.default.removeItem(at: self.recordingURL)
                     let recorder = try AVAudioRecorder(url: self.recordingURL, settings: settings)
-                    recorder.record()
+                    guard recorder.record() else {
+                        recorder.stop()
+                        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+                        self.addAIMessage(NSLocalizedString("prepare.recording.start_failed", comment: ""))
+                        return
+                    }
                     self.recorder = recorder
                     self.isRecording = true
                     self.micButton.tintColor = .systemRed
@@ -619,8 +745,7 @@ final class PrepareViewController: UIViewController {
             // STT succeeded — release the recording and send the text as one
             // idempotent PREPARE turn (same id even if resent after reconnect).
             pendingAudio = nil
-            addUserMessage(text)
-            sendPrepareText(text, clientMessageId: audio.utteranceId)
+            submitUserTurn(text, clientMessageId: audio.utteranceId)
         } catch {
             addRetryMessage(String(format: NSLocalizedString("prepare.stt.failed", comment: ""), error.localizedDescription))
         }
@@ -703,8 +828,13 @@ extension PrepareViewController: CallHintStreamDelegate {
             hideThinking()
             addAIMessage(text)
             if let goal = proposedGoal { addGoalProposal(goal) }
+            speakSecretaryResponse(reply: text, proposedGoal: proposedGoal)
         case .prepareOpening(let phraseEn, let translation):
             if mode == .secretary {
+                // A prepare_opening without the Secretary token is only a
+                // harmless acknowledgement unless we are awaiting an explicit
+                // confirm response. In that case, fail closed below.
+                guard pendingConfirm != nil else { break }
                 completeSecretaryConfirmation(
                     goal: acknowledgedGoal ?? pendingConfirm?.goal ?? "",
                     confirmationToken: nil)
@@ -719,12 +849,14 @@ extension PrepareViewController: CallHintStreamDelegate {
             addAIMessage(NSLocalizedString("prepare.goal_confirmed", comment: ""))
             onGoalConfirmed?(confirmedGoal)
         case .prepareSecretaryConfirmation(let confirmationToken):
-            guard mode == .secretary else { break }
+            guard mode == .secretary, pendingConfirm != nil else { break }
             completeSecretaryConfirmation(
                 goal: acknowledgedGoal ?? pendingConfirm?.goal ?? "",
                 confirmationToken: confirmationToken)
         case .prepareConfirmed(let goal):
-            guard mode == .secretary else { break }
+            // Legacy confirmation acknowledgements have no signed token. Ignore
+            // unsolicited/duplicate acks, but never advance an active confirm.
+            guard mode == .secretary, pendingConfirm != nil else { break }
             completeSecretaryConfirmation(goal: goal, confirmationToken: nil)
         case .prepareError(let text):
             // The server processed (and honestly failed) the turn — restore the

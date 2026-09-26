@@ -2,12 +2,19 @@ import UIKit
 
 /// Secretary is an autonomous follow-up queue. Creating a task is a distinct,
 /// explicitly confirmed flow and never starts the owner's live Hint call leg.
-final class SecretaryViewController: UITableViewController {
+final class SecretaryViewController: UITableViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     private var tasks: [APIClient.SecretaryTask] = []
     private var didLoadOnce = false
+    private var listLoadFailed = false
     private var openingTaskIDs = Set<String>()
     private let refresh = UIRefreshControl()
     private let notificationsButton = UIButton(type: .system)
+    private let voiceButton = UIButton(type: .system)
+    private let photoButton = UIButton(type: .system)
+    private var pendingPhotoJPEG: Data?
+    private var pendingPhotoText: String?
+    private var pendingPhotoError: String?
+    private var isUploadingPhoto = false
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -35,32 +42,64 @@ final class SecretaryViewController: UITableViewController {
             target: self, action: #selector(newTaskTapped))
         navigationItem.rightBarButtonItem?.accessibilityLabel =
             NSLocalizedString("secretary.new_task", comment: "")
-        installNotificationPrompt()
+        installHeaderActions()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         refreshNotificationPrompt()
         reloadTasks()
+        if let text = pendingPhotoText {
+            pendingPhotoText = nil
+            openPreparation(initialMessage: text)
+        } else if let error = pendingPhotoError {
+            pendingPhotoError = nil
+            showPhotoRetryError(details: error)
+        }
     }
 
-    private func installNotificationPrompt() {
+    private func installHeaderActions() {
+        configureActionButton(voiceButton, titleKey: "secretary.action.voice", image: "mic.fill")
+        voiceButton.accessibilityIdentifier = "button-secretary-voice"
+        voiceButton.addTarget(self, action: #selector(startVoicePreparation), for: .touchUpInside)
+        configureActionButton(photoButton, titleKey: "secretary.action.photo", image: "camera.fill")
+        photoButton.accessibilityIdentifier = "button-secretary-photo"
+        photoButton.addTarget(self, action: #selector(choosePhotoSource), for: .touchUpInside)
+
         notificationsButton.setTitle(NSLocalizedString("secretary.notifications.enable", comment: ""), for: .normal)
         notificationsButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
         notificationsButton.contentHorizontalAlignment = .leading
         notificationsButton.addTarget(self, action: #selector(enableNotificationsTapped), for: .touchUpInside)
         notificationsButton.accessibilityIdentifier = "button-secretary-notifications"
 
-        let header = UIView(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 50))
-        notificationsButton.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(notificationsButton)
+        let actions = UIStackView(arrangedSubviews: [voiceButton, photoButton])
+        actions.axis = .horizontal
+        actions.distribution = .fillEqually
+        actions.spacing = 12
+        let content = UIStackView(arrangedSubviews: [actions, notificationsButton])
+        content.axis = .vertical
+        content.spacing = 12
+        content.translatesAutoresizingMaskIntoConstraints = false
+        let header = UIView(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 130))
+        header.addSubview(content)
         NSLayoutConstraint.activate([
-            notificationsButton.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 18),
-            notificationsButton.trailingAnchor.constraint(lessThanOrEqualTo: header.trailingAnchor, constant: -18),
-            notificationsButton.topAnchor.constraint(equalTo: header.topAnchor, constant: 8),
-            notificationsButton.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -8),
+            content.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 18),
+            content.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -18),
+            content.topAnchor.constraint(equalTo: header.topAnchor, constant: 12),
+            content.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -12),
+            actions.heightAnchor.constraint(equalToConstant: 52),
         ])
         tableView.tableHeaderView = header
+    }
+
+    private func configureActionButton(_ button: UIButton, titleKey: String, image: String) {
+        var config = UIButton.Configuration.filled()
+        config.title = NSLocalizedString(titleKey, comment: "")
+        config.image = UIImage(systemName: image)
+        config.imagePadding = 8
+        config.cornerStyle = .medium
+        button.configuration = config
+        button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
     }
 
     private func refreshNotificationPrompt() {
@@ -68,7 +107,6 @@ final class SecretaryViewController: UITableViewController {
             guard let self else { return }
             let systemPermitted = status == .authorized || status == .provisional || status == .ephemeral
             let enabled = systemPermitted && SecretaryAlertManager.shared.isOptedIn
-            self.tableView.tableHeaderView?.isHidden = enabled
             self.notificationsButton.isHidden = enabled
             self.notificationsButton.setTitle(
                 status == .denied
@@ -83,7 +121,6 @@ final class SecretaryViewController: UITableViewController {
             guard let self else { return }
             if granted {
                 self.notificationsButton.isHidden = true
-                self.tableView.tableHeaderView?.isHidden = true
             } else {
                 let alert = UIAlertController(
                     title: NSLocalizedString("secretary.notifications.title", comment: ""),
@@ -111,12 +148,14 @@ final class SecretaryViewController: UITableViewController {
                         ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
                     }
                     self.didLoadOnce = true
+                    self.listLoadFailed = false
                     self.refresh.endRefreshing()
                     self.tableView.reloadData()
                 }
             } catch {
                 await MainActor.run {
                     self.didLoadOnce = true
+                    self.listLoadFailed = true
                     self.refresh.endRefreshing()
                     self.tableView.reloadData()
                     self.showError(error)
@@ -127,6 +166,164 @@ final class SecretaryViewController: UITableViewController {
 
     @objc private func newTaskTapped() {
         navigationController?.pushViewController(SecretaryTaskComposerViewController(), animated: true)
+    }
+
+    @objc private func startVoicePreparation() {
+        openPreparation(initialMessage: nil)
+    }
+
+    private func openPreparation(initialMessage: String?) {
+        let prepare = PrepareViewController(mode: .secretary, initialMessage: initialMessage)
+        prepare.onSecretaryTaskConfirmed = { [weak self] (instruction: String, token: String) in
+            self?.navigationController?.pushViewController(
+                SecretaryTaskReviewViewController(
+                    phoneNumber: "", instruction: instruction, confirmationToken: token),
+                animated: true)
+        }
+        navigationController?.pushViewController(prepare, animated: true)
+    }
+
+    @objc private func choosePhotoSource() {
+        guard !isUploadingPhoto else { return }
+        let alert = UIAlertController(title: NSLocalizedString("secretary.photo.source", comment: ""),
+                                      message: nil, preferredStyle: .actionSheet)
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            alert.addAction(UIAlertAction(title: NSLocalizedString("secretary.photo.camera", comment: ""),
+                                          style: .default) { [weak self] _ in
+                self?.showImagePicker(source: .camera)
+            })
+        }
+        alert.addAction(UIAlertAction(title: NSLocalizedString("secretary.photo.library", comment: ""),
+                                      style: .default) { [weak self] _ in
+            self?.showImagePicker(source: .photoLibrary)
+        })
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        if let popover = alert.popoverPresentationController {
+            popover.barButtonItem = navigationItem.rightBarButtonItem
+        }
+        present(alert, animated: true)
+    }
+
+    private func showImagePicker(source: UIImagePickerController.SourceType) {
+        guard UIImagePickerController.isSourceTypeAvailable(source) else {
+            showErrorMessage(NSLocalizedString("secretary.photo.failed", comment: ""))
+            return
+        }
+        let picker = UIImagePickerController()
+        picker.sourceType = source
+        picker.mediaTypes = ["public.image"]
+        picker.delegate = self
+        picker.allowsEditing = false
+        present(picker, animated: true)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
+
+    func imagePickerController(_ picker: UIImagePickerController,
+                               didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        guard let image = info[.originalImage] as? UIImage else {
+            picker.dismiss(animated: true) { [weak self] in
+                self?.showErrorMessage(NSLocalizedString("secretary.photo.failed", comment: ""))
+            }
+            return
+        }
+        let longestSide = max(image.size.width, image.size.height)
+        let scale = min(1, 1800 / max(longestSide, 1))
+        let renderSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: renderSize, format: format)
+        let jpeg = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: renderSize)) }
+            .jpegData(compressionQuality: 0.82)
+        guard let jpeg else {
+            picker.dismiss(animated: true) { [weak self] in
+                self?.showErrorMessage(NSLocalizedString("secretary.photo.failed", comment: ""))
+            }
+            return
+        }
+        picker.dismiss(animated: true) { [weak self] in
+            self?.prepareFromPhoto(jpeg)
+        }
+    }
+
+    private func prepareFromPhoto(_ jpeg: Data) {
+        guard !isUploadingPhoto else { return }
+        pendingPhotoJPEG = jpeg
+        uploadPendingPhoto()
+    }
+
+    private func uploadPendingPhoto() {
+        guard !isUploadingPhoto, let jpeg = pendingPhotoJPEG else { return }
+        isUploadingPhoto = true
+        photoButton.isEnabled = false
+        let activity = UIActivityIndicatorView(style: .large)
+        activity.startAnimating()
+        activity.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(activity)
+        NSLayoutConstraint.activate([
+            activity.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            activity.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+        Task { [weak self] in
+            do {
+                let text = try await APIClient.shared.prepareImage(image: jpeg, mimeType: "image/jpeg")
+                await MainActor.run { [weak self] in
+                    guard let self else {
+                        activity.removeFromSuperview()
+                        return
+                    }
+                    activity.removeFromSuperview()
+                    self.isUploadingPhoto = false
+                    self.photoButton.isEnabled = true
+                    guard !text.isEmpty else {
+                        self.handlePhotoUploadError(
+                            details: NSLocalizedString("secretary.photo.empty", comment: ""))
+                        return
+                    }
+                    self.pendingPhotoJPEG = nil
+                    guard self.viewIfLoaded?.window != nil else {
+                        self.pendingPhotoText = text
+                        return
+                    }
+                    self.openPreparation(initialMessage: text)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else {
+                        activity.removeFromSuperview()
+                        return
+                    }
+                    activity.removeFromSuperview()
+                    self.isUploadingPhoto = false
+                    self.photoButton.isEnabled = true
+                    self.handlePhotoUploadError(details: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func handlePhotoUploadError(details: String) {
+        guard viewIfLoaded?.window != nil else {
+            pendingPhotoError = details
+            return
+        }
+        showPhotoRetryError(details: details)
+    }
+
+    private func showPhotoRetryError(details: String) {
+        let message = String(format: NSLocalizedString("secretary.photo.retry_message", comment: ""), details)
+        let alert = UIAlertController(
+            title: NSLocalizedString("common.error", comment: ""),
+            message: message,
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: NSLocalizedString("secretary.photo.retry", comment: ""),
+            style: .default,
+            handler: { [weak self] _ in self?.uploadPendingPhoto() }))
+        present(alert, animated: true)
     }
 
     /// Called by an alert-push deep link after selecting the Secretary tab.
@@ -169,14 +366,19 @@ final class SecretaryViewController: UITableViewController {
         let cell = tableView.dequeueReusableCell(withIdentifier: "secretary-task", for: indexPath)
         var content = cell.defaultContentConfiguration()
         guard !tasks.isEmpty else {
-            content.text = didLoadOnce
-                ? NSLocalizedString("secretary.empty.title", comment: "")
-                : NSLocalizedString("common.loading", comment: "")
-            content.secondaryText = didLoadOnce ? NSLocalizedString("secretary.empty.message", comment: "") : nil
+            if listLoadFailed {
+                content.text = NSLocalizedString("secretary.list.error.title", comment: "")
+                content.secondaryText = NSLocalizedString("secretary.list.error.message", comment: "")
+            } else {
+                content.text = didLoadOnce
+                    ? NSLocalizedString("secretary.empty.title", comment: "")
+                    : NSLocalizedString("common.loading", comment: "")
+                content.secondaryText = didLoadOnce ? NSLocalizedString("secretary.empty.message", comment: "") : nil
+            }
             content.textProperties.color = .secondaryLabel
             cell.accessoryType = .none
-            cell.selectionStyle = .none
-            cell.accessibilityIdentifier = "cell-secretary-empty"
+            cell.selectionStyle = listLoadFailed ? .default : .none
+            cell.accessibilityIdentifier = listLoadFailed ? "cell-secretary-list-error" : "cell-secretary-empty"
             cell.contentConfiguration = content
             return cell
         }
@@ -199,6 +401,10 @@ final class SecretaryViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
+        if tasks.isEmpty, listLoadFailed {
+            reloadTasks()
+            return
+        }
         guard tasks.indices.contains(indexPath.row) else { return }
         navigationController?.pushViewController(
             SecretaryTaskDetailViewController(task: tasks[indexPath.row]), animated: true)
@@ -214,8 +420,12 @@ final class SecretaryViewController: UITableViewController {
     }
 
     private func showError(_ error: Error) {
+        showErrorMessage(error.localizedDescription)
+    }
+
+    private func showErrorMessage(_ message: String) {
         let alert = UIAlertController(title: NSLocalizedString("common.error", comment: ""),
-                                      message: error.localizedDescription,
+                                      message: message,
                                       preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
@@ -253,7 +463,6 @@ final class SecretaryViewController: UITableViewController {
 }
 
 private final class SecretaryTaskComposerViewController: UIViewController, UITextViewDelegate {
-    private let phoneField = UITextField()
     private let instructionView = UITextView()
     private let continueButton = UIButton(type: .system)
 
@@ -291,15 +500,6 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
         intro.numberOfLines = 0
         intro.font = .preferredFont(forTextStyle: .body)
         content.addArrangedSubview(intro)
-
-        let numberLabel = sectionLabel("secretary.phone.label")
-        content.addArrangedSubview(numberLabel)
-        phoneField.borderStyle = .roundedRect
-        phoneField.keyboardType = .phonePad
-        phoneField.textContentType = .telephoneNumber
-        phoneField.placeholder = NSLocalizedString("secretary.phone.placeholder", comment: "")
-        phoneField.accessibilityIdentifier = "field-secretary-phone"
-        content.addArrangedSubview(phoneField)
 
         content.addArrangedSubview(sectionLabel("secretary.instruction.label"))
         instructionView.font = .preferredFont(forTextStyle: .body)
@@ -339,14 +539,9 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
 
     @objc private func continueTapped() {
         view.endEditing(true)
-        let phone = SecretaryPhoneNumber.normalized(phoneField.text ?? "")
         let typedInstruction = instructionView.text ?? ""
         let instruction = typedInstruction == NSLocalizedString("secretary.instruction.placeholder", comment: "")
             ? "" : typedInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let phone else {
-            showError(NSLocalizedString("secretary.phone.invalid", comment: ""))
-            return
-        }
         guard !instruction.isEmpty else {
             showError(NSLocalizedString("secretary.instruction.required", comment: ""))
             return
@@ -356,7 +551,7 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
             guard let self else { return }
             self.navigationController?.pushViewController(
                 SecretaryTaskReviewViewController(
-                    phoneNumber: phone, instruction: confirmedInstruction, confirmationToken: confirmationToken),
+                    phoneNumber: "", instruction: confirmedInstruction, confirmationToken: confirmationToken),
                 animated: true)
         }
         navigationController?.pushViewController(prepare, animated: true)
@@ -443,6 +638,7 @@ private final class SecretaryTaskReviewViewController: UIViewController {
         phoneField.keyboardType = .phonePad
         phoneField.textContentType = .telephoneNumber
         phoneField.text = phoneNumber
+        phoneField.placeholder = NSLocalizedString("secretary.phone.placeholder", comment: "")
         phoneField.accessibilityIdentifier = "field-secretary-review-phone"
         stack.addArrangedSubview(phoneField)
         stack.addArrangedSubview(sectionLabel("secretary.instruction.label"))
