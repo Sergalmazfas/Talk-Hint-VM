@@ -8,3 +8,5 @@ Keep cloned-voice experiments in the internal Voice Lab, separate from live Tran
 **Why:** The requested experiment must establish whether speaker likeness and latency are acceptable before changing any production call behavior; automated tests cannot judge likeness without the owner's actual recording and listening review.
 
 **How to apply:** For future voice-provider work, offer a same-text comparison in the lab and wait for explicit user approval before changing the live audio path.
+
+The owner confirmed after hands-on testing that the ElevenLabs clone resembles him and speaks excellent English; he likes the result. Treat ElevenLabs as the proven quality baseline, not an untested candidate. This is approval of the Voice Lab result, **not** approval to change the live Translator/Copilot pipeline.
