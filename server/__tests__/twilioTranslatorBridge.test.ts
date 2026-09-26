@@ -6,12 +6,14 @@ import {
   expireTranslatorCall, getTranslatorBridgeSnapshot, handleTranslatorGuestStatus,
   getTranslatorCall, resolveTranslatorVoices,
   resolveTranslatorPlayback,
+  configureTranslatorCloneSynthesizer,
 } from "../translation/twilioBridge";
 import type { RealtimeTranslationProvider } from "../translation/provider";
 
 class FakeSocket extends EventEmitter {
   OPEN = 1;
   readyState = 1;
+  bufferedAmount = 0;
   sent: string[] = [];
   closed?: number;
   send(value: string) { this.sent.push(value); }
@@ -38,7 +40,256 @@ function fakeProvider(sessions: any[], configs: any[] = []): RealtimeTranslation
   };
 }
 
+async function startClonePair(id: string, sessions: any[], configs: any[] = []) {
+  registerTranslatorCall({
+    id, ownerId: "clone-owner", ownerCallSid: "CAowner", guestNumber: "+15551234567",
+    callerId: "+15557654321", baseUrl: "https://example.test", cloneVoiceId: "server-snapshotted-clone",
+  });
+  configureTranslatorDialer({ async createGuestLeg() { return { sid: "CAguest" }; } });
+  const owner = new FakeSocket(), guest = new FakeSocket(), provider = fakeProvider(sessions, configs);
+  handleTranslatorTwilioStream(owner as any, provider);
+  handleTranslatorTwilioStream(guest as any, provider);
+  owner.emit("message", start(id, "owner"));
+  await new Promise(resolve => setImmediate(resolve));
+  guest.emit("message", start(id, "guest"));
+  await new Promise(resolve => setImmediate(resolve));
+  return { owner, guest };
+}
+
 describe("PSTN translator bridge routing", () => {
+  it("uses owner text-only output for cloning while leaving Guest voice mode unchanged", async () => {
+    const sessions: any[] = [], configs: any[] = [];
+    const { owner, guest } = await startClonePair("clone-text-only", sessions, configs);
+    expect(configs.map(c => [c.sourceLangHint, c.outputMode])).toEqual([["ru", "text"], ["en", "audio"]]);
+    expect(configs[0].voice).toBeUndefined();
+    expect(configs[1].voice).toBe("cedar");
+
+    sessions[1].emit({ type: "translated_audio", base64: Buffer.alloc(12).toString("base64") });
+    expect(guest.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(1);
+    expect(owner.closed).toBeUndefined();
+    owner.emit("close");
+  });
+
+  it("fails closed on any unexpected OpenAI owner audio in cloned mode", async () => {
+    const sessions: any[] = [];
+    const { owner, guest } = await startClonePair("clone-no-openai-audio", sessions);
+    sessions[0].emit({ type: "translated_audio", base64: Buffer.alloc(12).toString("base64") });
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    expect(guest.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+  });
+
+  it.each([
+    ["Russian", { responseStatus: "completed", translatedTranscript: "Привет" }],
+    ["missing source item", { responseStatus: "completed", translatedTranscript: "Hello", sourceItemId: undefined }],
+    ["missing response id", { responseStatus: "completed", translatedTranscript: "Hello", responseId: undefined }],
+  ])("does not synthesize %s owner turns", async (_label, metricsOverride) => {
+    const sessions: any[] = [];
+    let synthCalls = 0;
+    configureTranslatorCloneSynthesizer(async () => { synthCalls++; return Buffer.alloc(12); });
+    const { owner, guest } = await startClonePair(`clone-reject-${String(_label)}`, sessions);
+    sessions[0].emit({ type: "response_created", responseId: "response-1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Привет", responseId: "response-1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      translatedTranscript: "Hello", sourceItemId: "item-1", responseId: "response-1",
+      ...metricsOverride,
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(synthCalls).toBe(0);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("ignores cancelled owner responses without speaking or ending the call", async () => {
+    const sessions: any[] = [];
+    let synthCalls = 0;
+    configureTranslatorCloneSynthesizer(async () => { synthCalls++; return Buffer.alloc(12); });
+    const { owner, guest } = await startClonePair("clone-cancelled", sessions);
+    sessions[0].emit({ type: "translated_transcript_delta", text: "partial", responseId: "response-1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "cancelled", cancelled: true,
+      translatedTranscript: "partial", sourceItemId: "item-1", responseId: "response-1",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(synthCalls).toBe(0);
+    expect(owner.closed).toBeUndefined();
+    expect(guest.closed).toBeUndefined();
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    owner.emit("close");
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("chunks cloned PCM into identical 20 ms μ-law fanout and marks after the final chunk", async () => {
+    const sessions: any[] = [];
+    configureTranslatorCloneSynthesizer(async (voice, text) => {
+      expect(voice).toBe("server-snapshotted-clone");
+      expect(text).toBe("Hello there.");
+      return Buffer.alloc(1_920, 100);
+    });
+    const { owner, guest } = await startClonePair("clone-fanout-marks", sessions);
+    sessions[0].emit({ type: "response_created", responseId: "response-1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello there.", responseId: "response-1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      sourceItemId: "item-1", responseId: "response-1",
+    } });
+    await new Promise(resolve => setTimeout(resolve, 55));
+
+    const ownerEvents = owner.sent.map(JSON.parse), guestEvents = guest.sent.map(JSON.parse);
+    const ownerMedia = ownerEvents.filter(m => m.event === "media");
+    const guestMedia = guestEvents.filter(m => m.event === "media");
+    expect(ownerMedia).toHaveLength(2);
+    expect(guestMedia).toHaveLength(2);
+    expect(ownerMedia.map(m => m.media.payload)).toEqual(guestMedia.map(m => m.media.payload));
+    expect(ownerMedia.map(m => Buffer.from(m.media.payload, "base64").length)).toEqual([160, 160]);
+    expect(ownerEvents.at(-1)).toMatchObject({ event: "mark", mark: { name: "translation-owner-1" } });
+    owner.emit("close");
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("aborts an in-flight clone synthesis when the bridge tears down", async () => {
+    const sessions: any[] = [];
+    let observedSignal: AbortSignal | undefined;
+    configureTranslatorCloneSynthesizer((_voice, _text, signal) => {
+      observedSignal = signal;
+      return new Promise(() => {});
+    });
+    const { owner } = await startClonePair("clone-abort-teardown", sessions);
+    sessions[0].emit({ type: "response_created", responseId: "response-1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello", responseId: "response-1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      translatedTranscript: "Hello", sourceItemId: "item-1", responseId: "response-1",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(observedSignal?.aborted).toBe(false);
+    owner.emit("close");
+    expect(observedSignal?.aborted).toBe(true);
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("tears down instead of falling back when clone synthesis fails", async () => {
+    const sessions: any[] = [];
+    configureTranslatorCloneSynthesizer(async () => { throw new Error("provider unavailable"); });
+    const { owner, guest } = await startClonePair("clone-network-failure", sessions);
+    sessions[0].emit({ type: "response_created", responseId: "response-1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello", responseId: "response-1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      translatedTranscript: "Hello", sourceItemId: "item-1", responseId: "response-1",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("requires response-keyed completed text and matching response source when responses interleave", async () => {
+    const sessions: any[] = [];
+    let synthCalls = 0;
+    configureTranslatorCloneSynthesizer(async () => { synthCalls++; return Buffer.alloc(12); });
+    const { owner, guest } = await startClonePair("clone-interleaved-source", sessions);
+    sessions[0].emit({ type: "response_created", responseId: "r1", sourceItemId: "item-1" });
+    sessions[0].emit({ type: "response_created", responseId: "r2", sourceItemId: "item-2" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "This belongs to two.", responseId: "r2" });
+    // Metrics text is deliberately present but must never be used as fallback.
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      translatedTranscript: "Wrong response fallback.", sourceItemId: "item-1", responseId: "r1",
+    } });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Too late.", responseId: "r1" });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(synthCalls).toBe(0);
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("fails explicitly when completed owner text has no response ID", async () => {
+    const sessions: any[] = [];
+    const { owner, guest } = await startClonePair("clone-missing-done-id", sessions);
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello" });
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+  });
+
+  it("rejects response text when its terminal source item does not match response-created attribution", async () => {
+    const sessions: any[] = [];
+    let synthCalls = 0;
+    configureTranslatorCloneSynthesizer(async () => { synthCalls++; return Buffer.alloc(12); });
+    const { owner, guest } = await startClonePair("clone-mismatched-source", sessions);
+    sessions[0].emit({ type: "response_created", responseId: "r1", sourceItemId: "source-one" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello", responseId: "r1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      sourceItemId: "source-two", responseId: "r1", translatedTranscript: "Wrong fallback",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(synthCalls).toBe(0);
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("clears both Twilio output queues and terminates on cancellation during paced playback", async () => {
+    const sessions: any[] = [];
+    configureTranslatorCloneSynthesizer(async () => Buffer.alloc(1_920, 100));
+    const { owner, guest } = await startClonePair("clone-cancel-playback", sessions);
+    sessions[0].emit({ type: "response_created", responseId: "r1", sourceItemId: "i1" });
+    sessions[0].emit({ type: "translated_transcript_done", text: "Hello", responseId: "r1" });
+    sessions[0].emit({ type: "turn_completed", metrics: {
+      turnIndex: 0, provider: "test", model: "test", responseStatus: "completed",
+      sourceItemId: "i1", responseId: "r1",
+    } });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(owner.sent.map(JSON.parse).some(m => m.event === "media")).toBe(true);
+    sessions[0].emit({ type: "response_cancelled", responseId: "r1", sourceItemId: "i1", ts: Date.now(), reason: "test" });
+    const ownerEvents = owner.sent.map(JSON.parse), guestEvents = guest.sent.map(JSON.parse);
+    expect(ownerEvents.some(m => m.event === "clear")).toBe(true);
+    expect(guestEvents.some(m => m.event === "clear")).toBe(true);
+    expect(owner.closed).toBe(1011);
+    expect(guest.closed).toBe(1011);
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
+  it("waits for buffer pressure to drain and for marks before starting the next clone turn", async () => {
+    const sessions: any[] = [], synthesized: string[] = [];
+    configureTranslatorCloneSynthesizer(async (_voice, text) => {
+      synthesized.push(text);
+      return Buffer.alloc(960, 100);
+    });
+    const { owner } = await startClonePair("clone-backpressure-mark-serialization", sessions);
+    owner.bufferedAmount = 40 * 1024;
+    for (const [responseId, sourceItemId, text] of [
+      ["r1", "i1", "First."], ["r2", "i2", "Second."],
+    ]) {
+      sessions[0].emit({ type: "response_created", responseId, sourceItemId });
+      sessions[0].emit({ type: "translated_transcript_done", text, responseId });
+      sessions[0].emit({ type: "turn_completed", metrics: {
+        turnIndex: responseId === "r1" ? 0 : 1, provider: "test", model: "test",
+        responseStatus: "completed", sourceItemId, responseId,
+      } });
+    }
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(owner.sent.map(JSON.parse).filter(m => m.event === "media")).toHaveLength(0);
+    owner.bufferedAmount = 0;
+    await new Promise(resolve => setTimeout(resolve, 35));
+    const firstMark = owner.sent.map(JSON.parse).find(m => m.event === "mark");
+    expect(firstMark).toBeDefined();
+    expect(synthesized).toEqual(["First."]);
+    owner.emit("message", Buffer.from(JSON.stringify({ event: "mark", mark: firstMark.mark })));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(synthesized).toEqual(["First.", "Second."]);
+    owner.emit("close");
+    configureTranslatorCloneSynthesizer(undefined);
+  });
+
   it("maps the closed preference to fixed opposite voices and defaults invalid input to Female", () => {
     expect(resolveTranslatorVoices("male")).toEqual({
       preference: "male",

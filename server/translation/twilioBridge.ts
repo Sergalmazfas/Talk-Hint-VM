@@ -4,6 +4,7 @@ import type WebSocket from "ws";
 import { openaiRealtimeTranslationProvider } from "./openaiRealtimeTranslator";
 import type { RealtimeTranslationProvider, RealtimeTranslationSession, TranslationTurnMetrics } from "./provider";
 import { storage } from "../storage";
+import { isSafeEnglishTranslation, synthesizeCloneSpeech } from "./cloneSpeech";
 
 const RATE = 24_000;
 const MODEL = process.env.TRANSLATOR_SPIKE_MODEL || "gpt-realtime";
@@ -47,6 +48,8 @@ export function translatorAudioDestinations(
 export interface TranslatorCall {
   id: string; ownerId: string; ownerCallSid: string; guestNumber: string;
   callerId: string; baseUrl: string;
+  /** Server-only immutable owner clone selected by the signed Twilio route. */
+  cloneVoiceId?: string;
   voicePreference?: TranslatorVoicePreference;
   voices?: TranslatorVoices;
   playbackPreference?: TranslatorPlaybackPreference;
@@ -77,10 +80,25 @@ type BridgeState = {
   translationPlaybackTokenByLeg: Map<TranslatorLeg, string>;
   guestOriginal: { speaking: boolean; preRoll: string[]; playbackToken?: string };
   playbackSequence: number;
+  cloneQueue: Array<{ responseId: string; sourceItemId: string; text: string }>;
+  cloneSynthesisActive: boolean;
+  cloneCurrentResponseId?: string;
+  cloneTextByResponse: Map<string, string>;
+  cloneSourceByResponse: Map<string, string>;
+  cloneCancelledResponses: Set<string>;
+  clonePlaybackStarted: boolean;
+  cloneMarkWaiters: Map<string, () => void>;
+  cloneAbortController?: AbortController;
 };
 const activeCalls = new Map<string, BridgeState>();
 const terminationHandlers = new Map<string, (failed: boolean, reason?: string) => void>();
 const feedSubscribers = new Map<string, Set<WebSocket>>();
+let cloneSynthesizer = synthesizeCloneSpeech;
+export function configureTranslatorCloneSynthesizer(
+  synthesizer: typeof synthesizeCloneSpeech | undefined,
+) {
+  cloneSynthesizer = synthesizer || synthesizeCloneSpeech;
+}
 export function subscribeTranslatorFeed(userId: string, ws: WebSocket) {
   const set = feedSubscribers.get(userId) || new Set<WebSocket>();
   set.add(ws); feedSubscribers.set(userId, set);
@@ -143,6 +161,135 @@ export function mulawToPcm24(payload: string): Buffer {
   for (let i = 0; i < source.length; i++) for (let n = 0; n < 3; n++) out.writeInt16LE(MULAW_DECODE[source[i]], (i * 3 + n) * 2);
   return out;
 }
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new Error("Clone playback aborted"));
+    const timer = setTimeout(done, ms);
+    function done() {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }
+    function abort() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(new Error("Clone playback aborted"));
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function waitForWritable(legs: ActiveLeg[], signal: AbortSignal) {
+  const deadline = Date.now() + 3_000;
+  while (true) {
+    if (signal.aborted) throw new Error("Clone playback aborted");
+    if (legs.some(target => target.ws.readyState !== target.ws.OPEN)) {
+      throw new Error("Translator media leg is unavailable");
+    }
+    if (legs.every(target => (target.ws.bufferedAmount || 0) <= 32 * 1024)) return;
+    if (Date.now() >= deadline) throw new Error("Translator media backpressure limit exceeded");
+    await delay(10, signal);
+  }
+}
+
+function waitForCloneMark(state: BridgeState, token: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Translator playback mark timed out"));
+    }, 25_000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      state.cloneMarkWaiters.delete(token);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("Clone playback aborted"));
+    };
+    state.cloneMarkWaiters.set(token, () => {
+      cleanup();
+      resolve();
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
+async function drainCloneQueue(call: RegisteredTranslatorCall, state: BridgeState) {
+  if (state.cloneSynthesisActive || state.finalized || state.failed) return;
+  const owner = state.legs.get("owner"), guest = state.legs.get("guest");
+  if (!owner || !guest || owner.ws.readyState !== owner.ws.OPEN || guest.ws.readyState !== guest.ws.OPEN) return;
+  state.cloneSynthesisActive = true;
+  try {
+    while (state.cloneQueue.length && !state.finalized && !state.failed &&
+      activeCalls.get(call.id) === state) {
+      const turn = state.cloneQueue.shift()!;
+      state.cloneCurrentResponseId = turn.responseId;
+      const controller = new AbortController();
+      state.cloneAbortController = controller;
+      const pcm = await cloneSynthesizer(call.cloneVoiceId!, turn.text, controller.signal);
+      if (controller.signal.aborted || state.finalized || state.failed ||
+        activeCalls.get(call.id) !== state || state.cloneCurrentResponseId !== turn.responseId) continue;
+      if (owner.ws.readyState !== owner.ws.OPEN || guest.ws.readyState !== guest.ws.OPEN) {
+        throw new Error("Translator media leg closed during cloned voice synthesis");
+      }
+      if (!pcm.length || pcm.length % 2 !== 0) throw new Error("Invalid cloned speech PCM");
+      const token = `translation-owner-${++state.playbackSequence}`;
+      let started = false;
+      for (let offset = 0; offset < pcm.length; offset += 960) {
+        if (controller.signal.aborted || state.finalized || state.failed ||
+          activeCalls.get(call.id) !== state || state.cloneCurrentResponseId !== turn.responseId) break;
+        await waitForWritable([guest, owner], controller.signal);
+        let packet = pcm.subarray(offset, Math.min(offset + 960, pcm.length));
+        if (packet.length % 6) {
+          const padded = Buffer.alloc(Math.ceil(packet.length / 6) * 6);
+          packet.copy(padded);
+          const lastSample = packet.length >= 2 ? packet.readInt16LE(packet.length - 2) : 0;
+          for (let padAt = packet.length; padAt < padded.length; padAt += 2) padded.writeInt16LE(lastSample, padAt);
+          packet = padded;
+        }
+        const payload = pcm24ToMulaw(packet);
+        if (!started) {
+          // Do not gate owner input during the potentially slow TTS request;
+          // start the half-duplex gate immediately before the first packet.
+          state.ownerPlaybackTokens.add(token);
+          state.clonePlaybackStarted = true;
+          started = true;
+        }
+        for (const target of [guest, owner]) {
+          if (target.ws.readyState === target.ws.OPEN) {
+            target.ws.send(JSON.stringify({ event: "media", streamSid: target.streamSid, media: { payload } }));
+          }
+        }
+        await delay(20, controller.signal);
+      }
+      if (controller.signal.aborted || state.finalized || state.failed ||
+        activeCalls.get(call.id) !== state || state.cloneCurrentResponseId !== turn.responseId) continue;
+      if (owner.ws.readyState === owner.ws.OPEN) {
+        const markAcknowledged = waitForCloneMark(state, token, controller.signal);
+        owner.ws.send(JSON.stringify({ event: "mark", streamSid: owner.streamSid, mark: { name: token } }));
+        await markAcknowledged;
+      }
+      state.clonePlaybackStarted = false;
+      state.cloneCurrentResponseId = undefined;
+      state.cloneAbortController = undefined;
+    }
+  } catch {
+    const wasCancelled = !!state.cloneCurrentResponseId &&
+      state.cloneCancelledResponses.has(state.cloneCurrentResponseId) && !state.clonePlaybackStarted;
+    if (!wasCancelled && !state.finalized && !state.failed && activeCalls.get(call.id) === state) {
+      terminationHandlers.get(call.id)?.(true, "Owner cloned speech or playback failed; translator call ended");
+    }
+  } finally {
+    state.cloneAbortController = undefined;
+    state.cloneCurrentResponseId = undefined;
+    state.clonePlaybackStarted = false;
+    state.cloneSynthesisActive = false;
+    if (state.cloneQueue.length && !state.finalized && !state.failed) void drainCloneQueue(call, state);
+  }
+}
+
 function pcm24ToMulaw(pcm: Buffer): string {
   const out = Buffer.alloc(Math.floor(pcm.length / 6));
   for (let i = 0; i < out.length; i++) {
@@ -180,6 +327,8 @@ export function handleTranslatorTwilioStream(
     state.finalized = true;
     state.failed = failed;
     if (reason) state.errors.push(reason);
+    state.cloneAbortController?.abort();
+    state.cloneQueue = [];
     if (failed && reason) {
       sendFeed(call.ownerId, { type: "error", callSid: call.ownerCallSid, message: reason, fatal: true });
     }
@@ -224,7 +373,10 @@ export function handleTranslatorTwilioStream(
         state = { legs: new Map(), turns: [], errors: [], failed: false, finalized: false,
           expiresAt: Date.now() + CALL_TTL_MS, startedLegs: new Set(), guestStartRequested: false, transcriptsByItem: new Map(),
           ownerPlaybackTokens: new Set(), translationPlaybackTokenByLeg: new Map(),
-          guestOriginal: { speaking: false, preRoll: [] }, playbackSequence: 0 };
+          guestOriginal: { speaking: false, preRoll: [] }, playbackSequence: 0,
+          cloneQueue: [], cloneSynthesisActive: false, cloneTextByResponse: new Map(),
+          cloneSourceByResponse: new Map(), cloneCancelledResponses: new Set(),
+          clonePlaybackStarted: false, cloneMarkWaiters: new Map() };
         activeCalls.set(call.id, state);
       }
       if (!terminationHandlers.has(call.id)) {
@@ -236,8 +388,10 @@ export function handleTranslatorTwilioStream(
           languages: ["ru", "en"],
           sourceLangHint: leg === "owner" ? "ru" : "en",
           outputLanguage: leg === "owner" ? "en" : "ru",
-          outputMode: leg === "guest" && call.playbackPreference === "text" ? "text" : "audio",
-          voice: call.voices[leg],
+          outputMode: leg === "owner" && call.cloneVoiceId
+            ? "text"
+            : leg === "guest" && call.playbackPreference === "text" ? "text" : "audio",
+          voice: leg === "owner" && call.cloneVoiceId ? undefined : call.voices[leg],
           inputFormat: { encoding: "pcm16", sampleRateHz: RATE },
           outputFormat: { encoding: "pcm16", sampleRateHz: RATE },
         });
@@ -252,6 +406,10 @@ export function handleTranslatorTwilioStream(
           const state = call ? activeCalls.get(call.id) : undefined;
           if (!state || state.failed || state.finalized) return;
           if (ev.type === "translated_audio" && call && leg) {
+            if (leg === "owner" && call.cloneVoiceId) {
+              finishBridge(true, "Unexpected OpenAI audio in owner cloned-voice mode");
+              return;
+            }
             if (leg === "guest" && call.playbackPreference === "text") {
               const message = "Text-only Translator received unexpected Guest audio";
               state.errors.push(message);
@@ -294,6 +452,14 @@ export function handleTranslatorTwilioStream(
               target.ws.send(JSON.stringify({ event: "mark", streamSid: target.streamSid, mark: { name: token } }));
             }
             state.guestOriginal.playbackToken = undefined;
+          } else if (ev.type === "response_created" && leg === "owner" && call?.cloneVoiceId && state) {
+            if (ev.responseId && ev.sourceItemId) {
+              if (!state.cloneSourceByResponse.has(ev.responseId) && state.cloneSourceByResponse.size >= 10) {
+                const oldest = state.cloneSourceByResponse.keys().next().value;
+                if (oldest) state.cloneSourceByResponse.delete(oldest);
+              }
+              state.cloneSourceByResponse.set(ev.responseId, ev.sourceItemId);
+            }
           } else if (ev.type === "source_transcript" && call && leg) {
             let completed: (TranslationTurnMetrics & { leg: TranslatorLeg }) | undefined;
             if (ev.itemId) {
@@ -314,11 +480,25 @@ export function handleTranslatorTwilioStream(
               });
             }
           } else if ((ev.type === "translated_transcript_delta" || ev.type === "translated_transcript_done") && call && leg) {
+            if (leg === "owner" && call.cloneVoiceId && ev.type === "translated_transcript_done") {
+              if (!ev.responseId) {
+                finishBridge(true, "Owner cloned voice received completed text without a response ID");
+                return;
+              }
+              if (ev.text && ev.text.length <= 1_500) {
+                if (!state.cloneTextByResponse.has(ev.responseId) && state.cloneTextByResponse.size >= 10) {
+                  const oldest = state.cloneTextByResponse.keys().next().value;
+                  if (oldest) state.cloneTextByResponse.delete(oldest);
+                }
+                state.cloneTextByResponse.set(ev.responseId, ev.text);
+              }
+            }
             sendFeed(call.ownerId, { type: ev.type, callSid: call.ownerCallSid, leg, text: ev.text, responseId: ev.responseId });
           } else if (ev.type === "turn_completed" && leg && state && call) {
             const playbackToken = state.translationPlaybackTokenByLeg.get(leg);
             const ownerTarget = state.legs.get("owner");
-            if (playbackToken && ownerTarget && ownerTarget.ws.readyState === ownerTarget.ws.OPEN) {
+            if (!(leg === "owner" && call.cloneVoiceId) &&
+              playbackToken && ownerTarget && ownerTarget.ws.readyState === ownerTarget.ws.OPEN) {
               ownerTarget.ws.send(JSON.stringify({ event: "mark", streamSid: ownerTarget.streamSid, mark: { name: playbackToken } }));
             }
             state.translationPlaybackTokenByLeg.delete(leg);
@@ -327,6 +507,59 @@ export function handleTranslatorTwilioStream(
             }
             state.turns.push({ ...ev.metrics, leg }); persist();
             sendFeed(call.ownerId, { type: "turn_completed", callSid: call.ownerCallSid, leg, metrics: ev.metrics });
+            if (leg === "owner" && call.cloneVoiceId) {
+              const metrics = ev.metrics;
+              const responseId = metrics.responseId;
+              const sourceItemId = metrics.sourceItemId;
+              if (responseId && (metrics.responseStatus === "cancelled" || metrics.cancelled)) {
+                state.cloneTextByResponse.delete(responseId);
+                state.cloneSourceByResponse.delete(responseId);
+                state.cloneCancelledResponses.delete(responseId);
+                return;
+              }
+              const responseText = responseId ? state.cloneTextByResponse.get(responseId) : undefined;
+              const responseSourceItemId = responseId ? state.cloneSourceByResponse.get(responseId) : undefined;
+              if (responseId) {
+                state.cloneTextByResponse.delete(responseId);
+                state.cloneSourceByResponse.delete(responseId);
+              }
+              const text = (responseText || "").trim();
+              if (metrics.responseStatus !== "completed" || !responseId || !sourceItemId ||
+                responseSourceItemId !== sourceItemId || !text || !isSafeEnglishTranslation(text)) {
+                finishBridge(true, "Owner cloned voice received an incomplete or non-English translation");
+                return;
+              }
+              if (state.cloneQueue.length >= 3) {
+                finishBridge(true, "Owner cloned voice translation queue is full");
+                return;
+              }
+              state.cloneQueue.push({ responseId, sourceItemId, text });
+              void drainCloneQueue(call, state);
+            }
+          } else if (ev.type === "response_cancelled" && leg === "owner" && call?.cloneVoiceId && state) {
+            state.cloneQueue = state.cloneQueue.filter(turn => turn.responseId !== ev.responseId);
+            if (ev.responseId) {
+              state.cloneTextByResponse.delete(ev.responseId);
+              state.cloneSourceByResponse.delete(ev.responseId);
+              state.cloneCancelledResponses.add(ev.responseId);
+              if (state.cloneCancelledResponses.size > 100) {
+                const oldest = state.cloneCancelledResponses.values().next().value;
+                if (oldest) state.cloneCancelledResponses.delete(oldest);
+              }
+            }
+            if (state.cloneAbortController && state.cloneCurrentResponseId === ev.responseId) {
+              if (state.clonePlaybackStarted) {
+                for (const destination of ["owner", "guest"] as const) {
+                  const target = state.legs.get(destination);
+                  if (target && target.ws.readyState === target.ws.OPEN) {
+                    target.ws.send(JSON.stringify({ event: "clear", streamSid: target.streamSid }));
+                  }
+                }
+                finishBridge(true, "Owner cloned voice response was cancelled during playback");
+              } else {
+                state.cloneAbortController.abort();
+              }
+            }
           } else if (ev.type === "invariant_violation" && call) {
             finishBridge(true, `Translator invariant violation: ${ev.code}`);
           } else if (ev.type === "error" && call) {
@@ -340,6 +573,7 @@ export function handleTranslatorTwilioStream(
           }
         });
         state.legs.set(leg, { ws, streamSid, session });
+        if (call.cloneVoiceId && state.cloneQueue.length) void drainCloneQueue(call, state);
         if (leg === "owner" && !state.guestStartRequested) {
           state.guestStartRequested = true;
           if (!dialer) throw new Error("Translator PSTN dialer is not configured");
@@ -388,7 +622,9 @@ export function handleTranslatorTwilioStream(
         }
       }
     } else if (msg.event === "mark" && call && leg === "owner" && msg.mark?.name) {
-      activeCalls.get(call.id)?.ownerPlaybackTokens.delete(msg.mark.name);
+      const state = activeCalls.get(call.id);
+      state?.ownerPlaybackTokens.delete(msg.mark.name);
+      state?.cloneMarkWaiters.get(msg.mark.name)?.();
     }
   });
   ws.on("close", () => {

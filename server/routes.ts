@@ -32,6 +32,8 @@ import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
 import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices, resolveTranslatorPlayback } from "./translation/twilioBridge";
+import { getClone } from "./voiceLab/store";
+import { requireReadyOwnerClone } from "./translation/cloneSpeech";
 import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
@@ -1284,6 +1286,17 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         return res.type("text/xml").send(twimlResponse.toString());
       }
       const ownerId = ownerMatch[1];
+      // Owner→English is spoken exclusively with that account's ready clone.
+      // Do this before registering the bridge or creating any paid guest leg.
+      const ownerClone = await getClone(ownerId).catch(() => null);
+      let cloneVoiceId: string;
+      try {
+        cloneVoiceId = requireReadyOwnerClone(ownerClone, process.env.ELEVENLABS_API_KEY);
+      } catch {
+        twimlResponse.say("Translator is unavailable: your cloned voice is not ready or voice synthesis is not configured.");
+        twimlResponse.hangup();
+        return res.type("text/xml").send(twimlResponse.toString());
+      }
       const ownerCallId = crypto.randomUUID();
       const resolvedVoice = resolveTranslatorVoices(translatorVoice);
       const resolvedPlayback = resolveTranslatorPlayback(translatorPlayback);
@@ -1300,6 +1313,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       registerTranslatorCall({
         id: ownerCallId, ownerId, ownerCallSid: callSid, guestNumber: guestTo,
         callerId, baseUrl: `${protocol}://${host}`,
+        cloneVoiceId,
         voicePreference: resolvedVoice.preference, voices: resolvedVoice.voices,
         playbackPreference: resolvedPlayback,
       });

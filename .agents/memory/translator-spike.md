@@ -32,10 +32,10 @@ The native Translator has two isolated transports: the standalone authenticated 
 **Why:** the live PSTN test proved Owner must hear exactly what Guest receives to catch consequential mistranslations before the conversation proceeds. Independent Owner/Guest audio ownership and fail-closed teardown remain necessary, while the established Hint/Deepgram route must stay untouched.
 **How to apply:** select Translator before dialing and explicitly tag the call. Keep its Twilio stream and feed endpoints separate from `/ui` and the Hint stream. Bind both expected CallSids, use directed RU→EN and EN→RU sessions, serialize Guest original before translation, reject duplicate/expired starts, terminate both legs on fatal errors, and persist structured turns in existing History.
 
-## Translator role voice preference
-Translator voice selection is a device-local, call-snapshotted `male|female` preference. Male maps Owner to cedar and Guest to marin; Female/default maps Owner to marin and Guest to cedar. OpenAI voice IDs never cross the UI boundary, and both fixed session voices are resolved before either provider session starts.
-**Why:** the two translated roles need to remain distinguishable by ear without allowing Settings changes to mutate an active call or widening the provider-facing configuration surface.
-**How to apply:** keep Female as the fallback for missing/invalid values, send only the closed preference through signed Twilio parameters, copy the resolved pair into call registration, and never alter routing or synthesize a second Owner-monitoring payload.
+## Translator voice ownership
+The live phone Translator must use the account owner's ready ElevenLabs clone for Owner→English speech only; Guest→Russian remains on its existing OpenAI voice path. Never silently substitute an OpenAI voice for Owner speech when cloning fails. Owner monitors the identical generated audio sent to Guest, rather than a second synthesis.
+**Why:** the user explicitly requested that the Translator speak their translations with their own voice, while keeping the two roles distinct. Silent fallback would falsely present another voice as theirs.
+**How to apply:** resolve the clone only for the authenticated call owner before dialing Guest, snapshot it for the call, require a completed response-bound translation before TTS, and fail visibly rather than sending a different Owner voice. The device's older male/female preference still affects the Guest voice; do not claim it selects the Owner clone.
 
 ## Translator incoming playback preference
 Incoming Guest→RU delivery is a device-local, call-snapshotted `voice|text` preference with Voice as the safe default. Text means a true text-output Guest session, never generated-and-muted audio; Owner→EN remains audio and keeps exact-payload monitoring.
