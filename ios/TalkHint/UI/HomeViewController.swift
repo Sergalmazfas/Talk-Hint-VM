@@ -597,7 +597,7 @@ final class HomeViewController: UIViewController {
 
     @objc private func prepareTapped() {
         let prepare = PrepareViewController()
-        prepare.onGoalConfirmed = { [weak self] in
+        prepare.onGoalConfirmed = { [weak self] _ in
             self?.renderGoalState()
         }
         let nav = UINavigationController(rootViewController: prepare)
@@ -610,7 +610,7 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func seeAllTapped() {
-        tabBarController?.selectedIndex = 3 // History
+        tabBarController?.selectedIndex = 4 // History
     }
 
     @objc private func callTapped() {

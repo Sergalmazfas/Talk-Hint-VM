@@ -133,6 +133,7 @@ final class AccountViewController: UIViewController {
         logoutButton.isEnabled = false
         Task {
             await PushManager.shared.unregisterCurrentToken()
+            await SecretaryAlertManager.shared.unregisterCurrentToken()
             await APIClient.shared.logout()
             SessionStore.shared.clear()
             onLoggedOut?()

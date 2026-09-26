@@ -11,7 +11,7 @@ import {
   type AiratomaDelivery,
   type DialogueLibrary, type DialogueEntry,
   users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards, airatomaDeliveries, dialogueLibraries,
-  tutorSessions, tutorCallMemories, voiceLabClones, voiceLabRuns
+  tutorSessions, tutorCallMemories, voiceLabClones, voiceLabRuns, secretaryTasks
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, or, sql, gt, lte, desc, asc, getTableColumns } from "drizzle-orm";
@@ -158,6 +158,7 @@ const APP_TABLES: Record<string, any> = {
   user_prompts: userPrompts,
   prompt_templates: promptTemplates,
   calls,
+  secretary_tasks: secretaryTasks,
   contact_memory: contactMemory,
   knowledge_cards: knowledgeCards,
   dialogue_libraries: dialogueLibraries,

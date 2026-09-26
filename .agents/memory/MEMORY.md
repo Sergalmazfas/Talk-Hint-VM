@@ -1,4 +1,4 @@
-- [iOS push / APNs architecture](ios-push-architecture.md) — direct cert-based VoIP APNs from our Engine (not Twilio); bundle app.talkhint, topic app.talkhint.voip, reuses web call flow.
+- [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.
 - [drizzle-kit push interactive blocker](drizzle-push-interactive-blocker.md) — db:push can hang on a rename prompt (out-of-schema user_sessions); apply DDL via executeSql instead, never accept the rename.
 - [/ui WebSocket per-user routing](ui-ws-per-user-routing.md) — live call transcripts/hints must auth + be scoped to owning user (callOwners map); never global broadcast.
 - [Live hint pipeline gotchas](hint-pipeline-gotchas.md) — goal-achieved NEVER blocks hints (user requirement: prompter suggests while call continues); cross-track echo dedup; duplicate window not last-only; farewell filter must exempt questions.

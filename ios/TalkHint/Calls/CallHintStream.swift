@@ -43,6 +43,10 @@ enum CallHintEvent: Equatable {
     /// PREPARE stage: the goal was confirmed and Sol produced the opening phrase
     /// (American English + translation into the user's language).
     case prepareOpening(phraseEn: String, translation: String?)
+    /// Secretary's task confirmation acknowledgement. The opaque token is
+    /// required by the task-creation endpoint and is never used by Hint mode.
+    case prepareSecretaryConfirmation(confirmationToken: String?)
+    case prepareConfirmed(goal: String)
     /// PREPARE stage: an honest, user-facing failure (Sol unavailable, reset
     /// mid-flight, …). The text is safe to show verbatim — never substituted.
     case prepareError(text: String)
@@ -152,27 +156,29 @@ final class CallHintStream: NSObject {
     /// Returns `false` when there is no open socket — the caller must keep the
     /// text pending and resend after reconnect instead of losing it.
     @discardableResult
-    func sendPrepareMessage(_ text: String, clientMessageId: String? = nil) -> Bool {
-        send(CallHintStream.prepareMessagePayload(text: text, clientMessageId: clientMessageId))
+    func sendPrepareMessage(_ text: String, clientMessageId: String? = nil,
+                            mode: PrepareMode = .hint) -> Bool {
+        send(CallHintStream.prepareMessagePayload(text: text, clientMessageId: clientMessageId, mode: mode))
     }
 
-    /// Confirms the proposed call goal. The server activates it via the existing
-    /// goal mechanism (a `goal_set` event echoes back) and then delivers the
-    /// opening phrase as a `prepareOpening` event.
+    /// Confirms the proposed goal. Hint mode activates the live goal and returns
+    /// an opening phrase; Secretary mode acknowledges the task without changing
+    /// the live Hint goal or generating an opening phrase.
     ///
     /// `clientMessageId` makes confirmation retries idempotent: a reconnect
-    /// resend with the same id replays the original opening phrase instead of
-    /// re-firing goal side effects or generating a second opening.
+    /// resend with the same id replays the original response instead of
+    /// re-firing side effects.
     /// Returns `false` when there is no open socket.
     @discardableResult
-    func confirmPrepareGoal(_ goal: String, clientMessageId: String? = nil) -> Bool {
-        send(CallHintStream.prepareConfirmGoalPayload(goal: goal, clientMessageId: clientMessageId))
+    func confirmPrepareGoal(_ goal: String, clientMessageId: String? = nil,
+                            mode: PrepareMode = .hint) -> Bool {
+        send(CallHintStream.prepareConfirmGoalPayload(goal: goal, clientMessageId: clientMessageId, mode: mode))
     }
 
     /// Resets the server-side PREPARE conversation so the next preparation
     /// starts from a clean slate.
-    func resetPrepare() {
-        send(CallHintStream.prepareResetPayload())
+    func resetPrepare(mode: PrepareMode = .hint) {
+        send(CallHintStream.prepareResetPayload(mode: mode))
     }
 
     // MARK: - Pure outgoing-payload builders
@@ -222,23 +228,34 @@ final class CallHintStream: NSObject {
 
     /// Builds the `prepare_message` control message (one PREPARE turn). The
     /// optional `clientMessageId` is the idempotency key for reconnect resends.
-    static func prepareMessagePayload(text: String, clientMessageId: String? = nil) -> [String: Any] {
+    enum PrepareMode: String {
+        case hint
+        case secretary
+    }
+
+    static func prepareMessagePayload(text: String, clientMessageId: String? = nil,
+                                      mode: PrepareMode = .hint) -> [String: Any] {
         var payload: [String: Any] = ["type": "prepare_message", "text": text]
         if let id = clientMessageId, !id.isEmpty { payload["clientMessageId"] = id }
+        if mode == .secretary { payload["mode"] = mode.rawValue }
         return payload
     }
 
     /// Builds the `prepare_confirm_goal` control message. The optional
     /// `clientMessageId` is the idempotency key for reconnect resends.
-    static func prepareConfirmGoalPayload(goal: String, clientMessageId: String? = nil) -> [String: Any] {
+    static func prepareConfirmGoalPayload(goal: String, clientMessageId: String? = nil,
+                                          mode: PrepareMode = .hint) -> [String: Any] {
         var payload: [String: Any] = ["type": "prepare_confirm_goal", "goal": goal]
         if let id = clientMessageId, !id.isEmpty { payload["clientMessageId"] = id }
+        if mode == .secretary { payload["mode"] = mode.rawValue }
         return payload
     }
 
     /// Builds the `prepare_reset` control message.
-    static func prepareResetPayload() -> [String: Any] {
-        ["type": "prepare_reset"]
+    static func prepareResetPayload(mode: PrepareMode = .hint) -> [String: Any] {
+        var payload: [String: Any] = ["type": "prepare_reset"]
+        if mode == .secretary { payload["mode"] = mode.rawValue }
+        return payload
     }
 
     /// Pushes the user's saved Assistant-tab selections (mode, language, goal) to
@@ -550,8 +567,15 @@ final class CallHintStream: NSObject {
             guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
             return .prepareReply(text: body, proposedGoal: nonEmpty(obj["proposedGoal"]))
         case "prepare_opening":
-            guard let phrase = obj["phraseEn"] as? String, !phrase.isEmpty else { return nil }
+            let confirmationToken = nonEmpty(obj["confirmationToken"])
+            let phrase = (obj["phraseEn"] as? String) ?? ""
+            if phrase.isEmpty || confirmationToken != nil {
+                return .prepareSecretaryConfirmation(confirmationToken: confirmationToken)
+            }
             return .prepareOpening(phraseEn: phrase, translation: nonEmpty(obj["translation"]))
+        case "prepare_confirmed":
+            guard let goal = nonEmpty(obj["goal"]) else { return nil }
+            return .prepareConfirmed(goal: goal)
         case "prepare_error":
             guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
             return .prepareError(text: body)

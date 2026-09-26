@@ -8,7 +8,20 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         _ = CallManager.shared
         // Start PushKit so VoIP pushes are handled even when launched in background.
         PushManager.shared.start()
+        // Standard APNs alerts are used for completed Secretary tasks. The
+        // manager does not request permission here; Secretary asks in context.
+        SecretaryAlertManager.shared.start()
         return true
+    }
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        SecretaryAlertManager.shared.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        SecretaryAlertManager.shared.didFailToRegisterForRemoteNotifications()
     }
 
     // MARK: UISceneSession Lifecycle

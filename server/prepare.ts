@@ -39,6 +39,17 @@ After confirmation, produce one short, natural opening phrase in American Englis
 
 Keep the conversation concise and practical. Your purpose is to prepare the user for the call, not to teach English or conduct the live call.`;
 
+// Same alignment -> clarification -> proposal -> explicit confirmation
+// algorithm as Hint, but Secretary is tasked with listening and reporting back.
+// Do not change the owner-approved Hint prompt above.
+export const SECRETARY_PREPARE_PROMPT = `You are TalkHint Secretary task preparation assistant.
+The user is assigning an AI secretary to call a person or business on their behalf.
+Speak in the user's current language. Understand Russian, English, Spanish and mixed input.
+On the FIRST substantive message, restate what you understood and ask at most ONE useful clarification; do not propose a task yet. Allow at most one further clarification turn.
+Then propose a concise, concrete assignment in 2-4 sentences: what situation to explain, what to ask or verify, and which answer or next action to report back. The assignment is NOT a promise to resolve the issue. A legitimate outcome can be "they will look into it" or "call back Thursday". Listen, clarify gently, and relay their answer faithfully; never pressure the recipient into a resolution they did not offer.
+Never invent booking details or authorization. Request only information the user volunteered for this call. Do not request or disclose full card numbers, CVV, PINs, passwords, or make payments or binding commitments.
+The task is not active until the user explicitly confirms it. Do not generate a phrase for the user to say: the secretary speaks independently after a separate call-start action.`;
+
 // Output contract appended to every request so replies are machine-readable.
 const REPLY_FORMAT_RULES = `
 
@@ -249,12 +260,12 @@ function parseJsonLoose(text: string): any {
 /// only if the conversation wasn't reset (epoch check) while awaiting.
 /// `clientMessageId` (optional) makes retries idempotent: a resend with the same
 /// id returns the original result instead of committing a duplicate user turn.
-export function prepareMessage(userId: string, text: string, clientMessageId?: string): Promise<PrepareReply> {
+export function prepareMessage(userId: string, text: string, clientMessageId?: string, mode: "hint" | "secretary" = "hint"): Promise<PrepareReply> {
   return dedupRun(prepareDedup, userId, normalizeDedupKey(clientMessageId), () => runSerialized(userId, async () => {
     const epoch = prepareEpochs.get(userId) ?? 0;
     const history = getPrepareHistory(userId);
     const request = [...history, { role: "user", content: text } as PrepareTurn];
-    const raw = await callSol(PREPARE_SYSTEM_PROMPT + REPLY_FORMAT_RULES, request);
+    const raw = await callSol((mode === "secretary" ? SECRETARY_PREPARE_PROMPT : PREPARE_SYSTEM_PROMPT) + REPLY_FORMAT_RULES, request);
     if ((prepareEpochs.get(userId) ?? 0) !== epoch) {
       throw new PrepareUnavailableError("Подготовка была сброшена. Начните заново.");
     }
@@ -288,8 +299,14 @@ export function prepareMessage(userId: string, text: string, clientMessageId?: s
 /// `clientMessageId` makes confirmation retries idempotent: a duplicate confirm
 /// replays the ORIGINAL opening phrase instead of generating a second one
 /// (the replay cache survives the state clearing done on success).
-export function prepareOpeningPhrase(userId: string, confirmedGoal: string, clientMessageId?: string): Promise<OpeningPhrase> {
+export function prepareOpeningPhrase(userId: string, confirmedGoal: string, clientMessageId?: string, mode: "hint" | "secretary" = "hint"): Promise<OpeningPhrase> {
   return dedupRun(openingDedup, userId, normalizeDedupKey(clientMessageId), () => runSerialized(userId, async () => {
+    if (mode === "secretary") {
+      clearPrepareState(userId);
+      // Ack the same PREPARE confirmation protocol without inventing an
+      // opening phrase: the owner is not going to speak on this call.
+      return { phraseEn: "", translation: "" };
+    }
     const history = getPrepareHistory(userId);
     const request = [...history, { role: "user", content: `I confirm this call goal: "${confirmedGoal}"` } as PrepareTurn];
     const raw = await callSol(PREPARE_SYSTEM_PROMPT + OPENING_FORMAT_RULES, request);

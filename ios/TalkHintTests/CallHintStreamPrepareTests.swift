@@ -66,9 +66,19 @@ final class CallHintStreamPrepareTests: XCTestCase {
         XCTAssertEqual(event, .prepareOpening(phraseEn: "Hello there.", translation: nil))
     }
 
-    func testDecodePrepareOpeningEmptyPhraseIsDropped() {
-        XCTAssertNil(CallHintStream.decode(#"{"type":"prepare_opening","phraseEn":"","translation":"x"}"#))
-        XCTAssertNil(CallHintStream.decode(#"{"type":"prepare_opening"}"#))
+    func testDecodeSecretaryOpeningAckWithoutToken() {
+        XCTAssertEqual(
+            CallHintStream.decode(#"{"type":"prepare_opening","phraseEn":"","translation":"x"}"#),
+            .prepareSecretaryConfirmation(confirmationToken: nil))
+        XCTAssertEqual(
+            CallHintStream.decode(#"{"type":"prepare_opening"}"#),
+            .prepareSecretaryConfirmation(confirmationToken: nil))
+    }
+
+    func testDecodeSecretaryOpeningAckCarriesConfirmationToken() {
+        XCTAssertEqual(
+            CallHintStream.decode(#"{"type":"prepare_opening","phraseEn":"","confirmationToken":"signed-token"}"#),
+            .prepareSecretaryConfirmation(confirmationToken: "signed-token"))
     }
 
     // MARK: - Decode: prepare_error

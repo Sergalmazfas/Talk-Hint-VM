@@ -1,8 +1,9 @@
 import UIKit
 import AVFoundation
 
-/// PREPARE stage — the pre-call preparation chat, ported from the web `/app`
-/// UI. The user explains the upcoming call by voice or text; GPT-5.6 Sol (one
+/// PREPARE stage — shared by live Hint goal preparation and Secretary task
+/// preparation, ported from the web `/app` UI. The user explains the call/task
+/// by voice or text; GPT-5.6 Sol (one
 /// brain, honest errors, never a silent model substitution) asks at most a
 /// couple of clarifying questions, proposes a compact call goal ("✓ Всё верно /
 /// Изменить"), and after explicit confirmation delivers the first English
@@ -12,15 +13,29 @@ import AVFoundation
 /// - voice → `POST /api/prepare/stt` (gpt-4o-transcribe, tap-to-record)
 /// - dialog → the `/ui` WebSocket: `prepare_message` / `prepare_reply` /
 ///   `prepare_confirm_goal` / `prepare_opening` / `prepare_error`
-/// - confirmation activates the goal through the EXISTING `goal_set` mechanism
-///   (the server echoes `goal_set`, which we mirror into `SessionStore.callGoal`
-///   so the next call is grounded in it).
+/// - Hint confirmation activates the live goal and opening phrase.
+/// - Secretary confirmation uses the Secretary conversation mode, treats the
+///   empty `prepare_opening` as an acknowledgement, and never sets callGoal.
 final class PrepareViewController: UIViewController {
 
-    /// Called on the main thread as soon as the goal is confirmed (the server
-    /// sent the opening phrase). The Calls screen uses it to switch the number
-    /// field to the compact "Goal ready ✓" badge.
-    var onGoalConfirmed: (() -> Void)?
+    /// Hint confirmation callback; retains the existing goal-only contract.
+    var onGoalConfirmed: ((String) -> Void)?
+    /// Secretary callback after both the confirmed instruction and signed
+    /// confirmation token arrive.
+    var onSecretaryTaskConfirmed: ((String, String) -> Void)?
+
+    private let mode: CallHintStream.PrepareMode
+    private var initialMessage: String?
+    private var acknowledgedGoal: String?
+
+    init(mode: CallHintStream.PrepareMode = .hint, initialMessage: String? = nil) {
+        self.mode = mode
+        let initial = initialMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.initialMessage = (initial?.isEmpty == false) ? initial : nil
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     // MARK: - Stream
 
@@ -58,9 +73,9 @@ final class PrepareViewController: UIViewController {
     /// to exactly one user turn even across retries.
     private var pendingAudio: (data: Data, mime: String, utteranceId: String)?
 
-    /// The goal confirmation awaiting the server's opening phrase. If the
-    /// socket drops before `prepare_opening` arrives, the confirmation is
-    /// resent with the SAME id — the server replays the original opening
+    /// The goal confirmation awaiting the server's acknowledgement. If the
+    /// socket drops before that acknowledgement arrives, the confirmation is
+    /// resent with the SAME id — the server replays the original response
     /// instead of re-firing goal side effects or generating a second one.
     private var pendingConfirm: (goal: String, id: String)?
 
@@ -76,10 +91,11 @@ final class PrepareViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = NSLocalizedString("prepare.title", comment: "")
+        title = NSLocalizedString(mode == .secretary ? "secretary.prepare.title" : "prepare.title", comment: "")
         view.backgroundColor = .systemBackground
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: NSLocalizedString("prepare.reset", comment: ""), style: .plain, target: self, action: #selector(resetTapped))
+            title: NSLocalizedString(mode == .secretary ? "secretary.prepare.reset" : "prepare.reset", comment: ""),
+            style: .plain, target: self, action: #selector(resetTapped))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-prepare-reset"
         if presentingViewController != nil || navigationController?.presentingViewController != nil {
             // Presented as a bottom sheet over Calls — give it an explicit close.
@@ -94,7 +110,7 @@ final class PrepareViewController: UIViewController {
         stream.delegate = self
         stream.connect()
 
-        addAIMessage(NSLocalizedString("prepare.intro", comment: ""))
+        addAIMessage(NSLocalizedString(mode == .secretary ? "secretary.prepare.intro" : "prepare.intro", comment: ""))
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(keyboardWillChange(_:)),
@@ -161,7 +177,8 @@ final class PrepareViewController: UIViewController {
         micButton.addTarget(self, action: #selector(micTapped), for: .touchUpInside)
         micButton.translatesAutoresizingMaskIntoConstraints = false
 
-        textField.placeholder = NSLocalizedString("prepare.input.placeholder", comment: "")
+        textField.placeholder = NSLocalizedString(
+            mode == .secretary ? "secretary.prepare.input.placeholder" : "prepare.input.placeholder", comment: "")
         textField.borderStyle = .roundedRect
         textField.returnKeyType = .send
         textField.delegate = self
@@ -297,7 +314,7 @@ final class PrepareViewController: UIViewController {
         card.accessibilityIdentifier = "card-goal-proposal"
 
         let header = UILabel()
-        header.text = NSLocalizedString("prepare.goal_header", comment: "")
+        header.text = NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_header" : "prepare.goal_header", comment: "")
         header.font = .preferredFont(forTextStyle: .caption1)
         header.textColor = Theme.purple
 
@@ -307,7 +324,7 @@ final class PrepareViewController: UIViewController {
         goalLabel.font = .preferredFont(forTextStyle: .body)
 
         let confirmButton = UIButton(type: .system)
-        confirmButton.setTitle(NSLocalizedString("prepare.goal_confirm", comment: ""), for: .normal)
+        confirmButton.setTitle(NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_confirm" : "prepare.goal_confirm", comment: ""), for: .normal)
         confirmButton.setTitleColor(.white, for: .normal)
         confirmButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         confirmButton.backgroundColor = Theme.purple
@@ -315,7 +332,7 @@ final class PrepareViewController: UIViewController {
         confirmButton.accessibilityIdentifier = "button-goal-confirm"
 
         let editButton = UIButton(type: .system)
-        editButton.setTitle(NSLocalizedString("prepare.goal_edit", comment: ""), for: .normal)
+        editButton.setTitle(NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_edit" : "prepare.goal_edit", comment: ""), for: .normal)
         editButton.setTitleColor(Theme.ink, for: .normal)
         editButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         editButton.backgroundColor = .systemBackground
@@ -339,7 +356,8 @@ final class PrepareViewController: UIViewController {
 
         editButton.addAction(UIAction { [weak self, weak buttons] _ in
             buttons?.removeFromSuperview()
-            self?.textField.placeholder = NSLocalizedString("prepare.goal_edit.placeholder", comment: "")
+            self?.textField.placeholder = NSLocalizedString(
+                self?.mode == .secretary ? "secretary.prepare.goal_edit.placeholder" : "prepare.goal_edit.placeholder", comment: "")
             self?.textField.becomeFirstResponder()
         }, for: .touchUpInside)
 
@@ -406,7 +424,8 @@ final class PrepareViewController: UIViewController {
         let text = (textField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         textField.text = ""
-        textField.placeholder = NSLocalizedString("prepare.input.placeholder", comment: "")
+        textField.placeholder = NSLocalizedString(
+            mode == .secretary ? "secretary.prepare.input.placeholder" : "prepare.input.placeholder", comment: "")
         addUserMessage(text)
         sendPrepareText(text, clientMessageId: UUID().uuidString)
     }
@@ -426,7 +445,7 @@ final class PrepareViewController: UIViewController {
         }
         pendingMessage = (text: text, id: clientMessageId)
         showThinking()
-        if !stream.sendPrepareMessage(text, clientMessageId: clientMessageId) {
+        if !stream.sendPrepareMessage(text, clientMessageId: clientMessageId, mode: mode) {
             hideThinking()
             pendingMessage = nil
             textField.text = text
@@ -435,18 +454,57 @@ final class PrepareViewController: UIViewController {
     }
 
     /// Sends the goal confirmation with an idempotency key and keeps it pending
-    /// until the opening phrase arrives. If the socket is down (or drops before
-    /// the ack) the confirmation is resent with the same id, or the proposal
-    /// card is re-shown so the user keeps an explicit retry control.
+    /// until the server acknowledges it. If the socket drops before the ack,
+    /// the confirmation is resent with the same id or the proposal is re-shown.
     private func confirmGoal(_ goal: String) {
         pendingConfirm = (goal: goal, id: UUID().uuidString)
         showThinking()
-        if !stream.confirmPrepareGoal(goal, clientMessageId: pendingConfirm!.id) {
+        if !stream.confirmPrepareGoal(goal, clientMessageId: pendingConfirm!.id, mode: mode) {
             hideThinking()
             pendingConfirm = nil
-            addAIMessage(NSLocalizedString("prepare.no_connection.confirm", comment: ""))
+            addAIMessage(NSLocalizedString(
+                mode == .secretary ? "secretary.prepare.no_connection.confirm" : "prepare.no_connection.confirm",
+                comment: ""))
             addGoalProposal(goal)
         }
+    }
+
+    private func completeSecretaryConfirmation(goal: String, confirmationToken: String?) {
+        guard mode == .secretary else { return }
+        let confirmedGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !confirmedGoal.isEmpty,
+              let confirmationToken,
+              !confirmationToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            pendingMessage = nil
+            pendingConfirm = nil
+            acknowledgedGoal = nil
+            hideThinking()
+            let messageKey = confirmedGoal.isEmpty
+                ? "secretary.prepare.confirmation.missing"
+                : "secretary.prepare.token_missing"
+            addAIMessage(NSLocalizedString(messageKey, comment: ""))
+            showSecretaryPreparationRetry(messageKey: messageKey)
+            return
+        }
+        pendingMessage = nil
+        pendingConfirm = nil
+        acknowledgedGoal = nil
+        hideThinking()
+        addAIMessage(NSLocalizedString("secretary.prepare.confirmed", comment: ""))
+        onSecretaryTaskConfirmed?(confirmedGoal, confirmationToken)
+    }
+
+    private func showSecretaryPreparationRetry(messageKey: String) {
+        let alert = UIAlertController(
+            title: NSLocalizedString("secretary.prepare.retry.title", comment: ""),
+            message: NSLocalizedString(messageKey, comment: ""),
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(
+            title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(
+            title: NSLocalizedString("secretary.prepare.retry", comment: ""), style: .default,
+            handler: { [weak self] _ in self?.resetTapped() }))
+        present(alert, animated: true)
     }
 
     @objc private func closeTapped() {
@@ -454,14 +512,16 @@ final class PrepareViewController: UIViewController {
     }
 
     @objc private func resetTapped() {
-        stream.resetPrepare()
+        stream.resetPrepare(mode: mode)
         hideThinking()
         pendingMessage = nil
         pendingAudio = nil
         pendingConfirm = nil
+        acknowledgedGoal = nil
         pendingGoalButtons?.removeFromSuperview()
         feedStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        addAIMessage(NSLocalizedString("prepare.reset.intro", comment: ""))
+        initialMessage = nil
+        addAIMessage(NSLocalizedString(mode == .secretary ? "secretary.prepare.reset.intro" : "prepare.reset.intro", comment: ""))
     }
 
     // MARK: - Voice input (tap-to-record → /api/prepare/stt)
@@ -644,12 +704,28 @@ extension PrepareViewController: CallHintStreamDelegate {
             addAIMessage(text)
             if let goal = proposedGoal { addGoalProposal(goal) }
         case .prepareOpening(let phraseEn, let translation):
+            if mode == .secretary {
+                completeSecretaryConfirmation(
+                    goal: acknowledgedGoal ?? pendingConfirm?.goal ?? "",
+                    confirmationToken: nil)
+                break
+            }
+            guard !phraseEn.isEmpty else { break }
+            let confirmedGoal = acknowledgedGoal ?? pendingConfirm?.goal ?? ""
             pendingMessage = nil
             pendingConfirm = nil
             hideThinking()
             addOpeningPhrase(en: phraseEn, translation: translation)
             addAIMessage(NSLocalizedString("prepare.goal_confirmed", comment: ""))
-            onGoalConfirmed?()
+            onGoalConfirmed?(confirmedGoal)
+        case .prepareSecretaryConfirmation(let confirmationToken):
+            guard mode == .secretary else { break }
+            completeSecretaryConfirmation(
+                goal: acknowledgedGoal ?? pendingConfirm?.goal ?? "",
+                confirmationToken: confirmationToken)
+        case .prepareConfirmed(let goal):
+            guard mode == .secretary else { break }
+            completeSecretaryConfirmation(goal: goal, confirmationToken: nil)
         case .prepareError(let text):
             // The server processed (and honestly failed) the turn — restore the
             // text to the input so the user can resend without retyping.
@@ -666,10 +742,16 @@ extension PrepareViewController: CallHintStreamDelegate {
                 addGoalProposal(confirm.goal)
             }
         case .goalSet(let goal):
-            // Confirmation activated the goal through the existing mechanism —
-            // mirror it locally so the next call is grounded in it.
-            SessionStore.shared.callGoal = goal
-            addAIMessage(String(format: NSLocalizedString("prepare.goal_active", comment: ""), goal))
+            if mode == .secretary {
+                // Secretary PREPARE has its own per-user conversation state.
+                // The backend echoes this confirmation event only to this socket;
+                // never leak it into the live Hint goal.
+                acknowledgedGoal = goal
+            } else {
+                SessionStore.shared.callGoal = goal
+                acknowledgedGoal = goal
+                addAIMessage(String(format: NSLocalizedString("prepare.goal_active", comment: ""), goal))
+            }
         default:
             break // live-call events are not relevant on the PREPARE screen
         }
@@ -677,13 +759,19 @@ extension PrepareViewController: CallHintStreamDelegate {
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
         statusLabel.text = ""
+        if let initial = initialMessage, !initial.isEmpty, pendingMessage == nil, pendingConfirm == nil {
+            initialMessage = nil
+            addUserMessage(initial)
+            sendPrepareText(initial, clientMessageId: UUID().uuidString)
+            return
+        }
         // The socket dropped before the last message was acknowledged — resend
         // it ONCE with the SAME clientMessageId. The server dedups by that id,
         // so "server already got it" resends return the original reply instead
         // of creating a duplicate user turn.
         if let pending = pendingMessage {
             showThinking()
-            if !stream.sendPrepareMessage(pending.text, clientMessageId: pending.id) {
+            if !stream.sendPrepareMessage(pending.text, clientMessageId: pending.id, mode: mode) {
                 hideThinking()
                 pendingMessage = nil
                 textField.text = pending.text
@@ -692,7 +780,7 @@ extension PrepareViewController: CallHintStreamDelegate {
         }
         if let confirm = pendingConfirm {
             showThinking()
-            if !stream.confirmPrepareGoal(confirm.goal, clientMessageId: confirm.id) {
+            if !stream.confirmPrepareGoal(confirm.goal, clientMessageId: confirm.id, mode: mode) {
                 hideThinking()
                 pendingConfirm = nil
                 addGoalProposal(confirm.goal)

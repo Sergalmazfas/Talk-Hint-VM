@@ -119,6 +119,75 @@ export const insertCallSchema = createInsertSchema(calls).omit({
 export type InsertCall = z.infer<typeof insertCallSchema>;
 export type Call = typeof calls.$inferSelect;
 
+// User-owned autonomous Secretary jobs. `starting` is a single-use outbound
+// dial lease: if the process loses an ambiguous Twilio create response we
+// finalize it as unknown rather than risk placing a duplicate call.
+// `finalizing` is held active while the last media-stream turns are persisted;
+// attempts is capped at two, while attemptHistory supports a rolling daily quota.
+export const secretaryTasks = pgTable("secretary_tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  phoneNumber: text("phone_number").notNull(),
+  instruction: text("instruction").notNull(),
+  voiceProvider: text("voice_provider").notNull().default("elevenlabs"),
+  status: text("status").notNull().default("queued"),
+  outcome: text("outcome"),
+  summary: text("summary"),
+  verifiedFacts: jsonb("verified_facts").notNull().default(sql`'[]'::jsonb`),
+  nextStep: text("next_step"),
+  transcript: text("transcript").notNull().default(""),
+  callSid: text("call_sid"),
+  callId: varchar("call_id").references(() => calls.id),
+  attempts: integer("attempts").notNull().default(0),
+  attemptHistory: jsonb("attempt_history").notNull().default(sql`'[]'::jsonb`),
+  // Full per-attempt transcript snapshots survive manual retry/reset. The
+  // corresponding `calls` row is also kept intact for History navigation.
+  attemptTranscripts: jsonb("attempt_transcripts").notNull().default(sql`'[]'::jsonb`),
+  dialStartedAt: timestamp("dial_started_at"),
+  providerStatus: text("provider_status"),
+  streamEndedAt: timestamp("stream_ended_at"),
+  finalizationDeadlineAt: timestamp("finalization_deadline_at"),
+  finalizationClaimedAt: timestamp("finalization_claimed_at"),
+  notificationStatus: text("notification_status").notNull().default("pending"),
+  notificationClaimedAt: timestamp("notification_claimed_at"),
+  notifiedAt: timestamp("notified_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  userCreatedIdx: index("secretary_tasks_user_created_idx").on(table.userId, table.createdAt),
+  queuedIdx: index("secretary_tasks_status_created_idx").on(table.status, table.createdAt),
+  callSidUnique: uniqueIndex("secretary_tasks_call_sid_unique").on(table.callSid),
+  oneActivePerUser: uniqueIndex("secretary_tasks_one_active_per_user_idx")
+    .on(table.userId)
+    .where(sql`${table.status} IN ('starting', 'ringing', 'connected', 'finalizing')`),
+}));
+
+export const insertSecretaryTaskSchema = createInsertSchema(secretaryTasks).omit({
+  id: true,
+  outcome: true,
+  summary: true,
+  verifiedFacts: true,
+  nextStep: true,
+  transcript: true,
+  callSid: true,
+  callId: true,
+  attempts: true,
+  attemptHistory: true,
+  attemptTranscripts: true,
+  dialStartedAt: true,
+  providerStatus: true,
+  streamEndedAt: true,
+  finalizationDeadlineAt: true,
+  finalizationClaimedAt: true,
+  notificationStatus: true,
+  notificationClaimedAt: true,
+  notifiedAt: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type InsertSecretaryTask = z.infer<typeof insertSecretaryTaskSchema>;
+export type SecretaryTask = typeof secretaryTasks.$inferSelect;
+
 // Per-user, per-phone contact memory. Keyed by BOTH user_id and phone_number so
 // the same number can hold different history for different TalkHint users.
 // Upserted after each call with an AI summary; loaded once per call as

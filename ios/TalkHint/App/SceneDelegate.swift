@@ -1,4 +1,5 @@
 import UIKit
+import UserNotifications
 
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -12,10 +13,24 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         showRoot(loggedIn: SessionStore.shared.isLoggedIn)
         window.makeKeyAndVisible()
 
+        if let response = connectionOptions.notificationResponse {
+            let payload = response.notification.request.content.userInfo
+            if payload["type"] as? String == "secretary_result",
+               let taskID = payload["taskId"] as? String,
+               !taskID.isEmpty {
+                Task { @MainActor in SecretaryNotificationRouter.open(taskID: taskID) }
+            }
+        }
+
         // If already logged in, make sure the VoIP token is registered.
         if SessionStore.shared.isLoggedIn {
             PushManager.shared.registerCurrentTokenIfPossible()
+            SecretaryAlertManager.shared.registerCurrentTokenIfPossible()
         }
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        _ = SecretaryNotificationRouter.openPendingIfPossible()
     }
 
     func showRoot(loggedIn: Bool) {
@@ -26,15 +41,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             login.onLoggedIn = { [weak self] in
                 self?.showRoot(loggedIn: true)
                 PushManager.shared.registerCurrentTokenIfPossible()
+                SecretaryAlertManager.shared.registerCurrentTokenIfPossible()
+                _ = SecretaryNotificationRouter.openPendingIfPossible()
             }
             window?.rootViewController = UINavigationController(rootViewController: login)
         }
     }
 
-    /// Builds the main tab bar shown after login — the redesigned three-tab
-    /// layout (Hint / Translator / History). Settings opens from the gear on
-    /// the Hint (calls) screen; Numbers, Assistant tools and Account are
-    /// reachable from Settings ("More" section).
+    /// Builds the main tab bar shown after login (Hint / Translator / Copilot /
+    /// Secretary / History). Settings opens from the gear on the Hint screen.
     ///
     /// The first tab is FUNCTIONALLY the same Calls flow (dialer, recents,
     /// live-hint calls) — only its user-facing name/icon changed to "Hint".
@@ -60,14 +75,20 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.copilot", comment: ""),
             image: UIImage(systemName: "mic.circle"), tag: 2)
 
+        let secretary = SecretaryViewController()
+        secretary.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("tab.secretary", comment: ""),
+            image: UIImage(systemName: "person.crop.circle.badge.checkmark"), tag: 3)
+
         let history = CallHistoryViewController()
         history.tabBarItem = UITabBarItem(
-            title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 3)
+            title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 4)
 
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),
             UINavigationController(rootViewController: translator),
             UINavigationController(rootViewController: copilot),
+            UINavigationController(rootViewController: secretary),
             UINavigationController(rootViewController: history),
         ]
         return tabController

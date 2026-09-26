@@ -84,6 +84,7 @@ const TABLE_DEFS: Record<string, any> = {
   user_prompts: schema.userPrompts,
   prompt_templates: schema.promptTemplates,
   calls: schema.calls,
+  secretary_tasks: schema.secretaryTasks,
   contact_memory: schema.contactMemory,
   knowledge_cards: schema.knowledgeCards,
   available_numbers: schema.availableNumbers,
@@ -260,6 +261,16 @@ describe("checkSchemaDrift", () => {
     expect(callsReport!.missingColumns).toContain("transcript");
     // Other tables remain healthy.
     expect(report.tables.find((t) => t.table === "contact_memory")!.ok).toBe(true);
+  });
+
+  it("reports a missing Secretary table before tasks or reports can be used", async () => {
+    delete h.state.liveColumnsByTable.secretary_tasks;
+    const report = await checkSchemaDrift();
+    expect(report.ok).toBe(false);
+    const secretary = report.tables.find((t) => t.table === "secretary_tasks");
+    expect(secretary?.ok).toBe(false);
+    expect(secretary?.missingColumns).toContain("id");
+    expect(secretary?.missingColumns).toContain("transcript");
   });
 
   it("detects drift across several tables at once", async () => {

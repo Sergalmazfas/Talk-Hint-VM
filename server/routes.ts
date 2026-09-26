@@ -34,6 +34,11 @@ import { isBenchmarkAdmin } from "./benchmark/adminGate";
 import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices, resolveTranslatorPlayback } from "./translation/twilioBridge";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
+import { registerSecretaryRoutes } from "./secretary/routes";
+import { dialSecretaryTask, secretaryCallbackOrigin } from "./secretary/dialer";
+import { notifySecretaryResult } from "./secretary/notifications";
+import { finishSecretaryAttempt, getSecretaryTaskById, getSecretaryTaskForCall } from "./secretary/tasks";
+import { signSecretaryStream } from "./secretary/streamAuth";
 import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
@@ -272,6 +277,60 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   setupWebSocket(httpServer);
+  registerSecretaryRoutes(app, {
+    dial: dialSecretaryTask,
+    notify: async (report) => {
+      const task = await getSecretaryTaskById(report.id);
+      if (!task) throw new Error("Secretary task disappeared before notification");
+      await notifySecretaryResult(task.userId, task.id);
+    },
+  });
+  // These callbacks are isolated from /twilio/voice and the owner-operated
+  // Hint call path. Signed Twilio requests are the only authority for a
+  // task/SID pair; the bidirectional stream checks the pair again on start.
+  app.post("/twilio/secretary/voice", validateTwilioSignature, async (req, res) => {
+    const taskId = String(req.query.taskId ?? "");
+    const callSid = String(req.body.CallSid ?? "");
+    try {
+      // Twilio may request TwiML just before the originating worker has
+      // attached the create response's SID to the durable task row.
+      let task = await getSecretaryTaskForCall(taskId, callSid);
+      for (let i = 0; !task && i < 8; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        task = await getSecretaryTaskForCall(taskId, callSid);
+      }
+      if (!task) return res.status(403).send("Secretary task is not assigned to this call");
+      const origin = secretaryCallbackOrigin();
+      const twiml = new twilio.twiml.VoiceResponse();
+      const stream = twiml.connect().stream({
+        url: new URL("/secretary-stream", origin).toString().replace(/^https:/, "wss:"),
+      });
+      stream.parameter({ name: "taskId", value: task.id });
+      stream.parameter({ name: "streamAuth", value: signSecretaryStream(task.id, callSid) });
+      res.type("text/xml").send(twiml.toString());
+    } catch (error: any) {
+      console.error(`[Secretary] voice callback failed: ${error?.message ?? error}`);
+      res.status(503).send("Secretary call unavailable");
+    }
+  });
+  app.post("/twilio/secretary/status", validateTwilioSignature, async (req, res) => {
+    const taskId = String(req.query.taskId ?? "");
+    const callSid = String(req.body.CallSid ?? "");
+    const status = String(req.body.CallStatus ?? "");
+    try {
+      const task = await finishSecretaryAttempt(taskId, callSid, status);
+      if (task && ["completed", "no-answer", "busy", "failed", "canceled"].includes(status)) {
+        const call = await storage.getCallByCallSid(callSid);
+        if (call) await storage.updateCall(call.id, {
+          status, endedAt: new Date(), transcript: task.transcript,
+        });
+      }
+      res.status(200).send("OK");
+    } catch (error: any) {
+      console.error(`[Secretary] status callback failed: ${error?.message ?? error}`);
+      res.status(503).send("Status could not be saved");
+    }
+  });
   // The translator PSTN guest is deliberately originated server-side. Its
   // callback carries only a generated pairing id; it cannot enter normal
   // incoming/outgoing Hint routing.
@@ -851,7 +910,9 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         return res.status(400).json({ error: "platform and token required" });
       }
 
-      const allowedPlatforms = ["ios", "android"];
+      // Standard alert APNs tokens and PushKit VoIP tokens have different APNs
+      // topics and must never be substituted for one another.
+      const allowedPlatforms = ["ios", "ios_alert", "android"];
       if (!allowedPlatforms.includes(platform)) {
         return res.status(400).json({ error: `platform must be one of: ${allowedPlatforms.join(", ")}` });
       }

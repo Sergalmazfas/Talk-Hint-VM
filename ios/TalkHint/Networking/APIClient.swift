@@ -101,6 +101,24 @@ final class APIClient {
         _ = try await request("/api/devices/unregister", method: "POST", json: body, authenticated: true)
     }
 
+    /// Registers a standard alert APNs token separately from the PushKit VoIP
+    /// token so Secretary reports never enter the incoming-call push channel.
+    func registerAlertDevice(token: String) async throws {
+        let body: [String: Any] = [
+            "platform": "ios_alert",
+            "token": token,
+            "bundleId": AppConfig.bundleId,
+            "environment": AppConfig.apnsEnvironment,
+        ]
+        _ = try await request("/api/devices/register", method: "POST", json: body, authenticated: true)
+    }
+
+    func unregisterAlertDevice(token: String) async throws {
+        _ = try await request("/api/devices/unregister", method: "POST", json: [
+            "token": token, "platform": "ios_alert",
+        ], authenticated: true)
+    }
+
     // MARK: - Call control
 
     /// Accepts a pending call as an iOS client. Returns the conference room name
@@ -622,6 +640,101 @@ final class APIClient {
             throw APIError.decoding
         }
         return ((obj["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Secretary tasks
+
+    struct SecretaryTask: Equatable {
+        let id: String
+        let phoneNumber: String
+        let instruction: String
+        let status: String
+        let outcome: String?
+        let summary: String?
+        let verifiedFacts: [String]
+        let nextStep: String?
+        let transcript: String?
+        let callId: String?
+        let createdAt: Date?
+        let updatedAt: Date?
+    }
+
+    /// Loads only the signed-in user's Secretary tasks.
+    func secretaryTasks() async throws -> [SecretaryTask] {
+        let data = try await request("/api/secretary/tasks", method: "GET", json: nil, authenticated: true)
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = obj["tasks"] as? [[String: Any]] else {
+            throw APIError.decoding
+        }
+        var tasks: [SecretaryTask] = []
+        for item in items {
+            guard let task = Self.parseSecretaryTask(item) else { throw APIError.decoding }
+            tasks.append(task)
+        }
+        return tasks
+    }
+
+    /// Explicitly creates/starts a task after the user reviews its confirmed goal.
+    func createSecretaryTask(phoneNumber: String, instruction: String, confirmationToken: String,
+                             voiceProvider: VoiceProviderPreference) async throws -> SecretaryTask {
+        let data = try await request("/api/secretary/tasks", method: "POST", json: [
+            "phoneNumber": phoneNumber,
+            "instruction": instruction,
+            "confirmationToken": confirmationToken,
+            "voiceProvider": voiceProvider.rawValue,
+        ], authenticated: true)
+        return try Self.secretaryTaskFromResponse(data)
+    }
+
+    func cancelSecretaryTask(id: String) async throws -> SecretaryTask {
+        let pathId = try Self.secretaryTaskPathComponent(id)
+        let data = try await request("/api/secretary/tasks/\(pathId)/cancel",
+                                     method: "POST", json: [:], authenticated: true)
+        return try Self.secretaryTaskFromResponse(data)
+    }
+
+    func retrySecretaryTask(id: String) async throws -> SecretaryTask {
+        let pathId = try Self.secretaryTaskPathComponent(id)
+        let data = try await request("/api/secretary/tasks/\(pathId)/retry",
+                                     method: "POST", json: [:], authenticated: true)
+        return try Self.secretaryTaskFromResponse(data)
+    }
+
+    private static func secretaryTaskPathComponent(_ id: String) throws -> String {
+        let pathCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard let encoded = id.addingPercentEncoding(withAllowedCharacters: pathCharacters),
+              !encoded.isEmpty else { throw APIError.decoding }
+        return encoded
+    }
+
+    private static func secretaryTaskFromResponse(_ data: Data) throws -> SecretaryTask {
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let task = obj["task"] as? [String: Any],
+              let parsed = parseSecretaryTask(task) else {
+            throw APIError.decoding
+        }
+        return parsed
+    }
+
+    private static func parseSecretaryTask(_ item: [String: Any]) -> SecretaryTask? {
+        guard let id = item["id"] as? String,
+              let phoneNumber = item["phoneNumber"] as? String,
+              let instruction = item["instruction"] as? String,
+              let status = item["status"] as? String else { return nil }
+        return SecretaryTask(
+            id: id,
+            phoneNumber: phoneNumber,
+            instruction: instruction,
+            status: status,
+            outcome: item["outcome"] as? String,
+            summary: item["summary"] as? String,
+            verifiedFacts: (item["verifiedFacts"] as? [String]) ?? [],
+            nextStep: item["nextStep"] as? String,
+            transcript: item["transcript"] as? String,
+            callId: item["callId"] as? String,
+            createdAt: parseDate(item["createdAt"]),
+            updatedAt: parseDate(item["updatedAt"])
+        )
     }
 
     /// Requests cloned speech for one verified Copilot reply. Success is

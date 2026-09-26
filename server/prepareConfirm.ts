@@ -23,6 +23,7 @@ export async function handlePrepareConfirmGoal(
   rawGoal: unknown,
   rawClientMessageId: unknown,
   deps: PrepareConfirmDeps,
+  mode: "hint" | "secretary" = "hint",
 ): Promise<void> {
   const goal = String(rawGoal || "").trim();
   if (!goal || !userId) return;
@@ -39,7 +40,7 @@ export async function handlePrepareConfirmGoal(
   }
 
   try {
-    const opening = await prepareOpeningPhrase(userId, goal, confirmId || undefined);
+    const opening = await prepareOpeningPhrase(userId, goal, confirmId || undefined, mode);
     deps.sendFrame({ type: "prepare_opening", phraseEn: opening.phraseEn, translation: opening.translation, ...(confirmId ? { clientMessageId: confirmId } : {}) });
   } catch (err: any) {
     const msg = err instanceof PrepareUnavailableError ? err.message : "Не удалось получить первую фразу.";

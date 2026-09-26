@@ -21,7 +21,8 @@ description: How incoming-call push to native iOS works and why; APNs cert conve
 - Twilio's `dial.conference(..., name)` `beep` flag must be a string (`"false"`), not a boolean, or TS rejects it (`ConferenceBeep` type).
 
 ## APNs facts for this app
-- Auth is **certificate-based** (VoIP Services cert), not `.p8` token auth. Secrets: `APNS_CERT_PEM` + `APNS_KEY_PEM` (PEM strings, matched pair). `isConfigured()` is false until both present.
+- Incoming calls use **certificate-based VoIP Services APNs**, not `.p8` token auth. Secrets: `APNS_CERT_PEM` + `APNS_KEY_PEM` (PEM strings, matched pair). `isConfigured()` is false until both present.
+- **Secretary completion reports use ordinary APNs alerts, not PushKit.** Standard alert tokens and the regular app topic require a separate Apple Push Notification Service certificate (`APNS_ALERT_CERT_PEM` + `APNS_ALERT_KEY_PEM`); the VoIP Services certificate/topic cannot substitute. **Why:** PushKit is reserved for incoming calls requiring CallKit reporting; sending reports as VoIP pushes would violate that contract and could cause false call UI. **How to apply:** keep report registration, transport and token lifecycle separate from the VoIP path; provision an ordinary alert certificate before claiming device push has been verified.
 - **Bundle id is `app.talkhint`** (env `APNS_BUNDLE_ID`), NOT `com.talkhint.app` (an earlier plan assumed the wrong one).
 - **VoIP push topic = `${bundleId}.voip`** i.e. `app.talkhint.voip`. Team `6G9ZS426J3`.
 - VoIP certs work for both sandbox and production; pick the APNs host per `device_tokens.environment`. One node-apn `Provider` per host, cached (persistent HTTP/2). `sandbox|development|dev` -> sandbox host, everything else -> production.

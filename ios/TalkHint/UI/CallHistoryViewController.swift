@@ -63,6 +63,33 @@ final class CallHistoryViewController: UITableViewController {
         }
     }
 
+    /// Opens the matching saved transcript by either the database call ID or
+    /// Twilio SID carried by a Secretary task.
+    func openCallTranscript(identifier: String) {
+        Task {
+            do {
+                async let callsTask = APIClient.shared.calls()
+                async let numbersTask = APIClient.shared.numbers()
+                let loadedCalls = try await callsTask
+                let loadedNumbers = (try? await numbersTask) ?? []
+                await MainActor.run {
+                    self.calls = loadedCalls
+                    self.ownNumbers = Set(loadedNumbers.map { $0.number })
+                    guard let call = loadedCalls.first(where: {
+                        $0.id == identifier || $0.callSid == identifier
+                    }) else {
+                        self.showTranscriptNotFound()
+                        return
+                    }
+                    let detail = CallDetailViewController(call: call, otherParty: self.otherParty(call))
+                    self.navigationController?.pushViewController(detail, animated: true)
+                }
+            } catch {
+                await MainActor.run { self.showError(error) }
+            }
+        }
+    }
+
     /// The number of the party the user spoke with: whichever side is not one of
     /// the user's own numbers. Falls back to the caller (`fromNumber`).
     private func otherParty(_ call: APIClient.CallRecord) -> String {
@@ -158,6 +185,15 @@ final class CallHistoryViewController: UITableViewController {
         let alert = UIAlertController(title: NSLocalizedString("common.error", comment: ""),
                                       message: error.localizedDescription,
                                       preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+        present(alert, animated: true)
+    }
+
+    private func showTranscriptNotFound() {
+        let alert = UIAlertController(
+            title: NSLocalizedString("common.error", comment: ""),
+            message: NSLocalizedString("secretary.transcript.not_found", comment: ""),
+            preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }

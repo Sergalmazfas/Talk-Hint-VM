@@ -45,6 +45,12 @@ import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
 import { createCopilotStream } from "./copilotStream";
+import { handleSecretaryTwilioStream } from "./secretary/agent";
+import { appendSecretaryTurn, getSecretaryTaskForCall, markSecretaryStreamEnded, markSecretaryStreamFailed } from "./secretary/tasks";
+import { getClone, getCartesiaClone } from "./voiceLab/store";
+import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
+import { verifySecretaryStream } from "./secretary/streamAuth";
+import { signSecretaryConfirmation } from "./secretary/confirmation";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -817,7 +823,7 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
+    if (!["/twilio-stream", "/media", "/secretary-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -890,6 +896,32 @@ export function setupWebSocket(server: Server) {
     } else if (pathname === "/translator-twilio-stream") {
       // Deliberately separate from handleTwilioStream (Hint/Deepgram).
       handleTranslatorTwilioStream(ws);
+    } else if (pathname === "/secretary-stream") {
+      // Never pass Secretary media to Hint or the owner-facing UI. The Twilio
+      // start event supplies a task/SID pair which the bridge rechecks in DB
+      // before it opens an AI session or sends any audio.
+      handleSecretaryTwilioStream(ws, {
+        lookup: async (callSid, taskId, streamAuth) => {
+          if (!verifySecretaryStream(taskId, callSid, streamAuth)) return null;
+          const task = await getSecretaryTaskForCall(taskId, callSid);
+          if (!task) return null;
+          const voiceProvider = task.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
+          const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(task.userId) : getClone(task.userId));
+          const cloneVoiceId = requireReadyTranslatorClone(
+            voiceProvider, clone,
+            voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY,
+          );
+          return { instruction: task.instruction, ownerId: task.userId, voiceProvider, cloneVoiceId };
+        },
+        onTurn: appendSecretaryTurn,
+        onStreamEnd: async (taskId, reason, callSid) => {
+          if (callSid) {
+            if (reason) await markSecretaryStreamFailed(taskId, callSid, reason);
+            else await markSecretaryStreamEnded(taskId, callSid);
+          }
+          if (reason) console.error(`[Secretary] Stream ended for task ${taskId}: ${reason}`);
+        },
+      });
     } else if (pathname === "/twilio-stream" || pathname === "/media") {
       log(`Twilio Media Stream connected via ${pathname}`, "twilio");
       handleTwilioStream(ws);
@@ -1087,11 +1119,13 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           // Optional idempotency key (Task #197): a client resending the same
           // message after a reconnect passes the same clientMessageId; the
           // server returns the original reply instead of a duplicate turn.
+          const secretary = message.mode === "secretary";
+          const prepareUserId = secretary ? `${userId}:secretary` : userId;
           const clientMessageId = typeof message.clientMessageId === "string"
             ? message.clientMessageId.trim().slice(0, 64) : "";
           (async () => {
             try {
-              const { reply, proposedGoal } = await prepareMessage(userId, text, clientMessageId || undefined);
+              const { reply, proposedGoal } = await prepareMessage(prepareUserId, text, clientMessageId || undefined, secretary ? "secretary" : "hint");
               ws.send(JSON.stringify({ type: "prepare_reply", text: reply, proposedGoal, ...(clientMessageId ? { clientMessageId } : {}) }));
             } catch (err: any) {
               const msg = err instanceof PrepareUnavailableError ? err.message : "Ошибка подготовки. Попробуйте ещё раз.";
@@ -1101,11 +1135,24 @@ NEVER output JSON - only plain text with the phrase and translation.`;
           })();
         } else if (message.type === "prepare_confirm_goal") {
           if (!userId) return;
+          const secretary = message.mode === "secretary";
+          const prepareUserId = secretary ? `${userId}:secretary` : userId;
           // Idempotent lost-ack handling lives in handlePrepareConfirmGoal
           // (unit-tested): duplicates replay goal_set + the original opening.
-          void handlePrepareConfirmGoal(userId, message.goal, message.clientMessageId, {
-            sendFrame: (obj) => ws.send(JSON.stringify(obj)),
+          void handlePrepareConfirmGoal(prepareUserId, message.goal, message.clientMessageId, {
+            sendFrame: (obj) => {
+              const frame = secretary && obj.type === "prepare_opening"
+                ? { ...obj, confirmationToken: signSecretaryConfirmation(userId, String(message.goal || "")) }
+                : obj;
+              ws.send(JSON.stringify(frame));
+            },
             activateGoal: (goal) => {
+              if (secretary) {
+                // Secretary's assignment is not the owner's Hint goal. Only
+                // echo it to this preparing client; don't broadcast/set Hint.
+                ws.send(JSON.stringify({ type: "goal_set", goal }));
+                return;
+              }
               // Confirmation activates the goal via the EXISTING goal mechanism —
               // same compact feed event, same Brain visibility during the call.
               setUserGoal(userId, goal);
@@ -1113,14 +1160,15 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               sendToUser(userId, { type: "goal_set", goal });
             },
             log: (msg) => log(msg, "server"),
-          });
+          }, secretary ? "secretary" : "hint");
         } else if (message.type === "suggestion_ack") {
           // Device confirmed rendering a suggestion — final stage of the
           // speech→hint latency chain. Silent no-op when stale/unowned.
           recordSuggestionAck(userId, message.callSid, message.utteranceId);
         } else if (message.type === "prepare_reset") {
-          clearPrepareState(userId);
-          clearOpeningDedup(userId);
+          const prepareUserId = message.mode === "secretary" && userId ? `${userId}:secretary` : userId;
+          clearPrepareState(prepareUserId);
+          clearOpeningDedup(prepareUserId);
         } else if (message.type === "ask_ai") {
           const question = message.question || "";
           const goal = message.goal || getUserGoal(userId);
