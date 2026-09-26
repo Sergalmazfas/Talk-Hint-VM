@@ -160,7 +160,7 @@ final class CopilotCloneSpeechOutput {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames) else {
                 throw APIError.decoding
             }
-            try file.read(buffer, frameCount: chunkFrames)
+            try file.read(into: buffer, frameCount: chunkFrames)
             let frames = Int(buffer.frameLength)
             guard frames > 0 else { break }
             guard frames <= maximumSamples,
