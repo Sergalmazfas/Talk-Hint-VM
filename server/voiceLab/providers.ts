@@ -22,6 +22,60 @@ export class ElevenLabsProvider implements VoiceProvider {
   }
 }
 
+const CARTESIA_VERSION = "2026-08-14";
+function cartesiaHeaders() {
+  const apiKey = process.env.CARTESIA_API_KEY;
+  if (!apiKey) throw new Error("Cartesia API key is not configured");
+  return { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": CARTESIA_VERSION };
+}
+
+export class CartesiaProvider implements VoiceProvider {
+  readonly name = "cartesia";
+
+  async streamSpeech(voiceId: string, text: string, signal?: AbortSignal): Promise<Response> {
+    return fetch("https://api.cartesia.ai/tts/bytes", {
+      method: "POST",
+      headers: { ...cartesiaHeaders(), "Content-Type": "application/json", Accept: "audio/mpeg" },
+      body: JSON.stringify({
+        model_id: "sonic-3.6", transcript: text, voice: { mode: "id", id: voiceId },
+        locale: "en", output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
+      }),
+      signal,
+    });
+  }
+}
+
+export class CartesiaHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Cartesia voice creation failed (HTTP ${status})`);
+  }
+}
+
+export function supportsCartesiaCloneMime(mimeType: SupportedMime) {
+  return ["audio/webm", "audio/wav", "audio/mpeg", "audio/ogg"].includes(mimeType);
+}
+
+export async function createCartesiaClonedVoice(audio: Buffer, mimeType: SupportedMime, adminId: string, signal?: AbortSignal) {
+  if (!supportsCartesiaCloneMime(mimeType)) {
+    throw Object.assign(new Error("Use a WebM, WAV, MP3, or OGG sample for Cartesia"), { status: 400 });
+  }
+  const form = new FormData();
+  form.append("name", `TalkHint Cartesia Voice Lab ${adminId.slice(0, 8)}`);
+  form.append("clip", new Blob([audio], { type: mimeType }), `sample.${mimeExtension(mimeType)}`);
+  form.append("language", "ru");
+  form.append("access", "private");
+  const response = await fetch("https://api.cartesia.ai/voices/clone", {
+    method: "POST", headers: cartesiaHeaders(), body: form, signal,
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new CartesiaHttpError(response.status);
+  }
+  const data = await response.json() as { id?: unknown };
+  if (typeof data.id !== "string" || !data.id) throw new Error("Cartesia returned no voice ID");
+  return data.id;
+}
+
 export type SupportedMime = "audio/webm" | "audio/wav" | "audio/mpeg" | "audio/mp4" | "audio/ogg" | "audio/m4a" | "audio/x-m4a";
 
 const MIME_EXTENSIONS: Record<SupportedMime, string> = {

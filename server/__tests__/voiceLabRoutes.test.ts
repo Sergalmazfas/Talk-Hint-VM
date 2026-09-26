@@ -4,6 +4,8 @@ import request from "supertest";
 
 const testState = vi.hoisted(() => ({
   clones: new Map<string, any>(),
+  cartesiaClones: new Map<string, any>(),
+  cartesiaUnavailable: false,
   runs: new Map<string, any>(),
   nextId: 0,
 }));
@@ -23,6 +25,31 @@ vi.mock("../voiceLab/store", async () => {
   const { withAbsolutePlaybackTimings } = await import("../voiceLab/timings");
   return {
   getClone: vi.fn(async (userId: string) => testState.clones.get(userId) ?? null),
+  getCartesiaClone: vi.fn(async (userId: string) => {
+    if (testState.cartesiaUnavailable) throw new Error("table unavailable");
+    return testState.cartesiaClones.get(userId) ?? null;
+  }),
+  reserveCartesiaClone: vi.fn(async (userId: string, durationMs: number) => {
+    const existing = testState.cartesiaClones.get(userId);
+    if (existing?.status === "retryable") {
+      Object.assign(existing, { status: "creating", voiceId: null, durationMs });
+      return existing;
+    }
+    if (existing) return null;
+    const row = { userId, voiceId: null, status: "creating", durationMs, createdAt: new Date() };
+    testState.cartesiaClones.set(userId, row);
+    return row;
+  }),
+  finishCartesiaClone: vi.fn(async (userId: string, voiceId: string) => {
+    const row = testState.cartesiaClones.get(userId);
+    if (row?.status !== "creating") return null;
+    Object.assign(row, { voiceId, status: "ready" });
+    return row;
+  }),
+  failCartesiaClone: vi.fn(async (userId: string, status: string) => {
+    const row = testState.cartesiaClones.get(userId);
+    if (row?.status === "creating") row.status = status;
+  }),
   reserveClone: vi.fn(async (userId: string, durationMs: number) => {
     const existing = testState.clones.get(userId);
     if (existing?.status === "retryable") {
@@ -88,6 +115,7 @@ vi.mock("../voiceLab/store", async () => {
 const { registerVoiceLabRoutes } = await import("../voiceLab/routes");
 const originalFetch = global.fetch;
 const originalElevenLabsKey = process.env.ELEVENLABS_API_KEY;
+const originalCartesiaKey = process.env.CARTESIA_API_KEY;
 const originalOpenAIKey = process.env.OPENAI_API_KEY;
 const audioBase64 = Buffer.alloc(2048, 2).toString("base64");
 const validAudio = { audioBase64, mimeType: "audio/webm", durationMs: 1800 };
@@ -107,9 +135,12 @@ function makeApp() {
 
 beforeEach(() => {
   testState.clones.clear();
+  testState.cartesiaClones.clear();
+  testState.cartesiaUnavailable = false;
   testState.runs.clear();
   testState.nextId = 0;
   process.env.ELEVENLABS_API_KEY = "test-elevenlabs-key";
+  process.env.CARTESIA_API_KEY = "test-cartesia-key";
   process.env.OPENAI_API_KEY = "test-openai-key";
   app = makeApp();
 });
@@ -118,11 +149,105 @@ afterEach(() => {
   global.fetch = originalFetch;
   if (originalElevenLabsKey === undefined) delete process.env.ELEVENLABS_API_KEY;
   else process.env.ELEVENLABS_API_KEY = originalElevenLabsKey;
+  if (originalCartesiaKey === undefined) delete process.env.CARTESIA_API_KEY;
+  else process.env.CARTESIA_API_KEY = originalCartesiaKey;
   if (originalOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = originalOpenAIKey;
 });
 
 describe("admin Voice Lab routes", () => {
+  it("keeps ElevenLabs runs available if the Cartesia table has not arrived yet", async () => {
+    testState.cartesiaUnavailable = true;
+    testState.clones.set("admin-1", { userId: "admin-1", voiceId: "existing", status: "ready" });
+    const response = await request(app).get("/api/admin/voice-lab").set(admin());
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      clone: { voiceId: "existing" }, cartesiaClone: null,
+      cartesiaError: expect.stringContaining("unavailable"), runs: [],
+    });
+  });
+
+  it("requires explicit Cartesia consent, limits sample length, and never exposes the new routes to non-admins", async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock;
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/clone").send({
+      ...validAudio, durationMs: 12_000, consent: true,
+    })).status).toBe(401);
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin()).send({
+      ...validAudio, durationMs: 12_000,
+    })).status).toBe(400);
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin()).send({
+      ...validAudio, durationMs: 9_999, consent: true,
+    })).status).toBe(400);
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin()).send({
+      ...validAudio, durationMs: 60_001, consent: true,
+    })).status).toBe(400);
+    expect((await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin()).send({
+      ...validAudio, mimeType: "audio/mp4", durationMs: 12_000, consent: true,
+    })).status).toBe(400);
+    expect(testState.cartesiaClones.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Cartesia clone separate from ElevenLabs and compares exactly the same run text", async () => {
+    testState.clones.set("admin-1", {
+      userId: "admin-1", voiceId: "eleven-voice", status: "ready", durationMs: 0,
+    });
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/voices/clone")) {
+        expect(init.headers).toMatchObject({ Authorization: "Bearer test-cartesia-key", "Cartesia-Version": "2026-08-14" });
+        expect(init.body).toBeInstanceOf(FormData);
+        expect((init.body as FormData).get("access")).toBe("private");
+        expect((init.body as FormData).get("language")).toBe("ru");
+        return new Response(JSON.stringify({ id: "cartesia-voice" }), { status: 200 });
+      }
+      expect(url).toBe("https://api.cartesia.ai/tts/bytes");
+      expect(JSON.parse(init.body as string)).toMatchObject({
+        model_id: "sonic-3.6", transcript: "Hello from the same run.",
+        voice: { mode: "id", id: "cartesia-voice" }, locale: "en",
+      });
+      return new Response(Buffer.from("cartesia-mp3"), { status: 200 });
+    });
+    global.fetch = fetchMock as any;
+    const created = await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin())
+      .send({ ...validAudio, durationMs: 12_000, consent: true });
+    expect(created.status).toBe(200);
+    expect(created.body.cartesiaClone).toMatchObject({ status: "ready", voiceId: "cartesia-voice" });
+    const duplicate = await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin())
+      .send({ ...validAudio, durationMs: 12_000, consent: true });
+    expect(duplicate.status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(testState.clones.get("admin-1").voiceId).toBe("eleven-voice");
+    testState.runs.set("same-run", {
+      id: "same-run", userId: "admin-1", voiceId: "eleven-voice", english: "Hello from the same run.",
+      transcript: "Привет.", provider: "elevenlabs", timings: {}, createdAt: new Date(),
+    });
+    const otherAdmin = await request(app).get("/api/admin/voice-lab/runs/same-run/audio?provider=cartesia")
+      .set(admin("admin-2"));
+    expect(otherAdmin.status).toBe(404);
+    const cartesia = await request(app).get("/api/admin/voice-lab/runs/same-run/audio?provider=cartesia")
+      .set(admin());
+    expect(cartesia.status).toBe(200);
+    expect(cartesia.headers["content-type"]).toMatch(/audio\/mpeg/);
+    expect(cartesia.body.toString()).toBe("cartesia-mp3");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((await request(app).get("/api/admin/voice-lab").set(admin())).body).toMatchObject({
+      clone: { voiceId: "eleven-voice" }, cartesiaClone: { voiceId: "cartesia-voice" },
+    });
+  });
+
+  it("does not retry an uncertain paid Cartesia clone after a provider outage", async () => {
+    global.fetch = vi.fn(async () => new Response("unavailable", { status: 503 })) as any;
+    const first = await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin())
+      .send({ ...validAudio, durationMs: 12_000, consent: true });
+    expect(first.status).toBe(502);
+    expect(first.body.cartesiaClone.status).toBe("uncertain");
+    const second = await request(app).post("/api/admin/voice-lab/cartesia/clone").set(admin())
+      .send({ ...validAudio, durationMs: 12_000, consent: true });
+    expect(second.status).toBe(409);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("gates every endpoint and makes no provider calls just by loading the lab", async () => {
     const fetchMock = vi.fn();
     global.fetch = fetchMock;
@@ -130,7 +255,7 @@ describe("admin Voice Lab routes", () => {
     expect((await request(app).get("/api/admin/voice-lab").set({ "x-test-user-id": "regular" })).status).toBe(403);
     const res = await request(app).get("/api/admin/voice-lab").set(admin());
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ clone: null, runs: [] });
+    expect(res.body).toEqual({ clone: null, cartesiaClone: null, cartesiaError: null, runs: [] });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

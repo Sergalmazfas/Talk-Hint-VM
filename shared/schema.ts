@@ -480,6 +480,15 @@ export const voiceLabClones = pgTable("voice_lab_clones", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// Independent provider: never reuse or overwrite the ElevenLabs clone.
+export const voiceLabCartesiaClones = pgTable("voice_lab_cartesia_clones", {
+  userId: varchar("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  voiceId: text("voice_id"),
+  status: text("status").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const voiceLabRuns = pgTable("voice_lab_runs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import { voiceLabClones, voiceLabRuns } from "@shared/schema";
+import { voiceLabClones, voiceLabCartesiaClones, voiceLabRuns } from "@shared/schema";
 import { withAbsolutePlaybackTimings, type PlaybackOffsets, type VoiceLabTimings } from "./timings";
 
 export type LabTimings = VoiceLabTimings;
@@ -8,6 +8,36 @@ export type LabTimings = VoiceLabTimings;
 export async function getClone(userId: string) {
   const [clone] = await db.select().from(voiceLabClones).where(eq(voiceLabClones.userId, userId)).limit(1);
   return clone ?? null;
+}
+
+export async function getCartesiaClone(userId: string) {
+  const [clone] = await db.select().from(voiceLabCartesiaClones)
+    .where(eq(voiceLabCartesiaClones.userId, userId)).limit(1);
+  return clone ?? null;
+}
+
+export async function reserveCartesiaClone(userId: string, durationMs: number) {
+  const [row] = await db.insert(voiceLabCartesiaClones).values({
+    userId, status: "creating", durationMs,
+  }).onConflictDoNothing().returning();
+  if (row) return row;
+  const [retry] = await db.update(voiceLabCartesiaClones).set({
+    status: "creating", voiceId: null, durationMs, createdAt: new Date(),
+  }).where(and(eq(voiceLabCartesiaClones.userId, userId), eq(voiceLabCartesiaClones.status, "retryable")))
+    .returning();
+  return retry ?? null;
+}
+
+export async function finishCartesiaClone(userId: string, voiceId: string) {
+  const [row] = await db.update(voiceLabCartesiaClones).set({ voiceId, status: "ready" })
+    .where(and(eq(voiceLabCartesiaClones.userId, userId), eq(voiceLabCartesiaClones.status, "creating")))
+    .returning();
+  return row;
+}
+
+export async function failCartesiaClone(userId: string, status: "retryable" | "uncertain") {
+  await db.update(voiceLabCartesiaClones).set({ status })
+    .where(and(eq(voiceLabCartesiaClones.userId, userId), eq(voiceLabCartesiaClones.status, "creating")));
 }
 
 export async function reserveClone(userId: string, durationMs: number) {

@@ -11,6 +11,13 @@ interface VoiceClone {
   createdAt: string;
 }
 
+interface CartesiaClone {
+  voiceId: string;
+  status: string;
+  durationMs: number;
+  createdAt: string;
+}
+
 interface VoiceLabRun {
   id: string;
   transcript: string;
@@ -40,6 +47,11 @@ interface RunLatency {
   releaseFirstAudio: number | null;
 }
 
+interface CartesiaPlaybackMeasurement {
+  requestToFirstAudibleMs: number | null;
+  status: string;
+}
+
 function formatDuration(ms: number) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
@@ -61,15 +73,60 @@ function audioBase64(blob: Blob): Promise<string> {
   });
 }
 
+async function cartesiaCompatibleSample(blob: Blob): Promise<Blob> {
+  const mime = blob.type.split(";")[0].toLowerCase();
+  if (["audio/webm", "audio/wav", "audio/mpeg", "audio/ogg"].includes(mime)) return blob;
+  // Safari records MP4/AAC. Decode only after consent, then upload a mono WAV
+  // without ever persisting a converted copy or sending MP4 to the clone API.
+  const context = new AudioContext();
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    const byteLength = 44 + decoded.length * 2;
+    if (byteLength > 10 * 1024 * 1024) throw new Error("Запись слишком велика после преобразования в WAV. Сделайте образец короче.");
+    const buffer = new ArrayBuffer(byteLength);
+    const view = new DataView(buffer);
+    const writeText = (offset: number, text: string) => {
+      for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+    };
+    writeText(0, "RIFF");
+    view.setUint32(4, byteLength - 8, true);
+    writeText(8, "WAVEfmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, decoded.sampleRate, true);
+    view.setUint32(28, decoded.sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeText(36, "data");
+    view.setUint32(40, byteLength - 44, true);
+    const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
+    for (let i = 0; i < decoded.length; i++) {
+      let value = 0;
+      for (const channel of channels) value += channel[i];
+      value = Math.max(-1, Math.min(1, value / channels.length));
+      view.setInt16(44 + i * 2, value < 0 ? value * 32768 : value * 32767, true);
+    }
+    return new Blob([buffer], { type: "audio/wav" });
+  } finally {
+    await context.close();
+  }
+}
+
 export default function VoiceLab() {
   const [, setLocation] = useLocation();
   const { user, token, isLoading } = useAuth();
   const [clone, setClone] = useState<VoiceClone | null>(null);
+  const [cartesiaClone, setCartesiaClone] = useState<CartesiaClone | null>(null);
+  const [cartesiaError, setCartesiaError] = useState("");
   const [runs, setRuns] = useState<VoiceLabRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusRefreshError, setStatusRefreshError] = useState("");
   const [consent, setConsent] = useState(false);
+  const [cartesiaConsent, setCartesiaConsent] = useState(false);
+  const [creatingCartesiaClone, setCreatingCartesiaClone] = useState(false);
+  const [cartesiaAttemptUncertain, setCartesiaAttemptUncertain] = useState(false);
   const [linkVoiceId, setLinkVoiceId] = useState("");
   const [linkConsent, setLinkConsent] = useState(false);
   const [linkingVoice, setLinkingVoice] = useState(false);
@@ -85,6 +142,7 @@ export default function VoiceLab() {
   const [working, setWorking] = useState(false);
   const [currentRun, setCurrentRun] = useState<VoiceLabRun | null>(null);
   const [latency, setLatency] = useState<RunLatency | null>(null);
+  const [cartesiaPlayback, setCartesiaPlayback] = useState<Record<string, CartesiaPlaybackMeasurement>>({});
   const [playing, setPlaying] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [playbackMode, setPlaybackMode] = useState<"streaming" | "buffered" | null>(null);
@@ -136,6 +194,8 @@ export default function VoiceLab() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Не удалось загрузить Voice Lab (${response.status}).`);
       setClone(data.clone || null);
+      setCartesiaClone(data.cartesiaClone || null);
+      setCartesiaError(data.cartesiaError || "");
       setRuns(Array.isArray(data.runs) ? data.runs : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить Voice Lab.");
@@ -152,6 +212,8 @@ export default function VoiceLab() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Не удалось обновить статус (${response.status}).`);
       setClone(data.clone || null);
+      setCartesiaClone(data.cartesiaClone || null);
+      setCartesiaError(data.cartesiaError || "");
       if (Array.isArray(data.runs)) setRuns(data.runs);
     } catch (err) {
       setStatusRefreshError(err instanceof Error ? err.message : "Не удалось обновить статус клона.");
@@ -256,6 +318,7 @@ export default function VoiceLab() {
   }
 
   function recordSample() {
+    setCartesiaConsent(false);
     setSampleElapsedMs(0);
     setSampleOverLimit(false);
     sampleLimitHitRef.current = false;
@@ -290,6 +353,7 @@ export default function VoiceLab() {
     setSampleOverLimit(false);
     sampleLimitHitRef.current = false;
     setConsent(false);
+    setCartesiaConsent(false);
   }
 
   async function createClone() {
@@ -340,6 +404,39 @@ export default function VoiceLab() {
     }
   }
 
+  async function createCartesiaClone() {
+    if (!sample || !cartesiaConsent || !token || cartesiaError || recordingSample || sampleOverLimit ||
+        sampleDuration < 10_000 || sampleDuration > 60_000 ||
+        (cartesiaClone && cartesiaClone.status !== "retryable") ||
+        (cartesiaAttemptUncertain && !/retryable/i.test(cartesiaClone?.status || ""))) return;
+    setCreatingCartesiaClone(true);
+    setError("");
+    try {
+      const prepared = await cartesiaCompatibleSample(sample);
+      const response = await fetch(`${API}/cartesia/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          audioBase64: await audioBase64(prepared),
+          mimeType: prepared.type || "audio/webm",
+          durationMs: sampleDuration,
+          consent: true,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось создать голос Cartesia (${response.status}).`);
+      setCartesiaClone(data.cartesiaClone);
+      setCartesiaAttemptUncertain(false);
+      await loadLab();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать голос Cartesia.");
+      setCartesiaAttemptUncertain(true);
+      await refreshCloneStatus();
+    } finally {
+      setCreatingCartesiaClone(false);
+    }
+  }
+
   async function notePlayback(run: VoiceLabRun, elevenlabsRequestMs: number, firstAudioMs: number | null, playResult: string) {
     const runId = run.id;
     const updatedRun: VoiceLabRun = {
@@ -372,27 +469,45 @@ export default function VoiceLab() {
     }
   }
 
-  async function streamAudio(run: VoiceLabRun) {
+  async function streamAudio(run: VoiceLabRun, voiceProvider: "elevenlabs" | "cartesia" = "elevenlabs") {
     if (!token) throw new Error("Сессия завершена. Войдите снова.");
+    if (voiceProvider === "cartesia" && cartesiaClone?.status !== "ready") {
+      throw new Error("Сначала создайте клон Cartesia из образца голоса.");
+    }
     const releaseAt = run.timings?.micRelease || Date.now();
-    const path = `${API}/runs/${encodeURIComponent(run.id)}/audio`;
+    const path = `${API}/runs/${encodeURIComponent(run.id)}/audio${voiceProvider === "cartesia" ? "?provider=cartesia" : ""}`;
     setAutoplayBlocked(false);
     setPlaybackMode(null);
+    if (voiceProvider === "cartesia") {
+      setCartesiaPlayback((previous) => ({
+        ...previous,
+        [run.id]: { requestToFirstAudibleMs: null, status: "Генерация…" },
+      }));
+    }
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.onplaying = null;
     }
     const requestAt = Date.now();
     const elevenlabsRequestMs = Math.max(0, requestAt - releaseAt);
-    setLatency((previous) => previous ? {
-      ...previous,
-      englishRequest: Math.max(0, requestAt - run.timings.englishReady),
-    } : previous);
+    if (voiceProvider === "elevenlabs") {
+      setLatency((previous) => previous ? {
+        ...previous,
+        englishRequest: Math.max(0, requestAt - run.timings.englishReady),
+      } : previous);
+    }
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       const message = data.error || `Не удалось загрузить аудио (${response.status}).`;
-      void notePlayback(run, elevenlabsRequestMs, null, `failed: ${message}`);
+      if (voiceProvider === "elevenlabs") {
+        void notePlayback(run, elevenlabsRequestMs, null, `failed: ${message}`);
+      } else {
+        setCartesiaPlayback((previous) => ({
+          ...previous,
+          [run.id]: { requestToFirstAudibleMs: null, status: "Ошибка генерации" },
+        }));
+      }
       throw new Error(message);
     }
     const audio = audioRef.current;
@@ -416,9 +531,26 @@ export default function VoiceLab() {
           setAutoplayBlocked(true);
           setError("Автовоспроизведение заблокировано браузером. Запустите звук кнопкой аудиоплеера.");
         }
-        void notePlayback(run, elevenlabsRequestMs, null, blocked ? "autoplay_blocked" : `failed: ${error.message}`);
+        if (voiceProvider === "elevenlabs") {
+          void notePlayback(run, elevenlabsRequestMs, null, blocked ? "autoplay_blocked" : `failed: ${error.message}`);
+        } else {
+          setCartesiaPlayback((previous) => ({
+            ...previous,
+            [run.id]: { requestToFirstAudibleMs: null, status: blocked ? "Нужно нажать Play в аудиоплеере" : "Ошибка воспроизведения" },
+          }));
+        }
       } else {
-        void notePlayback(run, elevenlabsRequestMs, audibleAt - releaseAt, `interrupted: ${error.message}`);
+        if (voiceProvider === "elevenlabs") {
+          void notePlayback(run, elevenlabsRequestMs, audibleAt - releaseAt, `interrupted: ${error.message}`);
+        } else {
+          setCartesiaPlayback((previous) => ({
+            ...previous,
+            [run.id]: {
+              requestToFirstAudibleMs: Math.max(0, audibleAt! - requestAt),
+              status: "Воспроизведение прервано",
+            },
+          }));
+        }
       }
       if (!startSettled) {
         startSettled = true;
@@ -432,12 +564,19 @@ export default function VoiceLab() {
       if (audibleAt === null) {
         audibleAt = Date.now();
         const firstAudioMs = Math.max(0, audibleAt - releaseAt);
-        setLatency((previous) => previous ? {
-          ...previous,
-          requestFirstAudio: Math.max(0, audibleAt! - requestAt),
-          releaseFirstAudio: firstAudioMs,
-        } : previous);
-        void notePlayback(run, elevenlabsRequestMs, firstAudioMs, "played");
+        if (voiceProvider === "elevenlabs") {
+          setLatency((previous) => previous ? {
+            ...previous,
+            requestFirstAudio: Math.max(0, audibleAt! - requestAt),
+            releaseFirstAudio: firstAudioMs,
+          } : previous);
+          void notePlayback(run, elevenlabsRequestMs, firstAudioMs, "played");
+        } else {
+          setCartesiaPlayback((previous) => ({
+            ...previous,
+            [run.id]: { requestToFirstAudibleMs: Math.max(0, audibleAt! - requestAt), status: "Готово" },
+          }));
+        }
       }
       if (!startSettled) {
         startSettled = true;
@@ -524,6 +663,24 @@ export default function VoiceLab() {
     }
   }
 
+  async function playCartesiaRun(run: VoiceLabRun) {
+    setError("");
+    try {
+      await streamAudio(run, "cartesia");
+    } catch (err) {
+      setPlaying(false);
+      const message = err instanceof Error ? err.message : "Не удалось воспроизвести Cartesia.";
+      setCartesiaPlayback((previous) => ({
+        ...previous,
+        [run.id]: {
+          requestToFirstAudibleMs: null,
+          status: message.includes("клон Cartesia") ? "Сначала создайте клон" : "Не удалось воспроизвести",
+        },
+      }));
+      setError(message);
+    }
+  }
+
   async function submitSpeech(blob: Blob, durationMs: number, releasedAt: number) {
     if (!token) return;
     setWorking(true);
@@ -601,6 +758,25 @@ export default function VoiceLab() {
     return ms == null ? "—" : `${Math.max(0, ms)} ms`;
   }
 
+  function playbackComparison(run: VoiceLabRun) {
+    const elevenLabsRequest = run.timings.elevenlabsRequest;
+    const elevenLabsFirstAudio = run.timings.firstAudio;
+    const elevenLabsMs = elevenLabsRequest != null && elevenLabsFirstAudio != null
+      ? Math.max(0, elevenLabsFirstAudio - elevenLabsRequest)
+      : currentRun?.id === run.id ? latency?.requestFirstAudio ?? null : null;
+    const cartesia = cartesiaPlayback[run.id];
+    return (
+      <div className="mt-3 rounded-md border border-gray-700 bg-gray-900/60 p-3 text-xs sm:text-sm">
+        <p className="text-gray-400">Запрос → первое слышимое аудио в этом браузере</p>
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <p className="text-gray-300">ElevenLabs: <span className="text-cyan-300">{intervalLabel(elevenLabsMs)}</span></p>
+          <p className="text-gray-300">Cartesia: <span className="text-purple-300">{cartesia?.requestToFirstAudibleMs == null ? cartesia?.status || "ещё не проверено" : intervalLabel(cartesia.requestToFirstAudibleMs)}</span></p>
+        </div>
+        <p className="mt-2 text-gray-500">Это клиентский замер до начала воспроизведения, а не только время генерации провайдера. Фразы и перевод для обеих кнопок одинаковы.</p>
+      </div>
+    );
+  }
+
   if (isLoading || (user?.isAdmin && loading)) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-900"><div className="animate-spin w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full" /></div>;
   }
@@ -629,7 +805,7 @@ export default function VoiceLab() {
 
         <Card className="bg-gray-800/50 border-gray-700"><CardContent className="p-5 sm:p-6 space-y-5">
           <div><h2 className="text-xl font-semibold">1. Образец голоса</h2>
-            <p className="text-sm text-gray-400 mt-1">Запишите 1–2 минуты естественной разговорной речи. Говорите ровно и в обычном темпе.</p>
+            <p className="text-sm text-gray-400 mt-1">Для клона ElevenLabs подойдёт запись до 3 минут. Для Cartesia требуется образец 10–60 секунд. Для честного сравнения используйте один и тот же короткий образец для обоих клонов.</p>
           </div>
           <div className="rounded-md bg-gray-900/70 p-4 space-y-2 text-sm">
             <p className="text-gray-300"><strong className="text-cyan-300">Текст для чтения:</strong> «Привет! Сегодня я хочу рассказать о том, как проходит мой обычный день. Утром я просыпаюсь, готовлю кофе и планирую дела. Иногда день бывает спокойным, а иногда всё меняется в последнюю минуту. Мне нравится встречаться с друзьями, обсуждать новости и делиться интересными историями. Самое важное — говорить естественно, как в обычном разговоре, не торопиться и делать небольшие паузы».</p>
@@ -689,8 +865,55 @@ export default function VoiceLab() {
           </div>}
         </CardContent></Card>
 
+        <Card className="bg-gray-800/50 border-purple-800/70"><CardContent className="p-5 sm:p-6 space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold">3. Отдельный клон Cartesia</h2>
+            <p className="mt-1 text-sm text-gray-400">Создаётся отдельно от ElevenLabs. Будет использован тот же сохранённый образец, который вы выбрали выше; голос ElevenLabs не заменяется.</p>
+          </div>
+          <div className="rounded-md border border-purple-900/70 bg-purple-950/20 p-3 text-sm text-gray-300">
+            <p>Запись будет отправлена Cartesia только после отдельного согласия и нажатия кнопки ниже. Она не отправляется автоматически ни при записи, ни при загрузке страницы.</p>
+            <p className="mt-2 text-gray-400">Cartesia принимает образец от 10 до 60 секунд. Если текущий образец длиннее, перезапишите короткий; для наиболее честного сравнения используйте одну и ту же запись при создании обоих голосов.</p>
+            <p className="mt-2 text-gray-400">Запись iPhone в MP4 перед отправкой преобразуется в WAV прямо в браузере.</p>
+            <p className="mt-2 text-gray-400">Образец на русском: при озвучивании английского может сохраниться акцент. Оцените его на слух рядом с ElevenLabs.</p>
+          </div>
+          {cartesiaError && <div role="alert" className="rounded-md border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-200">
+            <p>Данные клона Cartesia сейчас недоступны. ElevenLabs продолжает работать.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => void refreshCloneStatus()}>Обновить статус</Button>
+          </div>}
+          <label className="flex items-start gap-3 text-sm text-gray-300">
+            <input type="checkbox" checked={cartesiaConsent} onChange={(event) => setCartesiaConsent(event.target.checked)} className="mt-1 accent-purple-500" />
+            <span>Я подтверждаю, что это мой голос или у меня есть разрешение на его использование, и отдельно разрешаю отправить этот образец Cartesia для создания частного клона.</span>
+          </label>
+          <Button
+            disabled={!sample || !cartesiaConsent || cartesiaError !== "" || creatingCartesiaClone || recordingSample || sampleOverLimit ||
+              sampleDuration < 10_000 || sampleDuration > 60_000 ||
+              Boolean(cartesiaClone && cartesiaClone.status !== "retryable") ||
+              (cartesiaAttemptUncertain && !/retryable/i.test(cartesiaClone?.status || ""))}
+            onClick={() => void createCartesiaClone()}
+            className="bg-purple-700 hover:bg-purple-800"
+          >
+            {creatingCartesiaClone ? "Создание клона Cartesia…" : cartesiaClone?.status === "ready" ? "Клон Cartesia создан" : "Отправить этот образец в Cartesia"}
+          </Button>
+          {(!sample || sampleDuration < 10_000 || sampleDuration > 60_000) && (
+            <p className="text-sm text-amber-300">Запишите и прослушайте образец длительностью 10–60 секунд, затем установите отдельное согласие. Текущий лимит исходной записи Voice Lab — 3 минуты.</p>
+          )}
+          {cartesiaClone && <div className="rounded-md border border-gray-700 bg-gray-900/60 p-4 text-sm">
+            <p className={cartesiaClone.status === "ready" ? "font-medium text-green-300" : "font-medium text-amber-300"}>Cartesia: {cartesiaClone.status}</p>
+            {cartesiaClone.voiceId && <p className="break-all text-gray-300">Voice ID: {cartesiaClone.voiceId}</p>}
+            <p className="text-gray-400">Длительность образца: {cartesiaClone.durationMs ? formatDuration(cartesiaClone.durationMs) : "—"}{cartesiaClone.createdAt ? ` · Создан: ${new Date(cartesiaClone.createdAt).toLocaleString()}` : ""}</p>
+          </div>}
+          {cartesiaAttemptUncertain && <div className="rounded-md border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-200">
+            <p>{cartesiaClone?.status === "retryable"
+              ? "Cartesia отклонила запрос. Исправьте образец и отправьте повторно только по своему выбору."
+              : "Результат запроса клонирования пока неизвестен. Повторная отправка отключена, чтобы не создавать платный дубликат."}</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => void refreshCloneStatus()}>Обновить статус</Button>
+            {statusRefreshError && <p role="alert" className="mt-2 text-red-300">{statusRefreshError}</p>}
+          </div>}
+          <p className="text-xs text-gray-500">Этот стенд сравнивает озвучивание текста и задержку. Он не отправляет аудио автоматически в живой звонок.</p>
+        </CardContent></Card>
+
         <Card className="bg-gray-800/50 border-gray-700"><CardContent className="p-5 sm:p-6 space-y-4">
-          <div><h2 className="text-xl font-semibold">3. Русский → английский</h2>
+          <div><h2 className="text-xl font-semibold">4. Русский → английский</h2>
             <p className="text-sm text-gray-400 mt-1">Нажмите и удерживайте кнопку, произнесите фразу по-русски и отпустите.</p>
           </div>
           <Button
@@ -708,9 +931,14 @@ export default function VoiceLab() {
             <div><p className="text-xs uppercase tracking-wide text-gray-500">Распознано · русский</p><p className="text-gray-100">{currentRun.transcript}</p></div>
             <div><p className="text-xs uppercase tracking-wide text-gray-500">Перевод · English</p><p className="text-gray-100">{currentRun.english}</p></div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void playRun(currentRun)} disabled={playing} variant="outline">Play ElevenLabs</Button>
+            <Button onClick={() => void playRun(currentRun)} disabled={playing} variant="outline">Play ElevenLabs</Button>
+            <Button onClick={() => void playCartesiaRun(currentRun)} disabled={playing || cartesiaClone?.status !== "ready"} variant="outline">
+              Play Cartesia
+            </Button>
               <Button onClick={() => playDefaultVoice(currentRun.english)} variant="outline">Play browser default voice</Button>
             </div>
+          {cartesiaClone?.status !== "ready" && <p className="text-sm text-amber-300">Кнопка Cartesia включится после создания отдельного клона в карточке выше. ElevenLabs продолжает работать независимо.</p>}
+          {playbackComparison(currentRun)}
             <p className="text-xs text-gray-500">Browser default voice uses this device’s speech engine and may sound different from the iOS default voice.</p>
           </div>}
           {latency && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
@@ -739,10 +967,12 @@ export default function VoiceLab() {
                 <span>Release → first audio: {intervalLabel(run.timings.firstAudio == null ? null : run.timings.firstAudio - run.timings.micRelease)}</span>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3">
-                <Button variant="outline" size="sm" onClick={() => void playRun(run)} disabled={playing}>Play ElevenLabs</Button>
+              <Button variant="outline" size="sm" onClick={() => void playRun(run)} disabled={playing}>Play ElevenLabs</Button>
+              <Button variant="outline" size="sm" onClick={() => void playCartesiaRun(run)} disabled={playing || cartesiaClone?.status !== "ready"}>Play Cartesia</Button>
                 <Button variant="outline" size="sm" onClick={() => playDefaultVoice(run.english)} disabled={playing}>Play browser default voice</Button>
                 <span className="text-xs text-gray-500">{run.provider}{run.createdAt ? ` · ${new Date(run.createdAt).toLocaleString()}` : ""}</span>
               </div>
+              {playbackComparison(run)}
             </div>)}
           </div>}
         </CardContent></Card>

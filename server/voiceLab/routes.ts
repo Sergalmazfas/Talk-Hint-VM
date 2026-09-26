@@ -4,10 +4,13 @@ import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import {
   failClone, finishClone, getClone, getRun, insertRun, listVoiceLab, reserveExistingClone,
   recordPlayback, reserveClone, toPublicClone, toPublicRun,
+  getCartesiaClone, reserveCartesiaClone, finishCartesiaClone, failCartesiaClone,
 } from "./store";
 import {
-  createClonedVoice, decodeAudio, ElevenLabsProvider, transcribeRussian,
-  decodeAudioWithMaxDuration, ElevenLabsHttpError, translateToNaturalEnglish, type SupportedMime,
+  createClonedVoice, createCartesiaClonedVoice, CartesiaProvider, CartesiaHttpError,
+  decodeAudio, ElevenLabsProvider, transcribeRussian,
+  decodeAudioWithMaxDuration, ElevenLabsHttpError, supportsCartesiaCloneMime,
+  translateToNaturalEnglish, type SupportedMime,
 } from "./providers";
 import { withAbsolutePlaybackTimings } from "./timings";
 
@@ -18,6 +21,7 @@ const RELEASE_MAX_AGE_MS = 10 * 60_000;
 const RELEASE_MAX_FUTURE_MS = 30_000;
 const runRequests = new Map<string, number[]>();
 const provider = new ElevenLabsProvider();
+const cartesiaProvider = new CartesiaProvider();
 
 function userId(req: Request) {
   return (req as any).user?.id as string;
@@ -55,13 +59,70 @@ function abortOnDisconnect(req: Request, res: Response) {
 export function registerVoiceLabRoutes(app: Express) {
   app.get(base, requireBenchmarkAdmin, async (req, res) => {
     try {
-      const data = await listVoiceLab(userId(req));
+      const [data, cartesiaResult] = await Promise.all([
+        listVoiceLab(userId(req)), getCartesiaClone(userId(req))
+          .then((clone) => ({ clone, error: null }))
+          .catch(() => ({ clone: null, error: "Cartesia clone data is unavailable; ElevenLabs remains available" })),
+      ]);
       res.json({
         clone: toPublicClone(data.clone),
+        cartesiaClone: toPublicClone(cartesiaResult.clone),
+        cartesiaError: cartesiaResult.error,
         runs: data.runs.map(toPublicRun),
       });
     } catch {
       res.status(500).json({ error: "Voice Lab data is unavailable" });
+    }
+  });
+
+  app.post(`${base}/cartesia/clone`, requireBenchmarkAdmin, async (req, res) => {
+    const uid = userId(req);
+    let audio: ReturnType<typeof decodeAudio>;
+    try {
+      if (req.body?.consent !== true) return res.status(400).json({ error: "Explicit consent to send the voice sample to Cartesia is required" });
+      audio = decodeAudioWithMaxDuration(req.body?.audioBase64, req.body?.mimeType, req.body?.durationMs, 60_000);
+      if (audio.durationMs < 10_000) return res.status(400).json({ error: "Cartesia needs at least 10 seconds of voice sample" });
+      if (!supportsCartesiaCloneMime(audio.mimeType)) {
+        return res.status(400).json({ error: "Cartesia needs a WebM, WAV, MP3, or OGG sample; convert MP4 to WAV before submitting" });
+      }
+    } catch (error) {
+      return caughtError(res, error, "Invalid voice sample");
+    }
+    if (!process.env.CARTESIA_API_KEY) return res.status(503).json({ error: "Cartesia API key is not configured" });
+    let reserved;
+    try {
+      reserved = await reserveCartesiaClone(uid, audio.durationMs);
+      if (!reserved) {
+        const existing = await getCartesiaClone(uid);
+        return res.status(409).json({
+          error: "Cartesia clone already exists or its creation status is uncertain; do not create a duplicate",
+          cartesiaClone: toPublicClone(existing),
+        });
+      }
+    } catch {
+      return res.status(500).json({ error: "Could not reserve Cartesia clone creation" });
+    }
+    const controller = abortOnDisconnect(req, res);
+    try {
+      const voiceId = await createCartesiaClonedVoice(audio.buffer, audio.mimeType, uid, controller.signal);
+      const clone = await finishCartesiaClone(uid, voiceId);
+      if (!clone) throw new Error("Cartesia clone record could not be saved");
+      if (!res.headersSent) res.json({ cartesiaClone: toPublicClone(clone) });
+    } catch (error) {
+      const rejected = error instanceof CartesiaHttpError && error.status >= 400 && error.status < 500;
+      let saved = true;
+      try { await failCartesiaClone(uid, rejected ? "retryable" : "uncertain"); } catch { saved = false; }
+      if (!res.headersSent && !res.destroyed) {
+        const clone = await getCartesiaClone(uid).catch(() => null);
+        res.status(502).json({
+          error: !saved ? "Clone safety status could not be saved; do not retry" :
+            rejected ? `Cartesia rejected the voice sample (HTTP ${error.status}); you can explicitly retry` :
+              "Cartesia clone creation outcome is uncertain; do not retry or pay for a duplicate",
+          cartesiaClone: toPublicClone(clone),
+        });
+      }
+    } finally {
+      controller.abort();
     }
   });
 
@@ -239,13 +300,29 @@ export function registerVoiceLabRoutes(app: Express) {
       return res.status(500).json({ error: "Voice Lab run data is unavailable" });
     }
     if (!run) return res.status(404).json({ error: "Voice Lab run not found" });
+    if (req.query.provider !== undefined && req.query.provider !== "elevenlabs" && req.query.provider !== "cartesia") {
+      return res.status(400).json({ error: "Unknown voice provider" });
+    }
+    const useCartesia = req.query.provider === "cartesia";
+    let voiceId = run.voiceId;
+    if (useCartesia) {
+      try {
+        const clone = await getCartesiaClone(uid);
+        if (clone?.status !== "ready" || !clone.voiceId) {
+          return res.status(409).json({ error: "Create a Cartesia voice clone before playback" });
+        }
+        voiceId = clone.voiceId;
+      } catch {
+        return res.status(500).json({ error: "Cartesia clone data is unavailable" });
+      }
+    }
 
     const controller = abortOnDisconnect(req, res);
     try {
-      const upstream = await provider.streamSpeech(run.voiceId, run.english, controller.signal);
+      const upstream = await (useCartesia ? cartesiaProvider : provider).streamSpeech(voiceId, run.english, controller.signal);
       if (!upstream.ok || !upstream.body) {
         controller.abort();
-        return res.status(502).json({ error: `ElevenLabs audio request failed (HTTP ${upstream.status})` });
+        return res.status(502).json({ error: `${useCartesia ? "Cartesia" : "ElevenLabs"} audio request failed (HTTP ${upstream.status})` });
       }
       res.status(200).set({
         "Content-Type": "audio/mpeg",
@@ -257,7 +334,7 @@ export function registerVoiceLabRoutes(app: Express) {
         else res.destroy();
       }).pipe(res);
     } catch {
-      if (!res.headersSent && !res.destroyed) res.status(502).json({ error: "ElevenLabs audio request failed" });
+      if (!res.headersSent && !res.destroyed) res.status(502).json({ error: `${useCartesia ? "Cartesia" : "ElevenLabs"} audio request failed` });
     }
   });
 
