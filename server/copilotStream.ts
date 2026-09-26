@@ -6,6 +6,8 @@ import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import { registerVerifiedCopilotReply } from "./copilotVerifiedReplies";
+import { isLatinCopilotReply } from "./copilotVerifiedReplies";
+import { hasUnexpectedCopilotCaptionScript, preserveCopilotLongNumber } from "./copilotTextSafety";
 
 export const COPILOT_LANGUAGES = ["ru", "es", "uk", "kk"] as const;
 const COPILOT_SOURCE_NAMES: Record<string, string> = {
@@ -110,6 +112,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   const privateItems = new Map<string, string>();
   const responseItems = new Map<string, string>();
   const sourcedItems = new Set<string>();
+  const sourceTexts = new Map<string, string>();
   type PendingText = {
     direction: Direction;
     responseId: string;
@@ -135,6 +138,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     pendingText.forEach(pending => clearTimeout(pending.timeout));
     pendingText.clear();
     sourcedItems.clear();
+    sourceTexts.clear();
     finishedResponses.clear();
     verifiedPrivateResponses.clear();
     completedPrivateReplyText.clear();
@@ -171,6 +175,15 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     // may subsequently mark response.done as cancelled. Never enable iPhone
     // auto-speak until that result is known.
     if (pending.direction === "private" && pending.done && !verifiedPrivateResponses.has(key)) return;
+    if (pending.direction === "private" && pending.done) {
+      const source = sourceTexts.get(itemKey("private", pending.itemId));
+      const final = pending.frames.findLast((frame: any) => frame.type === "text_done") as
+        { type: string; text: string } | undefined;
+      const safe = source && final && isLatinCopilotReply(final.text)
+        ? preserveCopilotLongNumber(source, final.text) : null;
+      if (safe === null) { releaseResponse(key); return; }
+      if (final) final.text = safe;
+    }
     for (const frame of pending.frames) send(ws, frame);
     pending.frames.length = 0;
     pending.length = 0;
@@ -184,7 +197,9 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     const holdId = responseHolds.get(key);
     if (!text || !itemId || !holdId || !authorizedCallSid ||
         !sourcedItems.has(itemKey("private", itemId))) return;
-    registerVerifiedCopilotReply(_userId, authorizedCallSid, holdId, key.slice("private|".length), text);
+    const source = sourceTexts.get(itemKey("private", itemId));
+    const safe = source && isLatinCopilotReply(text) ? preserveCopilotLongNumber(source, text) : null;
+    if (safe !== null) registerVerifiedCopilotReply(_userId, authorizedCallSid, holdId, key.slice("private|".length), safe);
   };
   const translation = (
     direction: Direction,
@@ -204,6 +219,13 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     if (itemId && sourcedItems.has(itemKey(direction, itemId)) &&
         (direction !== "private" || ev.type !== "translated_transcript_done" ||
           verifiedPrivateResponses.has(key))) {
+      if (direction === "private" && ev.type === "translated_transcript_done") {
+        const source = sourceTexts.get(itemKey(direction, itemId));
+        const safe = source && isLatinCopilotReply(ev.text)
+          ? preserveCopilotLongNumber(source, ev.text) : null;
+        if (safe === null) { releaseResponse(key); return; }
+        frame.text = safe;
+      }
       send(ws, frame);
       if (ev.type === "translated_transcript_done") releaseResponse(key);
       return;
@@ -247,6 +269,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       }
     } else if (ev.type === "source_transcript") {
       if (!ev.itemId || !ev.text.trim()) return;
+      if (direction === "owner" && hasUnexpectedCopilotCaptionScript(ev.text)) return;
       if (direction === "private") {
         const holdId = privateItems.get(ev.itemId);
         if (!holdId) return;
@@ -255,7 +278,9 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
         send(ws, { type: "source_text", direction, text: ev.text, itemId: ev.itemId });
       }
       sourcedItems.add(itemKey(direction, ev.itemId));
+      sourceTexts.set(itemKey(direction, ev.itemId), ev.text);
       if (sourcedItems.size > 512) sourcedItems.delete(sourcedItems.values().next().value!);
+      if (sourceTexts.size > 512) sourceTexts.delete(sourceTexts.keys().next().value!);
       if (direction === "private") {
         responseItems.forEach((itemId, key) => {
           if (key.startsWith("private|") && itemId === ev.itemId) publishVerifiedPrivateReply(key);

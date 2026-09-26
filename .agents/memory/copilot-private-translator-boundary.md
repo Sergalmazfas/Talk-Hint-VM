@@ -36,7 +36,7 @@ Choose any future Copilot translation-model changes from isolated, identical rec
 
 **Why:** The dedicated live-translation model previously performed worse than the constrained Translator configuration; initial controlled Copilot comparisons showed both useful translations and subtle differences in meaning. Production behavior should not be switched on model branding or one smoke test.
 
-**How to apply:** Test both directions, short answers, names/numbers, consecutive turns, real noisy calls and repeatability; retain provider failures and unavailable source transcripts in evidence. Keep comparison sessions isolated from routing, private mic gating and production settings until a configuration has enough evidence to win.
+**How to apply:** Test both directions, short answers, names/numbers, consecutive turns, real noisy calls and repeatability; retain provider failures and unavailable source transcripts in evidence. Keep comparison sessions isolated from routing, private mic gating and production settings until a configuration has enough evidence to win. In particular, do not treat a fixed source-language *prompt hint* as an STT language lock or a proven fix for wrong-script captions: a same-recording numeric comparison produced an extra digit in one source transcript without reproducing the real-call missing translation. Verify any transcription-language change separately on identical audio before rollout.
 
 The guided web stand is sufficient for the current stage; prioritize debugging the actual iPhone Copilot audio/event path rather than polishing the stand or comparing models by default.
 

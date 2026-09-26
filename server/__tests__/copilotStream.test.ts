@@ -4,6 +4,7 @@ import type { RealtimeTranslationSession } from "../translation/provider";
 import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
 import { authorizeCopilotCall, copilotSpokenReplyInstructions, createCopilotStream, resamplePcm16Mono } from "../copilotStream";
 import { consumeVerifiedCopilotReply } from "../copilotVerifiedReplies";
+import { hasUnexpectedCopilotCaptionScript, preserveCopilotLongNumber } from "../copilotTextSafety";
 
 const { startSession } = vi.hoisted(() => ({ startSession: vi.fn() }));
 vi.mock("../translation/openaiRealtimeTranslator", async (importOriginal) => ({
@@ -38,6 +39,16 @@ const tick = async () => {
 };
 
 describe("authenticated Copilot stream contract", () => {
+  it("keeps fictional phone digits in the source grouping and rejects altered numbers", () => {
+    expect(preserveCopilotLongNumber("Мой тестовый номер 555-010-2048.",
+      "My test number is 555-01-02-048.")).toBe("My test number is 555-010-2048.");
+    expect(preserveCopilotLongNumber("Мой тестовый номер 555-010-020-48.",
+      "My test number is 555-01-02-048.")).toBeNull();
+    expect(preserveCopilotLongNumber("Да, всё правильно.", "Yes, that's correct."))
+      .toBe("Yes, that's correct.");
+    expect(hasUnexpectedCopilotCaptionScript("ちょっとだけ。")).toBe(true);
+    expect(hasUnexpectedCopilotCaptionScript("Я уже использую Mint Mobile.")).toBe(false);
+  });
   it("authorizes only active owned outgoing Copilot calls or accepted iOS Copilot pending calls", () => {
     expect(authorizeCopilotCall("u1", { userId: "u1", status: "active", metadata: { mode: "copilot" } }, undefined)).toBe(true);
     expect(authorizeCopilotCall("u2", { userId: "u1", status: "active", metadata: { mode: "copilot" } }, undefined)).toBe(false);
@@ -188,10 +199,12 @@ describe("authenticated Copilot stream contract", () => {
     guest.emit({ type: "response_created", ts: Date.now(), responseId: "guest-response", sourceItemId: "guest-1" });
     guest.emit({ type: "translated_transcript_done", text: "Привет", responseId: "guest-response" });
     owner.emit({ type: "source_transcript", text: "Hello again", itemId: "owner-1" });
+    owner.emit({ type: "source_transcript", text: "ちょっとだけ。", itemId: "owner-japanese" });
     owner.emit({ type: "translated_transcript_done", text: "ignored", responseId: "owner-response" });
     expect(ws.frames).toContainEqual({ type: "source_text", direction: "guest", text: "Hello", itemId: "guest-1" });
     expect(ws.frames).toContainEqual({ type: "text_done", direction: "guest", text: "Привет", responseId: "guest-response", itemId: "guest-1" });
     expect(ws.frames).toContainEqual({ type: "source_text", direction: "owner", text: "Hello again", itemId: "owner-1" });
+    expect(ws.frames.some(frame => frame.itemId === "owner-japanese")).toBe(false);
     expect(ws.frames.some(frame => frame.text === "ignored")).toBe(false);
     ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "private-hold" })));
     expect(owner.value.sendAudio).toHaveBeenCalledOnce();
@@ -206,6 +219,53 @@ describe("authenticated Copilot stream contract", () => {
     privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "private-item" });
     privateSession.emit({ type: "source_transcript", text: "my private words", itemId: "private-item" });
     expect(ws.frames).toContainEqual({ type: "source_text", direction: "private", text: "my private words", holdId: "private-hold", itemId: "private-item" });
+    ws.close();
+  });
+
+  it("corrects a completed private phone number before showing or verifying the tap-to-speak card", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-number", async () => true);
+    const callSid = "CA1234567890abcdef1234567890abcdef";
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid, language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "number-hold" })));
+    ws.emit("message", Buffer.from(JSON.stringify({
+      type: "audio", direction: "private", holdId: "number-hold", pcm16: Buffer.alloc(320).toString("base64"),
+    })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "number-hold" })));
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "number-item" });
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "number-response", sourceItemId: "number-item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "My test number is 555-01-02-048.", responseId: "number-response" });
+    privateSession.emit({ type: "turn_completed", metrics: { responseId: "number-response", sourceItemId: "number-item",
+      responseStatus: "completed", translatedTranscript: "My test number is 555-01-02-048." } });
+    privateSession.emit({ type: "source_transcript", text: "Мой тестовый номер 555-010-2048.", itemId: "number-item" });
+    const safe = "My test number is 555-010-2048.";
+    expect(ws.frames.at(-1)).toMatchObject({ type: "text_done", text: safe, holdId: "number-hold" });
+    expect(consumeVerifiedCopilotReply("copilot-number", callSid, "number-hold", "number-response",
+      "My test number is 555-01-02-048.")).toBe(false);
+    expect(consumeVerifiedCopilotReply("copilot-number", callSid, "number-hold", "number-response", safe)).toBe(true);
+    ws.close();
+  });
+
+  it("does not offer private speech when the number in the completed reply disagrees with source STT", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-number-mismatch", async () => true);
+    const callSid = "CA1234567890abcdef1234567890abcdef";
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid, language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "number-hold" })));
+    ws.emit("message", Buffer.from(JSON.stringify({
+      type: "audio", direction: "private", holdId: "number-hold", pcm16: Buffer.alloc(320).toString("base64"),
+    })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "number-hold" })));
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "number-item" });
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "number-response", sourceItemId: "number-item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "My test number is 555-01-02-048.", responseId: "number-response" });
+    privateSession.emit({ type: "turn_completed", metrics: { responseId: "number-response", sourceItemId: "number-item",
+      responseStatus: "completed", translatedTranscript: "My test number is 555-01-02-048." } });
+    privateSession.emit({ type: "source_transcript", text: "Мой тестовый номер 555-010-020-48.", itemId: "number-item" });
+    expect(ws.frames.some(frame => frame.type === "text_done")).toBe(false);
+    expect(consumeVerifiedCopilotReply("copilot-number-mismatch", callSid, "number-hold", "number-response",
+      "My test number is 555-01-02-048.")).toBe(false);
+    expect(ws.closed).toBe(false);
     ws.close();
   });
 
