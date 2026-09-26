@@ -254,6 +254,9 @@
 "copilot.private" = "Жеке режим — ұстап тұрыңыз";
 "copilot.unavailable" = "Copilot қолжетімсіз";
 "copilot.speech_unavailable" = "Жауапты дыбыстау мүмкін болмады — қоңырау жалғасуда";
+"copilot.tap_to_speak" = "Клонданған дауыспен тыңдау үшін түртіңіз";
+"copilot.clone_not_ready" = "Клонданған дауысыңыз дайын емес. Баптауды аяқтап, жаңа жеке жауап сұратыңыз.";
+"copilot.clone_unavailable" = "Бұл жауап үшін клонданған аудио қолжетімді емес.";
 "copilot.hold_to_talk" = "Сөйлеу үшін ұстап тұрыңыз";
 "copilot.language.title" = "Иесінің тілі";
 "copilot.language.selected" = "Тіл: %@";

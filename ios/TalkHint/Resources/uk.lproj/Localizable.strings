@@ -254,6 +254,9 @@
 "copilot.private" = "Приватний режим — утримуйте";
 "copilot.unavailable" = "Copilot недоступний";
 "copilot.speech_unavailable" = "Не вдалося озвучити відповідь — дзвінок триває";
+"copilot.tap_to_speak" = "Торкніться, щоб почути клонованим голосом";
+"copilot.clone_not_ready" = "Ваш клонований голос ще не готовий. Завершіть налаштування, а потім запросіть нову приватну відповідь.";
+"copilot.clone_unavailable" = "Клоноване аудіо для цієї відповіді недоступне.";
 "copilot.hold_to_talk" = "Утримуйте, щоб говорити";
 "copilot.language.title" = "Мова власника";
 "copilot.language.selected" = "Мова: %@";

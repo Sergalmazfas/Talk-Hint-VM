@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { Readable } from "node:stream";
 import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import {
-  failClone, finishClone, getClone, getRun, insertRun, listVoiceLab,
+  failClone, finishClone, getClone, getRun, insertRun, listVoiceLab, reserveExistingClone,
   recordPlayback, reserveClone, toPublicClone, toPublicRun,
 } from "./store";
 import {
@@ -63,6 +63,49 @@ export function registerVoiceLabRoutes(app: Express) {
     } catch {
       res.status(500).json({ error: "Voice Lab data is unavailable" });
     }
+  });
+
+  app.post(`${base}/link-existing`, requireBenchmarkAdmin, async (req, res) => {
+    const uid = userId(req);
+    const voiceId = req.body?.voiceId;
+    if (req.body?.consent !== true) {
+      return res.status(400).json({ error: "Explicit consent to use the existing ElevenLabs voice is required" });
+    }
+    if (typeof voiceId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(voiceId)) {
+      return res.status(400).json({ error: "voiceId must contain only letters, numbers, underscores, or hyphens" });
+    }
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "ElevenLabs API key is not configured" });
+
+    try {
+      const upstream = await fetch(`https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voiceId)}`, {
+        headers: { "xi-api-key": apiKey },
+      });
+      if (!upstream.ok) {
+        return res.status(502).json({ error: "ElevenLabs could not verify access to this voice" });
+      }
+      const voice = await upstream.json();
+      if (!voice || voice.voice_id !== voiceId) {
+        return res.status(502).json({ error: "ElevenLabs returned an invalid voice record" });
+      }
+    } catch {
+      return res.status(502).json({ error: "Could not verify the voice with ElevenLabs" });
+    }
+
+    let clone;
+    try {
+      clone = await reserveExistingClone(uid, voiceId);
+      if (!clone) {
+        const existing = await getClone(uid);
+        return res.status(409).json({
+          error: "A voice clone is already ready, being created, or has an uncertain outcome; it cannot be replaced",
+          clone: toPublicClone(existing),
+        });
+      }
+    } catch {
+      return res.status(500).json({ error: "Could not reserve the existing voice" });
+    }
+    return res.json({ clone: toPublicClone(clone) });
   });
 
   app.post(`${base}/clone`, requireBenchmarkAdmin, async (req, res) => {

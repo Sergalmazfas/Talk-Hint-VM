@@ -2,7 +2,7 @@ import UIKit
 
 /// Translator-style conversation feed with a pinned private translation card.
 /// CallManager owns the phone call and the private microphone gate.
-final class CopilotViewController: UIViewController {
+final class CopilotViewController: UIViewController, UIGestureRecognizerDelegate {
     let stream: CopilotStream
     /// Main's callback must close Owner→Guest before calling completion(true).
     var requestPrivateGate: (@escaping (Bool) -> Void) -> Void = { completion in completion(false) }
@@ -15,6 +15,7 @@ final class CopilotViewController: UIViewController {
     var onSpeaker: ((Bool) -> Void)?
     var onMute: (() -> Void)?
     var onEnd: (() -> Void)?
+    var onCloneSpeechTapped: ((String, String) -> Void)?
 
     private let status = UILabel()
     private let scrollView = UIScrollView()
@@ -22,6 +23,7 @@ final class CopilotViewController: UIViewController {
     private let translationCard = UIView()
     private let translationLabel = UILabel()
     private let privateSourceLabel = UILabel()
+    private let cloneSpeechButton = UIButton(type: .system)
     private let ptt = UIButton(type: .system)
     private let muteButton = UIButton(type: .system)
     private let routeButton = UIButton(type: .system)
@@ -43,6 +45,8 @@ final class CopilotViewController: UIViewController {
     private var intentGeneration = 0
     private var releaseDeliveredGeneration: Int?
     private var releasePending = false
+    private var verifiedHoldId: String?
+    private var verifiedResponseId: String?
 
     init(callSid: String, language: String, sampleRateHz: Int, stream: CopilotStream? = nil) {
         // CallManager must pass the measured device sample rate. Supplying a
@@ -67,8 +71,8 @@ final class CopilotViewController: UIViewController {
             self?.upsertConversation(direction: "guest", itemId: itemId, translation: text)
         }
         stream.onPrivateText = { [weak self] text in
-            self?.translationLabel.text = text
-            self?.translationCard.isHidden = text.isEmpty
+            guard let self, self.verifiedHoldId == nil else { return }
+            self.translationLabel.text = text
         }
         stream.onSourceText = { [weak self] direction, text, itemId in
             if direction == "private" {
@@ -180,15 +184,27 @@ final class CopilotViewController: UIViewController {
         privateSourceLabel.textColor = Theme.sub
         privateSourceLabel.numberOfLines = 0
         privateSourceLabel.isHidden = true
-        let content = UIStackView(arrangedSubviews: [tagRow, translationLabel, privateSourceLabel])
-        content.axis = .vertical; content.spacing = 4
-        content.translatesAutoresizingMaskIntoConstraints = false
-        translationCard.addSubview(content)
+        cloneSpeechButton.setTitle(NSLocalizedString("copilot.tap_to_speak", comment: ""), for: .normal)
+        cloneSpeechButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+        cloneSpeechButton.contentHorizontalAlignment = .leading
+        cloneSpeechButton.setImage(UIImage(systemName: "waveform"), for: .normal)
+        cloneSpeechButton.titleEdgeInsets = UIEdgeInsets(top: 0, left: 6, bottom: 0, right: 0)
+        cloneSpeechButton.isHidden = true
+        cloneSpeechButton.accessibilityIdentifier = "button-copilot-clone-speech"
+        cloneSpeechButton.addTarget(self, action: #selector(cloneSpeechTapped), for: .touchUpInside)
+        let cardTap = UITapGestureRecognizer(target: self, action: #selector(cloneSpeechCardTapped))
+        cardTap.cancelsTouchesInView = false
+        cardTap.delegate = self
+        translationCard.addGestureRecognizer(cardTap)
+        let cardContents = UIStackView(arrangedSubviews: [tagRow, translationLabel, privateSourceLabel, cloneSpeechButton])
+        cardContents.axis = .vertical; cardContents.spacing = 4
+        cardContents.translatesAutoresizingMaskIntoConstraints = false
+        translationCard.addSubview(cardContents)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: translationCard.topAnchor, constant: 10),
-            content.bottomAnchor.constraint(equalTo: translationCard.bottomAnchor, constant: -10),
-            content.leadingAnchor.constraint(equalTo: translationCard.leadingAnchor, constant: 12),
-            content.trailingAnchor.constraint(equalTo: translationCard.trailingAnchor, constant: -12)
+            cardContents.topAnchor.constraint(equalTo: translationCard.topAnchor, constant: 10),
+            cardContents.bottomAnchor.constraint(equalTo: translationCard.bottomAnchor, constant: -10),
+            cardContents.leadingAnchor.constraint(equalTo: translationCard.leadingAnchor, constant: 12),
+            cardContents.trailingAnchor.constraint(equalTo: translationCard.trailingAnchor, constant: -12)
         ])
     }
 
@@ -389,6 +405,56 @@ final class CopilotViewController: UIViewController {
         status.text = NSLocalizedString("copilot.speech_unavailable", comment: "")
     }
 
+    func clearVerifiedReply() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.clearVerifiedReply() }
+            return
+        }
+        verifiedHoldId = nil
+        verifiedResponseId = nil
+        translationLabel.text = nil
+        privateSourceLabel.text = nil
+        privateSourceLabel.isHidden = true
+        cloneSpeechButton.isHidden = true
+        cloneSpeechButton.isEnabled = false
+        translationCard.isHidden = true
+    }
+
+    func showVerifiedReply(text: String, holdId: String, responseId: String) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.showVerifiedReply(text: text, holdId: holdId, responseId: responseId)
+            }
+            return
+        }
+        verifiedHoldId = holdId
+        verifiedResponseId = responseId
+        translationLabel.text = text
+        cloneSpeechButton.isHidden = false
+        cloneSpeechButton.isEnabled = true
+        cloneSpeechButton.accessibilityLabel = NSLocalizedString("copilot.tap_to_speak", comment: "")
+        translationCard.isHidden = false
+    }
+
+    func cloneSpeechStarted() {
+        cloneSpeechButton.isEnabled = false
+    }
+
+    func cloneSpeechFinished(outcome: CopilotCloneSpeechOutcome) {
+        guard verifiedHoldId != nil, verifiedResponseId != nil else { return }
+        switch outcome {
+        case .success, .cancelled, .retryableFailure:
+            cloneSpeechButton.isEnabled = true
+            if outcome == .retryableFailure { speechFailed() }
+        case .cloneNotReady:
+            cloneSpeechButton.isEnabled = false
+            status.text = NSLocalizedString("copilot.clone_not_ready", comment: "")
+        case .failed:
+            cloneSpeechButton.isEnabled = false
+            status.text = NSLocalizedString("copilot.clone_unavailable", comment: "")
+        }
+    }
+
     private func serverHoldReady(_ id: String) {
         guard pressed, holdId == id, !failed else { return }
         privateActive = true
@@ -399,6 +465,20 @@ final class CopilotViewController: UIViewController {
         speakerEnabled.toggle()
         onSpeaker?(speakerEnabled)
         routeButton.setImage(UIImage(systemName: speakerEnabled ? "speaker.wave.2.fill" : "iphone"), for: .normal)
+    }
+    @objc private func cloneSpeechTapped() {
+        guard let verifiedHoldId, let verifiedResponseId, cloneSpeechButton.isEnabled else { return }
+        onCloneSpeechTapped?(verifiedHoldId, verifiedResponseId)
+    }
+    @objc private func cloneSpeechCardTapped() {
+        cloneSpeechTapped()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer.view === translationCard else { return true }
+        guard let touchedView = touch.view else { return true }
+        return touchedView !== cloneSpeechButton && !touchedView.isDescendant(of: cloneSpeechButton)
     }
     @objc private func muteTapped() {
         onMute?()

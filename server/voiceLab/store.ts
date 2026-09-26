@@ -27,6 +27,24 @@ export async function reserveClone(userId: string, durationMs: number) {
   return retry ?? null;
 }
 
+export async function reserveExistingClone(userId: string, voiceId: string) {
+  const [row] = await db.insert(voiceLabClones).values({
+    userId, voiceId, status: "ready", durationMs: 0,
+  }).onConflictDoNothing().returning();
+  if (row) return row;
+  // Only a definitively rejected creation may be replaced. The conditional
+  // update is atomic, so simultaneous link/create attempts cannot overwrite
+  // an existing, creating, or uncertain clone.
+  const [retry] = await db.update(voiceLabClones).set({
+    voiceId,
+    status: "ready",
+    durationMs: 0,
+    createdAt: new Date(),
+  }).where(and(eq(voiceLabClones.userId, userId), eq(voiceLabClones.status, "retryable")))
+    .returning();
+  return retry ?? null;
+}
+
 export async function finishClone(userId: string, voiceId: string, status = "ready") {
   const [row] = await db.update(voiceLabClones)
     .set({ voiceId, status })

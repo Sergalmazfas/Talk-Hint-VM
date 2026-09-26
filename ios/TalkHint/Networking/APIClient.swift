@@ -624,6 +624,48 @@ final class APIClient {
         return ((obj["text"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Requests cloned speech for one verified Copilot reply. Success is
+    /// bounded MP3; failures are explicit JSON errors from the service.
+    func copilotCloneSpeech(callSid: String, holdId: String, responseId: String,
+                            text: String) async throws -> Data {
+        let maxAudioBytes = 8 * 1024 * 1024
+        guard let token = SessionStore.shared.token else { throw APIError.notAuthenticated }
+        var req = URLRequest(url: AppConfig.baseURL.appendingPathComponent("/api/copilot/clone-speech"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "callSid": callSid, "holdId": holdId, "responseId": responseId, "text": text
+        ])
+
+        let (bytes, response) = try await session.bytes(for: req)
+        guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
+        if !(200..<300).contains(http.statusCode) {
+            var body = Data()
+            for try await byte in bytes {
+                guard body.count < 16 * 1024 else { break }
+                body.append(byte)
+            }
+            let message = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["error"] as? String ?? ""
+            throw APIError.http(http.statusCode, message)
+        }
+        guard http.mimeType?.lowercased() == "audio/mpeg",
+              http.expectedContentLength < 0 || http.expectedContentLength <= Int64(maxAudioBytes) else {
+            throw APIError.decoding
+        }
+        var audio = Data()
+        if http.expectedContentLength > 0 {
+            audio.reserveCapacity(Int(http.expectedContentLength))
+        }
+        for try await byte in bytes {
+            guard audio.count < maxAudioBytes else { throw APIError.decoding }
+            audio.append(byte)
+        }
+        guard !audio.isEmpty else { throw APIError.decoding }
+        return audio
+    }
+
     // MARK: - Core request
 
     private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {

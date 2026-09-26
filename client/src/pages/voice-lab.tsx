@@ -70,6 +70,9 @@ export default function VoiceLab() {
   const [error, setError] = useState("");
   const [statusRefreshError, setStatusRefreshError] = useState("");
   const [consent, setConsent] = useState(false);
+  const [linkVoiceId, setLinkVoiceId] = useState("");
+  const [linkConsent, setLinkConsent] = useState(false);
+  const [linkingVoice, setLinkingVoice] = useState(false);
   const [sample, setSample] = useState<Blob | null>(null);
   const [sampleUrl, setSampleUrl] = useState("");
   const [sampleDuration, setSampleDuration] = useState(0);
@@ -310,6 +313,30 @@ export default function VoiceLab() {
       await refreshCloneStatus();
     } finally {
       setCreatingClone(false);
+    }
+  }
+
+  async function linkExistingVoice() {
+    if (!linkVoiceId.trim() || !linkConsent || !token || linkingVoice ||
+        (clone && ["ready", "creating", "uncertain"].includes(clone.status))) return;
+    setLinkingVoice(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/link-existing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ voiceId: linkVoiceId.trim(), consent: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Не удалось привязать голос (${response.status}).`);
+      setClone(data.clone);
+      setCloneAttemptUncertain(false);
+      await loadLab();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось привязать существующий голос.");
+      await refreshCloneStatus();
+    } finally {
+      setLinkingVoice(false);
     }
   }
 
@@ -630,6 +657,26 @@ export default function VoiceLab() {
           <Button disabled={!sample || !consent || creatingClone || recordingSample || sampleOverLimit || sampleDuration >= MAX_SAMPLE_DURATION_MS || (clone && clone.status !== "retryable") || (cloneAttemptUncertain && !/retryable/i.test(clone?.status || ""))} onClick={createClone} className="bg-gradient-to-r from-cyan-600 to-purple-600">
             {creatingClone ? "Создание голоса…" : "Create ElevenLabs Voice"}
           </Button>
+          <div className="border-t border-gray-700 pt-4 space-y-3">
+            <div>
+              <h3 className="font-medium text-gray-200">Уже есть голос ElevenLabs?</h3>
+              <p className="mt-1 text-sm text-amber-300">Это привяжет уже существующий голос ElevenLabs и не создаст второй платный клон. Привязка применяется только к текущему окружению приложения; база данных между development и production не копируется.</p>
+            </div>
+            <label className="block text-sm text-gray-300">
+              Voice ID
+              <input value={linkVoiceId} onChange={(event) => setLinkVoiceId(event.target.value)} autoComplete="off"
+                className="mt-1 block w-full rounded-md border border-gray-600 bg-gray-900 px-3 py-2 text-white"
+                placeholder="ElevenLabs Voice ID" />
+            </label>
+            <label className="flex items-start gap-3 text-sm text-gray-300">
+              <input type="checkbox" checked={linkConsent} onChange={(event) => setLinkConsent(event.target.checked)} className="mt-1 accent-cyan-500" />
+              <span>Я подтверждаю, что имею право использовать этот существующий голос в текущем окружении приложения.</span>
+            </label>
+            <Button disabled={!linkVoiceId.trim() || !linkConsent || linkingVoice || creatingClone || recordingSample || Boolean(clone && ["ready", "creating", "uncertain"].includes(clone.status))}
+              onClick={linkExistingVoice} variant="outline">
+              {linkingVoice ? "Проверка и привязка…" : "Привязать существующий Voice ID"}
+            </Button>
+          </div>
           {cloneAttemptUncertain && <div className="rounded-md border border-amber-700 bg-amber-950/30 p-3 text-sm text-amber-200">
             <p>Статус предыдущего запроса: {clone?.status || "неизвестен"}. Повторная отправка отключена, пока статус не станет retryable.</p>
             <Button variant="outline" size="sm" className="mt-2" onClick={() => void refreshCloneStatus()}>Обновить статус</Button>
@@ -638,7 +685,7 @@ export default function VoiceLab() {
           {clone && <div className="rounded-md border border-gray-700 bg-gray-900/60 p-4 text-sm">
             <p className="text-green-300 font-medium">Клон: {clone.status}</p>
             <p className="text-gray-300 break-all">Voice ID: {clone.voiceId}</p>
-            <p className="text-gray-400">Длительность: {formatDuration(clone.durationMs)} · Создан: {new Date(clone.createdAt).toLocaleString()}</p>
+            <p className="text-gray-400">Длительность: {clone.durationMs === 0 ? "неизвестна (голос уже создан в ElevenLabs)" : formatDuration(clone.durationMs)} · Создан: {new Date(clone.createdAt).toLocaleString()}</p>
           </div>}
         </CardContent></Card>
 

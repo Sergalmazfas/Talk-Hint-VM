@@ -301,6 +301,7 @@ export async function registerRoutes(
   registerBenchmarkRoutes(app);
 
   await import("./voiceLab/routes").then(({ registerVoiceLabRoutes }) => registerVoiceLabRoutes(app));
+  await import("./copilotSpeech").then(({ registerCopilotSpeechRoute }) => registerCopilotSpeechRoute(app));
 
   // Translator Realtime Spike — dev-only test stand (404 in production).
   const { registerTranslatorSpike } = await import("./translation/spike");

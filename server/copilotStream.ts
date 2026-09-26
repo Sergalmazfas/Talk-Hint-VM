@@ -5,6 +5,7 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
+import { registerVerifiedCopilotReply } from "./copilotVerifiedReplies";
 
 export const COPILOT_LANGUAGES = ["ru", "es", "uk", "kk"] as const;
 const COPILOT_SOURCE_NAMES: Record<string, string> = {
@@ -93,6 +94,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   }
   activeUsers.add(_userId);
   let started = false;
+  let authorizedCallSid: string | undefined;
   let authorizing = false;
   let closed = false;
   let rate = 0;
@@ -121,6 +123,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   const pendingText = new Map<string, PendingText>();
   const finishedResponses = new Set<string>();
   const verifiedPrivateResponses = new Set<string>();
+  const completedPrivateReplyText = new Map<string, string>();
   const responseKey = (direction: Direction, responseId: string) => `${direction}|${responseId}`;
   const itemKey = (direction: Direction, itemId: string) => `${direction}|${itemId}`;
   const startedAt = Date.now();
@@ -134,6 +137,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     sourcedItems.clear();
     finishedResponses.clear();
     verifiedPrivateResponses.clear();
+    completedPrivateReplyText.clear();
     responseHolds.clear();
     responseItems.clear();
     privateItems.clear();
@@ -156,6 +160,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     responseHolds.delete(key);
     responseItems.delete(key);
     verifiedPrivateResponses.delete(key);
+    completedPrivateReplyText.delete(key);
     finishedResponses.add(key);
     if (finishedResponses.size > 512) finishedResponses.delete(finishedResponses.values().next().value!);
   };
@@ -172,6 +177,14 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
     clearTimeout(pending.timeout);
     pending.timeout = undefined;
     if (pending.done) releaseResponse(key);
+  };
+  const publishVerifiedPrivateReply = (key: string) => {
+    const text = completedPrivateReplyText.get(key);
+    const itemId = responseItems.get(key);
+    const holdId = responseHolds.get(key);
+    if (!text || !itemId || !holdId || !authorizedCallSid ||
+        !sourcedItems.has(itemKey("private", itemId))) return;
+    registerVerifiedCopilotReply(_userId, authorizedCallSid, holdId, key.slice("private|".length), text);
   };
   const translation = (
     direction: Direction,
@@ -243,6 +256,11 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       }
       sourcedItems.add(itemKey(direction, ev.itemId));
       if (sourcedItems.size > 512) sourcedItems.delete(sourcedItems.values().next().value!);
+      if (direction === "private") {
+        responseItems.forEach((itemId, key) => {
+          if (key.startsWith("private|") && itemId === ev.itemId) publishVerifiedPrivateReply(key);
+        });
+      }
       pendingText.forEach((pending, key) => {
         if (pending.direction === direction && pending.itemId === ev.itemId) flush(key);
       });
@@ -259,6 +277,11 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       if (ev.metrics.responseStatus === "completed" && !finishedResponses.has(key)) {
         verifiedPrivateResponses.add(key);
         if (verifiedPrivateResponses.size > 512) verifiedPrivateResponses.delete(verifiedPrivateResponses.values().next().value!);
+        if (!ev.metrics.cancelled && ev.metrics.sourceItemId === responseItems.get(key) &&
+            typeof ev.metrics.translatedTranscript === "string" && ev.metrics.translatedTranscript.trim()) {
+          completedPrivateReplyText.set(key, ev.metrics.translatedTranscript);
+          publishVerifiedPrivateReply(key);
+        }
         flush(key);
       } else {
         // Failed/incomplete turns are terminal too. Drop their pending text
@@ -311,6 +334,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       }
       if (closed) return;
       authorizing = false;
+      authorizedCallSid = msg.callSid;
       started = true; rate = msg.sampleRateHz;
       wantsConversationFeed = msg.conversationFeed === true;
       const language = msg.language as string;

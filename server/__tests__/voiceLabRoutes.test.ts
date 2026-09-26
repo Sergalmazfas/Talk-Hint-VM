@@ -34,6 +34,17 @@ vi.mock("../voiceLab/store", async () => {
     testState.clones.set(userId, clone);
     return clone;
   }),
+  reserveExistingClone: vi.fn(async (userId: string, voiceId: string) => {
+    const existing = testState.clones.get(userId);
+    if (existing?.status === "retryable") {
+      Object.assign(existing, { voiceId, status: "ready", durationMs: 0, createdAt: new Date() });
+      return existing;
+    }
+    if (existing) return null;
+    const clone = { userId, voiceId, status: "ready", durationMs: 0, createdAt: new Date() };
+    testState.clones.set(userId, clone);
+    return clone;
+  }),
   finishClone: vi.fn(async (userId: string, voiceId: string) => {
     const clone = testState.clones.get(userId);
     if (!clone) return undefined;
@@ -155,6 +166,53 @@ describe("admin Voice Lab routes", () => {
     expect(duplicate.status).toBe(409);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.elevenlabs.io/v1/voices/add");
+  });
+
+  it("links a verified existing voice without creating a second clone", async () => {
+    const fetchMock = vi.fn(async (url: any, init: any) => {
+      expect(String(url)).toBe("https://api.elevenlabs.io/v1/voices/existing_voice-123");
+      expect(init.headers).toEqual({ "xi-api-key": "test-elevenlabs-key" });
+      return new Response(JSON.stringify({ voice_id: "existing_voice-123" }), { status: 200 });
+    });
+    global.fetch = fetchMock as any;
+    const linked = await request(app).post("/api/admin/voice-lab/link-existing").set(admin())
+      .send({ voiceId: "existing_voice-123", consent: true });
+    expect(linked.status).toBe(200);
+    expect(linked.body.clone).toMatchObject({ voiceId: "existing_voice-123", status: "ready", durationMs: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(testState.clones.get("admin-1").durationMs).toBe(0);
+  });
+
+  it("validates consent and voice ID, failing closed when provider verification fails", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ voice_id: "different-id" }), { status: 200 }));
+    global.fetch = fetchMock as any;
+    expect((await request(app).post("/api/admin/voice-lab/link-existing").set(admin())
+      .send({ voiceId: "voice-1", consent: false })).status).toBe(400);
+    expect((await request(app).post("/api/admin/voice-lab/link-existing").set(admin())
+      .send({ voiceId: "../private", consent: true })).status).toBe(400);
+    const invalidProviderRecord = await request(app).post("/api/admin/voice-lab/link-existing").set(admin())
+      .send({ voiceId: "voice-1", consent: true });
+    expect(invalidProviderRecord.status).toBe(502);
+    expect(testState.clones.size).toBe(0);
+  });
+
+  it("does not replace existing clones and scopes links to the authenticated admin", async () => {
+    testState.clones.set("admin-1", {
+      userId: "admin-1", voiceId: "already-linked", status: "ready", durationMs: 0, createdAt: new Date(),
+    });
+    global.fetch = vi.fn(async (url: any) => new Response(JSON.stringify({
+      voice_id: String(url).split("/").pop(),
+    }), { status: 200 })) as any;
+    const duplicate = await request(app).post("/api/admin/voice-lab/link-existing").set(admin())
+      .send({ voiceId: "replacement", consent: true });
+    expect(duplicate.status).toBe(409);
+    expect(testState.clones.get("admin-1").voiceId).toBe("already-linked");
+
+    const linkedByOtherAdmin = await request(app).post("/api/admin/voice-lab/link-existing").set(admin("admin-2"))
+      .send({ voiceId: "replacement", consent: true });
+    expect(linkedByOtherAdmin.status).toBe(200);
+    expect(testState.clones.get("admin-2").voiceId).toBe("replacement");
+    expect(testState.clones.get("admin-1").voiceId).toBe("already-linked");
   });
 
   it("runs Russian transcription then faithful English translation and stores only text/metadata", async () => {

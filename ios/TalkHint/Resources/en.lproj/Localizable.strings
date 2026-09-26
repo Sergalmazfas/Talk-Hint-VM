@@ -254,6 +254,9 @@
 "copilot.private" = "Private — hold to talk";
 "copilot.unavailable" = "Copilot unavailable";
 "copilot.speech_unavailable" = "Couldn't play the reply — call continues";
+"copilot.tap_to_speak" = "Tap to hear in cloned voice";
+"copilot.clone_not_ready" = "Your cloned voice isn't ready. Finish setting it up, then create a new private reply.";
+"copilot.clone_unavailable" = "Cloned audio isn't available for this reply.";
 "copilot.hold_to_talk" = "Hold to talk";
 "copilot.language.title" = "Owner language";
 "copilot.language.selected" = "Language: %@";

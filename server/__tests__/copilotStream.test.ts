@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { RealtimeTranslationSession } from "../translation/provider";
 import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";
 import { authorizeCopilotCall, copilotSpokenReplyInstructions, createCopilotStream, resamplePcm16Mono } from "../copilotStream";
+import { consumeVerifiedCopilotReply } from "../copilotVerifiedReplies";
 
 const { startSession } = vi.hoisted(() => ({ startSession: vi.fn() }));
 vi.mock("../translation/openaiRealtimeTranslator", async (importOriginal) => ({
@@ -245,6 +246,53 @@ describe("authenticated Copilot stream contract", () => {
       { type: "source_text", direction: "private", text: "Нет, не раньше.", itemId: "private-1", holdId: "h1" },
       { type: "text_done", direction: "private", text: "No, not earlier.", responseId: "private-response", itemId: "private-1", holdId: "h1" },
     ]);
+    ws.close();
+  });
+
+  it("registers final private English only after matching source and noncancelled completion", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-tts-verified", async () => true);
+    const callSid = "CA1234567890abcdef1234567890abcdef";
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid, language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "verified-hold" })));
+    ws.emit("message", Buffer.from(JSON.stringify({
+      type: "audio", direction: "private", holdId: "verified-hold", pcm16: Buffer.alloc(320).toString("base64"),
+    })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "verified-hold" })));
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "verified-item" });
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "verified-response", sourceItemId: "verified-item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "I will be there soon.", responseId: "verified-response" });
+    privateSession.emit({ type: "turn_completed", metrics: {
+      responseId: "verified-response", sourceItemId: "verified-item", responseStatus: "completed",
+      translatedTranscript: "I will be there soon.",
+    } });
+    expect(consumeVerifiedCopilotReply("copilot-tts-verified", callSid, "verified-hold", "verified-response", "I will be there soon.")).toBe(false);
+    privateSession.emit({ type: "source_transcript", text: "Я скоро буду.", itemId: "verified-item" });
+    expect(consumeVerifiedCopilotReply("copilot-tts-verified", callSid, "verified-hold", "verified-response", "I will be there soon.")).toBe(true);
+    expect(consumeVerifiedCopilotReply("copilot-tts-verified", callSid, "verified-hold", "verified-response", "I will be there soon.")).toBe(false);
+    ws.close();
+  });
+
+  it("never registers a cancelled private reply", async () => {
+    const ws = new FakeWs(); createCopilotStream(ws as any, "copilot-tts-cancelled", async () => true);
+    const callSid = "CAabcdefabcdefabcdefabcdefabcdefab";
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "start", callSid, language: "ru", sampleRateHz: 24_000 })));
+    await tick();
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_start", holdId: "cancelled-hold" })));
+    ws.emit("message", Buffer.from(JSON.stringify({
+      type: "audio", direction: "private", holdId: "cancelled-hold", pcm16: Buffer.alloc(320).toString("base64"),
+    })));
+    ws.emit("message", Buffer.from(JSON.stringify({ type: "hold_end", holdId: "cancelled-hold" })));
+    privateSession.emit({ type: "input_committed", ts: Date.now(), itemId: "cancelled-item" });
+    privateSession.emit({ type: "response_created", ts: Date.now(), responseId: "cancelled-response", sourceItemId: "cancelled-item" });
+    privateSession.emit({ type: "translated_transcript_done", text: "Unsafe partial.", responseId: "cancelled-response" });
+    privateSession.emit({ type: "response_cancelled", ts: Date.now(), responseId: "cancelled-response", reason: "turn_detected" });
+    privateSession.emit({ type: "turn_completed", metrics: {
+      responseId: "cancelled-response", sourceItemId: "cancelled-item", responseStatus: "cancelled", cancelled: true,
+      translatedTranscript: "Unsafe partial.",
+    } });
+    privateSession.emit({ type: "source_transcript", text: "не отправлять", itemId: "cancelled-item" });
+    expect(consumeVerifiedCopilotReply("copilot-tts-cancelled", callSid, "cancelled-hold", "cancelled-response", "Unsafe partial.")).toBe(false);
     ws.close();
   });
 
