@@ -942,11 +942,9 @@ final class HomeViewController: UIViewController {
                         }
                         return
                     }
-                    if case APIError.http(429, let message) = error,
-                       message == "The Secretary daily call limit has been reached." {
-                        // The server checks for an existing request ID before
-                        // this quota response. It did not create a task, so
-                        // the provider can safely follow Settings next time.
+                    if case APIError.secretaryCooldown(let seconds) = error {
+                        // This explicit response occurs before a new task is
+                        // created. Keep ambiguous network errors idempotent.
                         var waiting = confirmed
                         waiting.requestAttempted = false
                         guard SessionStore.shared.savePendingSecretaryCall(waiting) else {
@@ -956,7 +954,8 @@ final class HomeViewController: UIViewController {
                         }
                         self.confirmedSecretaryTask = waiting
                         self.renderCallButtonIdle()
-                        self.showSecretaryError(NSLocalizedString("secretary.live.daily_limit", comment: ""))
+                        self.showSecretaryError(String(
+                            format: NSLocalizedString("secretary.live.cooldown", comment: ""), seconds))
                         return
                     }
                     self.renderCallButtonIdle()

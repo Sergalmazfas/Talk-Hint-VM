@@ -257,7 +257,7 @@
 "secretary.live.retry_safe" = "Retry safely";
 "secretary.live.safe_retry.message" = "The task response was not confirmed (%@). Retry safely to reuse the same request ID; it will not create a second call.";
 "secretary.live.safe_retry_required" = "This request may already have started a call. Retry it safely before preparing another assignment.";
-"secretary.live.daily_limit" = "The Secretary call limit has been reached. No new call was started. Wait for the 24-hour limit to clear; your current voice selection will be used next time.";
+"secretary.live.cooldown" = "No call was started. Wait %d seconds before starting a new Secretary call.";
 "secretary.live.assignment_save_failed" = "The confirmed call request could not be saved safely. No call was sent.";
 "secretary.live.connection_lost" = "Live monitoring disconnected. Audio is not being received.";
 "secretary.live.reconnecting" = "Connection lost. Reconnecting (%1$d of %2$d)…";

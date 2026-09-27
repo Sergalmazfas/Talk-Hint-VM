@@ -123,7 +123,7 @@ export type Call = typeof calls.$inferSelect;
 // dial lease: if the process loses an ambiguous Twilio create response we
 // finalize it as unknown rather than risk placing a duplicate call.
 // `finalizing` is held active while the last media-stream turns are persisted;
-// attempts is capped at two, while attemptHistory supports a rolling daily quota.
+// Scheduled tasks have bounded attempts; attemptHistory records their dial leases.
 export const secretaryTasks = pgTable("secretary_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

@@ -6,6 +6,7 @@ import { phoneNumbers } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
+import { SecretaryPreDialError } from "./dialErrors";
 import {
   cancelSecretaryTask,
   createLiveSecretaryTask,
@@ -15,6 +16,7 @@ import {
   validateSecretaryClientRequestId,
   getSecretaryTaskById,
   listSecretaryTasks,
+  markSecretaryPreDialFailed,
   retrySecretaryTask,
   startSecretaryWorker,
   toSecretaryTaskReport,
@@ -34,6 +36,13 @@ function sendError(res: Response, error: unknown, fallback: string): void {
   const message = typeof (error as any)?.message === "string" ? (error as any).message : fallback;
   if (code === "23505") {
     res.status(409).json({ error: "A Secretary call is already active, or this task cannot be started again yet." });
+    return;
+  }
+  if (code === "SECRETARY_COOLDOWN") {
+    const retryAfterSeconds = Math.max(1, Number((error as any)?.retryAfterSeconds) || 1);
+    res.set("Retry-After", String(retryAfterSeconds)).status(429).json({
+      error: message, code, retryAfterSeconds,
+    });
     return;
   }
   res.status(status >= 400 && status < 500 ? status : 503).json({ error: status ? message : fallback });
@@ -115,6 +124,15 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
           task = attached;
           publishSecretaryFeedEvent(task.id, { type: "status", status: task.status });
         } catch (error: any) {
+          if (error instanceof SecretaryPreDialError) {
+            const failed = await markSecretaryPreDialFailed(task.id);
+            if (failed) {
+              return res.status(202).json({
+                warning: "No call was placed. The Secretary calling service could not start.",
+                task: toSecretaryTaskReport(failed),
+              });
+            }
+          }
           task = await getSecretaryTaskById(task.id).catch(() => undefined) ?? task;
           return res.status(202).json({
             warning: "The live call outcome could not be confirmed. Monitor this task; it will not be dialed again automatically.",

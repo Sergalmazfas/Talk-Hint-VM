@@ -6,6 +6,7 @@ import { storage } from "../storage";
 import { resolveProductionBaseUrl } from "../baseUrl";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone, type TranslatorCloneProvider } from "../translation/cloneSpeech";
+import { SecretaryPreDialError } from "./dialErrors";
 
 export interface SecretaryDialJob {
   id: string;
@@ -28,25 +29,35 @@ export function secretaryCallbackOrigin(): string {
 }
 
 export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: string; callId: string }> {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
-  const voiceProvider: TranslatorCloneProvider = job.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
-  const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(job.userId) : getClone(job.userId));
-  requireReadyTranslatorClone(
-    voiceProvider,
-    clone,
-    voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY,
-  );
-  if (!process.env.OPENAI_API_KEY) throw new Error("Secretary conversation model is not configured");
-  const [number] = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(1);
-  if (!number) throw new Error("Assign a TalkHint phone number before starting a Secretary call");
-  const origin = secretaryCallbackOrigin();
+  let accountSid: string;
+  let authToken: string;
+  let fromNumber: string;
+  let origin: string;
+  let client: ReturnType<typeof twilio>;
+  try {
+    accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
+    authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+    if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
+    const voiceProvider: TranslatorCloneProvider = job.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
+    const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(job.userId) : getClone(job.userId));
+    requireReadyTranslatorClone(
+      voiceProvider,
+      clone,
+      voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY,
+    );
+    if (!process.env.OPENAI_API_KEY) throw new Error("Secretary conversation model is not configured");
+    const [number] = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(1);
+    if (!number) throw new Error("Assign a TalkHint phone number before starting a Secretary call");
+    fromNumber = number.twilioNumber;
+    origin = secretaryCallbackOrigin();
+    client = twilio(accountSid, authToken);
+  } catch (error: any) {
+    throw new SecretaryPreDialError(error?.message ?? "Secretary calling is unavailable");
+  }
   const params = new URLSearchParams({ taskId: job.id });
-  const client = twilio(accountSid, authToken);
   const created = await client.calls.create({
     to: job.phoneNumber,
-    from: number.twilioNumber,
+    from: fromNumber,
     url: `${origin}/twilio/secretary/voice?${params}`,
     method: "POST",
     statusCallback: `${origin}/twilio/secretary/status?${params}`,
@@ -63,7 +74,7 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
   const call = existing ?? await storage.createCall({
     userId: job.userId,
     callSid: created.sid,
-    fromNumber: number.twilioNumber,
+    fromNumber,
     toNumber: job.phoneNumber,
     direction: "outgoing",
     status: "ringing",

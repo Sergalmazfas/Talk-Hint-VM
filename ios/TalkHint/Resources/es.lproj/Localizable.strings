@@ -257,7 +257,7 @@
 "secretary.live.retry_safe" = "Reintentar de forma segura";
 "secretary.live.safe_retry.message" = "No se confirmó la respuesta de la tarea (%@). Reintenta de forma segura para reutilizar el mismo ID de solicitud; no se creará otra llamada.";
 "secretary.live.safe_retry_required" = "Es posible que esta solicitud ya haya iniciado una llamada. Reinténtala de forma segura antes de preparar otra tarea.";
-"secretary.live.daily_limit" = "Se alcanzó el límite de llamadas de Secretary. No se inició ninguna llamada nueva. Espera a que se libere el límite de 24 horas; la próxima vez se usará la voz seleccionada.";
+"secretary.live.cooldown" = "No se inició ninguna llamada. Espera %d segundos antes de iniciar otra llamada de Secretary.";
 "secretary.live.assignment_save_failed" = "No se pudo guardar de forma segura la solicitud confirmada. No se envió ninguna llamada.";
 "secretary.live.connection_lost" = "Monitorización desconectada. Ya no se recibe audio.";
 "secretary.live.reconnecting" = "Conexión perdida. Reconectando (%1$d de %2$d)…";

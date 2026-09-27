@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createSecretaryTask: vi.fn(),
   createLiveSecretaryTask: vi.fn(),
   attachSecretaryCall: vi.fn(),
+  markSecretaryPreDialFailed: vi.fn(),
   getSecretaryTaskById: vi.fn(),
   getLiveSecretaryTaskByClientRequest: vi.fn(),
   listSecretaryTasks: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock("../dialer", () => ({
 import { registerSecretaryRoutes } from "../routes";
 import { hangupSecretaryCall } from "../dialer";
 import { signSecretaryConfirmation } from "../confirmation";
+import { SecretaryPreDialError } from "../dialErrors";
 
 const task = {
   id: "task-1",
@@ -103,6 +105,7 @@ describe("Secretary owner-scoped routes", () => {
     mocks.createLiveSecretaryTask.mockResolvedValue({ task: { ...task, mode: "live", status: "starting", attempts: 1 }, created: true });
     mocks.getLiveSecretaryTaskByClientRequest.mockResolvedValue(undefined);
     mocks.attachSecretaryCall.mockResolvedValue({ ...task, mode: "live", status: "ringing", attempts: 1, callSid: "CA0123456789abcdef0123456789abcdef" });
+    mocks.markSecretaryPreDialFailed.mockResolvedValue({ ...task, mode: "live", status: "failed", attempts: 1 });
     mocks.getSecretaryTaskById.mockResolvedValue({ ...task, userId: "owner-a", mode: "live", status: "connected", callSid: "CA0123456789abcdef0123456789abcdef" });
     (hangupSecretaryCall as any).mockResolvedValue(undefined);
     mocks.listSecretaryTasks.mockResolvedValue([task]);
@@ -229,6 +232,46 @@ describe("Secretary owner-scoped routes", () => {
     expect(repeated.status).toBe(200);
     expect(repeated.body.task.status).toBe("starting");
     expect(dial).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes a confirmed pre-dial failure from an unknown Twilio result", async () => {
+    const dial = vi.fn().mockRejectedValue(new SecretaryPreDialError("No callback host"));
+    const server = express();
+    server.use(express.json());
+    registerSecretaryRoutes(server as any, { dial, notify: vi.fn() });
+    const response = await request(server).post("/api/secretary/tasks").set("x-test-user-id", "owner-a").send({
+      phoneNumber: "+19545551234",
+      instruction: "Ask about the returned deposit.",
+      live: true,
+      clientRequestId: "810f8906-4b66-4fee-9c41-2d21f41703b1",
+      confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit."),
+    });
+    expect(response.status).toBe(202);
+    expect(response.body.warning).toContain("No call was placed");
+    expect(response.body.task.status).toBe("failed");
+    expect(mocks.markSecretaryPreDialFailed).toHaveBeenCalledWith("task-1");
+    expect(dial).toHaveBeenCalledOnce();
+  });
+
+  it("sends a structured short cooldown without dialing", async () => {
+    mocks.createLiveSecretaryTask.mockRejectedValue(Object.assign(new Error("Wait briefly before starting another Secretary call."), {
+      status: 429, code: "SECRETARY_COOLDOWN", retryAfterSeconds: 2,
+    }));
+    const dial = vi.fn();
+    const server = express();
+    server.use(express.json());
+    registerSecretaryRoutes(server as any, { dial, notify: vi.fn() });
+    const response = await request(server).post("/api/secretary/tasks").set("x-test-user-id", "owner-a").send({
+      phoneNumber: "+19545551234",
+      instruction: "Ask about the returned deposit.",
+      live: true,
+      clientRequestId: "810f8906-4b66-4fee-9c41-2d21f41703b1",
+      confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit."),
+    });
+    expect(response.status).toBe(429);
+    expect(response.header["retry-after"]).toBe("2");
+    expect(response.body).toMatchObject({ code: "SECRETARY_COOLDOWN", retryAfterSeconds: 2 });
+    expect(dial).not.toHaveBeenCalled();
   });
 
   it("requires a client request UUID and reuses an existing request without dialing", async () => {

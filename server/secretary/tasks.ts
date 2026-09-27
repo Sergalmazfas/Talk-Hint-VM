@@ -1,16 +1,22 @@
-import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db, isDatabaseAvailable } from "../db";
 import { calls, secretaryTasks, users, type SecretaryTask } from "@shared/schema";
 import { publishSecretaryFeedEvent } from "./feed";
 import type { SubtitleLanguage } from "../translation/textSubtitle";
+import { SecretaryPreDialError } from "./dialErrors";
 
 export const SECRETARY_MAX_TASK_ATTEMPTS = 2;
-export const SECRETARY_MAX_USER_ATTEMPTS_PER_24H = 3;
+export const SECRETARY_MAX_QUEUED_ATTEMPTS_PER_24H = 3;
+export const SECRETARY_LIVE_COOLDOWN_MS = 3_000;
 export const SECRETARY_MAX_INSTRUCTION_CHARS = 2_000;
 export const SECRETARY_MAX_TRANSCRIPT_CHARS = 40_000;
 const TASK_START_TIMEOUT_MS = 2 * 60_000;
+// Twilio's dialer sets timeLimit: 300 seconds. Allow two more minutes for callbacks.
+const STALE_CALL_TIMEOUT_MS = 8 * 60_000;
 const REPORT_SETTLEMENT_GRACE_MS = 15_000;
+// Repeated report failures must not hold the per-owner active index forever.
+const REPORT_SETTLEMENT_TIMEOUT_MS = 4 * 60_000;
 const NOTIFICATION_LEASE_MS = 2 * 60_000;
 const MAX_QUEUE_BATCH = 3;
 const POLL_MS = 15_000;
@@ -381,7 +387,7 @@ export async function createSecretaryTask(
   return task;
 }
 
-/** Creates a durable single-use live attempt, enforcing owner concurrency and quota atomically. */
+/** Creates a durable single-use live attempt with per-owner concurrency and a brief dial cooldown. */
 export async function createLiveSecretaryTask(
   userId: string,
   data: {
@@ -425,21 +431,21 @@ export async function createLiveSecretaryTask(
       inArray(secretaryTasks.status, [...ACTIVE_STATUSES]),
     )).limit(1);
     if (active.length) throw Object.assign(new Error("A Secretary call is already active."), { status: 409 });
-    const recent = await tx.select({ attemptHistory: secretaryTasks.attemptHistory })
-      .from(secretaryTasks).where(eq(secretaryTasks.userId, userId));
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const attempts = recent.reduce((sum, row) => sum + (
-      Array.isArray(row.attemptHistory)
-        ? row.attemptHistory.filter((stamp) => {
-          const time = new Date(String(stamp)).getTime();
-          return Number.isFinite(time) && time > cutoff;
-        }).length
-        : 0
-    ), 0);
-    if (attempts >= SECRETARY_MAX_USER_ATTEMPTS_PER_24H) {
-      throw Object.assign(new Error("The Secretary daily call limit has been reached."), { status: 429 });
-    }
     const now = new Date();
+    const [recentAttempt] = await tx.select({ startedAt: secretaryTasks.dialStartedAt })
+      .from(secretaryTasks).where(and(
+        eq(secretaryTasks.userId, userId),
+        eq(secretaryTasks.mode, "live"),
+        gt(secretaryTasks.dialStartedAt, new Date(now.getTime() - SECRETARY_LIVE_COOLDOWN_MS)),
+      )).orderBy(desc(secretaryTasks.dialStartedAt)).limit(1);
+    if (recentAttempt?.startedAt) {
+      const retryAfterSeconds = Math.max(1, Math.ceil(
+        (recentAttempt.startedAt.getTime() + SECRETARY_LIVE_COOLDOWN_MS - now.getTime()) / 1_000,
+      ));
+      throw Object.assign(new Error("Wait briefly before starting another Secretary call."), {
+        status: 429, code: "SECRETARY_COOLDOWN", retryAfterSeconds,
+      });
+    }
     const [task] = await tx.insert(secretaryTasks).values({
       userId, phoneNumber, instruction, voiceProvider, mode: "live", status: "starting",
       clientRequestId, translationLanguage,
@@ -461,6 +467,25 @@ export async function createLiveSecretaryTask(
     }
     return { task: existing, created: false };
   }
+}
+
+/** A verified preflight failure happened before any Twilio create request. */
+export async function markSecretaryPreDialFailed(taskId: string): Promise<SecretaryTask | undefined> {
+  const [task] = await db.update(secretaryTasks).set({
+    status: "failed",
+    outcome: "failed",
+    summary: "The call could not be started. No phone call was placed.",
+    verifiedFacts: [],
+    nextStep: "Check the service configuration before starting a new call.",
+    notificationStatus: "pending",
+    updatedAt: new Date(),
+  }).where(and(
+    eq(secretaryTasks.id, taskId),
+    eq(secretaryTasks.status, "starting"),
+    isNull(secretaryTasks.callSid),
+  )).returning();
+  if (task) publishSecretaryFeedEvent(taskId, { type: "status", status: task.status });
+  return task;
 }
 
 export function validateSecretaryClientRequestId(value: unknown): string {
@@ -837,8 +862,9 @@ export function mapTwilioSecretaryStatus(status: string): string | null {
     case "busy":
       return "busy";
     case "failed":
-    case "canceled":
       return "failed";
+    case "canceled":
+      return "cancelled";
     default:
       return null;
   }
@@ -977,16 +1003,17 @@ export async function finishSecretaryAttempt(
   });
 }
 
-async function claimNextSecretaryTask(): Promise<SecretaryTask | undefined> {
+export async function claimNextSecretaryTask(userId?: string): Promise<SecretaryTask | undefined> {
   if (!isSecretaryCallingWindow(new Date())) return undefined;
   // Atomic claim across all server instances. The partial unique index guards
-  // a second live task for the same owner; attemptHistory enforces the rolling
-  // 24-hour user budget inside the same statement as the lease.
+  // a second task for the same owner. The scheduled queue retains its own
+  // rolling budget; manual live calls do not consume it.
   const result = await db.execute(sql`
     WITH candidate AS (
       SELECT t.id, t.user_id
       FROM secretary_tasks t
       WHERE t.status = 'queued'
+         ${userId ? sql`AND t.user_id = ${userId}` : sql``}
         AND t.attempts < ${SECRETARY_MAX_TASK_ATTEMPTS}
         AND NOT EXISTS (
           SELECT 1 FROM secretary_tasks active
@@ -998,8 +1025,9 @@ async function claimNextSecretaryTask(): Promise<SecretaryTask | undefined> {
           FROM secretary_tasks prior
           CROSS JOIN LATERAL jsonb_array_elements_text(prior.attempt_history) attempt(at)
           WHERE prior.user_id = t.user_id
+            AND prior.mode = 'queued'
             AND attempt.at::timestamptz > now() - interval '24 hours'
-        ) < ${SECRETARY_MAX_USER_ATTEMPTS_PER_24H}
+        ) < ${SECRETARY_MAX_QUEUED_ATTEMPTS_PER_24H}
       ORDER BY t.created_at ASC
       FOR UPDATE OF t SKIP LOCKED
       LIMIT 1
@@ -1018,7 +1046,7 @@ async function claimNextSecretaryTask(): Promise<SecretaryTask | undefined> {
   return rows[0];
 }
 
-async function expireAmbiguousSecretaryStarts(): Promise<number> {
+export async function expireAmbiguousSecretaryStarts(userId?: string): Promise<number> {
   const stale = await db.update(secretaryTasks).set({
     status: "unknown",
     outcome: "unknown",
@@ -1030,10 +1058,55 @@ async function expireAmbiguousSecretaryStarts(): Promise<number> {
   }).where(and(
     eq(secretaryTasks.status, "starting"),
     lt(secretaryTasks.dialStartedAt, new Date(Date.now() - TASK_START_TIMEOUT_MS)),
+    userId ? eq(secretaryTasks.userId, userId) : undefined,
   )).returning({ id: secretaryTasks.id, status: secretaryTasks.status });
   for (const task of stale) {
     publishSecretaryFeedEvent(task.id, { type: "status", status: task.status });
   }
+  return stale.length;
+}
+
+/** A lost terminal webhook must not hold an owner forever after Twilio's 5-minute cap. */
+export async function expireStaleSecretaryCalls(userId?: string): Promise<number> {
+  const stale = await db.update(secretaryTasks).set({
+    status: "unknown",
+    outcome: "unknown",
+    summary: "The server did not receive the call's final status.",
+    verifiedFacts: [],
+    nextStep: "Check call history before starting another call.",
+    notificationStatus: "pending",
+    updatedAt: new Date(),
+  }).where(and(
+    inArray(secretaryTasks.status, ["ringing", "connected"]),
+    lt(secretaryTasks.dialStartedAt, new Date(Date.now() - STALE_CALL_TIMEOUT_MS)),
+    userId ? eq(secretaryTasks.userId, userId) : undefined,
+  )).returning({ id: secretaryTasks.id, status: secretaryTasks.status });
+  for (const task of stale) publishSecretaryFeedEvent(task.id, { type: "status", status: task.status });
+  return stale.length;
+}
+
+/** Fail closed if report generation cannot finish: keep the transcript, release only the active lease. */
+export async function expireStaleSecretaryFinalizations(userId?: string): Promise<number> {
+  const cutoff = new Date(Date.now() - REPORT_SETTLEMENT_TIMEOUT_MS);
+  const stale = await db.update(secretaryTasks).set({
+    status: "unknown",
+    outcome: "unknown",
+    summary: "The call ended, but its report could not be finalized.",
+    verifiedFacts: [],
+    nextStep: "Review the transcript and call history before starting another call.",
+    finalizationDeadlineAt: null,
+    finalizationClaimedAt: null,
+    notificationStatus: "pending",
+    updatedAt: new Date(),
+  }).where(and(
+    eq(secretaryTasks.status, "finalizing"),
+    or(
+      lt(secretaryTasks.finalizationDeadlineAt, cutoff),
+      and(isNull(secretaryTasks.finalizationDeadlineAt), lt(secretaryTasks.updatedAt, cutoff)),
+    ),
+    userId ? eq(secretaryTasks.userId, userId) : undefined,
+  )).returning({ id: secretaryTasks.id, status: secretaryTasks.status });
+  for (const task of stale) publishSecretaryFeedEvent(task.id, { type: "status", status: task.status });
   return stale.length;
 }
 
@@ -1111,7 +1184,9 @@ export async function processSecretaryTasks(
 ): Promise<{ dialed: number; finalized: number; notified: number }> {
   if (!isDatabaseAvailable()) return { dialed: 0, finalized: 0, notified: 0 };
   await expireAmbiguousSecretaryStarts();
+  await expireStaleSecretaryCalls();
   const finalized = await settleReadySecretaryReports(logger);
+  await expireStaleSecretaryFinalizations();
   let dialed = 0;
   for (let i = 0; i < MAX_QUEUE_BATCH; i++) {
     if (!isSecretaryCallingWindow(new Date())) break;
@@ -1132,6 +1207,10 @@ export async function processSecretaryTasks(
       }
       dialed++;
     } catch (error: any) {
+      if (error instanceof SecretaryPreDialError) {
+        const failed = await markSecretaryPreDialFailed(claimed.id);
+        if (failed) continue;
+      }
       logger(`[Secretary] Dial outcome is ambiguous for task ${claimed.id}; suppressing retry: ${error?.message ?? error}`);
       // Intentionally leave the durable `starting` lease in place for the
       // watchdog to transition to unknown and report to the user.

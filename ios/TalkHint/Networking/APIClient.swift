@@ -3,6 +3,7 @@ import UIKit
 
 enum APIError: LocalizedError {
     case http(Int, String)
+    case secretaryCooldown(Int)
     case decoding
     case notAuthenticated
 
@@ -10,6 +11,8 @@ enum APIError: LocalizedError {
         switch self {
         case .http(let code, let message):
             return "Server error \(code): \(message)"
+        case .secretaryCooldown(let seconds):
+            return "Wait \(seconds) seconds before starting another Secretary call."
         case .decoding:
             return "Unexpected server response."
         case .notAuthenticated:
@@ -866,6 +869,10 @@ final class APIClient {
         guard (200..<300).contains(http.statusCode) else {
             var message = ""
             if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if path == "/api/secretary/tasks", http.statusCode == 429,
+                   obj["code"] as? String == "SECRETARY_COOLDOWN" {
+                    throw APIError.secretaryCooldown(max(1, obj["retryAfterSeconds"] as? Int ?? 1))
+                }
                 message = (obj["error"] as? String) ?? ""
             }
             throw APIError.http(http.statusCode, message)
