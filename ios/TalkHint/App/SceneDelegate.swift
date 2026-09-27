@@ -7,11 +7,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene,
               willConnectTo session: UISceneSession,
               options connectionOptions: UIScene.ConnectionOptions) {
+        print("[SceneDelegate] willConnectTo")
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
         self.window = window
-        showRoot(loggedIn: SessionStore.shared.isLoggedIn)
+        let loggedIn = SessionStore.shared.isLoggedIn
+        print("[SceneDelegate] preparing \(loggedIn ? "main tabs" : "login")")
+        showRoot(loggedIn: loggedIn)
+        print("[SceneDelegate] root controller ready")
         window.makeKeyAndVisible()
+        print("[SceneDelegate] window visible")
 
         if let response = connectionOptions.notificationResponse {
             let payload = response.notification.request.content.userInfo
@@ -30,6 +35,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
+        print("[SceneDelegate] active")
         _ = SecretaryNotificationRouter.openPendingIfPossible()
     }
 

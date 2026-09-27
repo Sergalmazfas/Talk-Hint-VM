@@ -60,7 +60,10 @@ final class CallManager: NSObject {
     private var inCallScreen: InCallViewController?
     private var translatorScreen: TranslatorViewController?
     private var copilotCoordinator: CopilotCallCoordinator?
-    private var disconnectingCalls: Set<UUID> = []
+    // Keep the Twilio Call alive until its terminal delegate callback. If the
+    // session releases its last reference immediately after disconnect(), the
+    // SDK can deallocate on the main thread while its media thread is stopping.
+    private var disconnectingCalls: [UUID: Call] = [:]
 
     private override init() {
         let config = CXProviderConfiguration()
@@ -346,14 +349,18 @@ final class CallManager: NSObject {
 extension CallManager: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
         for session in sessions.values {
-            session.twilioCall?.disconnect()
+            if let call = session.twilioCall {
+                disconnectingCalls[session.uuid] = call
+                call.disconnect()
+            }
             if session.isOutgoing {
                 postOutgoingCallState(.failed, uuid: session.uuid)
             }
         }
         sessions.removeAll()
         answerActions.removeAll()
-        disconnectingCalls.removeAll()
+        // The SDK may still be finishing disconnect. Terminal callbacks release
+        // these references even though CallKit has reset its own sessions.
         audioDevice.isEnabled = false
         tearDownInCallScreen()
     }
@@ -460,7 +467,7 @@ extension CallManager: CXProviderDelegate {
 
         if let call = session.twilioCall {
             // Active call (incoming or outgoing) -> hang up the Twilio leg.
-            if let uuid = call.uuid { disconnectingCalls.insert(uuid) }
+            disconnectingCalls[action.callUUID] = call
             call.disconnect()
         } else if !session.answered, !session.isOutgoing, let callSid = session.callSid {
             // User declined an incoming call before answering -> reject on the backend.
@@ -509,7 +516,7 @@ extension CallManager: CallDelegate {
 
     func callDidFailToConnect(call: Call, error: Error) {
         guard let uuid = call.uuid else { return }
-        disconnectingCalls.remove(uuid)
+        disconnectingCalls.removeValue(forKey: uuid)
         answerActions[uuid]?.fail()
         answerActions[uuid] = nil
         provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
@@ -521,7 +528,7 @@ extension CallManager: CallDelegate {
 
     func callDidDisconnect(call: Call, error: Error?) {
         guard let uuid = call.uuid else { return }
-        disconnectingCalls.remove(uuid)
+        disconnectingCalls.removeValue(forKey: uuid)
         let reason: CXCallEndedReason = (error == nil) ? .remoteEnded : .failed
         provider.reportCall(with: uuid, endedAt: Date(), reason: reason)
         if sessions[uuid]?.isOutgoing == true {

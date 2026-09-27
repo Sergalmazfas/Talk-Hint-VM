@@ -4,13 +4,17 @@ import UIKit
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        print("[AppDelegate] launch started")
         // Initialize CallKit before any push can arrive.
         _ = CallManager.shared
+        print("[AppDelegate] CallKit ready")
         // Start PushKit so VoIP pushes are handled even when launched in background.
         PushManager.shared.start()
+        print("[AppDelegate] PushKit ready")
         // Standard APNs alerts are used for completed Secretary tasks. The
         // manager does not request permission here; Secretary asks in context.
         SecretaryAlertManager.shared.start()
+        print("[AppDelegate] launch finished")
         return true
     }
 
