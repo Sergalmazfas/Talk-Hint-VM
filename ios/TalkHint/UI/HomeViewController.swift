@@ -685,7 +685,7 @@ final class HomeViewController: UIViewController {
     }
 
     private func updateSecretaryLanguageButton() {
-        let code = SessionStore.shared.language
+        let code = SessionStore.shared.secretaryTranslationLanguage
         let key = code == "es" ? "copilot.language.es" : "copilot.language.ru"
         let name = NSLocalizedString(key, comment: "")
         secretaryLanguageButton.setTitle(
@@ -703,7 +703,7 @@ final class HomeViewController: UIViewController {
         for language in ["ru", "es"] {
             let key = language == "es" ? "copilot.language.es" : "copilot.language.ru"
             sheet.addAction(UIAlertAction(title: NSLocalizedString(key, comment: ""), style: .default) { [weak self] _ in
-                SessionStore.shared.language = language
+                SessionStore.shared.secretaryTranslationLanguage = language
                 self?.updateSecretaryLanguageButton()
             })
         }
@@ -911,7 +911,7 @@ final class HomeViewController: UIViewController {
                     voiceProvider: confirmed.voiceProvider,
                     live: true,
                     clientRequestId: confirmed.clientRequestId,
-                    translationLanguage: SessionStore.shared.language)
+                    translationLanguage: SessionStore.shared.secretaryTranslationLanguage)
                 await MainActor.run {
                     self.isCreatingSecretaryTask = false
                     guard task.mode?.lowercased() == "live" else {

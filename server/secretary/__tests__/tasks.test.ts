@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   archiveSecretaryAttempt,
+  beginSecretarySubtitleTranslation,
   canMarkSecretaryStreamFailure,
   canRetrySecretaryTask,
   isSecretaryReportReady,
   containsForbiddenSecretarySecret,
   isSecretaryCallingWindow,
   isSecretaryTaskReportTerminal,
+  endSecretarySubtitleTranslation,
   mapTwilioSecretaryStatus,
   secretaryStreamFailureFields,
   validateSecretaryInstruction,
@@ -14,6 +16,7 @@ import {
   validateSecretaryTranslationLanguage,
   validateSecretaryReport,
   toSecretaryTaskReport,
+  pendingSecretarySubtitleTaskIds,
 } from "../tasks";
 
 describe("Secretary task safety and reporting", () => {
@@ -29,7 +32,7 @@ describe("Secretary task safety and reporting", () => {
       summary: null,
       verifiedFacts: [],
       nextStep: null,
-      transcript: "",
+      transcript: "Other party: hello",
       transcriptTurns: [{ id: "turn-1", role: "guest", text: "hello", translation: "hola", language: "es" }],
       translationLanguage: "es",
       callSid: null,
@@ -39,6 +42,7 @@ describe("Secretary task safety and reporting", () => {
     } as any);
     expect(report.clientRequestId).toBe("810f8906-4b66-4fee-9c41-2d21f41703b1");
     expect(report).toMatchObject({
+      transcript: "Other party: hello",
       transcriptTurns: [{ id: "turn-1", translation: "hola", language: "es" }],
       translationLanguage: "es",
     });
@@ -49,6 +53,17 @@ describe("Secretary task safety and reporting", () => {
     expect(validateSecretaryTranslationLanguage("ru")).toBe("ru");
     expect(validateSecretaryTranslationLanguage("es")).toBe("es");
     expect(() => validateSecretaryTranslationLanguage("fr")).toThrow();
+  });
+
+  it("tracks pending delayed subtitles until the final translation attempt settles", () => {
+    expect(pendingSecretarySubtitleTaskIds()).not.toContain("task-report");
+    beginSecretarySubtitleTranslation("task-report");
+    beginSecretarySubtitleTranslation("task-report");
+    expect(pendingSecretarySubtitleTaskIds()).toContain("task-report");
+    endSecretarySubtitleTranslation("task-report");
+    expect(pendingSecretarySubtitleTaskIds()).toContain("task-report");
+    endSecretarySubtitleTranslation("task-report");
+    expect(pendingSecretarySubtitleTaskIds()).not.toContain("task-report");
   });
 
   it("accepts a standard US number and rejects restricted/non-US destinations", () => {

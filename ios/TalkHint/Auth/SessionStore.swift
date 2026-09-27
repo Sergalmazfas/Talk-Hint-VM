@@ -28,6 +28,7 @@ final class SessionStore {
     private let activeNumberIdKey = "talkhint.active.number.id"
     private let activeModeKey = "talkhint.assistant.mode"
     private let languageKey = "talkhint.assistant.language"
+    private let secretaryTranslationLanguageKey = "talkhint.secretary.translation.language"
     private let copilotLanguageKey = "talkhint.copilot.language"
     private let callModeKey = "talkhint.user.call.mode"
     private let callGoalKey = "talkhint.assistant.goal"
@@ -110,6 +111,27 @@ final class SessionStore {
     var language: String {
         get { UserDefaults.standard.string(forKey: languageKey) ?? "ru" }
         set { UserDefaults.standard.set(newValue, forKey: languageKey) }
+    }
+
+    /// Subtitle target language for Secretary calls. Kept separate from Hint's
+    /// existing language setting so Secretary defaults and selections cannot
+    /// change Hint behavior.
+    var secretaryTranslationLanguage: String {
+        get {
+            if let stored = UserDefaults.standard.string(forKey: secretaryTranslationLanguageKey),
+               ["ru", "es"].contains(stored) {
+                return stored
+            }
+            let appLanguage = Bundle.main.preferredLocalizations.first
+                ?? Locale.preferredLanguages.first
+                ?? "ru"
+            let code = appLanguage.lowercased()
+            return code.hasPrefix("es") ? "es" : "ru"
+        }
+        set {
+            UserDefaults.standard.set(newValue == "es" ? "es" : "ru",
+                                      forKey: secretaryTranslationLanguageKey)
+        }
     }
 
     /// Copilot's owner-facing translation language. Kept separate from the
@@ -211,6 +233,7 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: activeNumberIdKey)
         UserDefaults.standard.removeObject(forKey: activeModeKey)
         UserDefaults.standard.removeObject(forKey: languageKey)
+        UserDefaults.standard.removeObject(forKey: secretaryTranslationLanguageKey)
         UserDefaults.standard.removeObject(forKey: copilotLanguageKey)
         UserDefaults.standard.removeObject(forKey: callModeKey)
         UserDefaults.standard.removeObject(forKey: callGoalKey)

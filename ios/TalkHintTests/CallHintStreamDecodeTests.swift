@@ -20,8 +20,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"guest_transcript","text":"Hello there","translation":"Privet","confidence":0.92,"isFinal":true}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .guestTranscript(text: "Hello there", translation: "Privet", turnId: nil, callSid: nil,
-                             confidence: 0.92, isFinal: true)
+            .guestTranscript(text: "Hello there", translation: "Privet", confidence: 0.92, isFinal: true)
         )
     }
 
@@ -29,8 +28,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"guest_transcript","text":"Hel"}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .guestTranscript(text: "Hel", translation: nil, turnId: nil, callSid: nil,
-                             confidence: nil, isFinal: false)
+            .guestTranscript(text: "Hel", translation: nil, confidence: nil, isFinal: false)
         )
     }
 
@@ -38,8 +36,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"guest_transcript","text":"Hi","translation":"","isFinal":false}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .guestTranscript(text: "Hi", translation: nil, turnId: nil, callSid: nil,
-                             confidence: nil, isFinal: false)
+            .guestTranscript(text: "Hi", translation: nil, confidence: nil, isFinal: false)
         )
     }
 
@@ -59,8 +56,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"owner_transcript","text":"I would like to book","confidence":0.92,"isFinal":true}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .ownerTranscript(text: "I would like to book", turnId: nil, callSid: nil,
-                             confidence: 0.92, isFinal: true)
+            .ownerTranscript(text: "I would like to book", confidence: 0.92, isFinal: true)
         )
     }
 
@@ -68,7 +64,7 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"owner_transcript","text":"so"}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .ownerTranscript(text: "so", turnId: nil, callSid: nil, confidence: nil, isFinal: false)
+            .ownerTranscript(text: "so", confidence: nil, isFinal: false)
         )
     }
 
@@ -76,55 +72,13 @@ final class CallHintStreamDecodeTests: XCTestCase {
         let json = #"{"type":"owner_transcript","text":"hello","confidence":1,"isFinal":true}"#
         XCTAssertEqual(
             CallHintStream.decode(json),
-            .ownerTranscript(text: "hello", turnId: nil, callSid: nil, confidence: 1.0, isFinal: true)
+            .ownerTranscript(text: "hello", confidence: 1.0, isFinal: true)
         )
     }
 
     func testOwnerTranscriptEmptyTextIsRejected() {
         let json = #"{"type":"owner_transcript","text":"","confidence":0.9}"#
         XCTAssertNil(CallHintStream.decode(json))
-    }
-
-    func testOwnerTranscriptAndDelayedTranslationCarryTurnID() {
-        // Fixture mirrors the media worker: it sends a numeric turnId/utteranceId
-        // plus callSid on the original owner frame.
-        let transcript = #"{"type":"owner_transcript","text":"I am on my way","isFinal":true,"isComplete":true,"confidence":0.94,"utteranceId":8741,"turnId":8741,"callSid":"CA-current"}"#
-        XCTAssertEqual(
-            CallHintStream.decode(transcript),
-            .ownerTranscript(text: "I am on my way", turnId: "8741", callSid: "CA-current",
-                             confidence: 0.94, isFinal: true))
-        let stringIDTranscript = #"{"type":"owner_transcript","text":"I am on my way","turnId":"8741","callSid":"CA-current","isFinal":true}"#
-        XCTAssertEqual(
-            CallHintStream.decode(stringIDTranscript),
-            .ownerTranscript(text: "I am on my way", turnId: "8741", callSid: "CA-current",
-                             confidence: nil, isFinal: true))
-
-        let translation = #"{"type":"owner_translation","turnId":8741,"translation":"Я уже еду","language":"ru","callSid":"CA-current"}"#
-        XCTAssertEqual(
-            CallHintStream.decode(translation),
-            .ownerTranslation(turnId: "8741", translation: "Я уже еду", language: "ru", callSid: "CA-current"))
-
-        let stringIDTranslation = #"{"type":"owner_translation","turnId":"8741","translation":"Я уже еду","language":"ru","callSid":"CA-current"}"#
-        XCTAssertEqual(
-            CallHintStream.decode(stringIDTranslation),
-            .ownerTranslation(turnId: "8741", translation: "Я уже еду", language: "ru", callSid: "CA-current"))
-        XCTAssertNil(CallHintStream.decode(
-            #"{"type":"owner_translation","turnId":8741,"translation":"Я уже еду","language":"ru"}"#),
-            "without callSid a delayed subtitle cannot be safely scoped to this call")
-    }
-
-    func testGuestTranscriptAndOptionalDelayedTranslationCarryCallScope() {
-        let transcript = #"{"type":"guest_transcript","text":"Can you call tomorrow?","translation":"","isFinal":true,"utteranceId":79,"callSid":"CA-current"}"#
-        XCTAssertEqual(
-            CallHintStream.decode(transcript),
-            .guestTranscript(text: "Can you call tomorrow?", translation: nil, turnId: "79", callSid: "CA-current",
-                             confidence: nil, isFinal: true))
-
-        let translation = #"{"type":"guest_translation","turnId":"79","translation":"Можете позвонить завтра?","language":"ru","callSid":"CA-current"}"#
-        XCTAssertEqual(
-            CallHintStream.decode(translation),
-            .guestTranslation(turnId: "79", translation: "Можете позвонить завтра?", language: "ru",
-                              callSid: "CA-current"))
     }
 
     // MARK: suggestion

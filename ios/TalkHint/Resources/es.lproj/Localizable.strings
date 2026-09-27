@@ -374,6 +374,7 @@
 "copilot.language.es" = "Español";
 "translation.language.title" = "Idioma de los subtítulos";
 "translation.language.selected" = "Traducción: %@";
+"secretary.live.subtitle_unavailable" = "Traducción no disponible";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Traductor";

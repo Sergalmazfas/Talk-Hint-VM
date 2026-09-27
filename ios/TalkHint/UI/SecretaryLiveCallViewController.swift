@@ -80,7 +80,7 @@ final class SecretaryLiveCallViewController: UIViewController {
         translationLanguageLabel.textColor = .secondaryLabel
         translationLanguageLabel.textAlignment = .center
         translationLanguageLabel.accessibilityIdentifier = "text-secretary-translation-language"
-        updateTranslationLanguageLabel(task.translationLanguage ?? SessionStore.shared.language)
+        updateTranslationLanguageLabel(task.translationLanguage ?? SessionStore.shared.secretaryTranslationLanguage)
 
         retryButton.setTitle(NSLocalizedString("secretary.live.retry", comment: ""), for: .normal)
         retryButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -264,6 +264,10 @@ final class SecretaryLiveCallViewController: UIViewController {
                   let translation = message["translation"] as? String,
                   !translation.isEmpty else { return }
             turnCardsByID[turnId]?.updateTranslation(translation)
+        case "subtitle_unavailable":
+            guard let turnId = message["turnId"] as? String else { return }
+            turnCardsByID[turnId]?.updateTranslation(
+                NSLocalizedString("secretary.live.subtitle_unavailable", comment: ""))
         case "audio":
             guard let role = message["role"] as? String,
                   let payload = message["payload"] as? String,
@@ -305,7 +309,7 @@ final class SecretaryLiveCallViewController: UIViewController {
         if let language = snapshot["translationLanguage"] as? String {
             updateTranslationLanguageLabel(language)
         }
-        if let turns = snapshot["transcriptTurns"] as? [[String: Any]] {
+        if let turns = snapshot["transcriptTurns"] as? [[String: Any]], !turns.isEmpty {
             for turn in turns {
                 guard let id = turn["id"] as? String,
                       let role = turn["role"] as? String,

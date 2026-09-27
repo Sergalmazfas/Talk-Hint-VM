@@ -8,7 +8,6 @@ import AVFoundation
 final class InCallViewController: UIViewController {
 
     private let callerName: String
-    private let callSid: String
     private let stream = CallHintStream()
 
     /// Test seam: the live hint stream that the "Reconnect" button drives via
@@ -36,20 +35,14 @@ final class InCallViewController: UIViewController {
 
     private let routeButton = UIButton(type: .system)
     private let muteButton = UIButton(type: .system)
-    private let translationLanguageButton = UIButton(type: .system)
     private let routeCaption = UILabel()
     private let muteCaption = UILabel()
-    private let translationLanguageCaption = UILabel()
 
     // Live (non-finalized) transcript card per speaker, kept independently —
     // like `interimMessages['guest']` / `interimMessages['you']` in the web.
     // Each is finalized only by its own `isFinal: true`.
     private var currentCallerCard: FeedCard?
     private var currentYouCard: FeedCard?
-    private var guestCardsByTurnID: [String: FeedCard] = [:]
-    private var guestCardTurnOrder: [String] = []
-    private var ownerCardsByTurnID: [String: FeedCard] = [:]
-    private var ownerCardTurnOrder: [String] = []
 
     // True when the stream stopped because the user is signed out. In this state
     // the retry button acts as a "Sign in" affordance (presenting the login
@@ -62,9 +55,8 @@ final class InCallViewController: UIViewController {
     // reconnect would duplicate the "GOAL" card in the conversation history.
     private var lastGoalShownInFeed: String?
 
-    init(callerName: String, callSid: String) {
+    init(callerName: String) {
         self.callerName = callerName
-        self.callSid = callSid
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -526,24 +518,13 @@ final class InCallViewController: UIViewController {
         routeCaption.minimumScaleFactor = 0.7
         updateRouteButton()
 
-        configureCircleButton(translationLanguageButton, diameter: 44)
-        translationLanguageButton.setImage(UIImage(systemName: "globe"), for: .normal)
-        translationLanguageButton.tintColor = Theme.greenDark
-        translationLanguageButton.accessibilityIdentifier = "button-translation-language"
-        translationLanguageButton.addTarget(self, action: #selector(translationLanguageTapped), for: .touchUpInside)
-        translationLanguageCaption.font = .systemFont(ofSize: 10)
-        translationLanguageCaption.textColor = Theme.sub
-        translationLanguageCaption.textAlignment = .center
-        updateTranslationLanguageControl()
-
         let mute = circleControl(button: muteButton, caption: muteCaption)
         let end = circleControl(button: endButton, caption: endCaption)
         let route = circleControl(button: routeButton, caption: routeCaption)
-        let translationLanguage = circleControl(button: translationLanguageButton, caption: translationLanguageCaption)
 
-        let row = UIStackView(arrangedSubviews: [mute, end, route, translationLanguage])
+        let row = UIStackView(arrangedSubviews: [mute, end, route])
         row.axis = .horizontal
-        row.spacing = 8
+        row.spacing = 12
         row.distribution = .fillEqually
         row.alignment = .bottom
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -603,38 +584,6 @@ final class InCallViewController: UIViewController {
         // Active speaker reads as "selected": green surface + green icon.
         routeButton.backgroundColor = isSpeakerRouteActive ? Theme.greenBg : Theme.fill
         routeButton.tintColor = isSpeakerRouteActive ? Theme.greenDark : Theme.ink
-    }
-
-    private func updateTranslationLanguageControl() {
-        let code = SessionStore.shared.language == "es" ? "es" : "ru"
-        let key = code == "es" ? "copilot.language.es" : "copilot.language.ru"
-        let title = NSLocalizedString(key, comment: "")
-        translationLanguageCaption.text = title
-        translationLanguageButton.accessibilityLabel = NSLocalizedString(
-            "translation.language.selected", comment: "")
-            .replacingOccurrences(of: "%@", with: title)
-    }
-
-    @objc private func translationLanguageTapped() {
-        let sheet = UIAlertController(
-            title: NSLocalizedString("translation.language.title", comment: ""),
-            message: nil,
-            preferredStyle: .actionSheet)
-        for language in ["ru", "es"] {
-            let key = language == "es" ? "copilot.language.es" : "copilot.language.ru"
-            sheet.addAction(UIAlertAction(title: NSLocalizedString(key, comment: ""), style: .default) { [weak self] _ in
-                guard let self else { return }
-                SessionStore.shared.language = language
-                self.stream.setLanguage(language)
-                self.updateTranslationLanguageControl()
-            })
-        }
-        sheet.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
-        if let popover = sheet.popoverPresentationController {
-            popover.sourceView = translationLanguageButton
-            popover.sourceRect = translationLanguageButton.bounds
-        }
-        present(sheet, animated: true)
     }
 
     /// External (non-built-in) input ports the user can explicitly select as a
@@ -896,11 +845,6 @@ final class InCallViewController: UIViewController {
             }
         }
 
-        func updateTranslation(_ translation: String) {
-            secondaryLabel.text = translation
-            secondaryLabel.isHidden = translation.isEmpty
-        }
-
         /// Dim interim text (matches the web's 0.7 opacity); full opacity on final.
         func setInterim(_ interim: Bool) {
             view.alpha = interim ? 0.7 : 1.0
@@ -966,20 +910,17 @@ final class InCallViewController: UIViewController {
     /// Update the speaker's live card in place for interim results, or create a
     /// new one if none is open. On `isFinal` the card is frozen and its slot is
     /// cleared so the next utterance starts a fresh card.
-    @discardableResult
     private func upsertTranscript(card: inout FeedCard?,
                                   title: String,
                                   titleColor: UIColor,
                                   primary: String,
                                   secondary: String?,
                                   testIdSuffix: String,
-                                  isFinal: Bool) -> FeedCard? {
-        let renderedCard: FeedCard
+                                  isFinal: Bool) {
         if let existing = card {
             existing.update(primary: primary, secondary: secondary)
             existing.setInterim(!isFinal)
             scrollToBottom()
-            renderedCard = existing
         } else {
             let new = appendCard(title: title, titleColor: titleColor,
                                  primary: primary, secondary: secondary,
@@ -987,12 +928,10 @@ final class InCallViewController: UIViewController {
                                  testIdSuffix: testIdSuffix)
             new.setInterim(!isFinal)
             card = new
-            renderedCard = new
         }
         if isFinal {
             card = nil
         }
-        return renderedCard
     }
 
     /// Show or replace the pinned suggestion banner with the latest suggestion.
@@ -1057,50 +996,28 @@ final class InCallViewController: UIViewController {
 extension InCallViewController: CallHintStreamDelegate {
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent) {
         switch event {
-        case .guestTranscript(let text, let translation, let turnId, let eventCallSid, let confidence, let isFinal):
-            guard eventCallSid == nil || eventCallSid == callSid else { return }
+        case .guestTranscript(let text, let translation, let confidence, let isFinal):
             // Drop obviously garbled finals so noisy STT never hits the CALLER
             // line, matching the web UI's `isGarbageSTT` guard. Interim text
             // still updates in place.
             if isFinal && isGarbageSTT(text, confidence: confidence) {
                 return
             }
-            let rendered = upsertTranscript(card: &currentCallerCard,
+            upsertTranscript(card: &currentCallerCard,
                              title: NSLocalizedString("incall.card.caller", comment: ""), titleColor: Theme.greenDark,
                              primary: text, secondary: translation,
                              testIdSuffix: "guest", isFinal: isFinal)
-            if let turnId, let rendered, eventCallSid == callSid {
-                guestCardsByTurnID[turnId] = rendered
-                if !guestCardTurnOrder.contains(turnId) { guestCardTurnOrder.append(turnId) }
-                while guestCardTurnOrder.count > 120 {
-                    guestCardsByTurnID.removeValue(forKey: guestCardTurnOrder.removeFirst())
-                }
-            }
-        case .ownerTranscript(let text, let turnId, let eventCallSid, let confidence, let isFinal):
-            guard eventCallSid == nil || eventCallSid == callSid else { return }
+        case .ownerTranscript(let text, let confidence, let isFinal):
             // Drop obviously garbled finals so noisy STT never hits the YOU line,
             // matching the web UI's `isGarbageSTT` guard. Interim text still
             // updates in place.
             if isFinal && isGarbageSTT(text, confidence: confidence) {
                 return
             }
-            let rendered = upsertTranscript(card: &currentYouCard,
+            upsertTranscript(card: &currentYouCard,
                              title: NSLocalizedString("incall.card.you", comment: ""), titleColor: Theme.sub,
                              primary: text, secondary: nil,
                              testIdSuffix: "owner", isFinal: isFinal)
-            if let turnId, let rendered, eventCallSid == callSid {
-                ownerCardsByTurnID[turnId] = rendered
-                if !ownerCardTurnOrder.contains(turnId) { ownerCardTurnOrder.append(turnId) }
-                while ownerCardTurnOrder.count > 120 {
-                    ownerCardsByTurnID.removeValue(forKey: ownerCardTurnOrder.removeFirst())
-                }
-            }
-        case .ownerTranslation(let turnId, let translation, _, let eventCallSid):
-            guard eventCallSid == callSid else { return }
-            ownerCardsByTurnID[turnId]?.updateTranslation(translation)
-        case .guestTranslation(let turnId, let translation, _, let eventCallSid):
-            guard eventCallSid == callSid else { return }
-            guestCardsByTurnID[turnId]?.updateTranslation(translation)
         case .suggestion(let en, let translation, let options):
             showSuggestion(en: en, translation: translation, options: options)
         case .fastPhrase(let text, let translation):

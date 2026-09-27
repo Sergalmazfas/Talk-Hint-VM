@@ -374,6 +374,7 @@
 "copilot.language.es" = "Español";
 "translation.language.title" = "Субтитр тілі";
 "translation.language.selected" = "Аударма: %@";
+"secretary.live.subtitle_unavailable" = "Аударма қолжетімсіз";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Аудармашы";

@@ -296,8 +296,7 @@ final class CallManager: NSObject {
                                 onEnd: { [weak self] in self?.endCall() })
             return
         }
-        guard let callSid = session.callSid ?? twilioCallSid else { return }
-        let screen = InCallViewController(callerName: session.remoteLabel, callSid: callSid)
+        let screen = InCallViewController(callerName: session.remoteLabel)
         inCallScreen = screen
         top.present(screen, animated: true)
     }

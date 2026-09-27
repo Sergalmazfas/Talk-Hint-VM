@@ -47,16 +47,18 @@ import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
 import { createCopilotStream } from "./copilotStream";
 import { handleSecretaryTwilioStream } from "./secretary/agent";
-import { appendSecretaryTurn, getSecretaryTaskById, getSecretaryTaskForCall, markSecretaryStreamEnded, markSecretaryStreamFailed, persistSecretaryTurnTranslation, toSecretaryTaskReport } from "./secretary/tasks";
-import { MAX_SUBTITLE_JOBS_PER_CALL, translateTextSubtitle } from "./translation/textSubtitle";
 import {
-  buildGuestTranscriptFinalEvent,
-  buildGuestSubtitleEvent,
-  buildOwnerSubtitleEvent,
-  buildOwnerTranscriptFinalEvent,
-  buildSubtitleUnavailableEvent,
-} from "./translation/liveSubtitleEvents";
-import { getUserSubtitleLanguage, setUserSubtitleLanguage } from "./translation/userLanguage";
+  appendSecretaryTurn,
+  beginSecretarySubtitleTranslation,
+  endSecretarySubtitleTranslation,
+  getSecretaryTaskById,
+  getSecretaryTaskForCall,
+  markSecretaryStreamEnded,
+  markSecretaryStreamFailed,
+  persistSecretaryTurnTranslation,
+  toSecretaryTaskReport,
+} from "./secretary/tasks";
+import { MAX_SUBTITLE_JOBS_PER_CALL, translateTextSubtitle } from "./translation/textSubtitle";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
 import { verifySecretaryStream } from "./secretary/streamAuth";
@@ -568,9 +570,7 @@ function getRealtimePrompt(mode: string = "universal"): string {
 }
 
 let currentMode = "universal";
-function getUserLanguage(userId?: string): "ru" | "es" {
-  return getUserSubtitleLanguage(userId);
-}
+let currentLanguage = "ru"; // Default to Russian, can be "ru" or "es"
 const uiClients = new Set<WebSocket>();
 // Each /ui (and /honor-stream) socket is bound to the user it authenticated as,
 // so live transcripts/hints are delivered only to that user — never broadcast
@@ -1010,8 +1010,18 @@ export function setupWebSocket(server: Server) {
         },
         onTurn: async (taskId, role, text, callSid) => {
           const turnId = randomUUID();
-          const turn = await appendSecretaryTurn(taskId, role, text, callSid, turnId);
-          if (!turn) return;
+          beginSecretarySubtitleTranslation(taskId);
+          let turn: Awaited<ReturnType<typeof appendSecretaryTurn>>;
+          try {
+            turn = await appendSecretaryTurn(taskId, role, text, callSid, turnId);
+          } catch (error) {
+            endSecretarySubtitleTranslation(taskId);
+            throw error;
+          }
+          if (!turn) {
+            endSecretarySubtitleTranslation(taskId);
+            return;
+          }
           publishSecretaryFeedEvent(taskId, { type: "turn", turnId, role, text });
           const scheduled = secretarySubtitleTurnCounts.get(taskId) ?? 0;
           if (scheduled >= MAX_SUBTITLE_JOBS_PER_CALL) {
@@ -1022,6 +1032,7 @@ export function setupWebSocket(server: Server) {
               language: turn.translationLanguage,
               reason: "turn_limit",
             });
+            endSecretarySubtitleTranslation(taskId);
             return;
           }
           secretarySubtitleTurnCounts.set(taskId, scheduled + 1);
@@ -1047,7 +1058,8 @@ export function setupWebSocket(server: Server) {
               role,
               language: turn.translationLanguage,
               reason: "provider_error",
-            }));
+            }))
+            .finally(() => endSecretarySubtitleTranslation(taskId));
         },
         onAudio: (taskId, role, payload) => publishSecretaryFeedEvent(taskId, { type: "audio", role, payload }),
         onStreamEnd: async (taskId, reason, callSid) => {
@@ -1145,7 +1157,7 @@ Reply ONLY with JSON: {"goal_update": true|false, "goal": "<the new goal, concis
     }
   }
 
-  async function handleAIQuestion(ws: WebSocket, question: string, goal: string, userId?: string) {
+  async function handleAIQuestion(ws: WebSocket, question: string, goal: string) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       ws.send(JSON.stringify({ type: "ai_response", text: "API ключ не настроен", error: true }));
@@ -1153,7 +1165,7 @@ Reply ONLY with JSON: {"goal_update": true|false, "goal": "<the new goal, concis
     }
 
     try {
-      const langName = LANGUAGE_NAMES[getUserLanguage(userId)] || "Russian";
+      const langName = LANGUAGE_NAMES[currentLanguage] || "Russian";
       const goalLockInstructions = goal ? `
 GOAL FOCUS: The user has set a clear goal: "${goal}"
 - Prefer phrases and help that move toward this goal
@@ -1232,9 +1244,9 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         } else if (message.type === "set_language") {
           const lang = message.language;
           if (lang === "ru" || lang === "es") {
-            if (userId) setUserSubtitleLanguage(userId, lang);
-            log(`Language changed to: ${lang} for user ${userId ?? "unknown"}`, "server");
-            ws.send(JSON.stringify({ type: "language_changed", language: lang }));
+            currentLanguage = lang;
+            log(`Language changed to: ${currentLanguage}`, "server");
+            ws.send(JSON.stringify({ type: "language_changed", language: currentLanguage }));
           }
         } else if (message.type === "set_model") {
           const model = message.model;
@@ -1367,7 +1379,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               const snap = bridge.snapshot();
               const refined = await refineHintFromAsk(question, {
                 goal,
-                language: getUserLanguage(userId),
+                language: currentLanguage,
                 ...snap,
               });
               if (refined) {
@@ -1390,7 +1402,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               return;
             }
             const updatedGoal = await goalPromise;
-            await handleAIQuestion(ws, question, updatedGoal || goal, userId);
+            await handleAIQuestion(ws, question, updatedGoal || goal);
           })().catch((err) => log(`ask_ai handling error: ${err?.message}`, "server"));
         }
       } catch (err) {}
@@ -1483,7 +1495,6 @@ NEVER output JSON - only plain text with the phrase and translation.`;
     // Per-user live-call feature toggles (Live Hints + Translation), loaded once on "start".
     // Defaults ON so a load failure never silently disables hints for a paying user.
     let callSettings = { liveHintsEnabled: true, translationEnabled: true };
-    let hintSubtitleJobs = 0;
     // Candidate Pipeline v1 (Task #207): per-user experimental live pipeline.
     // Disabled by default; loaded on "start" alongside callSettings. When
     // enabled it may swap the STT (OpenAI realtime instead of Flux) and/or the
@@ -1931,8 +1942,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       }
       
       // ALWAYS get translation for guest transcript
-      const callLanguage = getUserLanguage(streamUserId);
-      fastLayer.setLanguage(callLanguage);
+      fastLayer.setLanguage(currentLanguage);
       // fastLayer.onGstUtteranceEnd(); // Fast Layer disabled — silence while GPT thinks is better than an irrelevant filler
       
       // Goal status is context only: when the original goal appears resolved,
@@ -1991,18 +2001,10 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         !reactionOnly && !isFarewell && !waitingForInfo;
 
       const translationStart = Date.now();
-      const guestSubtitleLimitReached = translationEnabled &&
-        hintSubtitleJobs >= MAX_SUBTITLE_JOBS_PER_CALL;
-      if (translationEnabled && !guestSubtitleLimitReached) hintSubtitleJobs += 1;
       const translationPromise: Promise<{ translation: string; providerUsed: string }> =
-        translationEnabled && !guestSubtitleLimitReached
-          ? translateGuestText(text, callLanguage, brainModelOverride)
-          : Promise.resolve({
-            translation: "",
-            providerUsed: guestSubtitleLimitReached ? "turn_limit" : "translation_off",
-          });
-      let translationMs = 0;
-      let translationProviderUsed = translationEnabled ? "pending" : "translation_off";
+        translationEnabled
+          ? translateGuestText(text, currentLanguage, brainModelOverride)
+          : Promise.resolve({ translation: "", providerUsed: "translation_off" });
 
       // ===== LIBRARY-FIRST LOOKUP =====
       // Before spending an LLM call, look for a ready-made line in the owner's
@@ -2067,61 +2069,27 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(hintText, ownerGoal, callLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
+        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
         : null;
 
-      // ----- Caption: original first, delayed subtitle second -----
-      // Do not make the original transcript wait for translation. The separate
-      // subtitle is keyed to this final utterance so it cannot replace a newer
-      // transcript or a different call.
-      uiBroadcast(buildGuestTranscriptFinalEvent({
-        text,
+      // ----- Caption: broadcast as soon as the translation resolves -----
+      const tr = await translationPromise;
+      const translationMs = Date.now() - translationStart;
+      fastLayer.onGptResponseReceived();
+      // ALWAYS broadcast the guest transcript (caption), even if the suggestion
+      // is later blocked. Payload shape is unchanged (backward-compatible UI).
+      uiBroadcast({
+        type: "guest_transcript",
+        text: text,
+        translation: tr.translation,
+        isFinal: true,
+        isComplete: true,
         confidence,
         utteranceId,
-        callSid,
-      }));
-      const subtitleTurnId = String(utteranceId);
-      const subtitleOwnerId = streamUserId;
-      const subtitleCallSid = callSid;
-      void translationPromise.then((tr) => {
-        translationMs = Date.now() - translationStart;
-        translationProviderUsed = tr.providerUsed;
-        fastLayer.onGptResponseReceived();
-        const stillOwnsTurn = !streamClosed && !!subtitleOwnerId && !!subtitleCallSid &&
-          callOwners.get(subtitleCallSid) === subtitleOwnerId;
-        if (translationEnabled && stillOwnsTurn) {
-          if (tr.translation) {
-            uiBroadcast(buildGuestSubtitleEvent({
-              turnId: subtitleTurnId,
-              translation: tr.translation,
-              language: callLanguage,
-              callSid: subtitleCallSid,
-            }));
-          } else {
-            uiBroadcast(buildSubtitleUnavailableEvent({
-              turnId: subtitleTurnId,
-              role: "guest",
-              language: callLanguage,
-              reason: tr.providerUsed === "turn_limit" ? "turn_limit" : "provider_error",
-              callSid: subtitleCallSid,
-            }));
-          }
-        }
-        // `now` is captured at handler entry ≈ Deepgram EndOfTurn.
-        log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${translationMs} provider_used=${tr.providerUsed} utteranceId=${utteranceId}`, "websocket");
-      }).catch(() => {
-        translationProviderUsed = "error";
-        if (!streamClosed && subtitleOwnerId && subtitleCallSid &&
-          callOwners.get(subtitleCallSid) === subtitleOwnerId && translationEnabled) {
-          uiBroadcast(buildSubtitleUnavailableEvent({
-            turnId: subtitleTurnId,
-            role: "guest",
-            language: callLanguage,
-            reason: "provider_error",
-            callSid: subtitleCallSid,
-          }));
-        }
+        callSid
       });
+      // `now` is captured at handler entry ≈ Deepgram EndOfTurn (commitTurn fires this synchronously).
+      log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${translationMs} provider_used=${tr.providerUsed} utteranceId=${utteranceId}`, "websocket");
       
       // ===== HINT THROTTLING CHECKS (only for suggestions, not transcripts) =====
       
@@ -2173,7 +2141,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             ru: { en: "Sure, I'll wait.", translation: "Конечно, подожду." },
             es: { en: "Sure, I'll wait.", translation: "Claro, esperaré." }
           };
-          const ack = ackPhrases[callLanguage] || ackPhrases.ru;
+          const ack = ackPhrases[currentLanguage as "ru" | "es"] || ackPhrases.ru;
           
           // Latency: this static phrase IS a delivered hint — time it honestly.
           // No trigger/ready model stages (no Brain call): brain and stt→trigger
@@ -2234,7 +2202,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       if (translated?.suggestion?.en) {
         latencyRecorder.ready(utteranceId, translated.providerUsed === "library" ? "library" : "gpt");
       }
-      log(`[HINT] model=${libraryHit ? "library" : (brainModelOverride || currentModel)} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs || "pending"} translation_provider=${translationProviderUsed} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
+      log(`[HINT] model=${libraryHit ? "library" : (brainModelOverride || currentModel)} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
 
       // Freshness/stale guard: while this suggestion was generating, the Guest started
       // a newer turn. Drop the now-outdated suggestion and do NOT arm the cooldown, so
@@ -2425,53 +2393,15 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         log(`[GoalEngine] HON update: goal=${state.goalType}, status=${state.status}, slots=${JSON.stringify(goalUpdate.newSlots)}`, "goal");
       }
       
-      uiBroadcast(buildOwnerTranscriptFinalEvent({
+      uiBroadcast({
+        type: "owner_transcript",
         text: text,
+        isFinal: true,
+        isComplete: true,
         confidence,
         utteranceId,
-        callSid,
-      }));
-      const subtitleLanguage = getUserLanguage(streamUserId);
-      // The original owner transcript is sent immediately. Translation is a
-      // detached, queued text-only request and obeys both the per-user setting
-      // and the authenticated owner/call binding.
-      const subtitleOwnerId = streamUserId;
-      const subtitleCallSid = callSid;
-      void callSettingsReady
-        .then(async () => {
-          if (streamClosed || !callSettings.translationEnabled || !subtitleOwnerId ||
-            !subtitleCallSid || callOwners.get(subtitleCallSid) !== subtitleOwnerId) return;
-          if (hintSubtitleJobs >= MAX_SUBTITLE_JOBS_PER_CALL) {
-            uiBroadcast(buildSubtitleUnavailableEvent({
-              turnId: utteranceId,
-              role: "owner",
-              language: subtitleLanguage,
-              reason: "turn_limit",
-              callSid: subtitleCallSid,
-            }));
-            return;
-          }
-          hintSubtitleJobs += 1;
-          const result = await translateTextSubtitle(text, subtitleLanguage);
-          if (streamClosed || callOwners.get(subtitleCallSid) !== subtitleOwnerId) return;
-          if (result.translation) {
-            uiBroadcast(buildOwnerSubtitleEvent({
-              turnId: utteranceId,
-              translation: result.translation,
-              language: subtitleLanguage,
-              callSid: subtitleCallSid,
-            }));
-          } else {
-            uiBroadcast(buildSubtitleUnavailableEvent({
-              turnId: utteranceId,
-              role: "owner",
-              language: subtitleLanguage,
-              reason: result.unavailableReason ?? "provider_error",
-              callSid: subtitleCallSid,
-            }));
-          }
-        })
-        .catch(() => undefined);
+        callSid
+      });
     }
     
     // Fast Layer for quick responses while GPT is thinking

@@ -14,6 +14,7 @@ const REPORT_SETTLEMENT_GRACE_MS = 15_000;
 const NOTIFICATION_LEASE_MS = 2 * 60_000;
 const MAX_QUEUE_BATCH = 3;
 const POLL_MS = 15_000;
+const pendingSubtitleTranslations = new Map<string, number>();
 
 const ACTIVE_STATUSES = ["starting", "ringing", "connected", "finalizing"] as const;
 const TERMINAL_STATUSES = [
@@ -47,6 +48,20 @@ export interface SecretaryTranscriptTurn {
   text: string;
   translation?: string;
   language?: SubtitleLanguage;
+}
+
+export function beginSecretarySubtitleTranslation(taskId: string): void {
+  pendingSubtitleTranslations.set(taskId, (pendingSubtitleTranslations.get(taskId) ?? 0) + 1);
+}
+
+export function endSecretarySubtitleTranslation(taskId: string): void {
+  const pending = pendingSubtitleTranslations.get(taskId) ?? 0;
+  if (pending <= 1) pendingSubtitleTranslations.delete(taskId);
+  else pendingSubtitleTranslations.set(taskId, pending - 1);
+}
+
+export function pendingSecretarySubtitleTaskIds(): string[] {
+  return Array.from(pendingSubtitleTranslations.keys());
 }
 
 export interface DialedSecretaryCall {
@@ -1040,10 +1055,15 @@ async function settleReadySecretaryReports(logger: (message: string) => void): P
 }
 
 async function notifyTerminalTasks(deps: SecretaryWorkerDependencies, logger: (message: string) => void): Promise<number> {
+  const pendingTaskIds = pendingSecretarySubtitleTaskIds();
+  const pendingSubtitlesFilter = pendingTaskIds.length
+    ? sql`AND id NOT IN (${sql.join(pendingTaskIds.map((id) => sql`${id}`), sql`, `)})`
+    : sql``;
   const claim = await db.execute(sql`
     WITH candidates AS (
       SELECT id FROM secretary_tasks
       WHERE status IN ('completed', 'no_answer', 'busy', 'failed', 'unknown', 'cancelled')
+        ${pendingSubtitlesFilter}
         AND (
           notification_status = 'pending'
           OR (notification_status = 'sending' AND notification_claimed_at < now() - interval '2 minutes')

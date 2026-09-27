@@ -374,6 +374,7 @@
 "copilot.language.es" = "Español";
 "translation.language.title" = "Мова субтитрів";
 "translation.language.selected" = "Переклад: %@";
+"secretary.live.subtitle_unavailable" = "Переклад недоступний";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Перекладач";
