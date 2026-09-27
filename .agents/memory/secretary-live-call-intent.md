@@ -14,3 +14,9 @@ The Secretary must conduct the entire conversation autonomously. The owner only 
 **Why:** The owner explicitly corrected a misunderstanding that had led to unrelated live-Hint translation work. The Secretary is the speaker on the call, not the owner.
 
 **How to apply:** Keep Secretary translation and call reporting confined to Secretary flows. Do not route owner audio or Hint suggestions into Secretary, and do not modify Hint merely because its task-entry design was reused.
+
+Do not automatically read the entire prepared assignment aloud before dialing. Keep the complete text visible for review and confirmation; voice input may still be used to compose it.
+
+**Why:** The owner found the automatic system-voice recitation of a long Russian assignment unpleasant and could not understand what was read. It happened before the call and was separate from the Secretary's live-call voice.
+
+**How to apply:** Keep pre-call assignment confirmation visual unless a separately designed, intelligible playback option is explicitly requested.

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
   archiveSecretaryAttempt,
   beginSecretarySubtitleTranslation,
@@ -17,9 +18,15 @@ import {
   validateSecretaryReport,
   toSecretaryTaskReport,
   pendingSecretarySubtitleTaskIds,
+  secretaryTranscriptAppendExpression,
 } from "../tasks";
 
 describe("Secretary task safety and reporting", () => {
+  it("casts the transcript line so Postgres can infer its parameter type", () => {
+    const query = new PgDialect().sqlToQuery(secretaryTranscriptAppendExpression("Secretary: Hello."));
+    expect(query.sql).toContain("$1::text");
+    expect(query.params[0]).toBe("Secretary: Hello.");
+  });
   it("includes the persisted idempotency key in owner task reports", () => {
     const report = toSecretaryTaskReport({
       id: "task-1",

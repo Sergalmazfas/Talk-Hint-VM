@@ -79,7 +79,6 @@ final class PrepareViewController: UIViewController {
     private let sendButton = UIButton(type: .system)
     private let micButton = UIButton(type: .system)
     private let statusLabel = UILabel()
-    private let secretarySpeechSynthesizer = AVSpeechSynthesizer()
 
     /// The transient "…" thinking bubble shown while Sol is working.
     private var thinkingBubble: UIView?
@@ -169,7 +168,6 @@ final class PrepareViewController: UIViewController {
         super.viewWillDisappear(animated)
         isScreenActive = false
         isStartingRecording = false
-        stopSecretarySpeech()
         // Sheet is being swiped down or closed: stop the recorder immediately so
         // the iOS microphone indicator clears without waiting for deinit.
         if isRecording {
@@ -181,9 +179,6 @@ final class PrepareViewController: UIViewController {
     }
 
     deinit {
-        if mode == .secretary {
-            secretarySpeechSynthesizer.stopSpeaking(at: .immediate)
-        }
         stream.disconnect()
         recorder?.stop()
     }
@@ -409,14 +404,12 @@ final class PrepareViewController: UIViewController {
 
         confirmButton.addAction(UIAction { [weak self, weak buttons] _ in
             guard let self = self else { return }
-            self.stopSecretarySpeech()
             buttons?.removeFromSuperview()
             self.pendingProposalGoal = nil
             self.confirmGoal(goal)
         }, for: .touchUpInside)
 
         editButton.addAction(UIAction { [weak self, weak buttons] _ in
-            self?.stopSecretarySpeech()
             buttons?.removeFromSuperview()
             self?.pendingProposalGoal = nil
             self?.textField.placeholder = NSLocalizedString(
@@ -593,7 +586,6 @@ final class PrepareViewController: UIViewController {
     }
 
     @objc private func resetTapped() {
-        stopSecretarySpeech()
         stream.resetPrepare(mode: mode)
         hideThinking()
         pendingMessage = nil
@@ -610,46 +602,11 @@ final class PrepareViewController: UIViewController {
     // MARK: - Voice input (tap-to-record → /api/prepare/stt)
 
     @objc private func micTapped() {
-        stopSecretarySpeech()
         if isRecording {
             stopRecordingAndTranscribe()
         } else {
             startRecording()
         }
-    }
-
-    /// Speak only assistant-authored Secretary replies and the visible proposal.
-    /// User turns (including photo OCR) and error paths are never narrated.
-    private func speakSecretaryResponse(reply: String, proposedGoal: String?) {
-        guard mode == .secretary, isScreenActive, !isRecording, !isStartingRecording else { return }
-        secretarySpeechSynthesizer.stopSpeaking(at: .immediate)
-
-        let cleanReply = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lowerReply = cleanReply.lowercased()
-        let isErrorText = cleanReply.hasPrefix("⚠️") ||
-            lowerReply.hasPrefix("error") ||
-            lowerReply.hasPrefix("ошибка") ||
-            lowerReply.hasPrefix("помилка") ||
-            lowerReply.hasPrefix("қате")
-        if !cleanReply.isEmpty, cleanReply.count <= 280, !isErrorText {
-            enqueueSecretarySpeech(cleanReply)
-        }
-        if let proposedGoal {
-            enqueueSecretarySpeech(proposedGoal)
-            enqueueSecretarySpeech(NSLocalizedString("secretary.prepare.confirm_question", comment: ""))
-        }
-    }
-
-    private func enqueueSecretarySpeech(_ text: String) {
-        let utterance = AVSpeechUtterance(string: text)
-        let language = Bundle.main.preferredLocalizations.first ?? "en"
-        utterance.voice = AVSpeechSynthesisVoice(language: language)
-        secretarySpeechSynthesizer.speak(utterance)
-    }
-
-    private func stopSecretarySpeech() {
-        guard mode == .secretary else { return }
-        secretarySpeechSynthesizer.stopSpeaking(at: .immediate)
     }
 
     private func startRecording() {
@@ -828,7 +785,6 @@ extension PrepareViewController: CallHintStreamDelegate {
             hideThinking()
             addAIMessage(text)
             if let goal = proposedGoal { addGoalProposal(goal) }
-            speakSecretaryResponse(reply: text, proposedGoal: proposedGoal)
         case .prepareOpening(let phraseEn, let translation):
             if mode == .secretary {
                 // A prepare_opening without the Secretary token is only a

@@ -402,7 +402,10 @@ export function handleSecretaryTwilioStream(
   const queueTurn = (role: "secretary" | "guest", text: string) => {
     const clean = text.trim().slice(0, MAX_OUTPUT_TEXT_CHARS);
     if (!clean || !taskId) return;
-    turnQueue = turnQueue.then(() => deps.onTurn(taskId, role, clean, callSid)).catch(() => {
+    turnQueue = turnQueue.then(() => deps.onTurn(taskId, role, clean, callSid)).catch((error: unknown) => {
+      // Log only the database error code, never the spoken text or SQL params.
+      const code = (error as { code?: unknown })?.code;
+      console.error(`[Secretary] Transcript save failed (code=${typeof code === "string" && /^[A-Z0-9]{5}$/.test(code) ? code : "unknown"})`);
       void finish("Secretary transcript could not be saved");
     });
   };

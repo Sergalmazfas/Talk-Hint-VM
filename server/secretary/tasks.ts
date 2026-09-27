@@ -662,6 +662,11 @@ export async function markSecretaryStreamFailed(
   });
 }
 
+/** Cast the variadic concat_ws argument; Postgres cannot infer an untyped $1. */
+export function secretaryTranscriptAppendExpression(line: string) {
+  return sql`right(concat_ws(E'\n', nullif(${secretaryTasks.transcript}, ''), ${line}::text), ${SECRETARY_MAX_TRANSCRIPT_CHARS})`;
+}
+
 export async function appendSecretaryTurn(
   taskId: string,
   role: "secretary" | "guest",
@@ -679,7 +684,7 @@ export async function appendSecretaryTurn(
   return db.transaction(async (tx) => {
     const transcriptTurn: SecretaryTranscriptTurn = { id: turnId, role, text: cleaned };
     const [updated] = await tx.update(secretaryTasks).set({
-      transcript: sql`right(concat_ws(E'\n', nullif(${secretaryTasks.transcript}, ''), ${line}), ${SECRETARY_MAX_TRANSCRIPT_CHARS})`,
+      transcript: secretaryTranscriptAppendExpression(line),
       transcriptTurns: sql`coalesce(${secretaryTasks.transcriptTurns}, '[]'::jsonb) || ${JSON.stringify(transcriptTurn)}::jsonb`,
       updatedAt: new Date(),
     }).where(and(
