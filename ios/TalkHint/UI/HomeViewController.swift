@@ -874,6 +874,11 @@ final class HomeViewController: UIViewController {
             showSecretaryError(NSLocalizedString("secretary.task.not_ready.message", comment: ""))
             return
         }
+        // Before the first request, use the current Settings selection. Once
+        // attempted, keep the provider fixed to preserve request idempotency.
+        if !confirmed.requestAttempted {
+            confirmed.voiceProvider = SessionStore.shared.voiceProvider
+        }
         let cleaned: String
         if confirmed.requestAttempted, let requestedPhone = confirmed.phoneNumber {
             cleaned = requestedPhone
@@ -935,6 +940,23 @@ final class HomeViewController: UIViewController {
                         } else {
                             self.openSecretaryTask(id: recovered.id)
                         }
+                        return
+                    }
+                    if case APIError.http(429, let message) = error,
+                       message == "The Secretary daily call limit has been reached." {
+                        // The server checks for an existing request ID before
+                        // this quota response. It did not create a task, so
+                        // the provider can safely follow Settings next time.
+                        var waiting = confirmed
+                        waiting.requestAttempted = false
+                        guard SessionStore.shared.savePendingSecretaryCall(waiting) else {
+                            self.renderCallButtonIdle()
+                            self.showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
+                            return
+                        }
+                        self.confirmedSecretaryTask = waiting
+                        self.renderCallButtonIdle()
+                        self.showSecretaryError(NSLocalizedString("secretary.live.daily_limit", comment: ""))
                         return
                     }
                     self.renderCallButtonIdle()

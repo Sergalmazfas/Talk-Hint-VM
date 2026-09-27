@@ -59,7 +59,7 @@ final class SessionStore {
         let instruction: String
         let confirmationToken: String
         let clientRequestId: UUID
-        let voiceProvider: VoiceProviderPreference
+        var voiceProvider: VoiceProviderPreference
         var phoneNumber: String?
         var requestAttempted: Bool
     }
