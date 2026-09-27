@@ -6,6 +6,7 @@ import {
   handleSecretaryTwilioStream,
   mulaw8kToPcm24k,
   pcm24kToMulaw8k,
+  splitSecretarySpeech,
   type SecretaryRealtimeEvent,
   type SecretaryRealtimeSession,
 } from "./agent";
@@ -112,6 +113,60 @@ describe("Secretary autonomous media agent", () => {
     expect(pcm.readInt16LE(6)).toBeGreaterThan(0);
     expect(pcm24kToMulaw8k(pcm)).toEqual(input);
     expect(() => pcm24kToMulaw8k(Buffer.alloc(2))).toThrow(/complete 24kHz sample groups/);
+  });
+
+  it("splits long replies without dropping words or exceeding the per-phrase budget", () => {
+    const text = "Please confirm the deposit release date and the reference number with your team.";
+    const chunks = splitSecretarySpeech(text, 30);
+    expect(chunks.every((chunk) => chunk.length <= 30)).toBe(true);
+    expect(chunks.join(" ")).toBe(text);
+  });
+
+  it("splits oversized Cartesia audio again and saves only acknowledged speech without ending the call", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    const realtime = new FakeRealtimeSession(false);
+    const onTurn = vi.fn(async () => {});
+    const onStreamEnd = vi.fn(async () => {});
+    const synthesize = vi.fn(async (_voiceId: string, text: string) => {
+      if (text.length > 45) throw new Error("Cartesia cloned voice audio exceeded the call limit");
+      return Buffer.from([0, 0, 0, 0, 0, 0]);
+    });
+    configureSecretaryAgentForTests({ realtimeFactory: () => realtime, cartesiaSynthesizer: synthesize });
+    const ws = new FakeTwilioSocket();
+    handleSecretaryTwilioStream(ws as any, {
+      lookup: vi.fn(async () => ({
+        instruction: "Ask about the pending deposit.",
+        ownerId: "owner-1",
+        voiceProvider: "cartesia" as const,
+        cloneVoiceId: "voice-1",
+      })),
+      onTurn,
+      onStreamEnd,
+    });
+    await ws.emit("message", {
+      event: "start",
+      start: {
+        callSid: "CA-valid",
+        streamSid: "MZ-valid",
+        customParameters: { taskId: "task-valid", streamAuth: "test-stream-proof" },
+      },
+    });
+    await vi.waitFor(() => expect(realtime.introductionStarted).toBe(1));
+    const reply = "I am calling to confirm when the pending deposit will be returned. Please share the date and reference number when you have them.";
+    realtime.emit({ type: "response_text", responseId: "response-long", text: reply });
+    const expectedChunks = splitSecretarySpeech(reply).flatMap((chunk) =>
+      chunk.length > 45 ? splitSecretarySpeech(chunk, Math.floor(chunk.length / 2)) : [chunk]);
+    for (let index = 0; index < expectedChunks.length; index++) {
+      await vi.waitFor(() => expect(ws.sent.filter((frame) => frame.event === "mark")).toHaveLength(index + 1));
+      const mark = ws.sent.filter((frame) => frame.event === "mark")[index];
+      await ws.emit("message", { event: "mark", streamSid: "MZ-valid", mark: { name: mark.mark.name } });
+      await vi.waitFor(() => expect(onTurn).toHaveBeenCalledTimes(index + 1));
+    }
+    expect(onTurn.mock.calls.map((call) => call[2]).join(" ")).toBe(reply);
+    expect(onStreamEnd).not.toHaveBeenCalled();
+    expect(synthesize).toHaveBeenCalled();
+    expect(ws.closed).toHaveLength(0);
+    await ws.emit("message", { event: "stop" });
   });
 
   it("rejects a Twilio stream before opening OpenAI when task ownership lookup fails", async () => {

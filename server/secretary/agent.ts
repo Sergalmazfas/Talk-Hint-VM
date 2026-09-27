@@ -12,6 +12,9 @@ const CONNECT_TIMEOUT_MS = 12_000;
 const MAX_EARLY_AUDIO_FRAMES = 150; // 3 seconds at 20ms per Twilio frame
 const MAX_EARLY_AUDIO_BYTES = 512 * 1024;
 const MAX_OUTPUT_TEXT_CHARS = 1_500;
+// Keep a long answer in short spoken pieces: the clone provider enforces a
+// 15-second PCM limit per synthesis request, not per conversation turn.
+const MAX_SPEECH_CHUNK_CHARS = 90;
 const OUTPUT_FRAME_BYTES = 160; // 20ms, 8kHz G.711 μ-law
 const OUTPUT_PACING_MS = 20;
 const MAX_TWILIO_MESSAGE_BYTES = 24 * 1024;
@@ -128,6 +131,30 @@ export function pcm24kToMulaw8k(input: Buffer): Buffer {
     output[i] = encodeMulaw(input.readInt16LE(i * 6));
   }
   return output;
+}
+
+export function splitSecretarySpeech(text: string, maxChars = MAX_SPEECH_CHUNK_CHARS): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  for (const word of text.trim().split(/\s+/)) {
+    if (!word) continue;
+    if (word.length > maxChars) {
+      if (current) chunks.push(current);
+      current = "";
+      for (let offset = 0; offset < word.length; offset += maxChars) {
+        chunks.push(word.slice(offset, offset + maxChars));
+      }
+    } else if (!current) {
+      current = word;
+    } else if (current.length + 1 + word.length <= maxChars) {
+      current += ` ${word}`;
+    } else {
+      chunks.push(current);
+      current = word;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 function decodeMulaw(byte: number): number {
@@ -496,40 +523,61 @@ export function handleSecretaryTwilioStream(
       const synthesizer = context.voiceProvider === "cartesia"
         ? cartesiaSynthesizer
         : elevenLabsSynthesizer;
-      const pcm24k = await synthesizer(context.cloneVoiceId, text, controller.signal);
-      if (controller.signal.aborted || finalized || !streamSid || ws.readyState !== WebSocket.OPEN) return;
-      if (!pcm24k.length || pcm24k.length % 6 !== 0) {
-        throw new Error("Secretary cloned voice returned invalid 24kHz PCM");
-      }
-      const mulaw8k = pcm24kToMulaw8k(pcm24k);
-      if (!mulaw8k.length) throw new Error("Secretary cloned voice returned no playable audio");
-      for (let offset = 0; offset < mulaw8k.length; offset += OUTPUT_FRAME_BYTES) {
-        if (controller.signal.aborted || finalized || ws.readyState !== WebSocket.OPEN) return;
-        const frame = mulaw8k.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, mulaw8k.length));
-        const payload = JSON.stringify({
-          event: "media",
-          streamSid,
-          media: { payload: frame.toString("base64") },
-        });
-        if (ws.bufferedAmount + Buffer.byteLength(payload) > MAX_TWILIO_SEND_BUFFER_BYTES) {
-          throw new Error("Secretary Twilio media buffer exceeded its safety limit");
+      const chunks = splitSecretarySpeech(text);
+      for (let index = 0; index < chunks.length; index++) {
+        if (controller.signal.aborted || finalized || !streamSid || ws.readyState !== WebSocket.OPEN) return;
+        const chunk = chunks[index];
+        let pcm24k: Buffer;
+        try {
+          pcm24k = await synthesizer(context.cloneVoiceId, chunk, controller.signal);
+        } catch (error: any) {
+          // A provider can speak even a short phrase slowly. Split again rather
+          // than ending the call for an ordinary oversized audio response.
+          if (/cloned voice audio exceeded the call limit/.test(error?.message ?? "") &&
+            chunk.length > 32) {
+            const halves = splitSecretarySpeech(chunk, Math.max(20, Math.floor(chunk.length / 2)));
+            if (halves.length > 1) {
+              chunks.splice(index, 1, ...halves);
+              index--;
+              continue;
+            }
+          }
+          throw error;
         }
-        ws.send(payload);
-        deps.onAudio?.(taskId, "secretary", frame.toString("base64"));
-        cloneOutputActive = true;
-        if (offset + OUTPUT_FRAME_BYTES < mulaw8k.length) {
-          await delay(OUTPUT_PACING_MS, controller.signal);
+        if (controller.signal.aborted || finalized || !streamSid || ws.readyState !== WebSocket.OPEN) return;
+        if (!pcm24k.length || pcm24k.length % 6 !== 0) {
+          throw new Error("Secretary cloned voice returned invalid 24kHz PCM");
         }
-      }
-      if (controller.signal.aborted || finalized) return;
-      const name = `secretary-${++playbackSequence}-${responseId.slice(0, 20)}`;
-      const acknowledged = waitForMark(name, controller.signal);
-      ws.send(JSON.stringify({ event: "mark", streamSid, mark: { name } }));
-      await acknowledged;
-      if (!controller.signal.aborted && !finalized) {
-        // A transcript is evidence of what the recipient heard only once the
-        // Twilio playback mark confirms the complete cloned response played.
-        queueTurn("secretary", text);
+        const mulaw8k = pcm24kToMulaw8k(pcm24k);
+        if (!mulaw8k.length) throw new Error("Secretary cloned voice returned no playable audio");
+        for (let offset = 0; offset < mulaw8k.length; offset += OUTPUT_FRAME_BYTES) {
+          if (controller.signal.aborted || finalized || ws.readyState !== WebSocket.OPEN) return;
+          const frame = mulaw8k.subarray(offset, Math.min(offset + OUTPUT_FRAME_BYTES, mulaw8k.length));
+          const payload = JSON.stringify({
+            event: "media",
+            streamSid,
+            media: { payload: frame.toString("base64") },
+          });
+          if (ws.bufferedAmount + Buffer.byteLength(payload) > MAX_TWILIO_SEND_BUFFER_BYTES) {
+            throw new Error("Secretary Twilio media buffer exceeded its safety limit");
+          }
+          ws.send(payload);
+          deps.onAudio?.(taskId, "secretary", frame.toString("base64"));
+          cloneOutputActive = true;
+          if (offset + OUTPUT_FRAME_BYTES < mulaw8k.length) {
+            await delay(OUTPUT_PACING_MS, controller.signal);
+          }
+        }
+        if (controller.signal.aborted || finalized) return;
+        const name = `secretary-${++playbackSequence}-${responseId.slice(0, 20)}`;
+        const acknowledged = waitForMark(name, controller.signal);
+        ws.send(JSON.stringify({ event: "mark", streamSid, mark: { name } }));
+        await acknowledged;
+        if (!controller.signal.aborted && !finalized) {
+          // Save only audio Twilio confirms played, including earlier pieces if
+          // the recipient interrupts a later piece.
+          queueTurn("secretary", chunk);
+        }
       }
     } catch (error: any) {
       if (!controller.signal.aborted && !finalized) {
