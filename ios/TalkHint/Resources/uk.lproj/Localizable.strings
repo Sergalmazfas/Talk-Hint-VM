@@ -216,6 +216,8 @@
 "secretary.report.facts" = "Підтверджені факти";
 "secretary.report.next_step" = "Наступний крок";
 "secretary.report.transcript" = "Транскрипція дзвінка";
+"secretary.report.other_party" = "Співрозмовник";
+"secretary.report.refresh" = "Оновити звіт";
 "secretary.outcome.resolved" = "Співрозмовник сказав, що питання вирішено";
 "secretary.outcome.needs_action" = "Потрібні подальші дії";
 "secretary.outcome.not_reached" = "Не вдалося зв'язатися зі співрозмовником";
@@ -370,6 +372,8 @@
 "copilot.language.selected" = "Мова: %@";
 "copilot.language.ru" = "Русский";
 "copilot.language.es" = "Español";
+"translation.language.title" = "Мова субтитрів";
+"translation.language.selected" = "Переклад: %@";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Перекладач";

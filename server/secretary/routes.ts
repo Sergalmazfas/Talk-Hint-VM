@@ -18,6 +18,7 @@ import {
   retrySecretaryTask,
   startSecretaryWorker,
   toSecretaryTaskReport,
+  validateSecretaryTranslationLanguage,
   type SecretaryWorkerDependencies,
 } from "./tasks";
 import { hangupSecretaryCall } from "./dialer";
@@ -55,9 +56,11 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
     const userId = ownerId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
     const live = req.body?.live === true;
+    let translationLanguage: "ru" | "es" = "ru";
     if (live) {
       try {
         validateSecretaryClientRequestId(req.body?.clientRequestId);
+        translationLanguage = validateSecretaryTranslationLanguage(req.body?.translationLanguage);
         const existing = await getLiveSecretaryTaskByClientRequest(
           userId,
           req.body?.clientRequestId,
@@ -96,6 +99,7 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
           instruction: req.body?.instruction,
           voiceProvider: req.body?.voiceProvider,
           clientRequestId: req.body?.clientRequestId,
+          translationLanguage,
         });
         let task = result.task;
         if (!result.created) return res.status(200).json({ task: toSecretaryTaskReport(task) });

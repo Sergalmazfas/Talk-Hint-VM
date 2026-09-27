@@ -1,7 +1,9 @@
 import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { db, isDatabaseAvailable } from "../db";
 import { calls, secretaryTasks, users, type SecretaryTask } from "@shared/schema";
 import { publishSecretaryFeedEvent } from "./feed";
+import type { SubtitleLanguage } from "../translation/textSubtitle";
 
 export const SECRETARY_MAX_TASK_ATTEMPTS = 2;
 export const SECRETARY_MAX_USER_ATTEMPTS_PER_24H = 3;
@@ -32,9 +34,19 @@ export interface SecretaryTaskReport {
   verifiedFacts: string[];
   nextStep: string | null;
   transcript: string;
+  transcriptTurns: SecretaryTranscriptTurn[];
+  translationLanguage: SubtitleLanguage;
   callId: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface SecretaryTranscriptTurn {
+  id: string;
+  role: "secretary" | "guest";
+  text: string;
+  translation?: string;
+  language?: SubtitleLanguage;
 }
 
 export interface DialedSecretaryCall {
@@ -126,6 +138,10 @@ export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport 
     verifiedFacts: Array.isArray(task.verifiedFacts) ? task.verifiedFacts as string[] : [],
     nextStep: task.nextStep,
     transcript: task.transcript ?? "",
+    transcriptTurns: Array.isArray(task.transcriptTurns)
+      ? task.transcriptTurns as SecretaryTranscriptTurn[]
+      : [],
+    translationLanguage: task.translationLanguage === "es" ? "es" : "ru",
     callId: task.callId,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -156,6 +172,9 @@ export function buildSecretaryAttemptSnapshot(task: SecretaryTask) {
     verifiedFacts: task.verifiedFacts,
     nextStep: task.nextStep,
     transcript: task.transcript ?? "",
+    transcriptTurns: Array.isArray(task.transcriptTurns)
+      ? task.transcriptTurns as SecretaryTranscriptTurn[]
+      : [],
     completedAt: task.updatedAt.toISOString(),
   };
 }
@@ -350,10 +369,17 @@ export async function createSecretaryTask(
 /** Creates a durable single-use live attempt, enforcing owner concurrency and quota atomically. */
 export async function createLiveSecretaryTask(
   userId: string,
-  data: { phoneNumber: unknown; instruction: unknown; voiceProvider?: unknown; clientRequestId: unknown },
+  data: {
+    phoneNumber: unknown;
+    instruction: unknown;
+    voiceProvider?: unknown;
+    clientRequestId: unknown;
+    translationLanguage?: unknown;
+  },
 ): Promise<{ task: SecretaryTask; created: boolean }> {
   isDatabaseReady();
   const clientRequestId = validateSecretaryClientRequestId(data.clientRequestId);
+  const translationLanguage = validateSecretaryTranslationLanguage(data.translationLanguage);
   const phoneNumber = validateSecretaryPhoneNumber(data.phoneNumber);
   if (!phoneNumber) throw Object.assign(new Error("Enter a valid standard US phone number in +1 format."), { status: 400 });
   const instruction = validateSecretaryInstruction(data.instruction);
@@ -401,7 +427,7 @@ export async function createLiveSecretaryTask(
     const now = new Date();
     const [task] = await tx.insert(secretaryTasks).values({
       userId, phoneNumber, instruction, voiceProvider, mode: "live", status: "starting",
-      clientRequestId,
+      clientRequestId, translationLanguage,
       attempts: 1, attemptHistory: [now.toISOString()], dialStartedAt: now,
     }).returning();
     if (!task) throw new Error("Secretary task could not be saved.");
@@ -428,6 +454,12 @@ export function validateSecretaryClientRequestId(value: unknown): string {
     throw Object.assign(new Error("A valid clientRequestId UUID is required for live Secretary calls."), { status: 400 });
   }
   return value.toLowerCase();
+}
+
+export function validateSecretaryTranslationLanguage(value: unknown): SubtitleLanguage {
+  if (value === undefined || value === null || value === "") return "ru";
+  if (value === "ru" || value === "es") return value;
+  throw Object.assign(new Error("Secretary subtitles support Russian or Spanish."), { status: 400 });
 }
 
 export async function getLiveSecretaryTaskByClientRequest(
@@ -526,6 +558,7 @@ export async function retrySecretaryTask(userId: string, taskId: string): Promis
       verifiedFacts: [],
       nextStep: null,
       transcript: "",
+      transcriptTurns: [],
       attemptTranscripts,
       callSid: null,
       callId: null,
@@ -619,17 +652,20 @@ export async function appendSecretaryTurn(
   role: "secretary" | "guest",
   text: string,
   callSid?: string,
-): Promise<void> {
+  turnId = randomUUID(),
+): Promise<(SecretaryTranscriptTurn & { translationLanguage: SubtitleLanguage }) | undefined> {
   const cleaned = typeof text === "string" ? text.trim().slice(0, 4_000) : "";
-  if (!cleaned) return;
+  if (!cleaned) return undefined;
   const prefix = role === "secretary" ? "Secretary" : "Other party";
   const line = `${prefix}: ${cleaned.replace(/[\r\n]+/g, " ")}`;
   // Commit the task and its History call row under one transaction/row lock:
   // this both prevents concurrent turns from overwriting one another and means
   // a later manual retry can safely clear only the task's current transcript.
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
+    const transcriptTurn: SecretaryTranscriptTurn = { id: turnId, role, text: cleaned };
     const [updated] = await tx.update(secretaryTasks).set({
       transcript: sql`right(concat_ws(E'\n', nullif(${secretaryTasks.transcript}, ''), ${line}), ${SECRETARY_MAX_TRANSCRIPT_CHARS})`,
+      transcriptTurns: sql`coalesce(${secretaryTasks.transcriptTurns}, '[]'::jsonb) || ${JSON.stringify(transcriptTurn)}::jsonb`,
       updatedAt: new Date(),
     }).where(and(
       eq(secretaryTasks.id, taskId),
@@ -637,11 +673,12 @@ export async function appendSecretaryTurn(
       ...(callSid ? [eq(secretaryTasks.callSid, callSid)] : []),
     )).returning({
       transcript: secretaryTasks.transcript,
+      transcriptLanguage: secretaryTasks.translationLanguage,
       callId: secretaryTasks.callId,
       callSid: secretaryTasks.callSid,
       userId: secretaryTasks.userId,
     });
-    if (!updated || !updated.transcript) return;
+    if (!updated || !updated.transcript) return undefined;
     const ownerCallPredicate = updated.callId
       ? eq(calls.id, updated.callId)
       : updated.callSid ? eq(calls.callSid, updated.callSid) : undefined;
@@ -651,7 +688,52 @@ export async function appendSecretaryTurn(
         eq(calls.userId, updated.userId),
       ));
     }
+    return {
+      ...transcriptTurn,
+      translationLanguage: updated.transcriptLanguage === "es" ? "es" as const : "ru" as const,
+    };
   });
+}
+
+/** Persist a delayed subtitle only if its original owner/call/turn still match. */
+export async function persistSecretaryTurnTranslation(
+  taskId: string,
+  callSid: string,
+  turnId: string,
+  translation: string,
+  language: SubtitleLanguage,
+): Promise<boolean> {
+  const translated = translation.trim().slice(0, 4_000);
+  if (!translated) return false;
+  const saved = await db.transaction(async (tx) => {
+    const [task] = await tx.select({
+      transcriptTurns: secretaryTasks.transcriptTurns,
+      translationLanguage: secretaryTasks.translationLanguage,
+    }).from(secretaryTasks).where(and(
+      eq(secretaryTasks.id, taskId),
+      eq(secretaryTasks.callSid, callSid),
+    )).for("update").limit(1);
+    if (!task || (task.translationLanguage !== "ru" && task.translationLanguage !== "es") ||
+      task.translationLanguage !== language) return false;
+    const turns = Array.isArray(task.transcriptTurns)
+      ? task.transcriptTurns as SecretaryTranscriptTurn[]
+      : [];
+    const index = turns.findIndex((turn) => turn.id === turnId);
+    if (index < 0) return false;
+    turns[index] = { ...turns[index], translation: translated, language };
+    await tx.update(secretaryTasks).set({
+      transcriptTurns: turns,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(secretaryTasks.id, taskId),
+      eq(secretaryTasks.callSid, callSid),
+    ));
+    return true;
+  });
+  if (saved) {
+    publishSecretaryFeedEvent(taskId, { type: "subtitle", turnId, translation: translated, language });
+  }
+  return saved;
 }
 
 /**

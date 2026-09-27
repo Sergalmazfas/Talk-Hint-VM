@@ -738,6 +738,7 @@ private enum SecretaryPhoneNumber {
 
 private final class SecretaryTaskDetailViewController: UIViewController {
     private var task: APIClient.SecretaryTask
+    private var isRefreshingReport = false
     var taskID: String { task.id }
     private let cancelButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
@@ -754,9 +755,7 @@ private final class SecretaryTaskDetailViewController: UIViewController {
         super.viewDidLoad()
         title = NSLocalizedString("secretary.report.title", comment: "")
         view.backgroundColor = .systemBackground
-        navigationItem.rightBarButtonItem = task.callId == nil ? nil : UIBarButtonItem(
-            title: NSLocalizedString("secretary.transcript.history", comment: ""),
-            style: .plain, target: self, action: #selector(openHistoryTranscript))
+        updateNavigationButtons()
         render()
     }
 
@@ -814,7 +813,7 @@ private final class SecretaryTaskDetailViewController: UIViewController {
             stack.addArrangedSubview(sectionLabel("secretary.report.next_step"))
             stack.addArrangedSubview(bodyLabel(nextStep))
         }
-        if let transcript = nonEmpty(task.transcript) {
+        if let transcript = transcriptReportText() {
             stack.addArrangedSubview(sectionLabel("secretary.report.transcript"))
             let transcriptView = UITextView()
             transcriptView.text = transcript
@@ -896,6 +895,62 @@ private final class SecretaryTaskDetailViewController: UIViewController {
         return text
     }
 
+    private func transcriptReportText() -> String? {
+        let turns = task.transcriptTurns.compactMap { turn -> String? in
+            guard let text = nonEmpty(turn.text) else { return nil }
+            let speakerKey = turn.role.lowercased() == "guest"
+                ? "secretary.report.other_party" : "secretary.title"
+            var lines = ["\(NSLocalizedString(speakerKey, comment: "")): \(text)"]
+            if let translation = nonEmpty(turn.translation) {
+                lines.append("↳ \(translation)")
+            }
+            return lines.joined(separator: "\n")
+        }
+        if !turns.isEmpty { return turns.joined(separator: "\n\n") }
+        return nonEmpty(task.transcript)
+    }
+
+    private func updateNavigationButtons() {
+        let refresh = UIBarButtonItem(
+            barButtonSystemItem: .refresh, target: self, action: #selector(refreshTaskReport))
+        refresh.isEnabled = !isRefreshingReport
+        refresh.accessibilityLabel = NSLocalizedString("secretary.report.refresh", comment: "")
+        let history = task.callId.map { _ in
+            UIBarButtonItem(
+                title: NSLocalizedString("secretary.transcript.history", comment: ""),
+                style: .plain, target: self, action: #selector(openHistoryTranscript))
+        }
+        navigationItem.rightBarButtonItems = [refresh, history].compactMap { $0 }
+    }
+
+    @objc private func refreshTaskReport() {
+        guard !isRefreshingReport else { return }
+        isRefreshingReport = true
+        updateNavigationButtons()
+        Task {
+            do {
+                let latestTasks = try await APIClient.shared.secretaryTasks()
+                await MainActor.run {
+                    self.isRefreshingReport = false
+                    guard let latest = latestTasks.first(where: { $0.id == self.task.id }) else {
+                        self.updateNavigationButtons()
+                        self.showError(APIError.decoding)
+                        return
+                    }
+                    self.task = latest
+                    self.updateNavigationButtons()
+                    self.render()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isRefreshingReport = false
+                    self.updateNavigationButtons()
+                    self.showError(error)
+                }
+            }
+        }
+    }
+
     @objc private func cancelTapped() {
         confirmAction(key: "secretary.cancel.confirm") { [weak self] in
             guard let self else { return }
@@ -932,9 +987,7 @@ private final class SecretaryTaskDetailViewController: UIViewController {
                 await MainActor.run {
                     self.task = updated
                     self.actionActivity.stopAnimating()
-                    self.navigationItem.rightBarButtonItem = updated.callId == nil ? nil : UIBarButtonItem(
-                        title: NSLocalizedString("secretary.transcript.history", comment: ""),
-                        style: .plain, target: self, action: #selector(self.openHistoryTranscript))
+                    self.updateNavigationButtons()
                     self.render()
                 }
             } catch {

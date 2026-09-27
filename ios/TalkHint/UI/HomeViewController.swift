@@ -40,6 +40,7 @@ final class HomeViewController: UIViewController {
     private let callButton = UIButton(type: .system)
     private let resumeSecretaryButton = UIButton(type: .system)
     private let copilotLanguageButton = UIButton(type: .system)
+    private let secretaryLanguageButton = UIButton(type: .system)
 
     private static let copilotLanguages: [(code: String, key: String)] = [
         ("ru", "copilot.language.ru"),
@@ -66,6 +67,7 @@ final class HomeViewController: UIViewController {
         if callMode == .hint || secretaryMode { renderGoalState() }
         if !secretaryMode { loadRecents() }
         if secretaryMode {
+            updateSecretaryLanguageButton()
             restoreSecretaryDraft()
             loadActiveSecretaryTask()
         }
@@ -226,6 +228,14 @@ final class HomeViewController: UIViewController {
         copilotLanguageButton.addTarget(self, action: #selector(copilotLanguageTapped), for: .touchUpInside)
         copilotLanguageButton.isHidden = callMode != .copilot
 
+        secretaryLanguageButton.setImage(UIImage(systemName: "globe"), for: .normal)
+        secretaryLanguageButton.tintColor = Theme.green
+        secretaryLanguageButton.contentHorizontalAlignment = .leading
+        secretaryLanguageButton.accessibilityIdentifier = "secretary-translation-language-picker"
+        secretaryLanguageButton.addTarget(self, action: #selector(secretaryLanguageTapped), for: .touchUpInside)
+        secretaryLanguageButton.isHidden = !secretaryMode
+        updateSecretaryLanguageButton()
+
         // Call button.
         var callConfig = UIButton.Configuration.filled()
         callConfig.cornerStyle = .capsule
@@ -276,7 +286,7 @@ final class HomeViewController: UIViewController {
         let goalRow = UIStackView(arrangedSubviews: [UIView(), goalBadge])
         goalRow.isHidden = callMode != .hint && !secretaryMode
         let root = UIStackView(arrangedSubviews: [
-            header, fieldCard, goalRow, resumeSecretaryButton, copilotLanguageButton,
+            header, fieldCard, goalRow, resumeSecretaryButton, secretaryLanguageButton, copilotLanguageButton,
             keypad, recentsHeader, recentsStack
         ])
         root.axis = .vertical
@@ -674,6 +684,37 @@ final class HomeViewController: UIViewController {
         present(sheet, animated: true)
     }
 
+    private func updateSecretaryLanguageButton() {
+        let code = SessionStore.shared.language
+        let key = code == "es" ? "copilot.language.es" : "copilot.language.ru"
+        let name = NSLocalizedString(key, comment: "")
+        secretaryLanguageButton.setTitle(
+            NSLocalizedString("translation.language.selected", comment: "")
+                .replacingOccurrences(of: "%@", with: name),
+            for: .normal)
+    }
+
+    @objc private func secretaryLanguageTapped() {
+        guard secretaryMode else { return }
+        let sheet = UIAlertController(
+            title: NSLocalizedString("translation.language.title", comment: ""),
+            message: nil,
+            preferredStyle: .actionSheet)
+        for language in ["ru", "es"] {
+            let key = language == "es" ? "copilot.language.es" : "copilot.language.ru"
+            sheet.addAction(UIAlertAction(title: NSLocalizedString(key, comment: ""), style: .default) { [weak self] _ in
+                SessionStore.shared.language = language
+                self?.updateSecretaryLanguageButton()
+            })
+        }
+        sheet.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = secretaryLanguageButton
+            popover.sourceRect = secretaryLanguageButton.bounds
+        }
+        present(sheet, animated: true)
+    }
+
     @objc private func prepareTapped() {
         if secretaryMode {
             if confirmedSecretaryTask?.requestAttempted == true {
@@ -869,7 +910,8 @@ final class HomeViewController: UIViewController {
                     confirmationToken: confirmed.confirmationToken,
                     voiceProvider: confirmed.voiceProvider,
                     live: true,
-                    clientRequestId: confirmed.clientRequestId)
+                    clientRequestId: confirmed.clientRequestId,
+                    translationLanguage: SessionStore.shared.language)
                 await MainActor.run {
                     self.isCreatingSecretaryTask = false
                     guard task.mode?.lowercased() == "live" else {

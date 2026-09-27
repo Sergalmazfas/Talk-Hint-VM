@@ -11,6 +11,7 @@ import {
   secretaryStreamFailureFields,
   validateSecretaryInstruction,
   validateSecretaryPhoneNumber,
+  validateSecretaryTranslationLanguage,
   validateSecretaryReport,
   toSecretaryTaskReport,
 } from "../tasks";
@@ -29,12 +30,25 @@ describe("Secretary task safety and reporting", () => {
       verifiedFacts: [],
       nextStep: null,
       transcript: "",
+      transcriptTurns: [{ id: "turn-1", role: "guest", text: "hello", translation: "hola", language: "es" }],
+      translationLanguage: "es",
       callSid: null,
       callId: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     } as any);
     expect(report.clientRequestId).toBe("810f8906-4b66-4fee-9c41-2d21f41703b1");
+    expect(report).toMatchObject({
+      transcriptTurns: [{ id: "turn-1", translation: "hola", language: "es" }],
+      translationLanguage: "es",
+    });
+  });
+
+  it("limits live subtitles to Russian or Spanish", () => {
+    expect(validateSecretaryTranslationLanguage(undefined)).toBe("ru");
+    expect(validateSecretaryTranslationLanguage("ru")).toBe("ru");
+    expect(validateSecretaryTranslationLanguage("es")).toBe("es");
+    expect(() => validateSecretaryTranslationLanguage("fr")).toThrow();
   });
 
   it("accepts a standard US number and rejects restricted/non-US destinations", () => {

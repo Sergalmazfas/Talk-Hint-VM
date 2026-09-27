@@ -57,13 +57,15 @@ describe("Secretary feed task isolation", () => {
     const otherMessage = vi.fn();
     first.on("message", message);
     second.on("message", otherMessage);
-    publishSecretaryFeedEvent("task-one", { type: "turn", role: "guest", text: "private turn" });
+    publishSecretaryFeedEvent("task-one", { type: "turn", turnId: "turn-1", role: "guest", text: "private turn" });
+    publishSecretaryFeedEvent("task-one", { type: "subtitle", turnId: "turn-1", translation: "частный текст", language: "ru" });
     publishSecretaryFeedEvent("task-one", { type: "status", status: "unknown" });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(message).toHaveBeenCalledTimes(2);
+    expect(message).toHaveBeenCalledTimes(3);
     expect(otherMessage).not.toHaveBeenCalled();
     expect(message.mock.calls[0][0].toString()).toContain("private turn");
-    expect(message.mock.calls[1][0].toString()).toContain('"status":"unknown"');
+    expect(message.mock.calls[1][0].toString()).toContain('"translation":"частный текст"');
+    expect(message.mock.calls[2][0].toString()).toContain('"status":"unknown"');
     first.close();
     second.close();
   });
@@ -82,7 +84,9 @@ describe("Secretary feed task isolation", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
     const messages: string[] = [];
     client.on("message", (data) => messages.push(data.toString()));
-    publishSecretaryFeedEvent("task-handoff", { type: "turn", role: "guest", text: "persisted during snapshot read" });
+    publishSecretaryFeedEvent("task-handoff", {
+      type: "turn", turnId: "turn-2", role: "guest", text: "persisted during snapshot read",
+    });
     expect(messages).toEqual([]);
     expect(sendSecretaryFeedSnapshot("task-handoff", peer!, {
       type: "snapshot",

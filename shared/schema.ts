@@ -138,6 +138,10 @@ export const secretaryTasks = pgTable("secretary_tasks", {
   verifiedFacts: jsonb("verified_facts").notNull().default(sql`'[]'::jsonb`),
   nextStep: text("next_step"),
   transcript: text("transcript").notNull().default(""),
+  // Original turns remain authoritative; subtitles are attached by stable turn
+  // ID and are never mixed into the transcript used for reports.
+  transcriptTurns: jsonb("transcript_turns").notNull().default(sql`'[]'::jsonb`),
+  translationLanguage: text("translation_language").notNull().default("ru"),
   callSid: text("call_sid"),
   callId: varchar("call_id").references(() => calls.id),
   attempts: integer("attempts").notNull().default(0),

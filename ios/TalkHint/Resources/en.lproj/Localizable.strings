@@ -216,6 +216,8 @@
 "secretary.report.facts" = "Confirmed facts";
 "secretary.report.next_step" = "Next step";
 "secretary.report.transcript" = "Call transcript";
+"secretary.report.other_party" = "Other party";
+"secretary.report.refresh" = "Refresh report";
 "secretary.outcome.resolved" = "The other party said the issue is resolved";
 "secretary.outcome.needs_action" = "Follow-up is still needed";
 "secretary.outcome.not_reached" = "The other party was not reached";
@@ -370,6 +372,8 @@
 "copilot.language.selected" = "Language: %@";
 "copilot.language.ru" = "Русский";
 "copilot.language.es" = "Español";
+"translation.language.title" = "Subtitle language";
+"translation.language.selected" = "Translation: %@";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Translator";

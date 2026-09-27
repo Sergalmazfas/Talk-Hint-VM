@@ -166,14 +166,36 @@ describe("Secretary owner-scoped routes", () => {
       instruction: "Ask about the returned deposit.",
       live: true,
       clientRequestId: "810f8906-4b66-4fee-9c41-2d21f41703b1",
+      translationLanguage: "es",
       confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit."),
     });
     expect(response.status).toBe(201);
     expect(response.body.task.mode).toBe("live");
     expect(mocks.createLiveSecretaryTask).toHaveBeenCalledOnce();
+    expect(mocks.createLiveSecretaryTask).toHaveBeenCalledWith("owner-a", expect.objectContaining({
+      translationLanguage: "es",
+    }));
     expect(mocks.createSecretaryTask).not.toHaveBeenCalled();
     expect(dial).toHaveBeenCalledOnce();
     expect(mocks.attachSecretaryCall).toHaveBeenCalledWith("task-1", "CA0123456789abcdef0123456789abcdef", "call-1");
+  });
+
+  it("rejects unsupported live subtitle languages before dialing", async () => {
+    const dial = vi.fn();
+    const server = express();
+    server.use(express.json());
+    registerSecretaryRoutes(server as any, { dial, notify: vi.fn() });
+    const response = await request(server).post("/api/secretary/tasks").set("x-test-user-id", "owner-a").send({
+      phoneNumber: "+19545551234",
+      instruction: "Ask about the returned deposit.",
+      live: true,
+      clientRequestId: "810f8906-4b66-4fee-9c41-2d21f41703b1",
+      translationLanguage: "fr",
+      confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit."),
+    });
+    expect(response.status).toBe(400);
+    expect(mocks.createLiveSecretaryTask).not.toHaveBeenCalled();
+    expect(dial).not.toHaveBeenCalled();
   });
 
   it("does not retry a live call after an ambiguous create failure", async () => {

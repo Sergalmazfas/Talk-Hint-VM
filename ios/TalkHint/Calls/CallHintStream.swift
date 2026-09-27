@@ -18,10 +18,16 @@ enum CallHintEvent: Equatable {
     /// What the caller (the other party) said, optionally translated.
     /// `confidence` is the STT confidence score when the server provides one
     /// (used to filter garbled finals on the CALLER line).
-    case guestTranscript(text: String, translation: String?, confidence: Double?, isFinal: Bool)
+    case guestTranscript(text: String, translation: String?, turnId: String?, callSid: String?,
+                         confidence: Double?, isFinal: Bool)
     /// What the user (the phone owner) said. `confidence` is the STT confidence
     /// score when the server provides one (used to filter garbled finals).
-    case ownerTranscript(text: String, confidence: Double?, isFinal: Bool)
+    case ownerTranscript(text: String, turnId: String?, callSid: String?,
+                         confidence: Double?, isFinal: Bool)
+    /// A delayed translation for a finalized owner transcript card.
+    case ownerTranslation(turnId: String, translation: String, language: String?, callSid: String)
+    /// Optional delayed translation event for a finalized guest transcript card.
+    case guestTranslation(turnId: String, translation: String, language: String?, callSid: String)
     /// A GPT reply suggestion for the user to say. `options` is non-nil for
     /// CHOICE-type hints (≥ 2 entries), nil for every other hint type.
     /// `en` is always populated — for CHOICE it holds the server-composed
@@ -523,6 +529,8 @@ final class CallHintStream: NSObject {
             return .guestTranscript(
                 text: body,
                 translation: nonEmpty(obj["translation"]),
+                turnId: turnIdentifier(obj["turnId"]) ?? turnIdentifier(obj["utteranceId"]),
+                callSid: obj["callSid"] as? String,
                 confidence: (obj["confidence"] as? NSNumber)?.doubleValue,
                 isFinal: (obj["isFinal"] as? Bool) ?? false
             )
@@ -530,9 +538,29 @@ final class CallHintStream: NSObject {
             guard let body = obj["text"] as? String, !body.isEmpty else { return nil }
             return .ownerTranscript(
                 text: body,
+                turnId: turnIdentifier(obj["turnId"]) ?? turnIdentifier(obj["utteranceId"]),
+                callSid: obj["callSid"] as? String,
                 confidence: (obj["confidence"] as? NSNumber)?.doubleValue,
                 isFinal: (obj["isFinal"] as? Bool) ?? false
             )
+        case "owner_translation":
+            guard let turnId = turnIdentifier(obj["turnId"]),
+                  let translation = obj["translation"] as? String, !translation.isEmpty,
+                  let callSid = nonEmpty(obj["callSid"]) else { return nil }
+            return .ownerTranslation(
+                turnId: turnId,
+                translation: translation,
+                language: obj["language"] as? String,
+                callSid: callSid)
+        case "guest_translation":
+            guard let turnId = turnIdentifier(obj["turnId"]),
+                  let translation = obj["translation"] as? String, !translation.isEmpty,
+                  let callSid = nonEmpty(obj["callSid"]) else { return nil }
+            return .guestTranslation(
+                turnId: turnId,
+                translation: translation,
+                language: obj["language"] as? String,
+                callSid: callSid)
         case "suggestion":
             guard let en = obj["en"] as? String, !en.isEmpty else { return nil }
             // Parse CHOICE options (additive v2.1 field). Only accepted when
@@ -587,5 +615,14 @@ final class CallHintStream: NSObject {
     private static func nonEmpty(_ value: Any?) -> String? {
         guard let s = value as? String, !s.isEmpty else { return nil }
         return s
+    }
+
+    /// The media worker historically emitted numeric utterance IDs and the
+    /// updated subtitle contract emits string IDs. Normalize both wire forms so
+    /// original and delayed frames share a stable dictionary key.
+    private static func turnIdentifier(_ value: Any?) -> String? {
+        if let value = value as? String, !value.isEmpty { return value }
+        if let value = value as? NSNumber { return value.stringValue }
+        return nil
     }
 }

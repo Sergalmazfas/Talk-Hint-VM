@@ -216,6 +216,8 @@
 "secretary.report.facts" = "Расталған деректер";
 "secretary.report.next_step" = "Келесі қадам";
 "secretary.report.transcript" = "Қоңырау мәтіні";
+"secretary.report.other_party" = "Әңгімелесуші";
+"secretary.report.refresh" = "Есепті жаңарту";
 "secretary.outcome.resolved" = "Сұхбаттасушы мәселе шешілгенін айтты";
 "secretary.outcome.needs_action" = "Әрі қарай әрекет ету қажет";
 "secretary.outcome.not_reached" = "Сұхбаттасушымен байланысу мүмкін болмады";
@@ -370,6 +372,8 @@
 "copilot.language.selected" = "Тіл: %@";
 "copilot.language.ru" = "Русский";
 "copilot.language.es" = "Español";
+"translation.language.title" = "Субтитр тілі";
+"translation.language.selected" = "Аударма: %@";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Аудармашы";

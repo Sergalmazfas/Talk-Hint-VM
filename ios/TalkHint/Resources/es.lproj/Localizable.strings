@@ -216,6 +216,8 @@
 "secretary.report.facts" = "Hechos confirmados";
 "secretary.report.next_step" = "Próximo paso";
 "secretary.report.transcript" = "Transcripción de la llamada";
+"secretary.report.other_party" = "La otra persona";
+"secretary.report.refresh" = "Actualizar informe";
 "secretary.outcome.resolved" = "La otra persona dijo que el asunto está resuelto";
 "secretary.outcome.needs_action" = "Aún hace falta dar seguimiento";
 "secretary.outcome.not_reached" = "No se pudo contactar con la otra persona";
@@ -370,6 +372,8 @@
 "copilot.language.selected" = "Idioma: %@";
 "copilot.language.ru" = "Русский";
 "copilot.language.es" = "Español";
+"translation.language.title" = "Idioma de los subtítulos";
+"translation.language.selected" = "Traducción: %@";
 "copilot.language.uk" = "Українська";
 "copilot.language.kk" = "Қазақша";
 "translator.title" = "Traductor";

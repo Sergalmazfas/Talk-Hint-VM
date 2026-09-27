@@ -1,8 +1,11 @@
 import WebSocket from "ws";
 import type { SecretaryTaskReport } from "./tasks";
+import type { SubtitleUnavailableReason } from "../translation/textSubtitle";
 
 export type SecretaryFeedEvent =
-  | { type: "turn"; role: "secretary" | "guest"; text: string }
+  | { type: "turn"; turnId: string; role: "secretary" | "guest"; text: string }
+  | { type: "subtitle"; turnId: string; translation: string; language: "ru" | "es" }
+  | { type: "subtitle_unavailable"; turnId: string; role: "secretary" | "guest"; language: "ru" | "es"; reason: SubtitleUnavailableReason }
   | { type: "audio"; role: "secretary" | "guest"; payload: string }
   | { type: "status"; status: string };
 

@@ -659,6 +659,14 @@ final class APIClient {
     // MARK: - Secretary tasks
 
     struct SecretaryTask: Equatable {
+        struct TranscriptTurn: Equatable {
+            let id: String
+            let role: String
+            let text: String
+            let translation: String?
+            let language: String?
+        }
+
         let id: String
         let clientRequestId: String?
         let phoneNumber: String
@@ -670,6 +678,8 @@ final class APIClient {
         let verifiedFacts: [String]
         let nextStep: String?
         let transcript: String?
+        let transcriptTurns: [TranscriptTurn]
+        let translationLanguage: String?
         let callId: String?
         let createdAt: Date?
         let updatedAt: Date?
@@ -701,7 +711,8 @@ final class APIClient {
     /// Explicitly creates/starts a task after the user reviews its confirmed goal.
     func createSecretaryTask(phoneNumber: String, instruction: String, confirmationToken: String,
                              voiceProvider: VoiceProviderPreference, live: Bool = false,
-                             clientRequestId: UUID? = nil) async throws -> SecretaryTask {
+                             clientRequestId: UUID? = nil,
+                             translationLanguage: String? = nil) async throws -> SecretaryTask {
         var body: [String: Any] = [
             "phoneNumber": phoneNumber,
             "instruction": instruction,
@@ -712,6 +723,9 @@ final class APIClient {
             guard let clientRequestId else { throw APIError.decoding }
             body["live"] = true
             body["clientRequestId"] = clientRequestId.uuidString
+            if let translationLanguage, ["ru", "es"].contains(translationLanguage) {
+                body["translationLanguage"] = translationLanguage
+            }
         }
         let data = try await request("/api/secretary/tasks", method: "POST", json: body, authenticated: true)
         return try Self.secretaryTaskFromResponse(data)
@@ -771,6 +785,16 @@ final class APIClient {
             verifiedFacts: (item["verifiedFacts"] as? [String]) ?? [],
             nextStep: item["nextStep"] as? String,
             transcript: item["transcript"] as? String,
+            transcriptTurns: ((item["transcriptTurns"] as? [[String: Any]]) ?? []).compactMap { turn in
+                guard let id = turn["id"] as? String,
+                      let role = turn["role"] as? String,
+                      let text = turn["text"] as? String else { return nil }
+                return SecretaryTask.TranscriptTurn(
+                    id: id, role: role, text: text,
+                    translation: turn["translation"] as? String,
+                    language: turn["language"] as? String)
+            },
+            translationLanguage: item["translationLanguage"] as? String,
             callId: item["callId"] as? String,
             createdAt: parseDate(item["createdAt"]),
             updatedAt: parseDate(item["updatedAt"])

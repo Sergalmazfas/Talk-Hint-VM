@@ -23,7 +23,8 @@ final class InCallCaptionTests: XCTestCase {
 
         // First interim → one live (dimmed) card.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Hel", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "Hel", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 1, "interim should create exactly one card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hel")
         XCTAssertEqual(feedCards(vc)[0].alpha, 0.7, accuracy: 0.001,
@@ -31,13 +32,15 @@ final class InCallCaptionTests: XCTestCase {
 
         // Second interim → same card, text replaced in place.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Hello there", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "Hello there", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 1, "interim update must not add a card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hello there")
 
         // Final → still the same card, now frozen at full opacity.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Hello there friend", translation: "Privet drug", confidence: nil, isFinal: true))
+            .guestTranscript(text: "Hello there friend", translation: "Privet drug", turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: true))
         XCTAssertEqual(feedCards(vc).count, 1, "finalizing must not add a card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hello there friend")
         XCTAssertEqual(feedCards(vc)[0].alpha, 1.0, accuracy: 0.001,
@@ -47,7 +50,8 @@ final class InCallCaptionTests: XCTestCase {
 
         // Next utterance → a new card appears after the frozen one.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "Are you still there", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "Are you still there", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "a new utterance must create a new card")
         XCTAssertEqual(primaryText(feedCards(vc)[0]), "Hello there friend",
                        "the previous final card must remain unchanged")
@@ -62,14 +66,16 @@ final class InCallCaptionTests: XCTestCase {
         let stream = CallHintStream()
 
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest one", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "guest one", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "owner one", confidence: nil, isFinal: false))
+            .ownerTranscript(text: "owner one", turnId: nil, callSid: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "guest + owner should be two separate cards")
 
         // Updating the guest must not touch the owner's live card.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest two", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "guest two", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 2, "guest update must reuse its own card")
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "guest two")
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner one",
@@ -78,18 +84,75 @@ final class InCallCaptionTests: XCTestCase {
         // Finalizing the guest leaves the owner card still live; a new guest line
         // opens a third card while the owner card stays the same instance.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest final", translation: nil, confidence: nil, isFinal: true))
+            .guestTranscript(text: "guest final", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: true))
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest three", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "guest three", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 3)
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner one",
                        "owner live card persists across guest finalize + new card")
 
         // Owner's own final updates the owner card in place (no new card).
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "owner final caption", confidence: nil, isFinal: true))
+            .ownerTranscript(text: "owner final caption", turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: true))
         XCTAssertEqual(feedCards(vc).count, 3, "owner finalize must not add a card")
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "owner final caption")
+    }
+
+    func testDelayedOwnerTranslationAttachesToFinalizedOwnerCard() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "I am leaving now", turnId: "owner-turn-1", callSid: "test-call",
+                             confidence: nil, isFinal: true))
+        XCTAssertEqual(feedCards(vc).count, 1)
+        XCTAssertNil(secondaryText(feedCards(vc)[0]))
+
+        vc.callHintStream(stream, didReceive:
+            .ownerTranslation(turnId: "owner-turn-1", translation: "Я уже выхожу", language: "ru",
+                              callSid: "test-call"))
+        XCTAssertEqual(feedCards(vc).count, 1, "a delayed subtitle must update, not duplicate, the owner card")
+        XCTAssertEqual(primaryText(feedCards(vc)[0]), "I am leaving now")
+        XCTAssertEqual(secondaryText(feedCards(vc)[0]), "Я уже выхожу")
+    }
+
+    func testDelayedSubtitleFromAnotherCallCannotAttach() {
+        let vc = makeLoadedViewController(callSid: "CA-current")
+        let stream = CallHintStream()
+        vc.callHintStream(stream, didReceive:
+            .ownerTranscript(text: "I am leaving now", turnId: "same-turn", callSid: "CA-current",
+                             confidence: nil, isFinal: true))
+
+        vc.callHintStream(stream, didReceive:
+            .ownerTranslation(turnId: "same-turn", translation: "Wrong call", language: "ru",
+                              callSid: "CA-previous"))
+        XCTAssertNil(secondaryText(feedCards(vc)[0]))
+
+        vc.callHintStream(stream, didReceive:
+            .ownerTranslation(turnId: "same-turn", translation: "Correct call", language: "ru",
+                              callSid: "CA-current"))
+        XCTAssertEqual(secondaryText(feedCards(vc)[0]), "Correct call")
+    }
+
+    func testDelayedGuestTranslationAttachesToMatchingGuestTurn() {
+        let vc = makeLoadedViewController(callSid: "CA-current")
+        let stream = CallHintStream()
+        vc.callHintStream(stream, didReceive:
+            .guestTranscript(text: "Can you call tomorrow?", translation: nil, turnId: "79",
+                             callSid: "CA-current", confidence: nil, isFinal: true))
+        vc.callHintStream(stream, didReceive:
+            .guestTranslation(turnId: "79", translation: "Wrong call", language: "ru",
+                              callSid: "CA-previous"))
+        XCTAssertNil(secondaryText(feedCards(vc)[0]))
+
+        vc.callHintStream(stream, didReceive:
+            .guestTranslation(turnId: "79", translation: "Можете позвонить завтра?", language: "ru",
+                              callSid: "CA-current"))
+        XCTAssertEqual(primaryText(feedCards(vc)[0]), "Can you call tomorrow?")
+        XCTAssertEqual(secondaryText(feedCards(vc)[0]), "Можете позвонить завтра?")
     }
 
     /// Garbled owner finals (too short / known-noise) are dropped so they never
@@ -101,19 +164,20 @@ final class InCallCaptionTests: XCTestCase {
 
         // Interim is never filtered, even when short.
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "so", confidence: nil, isFinal: false))
+            .ownerTranscript(text: "so", turnId: nil, callSid: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "so",
                        "interim owner text must always render")
 
         // A garbled final (too short) must not replace the live card.
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "um uh", confidence: nil, isFinal: true))
+            .ownerTranscript(text: "um uh", turnId: nil, callSid: nil, confidence: nil, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "so",
                        "garbled owner final must be suppressed, leaving the live card")
 
         // A clean final still finalizes the card in place.
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "I would like to book", confidence: nil, isFinal: true))
+            .ownerTranscript(text: "I would like to book", turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book",
                        "a clean owner final must render normally")
     }
@@ -125,11 +189,13 @@ final class InCallCaptionTests: XCTestCase {
         let stream = CallHintStream()
 
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "I would like to book", confidence: 0.4, isFinal: false))
+            .ownerTranscript(text: "I would like to book", turnId: nil, callSid: nil,
+                             confidence: 0.4, isFinal: false))
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book")
 
         vc.callHintStream(stream, didReceive:
-            .ownerTranscript(text: "please confirm the booking", confidence: 0.4, isFinal: true))
+            .ownerTranscript(text: "please confirm the booking", turnId: nil, callSid: nil,
+                             confidence: 0.4, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-owner"), "I would like to book",
                        "low-confidence owner final must be suppressed")
     }
@@ -144,19 +210,22 @@ final class InCallCaptionTests: XCTestCase {
 
         // Interim is never filtered, even when short.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "so", translation: nil, confidence: nil, isFinal: false))
+            .guestTranscript(text: "so", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: false))
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "so",
                        "interim guest text must always render")
 
         // A garbled final (too short) must not replace the live card.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "um uh", translation: nil, confidence: nil, isFinal: true))
+            .guestTranscript(text: "um uh", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "so",
                        "garbled guest final must be suppressed, leaving the live card")
 
         // A clean final still finalizes the card in place.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "I would like to book", translation: nil, confidence: nil, isFinal: true))
+            .guestTranscript(text: "I would like to book", translation: nil, turnId: nil, callSid: nil,
+                             confidence: nil, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "I would like to book",
                        "a clean guest final must render normally")
     }
@@ -168,11 +237,13 @@ final class InCallCaptionTests: XCTestCase {
         let stream = CallHintStream()
 
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "I would like to book", translation: nil, confidence: 0.4, isFinal: false))
+            .guestTranscript(text: "I would like to book", translation: nil, turnId: nil, callSid: nil,
+                             confidence: 0.4, isFinal: false))
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "I would like to book")
 
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "please confirm the booking", translation: nil, confidence: 0.4, isFinal: true))
+            .guestTranscript(text: "please confirm the booking", translation: nil, turnId: nil, callSid: nil,
+                             confidence: 0.4, isFinal: true))
         XCTAssertEqual(lastCardText(vc, identifier: "card-guest"), "I would like to book",
                        "low-confidence guest final must be suppressed")
     }
@@ -886,12 +957,12 @@ final class InCallCaptionTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
-    private func makeLoadedViewController() -> InCallViewController {
-        makeLoadedViewControllerWithSize(CGSize(width: 390, height: 844))
+    private func makeLoadedViewController(callSid: String = "test-call") -> InCallViewController {
+        makeLoadedViewControllerWithSize(CGSize(width: 390, height: 844), callSid: callSid)
     }
 
-    private func makeLoadedViewControllerWithSize(_ size: CGSize) -> InCallViewController {
-        let vc = InCallViewController(callerName: "Tester")
+    private func makeLoadedViewControllerWithSize(_ size: CGSize, callSid: String = "test-call") -> InCallViewController {
+        let vc = InCallViewController(callerName: "Tester", callSid: callSid)
         vc.loadViewIfNeeded()
         vc.view.frame = CGRect(origin: .zero, size: size)
         vc.view.layoutIfNeeded()

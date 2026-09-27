@@ -12,6 +12,7 @@ final class SecretaryLiveCallViewController: UIViewController {
     private let endButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
     private let routeCaption = UILabel()
+    private let translationLanguageLabel = UILabel()
     private let spinner = UIActivityIndicatorView(style: .medium)
     private var stream: SecretaryLiveCallStream?
     private var isSpeaker = true
@@ -21,6 +22,7 @@ final class SecretaryLiveCallViewController: UIViewController {
     private var connectionTimeout: DispatchWorkItem?
     private var reconnectAttempt = 0
     private var renderedTranscript: String?
+    private var turnCardsByID: [String: SecretaryTurnCard] = [:]
     var onCallEnded: (() -> Void)?
 
     init(task: APIClient.SecretaryTask) {
@@ -74,6 +76,12 @@ final class SecretaryLiveCallViewController: UIViewController {
         description.numberOfLines = 3
         description.textAlignment = .center
 
+        translationLanguageLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        translationLanguageLabel.textColor = .secondaryLabel
+        translationLanguageLabel.textAlignment = .center
+        translationLanguageLabel.accessibilityIdentifier = "text-secretary-translation-language"
+        updateTranslationLanguageLabel(task.translationLanguage ?? SessionStore.shared.language)
+
         retryButton.setTitle(NSLocalizedString("secretary.live.retry", comment: ""), for: .normal)
         retryButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
         retryButton.isHidden = true
@@ -120,7 +128,7 @@ final class SecretaryLiveCallViewController: UIViewController {
         controls.distribution = .equalCentering
         controls.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = UIStackView(arrangedSubviews: [heading, description, statusRow])
+        let header = UIStackView(arrangedSubviews: [heading, description, translationLanguageLabel, statusRow])
         header.axis = .vertical
         header.alignment = .fill
         header.spacing = 10
@@ -249,7 +257,13 @@ final class SecretaryLiveCallViewController: UIViewController {
                   let text = message["text"] as? String, !text.isEmpty else { return }
             spinner.stopAnimating()
             statusLabel.text = NSLocalizedString("secretary.live.connected", comment: "")
-            appendTurn(role: role, text: text)
+            let turnId = message["turnId"] as? String
+            upsertTurn(id: turnId, role: role, text: text, translation: nil)
+        case "subtitle":
+            guard let turnId = message["turnId"] as? String,
+                  let translation = message["translation"] as? String,
+                  !translation.isEmpty else { return }
+            turnCardsByID[turnId]?.updateTranslation(translation)
         case "audio":
             guard let role = message["role"] as? String,
                   let payload = message["payload"] as? String,
@@ -288,9 +302,26 @@ final class SecretaryLiveCallViewController: UIViewController {
                 terminalStatus = status
             }
         }
+        if let language = snapshot["translationLanguage"] as? String {
+            updateTranslationLanguageLabel(language)
+        }
+        if let turns = snapshot["transcriptTurns"] as? [[String: Any]] {
+            for turn in turns {
+                guard let id = turn["id"] as? String,
+                      let role = turn["role"] as? String,
+                      let text = turn["text"] as? String, !text.isEmpty else { continue }
+                upsertTurn(
+                    id: id,
+                    role: role,
+                    text: text,
+                    translation: turn["translation"] as? String)
+            }
+            return
+        }
         guard let transcript = snapshot["transcript"] else { return }
         if let text = transcript as? String, !text.isEmpty, text != renderedTranscript {
             renderedTranscript = text
+            turnCardsByID.removeAll()
             feed.arrangedSubviews.forEach { $0.removeFromSuperview() }
             for line in text.components(separatedBy: .newlines) where !line.isEmpty {
                 if let colon = line.firstIndex(of: ":") {
@@ -308,18 +339,49 @@ final class SecretaryLiveCallViewController: UIViewController {
                     appendTurn(role: "transcript", text: line)
                 }
             }
-        } else if let turns = transcript as? [[String: Any]] {
-            feed.arrangedSubviews.forEach { $0.removeFromSuperview() }
-            for turn in turns {
-                guard let role = turn["role"] as? String,
-                      let text = turn["text"] as? String, !text.isEmpty else { continue }
-                appendTurn(role: role, text: text)
-            }
         }
     }
 
-    private func appendTurn(role: String, text: String) {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    private func updateTranslationLanguageLabel(_ language: String) {
+        let code = language == "es" ? "es" : "ru"
+        let key = code == "es" ? "copilot.language.es" : "copilot.language.ru"
+        let name = NSLocalizedString(key, comment: "")
+        translationLanguageLabel.text = NSLocalizedString("translation.language.selected", comment: "")
+            .replacingOccurrences(of: "%@", with: name)
+    }
+
+    private func upsertTurn(id: String?, role: String, text: String, translation: String?) {
+        if let id, let existing = turnCardsByID[id] {
+            existing.update(text: text)
+            if let translation, !translation.isEmpty { existing.updateTranslation(translation) }
+            return
+        }
+        guard let card = appendTurn(role: role, text: text, translation: translation) else { return }
+        if let id { turnCardsByID[id] = card }
+    }
+
+    private final class SecretaryTurnCard {
+        let bubble: UIView
+        let originalLabel: UILabel
+        let translationLabel: UILabel
+
+        init(bubble: UIView, originalLabel: UILabel, translationLabel: UILabel) {
+            self.bubble = bubble
+            self.originalLabel = originalLabel
+            self.translationLabel = translationLabel
+        }
+
+        func update(text: String) { originalLabel.text = text }
+
+        func updateTranslation(_ translation: String) {
+            translationLabel.text = translation
+            translationLabel.isHidden = false
+        }
+    }
+
+    @discardableResult
+    private func appendTurn(role: String, text: String, translation: String? = nil) -> SecretaryTurnCard? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let normalizedRole = role.lowercased()
         let isSecretary = normalizedRole == "secretary" || normalizedRole == "assistant"
         let isGuest = normalizedRole == "guest"
@@ -330,17 +392,32 @@ final class SecretaryLiveCallViewController: UIViewController {
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
 
+        let translationLabel = UILabel()
+        translationLabel.font = .systemFont(ofSize: 13)
+        translationLabel.textColor = isGuest ? UIColor.white.withAlphaComponent(0.86) : .secondaryLabel
+        translationLabel.numberOfLines = 0
+        translationLabel.accessibilityIdentifier = "text-secretary-turn-translation"
+        if let translation, !translation.isEmpty {
+            translationLabel.text = translation
+        } else {
+            translationLabel.isHidden = true
+        }
+        let labels = UIStackView(arrangedSubviews: [label, translationLabel])
+        labels.axis = .vertical
+        labels.spacing = 3
+        labels.translatesAutoresizingMaskIntoConstraints = false
+
         let bubble = UIView()
         bubble.backgroundColor = isSecretary ? .secondarySystemBackground :
             (isGuest ? Theme.green : .tertiarySystemBackground)
         bubble.layer.cornerRadius = 16
         bubble.translatesAutoresizingMaskIntoConstraints = false
-        bubble.addSubview(label)
+        bubble.addSubview(labels)
         NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 10),
-            label.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -10),
-            label.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
+            labels.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 10),
+            labels.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -10),
+            labels.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
+            labels.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
             bubble.widthAnchor.constraint(lessThanOrEqualTo: feed.widthAnchor, multiplier: 0.88),
         ])
         let row = UIStackView(arrangedSubviews: isGuest ? [UIView(), bubble] : [bubble, UIView()])
@@ -352,6 +429,7 @@ final class SecretaryLiveCallViewController: UIViewController {
             let bottom = CGPoint(x: 0, y: max(0, self.scrollView.contentSize.height - self.scrollView.bounds.height))
             self.scrollView.setContentOffset(bottom, animated: true)
         }
+        return SecretaryTurnCard(bubble: bubble, originalLabel: label, translationLabel: translationLabel)
     }
 
     private func handleDisconnect(_ error: Error?) {
