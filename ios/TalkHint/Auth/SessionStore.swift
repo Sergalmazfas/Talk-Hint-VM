@@ -10,7 +10,7 @@ enum TranslatorPlaybackPreference: String {
     case text
 }
 
-enum VoiceProviderPreference: String {
+enum VoiceProviderPreference: String, Codable {
     case elevenlabs
     case cartesia
 }
@@ -22,6 +22,7 @@ final class SessionStore {
     static let shared = SessionStore()
 
     private let tokenKey = "talkhint.session.token"
+    private let pendingSecretaryCallKey = "talkhint.secretary.pending.call"
     private let userIdKey = "talkhint.user.id"
     private let emailKey = "talkhint.user.email"
     private let activeNumberIdKey = "talkhint.active.number.id"
@@ -53,10 +54,35 @@ final class SessionStore {
 
     private init() {}
 
+    struct SecretaryCallDraft: Codable {
+        let instruction: String
+        let confirmationToken: String
+        let clientRequestId: UUID
+        let voiceProvider: VoiceProviderPreference
+        var phoneNumber: String?
+        var requestAttempted: Bool
+    }
+
     var token: String? { Keychain.get(tokenKey) }
     var userId: String? { UserDefaults.standard.string(forKey: userIdKey) }
     var email: String? { UserDefaults.standard.string(forKey: emailKey) }
     var isLoggedIn: Bool { token != nil }
+
+    var pendingSecretaryCall: SecretaryCallDraft? {
+        guard let stored = Keychain.get(pendingSecretaryCallKey),
+              let data = Data(base64Encoded: stored) else { return nil }
+        return try? JSONDecoder().decode(SecretaryCallDraft.self, from: data)
+    }
+
+    @discardableResult
+    func savePendingSecretaryCall(_ draft: SecretaryCallDraft) -> Bool {
+        guard let data = try? JSONEncoder().encode(draft) else { return false }
+        return Keychain.set(data.base64EncodedString(), for: pendingSecretaryCallKey)
+    }
+
+    func clearPendingSecretaryCall() {
+        Keychain.delete(pendingSecretaryCallKey)
+    }
 
     /// The phone number the user has chosen as their active line. The backend has
     /// no per-user "active number" field, so this selection is stored locally and
@@ -193,5 +219,6 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: translatorVoiceKey)
         UserDefaults.standard.removeObject(forKey: translatorPlaybackKey)
         UserDefaults.standard.removeObject(forKey: voiceProviderKey)
+        clearPendingSecretaryCall()
     }
 }

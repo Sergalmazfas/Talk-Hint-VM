@@ -46,11 +46,17 @@ import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
 import { createCopilotStream } from "./copilotStream";
 import { handleSecretaryTwilioStream } from "./secretary/agent";
-import { appendSecretaryTurn, getSecretaryTaskForCall, markSecretaryStreamEnded, markSecretaryStreamFailed } from "./secretary/tasks";
+import { appendSecretaryTurn, getSecretaryTaskById, getSecretaryTaskForCall, markSecretaryStreamEnded, markSecretaryStreamFailed, toSecretaryTaskReport } from "./secretary/tasks";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
 import { verifySecretaryStream } from "./secretary/streamAuth";
 import { signSecretaryConfirmation } from "./secretary/confirmation";
+import {
+  buildSecretaryFeedSnapshot,
+  publishSecretaryFeedEvent,
+  sendSecretaryFeedSnapshot,
+  subscribeSecretaryFeed,
+} from "./secretary/feed";
 
 // μ-law to linear PCM16 conversion table (8kHz μ-law to 16-bit PCM)
 const MULAW_DECODE_TABLE = new Int16Array(256);
@@ -823,7 +829,7 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/secretary-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
+    if (!["/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -839,6 +845,35 @@ export function setupWebSocket(server: Server) {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request, pathname);
       });
+      return;
+    }
+
+    if (pathname === "/secretary-feed") {
+      const token = parsedUrl.searchParams.get("token");
+      const taskId = parsedUrl.searchParams.get("taskId")?.trim();
+      if (!token || !taskId || taskId.length > 100) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      getSessionUserId(token).then(async (userId) => {
+        if (!userId) {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        // Do not complete the upgrade (or disclose a snapshot) until ownership
+        // is verified against the durable task row.
+        const task = await getSecretaryTaskById(taskId);
+        if (!task || task.userId !== userId || task.mode !== "live") {
+          socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+        wss.handleUpgrade(request, socket, head, (ws) => {
+          wss.emit("connection", ws, request, pathname, userId, taskId);
+        });
+      }).catch(() => socket.destroy());
       return;
     }
 
@@ -876,7 +911,7 @@ export function setupWebSocket(server: Server) {
     });
   });
 
-  wss.on("connection", (ws: WebSocket, request: any, pathname: string, userId?: string) => {
+  wss.on("connection", (ws: WebSocket, request: any, pathname: string, userId?: string, secretaryTaskId?: string) => {
     if (pathname === "/ui") {
       handleUIConnection(ws, userId);
     } else if (pathname === "/honor-stream") {
@@ -887,6 +922,53 @@ export function setupWebSocket(server: Server) {
       // Read-only owner-scoped call telemetry; unlike /translator this never
       // starts a provider session and unlike /ui it cannot receive hints.
       if (userId) subscribeTranslatorFeed(userId, ws);
+    } else if (pathname === "/secretary-feed") {
+      if (userId && secretaryTaskId) {
+        // Subscribe first and buffer events until the authoritative snapshot
+        // has been sent. This closes the DB-read/subscribe gap without exposing
+        // events for a different task.
+        const unsubscribe = subscribeSecretaryFeed(secretaryTaskId, ws, true);
+        let disposed = false;
+        let snapshotInFlight = false;
+        let snapshotTimer: ReturnType<typeof setInterval> | undefined;
+        const dispose = () => {
+          if (disposed) return;
+          disposed = true;
+          if (snapshotTimer) clearInterval(snapshotTimer);
+          unsubscribe();
+        };
+        ws.once("close", dispose);
+        ws.once("error", dispose);
+        // This is strictly a read-only monitor. Never accept or route client
+        // microphone/audio payloads into the Secretary call.
+        ws.on("message", () => ws.close(1008, "Secretary feed is read-only"));
+        const refreshSnapshot = async () => {
+          if (disposed || snapshotInFlight || ws.readyState !== WebSocket.OPEN) return;
+          snapshotInFlight = true;
+          try {
+            const task = await getSecretaryTaskById(secretaryTaskId);
+            if (!task || task.userId !== userId || task.mode !== "live") {
+              ws.close(1008, "unauthorized Secretary feed");
+              return;
+            }
+            if (!sendSecretaryFeedSnapshot(
+              secretaryTaskId,
+              ws,
+              buildSecretaryFeedSnapshot(toSecretaryTaskReport(task)),
+            )) {
+              if (ws.readyState === WebSocket.OPEN) ws.close(1011, "Secretary feed snapshot could not be sent");
+              return;
+            }
+          } catch {
+            ws.close(1011, "Secretary feed unavailable");
+          } finally {
+            snapshotInFlight = false;
+          }
+        };
+        void refreshSnapshot();
+        snapshotTimer = setInterval(() => { void refreshSnapshot(); }, 4_000);
+        snapshotTimer.unref?.();
+      }
     } else if (pathname === "/copilot-stream") {
       if (userId) createCopilotStream(ws, userId);
     } else if (pathname === "/translator-spike-stream") {
@@ -913,11 +995,17 @@ export function setupWebSocket(server: Server) {
           );
           return { instruction: task.instruction, ownerId: task.userId, voiceProvider, cloneVoiceId };
         },
-        onTurn: appendSecretaryTurn,
+        onTurn: async (taskId, role, text, callSid) => {
+          await appendSecretaryTurn(taskId, role, text, callSid);
+          publishSecretaryFeedEvent(taskId, { type: "turn", role, text });
+        },
+        onAudio: (taskId, role, payload) => publishSecretaryFeedEvent(taskId, { type: "audio", role, payload }),
         onStreamEnd: async (taskId, reason, callSid) => {
           if (callSid) {
-            if (reason) await markSecretaryStreamFailed(taskId, callSid, reason);
-            else await markSecretaryStreamEnded(taskId, callSid);
+            const task = reason
+              ? await markSecretaryStreamFailed(taskId, callSid, reason)
+              : await markSecretaryStreamEnded(taskId, callSid);
+            if (task) publishSecretaryFeedEvent(taskId, { type: "status", status: task.status });
           }
           if (reason) console.error(`[Secretary] Stream ended for task ${taskId}: ${reason}`);
         },

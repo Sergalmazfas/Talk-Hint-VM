@@ -72,3 +72,11 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
   });
   return { sid: created.sid, callId: call.id };
 }
+
+/** End only the Twilio call originated by this service's configured account. */
+export async function hangupSecretaryCall(callSid: string): Promise<void> {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
+  await twilio(accountSid, authToken).calls(callSid).update({ status: "completed" });
+}

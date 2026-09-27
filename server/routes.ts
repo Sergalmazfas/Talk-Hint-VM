@@ -37,8 +37,9 @@ import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./t
 import { registerSecretaryRoutes } from "./secretary/routes";
 import { dialSecretaryTask, secretaryCallbackOrigin } from "./secretary/dialer";
 import { notifySecretaryResult } from "./secretary/notifications";
-import { finishSecretaryAttempt, getSecretaryTaskById, getSecretaryTaskForCall } from "./secretary/tasks";
+import { bindSecretaryCall, finishSecretaryAttempt, getSecretaryTaskById, getSecretaryTaskForCall } from "./secretary/tasks";
 import { signSecretaryStream } from "./secretary/streamAuth";
+import { publishSecretaryFeedEvent } from "./secretary/feed";
 import {
   isDiagnosticRecordingUser,
   stampRecordingPolicy,
@@ -292,6 +293,8 @@ export async function registerRoutes(
     const taskId = String(req.query.taskId ?? "");
     const callSid = String(req.body.CallSid ?? "");
     try {
+      const bound = await bindSecretaryCall(taskId, callSid);
+      if (!bound) return res.status(403).send("Secretary task is not assigned to this call");
       // Twilio may request TwiML just before the originating worker has
       // attached the create response's SID to the durable task row.
       let task = await getSecretaryTaskForCall(taskId, callSid);
@@ -318,7 +321,10 @@ export async function registerRoutes(
     const callSid = String(req.body.CallSid ?? "");
     const status = String(req.body.CallStatus ?? "");
     try {
+      const bound = await bindSecretaryCall(taskId, callSid);
+      if (!bound) return res.status(403).send("Secretary task is not assigned to this call");
       const task = await finishSecretaryAttempt(taskId, callSid, status);
+      if (task) publishSecretaryFeedEvent(taskId, { type: "status", status: task.status });
       if (task && ["completed", "no-answer", "busy", "failed", "canceled"].includes(status)) {
         const call = await storage.getCallByCallSid(callSid);
         if (call) await storage.updateCall(call.id, {

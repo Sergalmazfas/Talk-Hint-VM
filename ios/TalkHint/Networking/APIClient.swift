@@ -660,9 +660,11 @@ final class APIClient {
 
     struct SecretaryTask: Equatable {
         let id: String
+        let clientRequestId: String?
         let phoneNumber: String
         let instruction: String
         let status: String
+        let mode: String?
         let outcome: String?
         let summary: String?
         let verifiedFacts: [String]
@@ -671,6 +673,14 @@ final class APIClient {
         let callId: String?
         let createdAt: Date?
         let updatedAt: Date?
+
+        var isTerminal: Bool {
+            ["completed", "failed", "cancelled", "canceled", "no_answer", "busy", "needs_action",
+             "unknown", "ended", "hangup", "hung_up", "disconnected"]
+                .contains(status.lowercased().replacingOccurrences(of: "-", with: "_"))
+        }
+
+        var isActiveLive: Bool { mode?.lowercased() == "live" && !isTerminal }
     }
 
     /// Loads only the signed-in user's Secretary tasks.
@@ -690,13 +700,27 @@ final class APIClient {
 
     /// Explicitly creates/starts a task after the user reviews its confirmed goal.
     func createSecretaryTask(phoneNumber: String, instruction: String, confirmationToken: String,
-                             voiceProvider: VoiceProviderPreference) async throws -> SecretaryTask {
-        let data = try await request("/api/secretary/tasks", method: "POST", json: [
+                             voiceProvider: VoiceProviderPreference, live: Bool = false,
+                             clientRequestId: UUID? = nil) async throws -> SecretaryTask {
+        var body: [String: Any] = [
             "phoneNumber": phoneNumber,
             "instruction": instruction,
             "confirmationToken": confirmationToken,
             "voiceProvider": voiceProvider.rawValue,
-        ], authenticated: true)
+        ]
+        if live {
+            guard let clientRequestId else { throw APIError.decoding }
+            body["live"] = true
+            body["clientRequestId"] = clientRequestId.uuidString
+        }
+        let data = try await request("/api/secretary/tasks", method: "POST", json: body, authenticated: true)
+        return try Self.secretaryTaskFromResponse(data)
+    }
+
+    func hangupSecretaryTask(id: String) async throws -> SecretaryTask {
+        let pathId = try Self.secretaryTaskPathComponent(id)
+        let data = try await request("/api/secretary/tasks/\(pathId)/hangup",
+                                     method: "POST", json: [:], authenticated: true)
         return try Self.secretaryTaskFromResponse(data)
     }
 
@@ -737,9 +761,11 @@ final class APIClient {
               let status = item["status"] as? String else { return nil }
         return SecretaryTask(
             id: id,
+            clientRequestId: (item["clientRequestId"] as? String) ?? (item["client_request_id"] as? String),
             phoneNumber: phoneNumber,
             instruction: instruction,
             status: status,
+            mode: item["mode"] as? String,
             outcome: item["outcome"] as? String,
             summary: item["summary"] as? String,
             verifiedFacts: (item["verifiedFacts"] as? [String]) ?? [],

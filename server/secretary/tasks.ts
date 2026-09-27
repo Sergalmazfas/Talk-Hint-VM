@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, isDatabaseAvailable } from "../db";
-import { calls, secretaryTasks, type SecretaryTask } from "@shared/schema";
+import { calls, secretaryTasks, users, type SecretaryTask } from "@shared/schema";
+import { publishSecretaryFeedEvent } from "./feed";
 
 export const SECRETARY_MAX_TASK_ATTEMPTS = 2;
 export const SECRETARY_MAX_USER_ATTEMPTS_PER_24H = 3;
@@ -21,6 +22,8 @@ export type SecretaryOutcome = "resolved" | "needs_follow_up" | "not_reached" | 
 export type SecretaryVoiceProvider = "elevenlabs" | "cartesia";
 export interface SecretaryTaskReport {
   id: string;
+  mode?: "live";
+  clientRequestId: string | null;
   phoneNumber: string;
   instruction: string;
   status: string;
@@ -113,6 +116,8 @@ export function isSecretaryCallingWindow(date: Date): boolean {
 export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport {
   return {
     id: task.id,
+    ...(task.mode === "live" ? { mode: "live" as const } : {}),
+    clientRequestId: task.clientRequestId ?? null,
     phoneNumber: task.phoneNumber,
     instruction: task.instruction,
     status: task.status,
@@ -179,8 +184,8 @@ export function secretaryStreamFailureFields() {
   };
 }
 
-export function canRetrySecretaryTask(task: Pick<SecretaryTask, "status" | "outcome" | "attempts">): boolean {
-  return task.attempts < SECRETARY_MAX_TASK_ATTEMPTS &&
+export function canRetrySecretaryTask(task: Pick<SecretaryTask, "status" | "outcome" | "attempts"> & Partial<Pick<SecretaryTask, "mode">>): boolean {
+  return task.mode !== "live" && task.attempts < SECRETARY_MAX_TASK_ATTEMPTS &&
     (["no_answer", "busy", "failed"].includes(task.status) ||
       (task.status === "completed" && task.outcome === "needs_follow_up"));
 }
@@ -297,6 +302,7 @@ async function summarizeSecretaryTranscript(task: SecretaryTask): Promise<Return
 
 async function setTaskReport(
   taskId: string,
+  callSid: string,
   fields: Pick<SecretaryTask, "status" | "outcome" | "summary" | "verifiedFacts" | "nextStep">,
 ) {
   const [updated] = await db.update(secretaryTasks).set({
@@ -304,7 +310,12 @@ async function setTaskReport(
     notificationStatus: "pending",
     notificationClaimedAt: null,
     updatedAt: new Date(),
-  }).where(eq(secretaryTasks.id, taskId)).returning();
+  }).where(and(
+    eq(secretaryTasks.id, taskId),
+    eq(secretaryTasks.callSid, callSid),
+    inArray(secretaryTasks.status, [...ACTIVE_STATUSES]),
+  )).returning();
+  if (updated) publishSecretaryFeedEvent(taskId, { type: "status", status: updated.status });
   return updated;
 }
 
@@ -330,8 +341,113 @@ export async function createSecretaryTask(
     phoneNumber,
     instruction,
     voiceProvider,
+    mode: "queued",
   }).returning();
   if (!task) throw new Error("Secretary task could not be saved.");
+  return task;
+}
+
+/** Creates a durable single-use live attempt, enforcing owner concurrency and quota atomically. */
+export async function createLiveSecretaryTask(
+  userId: string,
+  data: { phoneNumber: unknown; instruction: unknown; voiceProvider?: unknown; clientRequestId: unknown },
+): Promise<{ task: SecretaryTask; created: boolean }> {
+  isDatabaseReady();
+  const clientRequestId = validateSecretaryClientRequestId(data.clientRequestId);
+  const phoneNumber = validateSecretaryPhoneNumber(data.phoneNumber);
+  if (!phoneNumber) throw Object.assign(new Error("Enter a valid standard US phone number in +1 format."), { status: 400 });
+  const instruction = validateSecretaryInstruction(data.instruction);
+  if (!instruction) {
+    throw Object.assign(new Error("The task is empty, too long, or contains protected card or authentication data."), { status: 400 });
+  }
+  if (data.voiceProvider !== undefined && data.voiceProvider !== "cartesia" && data.voiceProvider !== "elevenlabs") {
+    throw Object.assign(new Error("Choose a supported Secretary voice provider."), { status: 400 });
+  }
+  const voiceProvider: SecretaryVoiceProvider = data.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
+  try {
+    return await db.transaction(async (tx) => {
+    // Serialize starts for this owner even before a new task reaches the
+    // partial unique active-task index.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update").limit(1);
+    const [existing] = await tx.select().from(secretaryTasks).where(and(
+      eq(secretaryTasks.userId, userId),
+      eq(secretaryTasks.clientRequestId, clientRequestId),
+    )).limit(1);
+    if (existing) {
+      if (existing.phoneNumber !== phoneNumber || existing.instruction !== instruction) {
+        throw Object.assign(new Error("This clientRequestId was already used for a different Secretary assignment."), { status: 409 });
+      }
+      return { task: existing, created: false };
+    }
+    const active = await tx.select({ id: secretaryTasks.id }).from(secretaryTasks).where(and(
+      eq(secretaryTasks.userId, userId),
+      inArray(secretaryTasks.status, [...ACTIVE_STATUSES]),
+    )).limit(1);
+    if (active.length) throw Object.assign(new Error("A Secretary call is already active."), { status: 409 });
+    const recent = await tx.select({ attemptHistory: secretaryTasks.attemptHistory })
+      .from(secretaryTasks).where(eq(secretaryTasks.userId, userId));
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const attempts = recent.reduce((sum, row) => sum + (
+      Array.isArray(row.attemptHistory)
+        ? row.attemptHistory.filter((stamp) => {
+          const time = new Date(String(stamp)).getTime();
+          return Number.isFinite(time) && time > cutoff;
+        }).length
+        : 0
+    ), 0);
+    if (attempts >= SECRETARY_MAX_USER_ATTEMPTS_PER_24H) {
+      throw Object.assign(new Error("The Secretary daily call limit has been reached."), { status: 429 });
+    }
+    const now = new Date();
+    const [task] = await tx.insert(secretaryTasks).values({
+      userId, phoneNumber, instruction, voiceProvider, mode: "live", status: "starting",
+      clientRequestId,
+      attempts: 1, attemptHistory: [now.toISOString()], dialStartedAt: now,
+    }).returning();
+    if (!task) throw new Error("Secretary task could not be saved.");
+    return { task, created: true };
+    });
+  } catch (error: any) {
+    // The per-owner row lock serializes normal requests; the unique index is
+    // the cross-process backstop. Resolve its rare collision idempotently.
+    if (String(error?.code) !== "23505") throw error;
+    const existing = await getLiveSecretaryTaskByClientRequest(
+      userId, clientRequestId, phoneNumber, instruction,
+    );
+    if (!existing) throw error;
+    if (existing.phoneNumber !== phoneNumber || existing.instruction !== instruction) {
+      throw Object.assign(new Error("This clientRequestId was already used for a different Secretary assignment."), { status: 409 });
+    }
+    return { task: existing, created: false };
+  }
+}
+
+export function validateSecretaryClientRequestId(value: unknown): string {
+  if (typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw Object.assign(new Error("A valid clientRequestId UUID is required for live Secretary calls."), { status: 400 });
+  }
+  return value.toLowerCase();
+}
+
+export async function getLiveSecretaryTaskByClientRequest(
+  userId: string,
+  clientRequestId: unknown,
+  phoneValue?: unknown,
+  instructionValue?: unknown,
+): Promise<SecretaryTask | undefined> {
+  isDatabaseReady();
+  const key = validateSecretaryClientRequestId(clientRequestId);
+  const [task] = await db.select().from(secretaryTasks).where(and(
+    eq(secretaryTasks.userId, userId),
+    eq(secretaryTasks.clientRequestId, key),
+  )).limit(1);
+  if (!task) return undefined;
+  const phone = validateSecretaryPhoneNumber(phoneValue);
+  const instruction = validateSecretaryInstruction(instructionValue);
+  if (phone !== task.phoneNumber || instruction !== task.instruction) {
+    throw Object.assign(new Error("This clientRequestId was already used for a different Secretary assignment."), { status: 409 });
+  }
   return task;
 }
 
@@ -355,7 +471,7 @@ export async function getSecretaryTaskForCall(taskId: string, callSid: string): 
   const [task] = await db.select().from(secretaryTasks).where(and(
     eq(secretaryTasks.id, taskId),
     eq(secretaryTasks.callSid, callSid),
-    inArray(secretaryTasks.status, [...ACTIVE_STATUSES].filter((status) => status !== "starting")),
+    inArray(secretaryTasks.status, [...ACTIVE_STATUSES]),
   )).limit(1);
   return task;
 }
@@ -382,7 +498,7 @@ export async function retrySecretaryTask(userId: string, taskId: string): Promis
       eq(secretaryTasks.id, taskId),
       eq(secretaryTasks.userId, userId),
     )).for("update").limit(1);
-    if (!current || !canRetrySecretaryTask(current) || current.notificationStatus === "sending") {
+    if (!current || current.mode === "live" || !canRetrySecretaryTask(current) || current.notificationStatus === "sending") {
       return undefined;
     }
 
@@ -538,6 +654,39 @@ export async function appendSecretaryTurn(
   });
 }
 
+/**
+ * Bind an authentic Twilio callback to the in-flight task before the REST
+ * create response arrives. A SID is immutable once bound.
+ */
+export async function bindSecretaryCall(taskId: string, sid: string): Promise<SecretaryTask | undefined> {
+  isDatabaseReady();
+  if (!taskId || !/^CA[a-fA-F0-9]{32}$/.test(sid)) return undefined;
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(secretaryTasks)
+      .where(eq(secretaryTasks.id, taskId)).for("update").limit(1);
+    if (!current) return undefined;
+    if (current.callSid) return current.callSid === sid ? current : undefined;
+    if (current.status !== "starting") return undefined;
+    const [bound] = await tx.update(secretaryTasks).set({
+      callSid: sid,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(secretaryTasks.id, taskId),
+      eq(secretaryTasks.status, "starting"),
+      isNull(secretaryTasks.callSid),
+    )).returning();
+    return bound;
+  });
+}
+
+function historyStatusForSecretaryTask(task: SecretaryTask): string | null {
+  if (task.status === "finalizing" || task.status === "completed") return "completed";
+  if (task.status === "no_answer") return "no-answer";
+  if (task.status === "busy") return "busy";
+  if (task.status === "failed" || task.status === "unknown" || task.status === "cancelled") return "failed";
+  return null;
+}
+
 export async function attachSecretaryCall(
   taskId: string,
   sid: string,
@@ -546,14 +695,36 @@ export async function attachSecretaryCall(
   const [updated] = await db.update(secretaryTasks).set({
     callSid: sid,
     ...(callId ? { callId } : {}),
-    status: "ringing",
+    status: sql`CASE WHEN ${secretaryTasks.status} = 'starting' THEN 'ringing' ELSE ${secretaryTasks.status} END`,
     updatedAt: new Date(),
-  }).where(and(eq(secretaryTasks.id, taskId), eq(secretaryTasks.status, "starting"))).returning();
-  return updated;
+  }).where(and(
+    eq(secretaryTasks.id, taskId),
+    or(isNull(secretaryTasks.callSid), eq(secretaryTasks.callSid, sid)),
+    or(inArray(secretaryTasks.status, [...ACTIVE_STATUSES]), eq(secretaryTasks.callSid, sid)),
+  )).returning();
+  const task = updated ?? await db.select().from(secretaryTasks).where(and(
+    eq(secretaryTasks.id, taskId),
+    eq(secretaryTasks.callSid, sid),
+  )).limit(1).then((rows) => rows[0]);
+  if (!task) return undefined;
+  if (task.callId) {
+    const historyStatus = historyStatusForSecretaryTask(task);
+    if (historyStatus) {
+      await db.update(calls).set({
+        status: historyStatus,
+        endedAt: new Date(),
+        ...(task.transcript ? { transcript: task.transcript } : {}),
+      }).where(and(eq(calls.id, task.callId), eq(calls.userId, task.userId)));
+    }
+  }
+  if (updated) publishSecretaryFeedEvent(taskId, { type: "status", status: task.status });
+  return task;
 }
 
 export function mapTwilioSecretaryStatus(status: string): string | null {
   switch (status.toLowerCase()) {
+    case "ringing":
+      return "ringing";
     case "in-progress":
     case "answered":
       return "connected";
@@ -610,6 +781,7 @@ async function settleSecretaryFinalization(taskId: string, callSid: string): Pro
     eq(secretaryTasks.callSid, callSid),
     eq(secretaryTasks.status, "finalizing"),
   )).returning();
+  if (updated) publishSecretaryFeedEvent(taskId, { type: "status", status: updated.status });
   return updated;
 }
 
@@ -629,7 +801,7 @@ export async function markSecretaryStreamEnded(
   }).where(and(
     eq(secretaryTasks.id, taskId),
     eq(secretaryTasks.callSid, callSid),
-    inArray(secretaryTasks.status, [...ACTIVE_STATUSES].filter((status) => status !== "starting")),
+    inArray(secretaryTasks.status, [...ACTIVE_STATUSES]),
   ));
   const task = await getSecretaryTaskById(taskId);
   if (!task || task.callSid !== callSid) return undefined;
@@ -649,10 +821,21 @@ export async function finishSecretaryAttempt(
   if (!mapped) return undefined;
   const current = await getSecretaryTaskById(taskId);
   if (!current || current.callSid !== callSid || isSecretaryTaskReportTerminal(current.status)) return undefined;
+  if (mapped === "ringing") {
+    const [updated] = await db.update(secretaryTasks).set({ status: "ringing", updatedAt: new Date() })
+      .where(and(
+        eq(secretaryTasks.id, taskId),
+        eq(secretaryTasks.callSid, callSid),
+        eq(secretaryTasks.status, "starting"),
+      )).returning();
+    if (updated) publishSecretaryFeedEvent(taskId, { type: "status", status: updated.status });
+    return updated ?? getSecretaryTaskById(taskId);
+  }
   if (mapped === "connected") {
     const [updated] = await db.update(secretaryTasks).set({ status: "connected", updatedAt: new Date() })
-      .where(and(eq(secretaryTasks.id, taskId), eq(secretaryTasks.callSid, callSid), inArray(secretaryTasks.status, ["ringing", "connected"])))
+      .where(and(eq(secretaryTasks.id, taskId), eq(secretaryTasks.callSid, callSid), inArray(secretaryTasks.status, ["starting", "ringing", "connected"])))
       .returning();
+    if (updated) publishSecretaryFeedEvent(taskId, { type: "status", status: updated.status });
     return updated;
   }
 
@@ -668,10 +851,11 @@ export async function finishSecretaryAttempt(
       }).where(and(
         eq(secretaryTasks.id, taskId),
         eq(secretaryTasks.callSid, callSid),
-        inArray(secretaryTasks.status, ["ringing", "connected"]),
+        inArray(secretaryTasks.status, ["starting", "ringing", "connected"]),
       )).returning();
       if (!updated) return getSecretaryTaskById(taskId);
       finalizing = updated;
+      publishSecretaryFeedEvent(taskId, { type: "status", status: updated.status });
     }
     if (isSecretaryReportReady(finalizing, new Date())) {
       return settleSecretaryFinalization(taskId, callSid);
@@ -680,7 +864,7 @@ export async function finishSecretaryAttempt(
   }
 
   const noAnswer = mapped === "no_answer" || mapped === "busy";
-  return setTaskReport(taskId, {
+  return setTaskReport(taskId, callSid, {
     status: mapped,
     outcome: noAnswer ? "not_reached" : "failed",
     summary: noAnswer
@@ -744,7 +928,10 @@ async function expireAmbiguousSecretaryStarts(): Promise<number> {
   }).where(and(
     eq(secretaryTasks.status, "starting"),
     lt(secretaryTasks.dialStartedAt, new Date(Date.now() - TASK_START_TIMEOUT_MS)),
-  )).returning({ id: secretaryTasks.id });
+  )).returning({ id: secretaryTasks.id, status: secretaryTasks.status });
+  for (const task of stale) {
+    publishSecretaryFeedEvent(task.id, { type: "status", status: task.status });
+  }
   return stale.length;
 }
 

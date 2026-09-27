@@ -13,10 +13,16 @@ final class HomeViewController: UIViewController {
     private var dialed = "" { didSet { renderNumber() } }
     private var recents: [APIClient.CallRecord] = []
     private let callMode: CallManager.CallMode
+    private let secretaryMode: Bool
     private var outgoingCallUUID: UUID?
+    private var confirmedSecretaryTask: SessionStore.SecretaryCallDraft?
+    private var activeSecretaryTask: APIClient.SecretaryTask?
+    private var recoveredSecretaryTask: APIClient.SecretaryTask?
+    private var isCreatingSecretaryTask = false
 
-    init(mode: CallManager.CallMode = .hint) {
+    init(mode: CallManager.CallMode = .hint, secretary: Bool = false) {
         callMode = mode
+        secretaryMode = secretary
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -32,6 +38,7 @@ final class HomeViewController: UIViewController {
     private let recentsStack = UIStackView()
     private let recentsHeader = UIStackView()
     private let callButton = UIButton(type: .system)
+    private let resumeSecretaryButton = UIButton(type: .system)
     private let copilotLanguageButton = UIButton(type: .system)
 
     private static let copilotLanguages: [(code: String, key: String)] = [
@@ -56,8 +63,12 @@ final class HomeViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         navigationController?.setNavigationBarHidden(true, animated: animated)
-        if callMode == .hint { renderGoalState() }
-        loadRecents()
+        if callMode == .hint || secretaryMode { renderGoalState() }
+        if !secretaryMode { loadRecents() }
+        if secretaryMode {
+            restoreSecretaryDraft()
+            loadActiveSecretaryTask()
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -71,8 +82,8 @@ final class HomeViewController: UIViewController {
     private func buildUI() {
         // Header: "Calls" + gear.
         let titleLabel = UILabel()
-        titleLabel.text = NSLocalizedString(callMode == .hint ? "home.title" :
-                                            (callMode == .copilot ? "copilot.title" : "translator.title"), comment: "")
+        titleLabel.text = NSLocalizedString(secretaryMode ? "secretary.title" : (callMode == .hint ? "home.title" :
+                                            (callMode == .copilot ? "copilot.title" : "translator.title")), comment: "")
         titleLabel.font = .systemFont(ofSize: 32, weight: .bold)
         titleLabel.textColor = .label
 
@@ -101,16 +112,23 @@ final class HomeViewController: UIViewController {
         headerPrepare.setContentHuggingPriority(.required, for: .horizontal)
         headerPrepare.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        let taskHistory = UIButton(type: .system)
+        taskHistory.setImage(UIImage(systemName: "clock.arrow.circlepath"), for: .normal)
+        taskHistory.tintColor = Theme.sub
+        taskHistory.accessibilityLabel = NSLocalizedString("secretary.history", comment: "")
+        taskHistory.accessibilityIdentifier = "button-secretary-history"
+        taskHistory.addTarget(self, action: #selector(secretaryHistoryTapped), for: .touchUpInside)
+        taskHistory.isHidden = !secretaryMode
         let spacerL = UIView()
         let spacerR = UIView()
-        let header = UIStackView(arrangedSubviews: [titleLabel, spacerL, headerPrepare, spacerR, gear])
+        let header = UIStackView(arrangedSubviews: [titleLabel, spacerL, headerPrepare, spacerR, taskHistory, gear])
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 8
         // Equal-width spacers keep the pill visually centered between the
         // title and the gear (a plain .fill stack splits them arbitrarily).
         spacerL.widthAnchor.constraint(equalTo: spacerR.widthAnchor).isActive = true
-        headerPrepare.isHidden = callMode != .hint
+        headerPrepare.isHidden = callMode != .hint && !secretaryMode
 
         // Number field card.
         let fieldCard = UIView()
@@ -159,7 +177,7 @@ final class HomeViewController: UIViewController {
 
         // …replaced by a compact "Goal ready ✓" badge once confirmed
         // (tapping it re-opens Prepare to review or change the goal).
-        goalBadge.setTitle(NSLocalizedString("home.goal_ready", comment: ""), for: .normal)
+        goalBadge.setTitle(NSLocalizedString(secretaryMode ? "secretary.task.ready" : "home.goal_ready", comment: ""), for: .normal)
         goalBadge.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
         goalBadge.setTitleColor(Theme.greenDark, for: .normal)
         goalBadge.backgroundColor = Theme.greenBg
@@ -170,6 +188,17 @@ final class HomeViewController: UIViewController {
         goalBadge.addTarget(self, action: #selector(prepareTapped), for: .touchUpInside)
         goalBadge.setContentHuggingPriority(.required, for: .horizontal)
         goalBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        var resumeConfig = UIButton.Configuration.tinted()
+        resumeConfig.title = NSLocalizedString("secretary.live.resume", comment: "")
+        resumeConfig.image = UIImage(systemName: "waveform")
+        resumeConfig.imagePadding = 8
+        resumeConfig.cornerStyle = .medium
+        resumeConfig.baseForegroundColor = Theme.greenDark
+        resumeSecretaryButton.configuration = resumeConfig
+        resumeSecretaryButton.accessibilityIdentifier = "button-secretary-resume-monitoring"
+        resumeSecretaryButton.addTarget(self, action: #selector(resumeSecretaryMonitoring), for: .touchUpInside)
+        resumeSecretaryButton.isHidden = true
 
         let numberWrap = UIView()
         numberWrap.addSubview(placeholderLabel)
@@ -183,7 +212,7 @@ final class HomeViewController: UIViewController {
         fieldStack.spacing = 8
         fieldStack.translatesAutoresizingMaskIntoConstraints = false
         fieldCard.addSubview(fieldStack)
-        goalBadge.isHidden = callMode != .hint
+        goalBadge.isHidden = callMode != .hint && !secretaryMode
         prepareButton.isHidden = callMode != .hint
 
         // Keypad.
@@ -241,11 +270,14 @@ final class HomeViewController: UIViewController {
 
         recentsStack.axis = .vertical
         recentsStack.spacing = 4
+        recentsHeader.isHidden = secretaryMode
+        recentsStack.isHidden = secretaryMode
 
         let goalRow = UIStackView(arrangedSubviews: [UIView(), goalBadge])
-        goalRow.isHidden = callMode != .hint
+        goalRow.isHidden = callMode != .hint && !secretaryMode
         let root = UIStackView(arrangedSubviews: [
-            header, fieldCard, goalRow, copilotLanguageButton, keypad, recentsHeader, recentsStack
+            header, fieldCard, goalRow, resumeSecretaryButton, copilotLanguageButton,
+            keypad, recentsHeader, recentsStack
         ])
         root.axis = .vertical
         root.spacing = 16
@@ -452,10 +484,57 @@ final class HomeViewController: UIViewController {
     // MARK: - Goal badge
 
     private func renderGoalState() {
+        if secretaryMode {
+            goalBadge.isHidden = confirmedSecretaryTask == nil
+            prepareButton.isHidden = true
+            return
+        }
         let hasGoal = !SessionStore.shared.callGoal
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         goalBadge.isHidden = !hasGoal
         prepareButton.isHidden = hasGoal
+    }
+
+    private func restoreSecretaryDraft() {
+        guard let draft = SessionStore.shared.pendingSecretaryCall else {
+            renderGoalState()
+            if !isCreatingSecretaryTask { renderCallButtonIdle() }
+            return
+        }
+        confirmedSecretaryTask = draft
+        if draft.requestAttempted, let phoneNumber = draft.phoneNumber {
+            dialed = phoneNumber
+        }
+        renderGoalState()
+        if !isCreatingSecretaryTask { renderCallButtonIdle() }
+    }
+
+    private func loadActiveSecretaryTask() {
+        Task {
+            do {
+                let tasks = try await APIClient.shared.secretaryTasks()
+                await MainActor.run {
+                    if let draft = self.confirmedSecretaryTask,
+                       let recovered = tasks.first(where: {
+                           $0.clientRequestId?.lowercased() == draft.clientRequestId.uuidString.lowercased()
+                       }) {
+                        self.recoveredSecretaryTask = recovered
+                        SessionStore.shared.clearPendingSecretaryCall()
+                        self.confirmedSecretaryTask = nil
+                        self.renderGoalState()
+                        if !self.isCreatingSecretaryTask { self.renderCallButtonIdle() }
+                    }
+                    self.activeSecretaryTask = tasks
+                        .filter(\.isActiveLive)
+                        .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+                        .first
+                    self.resumeSecretaryButton.isHidden = self.activeSecretaryTask == nil
+                }
+            } catch {
+                // Keep the last known resume state; History exposes its own
+                // explicit load/retry state if the task list is unavailable.
+            }
+        }
     }
 
     // MARK: - Recents
@@ -596,6 +675,38 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func prepareTapped() {
+        if secretaryMode {
+            if confirmedSecretaryTask?.requestAttempted == true {
+                showSecretaryError(NSLocalizedString("secretary.live.safe_retry_required", comment: ""))
+                return
+            }
+            let prepare = PrepareViewController(mode: .secretary)
+            prepare.onSecretaryTaskConfirmed = { [weak self] instruction, token in
+                guard let self else { return }
+                let draft = SessionStore.SecretaryCallDraft(
+                    instruction: instruction,
+                    confirmationToken: token,
+                    clientRequestId: UUID(),
+                    voiceProvider: SessionStore.shared.voiceProvider,
+                    phoneNumber: nil,
+                    requestAttempted: false)
+                guard SessionStore.shared.savePendingSecretaryCall(draft) else {
+                    self.showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
+                    return
+                }
+                self.recoveredSecretaryTask = nil
+                self.confirmedSecretaryTask = draft
+                self.renderGoalState()
+                self.presentedViewController?.dismiss(animated: true)
+            }
+            let nav = UINavigationController(rootViewController: prepare)
+            if let sheet = nav.sheetPresentationController {
+                sheet.detents = [.medium(), .large()]
+                sheet.prefersGrabberVisible = true
+            }
+            present(nav, animated: true)
+            return
+        }
         let prepare = PrepareViewController()
         prepare.onGoalConfirmed = { [weak self] _ in
             self?.renderGoalState()
@@ -613,9 +724,40 @@ final class HomeViewController: UIViewController {
         tabBarController?.selectedIndex = 4 // History
     }
 
+    @objc private func secretaryHistoryTapped() {
+        guard secretaryMode else { return }
+        navigationController?.pushViewController(SecretaryViewController(), animated: true)
+    }
+
+    func openSecretaryTask(id: String) {
+        guard secretaryMode else { return }
+        let history = SecretaryViewController()
+        navigationController?.pushViewController(history, animated: false)
+        history.openTask(id: id)
+    }
+
+    @objc private func resumeSecretaryMonitoring() {
+        guard secretaryMode, let task = activeSecretaryTask, task.isActiveLive else { return }
+        presentLiveMonitoring(for: task)
+    }
+
+    private func presentLiveMonitoring(for task: APIClient.SecretaryTask) {
+        let live = SecretaryLiveCallViewController(task: task)
+        live.onCallEnded = { [weak self] in
+            guard let self else { return }
+            self.navigationController?.popToRootViewController(animated: false)
+            self.openSecretaryTask(id: task.id)
+        }
+        navigationController?.pushViewController(live, animated: true)
+    }
+
     @objc private func callTapped() {
         dismissDialKeyboard()
-        guard outgoingCallUUID == nil else { return }
+        guard outgoingCallUUID == nil, !isCreatingSecretaryTask else { return }
+        if secretaryMode {
+            startSecretaryCall()
+            return
+        }
         startCall(to: dialed)
     }
 
@@ -662,7 +804,9 @@ final class HomeViewController: UIViewController {
         callButton.isEnabled = true
         callButton.configuration?.showsActivityIndicator = false
         callButton.configuration?.image = UIImage(systemName: "phone.fill")
-        callButton.configuration?.title = NSLocalizedString("home.call", comment: "")
+        let titleKey = secretaryMode && confirmedSecretaryTask?.requestAttempted == true
+            ? "secretary.live.retry_safe" : "home.call"
+        callButton.configuration?.title = NSLocalizedString(titleKey, comment: "")
         callButton.accessibilityIdentifier = "button-start-call"
     }
 
@@ -682,6 +826,90 @@ final class HomeViewController: UIViewController {
         }
         renderCallButtonConnecting()
         outgoingCallUUID = CallManager.shared.startOutgoingCall(to: cleaned, mode: callMode)
+    }
+
+    private func startSecretaryCall() {
+        guard var confirmed = confirmedSecretaryTask else {
+            showSecretaryError(NSLocalizedString("secretary.task.not_ready.message", comment: ""))
+            return
+        }
+        let cleaned: String
+        if confirmed.requestAttempted, let requestedPhone = confirmed.phoneNumber {
+            cleaned = requestedPhone
+            dialed = requestedPhone
+        } else {
+            cleaned = dialed.filter { $0 == "+" || $0.isNumber }
+        }
+        guard cleaned.range(of: #"^\+[1-9]\d{6,14}$"#, options: .regularExpression) != nil else {
+            let alert = UIAlertController(
+                title: NSLocalizedString("home.invalid_number.title", comment: ""),
+                message: NSLocalizedString("home.invalid_number.message", comment: ""),
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+            present(alert, animated: true)
+            return
+        }
+        confirmed.phoneNumber = cleaned
+        confirmed.requestAttempted = true
+        guard SessionStore.shared.savePendingSecretaryCall(confirmed) else {
+            showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
+            return
+        }
+        confirmedSecretaryTask = confirmed
+        isCreatingSecretaryTask = true
+        callButton.isEnabled = false
+        callButton.configuration?.showsActivityIndicator = true
+        callButton.configuration?.image = nil
+        callButton.configuration?.title = NSLocalizedString("home.connecting", comment: "")
+        Task {
+            do {
+                let task = try await APIClient.shared.createSecretaryTask(
+                    phoneNumber: cleaned,
+                    instruction: confirmed.instruction,
+                    confirmationToken: confirmed.confirmationToken,
+                    voiceProvider: confirmed.voiceProvider,
+                    live: true,
+                    clientRequestId: confirmed.clientRequestId)
+                await MainActor.run {
+                    self.isCreatingSecretaryTask = false
+                    guard task.mode?.lowercased() == "live" else {
+                        self.renderCallButtonIdle()
+                        self.showSecretaryError(NSLocalizedString("secretary.live.unavailable", comment: ""))
+                        return
+                    }
+                    SessionStore.shared.clearPendingSecretaryCall()
+                    self.confirmedSecretaryTask = nil
+                    self.renderGoalState()
+                    self.renderCallButtonIdle()
+                    self.presentLiveMonitoring(for: task)
+                }
+            } catch {
+                await MainActor.run {
+                    self.isCreatingSecretaryTask = false
+                    if let recovered = self.recoveredSecretaryTask,
+                       recovered.clientRequestId?.lowercased() == confirmed.clientRequestId.uuidString.lowercased() {
+                        if recovered.isActiveLive {
+                            self.presentLiveMonitoring(for: recovered)
+                        } else {
+                            self.openSecretaryTask(id: recovered.id)
+                        }
+                        return
+                    }
+                    self.renderCallButtonIdle()
+                    let message = String(
+                        format: NSLocalizedString("secretary.live.safe_retry.message", comment: ""),
+                        error.localizedDescription)
+                    self.showSecretaryError(message)
+                }
+            }
+        }
+    }
+
+    private func showSecretaryError(_ message: String) {
+        let alert = UIAlertController(title: NSLocalizedString("common.error", comment: ""),
+                                      message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+        present(alert, animated: true)
     }
 }
 

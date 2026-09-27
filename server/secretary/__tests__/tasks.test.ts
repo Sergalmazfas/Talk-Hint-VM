@@ -12,9 +12,31 @@ import {
   validateSecretaryInstruction,
   validateSecretaryPhoneNumber,
   validateSecretaryReport,
+  toSecretaryTaskReport,
 } from "../tasks";
 
 describe("Secretary task safety and reporting", () => {
+  it("includes the persisted idempotency key in owner task reports", () => {
+    const report = toSecretaryTaskReport({
+      id: "task-1",
+      clientRequestId: "810f8906-4b66-4fee-9c41-2d21f41703b1",
+      mode: "live",
+      phoneNumber: "+19545551234",
+      instruction: "Ask about a return.",
+      status: "starting",
+      outcome: null,
+      summary: null,
+      verifiedFacts: [],
+      nextStep: null,
+      transcript: "",
+      callSid: null,
+      callId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+    expect(report.clientRequestId).toBe("810f8906-4b66-4fee-9c41-2d21f41703b1");
+  });
+
   it("accepts a standard US number and rejects restricted/non-US destinations", () => {
     expect(validateSecretaryPhoneNumber("+19545551234")).toBe("+19545551234");
     expect(validateSecretaryPhoneNumber("+442071838750")).toBeNull();
@@ -152,6 +174,15 @@ describe("Secretary task safety and reporting", () => {
       status: "completed",
       notificationStatus: "sent",
       notifiedAt: new Date(),
+    } as any)).toBe(false);
+  });
+
+  it("never allows a live task to be queued for another attempt", () => {
+    expect(canRetrySecretaryTask({
+      mode: "live",
+      status: "failed",
+      outcome: "failed",
+      attempts: 1,
     } as any)).toBe(false);
   });
 });

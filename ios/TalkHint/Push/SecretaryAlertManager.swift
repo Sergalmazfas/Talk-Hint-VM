@@ -149,11 +149,11 @@ enum SecretaryNotificationRouter {
                   let tabs = window.rootViewController as? UITabBarController,
                   tabs.viewControllers?.indices.contains(3) == true,
                   let navigation = tabs.viewControllers?[3] as? UINavigationController,
-                  let secretary = navigation.viewControllers.first as? SecretaryViewController else { continue }
+                  let secretary = navigation.viewControllers.first as? HomeViewController else { continue }
             tabs.selectedIndex = 3
             navigation.popToRootViewController(animated: false)
             pendingTaskID = nil
-            secretary.openTask(id: taskID)
+            secretary.openSecretaryTask(id: taskID)
             return true
         }
         return false

@@ -129,7 +129,9 @@ export const secretaryTasks = pgTable("secretary_tasks", {
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   phoneNumber: text("phone_number").notNull(),
   instruction: text("instruction").notNull(),
+  clientRequestId: text("client_request_id"),
   voiceProvider: text("voice_provider").notNull().default("elevenlabs"),
+  mode: text("mode").notNull().default("queued"),
   status: text("status").notNull().default("queued"),
   outcome: text("outcome"),
   summary: text("summary"),
@@ -157,6 +159,9 @@ export const secretaryTasks = pgTable("secretary_tasks", {
   userCreatedIdx: index("secretary_tasks_user_created_idx").on(table.userId, table.createdAt),
   queuedIdx: index("secretary_tasks_status_created_idx").on(table.status, table.createdAt),
   callSidUnique: uniqueIndex("secretary_tasks_call_sid_unique").on(table.callSid),
+  clientRequestUnique: uniqueIndex("secretary_tasks_user_client_request_unique")
+    .on(table.userId, table.clientRequestId)
+    .where(sql`${table.clientRequestId} IS NOT NULL`),
   oneActivePerUser: uniqueIndex("secretary_tasks_one_active_per_user_idx")
     .on(table.userId)
     .where(sql`${table.status} IN ('starting', 'ringing', 'connected', 'finalizing')`),

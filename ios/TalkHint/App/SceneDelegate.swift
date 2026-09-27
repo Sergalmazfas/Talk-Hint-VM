@@ -75,7 +75,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.copilot", comment: ""),
             image: UIImage(systemName: "mic.circle"), tag: 2)
 
-        let secretary = SecretaryViewController()
+        let secretary = HomeViewController(secretary: true)
         secretary.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.secretary", comment: ""),
             image: UIImage(systemName: "person.crop.circle.badge.checkmark"), tag: 3)

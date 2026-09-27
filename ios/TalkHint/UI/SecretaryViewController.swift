@@ -37,11 +37,6 @@ final class SecretaryViewController: UITableViewController, UIImagePickerControl
         refresh.addTarget(self, action: #selector(reloadTasks), for: .valueChanged)
         tableView.refreshControl = refresh
 
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            image: UIImage(systemName: "plus"), style: .plain,
-            target: self, action: #selector(newTaskTapped))
-        navigationItem.rightBarButtonItem?.accessibilityLabel =
-            NSLocalizedString("secretary.new_task", comment: "")
         installHeaderActions()
     }
 
@@ -72,22 +67,17 @@ final class SecretaryViewController: UITableViewController, UIImagePickerControl
         notificationsButton.addTarget(self, action: #selector(enableNotificationsTapped), for: .touchUpInside)
         notificationsButton.accessibilityIdentifier = "button-secretary-notifications"
 
-        let actions = UIStackView(arrangedSubviews: [voiceButton, photoButton])
-        actions.axis = .horizontal
-        actions.distribution = .fillEqually
-        actions.spacing = 12
-        let content = UIStackView(arrangedSubviews: [actions, notificationsButton])
+        let content = UIStackView(arrangedSubviews: [notificationsButton])
         content.axis = .vertical
         content.spacing = 12
         content.translatesAutoresizingMaskIntoConstraints = false
-        let header = UIView(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 130))
+        let header = UIView(frame: CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 56))
         header.addSubview(content)
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 18),
             content.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -18),
             content.topAnchor.constraint(equalTo: header.topAnchor, constant: 12),
             content.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: -12),
-            actions.heightAnchor.constraint(equalToConstant: 52),
         ])
         tableView.tableHeaderView = header
     }
@@ -162,10 +152,6 @@ final class SecretaryViewController: UITableViewController, UIImagePickerControl
                 }
             }
         }
-    }
-
-    @objc private func newTaskTapped() {
-        navigationController?.pushViewController(SecretaryTaskComposerViewController(), animated: true)
     }
 
     @objc private func startVoicePreparation() {
@@ -385,11 +371,15 @@ final class SecretaryViewController: UITableViewController, UIImagePickerControl
 
         let task = tasks[indexPath.row]
         content.text = task.instruction
-        content.secondaryText = [
+        var details = [
             Self.statusTitle(task.status),
             task.phoneNumber,
             task.createdAt.map(Self.dateFormatter.string(from:)),
-        ].compactMap { $0 }.joined(separator: " · ")
+        ].compactMap { $0 }
+        if task.isActiveLive {
+            details.insert(NSLocalizedString("secretary.live.resume", comment: ""), at: 0)
+        }
+        content.secondaryText = details.joined(separator: " · ")
         content.secondaryTextProperties.color = .secondaryLabel
         content.secondaryTextProperties.numberOfLines = 2
         cell.accessoryType = .disclosureIndicator
@@ -406,8 +396,19 @@ final class SecretaryViewController: UITableViewController, UIImagePickerControl
             return
         }
         guard tasks.indices.contains(indexPath.row) else { return }
-        navigationController?.pushViewController(
-            SecretaryTaskDetailViewController(task: tasks[indexPath.row]), animated: true)
+        let task = tasks[indexPath.row]
+        if task.isActiveLive {
+            let live = SecretaryLiveCallViewController(task: task)
+            live.onCallEnded = { [weak self] in
+                guard let self else { return }
+                self.navigationController?.popViewController(animated: false)
+                self.openTask(id: task.id)
+            }
+            navigationController?.pushViewController(live, animated: true)
+        } else {
+            navigationController?.pushViewController(
+                SecretaryTaskDetailViewController(task: task), animated: true)
+        }
     }
 
     private func showTaskNotFound() {
@@ -832,7 +833,9 @@ private final class SecretaryTaskDetailViewController: UIViewController {
         actionRow.axis = .vertical
         actionRow.spacing = 10
         cancelButton.isHidden = !SecretaryViewController.canCancel(task.status)
-        retryButton.isHidden = !SecretaryViewController.canRetry(task)
+        // Secretary history is read-only for new calls: all new dialing now goes
+        // through the manual live dialer rather than the legacy automatic retry.
+        retryButton.isHidden = true
         styleActionButton(cancelButton, titleKey: "secretary.cancel")
         styleActionButton(retryButton, titleKey: "secretary.call_again")
         cancelButton.removeTarget(self, action: #selector(cancelTapped), for: .touchUpInside)

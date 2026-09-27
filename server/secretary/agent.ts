@@ -39,6 +39,7 @@ export interface SecretaryStreamDependencies {
     callSid: string,
   ): Promise<void>;
   onStreamEnd(taskId: string, reason?: string, callSid?: string): Promise<void>;
+  onAudio?(taskId: string, role: "secretary" | "guest", payload: string): void;
 }
 
 export type SecretaryRealtimeEvent =
@@ -86,6 +87,7 @@ export function buildSecretaryInstructions(instruction: string): string {
   return [
     "You are Secretary, an autonomous AI assistant speaking on a live telephone call on behalf of the person who authorized this specific call.",
     "Use English. At the beginning, say plainly and briefly that you are an AI assistant calling on behalf of that person; never pretend to be the person or claim to be human.",
+    "Do not assign yourself a personal name, claim a human identity, or invent or guess the owner's name. If asked for a name, identify yourself only as an AI assistant calling on the owner's behalf.",
     "Your purpose is to listen patiently, explain the caller's stated issue, ask relevant clarifying questions, and accurately report the other party's answer back to the person who authorized the call.",
     "This is a soft goal, not a rigid script. Let the representative explain. Ask a concise follow-up only when it helps understand what happened, what will happen next, a promised callback day/time, a reference number, or what the caller should do. Do not pressure the representative or repeat a question after a clear answer.",
     "A promise to investigate or call back is a useful outcome, but is NOT a confirmed resolution. Acknowledge it courteously, capture who will follow up and when, and say you will pass that information back. Never imply that you or the user accepts an obligation.",
@@ -510,6 +512,7 @@ export function handleSecretaryTwilioStream(
           throw new Error("Secretary Twilio media buffer exceeded its safety limit");
         }
         ws.send(payload);
+        deps.onAudio?.(taskId, "secretary", frame.toString("base64"));
         cloneOutputActive = true;
         if (offset + OUTPUT_FRAME_BYTES < mulaw8k.length) {
           await delay(OUTPUT_PACING_MS, controller.signal);
@@ -632,6 +635,7 @@ export function handleSecretaryTwilioStream(
         return;
       }
       const frame = Buffer.from(encoded, "base64");
+      deps.onAudio?.(taskId, "guest", encoded);
       if (!initialized) {
         if (earlyAudio.length >= MAX_EARLY_AUDIO_FRAMES ||
           earlyAudioBytes + frame.length > MAX_EARLY_AUDIO_BYTES) {
