@@ -12,7 +12,7 @@ import type { SavedTaskEvent } from "./savedEvents";
 
 export interface AuthorizationRequest {
   response_type: "code"; client_id: string; redirect_uri: string; resource: string;
-  scope: string; state: string; code_challenge: string; code_challenge_method: "S256";
+  scope: string; state: string; code_challenge?: string; code_challenge_method?: "S256";
 }
 export interface BrowserAuth {
   login(email: string, password: string): Promise<{ id: string; email?: string }>;
@@ -33,11 +33,14 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     scopes(value: string): Scope[];
     finish(owner: string, request: AuthorizationRequest, allow: boolean): Promise<string>;
   }) {
-  const security = new BrowserSecurity(config.signingKey, config.origin);
+  const api = config.actions ? "/api/chatgpt-actions" : "/api/chatgpt";
+  const security = new BrowserSecurity(config.signingKey, config.origin, config.actions ? config.clientId : "");
+  const grantsFor = async (userId: string) => (await store.list(userId)).filter(g =>
+    !config.actions || g.id.startsWith(`chatgpt:grant:${digest(config.clientId)}:`));
   const attempts = new Map<string, { count: number; until: number }>();
   const form = express.urlencoded({ extended: false, limit: "32kb" });
-  app.use(["/api/chatgpt/browser", "/api/chatgpt/secretary", "/api/chatgpt/approve", "/api/chatgpt/oauth/authorize",
-    "/api/chatgpt/connections/manage"], (_req, res, next) => {
+  app.use([`${api}/browser`, `${api}/secretary`, `${api}/approve`, `${api}/oauth/authorize`,
+    `${api}/connections/manage`], (_req, res, next) => {
     res.set({ "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY" });
     next();
@@ -51,7 +54,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
       "X-Frame-Options": "DENY",
       "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
       "Permissions-Policy": "microphone=(), camera=(), geolocation=()",
-    }).type("html").send(renderBrowserPage(model, nonce));
+    }).type("html").send(renderBrowserPage(model, nonce, api));
   };
   const wrap = (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler =>
     (req, res, next) => { Promise.resolve().then(() => fn(req, res, next)).catch(error => {
@@ -80,11 +83,13 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     try { owner = security.open<OwnerTicket>(raw, "owner"); }
     catch (error: any) { if (error.status >= 500) throw error; return; }
     if (owner.browser !== digest(security.binding(req))) return;
+    if (config.actions && owner.sub !== config.actions.ownerId) return;
     const marker = await store.get(markerId(raw));
     return marker?.userId === owner.sub ? owner : undefined;
   };
   const requireOwner = async (req: Request) => await readOwner(req) ?? fail(401, "Sign in required");
   const setOwner = async (req: Request, res: Response, user: { id: string; email?: string }) => {
+    if (config.actions && user.id !== config.actions.ownerId) return fail(403, "Owner access required");
     const prior = security.ownerCookie(req);
     if (prior) await store.consume(markerId(prior));
     const exp = Date.now() + WEB_TTL;
@@ -161,13 +166,13 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
       return page(res, { kind: "approval", ...common, ...claims.call!,
         expiresAt: new Date(claims.exp).toISOString(), approved });
     }
-    return page(res, { kind: "connections", ...common, connections: (await store.list(owner.sub)).map(row =>
+    return page(res, { kind: "connections", ...common, connections: (await grantsFor(owner.sub)).map(row =>
       ({ id: row.id, scopes: grantScopes(row.id), expiresAt: row.expiresAt.toISOString() })) });
   };
-  const reviewURL = (token: string) => `/api/chatgpt/browser/review?flow=${encodeURIComponent(token)}`;
+  const reviewURL = (token: string) => `${api}/browser/review?flow=${encodeURIComponent(token)}`;
 
   // Non-HTML clients retain the existing owner-authenticated authorization API.
-  app.get("/api/chatgpt/oauth/authorize", (req, res, next) => {
+  app.get(`${api}/oauth/authorize`, (req, res, next) => {
     if (!req.headers.accept?.includes("text/html")) return next();
     wrap(async (req, res) => {
       const authorization = oauth.validate(req.query); // Validate before rendering or redirecting.
@@ -177,32 +182,32 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
       res.redirect(303, reviewURL(token));
     })(req, res, next);
   });
-  app.get("/api/chatgpt/approve", wrap(async (req, res) => {
+  app.get(`${api}/approve`, wrap(async (req, res) => {
     const link = security.open<ApprovalLink>(req.query.ticket, "approval-link");
     await confirmations.inspect(link.confirmation); // Fail closed in the read-only stage.
     const token = makeFlow(req, res, { purpose: "call", confirmation: link.confirmation });
     res.redirect(303, reviewURL(token));
   }));
-  app.get("/api/chatgpt/connections/manage", wrap(async (req, res) => {
+  app.get(`${api}/connections/manage`, wrap(async (req, res) => {
     const token = makeFlow(req, res, { purpose: "manage" });
     res.redirect(303, reviewURL(token));
   }));
-  app.get("/api/chatgpt/secretary", wrap(async (req, res) => {
+  app.get(`${api}/secretary`, wrap(async (req, res) => {
     res.redirect(303, reviewURL(makeFlow(req, res, { purpose: "history" })));
   }));
   for (const type of ["task", "call"] as const) {
-    app.get(`/api/chatgpt/secretary/${type}s/:id`, wrap(async (req, res) => {
+    app.get(`${api}/secretary/${type}s/:id`, wrap(async (req, res) => {
       const id = z.string().min(1).max(256).parse(req.params.id);
       const transcript = z.enum(["true", "false"]).optional().parse(req.query.transcript);
       res.redirect(303, reviewURL(makeFlow(req, res, { purpose: "detail",
         recordType: type, recordId: id, includeTranscript: transcript === "true" })));
     }));
   }
-  app.get("/api/chatgpt/browser/review", wrap(async (req, res) => {
+  app.get(`${api}/browser/review`, wrap(async (req, res) => {
     const token = z.string().max(24000).parse(req.query.flow);
     return review(req, res, token);
   }));
-  app.post("/api/chatgpt/browser/login", form, wrap(async (req, res) => {
+  app.post(`${api}/browser/login`, form, wrap(async (req, res) => {
     const { token } = post(req);
     const input = z.object({ flow: z.string(), csrf: z.string(),
       email: z.string().email().max(254), password: z.string().min(1).max(1024) }).strict().parse(req.body);
@@ -221,7 +226,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     res.redirect(303, reviewURL(token));
   }));
   // Exchange the already existing same-origin TalkHint login, never an MCP token.
-  app.post("/api/chatgpt/browser/session", wrap(async (req, _res, next) => {
+  app.post(`${api}/browser/session`, wrap(async (req, _res, next) => {
     post(req);
     next();
   }), ownerAuth, wrap(async (req, res) => {
@@ -230,7 +235,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     await setOwner(req, res, req.user);
     res.json({ next: reviewURL(token) });
   }));
-  app.post("/api/chatgpt/browser/consent", form, wrap(async (req, res) => {
+  app.post(`${api}/browser/consent`, form, wrap(async (req, res) => {
     const { token, flow } = post(req, "oauth");
     const { decision } = z.object({ flow: z.string(), csrf: z.string(),
       decision: z.enum(["allow", "deny"]) }).strict().parse(req.body);
@@ -239,7 +244,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     const target = await oauth.finish(owner.sub, oauth.validate(flow.authorization), decision === "allow");
     res.redirect(303, target);
   }));
-  app.post("/api/chatgpt/browser/approve", form, wrap(async (req, res) => {
+  app.post(`${api}/browser/approve`, form, wrap(async (req, res) => {
     const { token, flow } = post(req, "call");
     const { decision } = z.object({ flow: z.string(), csrf: z.string(),
       decision: z.enum(["approve", "deny"]) }).strict().parse(req.body);
@@ -254,15 +259,15 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
         "Номер не набирался. Вернитесь в ChatGPT: он сможет запросить запуск только этого задания до истечения подтверждения." :
         "Разрешение на этот запрос не выдано. Номер не набирался." });
   }));
-  app.post("/api/chatgpt/browser/revoke", form, wrap(async (req, res) => {
+  app.post(`${api}/browser/revoke`, form, wrap(async (req, res) => {
     const { token } = post(req, "manage");
     const { id } = z.object({ flow: z.string(), csrf: z.string(), id: z.string().max(256) }).strict().parse(req.body);
     const owner = await requireOwner(req);
-    if (!(await store.list(owner.sub)).some(row => row.id === id)) return fail(404, "Connection not found");
+    if (!(await grantsFor(owner.sub)).some(row => row.id === id)) return fail(404, "Connection not found");
     await store.expire(id, owner.sub);
     res.redirect(303, reviewURL(token));
   }));
-  app.post("/api/chatgpt/browser/logout", form, wrap(async (req, res) => {
+  app.post(`${api}/browser/logout`, form, wrap(async (req, res) => {
     post(req);
     const raw = security.ownerCookie(req);
     if (raw) await store.consume(markerId(raw));
@@ -273,7 +278,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
   return {
     approvalURL(confirmation: string) {
       const { exp } = credentials.read(confirmation, "confirmation");
-      return `${config.origin}/api/chatgpt/approve?ticket=${encodeURIComponent(
+      return `${config.origin}${api}/approve?ticket=${encodeURIComponent(
         security.seal({ kind: "approval-link", exp, confirmation }))}`;
     },
   };

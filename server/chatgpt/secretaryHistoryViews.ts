@@ -54,14 +54,14 @@ const escapeHtml = (value: unknown): string =>
 const detailValue = (label: string, value: unknown): string =>
   `<div class="row"><span class="detail-label">${escapeHtml(label)}</span><div class="detail-value">${escapeHtml(value)}</div></div>`;
 
-const historyRows = (rows: HistoryRow[], recordType: "task" | "call"): string => {
+const historyRows = (rows: HistoryRow[], recordType: "task" | "call", api: string): string => {
   if (rows.length === 0) {
     return `<li class="notice">Сохранённых ${recordType === "task" ? "заданий" : "звонков"} пока нет.</li>`;
   }
 
   return rows
     .map((row) => {
-      const href = `/api/chatgpt/secretary/${recordType === "task" ? "tasks" : "calls"}/${encodeURIComponent(row.id)}`;
+      const href = `${api}/secretary/${recordType === "task" ? "tasks" : "calls"}/${encodeURIComponent(row.id)}`;
       return `<li class="row">
         <div class="row-head"><div class="row-title">Запись <span class="detail-value">${escapeHtml(row.id)}</span></div><span class="detail-label">${escapeHtml(row.status)}</span></div>
         <div class="section">${detailValue("Номер", row.phoneNumber)}${detailValue("Кратко", row.summary)}${detailValue("Создано", row.createdAt)}${detailValue("Обновлено", row.updatedAt)}</div>
@@ -71,7 +71,7 @@ const historyRows = (rows: HistoryRow[], recordType: "task" | "call"): string =>
     .join("");
 };
 
-export function renderSecretaryContent(page: SecretaryHistoryPage): string {
+export function renderSecretaryContent(page: SecretaryHistoryPage, api = "/api/chatgpt"): string {
   if (page.kind === "secretary-history") {
     return `<article class="card">
       <p class="eyebrow">Секретарь · история</p>
@@ -80,17 +80,17 @@ export function renderSecretaryContent(page: SecretaryHistoryPage): string {
       <p class="notice">До 50 последних записей каждого вида из backend TalkHint. Это сохранённые отчёты, не гарантированные обновления в реальном времени. Эта страница не набирает номера.</p>
       <section class="section" aria-labelledby="secretary-tasks-heading">
         <h2 id="secretary-tasks-heading">Задания</h2>
-        <ul class="list">${historyRows(page.tasks, "task")}</ul>
+        <ul class="list">${historyRows(page.tasks, "task", api)}</ul>
       </section>
       <section class="section" aria-labelledby="secretary-calls-heading">
         <h2 id="secretary-calls-heading">Звонки</h2>
-        <ul class="list">${historyRows(page.calls, "call")}</ul>
+        <ul class="list">${historyRows(page.calls, "call", api)}</ul>
       </section>
     </article>`;
   }
 
   const recordName = page.recordType === "task" ? "задания" : "звонка";
-  const detailHref = `/api/chatgpt/secretary/${page.recordType === "task" ? "tasks" : "calls"}/${encodeURIComponent(page.id)}`;
+  const detailHref = `${api}/secretary/${page.recordType === "task" ? "tasks" : "calls"}/${encodeURIComponent(page.id)}`;
   const facts = page.facts.length
     ? `<ul class="scope-list">${page.facts.map((fact) => `<li>${escapeHtml(fact)}</li>`).join("")}</ul>`
     : `<p class="notice">Подтверждённые факты не сохранены.</p>`;
@@ -144,6 +144,6 @@ export function renderSecretaryContent(page: SecretaryHistoryPage): string {
     ${transcript}
     ${turns}
     <p class="notice">Это сохранённый отчёт, а не гарантированное обновление в реальном времени.</p>
-    <a class="manage" href="/api/chatgpt/secretary">Назад к истории</a>
+    <a class="manage" href="${api}/secretary">Назад к истории</a>
   </article>`;
 }

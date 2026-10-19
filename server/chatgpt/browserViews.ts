@@ -114,14 +114,14 @@ const shell = (title: string, nonce: string, content: string, script = ""): stri
 const hidden = (csrf: string, flow: string): string =>
   `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><input type="hidden" name="flow" value="${escapeHtml(flow)}">`;
 
-const logoutAndManage = (csrf: string, flow: string): string =>
-  `<section class="section"><form method="post" action="/api/chatgpt/browser/logout">${hidden(csrf, flow)}<button class="button secondary" type="submit">Завершить web-сеанс</button></form><a class="manage" href="/api/chatgpt/secretary">Secretary — история и отчёты</a><br><a class="manage" href="/api/chatgpt/connections/manage">Управление подключениями</a></section>`;
+const logoutAndManage = (csrf: string, flow: string, api: string): string =>
+  `<section class="section"><form method="post" action="${api}/browser/logout">${hidden(csrf, flow)}<button class="button secondary" type="submit">Завершить web-сеанс</button></form><a class="manage" href="${api}/secretary">Secretary — история и отчёты</a><br><a class="manage" href="${api}/connections/manage">Управление подключениями</a></section>`;
 
-export function renderBrowserPage(page: BrowserPage, nonce: string): string {
+export function renderBrowserPage(page: BrowserPage, nonce: string, api: "/api/chatgpt" | "/api/chatgpt-actions" = "/api/chatgpt"): string {
   switch (page.kind) {
     case "secretary-history":
     case "secretary-detail":
-      return shell("Secretary", nonce, renderSecretaryContent(page) + logoutAndManage(page.csrf, page.flow));
+      return shell("Secretary", nonce, renderSecretaryContent(page, api) + logoutAndManage(page.csrf, page.flow, api));
     case "login": {
       const notice = page.message ? `<p class="error" role="status">${escapeHtml(page.message)}</p>` : "";
       const content = `<article class="card">
@@ -130,7 +130,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         <p class="lede">Используйте существующий аккаунт TalkHint, чтобы продолжить настройку доступа для ChatGPT.</p>
         <div class="readonly"><span class="readonly-mark" aria-hidden="true"></span>Защищённое подтверждение владельца</div>
         ${notice}
-        <form class="form-grid" method="post" action="/api/chatgpt/browser/login">
+        <form class="form-grid" method="post" action="${api}/browser/login">
           ${hidden(page.csrf, page.flow)}
           <div class="field"><label for="email">Электронная почта</label><input id="email" name="email" type="email" autocomplete="email" required></div>
           <div class="field"><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
@@ -144,7 +144,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         <p id="bridge-status" role="status" aria-live="polite"></p>
         <p class="notice">Разрешения будут показаны отдельно после входа. Сама авторизация не разрешает звонки.</p>
       </article>`;
-      const script = `const bridgeButton=document.getElementById("bridge-login");const status=document.getElementById("bridge-status");bridgeButton.addEventListener("click",async()=>{status.textContent="";let token;try{token=localStorage.getItem("token")}catch{status.textContent="Не удалось получить активный сеанс. Войдите в TalkHint ещё раз.";return}if(!token){status.textContent="Активный сеанс TalkHint не найден. Войдите в TalkHint и повторите попытку.";return}bridgeButton.disabled=true;bridgeButton.setAttribute("aria-busy","true");try{const form=document.querySelector('form[action="/api/chatgpt/browser/login"]');const body={csrf:form.elements.csrf.value,flow:form.elements.flow.value};const response=await fetch("/api/chatgpt/browser/session",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body),credentials:"same-origin"});if(!response.ok)throw new Error("session");const result=await response.json();if(typeof result.next!=="string"||!result.next.startsWith("/api/chatgpt/browser/review?flow="))throw new Error("next");window.location.assign(result.next)}catch{status.textContent="Не удалось подтвердить сеанс. Проверьте вход в TalkHint и попробуйте ещё раз.";bridgeButton.disabled=false;bridgeButton.removeAttribute("aria-busy")}});`;
+      const script = `const bridgeButton=document.getElementById("bridge-login");const status=document.getElementById("bridge-status");bridgeButton.addEventListener("click",async()=>{status.textContent="";let token;try{token=localStorage.getItem("token")}catch{status.textContent="Не удалось получить активный сеанс. Войдите в TalkHint ещё раз.";return}if(!token){status.textContent="Активный сеанс TalkHint не найден. Войдите в TalkHint и повторите попытку.";return}bridgeButton.disabled=true;bridgeButton.setAttribute("aria-busy","true");try{const form=document.querySelector('form[action="${api}/browser/login"]');const body={csrf:form.elements.csrf.value,flow:form.elements.flow.value};const response=await fetch("${api}/browser/session",{method:"POST",headers:{"Authorization":"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body),credentials:"same-origin"});if(!response.ok)throw new Error("session");const result=await response.json();if(typeof result.next!=="string"||!result.next.startsWith("${api}/browser/review?flow="))throw new Error("next");window.location.assign(result.next)}catch{status.textContent="Не удалось подтвердить сеанс. Проверьте вход в TalkHint и попробуйте ещё раз.";bridgeButton.disabled=false;bridgeButton.removeAttribute("aria-busy")}});`;
       return shell("Вход", nonce, content, script);
     }
     case "consent": {
@@ -156,11 +156,11 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         <div class="section row"><span class="detail-label">Аккаунт TalkHint</span><div class="detail-value">${escapeHtml(page.account)}</div></div>
         <div class="section"><span class="detail-label">Запрошенные разрешения</span><ul class="scope-list">${scopeRows}</ul></div>
         <p class="notice"><strong>${page.scopes.includes("secretary:start") ? "Запрошена возможность подготовить исходящий вызов." : "Данные доступны только для чтения."}</strong> Для каждого вызова всё равно требуется отдельное подтверждение владельца с номером и заданием. Не передавайте пароли и коды из транскрипций. Совместимость с ChatGPT на iPhone ещё не проверена.</p>
-        <form method="post" action="/api/chatgpt/browser/consent">
+        <form method="post" action="${api}/browser/consent">
           ${hidden(page.csrf, page.flow)}
           <div class="actions"><button class="button" type="submit" name="decision" value="allow">Разрешить</button><button class="button deny" type="submit" name="decision" value="deny">Отказать</button></div>
         </form>
-        ${logoutAndManage(page.csrf, page.flow)}
+        ${logoutAndManage(page.csrf, page.flow, api)}
       </article>`;
       return shell("Проверка доступа", nonce, content);
     }
@@ -168,7 +168,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
       const decision = page.approved
         ? `<p class="notice" role="status"><strong>Уже одобрено.</strong> Повторное подтверждение не требуется. Разрешение позволит ChatGPT только начать один указанный вызов позже; эта страница не выполняет звонок.</p>`
         : `<p class="notice"><strong>Одно точное действие.</strong> Подтверждение разрешает последующий запрос ChatGPT начать только этот вызов. На этой странице звонок не выполняется и номер не набирается.</p>
-          <form method="post" action="/api/chatgpt/browser/approve">
+          <form method="post" action="${api}/browser/approve">
             ${hidden(page.csrf, page.flow)}
             <div class="actions"><button class="button" type="submit" name="decision" value="approve">Одобрить этот вызов</button><button class="button deny" type="submit" name="decision" value="deny">Отказать</button></div>
           </form>`;
@@ -183,7 +183,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         </div>
         <p class="expiry">Срок действия запроса: ${escapeHtml(page.expiresAt)}</p>
         ${decision}
-        ${logoutAndManage(page.csrf, page.flow)}
+        ${logoutAndManage(page.csrf, page.flow, api)}
       </article>`;
       return shell("Подтверждение вызова", nonce, content);
     }
@@ -192,7 +192,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         <div class="row-head"><div><span class="detail-label">Аккаунт TalkHint</span><div class="row-title">${escapeHtml(page.account)}</div></div></div>
         <p class="expiry">Разрешения: ${escapeHtml(connection.scopes.join(", "))}</p>
         <p class="expiry">Истекает: ${escapeHtml(connection.expiresAt)}</p>
-        <form class="section" method="post" action="/api/chatgpt/browser/revoke">
+        <form class="section" method="post" action="${api}/browser/revoke">
           ${hidden(page.csrf, page.flow)}<input type="hidden" name="id" value="${escapeHtml(connection.id)}">
           <button class="button deny" type="submit">Отозвать подключение</button>
         </form>
@@ -203,7 +203,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         <p class="lede">Показаны только активные подключения, предоставленные TalkHint. Вы можете отозвать любое из них.</p>
         <div class="readonly"><span class="readonly-mark" aria-hidden="true"></span>Отзыв не удаляет историю и не завершает звонок</div>
         ${rows ? `<ul class="list">${rows}</ul>` : `<p class="notice">Активных подключений нет.</p>`}
-        ${logoutAndManage(page.csrf, page.flow)}
+        ${logoutAndManage(page.csrf, page.flow, api)}
       </article>`;
       return shell("Подключения", nonce, content);
     }
@@ -212,7 +212,7 @@ export function renderBrowserPage(page: BrowserPage, nonce: string): string {
         <p class="eyebrow">TalkHint · ChatGPT</p>
         <h1>${escapeHtml(page.title)}</h1>
         <p class="lede">${escapeHtml(page.message)}</p>
-        <a class="manage" href="/api/chatgpt/connections/manage">Управление подключениями</a>
+        <a class="manage" href="${api}/connections/manage">Управление подключениями</a>
       </article>`;
       return shell(page.title, nonce, content);
     }

@@ -257,3 +257,45 @@ mtime_ms = 1792449943545
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1bccdc58-6fb1-470a-8426-f47f3dd609f1/7cc83bdf-7fea-4001-a0d6-017dc02559e7"
 storage_version_token = "1792450245670934"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "O-umDSljG_nN8gkgfRh-C"
+uri = "file://docs/talkhint-personal-actions.md"
+type = "text"
+title = "TalkHint — личное подключение через GPT Actions"
+description = "Пошаговая настройка, официальные ограничения Plus/Pro 100 и iPhone, права и результаты 92 изолированных / 1360 общих тестов. Внешнее подключение не активировано."
+logical_id = "e6cd5bbe-482c-43c3-b279-b42092bc942f"
+content_hash = "sha256:52694f3d01fe4a2cbe29ecf3e8d633e2908852ca918064df86acdddef9465e68"
+size = 18187
+mtime_ms = 1792452731347
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e6cd5bbe-482c-43c3-b279-b42092bc942f/c10e0279-468a-45d1-8daa-f0c4f367f8e0"
+storage_version_token = "1792452777723830"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "Wvj918Gl-Dl_3VGec29y4"
+uri = "file://docs/talkhint-actions-gpt-instructions.md"
+type = "text"
+title = "TalkHint — инструкции для Custom GPT"
+description = "Готовый текст Instructions: чтение своих данных, независимое web-подтверждение и безопасная работа с task_id."
+logical_id = "c4d913e2-382f-4a2a-9041-0c22f1a556b4"
+content_hash = "sha256:dfda3f00f2dd1d6157bd128706b6c04dbe9a3bac34e1a15d001e3c744e77b905"
+size = 6921
+mtime_ms = 1792452244599
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c4d913e2-382f-4a2a-9041-0c22f1a556b4/d27b694d-d7d5-4526-8f5c-c63415b077f2"
+storage_version_token = "1792452778410323"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "VJcwKJ-DdQ-xEBa-5GGcu"
+uri = "file://generated-artifacts/talkhint-actions/draft/talkhint-actions-NOT-FOR-CONNECTION.json"
+type = "unspecified"
+title = "TalkHint Actions — черновая OpenAPI 3.1 схема"
+description = "Для подготовки. Содержит .invalid HTTPS origin: перед подключением потребуется согласованный тестовый сервер. Секретов и действующих разрешений нет."
+logical_id = "73a7d118-2cf9-4880-8014-8ca5eed4cda2"
+content_hash = "sha256:5799bb8291a9ce0fba7b368001dd2ca009955a1f3e0e4f6de6e36f6f630e245b"
+size = 41218
+mtime_ms = 1792452451799
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/73a7d118-2cf9-4880-8014-8ca5eed4cda2/c65da598-e484-460a-bc4f-c0b4f8dc0152"
+storage_version_token = "1792452779042501"
+content_type = "application/octet-stream"

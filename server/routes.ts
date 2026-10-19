@@ -292,6 +292,17 @@ export async function registerRoutes(
     redirectUri: process.env.CHATGPT_SECRETARY_REDIRECT_URI ?? "",
     signingKey: () => process.env.SESSION_SECRET ?? "",
   }, integrationStore, secretaryBackend(dialSecretaryTask));
+  registerChatGPTIntegration(app, {
+    // Personal GPT Actions is a separate confidential OAuth client. Defaults OFF.
+    enabled: process.env.CHATGPT_ACTIONS_ENABLED === "true",
+    outboundEnabled: process.env.CHATGPT_ACTIONS_OUTBOUND_ENABLED === "true",
+    origin: process.env.CHATGPT_ACTIONS_ORIGIN ?? "",
+    clientId: "talkhint-personal-actions",
+    redirectUri: process.env.CHATGPT_ACTIONS_REDIRECT_URI ?? "",
+    signingKey: () => process.env.SESSION_SECRET ?? "",
+    actions: { ownerId: process.env.CHATGPT_ACTIONS_OWNER_ID ?? "",
+      clientSecret: () => process.env.CHATGPT_ACTIONS_CLIENT_SECRET ?? "" },
+  }, integrationStore, secretaryBackend(dialSecretaryTask));
   registerSecretaryRoutes(app, {
     dial: dialSecretaryTask,
     notify: async (report) => {

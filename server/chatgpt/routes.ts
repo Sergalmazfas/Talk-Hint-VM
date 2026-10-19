@@ -8,12 +8,16 @@ import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest
 import { CallConfirmations } from "./confirmations";
 import { talkHintPluginPackage } from "./plugin";
 import { PUBLIC_TOOLS, publicToolMetadata, type PublicTool } from "./toolMetadata";
+import { actionsExchange } from "./actionsOAuth";
+import { talkHintActionsSchema, registerActionOperations } from "./actionsSchema";
 
 export interface IntegrationConfig {
   enabled: boolean; origin: string; clientId: string; redirectUri: string;
   signingKey: () => string;
   /** Stage one is read-only. Never infer dialing permission from token scopes. */
   outboundEnabled?: boolean;
+  /** Separate confidential client and audience. Never enable by inference from MCP. */
+  actions?: { ownerId: string; clientSecret: () => string };
 }
 const CALL = z.object({
   phoneNumber: z.string().regex(/^\+1[2-9]\d{9}$/),
@@ -67,9 +71,11 @@ export function registerChatGPTIntegration(
   browserAuth: BrowserAuth = { login: (email, password) => loginUser(email, password) },
 ): void {
   const base = config.origin;
-  const resource = `${base}/api/chatgpt/mcp`;
-  const scopesSupported = config.outboundEnabled === true ? [...SCOPES] :
-    SCOPES.filter(scope => scope !== "secretary:start" && scope !== "incoming:read");
+  const api = config.actions ? "/api/chatgpt-actions" : "/api/chatgpt";
+  const resource = `${base}${api}${config.actions ? "" : "/mcp"}`;
+  const scopesSupported = (config.outboundEnabled === true ? [...SCOPES] :
+    SCOPES.filter(scope => scope !== "secretary:start" && scope !== "incoming:read"))
+    .filter(scope => !config.actions || scope !== "incoming:read");
   const availableTools = (Object.keys(schemas) as Tool[]).filter(name =>
     scopesSupported.includes(permissions[name]));
   // Preserve the existing owner REST API, but do not expose incoming controls
@@ -82,7 +88,8 @@ export function registerChatGPTIntegration(
   const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"`;
   const scopeChallenge = (scope: Scope) =>
     `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="Additional TalkHint permission required", scope="${scope}"`;
-  const paths = ["/api/chatgpt", "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"];
+  const paths = config.actions ? [api] :
+    [api, "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"];
   const setupPaths = new Set(["/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server",
     "/api/chatgpt/plugin.json", "/api/chatgpt/mcp.json"]);
   const buckets = new Map<string, { count: number; reset: number }>();
@@ -92,14 +99,20 @@ export function registerChatGPTIntegration(
     try {
       valid = config.enabled && new URL(base).origin === base && base.startsWith("https://") &&
         !!config.clientId;
-    } catch { /* Fail closed on incomplete deployment configuration. */ }
+      if (config.actions) valid = valid && !!config.actions.ownerId &&
+        config.actions.clientSecret().length >= 32 && !new URL(base).port;
+    } catch { valid = false; /* Fail closed on incomplete deployment configuration. */ }
     if (!valid) return res.status(503).json({ error: "ChatGPT integration is disabled or not configured" });
     try {
       const callback = new URL(config.redirectUri);
       callbackReady = callback.protocol === "https:" && !callback.username && !callback.password && !callback.hash;
+      if (config.actions) callbackReady = callbackReady &&
+        ["https://chatgpt.com", "https://chat.openai.com"].includes(callback.origin) &&
+        /^\/aip\/g-[A-Za-z0-9_-]+\/oauth\/callback$/.test(callback.pathname) && !callback.search;
     } catch { /* The exact callback may only become visible after the tool scan. */ }
     const requestPath = req.originalUrl.split("?")[0];
-    const setupOnly = (req.method === "GET" && setupPaths.has(requestPath)) ||
+    const setupOnly = (req.method === "GET" &&
+      (setupPaths.has(requestPath) || (config.actions && requestPath === `${api}/openapi.json`))) ||
       (req.method === "POST" && requestPath === "/api/chatgpt/mcp" &&
         ["initialize", "tools/list", "ping", "notifications/initialized"].includes(req.body?.method));
     if (!callbackReady && !setupOnly)
@@ -134,7 +147,9 @@ export function registerChatGPTIntegration(
     (req, res) => { Promise.resolve().then(() => fn(req, res)).catch(error => {
       if (res.headersSent) return;
       const unavailable = Number(error?.status) >= 500 || (!error?.status && !(error instanceof z.ZodError));
-      res.status(unavailable ? 503 : 400).json({
+      const invalidClient = config.actions && error?.oauthCode === "invalid_client";
+      if (invalidClient) res.set("WWW-Authenticate", 'Basic realm="TalkHint Actions"');
+      res.status(unavailable ? 503 : invalidClient ? 401 : 400).json({
         error: unavailable ? "temporarily_unavailable" : error.oauthCode ??
           (error instanceof z.ZodError ? "invalid_request" : "invalid_grant"),
         ...(req.path.endsWith("/authorize") ? { iss: base } : {}),
@@ -154,6 +169,7 @@ export function registerChatGPTIntegration(
     if (!header?.startsWith("Bearer ")) return fail(401, "Authorization required");
     const claims = credentials.read(header.slice(7), "access");
     if (claims.client !== config.clientId) return fail(401, "Invalid client");
+    if (config.actions && claims.sub !== config.actions.ownerId) return fail(403, "Owner access required");
     await activeGrant(store, claims);
     return claims;
   };
@@ -161,12 +177,19 @@ export function registerChatGPTIntegration(
     if (!claims.scopes.includes(scope)) throw Object.assign(new Error(`Required scope: ${scope}`),
       { status: 403, requiredScope: scope });
   };
-  const owner = (req: Request) => req.user?.id ?? fail(401, "Owner authentication required");
+  const owner = (req: Request) => {
+    const id = req.user?.id ?? fail(401, "Owner authentication required");
+    if (config.actions && id !== config.actions.ownerId) return fail(403, "Owner access required");
+    return id;
+  };
+  const grantsFor = async (userId: string) => (await store.list(userId)).filter(g =>
+    !config.actions || g.id.startsWith(`chatgpt:grant:${digest(config.clientId)}:`));
   const jsonOwner: RequestHandler = (req, res, next) => {
     if (!req.is("application/json")) return res.status(415).json({ error: "JSON required" });
     next();
   };
 
+  if (!config.actions) {
   app.get("/.well-known/oauth-protected-resource", (_req, res) => res.json({
     resource, authorization_servers: [base], scopes_supported: scopesSupported,
   }));
@@ -185,32 +208,43 @@ export function registerChatGPTIntegration(
     res.json(talkHintPluginPackage(base, config.outboundEnabled === true).manifest));
   app.get("/api/chatgpt/mcp.json", (_req, res) =>
     res.json(talkHintPluginPackage(base, config.outboundEnabled === true).mcp));
+  }
 
-  app.post("/api/chatgpt/connections", jsonOwner, ownerAuth, wrap(async (req, res) => {
+  app.post(`${api}/connections`, jsonOwner, ownerAuth, wrap(async (req, res) => {
     const input = z.object({ approved: z.literal(true), scope: z.string() }).strict().parse(req.body);
     const scopes = permittedScopes(input.scope);
-    if ((await store.list(owner(req))).length >= 10) return fail(409, "Revoke an existing connection first");
+    if ((await grantsFor(owner(req))).length >= 10) return fail(409, "Revoke an existing connection first");
     const id = grantId(config.clientId, scopes);
     const expiresAt = new Date(Date.now() + GRANT_MS);
     await store.put({ id, userId: owner(req), expiresAt });
     res.status(201).json({ id, scopes, expiresAt });
   }));
-  app.get("/api/chatgpt/connections", ownerAuth, wrap(async (req, res) => {
-    res.json({ connections: (await store.list(owner(req))).map(row =>
+  app.get(`${api}/connections`, ownerAuth, wrap(async (req, res) => {
+    res.json({ connections: (await grantsFor(owner(req))).map(row =>
       ({ id: row.id, scopes: grantScopes(row.id), expiresAt: row.expiresAt })) });
   }));
-  app.post("/api/chatgpt/connections/revoke", jsonOwner, ownerAuth, wrap(async (req, res) => {
+  app.post(`${api}/connections/revoke`, jsonOwner, ownerAuth, wrap(async (req, res) => {
     const { id } = z.object({ id: z.string().max(256) }).strict().parse(req.body);
+    if (config.actions && !(await grantsFor(owner(req))).some(g => g.id === id)) return fail(404, "Connection not found");
     await store.expire(id, owner(req));
     res.json({ revoked: true, existingCallContinues: true });
   }));
 
-  const authorizationQuery = (query: unknown): AuthorizationRequest => z.object({
+  const authorizationQuery = (query: unknown): AuthorizationRequest => {
+    if (config.actions) return z.object({
+      response_type: z.literal("code"), client_id: z.literal(config.clientId),
+      redirect_uri: z.literal(config.redirectUri), resource: z.literal(resource).default(resource),
+      scope: z.string(), state: z.string().min(16).max(1024),
+      code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
+      code_challenge_method: z.literal("S256").optional(),
+    }).refine(q => !!q.code_challenge === !!q.code_challenge_method).parse(query);
+    return z.object({
       response_type: z.literal("code"), client_id: z.literal(config.clientId),
       redirect_uri: z.literal(config.redirectUri), resource: z.literal(resource),
       scope: z.string(), state: z.string().min(16).max(1024),
       code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal("S256"),
     }).parse(query);
+  };
   const authorizationError = (q: AuthorizationRequest, error: string) => {
     const target = new URL(config.redirectUri);
     target.searchParams.set("error", error);
@@ -234,17 +268,19 @@ export function registerChatGPTIntegration(
     browserAuth, backend, {
       validate: authorizationQuery, scopes: permittedScopes,
       async finish(userId, q, allow) {
+        if (config.actions && userId !== config.actions.ownerId) return fail(403, "Owner access required");
         const scopes = permittedScopes(q.scope);
         if (!allow) return authorizationError(q, "access_denied");
-        if ((await store.list(userId)).length >= 10) return fail(409, "Revoke an existing connection first");
+        if ((await grantsFor(userId)).length >= 10) return fail(409, "Revoke an existing connection first");
         const grant = { id: grantId(config.clientId, scopes), userId, expiresAt: new Date(Date.now() + GRANT_MS) };
         await store.put(grant);
         return authorizationCode(userId, q, scopes, grant);
       },
     });
 
-  app.get("/api/chatgpt/oauth/authorize", ownerAuth, oauthWrap(async (req, res) => {
+  app.get(`${api}/oauth/authorize`, ownerAuth, oauthWrap(async (req, res) => {
     const q = authorizationQuery(req.query);
+    owner(req);
     let scopes: Scope[];
     try { scopes = permittedScopes(q.scope); }
     catch {
@@ -258,7 +294,8 @@ export function registerChatGPTIntegration(
     }
     res.redirect(await authorizationCode(owner(req), q, scopes, grant));
   }));
-  app.post("/api/chatgpt/oauth/token", express.urlencoded({ extended: false, limit: "24kb" }), oauthWrap(async (req, res) => {
+  app.post(`${api}/oauth/token`, express.urlencoded({ extended: false, limit: "24kb" }), oauthWrap(async (req, res) => {
+    if (config.actions) req.body = actionsExchange(req, config.clientId, config.actions.clientSecret(), resource);
     if (typeof req.body?.grant_type === "string" &&
         !["authorization_code", "refresh_token"].includes(req.body.grant_type)) oauthFail("unsupported_grant_type");
     if (req.body?.client_id !== config.clientId) oauthFail("invalid_client");
@@ -275,9 +312,11 @@ export function registerChatGPTIntegration(
     if (old.client !== input.client_id) return fail(401, "Invalid client");
     permittedScopes(old.scopes.join(" "));
     const grant = await activeGrant(store, old);
+    if (config.actions && old.sub !== config.actions.ownerId) return fail(403, "Owner access required");
     if (type === "code" && (input.redirect_uri !== config.redirectUri ||
-        old.redirect !== input.redirect_uri || !/^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier ?? "") ||
-        digest(input.code_verifier!) !== old.challenge)) return fail(400, "Invalid PKCE or redirect");
+        old.redirect !== input.redirect_uri || ((!config.actions || old.challenge) &&
+        (!/^[A-Za-z0-9._~-]{43,128}$/.test(input.code_verifier ?? "") ||
+        digest(input.code_verifier!) !== old.challenge)))) return fail(400, "Invalid PKCE or redirect");
     if (type === "refresh" && !old.scopes.includes("offline_access")) return fail(401, "Refresh not allowed");
     if (!await store.consume(markerId(raw!))) {
       // A valid signed refresh token reused after rotation means the family
@@ -296,7 +335,12 @@ export function registerChatGPTIntegration(
     res.json({ access_token: access, token_type: "Bearer", expires_in: Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)),
       scope: old.scopes.join(" "), ...(refresh ? { refresh_token: refresh } : {}) });
   }));
-  app.post("/api/chatgpt/oauth/revoke", express.urlencoded({ extended: false, limit: "24kb" }), oauthWrap(async (req, res) => {
+  app.post(`${api}/oauth/revoke`, express.urlencoded({ extended: false, limit: "24kb" }), oauthWrap(async (req, res) => {
+    if (config.actions) {
+      const body = actionsExchange(req, config.clientId, config.actions.clientSecret(), resource);
+      delete body.resource;
+      req.body = body;
+    }
     const { token } = z.object({ token: z.string().max(16000), token_type_hint: z.string().optional(),
       client_id: z.literal(config.clientId) }).strict().parse(req.body);
     let claims: Claims | undefined;
@@ -307,7 +351,7 @@ export function registerChatGPTIntegration(
     res.status(200).json({});
   }));
 
-  app.post("/api/chatgpt/confirmations/approve", jsonOwner, ownerAuth, wrap(async (req, res) => {
+  if (!config.actions) app.post(`${api}/confirmations/approve`, jsonOwner, ownerAuth, wrap(async (req, res) => {
     if (config.outboundEnabled !== true) return fail(403, "Outbound integration is disabled");
     const { confirmation } = z.object({ approved: z.literal(true), confirmation: z.string().max(16000) }).strict().parse(req.body);
     const claims = await confirmations.approve(confirmation, owner(req));
@@ -334,7 +378,7 @@ export function registerChatGPTIntegration(
         const confirmation = credentials.issue({ type: "confirmation", sub: claims.sub, grant: claims.grant,
           scopes: claims.scopes, client: claims.client, exp: Math.min(Date.now() + CONFIRM_MS, claims.exp), call });
         return { call, confirmation, status: "owner_approval_required",
-          approvalEndpoint: "/api/chatgpt/confirmations/approve",
+          ...(!config.actions ? { approvalEndpoint: "/api/chatgpt/confirmations/approve" } : {}),
           approval_url: browser.approvalURL(confirmation),
           note: "Owner session and explicit review required. This tool has not placed a call." };
       }
@@ -349,6 +393,11 @@ export function registerChatGPTIntegration(
           note: "Read this task again for its outcome. Never redial because a response is delayed." };
       }
     }
+  }
+  if (config.actions) {
+    app.get(`${api}/openapi.json`, (_req, res) => res.json(talkHintActionsSchema(base, config.outboundEnabled === true)));
+    registerActionOperations(app, api, config.outboundEnabled === true, wrap, execute);
+    return; // Never expose generic /tools/:name, MCP, or API self-approval in Actions.
   }
   // Restricted HTTP operations for testing/other approved adapters. This is
   // NOT a claim of GPT Actions OAuth compatibility (resource is mandatory).

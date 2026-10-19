@@ -23,7 +23,8 @@ app.get("/preview/:state", (req, res) => {
   if (!page) return void res.sendStatus(404);
   res.set({ "Cache-Control": "no-store", "Content-Security-Policy":
     "default-src 'none'; style-src 'nonce-visual-fixture'; script-src 'none'; form-action 'none'; frame-ancestors 'none'" });
-  res.type("html").send(renderBrowserPage(page, "visual-fixture"));
+  res.type("html").send(renderBrowserPage(page, "visual-fixture",
+    req.query.adapter === "actions" ? "/api/chatgpt-actions" : "/api/chatgpt"));
 });
 app.use((_req, res) => res.status(405).send("Visual fixture only. No login, permissions or calls."));
 const port = Number(process.argv[2] ?? 5000);

@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:chatgpt-secretary": "vitest run --config vitest.chatgpt.config.ts",
     "chatgpt:package": "tsx scripts/prepare-chatgpt-plugin.ts",
+    "chatgpt:actions": "tsx scripts/prepare-chatgpt-actions.ts",
     "test:tutor-engine-contract": "tsx scripts/tutor-engine-contract-probe.ts",
     "db:push": "drizzle-kit push"
   },

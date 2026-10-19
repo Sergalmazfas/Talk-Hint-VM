@@ -13,11 +13,13 @@ export const WEB_TTL = 15 * 60_000;
  * Encryption keeps numbers/instructions out of URL plaintext and Referer.
  */
 export class BrowserSecurity {
-  constructor(private readonly signingKey: () => string, private readonly origin: string) {}
+  constructor(private readonly signingKey: () => string, private readonly origin: string,
+    private readonly namespace = "") {}
+  private cookieName(name: string) { return this.namespace ? `${name}-actions` : name; }
   private key() {
     const key = this.signingKey();
     if (!key || key.length < 32) return fail(503, "Browser signing is unavailable");
-    return createHmac("sha256", key).update(`talkhint-chatgpt-web-v1:${this.origin}`).digest();
+    return createHmac("sha256", key).update(`talkhint-chatgpt-web-v1:${this.origin}${this.namespace ? `:${this.namespace}` : ""}`).digest();
   }
   seal(value: { kind: string; exp: number; [key: string]: unknown }): string {
     const iv = randomBytes(12);
@@ -44,6 +46,7 @@ export class BrowserSecurity {
     } catch { return fail(400, "Invalid or expired browser ticket"); }
   }
   cookie(req: Request, name: string): string | undefined {
+    name = this.cookieName(name);
     const values = (req.headers.cookie ?? "").split(";").map(v => v.trim())
       .filter(v => v.startsWith(`${name}=`)).map(v => v.slice(name.length + 1));
     if (values.length > 1) return fail(400, "Ambiguous browser session");
@@ -60,10 +63,10 @@ export class BrowserSecurity {
   ownerCookie(req: Request) { return this.cookie(req, OWNER); }
   setOwner(res: Response, token: string) { this.setCookie(res, OWNER, token); }
   clearOwner(res: Response) {
-    res.clearCookie(OWNER, { httpOnly: true, secure: true, sameSite: "lax", path: "/" });
+    res.clearCookie(this.cookieName(OWNER), { httpOnly: true, secure: true, sameSite: "lax", path: "/" });
   }
   private setCookie(res: Response, name: string, value: string) {
-    res.cookie(name, value, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: WEB_TTL });
+    res.cookie(this.cookieName(name), value, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: WEB_TTL });
   }
   csrf(binding: string, flow: string, ownerCookie?: string) {
     return createHmac("sha256", this.key()).update(
