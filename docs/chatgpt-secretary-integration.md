@@ -1,10 +1,21 @@
 # TalkHint Secretary: isolated ChatGPT server integration
 
+Stage-one operator guide (Russian, checked 2026-10-19):
+[ChatGPT read-only connection and mock outbound acceptance](chatgpt-secretary-stage-one.md).
+
 ## Release state and boundaries
 
 Implemented in the existing backend, **disabled by default**. No production
 configuration, publishing, telephone calls, SMS, schema migrations, data deletion,
 new chat application, or iOS UI are part of this change.
+
+Stage one is additionally **read-only by default**, even when the integration is
+enabled: discovery advertises only `calls:read`, `calls:transcript` and
+`offline_access`; MCP exposes only profile/call/task reads. Incoming-pending and
+outbound tools are hidden AND rejected at execution, grant creation and OAuth.
+The runtime composition does not enable outbound mode. The separate injected
+`outboundEnabled:true` configuration is exercised only with fake telephony in
+tests. An old write-capable token cannot bypass the stage boundary.
 
 The full native Secretary routes, Twilio dialer, signed callbacks, audio streams,
 reports and incoming call reception remain in place. The legacy `/start-call`
@@ -34,7 +45,8 @@ The adapter implements a predefined public OAuth client, not DCR/CIMD.
 Configure the same predefined client in the eligible ChatGPT connection.
 The exact redirect URI must be copied from that connection, not guessed.
 The integration advertises issuer identification and returns `iss` in successful
-authorization redirects. Invalid client/redirect requests fail locally without
+authorization redirects, including trusted-callback access/scope denials.
+Invalid client/redirect requests fail locally without
 redirecting to an untrusted URI.
 
 MCP is JSON-response-only, stateless Streamable HTTP: POST initialize,
@@ -106,6 +118,13 @@ An unauthenticated browser is not automatically navigated through a new login UI
 use the existing TalkHint login first. End-to-end ChatGPT linking remains a
 manual acceptance gate.
 
+Token endpoint errors use OAuth protocol codes (`invalid_grant`,
+`invalid_request`, `invalid_client`, `invalid_target`,
+`unsupported_grant_type`), not raw application errors. Insufficient transcript
+scope produces a scoped `WWW-Authenticate` / MCP authorization challenge.
+Credentials validate issuer as well as audience. Credentials issued before the
+issuer validation change fail closed and require reconnection.
+
 Scopes:
 
 - `calls:read`: own call history, Secretary status and reports.
@@ -117,7 +136,9 @@ Scopes:
 Access lifetime: at most 10 minutes. Codes: at most 60 seconds, atomically
 single-use. Refresh tokens rotate and expire with their grant. Every privileged
 request checks the persistent grant again, so revocation rejects both existing
-access tokens and refresh exchanges. Revocation is **not** a hangup command;
+access tokens and refresh exchanges. Reusing a valid, already-rotated refresh
+token revokes the connection family; do not exchange it concurrently or retry it
+after a lost response without reconnecting. Revocation is **not** a hangup command;
 an already accepted telephone call continues under the native lifecycle.
 
 Persistence reuses the existing `sessions` table for fixed-size, namespaced
@@ -142,7 +163,10 @@ Equivalent restricted test HTTP endpoint: POST `/api/chatgpt/tools/{tool}`.
 - `prepare_call`: exact US `+1` number, bounded instruction, UUID request ID,
   clone provider and subtitle language; returns a signed short-lived confirmation.
 - `start_call`: accepts only that confirmation, with a separate stored owner
-  approval. Returns a task reference immediately.
+  approval. Returns a task reference and `task_id` immediately.
+
+`get_incoming`, `prepare_call`, and `start_call` above describe the future/test
+capability set, not tools available in the default read-only stage.
 
 Unknown tools and extra inputs (including ownerId or a changed phone number)
 are rejected. No generic HTTP proxy, provider/admin API, SMS, automatic redial,

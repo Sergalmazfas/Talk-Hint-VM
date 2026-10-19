@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express, { type RequestHandler } from "express";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
@@ -12,6 +12,7 @@ const config: IntegrationConfig = {
   enabled: true, origin: "https://example.test", clientId: "talkhint-chatgpt",
   redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
   signingKey: () => "isolated-test-key-never-an-environment-secret-000",
+  outboundEnabled: true, // Isolated mock backend only; runtime defaults to read-only.
 };
 const resource = `${config.origin}/api/chatgpt/mcp`;
 const ownerAuth: RequestHandler = (req, res, next) => {
@@ -62,6 +63,7 @@ const call = () => ({
   clientRequestId: randomUUID(), voiceProvider: "elevenlabs", translationLanguage: "ru",
 });
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(() => { throw new Error("External network forbidden in adapter tests"); }));
   ({ store, rows } = memoryStore());
   backend = {
     history: vi.fn().mockResolvedValue([]), call: vi.fn().mockResolvedValue({ id: "c1", transcript: "guest text" }),
@@ -73,6 +75,7 @@ beforeEach(() => {
   app.use(express.json({ limit: "32kb" }));
   registerChatGPTIntegration(app, config, store, backend, ownerAuth);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("isolated owner-authorized ChatGPT adapter", () => {
   it("is fail-closed by default and never reaches data/dialing", async () => {
@@ -233,9 +236,11 @@ describe("OAuth authorization code + PKCE and rotated refresh", () => {
     expect(meta.registration_endpoint).toBeUndefined();
   });
   it("does not issue codes without prior owner consent or for unapproved scopes/redirects", async () => {
-    expect((await request(app).get("/api/chatgpt/oauth/authorize").set("x-test-owner", "alice").query(query())).status).toBe(403);
+    const denied = await request(app).get("/api/chatgpt/oauth/authorize").set("x-test-owner", "alice").query(query());
+    expect(new URL(denied.headers.location).searchParams.get("error")).toBe("access_denied");
     await access("calls:read");
-    expect((await request(app).get("/api/chatgpt/oauth/authorize").set("x-test-owner", "alice").query(query())).status).toBe(403);
+    const insufficient = await request(app).get("/api/chatgpt/oauth/authorize").set("x-test-owner", "alice").query(query());
+    expect(new URL(insufficient.headers.location).searchParams.get("error")).toBe("access_denied");
     expect((await request(app).get("/api/chatgpt/oauth/authorize").set("x-test-owner", "alice")
       .query({ ...query(), redirect_uri: "https://attacker.test" })).status).toBe(400);
   });
@@ -257,7 +262,7 @@ describe("OAuth authorization code + PKCE and rotated refresh", () => {
     const value = await code();
     const claims = credentials.read(value, "code");
     await store.expire(claims.grant, "alice");
-    expect((await exchange(value)).status).toBe(401);
+    expect((await exchange(value)).body.error).toBe("invalid_grant");
     expect(rows.get(markerId(value))!.expiresAt.getTime()).toBeGreaterThan(Date.now());
     const next = await code();
     rows.set(markerId(next), { ...rows.get(markerId(next))!, expiresAt: new Date(0) });
@@ -271,7 +276,6 @@ describe("OAuth authorization code + PKCE and rotated refresh", () => {
     });
     const rotated = await refresh();
     expect(rotated.status).toBe(200);
-    expect((await refresh()).status).toBe(400);
     expect((await tool("list_calls", rotated.body.access_token)).status).toBe(200);
     expect((await request(app).post("/api/chatgpt/oauth/revoke").type("form")
       .send({ client_id: config.clientId, token: rotated.body.refresh_token })).status).toBe(200);

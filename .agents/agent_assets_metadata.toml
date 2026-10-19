@@ -201,3 +201,17 @@ mtime_ms = 1790237722363
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0fcc91b2-26c7-4e03-9ad3-feb074db1e4e/b3ea8ec1-4818-451a-a7a9-3c82254ea6e5"
 storage_version_token = "1790237968170377"
 content_type = "text/html"
+
+[[outputs]]
+id = "trDZsconyobvA3GSfZEy-"
+uri = "file://docs/chatgpt-secretary-stage-one.md"
+type = "text"
+title = "TalkHint → ChatGPT: первый этап и инструкция подключения"
+description = "Что реализовано и проверено, ограничения web/iPhone, безопасный OAuth и mock-сценарий исходящего звонка. Проверено 19.10.2026."
+logical_id = "435c86dd-2f65-4d13-88e7-a11e0fac8854"
+content_hash = "sha256:cc09177108cbe4c7ccd17d1ea52d125f197c6cd3796ea561e0915b48dbde3ebd"
+size = 15140
+mtime_ms = 1792445128794
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/435c86dd-2f65-4d13-88e7-a11e0fac8854/4f0eaa09-d947-433b-81d4-81b645075b39"
+storage_version_token = "1792445135747160"
+content_type = "text/markdown"

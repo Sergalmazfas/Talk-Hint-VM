@@ -18,6 +18,12 @@ vi.mock("../secretary/tasks", () => ({
 }));
 import { secretaryBackend } from "./secretary";
 import { SecretaryPreDialError } from "../secretary/dialErrors";
+import express from "express";
+import request from "supertest";
+import { registerChatGPTIntegration } from "./routes";
+import { digest } from "./security";
+import { testMarkerStore } from "./testSupport";
+vi.mock("../auth", () => ({ authMiddleware: (_req: any, res: any) => res.sendStatus(401) }));
 const input = {
   phoneNumber: "+12025550123", instruction: "Ask for opening hours",
   clientRequestId: "56fa4264-8b0a-4692-bcb2-77b03c145631",
@@ -31,6 +37,8 @@ const row = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("OPENAI_API_KEY", "fake-test-only");
+  vi.stubEnv("ELEVENLABS_API_KEY", "fake-test-only");
+  vi.stubEnv("CARTESIA_API_KEY", "fake-test-only");
   f.query.mockResolvedValue([{ id: "number" }]);
   f.clone.mockResolvedValue({ status: "ready", voiceId: "fake" });
   f.existing.mockResolvedValue(undefined);
@@ -41,6 +49,71 @@ beforeEach(() => {
 import { afterEach } from "vitest";
 afterEach(() => vi.unstubAllEnvs());
 describe("Secretary adapter uses durable native launch helpers", () => {
+  it("executes OAuth -> exact owner approval -> one native launch -> task result entirely on mocks", async () => {
+    const app = express();
+    app.use(express.json());
+    let won = false;
+    const task = { ...row };
+    f.create.mockImplementation(async () => {
+      const created = !won; won = true;
+      return { created, task };
+    });
+    f.getTask.mockImplementation(async () => task);
+    const dial = vi.fn().mockResolvedValue({ sid: `CA${"a".repeat(32)}`, callId: "fixture-call" });
+    const origin = "https://outbound-fixture.example.test", clientId = "talkhint-chatgpt";
+    const resource = `${origin}/api/chatgpt/mcp`;
+    const redirectUri = "https://chatgpt.com/connector_platform_oauth_redirect";
+    registerChatGPTIntegration(app, {
+      enabled: true, outboundEnabled: true, origin, clientId, redirectUri,
+      signingKey: () => "outbound-only-isolated-fixture-key-not-secret",
+    }, testMarkerStore(), secretaryBackend(dial), (req, res, next) => {
+      const id = req.header("x-fixture-owner");
+      if (!id) return void res.sendStatus(401);
+      req.user = { id } as any;
+      next();
+    });
+    const scope = "calls:read calls:transcript secretary:start offline_access";
+    expect((await request(app).post("/api/chatgpt/connections").set("x-fixture-owner", "alice")
+      .send({ approved: true, scope })).status).toBe(201);
+    const verifier = "outbound-fixture-pkce-verifier-forty-three-characters-long";
+    const authorized = await request(app).get("/api/chatgpt/oauth/authorize").set("x-fixture-owner", "alice")
+      .query({ response_type: "code", client_id: clientId, redirect_uri: redirectUri, resource,
+        scope, state: "isolated-outbound-state", code_challenge_method: "S256", code_challenge: digest(verifier) });
+    const tokens = await request(app).post("/api/chatgpt/oauth/token").type("form").send({
+      client_id: clientId, redirect_uri: redirectUri, resource, grant_type: "authorization_code",
+      code_verifier: verifier, code: new URL(authorized.headers.location).searchParams.get("code"),
+    });
+    expect(tokens.status).toBe(200);
+    const rpc = (name: string, args: object) => request(app).post("/api/chatgpt/mcp")
+      .set("Authorization", `Bearer ${tokens.body.access_token}`)
+      .send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+    const prepared = await rpc("prepare_call", input);
+    expect(prepared.body.result.structuredContent.call).toEqual(input);
+    const { confirmation } = prepared.body.result.structuredContent;
+    expect((await rpc("start_call", { confirmation, confirmed: true })).body.result.isError).toBe(true);
+    expect((await rpc("start_call", { confirmation })).body.result.isError).toBe(true);
+    expect(dial).not.toHaveBeenCalled();
+    expect((await request(app).post("/api/chatgpt/confirmations/approve")
+      .set("Authorization", `Bearer ${tokens.body.access_token}`)
+      .send({ approved: true, confirmation })).status).toBe(401);
+    expect((await request(app).post("/api/chatgpt/confirmations/approve").set("x-fixture-owner", "alice")
+      .send({ approved: true, confirmation })).status).toBe(200);
+    const starts = await Promise.all([rpc("start_call", { confirmation }), rpc("start_call", { confirmation })]);
+    for (const response of starts) {
+      expect(response.body.result.isError).toBe(false);
+      expect(response.body.result.structuredContent.task_id).toBe(task.id);
+    }
+    await vi.waitFor(() => expect(f.attach).toHaveBeenCalledTimes(1));
+    expect(dial).toHaveBeenCalledTimes(1);
+    expect(f.create).toHaveBeenCalledWith("alice", input);
+    task.status = "finalizing";
+    expect((await rpc("get_task", { id: task.id })).body.result.structuredContent.status).toBe("finalizing");
+    task.status = "completed";
+    const result = await rpc("get_task", { id: task.id, includeTranscript: true });
+    expect(result.body.result.structuredContent).toMatchObject({ id: task.id, status: "completed", transcript: "private words" });
+    // All persistence, clone lookup and provider dialing in this test are fakes.
+    // The production Twilio dialer, database and worker are never imported.
+  });
   it("recovers existing attempts without dialing or leaking transcripts", async () => {
     f.existing.mockResolvedValue(row);
     const dial = vi.fn();

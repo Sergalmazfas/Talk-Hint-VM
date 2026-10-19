@@ -13,7 +13,7 @@ export interface MarkerStore {
 }
 export interface Claims {
   type: "code" | "access" | "refresh" | "confirmation";
-  sub: string; grant: string; scopes: Scope[]; client: string; aud: string;
+  sub: string; grant: string; scopes: Scope[]; client: string; aud: string; iss: string;
   exp: number; nonce: string;
   redirect?: string; challenge?: string;
   call?: { phoneNumber: string; instruction: string; clientRequestId: string; voiceProvider: "elevenlabs" | "cartesia"; translationLanguage: "ru" | "es" };
@@ -33,8 +33,9 @@ export function parseScopes(value: unknown): Scope[] {
 /** Domain-separated credentials, never accepted by TalkHint's general auth. */
 export class Credentials {
   constructor(private readonly key: () => string, readonly resource: string) {}
-  issue(claims: Omit<Claims, "nonce" | "aud">): string {
-    const body = Buffer.from(JSON.stringify({ ...claims, nonce: randomUUID(), aud: this.resource })).toString("base64url");
+  issue(claims: Omit<Claims, "nonce" | "aud" | "iss">): string {
+    const body = Buffer.from(JSON.stringify({ ...claims, nonce: randomUUID(), aud: this.resource,
+      iss: new URL(this.resource).origin })).toString("base64url");
     return `thcg.${body}.${this.mac(body)}`;
   }
   read(token: unknown, type: Claims["type"]): Claims {
@@ -47,7 +48,7 @@ export class Credentials {
     let claims: Claims;
     try { claims = JSON.parse(Buffer.from(body, "base64url").toString()); }
     catch { return fail(401, "Invalid credential"); }
-    if (claims.type !== type || claims.aud !== this.resource || !Number.isFinite(claims.exp) ||
+    if (claims.type !== type || claims.aud !== this.resource || claims.iss !== new URL(this.resource).origin || !Number.isFinite(claims.exp) ||
         claims.exp <= Date.now() || !claims.sub || !claims.grant || !Array.isArray(claims.scopes) ||
         claims.scopes.some(s => !SCOPES.includes(s))) return fail(401, "Expired or invalid credential");
     return claims;
