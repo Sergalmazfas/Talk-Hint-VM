@@ -229,3 +229,31 @@ mtime_ms = 1792447755156
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ac858fa-1eb4-4aaa-81af-e0e0b939394b/29c65a03-784f-4ede-90d8-34b0e765d84c"
 storage_version_token = "1792447776326870"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "pKwUH0I8kt2a3tsoasmrd"
+uri = "file://docs/talkhint-plugin-public-review.md"
+type = "text"
+title = "TalkHint — подготовка к каталогу ChatGPT"
+description = "Готовность, официальные ограничения Plus/iPhone, шаги подачи, материалы владельца и результаты тестов. Ничего не подано и не опубликовано."
+logical_id = "49f29681-725c-453a-908d-75fd83fe6a97"
+content_hash = "sha256:4a1fda4764ad2aa4e1d13b10b66ec83f0b3b3b23cac25f7a5f256248e729d894"
+size = 21122
+mtime_ms = 1792450175656
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/49f29681-725c-453a-908d-75fd83fe6a97/0e0038df-934d-4c16-89f7-56047604321c"
+storage_version_token = "1792450244941986"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "XdfRYuIYvX-mJzQ7DIOdB"
+uri = "file://generated-artifacts/talkhint-plugin/draft/talkhint-NOT-FOR-UPLOAD.zip"
+type = "unspecified"
+title = "TalkHint Plugin — локальный черновой пакет"
+description = "Только manifest, MCP-конфигурация и значок TalkHint. URL-заглушки: НЕ загружать в OpenAI. Секретов и данных звонков нет."
+logical_id = "1bccdc58-6fb1-470a-8426-f47f3dd609f1"
+content_hash = "sha256:4f7d82a43e04e270d7c7908ca252357731045f7df650bce5eaf39fc95670f75d"
+size = 27742
+mtime_ms = 1792449943545
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1bccdc58-6fb1-470a-8426-f47f3dd609f1/7cc83bdf-7fea-4001-a0d6-017dc02559e7"
+storage_version_token = "1792450245670934"
+content_type = "application/octet-stream"

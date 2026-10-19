@@ -22,7 +22,7 @@ describe("separate TalkHint remote-MCP plugin", () => {
   it("only advertises write mode when explicitly injected, with no auto-enable", () => {
     const pack = talkHintPluginPackage("https://fixture.example.test", true);
     expect(pack.manifest.extensions["com.openai"].interface.capabilities).toContain("Write");
-    expect(pack.mcp.mcpServers.talkhint.extensions["com.openai"].auth.baseScopes).toContain("secretary:start");
+    expect(pack.mcp.mcpServers.talkhint.extensions["com.openai"].auth.baseScopes).not.toContain("secretary:start");
     expect(talkHintPluginPackage("https://fixture.example.test").mcp.mcpServers.talkhint
       .extensions["com.openai"].auth.baseScopes).not.toContain("secretary:start");
   });

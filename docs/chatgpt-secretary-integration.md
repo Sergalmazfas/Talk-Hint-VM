@@ -16,7 +16,9 @@ Stage one is additionally **read-only by default**, even when the integration is
 enabled: discovery advertises only `calls:read`, `calls:transcript` and
 `offline_access`; MCP exposes only profile/call/task reads. Incoming-pending and
 outbound tools are hidden AND rejected at execution, grant creation and OAuth.
-The runtime composition does not enable outbound mode. The separate injected
+The runtime composition defaults to read-only. A separate explicit
+`CHATGPT_SECRETARY_OUTBOUND_ENABLED=true` opt-in is now prepared for a future
+authorized rollout; no setting was enabled. The injected
 `outboundEnabled:true` configuration is exercised only with fake telephony in
 tests. An old write-capable token cannot bypass the stage boundary.
 

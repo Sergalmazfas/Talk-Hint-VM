@@ -26,4 +26,6 @@ app.get("/preview/:state", (req, res) => {
   res.type("html").send(renderBrowserPage(page, "visual-fixture"));
 });
 app.use((_req, res) => res.status(405).send("Visual fixture only. No login, permissions or calls."));
-app.listen(5000, "0.0.0.0", () => console.log("Isolated visual fixture on port 5000; no backend or dialing."));
+const port = Number(process.argv[2] ?? 5000);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid fixture port");
+app.listen(port, "0.0.0.0", () => console.log(`Isolated visual fixture on port ${port}; no backend or dialing.`));

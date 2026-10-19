@@ -15,3 +15,4 @@ attached_assets/
 
 # Seed config with real Twilio data (use seed-config.template.json as reference)
 seed-config.json
+/generated-artifacts/

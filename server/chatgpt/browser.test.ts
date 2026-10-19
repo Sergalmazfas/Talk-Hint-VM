@@ -338,6 +338,40 @@ describe("separate owner approval, never a browser dialer", () => {
 });
 
 describe("separate TalkHint plugin and owner Secretary history", () => {
+  it("does not mint duplicate OAuth grants on concurrent consent submissions", async () => {
+    const browser = new Browser();
+    const consent = await browser.signIn(await browser.begin());
+    const payload = { ...fields(consent), decision: "allow" };
+    const results = await Promise.all([
+      browser.post(`${path}/consent`, payload), browser.post(`${path}/consent`, payload),
+    ]);
+    expect(results.filter(r => r.status === 303)).toHaveLength(1);
+    expect([403, 409]).toContain(results.find(r => r.status !== 303)?.status);
+    expect(await store.list("alice")).toHaveLength(1);
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("advertises reviewed outbound hints only on opt-in; cannot invoke unlisted incoming tools", async () => {
+    config.outboundEnabled = true;
+    const tools = await request(app).post("/api/chatgpt/mcp")
+      .send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    // This app was registered read-only. Changing a flag cannot silently add
+    // runtime tools; registering the explicitly enabled composition is separate.
+    expect(tools.body.result.tools.map((t: any) => t.name)).not.toContain("start_call");
+    const hidden = await request(app).post("/api/chatgpt/mcp").send({ jsonrpc: "2.0", id: 2,
+      method: "tools/call", params: { name: "get_incoming", arguments: {} } });
+    expect(hidden.body.result.isError).toBe(true);
+    expect(backend.incoming).not.toHaveBeenCalled();
+    setup(true);
+    const enabled = await request(app).post("/api/chatgpt/mcp")
+      .send({ jsonrpc: "2.0", id: 3, method: "tools/list" });
+    const catalog = enabled.body.result.tools;
+    expect(catalog).toHaveLength(7);
+    expect(catalog.map((t: any) => t.name)).not.toContain("get_incoming");
+    expect(catalog.find((t: any) => t.name === "start_call").annotations)
+      .toMatchObject({ readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: true });
+    expect(catalog.find((t: any) => t.name === "prepare_call").annotations)
+      .toMatchObject({ readOnlyHint: true, destructiveHint: false });
+  });
   it("serves a separate read-only plugin definition without owner data or dialing", async () => {
     const manifest = await request(app).get("/api/chatgpt/plugin.json");
     const mcp = await request(app).get("/api/chatgpt/mcp.json");

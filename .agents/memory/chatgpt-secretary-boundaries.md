@@ -14,6 +14,11 @@ number and task. Forwarding UI still requires separate agreement.
 TalkHint must be a separate connectable ChatGPT app/plugin. Route Leader is
 only a UX reference; never mix their projects, endpoints, identities or access.
 
+The target is a publicly listed TalkHint plugin for ChatGPT Plus, primarily
+the official iPhone client. Do not assume manual custom MCP access on Plus
+or require a Pro upgrade. Prepare locally; owner approval is required before
+any upload/review, deployment, publication or real calls.
+
 **Why:** The user explicitly requested this boundary and wants the existing
 telephone product preserved rather than replaced by another chat.
 The user explicitly approved only the minimal web addition after the API-only

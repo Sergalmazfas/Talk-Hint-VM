@@ -45,3 +45,4 @@
 - [Voice Lab rollout approval](voice-lab-rollout.md) — owner approved opt-in Cartesia/ElevenLabs live comparison; ElevenLabs default, Copilot remains tap-only.
 - [Secretary live-call intent](secretary-live-call-intent.md) — one manual call; owner only monitors, Secretary speaks autonomously; Hint is design reference, not a feature target.
 - [ChatGPT Secretary boundaries](chatgpt-secretary-boundaries.md) — official ChatGPT only; no replacement chat, no SMS, incoming AI handoff requires separate approval.
+- [OpenAI plugin review](openai-plugin-review.md) — retain OAuth despite upstream portable-schema conflict; local package checks are not portal acceptance.

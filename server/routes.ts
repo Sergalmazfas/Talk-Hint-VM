@@ -285,6 +285,8 @@ export async function registerRoutes(
   registerChatGPTIntegration(app, {
     // Opt-in only; no production or environment setting is changed here.
     enabled: process.env.CHATGPT_SECRETARY_ENABLED === "true",
+    // Separate opt-in, never enabled by packaging, scopes or client tool approval.
+    outboundEnabled: process.env.CHATGPT_SECRETARY_OUTBOUND_ENABLED === "true",
     origin: process.env.CHATGPT_SECRETARY_ORIGIN ?? "",
     clientId: "talkhint-chatgpt",
     redirectUri: process.env.CHATGPT_SECRETARY_REDIRECT_URI ?? "",
