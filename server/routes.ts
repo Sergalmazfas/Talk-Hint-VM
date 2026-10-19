@@ -35,6 +35,10 @@ import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, r
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
 import { registerSecretaryRoutes } from "./secretary/routes";
+import { registerLegacyTestCallRoute } from "./secretary/legacyRoute";
+import { registerChatGPTIntegration } from "./chatgpt/routes";
+import { integrationStore } from "./chatgpt/store";
+import { secretaryBackend } from "./chatgpt/secretary";
 import { dialSecretaryTask, secretaryCallbackOrigin } from "./secretary/dialer";
 import { notifySecretaryResult } from "./secretary/notifications";
 import { bindSecretaryCall, finishSecretaryAttempt, getSecretaryTaskById, getSecretaryTaskForCall } from "./secretary/tasks";
@@ -278,6 +282,14 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   setupWebSocket(httpServer);
+  registerChatGPTIntegration(app, {
+    // Opt-in only; no production or environment setting is changed here.
+    enabled: process.env.CHATGPT_SECRETARY_ENABLED === "true",
+    origin: process.env.CHATGPT_SECRETARY_ORIGIN ?? "",
+    clientId: "talkhint-chatgpt",
+    redirectUri: process.env.CHATGPT_SECRETARY_REDIRECT_URI ?? "",
+    signingKey: () => process.env.SESSION_SECRET ?? "",
+  }, integrationStore, secretaryBackend(dialSecretaryTask));
   registerSecretaryRoutes(app, {
     dial: dialSecretaryTask,
     notify: async (report) => {
@@ -1909,71 +1921,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     res.type("text/xml").send(twiml);
   });
 
-  // Start outbound call via Twilio REST API
-  // Direct call to target with inline TwiML
-  app.post("/start-call", async (req, res) => {
-    try {
-      const { target } = req.body;
-      
-      if (!target) {
-        return res.status(400).json({ error: "Target phone number is required" });
-      }
-      
-      if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
-        return res.status(500).json({ error: "Twilio credentials not configured" });
-      }
-      
-      console.log(`[start-call] ===== DIRECT OUTBOUND CALL =====`);
-      console.log(`[start-call] Target: ${target}`);
-      console.log(`[start-call] From: ${TWILIO_PHONE_NUMBER}`);
-      
-      // Simple TwiML - just say a message
-      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Say>Hello! This is a test call from TalkHint.</Say>
-  <Pause length="2"/>
-  <Say>The connection is working. Goodbye!</Say>
-</Response>`;
-      
-      const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
-      
-      const twilioResponse = await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            To: target,
-            From: TWILIO_PHONE_NUMBER!,
-            Twiml: twiml,
-          }),
-        }
-      );
-      
-      if (!twilioResponse.ok) {
-        const errorText = await twilioResponse.text();
-        console.error('[start-call] Twilio API error:', errorText);
-        return res.status(twilioResponse.status).json({ error: 'Failed to initiate call', details: errorText });
-      }
-      
-      const callData = await twilioResponse.json();
-      console.log(`[start-call] Call initiated: ${callData.sid}, status: ${callData.status}`);
-      
-      res.json({ 
-        success: true, 
-        callSid: callData.sid,
-        status: callData.status,
-        target
-      });
-    } catch (error: any) {
-      console.error('[start-call] Error:', error);
-      res.status(500).json({ error: error.message || 'Failed to start call' });
-    }
-  });
-
+  registerLegacyTestCallRoute(app);
   const clients: Set<any> = new Set();
 
   app.get("/api/events", (req, res) => {

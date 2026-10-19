@@ -67,6 +67,9 @@ export async function createSession(userId: string): Promise<string> {
 }
 
 export async function getSessionUserId(token: string): Promise<string | undefined> {
+  // Integration revocation/consent markers are not login sessions, even if an
+  // attacker knows a marker ID. Only the isolated adapter may resolve them.
+  if (token.startsWith("chatgpt:") || token.startsWith("thcg.")) return undefined;
   const session = await storage.getSession(token);
   return session?.userId;
 }

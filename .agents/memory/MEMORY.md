@@ -44,3 +44,4 @@
 - [Copilot private audio boundary](copilot-private-translator-boundary.md) — Copilot translation is read-first; only a tap on its card may speak verified English with owner's clone to Guest.
 - [Voice Lab rollout approval](voice-lab-rollout.md) — owner approved opt-in Cartesia/ElevenLabs live comparison; ElevenLabs default, Copilot remains tap-only.
 - [Secretary live-call intent](secretary-live-call-intent.md) — one manual call; owner only monitors, Secretary speaks autonomously; Hint is design reference, not a feature target.
+- [ChatGPT Secretary boundaries](chatgpt-secretary-boundaries.md) — official ChatGPT only; no replacement chat, no SMS, incoming AI handoff requires separate approval.
