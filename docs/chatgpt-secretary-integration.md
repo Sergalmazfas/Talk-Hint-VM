@@ -2,6 +2,8 @@
 
 Stage-one operator guide (Russian, checked 2026-10-19):
 [ChatGPT read-only connection and mock outbound acceptance](chatgpt-secretary-stage-one.md).
+Current separate-plugin and Secretary history guide:
+[TalkHint as its own ChatGPT plugin](talkhint-chatgpt-plugin.md).
 
 ## Release state and boundaries
 
@@ -70,8 +72,11 @@ Future, separately approved development setup:
   Rotating it invalidates integration credentials. Never copy it to ChatGPT.
 - Predefined public client ID: `talkhint-chatgpt`, token endpoint auth `none`.
 
-No settings were set by this implementation. Missing/invalid configuration
-returns 503 before storage or dialing. Cross-origin browser requests are rejected.
+No settings were set by this implementation. Disabled integration or invalid
+origin returns 503 before storage or dialing. If only the exact callback is
+missing, public discovery/plugin metadata and MCP initialization/tool listing
+remain available for setup; authorization, owner data and grants still return
+503 until the callback is configured. Cross-origin browser requests are rejected.
 An additional bounded in-process rate limiter is included; it is not a global
 distributed limiter. A public rollout still needs normal edge abuse controls.
 
@@ -91,6 +96,10 @@ into a chat or give it to the MCP client.
 | GET `/api/chatgpt/oauth/authorize` (`Accept: text/html`) | Validate request, then login and explicit consent |
 | GET `/api/chatgpt/approve?ticket=…` | Encrypted short-lived link; requires correct owner, never approves on GET |
 | GET `/api/chatgpt/connections/manage` | List/revoke only this owner's grants |
+| GET `/api/chatgpt/secretary` | Protected saved tasks/call history, owner cookie required |
+| GET `/api/chatgpt/secretary/tasks/:id` | Own saved report; transcript opt-in |
+| GET `/api/chatgpt/secretary/calls/:id` | Own saved call; transcript opt-in |
+| GET `/api/chatgpt/plugin.json`, `/api/chatgpt/mcp.json` | Separate TalkHint plugin metadata; not an OpenAI registration |
 | POST `/api/chatgpt/browser/login` | Existing-account password login into isolated web cookie |
 | POST `/api/chatgpt/browser/session` | Explicit same-origin existing-owner session exchange |
 | POST `/api/chatgpt/browser/consent` | Explicit allow/deny, one-time review |

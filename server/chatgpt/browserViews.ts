@@ -1,4 +1,7 @@
+import { renderSecretaryContent, type SecretaryHistoryPage } from "./secretaryHistoryViews";
+
 export type BrowserPage =
+  | (SecretaryHistoryPage & { csrf: string; flow: string })
   | { kind: "login"; csrf: string; flow: string; message?: string }
   | { kind: "consent"; csrf: string; flow: string; account: string; scopes: string[] }
   | {
@@ -112,10 +115,13 @@ const hidden = (csrf: string, flow: string): string =>
   `<input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><input type="hidden" name="flow" value="${escapeHtml(flow)}">`;
 
 const logoutAndManage = (csrf: string, flow: string): string =>
-  `<section class="section"><form method="post" action="/api/chatgpt/browser/logout">${hidden(csrf, flow)}<button class="button secondary" type="submit">Завершить web-сеанс</button></form><a class="manage" href="/api/chatgpt/connections/manage">Управление подключениями</a></section>`;
+  `<section class="section"><form method="post" action="/api/chatgpt/browser/logout">${hidden(csrf, flow)}<button class="button secondary" type="submit">Завершить web-сеанс</button></form><a class="manage" href="/api/chatgpt/secretary">Secretary — история и отчёты</a><br><a class="manage" href="/api/chatgpt/connections/manage">Управление подключениями</a></section>`;
 
 export function renderBrowserPage(page: BrowserPage, nonce: string): string {
   switch (page.kind) {
+    case "secretary-history":
+    case "secretary-detail":
+      return shell("Secretary", nonce, renderSecretaryContent(page) + logoutAndManage(page.csrf, page.flow));
     case "login": {
       const notice = page.message ? `<p class="error" role="status">${escapeHtml(page.message)}</p>` : "";
       const content = `<article class="card">

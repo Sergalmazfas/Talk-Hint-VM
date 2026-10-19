@@ -6,6 +6,9 @@ import { renderBrowserPage, type BrowserPage } from "./browserViews";
 import { digest, fail, grantScopes, markerId, type Credentials, type MarkerStore, type Scope } from "./security";
 import type { CallConfirmations } from "./confirmations";
 import type { IntegrationConfig } from "./routes";
+import type { SecretaryBackend } from "./secretary";
+import type { HistoryRow } from "./secretaryHistoryViews";
+import type { SavedTaskEvent } from "./savedEvents";
 
 export interface AuthorizationRequest {
   response_type: "code"; client_id: string; redirect_uri: string; resource: string;
@@ -16,15 +19,16 @@ export interface BrowserAuth {
 }
 interface OwnerTicket { kind: "owner"; sub: string; label: string; exp: number; browser: string }
 interface Flow {
-  kind: "flow"; purpose: "oauth" | "call" | "manage"; exp: number; browser: string; nonce: string;
+  kind: "flow"; purpose: "oauth" | "call" | "manage" | "history" | "detail"; exp: number; browser: string; nonce: string;
   authorization?: AuthorizationRequest; confirmation?: string;
+  recordType?: "task" | "call"; recordId?: string; includeTranscript?: boolean;
 }
 interface ApprovalLink { kind: "approval-link"; confirmation: string; exp: number }
 
 /** Isolated browser surface. Never receives or calls a dialer. */
 export function registerBrowserIntegration(app: Express, config: IntegrationConfig, store: MarkerStore,
   credentials: Credentials, confirmations: CallConfirmations, ownerAuth: RequestHandler,
-  auth: BrowserAuth, oauth: {
+  auth: BrowserAuth, backend: SecretaryBackend, oauth: {
     validate(query: unknown): AuthorizationRequest;
     scopes(value: string): Scope[];
     finish(owner: string, request: AuthorizationRequest, allow: boolean): Promise<string>;
@@ -32,7 +36,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
   const security = new BrowserSecurity(config.signingKey, config.origin);
   const attempts = new Map<string, { count: number; until: number }>();
   const form = express.urlencoded({ extended: false, limit: "32kb" });
-  app.use(["/api/chatgpt/browser", "/api/chatgpt/approve", "/api/chatgpt/oauth/authorize",
+  app.use(["/api/chatgpt/browser", "/api/chatgpt/secretary", "/api/chatgpt/approve", "/api/chatgpt/oauth/authorize",
     "/api/chatgpt/connections/manage"], (_req, res, next) => {
     res.set({ "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY" });
@@ -58,13 +62,14 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
           "Запрос недействителен, истёк или не принадлежит этому аккаунту. Начните заново. Не повторяйте набор номера." },
       code >= 400 && code <= 503 ? code : 503);
     }); };
-  const makeFlow = (req: Request, res: Response, fields: Pick<Flow, "purpose" | "authorization" | "confirmation">) =>
+  const makeFlow = (req: Request, res: Response, fields: Pick<Flow, "purpose" | "authorization" | "confirmation" |
+    "recordType" | "recordId" | "includeTranscript">) =>
     security.seal({ kind: "flow", ...fields, nonce: randomUUID(), exp: Date.now() + WEB_TTL,
       browser: digest(security.binding(req, res)) });
   const readFlow = (req: Request, token: unknown, purpose?: Flow["purpose"]) => {
     const flow = security.open<Flow>(token, "flow");
     if (flow.browser !== digest(security.binding(req)) ||
-        !["oauth", "call", "manage"].includes(flow.purpose) ||
+        !["oauth", "call", "manage", "history", "detail"].includes(flow.purpose) ||
         (purpose && flow.purpose !== purpose)) return fail(403, "Wrong browser flow");
     return flow;
   };
@@ -107,11 +112,43 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     if ((await store.get(id))?.userId !== owner.sub) return fail(403, "Review required");
     if (!(await store.consume(id))) return fail(409, "Review already submitted");
   };
+  const text = (value: unknown): string => value instanceof Date ? value.toISOString() :
+    typeof value === "string" ? value : "";
+  const historyRow = (row: Record<string, unknown>): HistoryRow => ({
+    id: text(row.id), status: text(row.status),
+    phoneNumber: text(row.phoneNumber) || `${text(row.fromNumber)} → ${text(row.toNumber)}`,
+    summary: text(row.summary) || "Сохранённого итога нет.",
+    createdAt: text(row.createdAt ?? row.startedAt), updatedAt: text(row.updatedAt ?? row.endedAt),
+  });
   const review = async (req: Request, res: Response, token: string) => {
     const flow = readFlow(req, token);
     const owner = await readOwner(req);
     if (!owner) return page(res, { kind: "login", ...fields(req, token) });
     const common = { ...fields(req, token), account: owner.label };
+    if (flow.purpose === "history") {
+      const [tasks, calls] = await Promise.all([backend.tasks(owner.sub), backend.history(owner.sub)]);
+      return page(res, { kind: "secretary-history", ...common,
+        tasks: tasks.map(historyRow), calls: calls.map(historyRow) });
+    }
+    if (flow.purpose === "detail") {
+      const id = z.string().min(1).max(256).parse(flow.recordId);
+      const type = z.enum(["task", "call"]).parse(flow.recordType);
+      const includeTranscript = flow.includeTranscript === true;
+      // Owner is derived only from the protected browser session. Neither URL
+      // identifiers nor an MCP access token may select another account.
+      const record = await (type === "task" ? backend.task(owner.sub, id, includeTranscript) :
+        backend.call(owner.sub, id, includeTranscript)) as Record<string, unknown>;
+      return page(res, { kind: "secretary-detail", ...common, recordType: type, ...historyRow(record),
+        instruction: text(record.instruction), summary: text(record.summary) || "Сохранённого итога нет.",
+        outcome: text(record.outcome), nextStep: text(record.nextStep),
+        facts: Array.isArray(record.verifiedFacts) ? record.verifiedFacts.filter(v => typeof v === "string") : [],
+        events: Array.isArray(record.events) ? record.events as SavedTaskEvent[] : [],
+        ...(includeTranscript ? { transcript: text(record.transcript),
+          turns: Array.isArray(record.transcriptTurns) ? record.transcriptTurns.map(turn => ({
+            id: text(turn.id), role: text(turn.role), text: text(turn.text),
+          })) : [] } : {}),
+      });
+    }
     if (flow.purpose === "oauth") {
       const authorization = oauth.validate(flow.authorization);
       const scopes = oauth.scopes(authorization.scope);
@@ -150,6 +187,17 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     const token = makeFlow(req, res, { purpose: "manage" });
     res.redirect(303, reviewURL(token));
   }));
+  app.get("/api/chatgpt/secretary", wrap(async (req, res) => {
+    res.redirect(303, reviewURL(makeFlow(req, res, { purpose: "history" })));
+  }));
+  for (const type of ["task", "call"] as const) {
+    app.get(`/api/chatgpt/secretary/${type}s/:id`, wrap(async (req, res) => {
+      const id = z.string().min(1).max(256).parse(req.params.id);
+      const transcript = z.enum(["true", "false"]).optional().parse(req.query.transcript);
+      res.redirect(303, reviewURL(makeFlow(req, res, { purpose: "detail",
+        recordType: type, recordId: id, includeTranscript: transcript === "true" })));
+    }));
+  }
   app.get("/api/chatgpt/browser/review", wrap(async (req, res) => {
     const token = z.string().max(24000).parse(req.query.flow);
     return review(req, res, token);

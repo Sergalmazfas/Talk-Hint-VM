@@ -190,4 +190,21 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     expect(await backend.task("alice", "task1", true)).toHaveProperty("transcript", "private words");
     expect((await backend.tasks("alice"))[0].clientRequestId).toBe(input.clientRequestId);
   });
+  it("links saved summaries only to this owner's calls, never to a foreign report", async () => {
+    f.history.mockResolvedValue([{ id: "call1", userId: "alice", status: "completed" }]);
+    f.listTasks.mockResolvedValue([
+      { ...row, callId: "call1", summary: "Own saved summary" },
+      { ...row, userId: "bob", callId: "call1", summary: "Foreign private summary" },
+    ]);
+    const backend = secretaryBackend(vi.fn());
+    expect((await backend.history("alice"))[0].summary).toBe("Own saved summary");
+    f.getCall.mockResolvedValue({ id: "call1", userId: "alice", metadata: { secretaryTaskId: "task1" } });
+    f.getTask.mockResolvedValue({ ...row, userId: "bob", callId: "call1", summary: "Foreign private summary" });
+    expect((await backend.call("alice", "call1", false)).summary).toBeNull();
+    f.getTask.mockResolvedValue({ ...row, callId: "different-call", summary: "Unrelated own summary" });
+    expect((await backend.call("alice", "call1", false)).summary).toBeNull();
+    f.getTask.mockResolvedValue({ ...row, callId: "call1", summary: "Own saved summary" });
+    expect((await backend.call("alice", "call1", false)).summary).toBe("Own saved summary");
+    expect(f.create).not.toHaveBeenCalled();
+  });
 });

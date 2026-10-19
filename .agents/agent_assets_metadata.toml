@@ -215,3 +215,17 @@ mtime_ms = 1792446477556
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/435c86dd-2f65-4d13-88e7-a11e0fac8854/49220edc-4a85-491f-b193-9188a9482a20"
 storage_version_token = "1792446538253269"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "76OzMrvd6pd2JNsmMlc8n"
+uri = "file://docs/talkhint-chatgpt-plugin.md"
+type = "text"
+title = "TalkHint — отдельный плагин ChatGPT"
+description = "Что реализовано и проверено, как подключить через OAuth, ограничения iPhone и дальнейшие действия. Проверка: 19.10.2026."
+logical_id = "5ac858fa-1eb4-4aaa-81af-e0e0b939394b"
+content_hash = "sha256:260c12b64129e3e255a8ee251e34754e498e9e7163431e137bd238b54f6e950f"
+size = 13842
+mtime_ms = 1792447755156
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ac858fa-1eb4-4aaa-81af-e0e0b939394b/29c65a03-784f-4ede-90d8-34b0e765d84c"
+storage_version_token = "1792447776326870"
+content_type = "text/markdown"

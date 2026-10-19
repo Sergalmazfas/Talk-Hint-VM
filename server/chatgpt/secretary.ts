@@ -13,6 +13,7 @@ import {
 import { SecretaryPreDialError } from "../secretary/dialErrors";
 import { publishSecretaryFeedEvent } from "../secretary/feed";
 import { fail, type Claims } from "./security";
+import { savedTaskEvents } from "./savedEvents";
 
 /** Reuses the same durable lease/dialer/streams/reporting as native Secretary. */
 export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
@@ -25,14 +26,22 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
   return {
     async history(userId: string) {
       const rows = await storage.getUserCalls(userId);
-      return rows.slice(0, 50).map(({ id, direction, fromNumber, toNumber, status, startedAt, endedAt }) =>
-        ({ id, direction, fromNumber, toNumber, status, startedAt, endedAt }));
+      const reports = (await listSecretaryTasks(userId)).filter(task => task.userId === userId && task.callId);
+      const byCall = new Map(reports.map(task => [task.callId, task]));
+      return rows.slice(0, 50).map(({ id, direction, fromNumber, toNumber, status, startedAt, endedAt }) => ({
+        id, direction, fromNumber, toNumber, status, startedAt, endedAt,
+        summary: byCall.get(id)?.summary ?? null, secretaryTaskId: byCall.get(id)?.id ?? null,
+      }));
     },
     async call(userId: string, id: string, transcript: boolean) {
       const call = await storage.getCall(id);
       if (!call || call.userId !== userId) return fail(404, "Call not found");
+      const taskId = (call.metadata as { secretaryTaskId?: unknown } | null)?.secretaryTaskId;
+      const task = typeof taskId === "string" ? await getSecretaryTaskById(taskId) : undefined;
+      const report = task?.userId === userId && task.callId === call.id ? task : undefined;
       return { id: call.id, direction: call.direction, fromNumber: call.fromNumber, toNumber: call.toNumber,
         status: call.status, startedAt: call.startedAt, endedAt: call.endedAt,
+        summary: report?.summary ?? null, secretaryTaskId: report?.id ?? null,
         ...(transcript ? { transcript: call.transcript } : {}) };
     },
     async tasks(userId: string) {
@@ -46,7 +55,8 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
       if (!task || task.userId !== userId) return fail(404, "Task not found");
       const report = toSecretaryTaskReport(task);
       const { transcript: text, transcriptTurns, ...rest } = report;
-      return { ...rest, ...(transcript ? { transcript: text, transcriptTurns } : {}) };
+      return { ...rest, events: savedTaskEvents(task), eventCoverage: "saved_checkpoints",
+        ...(transcript ? { transcript: text, transcriptTurns } : {}) };
     },
     async incoming(userId: string) {
       const rows = await db.select().from(pendingCalls).where(and(eq(pendingCalls.userId, userId),

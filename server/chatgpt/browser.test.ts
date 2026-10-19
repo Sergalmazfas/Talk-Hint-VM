@@ -336,3 +336,102 @@ describe("separate owner approval, never a browser dialer", () => {
     expect((await start(prepared)).status).toBe(202);
   });
 });
+
+describe("separate TalkHint plugin and owner Secretary history", () => {
+  it("serves a separate read-only plugin definition without owner data or dialing", async () => {
+    const manifest = await request(app).get("/api/chatgpt/plugin.json");
+    const mcp = await request(app).get("/api/chatgpt/mcp.json");
+    expect(manifest.status).toBe(200);
+    expect(manifest.body.name).toBe("talkhint");
+    expect(manifest.body.extensions["com.openai"].interface.displayName).toBe("TalkHint");
+    expect(mcp.body.mcpServers.talkhint.url).toBe(`${base}/api/chatgpt/mcp`);
+    expect(manifest.headers["cache-control"]).toBe("no-store");
+    expect(JSON.stringify([manifest.body, mcp.body])).not.toContain("alice");
+    expect(backend.history).not.toHaveBeenCalled();
+    expect(backend.start).not.toHaveBeenCalled();
+    config.enabled = false;
+    expect((await request(app).get("/api/chatgpt/plugin.json")).status).toBe(503);
+  });
+  it("allows only discovery before the exact callback is known, never owner reads or grants", async () => {
+    config.redirectUri = "";
+    expect((await request(app).get("/.well-known/oauth-authorization-server")).status).toBe(200);
+    expect((await request(app).get("/api/chatgpt/mcp.json")).status).toBe(200);
+    const tools = await request(app).post("/api/chatgpt/mcp").send({
+      jsonrpc: "2.0", id: 1, method: "tools/list",
+    });
+    expect(tools.status).toBe(200);
+    expect(tools.body.result.tools.map((tool: any) => tool.name)).toContain("list_tasks");
+    expect((await request(app).post("/api/chatgpt/mcp").send({
+      jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_tasks", arguments: {} },
+    })).status).toBe(503);
+    expect((await request(app).get("/api/chatgpt/secretary")).status).toBe(503);
+    expect((await request(app).post("/api/chatgpt/connections").auth("fixture-owner-alice", { type: "bearer" })
+      .send({ approved: true, scope: "calls:read" })).status).toBe(503);
+    expect(backend.tasks).not.toHaveBeenCalled();
+    expect(backend.start).not.toHaveBeenCalled();
+    expect(await store.list("alice")).toEqual([]);
+  });
+  it("requires owner login and reads only that owner's saved tasks/calls, never a URL userId", async () => {
+    vi.mocked(backend.tasks).mockResolvedValue([{ id: "alice-task", status: "completed",
+      phoneNumber: "+12025550123", summary: "Deposit returned", createdAt: "2026-10-19" }] as any);
+    vi.mocked(backend.history).mockResolvedValue([{ id: "alice-call", status: "completed",
+      fromNumber: "+12025550123", toNumber: "+12025550124", startedAt: "2026-10-19" }] as any);
+    const browser = new Browser();
+    const initial = await browser.follow(await browser.get("/api/chatgpt/secretary?userId=bob"));
+    expect(initial.text).toContain("Войдите в TalkHint");
+    expect(backend.tasks).not.toHaveBeenCalled();
+    const history = await browser.signIn(initial);
+    expect(history.status).toBe(200);
+    expect(history.text).toContain("Deposit returned");
+    expect(history.text).toContain("/api/chatgpt/secretary/tasks/alice-task");
+    expect(history.text).toContain("/api/chatgpt/secretary/calls/alice-call");
+    expect(backend.tasks).toHaveBeenCalledWith("alice");
+    expect(backend.history).toHaveBeenCalledWith("alice");
+    expect(backend.start).not.toHaveBeenCalled();
+    expect(await store.list("alice")).toEqual([]); // Reading is not OAuth consent.
+  });
+  it("does not auto-fetch transcripts; details reject another owner's record and escape saved text", async () => {
+    vi.mocked(backend.tasks).mockResolvedValue([]);
+    vi.mocked(backend.history).mockResolvedValue([]);
+    vi.mocked(backend.task).mockImplementation(async (owner, id, includeTranscript) => {
+      if (owner !== "alice" || id !== "alice-task") throw Object.assign(new Error("Not found"), { status: 404 });
+      return { id, status: "completed", summary: "Saved result", verifiedFacts: ["Verified fact"],
+        events: [{ type: "state_snapshot", at: "2026-10-19T19:00:00Z", status: "completed" }],
+        ...(includeTranscript ? { transcript: '<script>private transcript</script>',
+          transcriptTurns: [{ id: "turn1", role: "guest", text: '<img src=x onerror="alert(1)">' }] } : {}),
+      } as any;
+    });
+    vi.mocked(backend.call).mockImplementation(async (owner, id, includeTranscript) => {
+      if (owner !== "alice" || id !== "alice-call") throw Object.assign(new Error("Not found"), { status: 404 });
+      return { id, status: "completed", summary: "Saved call result",
+        ...(includeTranscript ? { transcript: "private call transcript" } : {}) } as any;
+    });
+    const browser = new Browser();
+    await browser.signIn(await browser.follow(await browser.get("/api/chatgpt/secretary")));
+    const detail = await browser.follow(await browser.get("/api/chatgpt/secretary/tasks/alice-task"));
+    expect(detail.text).toContain("Saved result");
+    expect(detail.text).toContain("Сохранённые отметки");
+    expect(detail.text).not.toContain("private transcript");
+    expect(backend.task).toHaveBeenLastCalledWith("alice", "alice-task", false);
+    const expanded = await browser.follow(await browser.get("/api/chatgpt/secretary/tasks/alice-task?transcript=true"));
+    expect(expanded.text).toContain("&lt;script&gt;private transcript&lt;/script&gt;");
+    expect(expanded.text).toContain("&lt;img");
+    expect(expanded.text).not.toContain('<img src=x');
+    expect(backend.task).toHaveBeenLastCalledWith("alice", "alice-task", true);
+    expect((await browser.follow(await browser.get("/api/chatgpt/secretary/tasks/bob-task"))).status).toBe(404);
+    const call = await browser.follow(await browser.get("/api/chatgpt/secretary/calls/alice-call"));
+    expect(call.text).toContain("Saved call result");
+    expect(backend.call).toHaveBeenLastCalledWith("alice", "alice-call", false);
+    expect((await browser.follow(await browser.get("/api/chatgpt/secretary/calls/bob-call"))).status).toBe(404);
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("does not silently turn storage failures into an empty success or disclose errors", async () => {
+    const browser = new Browser();
+    vi.mocked(backend.tasks).mockRejectedValue(new Error("private database diagnostic"));
+    expect((await browser.signIn(await browser.follow(await browser.get("/api/chatgpt/secretary")))).status).toBe(503);
+    const failure = await browser.follow(await browser.get("/api/chatgpt/secretary"));
+    expect(failure.status).toBe(503);
+    expect(failure.text).not.toContain("private database diagnostic");
+    expect(failure.text).not.toContain("Сохранённых заданий пока нет");
+  });
+});

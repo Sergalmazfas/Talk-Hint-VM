@@ -13,6 +13,10 @@ const pages: Record<string, BrowserPage> = {
   approval: { kind: "approval", ...form, account: "owner@example.test",
     phoneNumber: "+12025550123", instruction: "Уточнить статус возврата депозита.\nНе сообщать платёжные данные и не соглашаться на новые расходы.",
     expiresAt: "2026-10-19T22:10:00Z", approved: false },
+  history: { kind: "secretary-history", ...form, account: "owner@example.test",
+    tasks: [{ id: "demo-task", status: "completed", phoneNumber: "+12025550123",
+      summary: "Демонстрационный сохранённый отчёт. Возврат депозита подтверждён.",
+      createdAt: "2026-10-19T19:00:00Z", updatedAt: "2026-10-19T19:03:00Z" }], calls: [] },
 };
 app.get("/preview/:state", (req, res) => {
   const page = pages[req.params.state];
