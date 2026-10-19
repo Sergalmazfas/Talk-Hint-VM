@@ -1,9 +1,11 @@
 import express, { type Express, type Request, type Response, type RequestHandler } from "express";
 import { z } from "zod";
-import { authMiddleware } from "../auth";
+import { authMiddleware, loginUser } from "../auth";
 import { activeGrant, Credentials, digest, fail, grantId, grantScopes, markerId, parseScopes,
   SCOPES, type Claims, type MarkerStore, type Scope } from "./security";
 import type { SecretaryBackend } from "./secretary";
+import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest } from "./browser";
+import { CallConfirmations } from "./confirmations";
 
 export interface IntegrationConfig {
   enabled: boolean; origin: string; clientId: string; redirectUri: string;
@@ -54,12 +56,13 @@ const TOOL_INPUTS: Record<Tool, object> = {
 };
 
 /**
- * No new UI: grants and per-call approvals require the existing owner's
- * session on separate management APIs, never an MCP credential.
+ * Isolated browser/API owner approvals, never approvals by an MCP credential.
+ * Existing native UI and telephone composition remain unchanged.
  */
 export function registerChatGPTIntegration(
   app: Express, config: IntegrationConfig, store: MarkerStore, backend: SecretaryBackend,
   ownerAuth: RequestHandler = authMiddleware,
+  browserAuth: BrowserAuth = { login: (email, password) => loginUser(email, password) },
 ): void {
   const base = config.origin;
   const resource = `${base}/api/chatgpt/mcp`;
@@ -68,6 +71,8 @@ export function registerChatGPTIntegration(
   const availableTools = (Object.keys(schemas) as Tool[]).filter(name =>
     scopesSupported.includes(permissions[name]));
   const credentials = new Credentials(config.signingKey, resource);
+  const confirmations = new CallConfirmations(credentials, store,
+    () => config.outboundEnabled === true, config.clientId);
   const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"`;
   const scopeChallenge = (scope: Scope) =>
     `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="insufficient_scope", scope="${scope}"`;
@@ -176,41 +181,58 @@ export function registerChatGPTIntegration(
     res.json({ revoked: true, existingCallContinues: true });
   }));
 
-  app.get("/api/chatgpt/oauth/authorize", ownerAuth, oauthWrap(async (req, res) => {
-    const q = z.object({
+  const authorizationQuery = (query: unknown): AuthorizationRequest => z.object({
       response_type: z.literal("code"), client_id: z.literal(config.clientId),
       redirect_uri: z.literal(config.redirectUri), resource: z.literal(resource),
       scope: z.string(), state: z.string().min(16).max(1024),
       code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/), code_challenge_method: z.literal("S256"),
-    }).parse(req.query);
+    }).parse(query);
+  const authorizationError = (q: AuthorizationRequest, error: string) => {
+    const target = new URL(config.redirectUri);
+    target.searchParams.set("error", error);
+    target.searchParams.set("state", q.state);
+    target.searchParams.set("iss", base);
+    return target.toString();
+  };
+  const authorizationCode = async (userId: string, q: AuthorizationRequest, scopes: Scope[],
+    grant: { id: string; expiresAt: Date }) => {
+    const code = credentials.issue({ type: "code", sub: userId, grant: grant.id,
+      scopes, client: config.clientId, redirect: q.redirect_uri, challenge: q.code_challenge,
+      exp: Math.min(Date.now() + 60_000, grant.expiresAt.getTime()) });
+    await store.put({ id: markerId(code), userId, expiresAt: new Date(Date.now() + 60_000) });
+    const redirect = new URL(config.redirectUri);
+    redirect.searchParams.set("code", code);
+    redirect.searchParams.set("state", q.state);
+    redirect.searchParams.set("iss", base);
+    return redirect.toString();
+  };
+  const browser = registerBrowserIntegration(app, config, store, credentials, confirmations, ownerAuth,
+    browserAuth, {
+      validate: authorizationQuery, scopes: permittedScopes,
+      async finish(userId, q, allow) {
+        const scopes = permittedScopes(q.scope);
+        if (!allow) return authorizationError(q, "access_denied");
+        if ((await store.list(userId)).length >= 10) return fail(409, "Revoke an existing connection first");
+        const grant = { id: grantId(config.clientId, scopes), userId, expiresAt: new Date(Date.now() + GRANT_MS) };
+        await store.put(grant);
+        return authorizationCode(userId, q, scopes, grant);
+      },
+    });
+
+  app.get("/api/chatgpt/oauth/authorize", ownerAuth, oauthWrap(async (req, res) => {
+    const q = authorizationQuery(req.query);
     let scopes: Scope[];
     try { scopes = permittedScopes(q.scope); }
     catch {
-      const target = new URL(config.redirectUri);
-      target.searchParams.set("error", "invalid_scope");
-      target.searchParams.set("state", q.state);
-      target.searchParams.set("iss", base);
-      return res.redirect(target.toString());
+      return res.redirect(authorizationError(q, "invalid_scope"));
     }
     const grant = (await store.list(owner(req))).find(g =>
       g.id.startsWith(`chatgpt:grant:${digest(config.clientId)}:`) &&
       scopes.every(s => grantScopes(g.id).includes(s)));
     if (!grant) {
-      const target = new URL(config.redirectUri);
-      target.searchParams.set("error", "access_denied");
-      target.searchParams.set("state", q.state);
-      target.searchParams.set("iss", base);
-      return res.redirect(target.toString());
+      return res.redirect(authorizationError(q, "access_denied"));
     }
-    const code = credentials.issue({ type: "code", sub: owner(req), grant: grant.id,
-      scopes, client: config.clientId, redirect: q.redirect_uri, challenge: q.code_challenge,
-      exp: Math.min(Date.now() + 60_000, grant.expiresAt.getTime()) });
-    await store.put({ id: markerId(code), userId: owner(req), expiresAt: new Date(Date.now() + 60_000) });
-    const redirect = new URL(config.redirectUri);
-    redirect.searchParams.set("code", code);
-    redirect.searchParams.set("state", q.state);
-    redirect.searchParams.set("iss", base);
-    res.redirect(redirect.toString());
+    res.redirect(await authorizationCode(owner(req), q, scopes, grant));
   }));
   app.post("/api/chatgpt/oauth/token", express.urlencoded({ extended: false, limit: "24kb" }), oauthWrap(async (req, res) => {
     if (typeof req.body?.grant_type === "string" &&
@@ -264,11 +286,7 @@ export function registerChatGPTIntegration(
   app.post("/api/chatgpt/confirmations/approve", jsonOwner, ownerAuth, wrap(async (req, res) => {
     if (config.outboundEnabled !== true) return fail(403, "Outbound integration is disabled");
     const { confirmation } = z.object({ approved: z.literal(true), confirmation: z.string().max(16000) }).strict().parse(req.body);
-    const claims = credentials.read(confirmation, "confirmation");
-    if (claims.sub !== owner(req)) return fail(404, "Confirmation not found");
-    await activeGrant(store, claims);
-    if (!claims.call) return fail(400, "Invalid confirmation");
-    await store.put({ id: markerId(confirmation), userId: owner(req), expiresAt: new Date(claims.exp) });
+    const claims = await confirmations.approve(confirmation, owner(req));
     res.json({ approved: true, call: claims.call, expiresAt: new Date(claims.exp) });
   }));
 
@@ -293,15 +311,15 @@ export function registerChatGPTIntegration(
           scopes: claims.scopes, client: claims.client, exp: Math.min(Date.now() + CONFIRM_MS, claims.exp), call });
         return { call, confirmation, status: "owner_approval_required",
           approvalEndpoint: "/api/chatgpt/confirmations/approve",
+          approval_url: browser.approvalURL(confirmation),
           note: "Owner session and explicit review required. This tool has not placed a call." };
       }
       case "start_call": {
         const confirmed = credentials.read(args.confirmation, "confirmation");
         if (confirmed.sub !== claims.sub || confirmed.grant !== claims.grant ||
             !confirmed.call) return fail(403, "Confirmation does not belong to this connection");
-        await activeGrant(store, confirmed);
-        const approved = await store.get(markerId(args.confirmation));
-        if (!approved || approved.userId !== claims.sub) return fail(403, "Explicit owner approval required");
+        const { approved } = await confirmations.inspect(args.confirmation, claims.sub);
+        if (!approved) return fail(403, "Explicit owner approval required");
         const result = await backend.start(claims.sub, CALL.parse(confirmed.call));
         return { ...result, task_id: result.task.id, asynchronous: true,
           note: "Read this task again for its outcome. Never redial because a response is delayed." };

@@ -7,7 +7,8 @@ Stage-one operator guide (Russian, checked 2026-10-19):
 
 Implemented in the existing backend, **disabled by default**. No production
 configuration, publishing, telephone calls, SMS, schema migrations, data deletion,
-new chat application, or iOS UI are part of this change.
+new chat application, or iOS UI are part of this change. Separately approved
+minimal browser consent/approval pages are isolated under `/api/chatgpt`.
 
 Stage one is additionally **read-only by default**, even when the integration is
 enabled: discovery advertises only `calls:read`, `calls:transcript` and
@@ -74,12 +75,35 @@ returns 503 before storage or dialing. Cross-origin browser requests are rejecte
 An additional bounded in-process rate limiter is included; it is not a global
 distributed limiter. A public rollout still needs normal edge abuse controls.
 
-## Minimal no-UI owner approval
+## Minimal owner approval: API and separately approved browser pages
 
-No iOS screen or new web approval UI was introduced. This intentionally means
-initial setup and per-call approval currently require an authenticated owner
-API client. This is secure but **not** a polished phone-only onboarding flow.
-Never put an owner session into a chat or give it to the MCP client.
+No existing iOS or TalkHint screen was changed. The owner API remains supported.
+Minimal separate pages now support explicit OAuth login/consent, reviewing
+one exact number/task, and revoking connections. They never dial. Their short
+encrypted cookies cannot authenticate to general TalkHint APIs. Existing
+password login is reused without creating a native login session; an explicit
+same-origin bridge can exchange an existing browser TalkHint session.
+Real OpenAI/iPhone linking has not been verified. Never put an owner session
+into a chat or give it to the MCP client.
+
+| Browser route | Meaning |
+|---|---|
+| GET `/api/chatgpt/oauth/authorize` (`Accept: text/html`) | Validate request, then login and explicit consent |
+| GET `/api/chatgpt/approve?ticket=…` | Encrypted short-lived link; requires correct owner, never approves on GET |
+| GET `/api/chatgpt/connections/manage` | List/revoke only this owner's grants |
+| POST `/api/chatgpt/browser/login` | Existing-account password login into isolated web cookie |
+| POST `/api/chatgpt/browser/session` | Explicit same-origin existing-owner session exchange |
+| POST `/api/chatgpt/browser/consent` | Explicit allow/deny, one-time review |
+| POST `/api/chatgpt/browser/approve` | Exact call approve/deny, never dials |
+| POST `/api/chatgpt/browser/revoke` | Revoke own grant; no deletion/hangup |
+| POST `/api/chatgpt/browser/logout` | Revoke isolated browser session, leave native login alone |
+
+All browser mutations require exact Origin and browser/flow/session-bound
+CSRF. Cookies use `__Host-`, Secure, HttpOnly, SameSite=Lax, 15-minute expiry.
+Pages use nonce-only CSP, no external assets, no iframe embedding, no-store
+and no-referrer. Approval links are encrypted and purpose-bound, not OAuth
+access tokens; treat links as private. A read-only deployment rejects approval
+links even if they were prepared by another instance with the same key.
 
 Owner management APIs use the existing TalkHint authentication:
 
@@ -93,10 +117,9 @@ Owner management APIs use the existing TalkHint authentication:
 Write management requests require JSON and reject foreign browser Origin.
 A delegated integration credential cannot authenticate to these owner APIs.
 
-This API-only approach is the minimum without new UI. If real iPhone testing
-demonstrates that owner consent/confirmation cannot be completed safely with
-existing tooling, propose a small permission/approval surface separately.
-Do not silently weaken confirmation to a model-generated boolean.
+The browser surface was separately approved after the API-only stage. It does
+not establish official ChatGPT mobile support. Do not weaken confirmation to
+a model-generated boolean or an "Allow all tools" setting.
 
 ## OAuth and credential isolation
 
@@ -111,12 +134,11 @@ OAuth:
 - POST `/api/chatgpt/oauth/token` (form body)
 - POST `/api/chatgpt/oauth/revoke` (form body)
 
-The owner must first explicitly create a grant. The authorization endpoint
-requires an existing owner login/session and a prior grant covering the requested
-scopes. It validates client ID, exact redirect, resource, state and S256 PKCE.
-An unauthenticated browser is not automatically navigated through a new login UI;
-use the existing TalkHint login first. End-to-end ChatGPT linking remains a
-manual acceptance gate.
+HTML browser authorization validates the request, requires an isolated owner
+login, displays scopes, and creates a new grant/code only after explicit consent.
+Non-HTML owner API clients retain the prior-grant path. Both validate client ID,
+exact redirect, resource, state and S256 PKCE. End-to-end linking in an actual
+ChatGPT account remains a manual acceptance gate.
 
 Token endpoint errors use OAuth protocol codes (`invalid_grant`,
 `invalid_request`, `invalid_client`, `invalid_target`,
