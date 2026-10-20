@@ -6,8 +6,10 @@ import type { SecretaryBackend } from "./secretary";
 import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest } from "./browser";
 import { CallConfirmations } from "./confirmations";
 import { talkHintPluginPackage } from "./plugin";
-import { PUBLIC_TOOLS, publicToolMetadata, type PublicTool } from "./toolMetadata";
-import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION } from "./pluginWorkflow";
+import { PUBLIC_TOOLS, publicToolMetadata, cardApprovalToolMetadata, type PublicTool } from "./toolMetadata";
+import { CardApproval } from "./cardApproval";
+import { CALL_APPROVAL_RESOURCE, callApprovalWidgetHtml } from "./callApprovalWidget";
+import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION } from "./pluginWorkflow";
 import { actionsExchange } from "./actionsOAuth";
 import { talkHintActionsSchema, registerActionOperations } from "./actionsSchema";
 
@@ -28,6 +30,10 @@ const CALL = z.object({
   voiceProvider: z.enum(["elevenlabs", "cartesia"]).default("elevenlabs"),
   translationLanguage: z.enum(["ru", "es"]).default("ru"),
 }).strict();
+const CARD_DECISION = z.object({
+  confirmation: z.string().max(16000), approvalToken: z.string().max(16000),
+  decision: z.enum(["approve", "deny"]),
+}).strict();
 const ID = z.string().min(1).max(256);
 const schemas = {
   get_profile: z.object({}).strict(),
@@ -36,7 +42,7 @@ const schemas = {
   list_tasks: z.object({}).strict(),
   get_task: z.object({ id: ID, includeTranscript: z.boolean().default(false) }).strict(),
   get_incoming: z.object({}).strict(),
-  prepare_call: CALL,
+  prepare_call: CALL.extend({ recipient: z.string().trim().min(1).max(200).optional() }),
   start_call: z.object({ confirmation: z.string().max(16000) }).strict(),
 };
 type Tool = keyof typeof schemas;
@@ -54,6 +60,8 @@ const TOOL_INPUTS: Record<Tool, object> = {
   get_call: { id: { type: "string" }, includeTranscript: { type: "boolean", default: false } },
   get_task: { id: { type: "string" }, includeTranscript: { type: "boolean", default: false } },
   prepare_call: {
+    recipient: { type: "string", minLength: 1, maxLength: 200,
+      description: "Recipient name supplied by the owner, never inferred from phone number." },
     phoneNumber: { type: "string", pattern: "^\\+1[2-9]\\d{9}$" },
     instruction: { type: "string", minLength: 1, maxLength: 2000 },
     clientRequestId: { type: "string", format: "uuid" },
@@ -98,6 +106,8 @@ export function registerChatGPTIntegration(
   const credentials = new Credentials(config.signingKey, resource);
   const confirmations = new CallConfirmations(credentials, store,
     () => config.outboundEnabled === true, config.clientId);
+  const cardApproval = new CardApproval(credentials, store, confirmations);
+  const cardEnabled = !config.actions && availableTools.includes("prepare_call");
   const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"` +
     (config.actions ? "" : `, scope="${MCP_BASE_SCOPES.join(" ")}"`);
   const scopeChallenge = (scope: Scope) =>
@@ -255,6 +265,9 @@ export function registerChatGPTIntegration(
     registration: "provided", clientId: config.clientId, tokenEndpointAuthMethod: "none",
     callbackConfigured: Boolean(config.redirectUri),
     tools: mcpTools,
+    pluginVersion: TALKHINT_PLUGIN_VERSION, mcpVersion: TALKHINT_MCP_VERSION,
+    confirmationMethod: cardEnabled ? "inline_card" : "unavailable",
+    uiTools: cardEnabled ? ["confirm_call_from_card"] : [],
     scopes: discoveryScopes,
     // No callback value, account details, signing keys or credentials.
   }));
@@ -423,11 +436,14 @@ export function registerChatGPTIntegration(
       case "get_task": return backend.task(claims.sub, args.id, args.includeTranscript);
       case "get_incoming": return backend.incoming(claims.sub);
       case "prepare_call": {
-        const call = CALL.parse(args);
+        const { recipient, ...nativeArgs } = args;
+        const call = CALL.parse(nativeArgs);
         if (!uuidPattern.test(call.clientRequestId)) return fail(400, "Invalid request ID");
         const confirmation = credentials.issue({ type: "confirmation", sub: claims.sub, grant: claims.grant,
-          scopes: claims.scopes, client: claims.client, exp: Math.min(Date.now() + CONFIRM_MS, claims.exp), call });
-        return { call, confirmation, status: "owner_approval_required",
+          scopes: claims.scopes, client: claims.client, exp: Math.min(Date.now() + CONFIRM_MS, claims.exp), call,
+          ...(recipient ? { recipient } : {}) });
+        return { call, confirmation, expiresAt: new Date(credentials.read(confirmation, "confirmation").exp).toISOString(),
+          status: "owner_approval_required",
           ...(!config.actions ? { approvalEndpoint: "/api/chatgpt/confirmations/approve" } : {}),
           approval_url: browser.approvalURL(confirmation),
           note: "Owner session and explicit review required. This tool has not placed a call." };
@@ -469,23 +485,62 @@ export function registerChatGPTIntegration(
     if (rpc.method === "initialize") result = {
       protocolVersion: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"].includes(String(rpc.params?.protocolVersion)) ?
         rpc.params!.protocolVersion : "2025-11-25",
-      capabilities: { tools: {} }, serverInfo: { name: "talkhint-secretary", title: "TalkHint", version: TALKHINT_MCP_VERSION },
+      capabilities: { tools: {}, ...(cardEnabled ? { resources: {} } : {}) },
+      serverInfo: { name: "talkhint-secretary", title: "TalkHint", version: TALKHINT_MCP_VERSION },
       instructions: secretaryInstructions(config.outboundEnabled === true),
     };
     else if (rpc.method === "ping") result = {};
-    else if (rpc.method === "tools/list") result = { tools: mcpTools.map(name =>
+    else if (rpc.method === "resources/list") result = { resources: cardEnabled ? [{
+      uri: CALL_APPROVAL_RESOURCE, name: "TalkHint call confirmation", mimeType: "text/html;profile=mcp-app",
+    }] : [] };
+    else if (rpc.method === "resources/read") {
+      if (!cardEnabled || rpc.params?.uri !== CALL_APPROVAL_RESOURCE) return fail(404, "Resource not found");
+      result = { contents: [{ uri: CALL_APPROVAL_RESOURCE, mimeType: "text/html;profile=mcp-app",
+        text: callApprovalWidgetHtml(), _meta: { ui: { prefersBorder: true,
+          csp: { connectDomains: [], resourceDomains: [] } },
+          "openai/widgetDescription": "Review the exact call and explicitly confirm once, without leaving this chat.",
+        } }] };
+    }
+    else if (rpc.method === "tools/list") result = { tools: [...mcpTools.map(name =>
       publicToolMetadata(name, permissions[name], TOOL_INPUTS[name],
         name === "prepare_call" ? ["phoneNumber", "instruction", "clientRequestId"] :
-          name === "start_call" ? ["confirmation"] : ["get_call", "get_task"].includes(name) ? ["id"] : [])) };
+          name === "start_call" ? ["confirmation"] : ["get_call", "get_task"].includes(name) ? ["id"] : [])),
+      ...(cardEnabled ? [cardApprovalToolMetadata()] : [])] };
     else if (rpc.method === "tools/call") {
       const name = rpc.params?.name as Tool;
-      if (!Object.hasOwn(schemas, name)) return res.json({ jsonrpc: "2.0", id: rpc.id,
+      const cardRequest = (name as string) === "confirm_call_from_card" && cardEnabled;
+      if (!Object.hasOwn(schemas, name) && !cardRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         error: { code: -32602, message: "Unknown tool" } });
-      if (!(mcpTools as readonly string[]).includes(name)) return res.json({ jsonrpc: "2.0", id: rpc.id,
+      if (!(mcpTools as readonly string[]).includes(name) && !cardRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         result: { isError: true, content: [{ type: "text", text: "Tool is unavailable in this plugin." }] } });
       try {
-        const value = await execute(req, name, rpc.params?.arguments ?? {});
-        result = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value, isError: false };
+        let value: any;
+        let meta: object | undefined;
+        if (cardRequest) {
+          const claims = await claimsFor(req);
+          need(claims, "secretary:start");
+          const args = CARD_DECISION.parse(rpc.params?.arguments ?? {});
+          const decision = await cardApproval.decide(claims, args.confirmation, args.approvalToken, args.decision);
+          if (!decision.approved) value = { status: "denied", note: "No call was started." };
+          else {
+            const started = await backend.start(claims.sub, CALL.parse(decision.call));
+            value = { ...started, task_id: started.task.id, asynchronous: true,
+              note: "Read get_task with this task_id. Never create a new call because the result is delayed." };
+          }
+        } else {
+          value = await execute(req, name, rpc.params?.arguments ?? {});
+          if (name === "prepare_call") {
+            // No approval URL or approval capability in model-visible content.
+            const { approval_url, approvalEndpoint, note, ...preview } = value;
+            const recipient = credentials.read(value.confirmation, "confirmation").recipient;
+            const displayCall = { ...preview.call, ...(recipient ? { recipient } : {}) };
+            meta = { "talkhint/cardApproval": { ...await cardApproval.issue(value.confirmation), call: displayCall } };
+            value = { ...preview, call: displayCall, confirmationMethod: "inline_card",
+              note: "Confirm this exact call using the button in this chat. If the card is unavailable, stop. No call has started." };
+          }
+        }
+        result = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value,
+          isError: false, ...(meta ? { _meta: meta } : {}) };
       } catch (error: any) {
         if (error?.status === 401) res.set("WWW-Authenticate", challenge);
         const authenticate = error?.status === 401 ? challenge :

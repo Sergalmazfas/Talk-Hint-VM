@@ -57,7 +57,7 @@ describe("TalkHint public-directory preparation, never submission", () => {
       expect(tool.annotations.destructiveHint).toBe(name === "start_call");
     }
     const preview = publicToolMetadata("prepare_call", "secretary:start", {}, []);
-    expect(preview.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
+    expect(preview.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false, idempotentHint: false });
     expect(PUBLIC_TOOLS).not.toContain("get_incoming");
     expect(PUBLIC_TOOLS).not.toContain("execute");
     for (const mode of [false, true]) {

@@ -456,12 +456,13 @@ describe("separate TalkHint plugin and owner Secretary history", () => {
     const enabled = await request(app).post("/api/chatgpt/mcp")
       .send({ jsonrpc: "2.0", id: 3, method: "tools/list" });
     const catalog = enabled.body.result.tools;
-    expect(catalog).toHaveLength(7);
+    expect(catalog).toHaveLength(8);
     expect(catalog.map((t: any) => t.name)).not.toContain("get_incoming");
     expect(catalog.find((t: any) => t.name === "start_call").annotations)
       .toMatchObject({ readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: true });
     expect(catalog.find((t: any) => t.name === "prepare_call").annotations)
-      .toMatchObject({ readOnlyHint: true, destructiveHint: false });
+      .toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    expect(catalog.find((t: any) => t.name === "confirm_call_from_card")._meta.ui.visibility).toEqual(["app"]);
   });
   it("serves a separate read-only plugin definition without owner data or dialing", async () => {
     const manifest = await request(app).get("/api/chatgpt/plugin.json");

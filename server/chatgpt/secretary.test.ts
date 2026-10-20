@@ -98,7 +98,8 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     });
     const prepared = await rpc("prepare_call", input);
     expect(prepared.body.result.structuredContent.call).toEqual(input);
-    expect(new URL(prepared.body.result.structuredContent.approval_url).pathname).toBe("/api/chatgpt/approve");
+    expect(prepared.body.result.structuredContent).not.toHaveProperty("approval_url");
+    expect(prepared.body.result.structuredContent.confirmationMethod).toBe("inline_card");
     expect(f.create).not.toHaveBeenCalled();
     const { confirmation } = prepared.body.result.structuredContent;
     expect((await rpc("start_call", { confirmation, confirmed: true })).body.result.isError).toBe(true);
@@ -107,8 +108,14 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     expect((await request(app).post("/api/chatgpt/confirmations/approve")
       .set("Authorization", `Bearer ${tokens.body.access_token}`)
       .send({ approved: true, confirmation })).status).toBe(401);
-    expect((await request(app).post("/api/chatgpt/confirmations/approve").set("x-fixture-owner", "alice")
-      .send({ approved: true, confirmation })).status).toBe(200);
+    const { confirmation: cardConfirmation, approvalToken } = prepared.body.result._meta["talkhint/cardApproval"];
+    const card = { confirmation: cardConfirmation, approvalToken };
+    const confirmed = await rpc("confirm_call_from_card", { ...card, decision: "approve" });
+    expect(confirmed.body.result.isError).toBe(false);
+    expect(confirmed.body.result.structuredContent.task_id).toBe(task.id);
+    const repeatedClick = await rpc("confirm_call_from_card", { ...card, decision: "approve" });
+    expect(repeatedClick.body.result.isError).toBe(false);
+    expect(repeatedClick.body.result.structuredContent.task_id).toBe(task.id);
     const starts = await Promise.all([rpc("start_call", { confirmation }), rpc("start_call", { confirmation })]);
     for (const response of starts) {
       expect(response.body.result.isError).toBe(false);

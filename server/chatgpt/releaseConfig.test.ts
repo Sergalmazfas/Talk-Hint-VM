@@ -105,7 +105,7 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       jsonrpc: "2.0", id: 1, method: "tools/list",
     });
     expect(listed.body.result.tools.map((tool: any) => tool.name)).toEqual([
-      "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "prepare_call", "start_call",
+      "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "prepare_call", "start_call", "confirm_call_from_card",
     ]);
     expect((await request(f.app).get("/api/chatgpt/readiness")).body.mode).toBe("outbound");
     const initialized = await request(f.app).post("/api/chatgpt/mcp").send({

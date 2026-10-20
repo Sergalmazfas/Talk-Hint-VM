@@ -14,11 +14,14 @@ export interface MarkerStore {
   expire(id: string, userId: string): Promise<void>;
 }
 export interface Claims {
-  type: "code" | "access" | "refresh" | "confirmation";
+  type: "code" | "access" | "refresh" | "confirmation" | "card-approval";
   sub: string; grant: string; scopes: Scope[]; client: string; aud: string; iss: string;
   exp: number; nonce: string;
   redirect?: string; challenge?: string;
+  /** UI-only capability is bound to one exact signed draft, never a chat boolean. */
+  approvalFor?: string;
   call?: { phoneNumber: string; instruction: string; clientRequestId: string; voiceProvider: "elevenlabs" | "cartesia"; translationLanguage: "ru" | "es" };
+  recipient?: string;
 }
 export function fail(status: number, message: string): never {
   throw Object.assign(new Error(message), { status });

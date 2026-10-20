@@ -34,7 +34,7 @@ export function talkHintPluginPackage(origin: string, outboundEnabled = false, l
         websiteURL: `${origin}/api/chatgpt/secretary`,
         ...(listing ?? {}),
         defaultPrompt: outboundEnabled ? [
-          "Подготовь звонок Secretary: сначала уточни номер и цель, затем покажи ссылку подтверждения. Без моего подтверждения не звони.",
+          "Подготовь звонок Secretary: уточни получателя, номер и цель, затем покажи карточку подтверждения прямо в чате. Без нажатия подтверждения не звони.",
           "Проверь результат поручения по task_id из этого чата. Не запускай новый звонок.",
         ] : [
           "Покажи мои последние поручения Secretary и их статусы.",

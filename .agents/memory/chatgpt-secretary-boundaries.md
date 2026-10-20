@@ -6,8 +6,9 @@ description: User-approved integration scope and safety boundaries for official 
 Use official ChatGPT as a command/result surface for the existing TalkHint
 Secretary, not a replacement chat application or a new iOS interface. Keep
 Secretary, Twilio, the existing database and native call reception intact.
-Exclude SMS. The user approved minimal protected web pages for OAuth consent
-and per-call approval, without changes to existing TalkHint or iOS interfaces.
+Exclude SMS. The user approved minimal protected web pages for initial OAuth
+consent, without changes to existing TalkHint or iOS interfaces. Per-call approval
+must now happen inside ChatGPT, without a mandatory website visit.
 Every outbound call requires separate owner confirmation showing its exact
 number and task. Forwarding UI still requires separate agreement.
 
@@ -52,8 +53,8 @@ publication, production changes or real calls.
 
 **Why:** The user explicitly requested this boundary and wants the existing
 telephone product preserved rather than replaced by another chat.
-The user explicitly approved only the minimal web addition after the API-only
-stage; this does not authorize changing native interfaces or production.
+The user approved initial web authorization but subsequently required per-call
+confirmation in chat; this does not authorize changing native interfaces or production.
 The user explicitly requested the independent-plugin boundary.
 The user requested personal Actions and private MCP connections without
 automatically resuming public review.
@@ -70,3 +71,20 @@ approval gate. A draft must not accidentally become executable work.
 
 **How to apply:** keep preparation separate from the native launch. Only
 owner-approved start may enter the existing idempotent live-task path.
+
+## Confirmation inside ChatGPT
+
+Use a supported in-chat owner interaction for each exact call, not a model-sent
+`confirmed:true`, an instruction to trust "yes", or Allow all tools. OAuth bearer
+access alone is not a per-call owner decision.
+
+**Why:** The user explicitly requires the Gmail-like experience: initial login
+and consent once, then call review, confirmation and results within the chat,
+without visiting the TalkHint website before every call. Official tool
+annotations affect host UX but are not a server-verifiable approval receipt.
+
+**How to apply:** Preserve server owner/grant/scope/revocation/draft binding and
+idempotency. MCP Apps supports inline confirmation and widget-only result
+metadata; keep the per-draft approval capability hidden from the model and
+limit its tool to the UI. Unsupported clients fail closed; do not promise
+iPhone/private-MCP availability from local mock success.
