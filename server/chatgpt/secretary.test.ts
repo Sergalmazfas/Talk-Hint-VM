@@ -90,8 +90,16 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     const rpc = (name: string, args: object) => request(app).post("/api/chatgpt/mcp")
       .set("Authorization", `Bearer ${tokens.body.access_token}`)
       .send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
+    f.listTasks.mockResolvedValue([{ ...row, id: "historical-failed", status: "failed",
+      createdAt: new Date("2026-09-27T00:00:00Z") }]);
+    const oldHistory = await rpc("list_tasks", {});
+    expect(oldHistory.body.result.structuredContent.tasks[0]).toMatchObject({
+      id: "historical-failed", status: "failed",
+    });
     const prepared = await rpc("prepare_call", input);
     expect(prepared.body.result.structuredContent.call).toEqual(input);
+    expect(new URL(prepared.body.result.structuredContent.approval_url).pathname).toBe("/api/chatgpt/approve");
+    expect(f.create).not.toHaveBeenCalled();
     const { confirmation } = prepared.body.result.structuredContent;
     expect((await rpc("start_call", { confirmation, confirmed: true })).body.result.isError).toBe(true);
     expect((await rpc("start_call", { confirmation })).body.result.isError).toBe(true);
@@ -105,6 +113,7 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     for (const response of starts) {
       expect(response.body.result.isError).toBe(false);
       expect(response.body.result.structuredContent.task_id).toBe(task.id);
+      expect(response.body.result.structuredContent.task_id).not.toBe("historical-failed");
     }
     await vi.waitFor(() => expect(f.attach).toHaveBeenCalledTimes(1));
     expect(dial).toHaveBeenCalledTimes(1);

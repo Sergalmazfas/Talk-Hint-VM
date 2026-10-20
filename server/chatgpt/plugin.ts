@@ -3,6 +3,7 @@
  * No keys, owner identity, fixed bearer tokens, local servers or lifecycle hooks.
  */
 import { MCP_BASE_SCOPES } from "./security";
+import { TALKHINT_PLUGIN_VERSION } from "./pluginWorkflow";
 
 export interface TalkHintListing {
   developerName: string; websiteURL: string; privacyPolicyURL: string;
@@ -16,13 +17,13 @@ export function talkHintPluginPackage(origin: string, outboundEnabled = false, l
   return {
     manifest: {
       $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-      name: "talkhint", version: "0.1.0",
+      name: "talkhint", version: TALKHINT_PLUGIN_VERSION,
       description: outboundEnabled ?
         "Read your TalkHint reports and delegate a Secretary call after separate owner approval." :
         "TalkHint Secretary: private call history, task status and saved reports.",
       author: { name: listing?.developerName ?? "TalkHint" },
       keywords: ["secretary", "calls", "reports"],
-      extensions: { "com.openai": { interface: {
+      extensions: { "com.openai": { onboardingSkill: "./skills/setup/SKILL.md", interface: {
          displayName: "TalkHint Secretary", developerName: "TalkHint", category: "Productivity",
         shortDescription: "Secretary: звонки и отчёты",
         longDescription: outboundEnabled ?
@@ -32,7 +33,10 @@ export function talkHintPluginPackage(origin: string, outboundEnabled = false, l
         brandColor: "#315fca",
         websiteURL: `${origin}/api/chatgpt/secretary`,
         ...(listing ?? {}),
-        defaultPrompt: [
+        defaultPrompt: outboundEnabled ? [
+          "Подготовь звонок Secretary: сначала уточни номер и цель, затем покажи ссылку подтверждения. Без моего подтверждения не звони.",
+          "Проверь результат поручения по task_id из этого чата. Не запускай новый звонок.",
+        ] : [
           "Покажи мои последние поручения Secretary и их статусы.",
           "Покажи сохранённый итог последнего завершённого поручения.",
         ],

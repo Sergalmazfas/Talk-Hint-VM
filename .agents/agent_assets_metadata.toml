@@ -341,3 +341,17 @@ mtime_ms = 1792456851714
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c6ad38d7-f759-42fb-8e13-0a33710f9359/16950b15-0def-402c-9323-8c8285657419"
 storage_version_token = "1792456882568639"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "w0G3XZhDZYMjgU_Hi0yXF"
+uri = "file://generated-artifacts/talkhint-plugin/talkhint-chatgpt-next-steps.html"
+type = "html"
+title = "TalkHint: точные шаги в ChatGPT"
+description = "Refresh подключения, обновление установленного плагина, права, ограничения и безопасный сценарий одного тестового звонка. С кнопкой открытия Plugins."
+logical_id = "b74f4ac8-3e5b-4451-8795-7034fddd692e"
+content_hash = "sha256:038a3e8660e5c5ba93dc6306391c4202d8478f028cf16379fe879e16447ec844"
+size = 11239
+mtime_ms = 1792471617832
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b74f4ac8-3e5b-4451-8795-7034fddd692e/dfbdec8a-013c-4ef3-bbb1-3aab90a31ace"
+storage_version_token = "1792471618754770"
+content_type = "text/html"

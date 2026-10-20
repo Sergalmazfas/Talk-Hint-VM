@@ -52,3 +52,23 @@ descriptors required only ordinary call reading.
 descriptors or package `baseScopes`. Upgrade challenges must include the basic
 read permission as well as the new permission, without auto-upgrading any grant.
 https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#scope-selection-strategy
+
+## Live server and installed plugin update independently
+
+When live MCP lists outbound tools but the selected plugin has old read-only
+instructions or no tools, diagnose the ChatGPT connection snapshot and installed
+package separately. Republish is not a way to replace a user's installed skills.
+For a local package, use the actual registered MCP mapping from ChatGPT; an
+installed package ID is not a registered MCP connection ID.
+
+**Why:** OpenAI documents an explicit connection Refresh/new-chat step, a cached
+installed copy for local plugins, and a separate registered MCP mapping. A live
+seven-tool endpoint therefore does not prove that a selected plugin exposes it.
+
+**How to apply:** Verify live initialize/tools first, then the actual selected
+connection, registered mapping and installed skill files. Keep a source bundle
+without an observed mapping explicitly blocked, never invent the mapping or
+substitute a saved-history page for dispatch. Do not infer a successful current
+call from a historical failed report.
+https://developers.openai.com/plugins/build/plugins
+https://developers.openai.com/plugins/deploy/connect-chatgpt

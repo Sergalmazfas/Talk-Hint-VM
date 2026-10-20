@@ -70,13 +70,14 @@ describe("TalkHint public-directory preparation, never submission", () => {
       }
     }
   });
-  it("packages only two manifests and existing product icons, never source, data or credentials", () => {
+  it("packages manifests, workflow skills and existing product icons, never server source or credentials", () => {
     execFileSync(process.execPath, [fileURLToPath(import.meta.resolve("tsx/cli")),
       "scripts/prepare-chatgpt-plugin.ts", "--draft"], { stdio: "pipe" });
     const base = "generated-artifacts/talkhint-plugin/draft";
     const zip = `${base}/talkhint-NOT-FOR-UPLOAD.zip`;
     const entries = execFileSync("unzip", ["-Z1", zip], { encoding: "utf8" }).trim().split("\n");
-    expect(entries.sort()).toEqual(["assets/icon.png", "assets/logo.png", "mcp.json", "plugin.json"]);
+    expect(entries.sort()).toEqual(["assets/icon.png", "assets/logo.png", "mcp.json", "plugin.json",
+      "skills/secretary/SKILL.md", "skills/setup/SKILL.md"]);
     const manifest = JSON.parse(execFileSync("unzip", ["-p", zip, "plugin.json"], { encoding: "utf8" }));
     expect(manifest.name).toBe("talkhint");
     const mcp = JSON.parse(execFileSync("unzip", ["-p", zip, "mcp.json"], { encoding: "utf8" }));

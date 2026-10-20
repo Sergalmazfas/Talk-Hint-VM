@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isIP } from "node:net";
 import { talkHintPluginPackage } from "./plugin";
 import { talkHintReviewCases } from "./reviewCases";
+import { packagedSecretarySkills } from "./pluginWorkflow";
 
 const httpsURL = z.string().max(1024).url().refine(value => {
   const u = new URL(value);
@@ -59,10 +60,10 @@ export function prepareSubmission(raw: unknown, draft = false) {
       "Run all five positive and three negative cases in actual ChatGPT; record accessible walkthrough.",
       "Verify installed published-plugin path on actual Plus/iPhone: OAuth, account isolation, approval, return to chat and task read.",
       "Resolve the Agent Plugins core MCP schema / documented OpenAI auth-extension mismatch in portal validation.",
-      ...(outbound ? ["The reviewed server must advertise matching outbound tools; current main composition remains read-only."] : []),
+      ...(outbound ? ["Verify the live server advertises matching outbound tools; local package mode does not enable the deployment."] : []),
       "Separate owner authorization is required before deployment, submission, publication or any real call.",
     ],
     schemaNote: "Agent Plugins 1.0.0 mcp.schema.json currently forbids server extensions, while OpenAI documents extensions.com.openai.auth. OAuth is retained, never stripped or replaced by noauth. Portal acceptance has not been tested.",
   };
-  return { manifest, mcp: base.mcp, readiness };
+  return { manifest, mcp: base.mcp, skills: packagedSecretarySkills(outbound), readiness };
 }

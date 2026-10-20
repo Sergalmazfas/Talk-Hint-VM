@@ -108,6 +108,15 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "prepare_call", "start_call",
     ]);
     expect((await request(f.app).get("/api/chatgpt/readiness")).body.mode).toBe("outbound");
+    const initialized = await request(f.app).post("/api/chatgpt/mcp").send({
+      jsonrpc: "2.0", id: 2, method: "initialize",
+    });
+    expect(initialized.body.result.instructions).toContain("Owner-approved outbound workflow is enabled");
+    expect(initialized.body.result.instructions).not.toContain("Read only the authenticated");
+    const callSkill = await request(f.app).get("/api/chatgpt/skills/secretary/SKILL.md");
+    expect(callSkill.status).toBe(200);
+    expect(callSkill.type).toBe("text/plain");
+    expect(callSkill.text).toContain("## One explicit call");
     expect((await request(f.app).get("/.well-known/oauth-protected-resource")).body.scopes_supported)
       .toEqual(["calls:read", "offline_access"]);
     const base = await f.token("alice", ["calls:read", "offline_access"]);
@@ -170,6 +179,10 @@ describe("next-release MCP configuration (no environment mutations)", () => {
     const get = await request(f.app).get("/api/chatgpt/mcp");
     expect(get.status).toBe(405); expect(get.headers.allow).toBe("POST");
     const metadata = await request(f.app).get("/api/chatgpt/mcp.json");
+    const setup = await request(f.app).get("/api/chatgpt/skills/setup/SKILL.md");
+    expect(setup.status).toBe(200);
+    expect(setup.text).toContain("get_profile");
+    expect(setup.text).not.toContain("Expected outbound tools");
     expect(metadata.body.mcpServers.talkhint.extensions["com.openai"].auth.client).toEqual({
       mode: "provided", clientId: "talkhint-chatgpt", tokenEndpointAuthMethod: "none",
     });
