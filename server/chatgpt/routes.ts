@@ -1,6 +1,5 @@
 import express, { type Express, type Request, type Response, type RequestHandler } from "express";
 import { z } from "zod";
-import { authMiddleware, loginUser } from "../auth";
 import { activeGrant, Credentials, digest, fail, grantId, grantScopes, markerId, parseScopes,
   SCOPES, type Claims, type MarkerStore, type Scope } from "./security";
 import type { SecretaryBackend } from "./secretary";
@@ -67,8 +66,14 @@ const TOOL_INPUTS: Record<Tool, object> = {
  */
 export function registerChatGPTIntegration(
   app: Express, config: IntegrationConfig, store: MarkerStore, backend: SecretaryBackend,
-  ownerAuth: RequestHandler = authMiddleware,
-  browserAuth: BrowserAuth = { login: (email, password) => loginUser(email, password) },
+  // Injected test servers must not load the native DB/auth/provider graph.
+  // Native composition retains exactly the same auth, loaded only when needed.
+  ownerAuth: RequestHandler = (req, res, next) => {
+    void import("../auth").then(({ authMiddleware }) => authMiddleware(req, res, next)).catch(next);
+  },
+  browserAuth: BrowserAuth = {
+    login: async (email, password) => (await import("../auth")).loginUser(email, password),
+  },
 ): void {
   const base = config.origin;
   const api = config.actions ? "/api/chatgpt-actions" : "/api/chatgpt";

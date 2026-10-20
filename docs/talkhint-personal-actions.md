@@ -5,6 +5,9 @@
 Приоритет — отдельный личный GPT **TalkHint Secretary**, без изменения
 Road Ranger Business Processes, Route Leader, iOS или действующей телефонии.
 
+Текущий HTTPS-тест и оставшиеся шаги подключения:
+[TalkHint Actions — тестовый этап](talkhint-actions-https-test.md).
+
 ## Зафиксированное архитектурное решение
 
 Поддерживаются **два независимых способа подключения**:

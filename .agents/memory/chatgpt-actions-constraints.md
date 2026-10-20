@@ -3,6 +3,18 @@ name: Personal ChatGPT Actions constraints
 description: Why personal Actions needs a distinct OAuth mode and why Plus/iPhone installation cannot be promised from local tests.
 ---
 
+Do not switch the native phone server's HTTPS ingress or restart it just to
+expose an Actions test service. Use an approved isolated test origin on 443.
+Loopback HTTPS with a test CA proves transport behavior, not public reachability,
+real-owner verification or a working ChatGPT/iPhone connection.
+
+**Why:** The owner authorized mock testing while explicitly preserving existing
+telephony; a private additional port is not an Actions-compatible public origin.
+
+**How to apply:** Reuse the same adapter with synthetic backend injection,
+keep native DB/auth/provider imports out of the test process, and obtain the
+exact callback from the separate TalkHint GPT. Record external tests separately.
+
 Keep MCP's resource binding and mandatory S256 unchanged. Actions needs its
 own confidential-client OAuth mode, audience and browser ticket/cookie namespace.
 Never make the MCP public client accept missing PKCE merely to fit Actions.

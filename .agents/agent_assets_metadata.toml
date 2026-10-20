@@ -299,3 +299,31 @@ mtime_ms = 1792452451799
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/73a7d118-2cf9-4880-8014-8ca5eed4cda2/c65da598-e484-460a-bc4f-c0b4f8dc0152"
 storage_version_token = "1792452779042501"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "kJnzXt1D-uUWO9R4_Ppf4"
+uri = "file://docs/talkhint-actions-https-test.md"
+type = "text"
+title = "TalkHint — HTTPS-тест и подключение к ChatGPT"
+description = "Что проверено на настоящем TLS с синтетическими данными, что пока не проверено в ChatGPT и какие параметры нужны для отдельного test endpoint."
+logical_id = "5fdbb26d-ab34-48b7-a798-1b120d3f986e"
+content_hash = "sha256:22754dbe03715d3d45d76f2e9c1a571fd03155c34ca317ed2c87e4894435bda4"
+size = 9102
+mtime_ms = 1792454668287
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5fdbb26d-ab34-48b7-a798-1b120d3f986e/2ea77f02-5eb0-4b98-9396-63934d2ad0f9"
+storage_version_token = "1792454760785939"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "8rJ6s7nGcnL8TWYG3XcZo"
+uri = "file://generated-artifacts/talkhint-actions/https-test/report.json"
+type = "unspecified"
+title = "TalkHint — результат HTTPS mock-прогона"
+description = "7 групп проверок; один mock dispatch и один временный task_id. Внешних звонков нет; это не отчёт о подключении к ChatGPT."
+logical_id = "2095e927-a9e5-4a20-b7ab-b885522ff567"
+content_hash = "sha256:9a60be88da39b17a89f5eaf03c38661646c9512e2f1d7879eea76b69c53cc264"
+size = 1244
+mtime_ms = 1792454712211
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2095e927-a9e5-4a20-b7ab-b885522ff567/0a058e87-dca3-4184-a450-67d2701003e8"
+storage_version_token = "1792454761518299"
+content_type = "application/octet-stream"
