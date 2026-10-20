@@ -17,3 +17,21 @@ before review. Explicitly distinguish local packaging validation from real
 OpenAI scan/acceptance. Sources:
 https://developers.openai.com/plugins/build/plugins
 https://agent-plugins.org/schemas/1.0.0/mcp.schema.json
+
+## Private MCP OAuth is not public submission
+
+A private connection may use the existing predefined public OAuth client
+(`provided` / `none`) with mandatory S256 PKCE and resource binding. Do not add
+open DCR or CIMD solely because they are preferred examples in authentication
+documentation, and never substitute the Custom GPT Actions callback.
+
+**Why:** Official OpenAI packaging/auth documentation checked on 2026-10-20
+explicitly supports predefined clients and `none`. Registration expansion is
+unnecessary for this chosen path and does not prove real ChatGPT acceptance.
+
+**How to apply:** Copy the exact MCP callback from the connection management
+page, retain exact redirect matching, and distinguish metadata scan from owner
+OAuth completion. Verify the actual client's connection surface rather than
+inferring iPhone MCP support from an existing Actions GPT.
+https://developers.openai.com/plugins/build/auth
+https://developers.openai.com/plugins/build/plugins

@@ -93,10 +93,12 @@ export function registerChatGPTIntegration(
   const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"`;
   const scopeChallenge = (scope: Scope) =>
     `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="Additional TalkHint permission required", scope="${scope}"`;
+  const resourceMetadataPaths = ["/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/api/chatgpt/mcp"];
   const paths = config.actions ? [api] :
-    [api, "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"];
+    [api, ...resourceMetadataPaths, "/.well-known/oauth-authorization-server"];
   const setupPaths = new Set(["/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server",
-    "/api/chatgpt/plugin.json", "/api/chatgpt/mcp.json"]);
+    ...resourceMetadataPaths, "/api/chatgpt/plugin.json", "/api/chatgpt/mcp.json", "/api/chatgpt/readiness"]);
   const buckets = new Map<string, { count: number; reset: number }>();
   app.use(paths, (req, res, next) => {
     res.set("Cache-Control", "no-store");
@@ -117,9 +119,20 @@ export function registerChatGPTIntegration(
     } catch { /* The exact callback may only become visible after the tool scan. */ }
     const requestPath = req.originalUrl.split("?")[0];
     const setupOnly = (req.method === "GET" &&
-      (setupPaths.has(requestPath) || (config.actions && requestPath === `${api}/openapi.json`))) ||
+      (setupPaths.has(requestPath) || (!config.actions && requestPath === "/api/chatgpt/mcp") ||
+        (config.actions && requestPath === `${api}/openapi.json`))) ||
       (req.method === "POST" && requestPath === "/api/chatgpt/mcp" &&
         ["initialize", "tools/list", "ping", "notifications/initialized"].includes(req.body?.method));
+    // Advertise OAuth without executing ANY data operation while linking is
+    // unconfigured (including requests bearing an old otherwise-valid token).
+    const toolRequest = !config.actions && req.method === "POST" && requestPath === "/api/chatgpt/mcp" &&
+      req.body?.method === "tools/call";
+    if (!callbackReady && toolRequest) return res.status(401).set("WWW-Authenticate", challenge).json({
+      jsonrpc: "2.0", id: req.body?.id ?? null,
+      result: { isError: true, content: [{ type: "text",
+        text: "OAuth setup pending: configure the exact callback shown by ChatGPT." }],
+        _meta: { "mcp/www_authenticate": [challenge] } },
+    });
     if (!callbackReady && !setupOnly)
       return res.status(503).json({ error: "Configure the exact ChatGPT OAuth callback before authorization" });
     if (req.headers.origin && req.headers.origin !== base) return res.status(403).json({ error: "Cross-origin request denied" });
@@ -195,7 +208,7 @@ export function registerChatGPTIntegration(
   };
 
   if (!config.actions) {
-  app.get("/.well-known/oauth-protected-resource", (_req, res) => res.json({
+  app.get(resourceMetadataPaths, (_req, res) => res.json({
     resource, authorization_servers: [base], scopes_supported: scopesSupported,
   }));
   app.get("/.well-known/oauth-authorization-server", (_req, res) => res.json({
@@ -213,6 +226,16 @@ export function registerChatGPTIntegration(
     res.json(talkHintPluginPackage(base, config.outboundEnabled === true).manifest));
   app.get("/api/chatgpt/mcp.json", (_req, res) =>
     res.json(talkHintPluginPackage(base, config.outboundEnabled === true).mcp));
+  app.get("/api/chatgpt/readiness", (_req, res) => res.json({
+    integration: "talkhint-secretary-mcp",
+    mode: config.outboundEnabled === true ? "outbound" : "read-only",
+    transport: "streamable-http", resource,
+    registration: "provided", clientId: config.clientId, tokenEndpointAuthMethod: "none",
+    callbackConfigured: Boolean(config.redirectUri),
+    tools: mcpTools,
+    scopes: scopesSupported,
+    // No callback value, account details, signing keys or credentials.
+  }));
   }
 
   app.post(`${api}/connections`, jsonOwner, ownerAuth, wrap(async (req, res) => {

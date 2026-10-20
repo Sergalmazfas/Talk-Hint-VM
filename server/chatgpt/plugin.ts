@@ -21,7 +21,7 @@ export function talkHintPluginPackage(origin: string, outboundEnabled = false, l
       author: { name: listing?.developerName ?? "TalkHint" },
       keywords: ["secretary", "calls", "reports"],
       extensions: { "com.openai": { interface: {
-        displayName: "TalkHint", developerName: "TalkHint", category: "Productivity",
+         displayName: "TalkHint Secretary", developerName: "TalkHint", category: "Productivity",
         shortDescription: "Secretary: звонки и отчёты",
         longDescription: outboundEnabled ?
           "Только свои данные. Каждый исходящий требует отдельного подтверждения номера и задания владельцем." :

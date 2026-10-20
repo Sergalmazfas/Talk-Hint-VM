@@ -327,3 +327,17 @@ mtime_ms = 1792454712211
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2095e927-a9e5-4a20-b7ab-b885522ff567/0a058e87-dca3-4184-a450-67d2701003e8"
 storage_version_token = "1792454761518299"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "FazSr6uGrInHKIjo3lv5W"
+uri = "file://docs/talkhint-private-mcp-rollout.md"
+type = "text"
+title = "TalkHint Secretary: MCP, OAuth и порядок подключения"
+description = "Параметры read-only подключения, результаты проверок, необходимые действия владельца и подтверждённые ограничения iPhone. Проверено 20 октября 2026."
+logical_id = "c6ad38d7-f759-42fb-8e13-0a33710f9359"
+content_hash = "sha256:324aa097fdf0e7f97d35738163c70358a4fd050d8e4801015b2edf78e60436a4"
+size = 14331
+mtime_ms = 1792456851714
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c6ad38d7-f759-42fb-8e13-0a33710f9359/16950b15-0def-402c-9323-8c8285657419"
+storage_version_token = "1792456882568639"
+content_type = "text/markdown"

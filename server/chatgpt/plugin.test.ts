@@ -6,7 +6,7 @@ describe("separate TalkHint remote-MCP plugin", () => {
   it("has its own identity, existing OAuth/MCP endpoints and no fixed credentials", () => {
     const pack = talkHintPluginPackage("https://fixture.example.test");
     expect(pack.manifest.name).toBe("talkhint");
-    expect(pack.manifest.extensions["com.openai"].interface.displayName).toBe("TalkHint");
+    expect(pack.manifest.extensions["com.openai"].interface.displayName).toBe("TalkHint Secretary");
     expect(pack.manifest.extensions["com.openai"].interface.capabilities).toEqual(["Read"]);
     const server = pack.mcp.mcpServers.talkhint;
     expect(server.type).toBe("streamable-http");

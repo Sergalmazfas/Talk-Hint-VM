@@ -30,8 +30,8 @@ and grants isolated while reusing the same business logic, persistence and
 native launch/idempotency. Mock success is not proof of a real ChatGPT connection.
 Real calls, production changes and publication still require separate approval.
 
-The immediate setup priority is personal API/Custom GPT Actions, not a public
-catalogue/review; do not remove the independent OAuth/MCP path.
+Private MCP setup and personal Custom GPT Actions do not imply a public
+catalogue/review; do not automatically resume public submission.
 Road Ranger Business Processes is only a UX
 reference, like Route Leader; never modify or replace those GPTs. Keep the
 previous public-plugin preparation parked, not automatically resumed.
@@ -46,7 +46,8 @@ telephone product preserved rather than replaced by another chat.
 The user explicitly approved only the minimal web addition after the API-only
 stage; this does not authorize changing native interfaces or production.
 The user explicitly requested the independent-plugin boundary.
-The user subsequently chose personal Custom GPT Actions instead of public review.
+The user requested personal Actions and private MCP connections without
+automatically resuming public review.
 
 **How to apply:** Verify official iPhone support rather than assuming web MCP
 support implies mobile availability. Do not automatically enable incoming AI

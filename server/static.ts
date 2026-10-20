@@ -30,6 +30,14 @@ export function serveStatic(app: Express) {
 
   app.use("*", (req, res, next) => {
     const reqPath = req.originalUrl;
+    // Missing OAuth discovery must never masquerade as the SPA's HTTP 200.
+    // Keep unrelated well-known paths (e.g. iOS association files) unchanged.
+    const pathname = reqPath.split("?")[0];
+    if (pathname === "/.well-known/oauth-authorization-server" ||
+        pathname === "/.well-known/oauth-protected-resource" ||
+        pathname.startsWith("/.well-known/oauth-protected-resource/")) {
+      return res.status(404).set("Cache-Control", "no-store").json({ error: "OAuth metadata unavailable" });
+    }
     if (reqPath.startsWith("/api/") || reqPath.startsWith("/twilio/") || reqPath.startsWith("/app/") || reqPath === "/app") {
       return next();
     }

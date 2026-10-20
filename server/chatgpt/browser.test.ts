@@ -377,7 +377,7 @@ describe("separate TalkHint plugin and owner Secretary history", () => {
     const mcp = await request(app).get("/api/chatgpt/mcp.json");
     expect(manifest.status).toBe(200);
     expect(manifest.body.name).toBe("talkhint");
-    expect(manifest.body.extensions["com.openai"].interface.displayName).toBe("TalkHint");
+    expect(manifest.body.extensions["com.openai"].interface.displayName).toBe("TalkHint Secretary");
     expect(mcp.body.mcpServers.talkhint.url).toBe(`${base}/api/chatgpt/mcp`);
     expect(manifest.headers["cache-control"]).toBe("no-store");
     expect(JSON.stringify([manifest.body, mcp.body])).not.toContain("alice");
@@ -397,7 +397,7 @@ describe("separate TalkHint plugin and owner Secretary history", () => {
     expect(tools.body.result.tools.map((tool: any) => tool.name)).toContain("list_tasks");
     expect((await request(app).post("/api/chatgpt/mcp").send({
       jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_tasks", arguments: {} },
-    })).status).toBe(503);
+    })).status).toBe(401);
     expect((await request(app).get("/api/chatgpt/secretary")).status).toBe(503);
     expect((await request(app).post("/api/chatgpt/connections").auth("fixture-owner-alice", { type: "bearer" })
       .send({ approved: true, scope: "calls:read" })).status).toBe(503);

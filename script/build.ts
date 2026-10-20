@@ -2,6 +2,9 @@ import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile, writeFile, cp } from "fs/promises";
 import { spawnSync } from "child_process";
+import { resolve, join } from "node:path";
+import { createHash } from "node:crypto";
+import { verifyMcpBuild } from "./mcp-build-verification";
 
 // -----------------------------------------------------------------------------
 // MANDATORY pre-publish gate: the LIVE Tutor Engine contract probe runs before
@@ -62,12 +65,17 @@ const allowlist = [
 ];
 
 async function buildAll() {
-  runTutorEngineContractProbe();
+  const prepareOnly = process.argv.includes("--prepare-only");
+  // A candidate never replaces dist used by the running phone/UI server.
+  // The NORMAL Publish command keeps its mandatory live Tutor gate.
+  const out = prepareOnly ? "generated-artifacts/talkhint-release-candidate/dist" : "dist";
+  if (prepareOnly) console.log("OFFLINE PREPARATION ONLY: no app boot, live Tutor probe or publication.");
+  else runTutorEngineContractProbe();
 
-  await rm("dist", { recursive: true, force: true });
+  await rm(out, { recursive: true, force: true });
 
   console.log("building client...");
-  await viteBuild();
+  await viteBuild({ build: { outDir: resolve(out, "public") } });
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
@@ -77,12 +85,13 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
-  await esbuild({
+  const compiled = await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
     bundle: true,
     format: "esm",
-    outfile: "dist/index.js",
+    outfile: join(out, "index.js"),
+    metafile: true,
     define: {
       "process.env.NODE_ENV": '"production"',
     },
@@ -94,12 +103,19 @@ async function buildAll() {
     },
   });
 
-  await writeFile("dist/index.cjs", "import('./index.js');\n");
-  console.log("created ESM wrapper at dist/index.cjs");
+  const bundle = await readFile(join(out, "index.js"), "utf8");
+  const mcp = verifyMcpBuild(compiled.metafile!, bundle);
+  await writeFile(join(out, "mcp-build-receipt.json"), JSON.stringify({
+    ...mcp, preparedAt: new Date().toISOString(), prepareOnly,
+    bundleSha256: createHash("sha256").update(bundle).digest("hex"),
+  }, null, 2) + "\n");
+  console.log("MCP runtime inclusion gate PASSED.");
+  await writeFile(join(out, "index.cjs"), "import('./index.js');\n");
+  console.log(`created ESM wrapper at ${out}/index.cjs`);
 
   console.log("copying TalkHint UI...");
-  await cp("talkhint/ui", "dist/talkhint/ui", { recursive: true });
-  console.log("copied TalkHint UI to dist/talkhint/ui");
+  await cp("talkhint/ui", join(out, "talkhint/ui"), { recursive: true });
+  console.log(`copied TalkHint UI to ${out}/talkhint/ui`);
 }
 
 buildAll().catch((err) => {

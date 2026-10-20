@@ -37,6 +37,7 @@ import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./t
 import { registerSecretaryRoutes } from "./secretary/routes";
 import { registerLegacyTestCallRoute } from "./secretary/legacyRoute";
 import { registerChatGPTIntegration } from "./chatgpt/routes";
+import { mcpReleaseConfiguration } from "./chatgpt/releaseConfig";
 import { integrationStore } from "./chatgpt/store";
 import { secretaryBackend } from "./chatgpt/secretary";
 import { dialSecretaryTask, secretaryCallbackOrigin } from "./secretary/dialer";
@@ -282,16 +283,9 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   setupWebSocket(httpServer);
-  registerChatGPTIntegration(app, {
-    // Opt-in only; no production or environment setting is changed here.
-    enabled: process.env.CHATGPT_SECRETARY_ENABLED === "true",
-    // Separate opt-in, never enabled by packaging, scopes or client tool approval.
-    outboundEnabled: process.env.CHATGPT_SECRETARY_OUTBOUND_ENABLED === "true",
-    origin: process.env.CHATGPT_SECRETARY_ORIGIN ?? "",
-    clientId: "talkhint-chatgpt",
-    redirectUri: process.env.CHATGPT_SECRETARY_REDIRECT_URI ?? "",
-    signingKey: () => process.env.SESSION_SECRET ?? "",
-  }, integrationStore, secretaryBackend(dialSecretaryTask));
+  registerChatGPTIntegration(app, mcpReleaseConfiguration(
+    process.env, process.env.NODE_ENV === "production", () => process.env.SESSION_SECRET ?? "",
+  ), integrationStore, secretaryBackend(dialSecretaryTask));
   registerChatGPTIntegration(app, {
     // Personal GPT Actions is a separate confidential OAuth client. Defaults OFF.
     enabled: process.env.CHATGPT_ACTIONS_ENABLED === "true",

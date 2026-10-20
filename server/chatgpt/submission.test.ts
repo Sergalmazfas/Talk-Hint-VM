@@ -16,7 +16,7 @@ describe("TalkHint public-directory preparation, never submission", () => {
   it("builds separate branded metadata with documented review fields and least initial scopes", () => {
     const pack = prepareSubmission(settings, true);
     const extension = pack.manifest.extensions["com.openai"];
-    expect(extension.interface.displayName).toBe("TalkHint");
+    expect(extension.interface.displayName).toBe("TalkHint Secretary");
     expect(extension.interface.shortDescription.length).toBeLessThanOrEqual(30);
     expect(extension.interface.privacyPolicyURL).toBe(settings.privacyPolicyURL);
     expect(extension.interface.logo).toBe("./assets/logo.png");
