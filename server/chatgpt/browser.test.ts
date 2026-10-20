@@ -222,8 +222,12 @@ describe("isolated browser OAuth consent", () => {
     expect(signIn.text).toContain("Войдите в TalkHint");
     expect(await store.list("alice")).toEqual([]);
     expect(signIn.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
-    expect(signIn.headers["referrer-policy"]).toBe("no-referrer");
+    expect(signIn.headers["referrer-policy"]).toBe("strict-origin");
+    expect(signIn.headers["content-security-policy"]).toContain("form-action 'self';");
     const consent = await browser.signIn(signIn);
+    expect(consent.headers["referrer-policy"]).toBe("strict-origin");
+    expect(consent.headers["content-security-policy"])
+      .toContain(`form-action 'self' ${config.redirectUri};`);
     expect(consent.text).toContain("alice@example.test");
     expect(consent.text).toContain("calls:transcript");
     expect(await store.list("alice")).toEqual([]);

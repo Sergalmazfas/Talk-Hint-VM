@@ -1,7 +1,7 @@
 import express, { type Express, type Request, type Response, type RequestHandler, type NextFunction } from "express";
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { BrowserSecurity, WEB_TTL } from "./browserSecurity";
+import { BrowserSecurity, WEB_TTL, BROWSER_REFERRER_POLICY, browserFormAction } from "./browserSecurity";
 import { renderBrowserPage, type BrowserPage } from "./browserViews";
 import { digest, fail, grantScopes, markerId, type Credentials, type MarkerStore, type Scope } from "./security";
 import type { CallConfirmations } from "./confirmations";
@@ -41,7 +41,7 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
   const form = express.urlencoded({ extended: false, limit: "32kb" });
   app.use([`${api}/browser`, `${api}/secretary`, `${api}/approve`, `${api}/oauth/authorize`,
     `${api}/connections/manage`], (_req, res, next) => {
-    res.set({ "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+    res.set({ "Referrer-Policy": BROWSER_REFERRER_POLICY, "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY" });
     next();
   });
@@ -49,10 +49,10 @@ export function registerBrowserIntegration(app: Express, config: IntegrationConf
     const nonce = randomBytes(18).toString("base64url");
     return res.status(status).set({
       "Cache-Control": "no-store",
-      "Referrer-Policy": "no-referrer",
+      "Referrer-Policy": BROWSER_REFERRER_POLICY,
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
-      "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+      "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; form-action ${browserFormAction(model.kind === "consent" ? config.redirectUri : undefined)}; base-uri 'none'; frame-ancestors 'none'`,
       "Permissions-Policy": "microphone=(), camera=(), geolocation=()",
     }).type("html").send(renderBrowserPage(model, nonce, api));
   };

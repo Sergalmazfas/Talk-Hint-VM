@@ -1,7 +1,15 @@
 # TalkHint Secretary: confirmation inside ChatGPT
 
-Prepared 2026-10-20. Candidate plugin **0.3.0**, MCP **1.2.0**.
+Prepared 2026-10-20. Candidate plugin **0.3.1**, MCP **1.2.1**.
 Not a publication or proof of a real ChatGPT/iPhone/PSTN session.
+
+The patch corrects browser form Referrer-Policy to `strict-origin`: `no-referrer`
+made native HTML POSTs use `Origin: null`, causing consent rejection. Exact
+Origin and CSRF checks remain unchanged. A real local Chromium test reproduces
+the old behavior and verifies the fix without accounts, providers or calls.
+The consent document also permits its exact registered callback in `form-action`,
+so the post-consent redirect is not blocked by Chromium's CSP. Other forms stay
+self-only. This does not change OAuth redirect validation.
 
 ## Supported design and its limits
 
@@ -86,7 +94,7 @@ OAuth consent once. Do not grant `calls:transcript` unless separately wanted.
 Refreshing tokens uses the existing grant; revocation/expiry can require login again.
 
 Complete the TalkHint login and consent, refresh metadata and use a new chat.
-Expected versions: plugin 0.3.0, MCP 1.2.0, readiness
+Expected versions: plugin 0.3.1, MCP 1.2.1, readiness
 `confirmationMethod: inline_card`; seven model tools plus one UI-only tool.
 If using an installed source package, update its skills as well; a server refresh
 does not replace an old installed package's instructions.
@@ -106,8 +114,8 @@ real iframe rendering on iPhone, OAuth completion by the owner, or a PSTN outcom
 Checks actually passed in this preparation:
 
 - TypeScript `npm run check`.
-- Isolated integration suite: 14 files, 133 tests.
-- Full suite: 113 files, 1401 tests.
+- Latest full suite after the browser-policy fix: 114 files, 1404 tests,
+  including real Chromium form-Origin and callback-CSP regressions.
 - Offline `npm run build:prepare`, including MCP runtime inclusion gate.
 - Inline resource rendered at phone-width in an isolated mock host. Interaction
   behavior is checked by simulated host/DOM tests, not by a signed-in ChatGPT

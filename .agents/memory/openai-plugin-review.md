@@ -87,3 +87,30 @@ with the ChatGPT or opaque Origin, before OAuth validation could run.
 GET entry and browser-bound review. Preserve exact callback, PKCE, resource,
 scope, flow and owner checks. Do not trust opaque origins for POST, relax CSRF,
 add wildcard CORS or exempt the MCP/data endpoints.
+
+## Browser form Origin and referrer policy
+
+Use an origin-only referrer policy on protected OAuth/browser form pages, not
+`no-referrer`. Keep rejecting opaque/external Origin on state-changing requests.
+
+**Why:** A production consent POST was rejected after OAuth entry had been
+fixed. Under the Fetch referrer-policy rules, `no-referrer` makes native HTML
+form POSTs use `Origin: null`, even when submitted to the same origin.
+Origin-only policy keeps path/query out of Referer without breaking the Origin
+check. See https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referrer-Policy.
+
+**How to apply:** Check the actual form submission, not just synthetic GETs or
+fetch POSTs: fetch defaults to CORS mode and does not reproduce the native form
+Origin behavior. Preserve CSRF, browser binding, exact callback, PKCE, resource
+and owner checks; never “fix” this by accepting null Origin on writes.
+
+OAuth consent forms also need an exact registered callback CSP source. Keeping
+`form-action 'self'` on that document blocks a post-consent 303 to ChatGPT in
+Chromium, even after the server accepted the form.
+
+**Why:** A real local browser reproduction reached no callback with self-only
+policy and reached it with the exact callback allowed.
+
+**How to apply:** Allow the registered callback only on the consent document;
+keep login/approval/revocation forms self-only and all OAuth redirect validation
+unchanged. Browser navigation tests catch this; HTTP clients following redirects do not.

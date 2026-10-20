@@ -6,6 +6,19 @@ import { digest, fail } from "./security";
 const BINDING = "__Host-thcg-binding";
 const OWNER = "__Host-thcg-owner";
 export const WEB_TTL = 15 * 60_000;
+// no-referrer nulls Origin on native HTML form POSTs (including same-origin).
+// Keep strict Origin/CSRF validation while sending no URL path/query in Referer.
+export const BROWSER_REFERRER_POLICY = "strict-origin";
+/** Only the OAuth consent document may redirect its form to the registered callback. */
+export function browserFormAction(callback?: string) {
+  if (!callback) return "'self'";
+  const target = new URL(callback);
+  if (target.protocol !== "https:" || target.username || target.password || target.hash)
+    return fail(503, "Invalid OAuth callback configuration");
+  // CSP source matching ignores query parameters. Never put codes/state in CSP.
+  const path = target.pathname.replace(/[';]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `'self' ${target.origin}${path}`;
+}
 
 /**
  * Encrypted, purpose-bound browser tickets. An approval link is NOT an access
