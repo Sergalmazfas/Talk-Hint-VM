@@ -1,7 +1,7 @@
 import express, { type Express, type Request, type Response, type RequestHandler } from "express";
 import { z } from "zod";
 import { activeGrant, Credentials, digest, fail, grantId, grantScopes, markerId, parseScopes,
-  SCOPES, type Claims, type MarkerStore, type Scope } from "./security";
+  SCOPES, MCP_BASE_SCOPES, type Claims, type MarkerStore, type Scope } from "./security";
 import type { SecretaryBackend } from "./secretary";
 import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest } from "./browser";
 import { CallConfirmations } from "./confirmations";
@@ -81,6 +81,10 @@ export function registerChatGPTIntegration(
   const scopesSupported = (config.outboundEnabled === true ? [...SCOPES] :
     SCOPES.filter(scope => scope !== "secretary:start" && scope !== "incoming:read"))
     .filter(scope => !config.actions || scope !== "incoming:read");
+  // MCP clients fall back to ALL protected-resource scopes when a challenge
+  // omits scope. Advertise only baseline rights, not every incremental capability.
+  // The authorization/consent validator still accepts explicit supported upgrades.
+  const discoveryScopes = [...MCP_BASE_SCOPES];
   const availableTools = (Object.keys(schemas) as Tool[]).filter(name =>
     scopesSupported.includes(permissions[name]));
   // Preserve the existing owner REST API, but do not expose incoming controls
@@ -90,9 +94,11 @@ export function registerChatGPTIntegration(
   const credentials = new Credentials(config.signingKey, resource);
   const confirmations = new CallConfirmations(credentials, store,
     () => config.outboundEnabled === true, config.clientId);
-  const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"`;
+  const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"` +
+    (config.actions ? "" : `, scope="${MCP_BASE_SCOPES.join(" ")}"`);
   const scopeChallenge = (scope: Scope) =>
-    `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="Additional TalkHint permission required", scope="${scope}"`;
+    `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="Additional TalkHint permission required", scope="${config.actions ?
+      scope : Array.from(new Set([...MCP_BASE_SCOPES, scope])).join(" ")}"`;
   const resourceMetadataPaths = ["/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/api/chatgpt/mcp"];
   const paths = config.actions ? [api] :
@@ -209,7 +215,7 @@ export function registerChatGPTIntegration(
 
   if (!config.actions) {
   app.get(resourceMetadataPaths, (_req, res) => res.json({
-    resource, authorization_servers: [base], scopes_supported: scopesSupported,
+    resource, authorization_servers: [base], scopes_supported: discoveryScopes,
   }));
   app.get("/.well-known/oauth-authorization-server", (_req, res) => res.json({
     issuer: base, authorization_endpoint: `${base}/api/chatgpt/oauth/authorize`,
@@ -218,7 +224,7 @@ export function registerChatGPTIntegration(
     authorization_response_iss_parameter_supported: true,
     response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"],
-    scopes_supported: scopesSupported,
+    scopes_supported: discoveryScopes,
   }));
   // Packaging aids only. Installation still requires the owner's ChatGPT
   // account, eligible workspace and OAuth consent; no listing is created here.
@@ -233,7 +239,7 @@ export function registerChatGPTIntegration(
     registration: "provided", clientId: config.clientId, tokenEndpointAuthMethod: "none",
     callbackConfigured: Boolean(config.redirectUri),
     tools: mcpTools,
-    scopes: scopesSupported,
+    scopes: discoveryScopes,
     // No callback value, account details, signing keys or credentials.
   }));
   }

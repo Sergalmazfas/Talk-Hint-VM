@@ -35,3 +35,20 @@ OAuth completion. Verify the actual client's connection surface rather than
 inferring iPhone MCP support from an existing Actions GPT.
 https://developers.openai.com/plugins/build/auth
 https://developers.openai.com/plugins/build/plugins
+
+## MCP discovery scopes are baseline, not a capability catalogue
+
+Always put the minimal connection scopes in the initial `WWW-Authenticate`
+challenge and protected-resource `scopes_supported`. Do not advertise transcript
+permission as a baseline; request it only in an explicit step-up challenge.
+Keep the authorization validator able to accept that separately consented upgrade.
+
+**Why:** The MCP scope-selection strategy tells clients to request every
+protected-resource advertised scope when the initial challenge omits `scope`.
+ChatGPT consequently requested transcript access even though TalkHint's tool
+descriptors required only ordinary call reading.
+
+**How to apply:** Check challenges and discovery together, not just tool
+descriptors or package `baseScopes`. Upgrade challenges must include the basic
+read permission as well as the new permission, without auto-upgrading any grant.
+https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization#scope-selection-strategy

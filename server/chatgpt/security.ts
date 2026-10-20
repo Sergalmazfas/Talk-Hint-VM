@@ -2,6 +2,8 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 
 export const SCOPES = ["calls:read", "calls:transcript", "incoming:read", "secretary:start", "offline_access"] as const;
 export type Scope = typeof SCOPES[number];
+/** Minimal MCP connection rights; transcript access is an explicit step-up. */
+export const MCP_BASE_SCOPES: readonly Scope[] = ["calls:read", "offline_access"];
 export interface Marker { id: string; userId: string; expiresAt: Date }
 export interface MarkerStore {
   put(marker: Marker): Promise<void>;

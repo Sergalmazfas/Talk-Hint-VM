@@ -91,12 +91,13 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       const res = await request(f.app).get(path);
       expect(res.status).toBe(200); expect(res.type).toBe("application/json");
       expect(res.body).toEqual({ resource: `${MCP_RELEASE_ORIGIN}/api/chatgpt/mcp`,
-        authorization_servers: [MCP_RELEASE_ORIGIN], scopes_supported: ["calls:read", "calls:transcript", "offline_access"] });
+        authorization_servers: [MCP_RELEASE_ORIGIN], scopes_supported: ["calls:read", "offline_access"] });
     }
     const discovery = await request(f.app).get("/.well-known/oauth-authorization-server");
     expect(discovery.body).toMatchObject({ issuer: MCP_RELEASE_ORIGIN,
       authorization_response_iss_parameter_supported: true,
-      token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"] });
+      token_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"],
+      scopes_supported: ["calls:read", "offline_access"] });
     expect(discovery.body).not.toHaveProperty("registration_endpoint");
     expect(discovery.body).not.toHaveProperty("client_id_metadata_document_supported");
     const initialized = await request(f.app).post("/api/chatgpt/mcp").send({
@@ -112,6 +113,12 @@ describe("next-release MCP configuration (no environment mutations)", () => {
     ]);
     expect(listed.body.result.tools.every((t: any) =>
       t.annotations.readOnlyHint && t.securitySchemes[0].type === "oauth2")).toBe(true);
+    for (const tool of listed.body.result.tools) {
+      expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: ["calls:read"] }]);
+      expect(tool._meta.securitySchemes).toEqual(tool.securitySchemes);
+      if (["get_call", "get_task"].includes(tool.name))
+        expect(tool.inputSchema.properties.includeTranscript.default).toBe(false);
+    }
     const get = await request(f.app).get("/api/chatgpt/mcp");
     expect(get.status).toBe(405); expect(get.headers.allow).toBe("POST");
     const metadata = await request(f.app).get("/api/chatgpt/mcp.json");
@@ -129,6 +136,8 @@ describe("next-release MCP configuration (no environment mutations)", () => {
     expect(res.body.result.isError).toBe(true);
     expect(res.body.result._meta["mcp/www_authenticate"][0]).toContain('error="invalid_token"');
     expect(res.headers["www-authenticate"]).toContain("/.well-known/oauth-protected-resource");
+    expect(res.headers["www-authenticate"]).toContain('scope="calls:read offline_access"');
+    expect(res.headers["www-authenticate"]).not.toContain("calls:transcript");
     const previouslyIssued = await f.token("alice");
     expect((await f.rpc("list_calls", {}, previouslyIssued.value)).status).toBe(401);
     expect(f.backend.history).not.toHaveBeenCalled();
@@ -160,6 +169,33 @@ describe("next-release MCP configuration (no environment mutations)", () => {
     expect((await f.rpc("get_profile", {}, bob.value)).body.result.isError).toBe(false);
     expect(f.backend.start).not.toHaveBeenCalled(); expect(f.backend.incoming).not.toHaveBeenCalled();
   });
+  it("uses baseline scopes after callback setup and requests transcript only as an explicit step-up", async () => {
+    const f = fixture(callback);
+    const anonymous = await f.rpc("list_calls");
+    expect(anonymous.body.result.isError).toBe(true);
+    expect(anonymous.headers["www-authenticate"]).toContain('scope="calls:read offline_access"');
+    expect(anonymous.body.result._meta["mcp/www_authenticate"][0]).not.toContain("calls:transcript");
+    const base = await f.token("alice", ["calls:read", "offline_access"]);
+    const count = (await f.store.list("alice")).length;
+    const noTranscript = await f.rpc("get_call", { id: "alice-record" }, base.value);
+    expect(noTranscript.body.result.structuredContent).not.toHaveProperty("transcript");
+    vi.mocked(f.backend.call).mockClear();
+    const stepUp = await f.rpc("get_call", { id: "alice-record", includeTranscript: true }, base.value);
+    expect(stepUp.body.result.isError).toBe(true);
+    expect(stepUp.headers["www-authenticate"]).toContain(
+      'scope="calls:read offline_access calls:transcript"');
+    expect(stepUp.body.result._meta["mcp/www_authenticate"]).toEqual([stepUp.headers["www-authenticate"]]);
+    expect(f.backend.call).not.toHaveBeenCalled();
+    expect((await f.store.list("alice")).length).toBe(count);
+    expect(f.credentials.read(base.value, "access").scopes).not.toContain("calls:transcript");
+    // Only a separately authorized upgrade allows the requested transcript.
+    const upgraded = await f.token("alice", ["calls:read", "offline_access", "calls:transcript"]);
+    expect((await f.rpc("get_call", { id: "alice-record", includeTranscript: true }, upgraded.value))
+      .body.result.structuredContent.transcript).toBe("Synthetic transcript");
+    // Upgrading never changes the base connection or another owner's scope.
+    expect((await f.rpc("get_call", { id: "alice-record", includeTranscript: true }, base.value))
+      .body.result.isError).toBe(true);
+  });
   it("supports provided public-client OAuth with S256/resource/issuer and rejects replay", async () => {
     const f = fixture(callback);
     await f.token("alice", ["calls:read", "offline_access"]);
@@ -184,6 +220,7 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       .send({ ...exchange, resource: "https://evil.test/mcp" })).status).toBe(400);
     const tokens = await request(f.app).post("/api/chatgpt/oauth/token").type("form").send(exchange);
     expect(tokens.status).toBe(200);
+    expect(f.credentials.read(tokens.body.access_token, "access").scopes).toEqual(["calls:read", "offline_access"]);
     expect((await f.rpc("get_profile", {}, tokens.body.access_token)).body.result.structuredContent.id).toBe("alice");
     expect((await request(f.app).post("/api/chatgpt/oauth/token").type("form").send(exchange)).status).toBe(400);
     const denied = await request(f.app).get("/api/chatgpt/oauth/authorize").set("x-test-owner", "unconsented").query(query);

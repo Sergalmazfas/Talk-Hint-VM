@@ -84,7 +84,7 @@ describe("stage one: actual HTTP OAuth + MCP with fake identities, storage and t
   it("advertises only read scopes and only read-only tools by default", async () => {
     for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"]) {
       const meta = await request(app).get(path);
-      expect(meta.body.scopes_supported).toEqual(["calls:read", "calls:transcript", "offline_access"]);
+      expect(meta.body.scopes_supported).toEqual(["calls:read", "offline_access"]);
       expect(meta.headers["cache-control"]).toBe("no-store");
     }
     const list = await rpc("tools/list");
@@ -119,7 +119,8 @@ describe("stage one: actual HTTP OAuth + MCP with fake identities, storage and t
     expect(plain.body.result.structuredContent).not.toHaveProperty("transcript");
     const full = await call("get_call", alice.access_token, { id: "alice-call", includeTranscript: true });
     expect(full.body.result.isError).toBe(true);
-    expect(full.body.result._meta["mcp/www_authenticate"][0]).toContain('scope="calls:transcript"');
+    expect(full.body.result._meta["mcp/www_authenticate"][0]).toContain(
+      'scope="calls:read offline_access calls:transcript"');
     expect(full.headers["www-authenticate"]).toContain("insufficient_scope");
   });
   it("cannot enable writes with old broad grants, forged flags, approval API or hidden tool calls", async () => {

@@ -2,6 +2,8 @@
  * Portable remote-MCP plugin metadata, not a registration in OpenAI's directory.
  * No keys, owner identity, fixed bearer tokens, local servers or lifecycle hooks.
  */
+import { MCP_BASE_SCOPES } from "./security";
+
 export interface TalkHintListing {
   developerName: string; websiteURL: string; privacyPolicyURL: string;
   termsOfServiceURL: string; supportURL: string;
@@ -47,7 +49,7 @@ export function talkHintPluginPackage(origin: string, outboundEnabled = false, l
           tokenUrl: `${origin}/api/chatgpt/oauth/token`,
           resource,
           // Write and transcript access are incremental, not forced on install.
-          baseScopes: ["calls:read", "offline_access"], defaultScopes: [],
+          baseScopes: [...MCP_BASE_SCOPES], defaultScopes: [],
         } } },
       } },
     },
