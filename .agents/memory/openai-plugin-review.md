@@ -72,3 +72,18 @@ substitute a saved-history page for dispatch. Do not infer a successful current
 call from a historical failed report.
 https://developers.openai.com/plugins/build/plugins
 https://developers.openai.com/plugins/deploy/connect-chatgpt
+
+## OAuth navigation is not a cross-origin data action
+
+Permit validated browser navigation into OAuth even when an embedded client
+sends an external or opaque (`null`) Origin. Do not apply the MCP/data API's
+blanket same-origin rule to every browser authorization entry.
+
+**Why:** The iPhone Connect failure was reproduced against production: an
+otherwise valid authorization GET redirected without Origin but returned 403
+with the ChatGPT or opaque Origin, before OAuth validation could run.
+
+**How to apply:** Keep any exception narrowly scoped to the actual OAuth HTML
+GET entry and browser-bound review. Preserve exact callback, PKCE, resource,
+scope, flow and owner checks. Do not trust opaque origins for POST, relax CSRF,
+add wildcard CORS or exempt the MCP/data endpoints.

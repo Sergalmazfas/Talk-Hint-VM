@@ -71,11 +71,14 @@ class Browser {
     return res;
   }
   cookie() { return Array.from(this.cookies).map(([k, v]) => `${k}=${v}`).join("; "); }
-  async get(url: string) {
-    return this.remember(await request(app).get(url).set("Accept", "text/html").set("Cookie", this.cookie()));
+  async get(url: string, origin?: string) {
+    const q = request(app).get(url).set("Accept", "text/html").set("Cookie", this.cookie());
+    if (origin) q.set("Origin", origin).set("Sec-Fetch-Site", "cross-site");
+    return this.remember(await q);
   }
   async post(url: string, body: object, origin: string | null = base) {
-    const q = request(app).post(url).set("Cookie", this.cookie()).type("form");
+    const q = request(app).post(url).set("Cookie", this.cookie())
+      .type(url === `${path}/session` ? "json" : "form");
     if (origin) q.set("Origin", origin);
     return this.remember(await q.send(body));
   }
@@ -130,6 +133,88 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("isolated browser OAuth consent", () => {
+  it.each(["https://chatgpt.com", "null", "https://attacker.example"])(
+    "opens only the validated OAuth login from external Origin %s without granting access", async origin => {
+      const browser = new Browser();
+      const entry = await browser.get(`/api/chatgpt/oauth/authorize?${new URLSearchParams(
+        authorization("calls:read offline_access"))}`, origin);
+      expect(entry.status).toBe(303);
+      expect(entry.headers.location).toMatch(/^\/api\/chatgpt\/browser\/review\?flow=/);
+      const page = await browser.get(entry.headers.location, origin);
+      expect(page.status).toBe(200);
+      expect(page.text).toContain("Войдите в TalkHint");
+      expect(page.headers["access-control-allow-origin"]).toBeUndefined();
+      expect(page.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+      expect(await store.list("alice")).toEqual([]);
+      expect(login).not.toHaveBeenCalled();
+      expect(backend.history).not.toHaveBeenCalled();
+      expect(backend.start).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  it("still validates callback, client, resource, state, scopes and S256 before external navigation", async () => {
+    const browser = new Browser();
+    for (const override of [
+      { redirect_uri: "https://attacker.example/callback" }, { client_id: "attacker" },
+      { resource: "https://attacker.example/api/chatgpt/mcp" }, { state: "" },
+      { code_challenge: "" }, { code_challenge_method: "plain" }, { scope: "secretary:start" },
+    ]) {
+      const response = await browser.get(`/api/chatgpt/oauth/authorize?${new URLSearchParams({
+        ...authorization("calls:read offline_access"), ...override,
+      })}`, "https://chatgpt.com");
+      expect(response.status).toBe(400);
+      expect(response.headers.location).toBeUndefined();
+      expect(response.headers["set-cookie"]).toBeUndefined();
+    }
+    expect((await browser.get(`${path}/review?flow=forged`, "null")).status).toBe(400);
+    expect(await store.list("alice")).toEqual([]);
+    expect(login).not.toHaveBeenCalled();
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("does not extend the exception to non-HTML, HEAD, preflight, data APIs or MCP", async () => {
+    for (const url of ["/api/chatgpt/oauth/authorize", `${path}/review`]) {
+      expect((await request(app).get(url).set("Origin", "https://chatgpt.com")
+        .set("Accept", "application/json")).status).toBe(403);
+      expect((await request(app).head(url).set("Origin", "null").set("Accept", "text/html")).status).toBe(403);
+      expect((await request(app).options(url).set("Origin", "https://chatgpt.com")
+        .set("Access-Control-Request-Method", "POST")).status).toBe(403);
+    }
+    for (const url of ["/api/chatgpt/mcp", "/api/chatgpt/secretary",
+      "/api/chatgpt/connections/manage", "/api/chatgpt/approve"]) {
+      expect((await new Browser().get(url, "https://chatgpt.com")).status).toBe(403);
+    }
+    expect(backend.history).not.toHaveBeenCalled();
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("rejects external or missing Origin for browser writes even with valid bound CSRF", async () => {
+    const browser = new Browser();
+    const consent = await browser.signIn(await browser.begin("calls:read offline_access"));
+    for (const origin of ["https://chatgpt.com", "https://attacker.example", "null", null]) {
+      for (const action of ["login", "session", "consent", "approve", "revoke", "logout"]) {
+        const response = await browser.post(`${path}/${action}`, { ...fields(consent),
+          decision: "allow", email: "alice@example.test", password: "fixture-password" }, origin);
+        expect(response.status).toBe(403);
+      }
+    }
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(await store.list("alice")).toEqual([]);
+    expect(backend.start).not.toHaveBeenCalled();
+    expect((await request(app).post(`${path}/consent`).set("Origin", base)
+      .set("Sec-Fetch-Site", "cross-site").set("Cookie", browser.cookie()).type("form")
+      .send({ ...fields(consent), decision: "allow" })).status).toBe(403);
+    // A legitimate same-origin consent still works after all rejected attempts.
+    const allowed = await browser.post(`${path}/consent`, { ...fields(consent), decision: "allow" });
+    const token = await accessFromConsent(allowed);
+    for (const origin of ["https://chatgpt.com", "null"]) {
+      expect((await request(app).post("/api/chatgpt/tools/list_calls").set("Origin", origin)
+        .auth(token, { type: "bearer" }).send({})).status).toBe(403);
+      expect((await request(app).post("/api/chatgpt/mcp").set("Origin", origin)
+        .auth(token, { type: "bearer" }).send({ jsonrpc: "2.0", id: 1, method: "tools/call",
+          params: { name: "list_calls", arguments: {} } })).status).toBe(403);
+    }
+    expect((await store.list("alice")).length).toBe(1);
+    expect(backend.history).not.toHaveBeenCalled();
+    expect(backend.start).not.toHaveBeenCalled();
+  });
   it("shows login, consent and exact scopes, never grants on GET; then performs PKCE", async () => {
     const browser = new Browser();
     const signIn = await browser.begin();
@@ -265,6 +350,12 @@ describe("separate owner approval, never a browser dialer", () => {
     expect(page.text).not.toContain('<img src=x');
     expect((await start(prepared)).status).toBe(403);
     expect((await start(prepared, { confirmed: true })).status).toBe(400);
+    for (const origin of ["https://chatgpt.com", "null", null]) {
+      expect((await browser.post(`${path}/approve`, { ...fields(page), decision: "approve" },
+        origin)).status).toBe(403);
+      expect((await start(prepared)).status).toBe(403);
+    }
+    expect(backend.start).not.toHaveBeenCalled();
     const approval = await browser.post(`${path}/approve`, { ...fields(page), decision: "approve" });
     expect(approval.status).toBe(200);
     expect(backend.start).not.toHaveBeenCalled();

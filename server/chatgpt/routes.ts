@@ -147,7 +147,15 @@ export function registerChatGPTIntegration(
     });
     if (!callbackReady && !setupOnly)
       return res.status(503).json({ error: "Configure the exact ChatGPT OAuth callback before authorization" });
-    if (req.headers.origin && req.headers.origin !== base) return res.status(403).json({ error: "Cross-origin request denied" });
+    // OAuth starts in another origin (including opaque iOS browser origins).
+    // Only these HTML GETs may navigate here cross-origin; they still validate
+    // the OAuth request / browser-bound flow. Never relax POST, data API or MCP
+    // Origin checks, and do not grant cross-origin script access via CORS.
+    const oauthNavigation = req.method === "GET" &&
+      req.headers.accept?.includes("text/html") &&
+      (requestPath === `${api}/oauth/authorize` || requestPath === `${api}/browser/review`);
+    if (req.headers.origin && req.headers.origin !== base && !oauthNavigation)
+      return res.status(403).json({ error: "Cross-origin request denied" });
     // Bounded, local abuse guard; not a substitute for edge/global rate limits.
     const key = `${req.ip}:${req.path}`;
     const now = Date.now();
