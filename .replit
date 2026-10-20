@@ -80,6 +80,7 @@ DISABLE_TWILIO_SIGNATURE_CHECK = "true"
 [userenv.production]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"
 CHATGPT_SECRETARY_REDIRECT_URI = "https://chatgpt.com/connector_platform_oauth_redirect"
+CHATGPT_SECRETARY_CALL_MODE = "owner-confirmed"
 
 [postMerge]
 path = "scripts/post-merge.sh"
