@@ -11,6 +11,15 @@ and per-call approval, without changes to existing TalkHint or iOS interfaces.
 Every outbound call requires separate owner confirmation showing its exact
 number and task. Forwarding UI still requires separate agreement.
 
+Outbound integration must be an explicit new opt-in, not a reinterpretation of
+old broad feature flags. Enabling outbound must not also enable incoming scopes.
+**Why:** Existing flag values may predate the approved rollout; a later build
+must not silently turn a read-only connection into permission to dial or access
+unrelated capabilities.
+**How to apply:** Keep baseline OAuth minimal, require separate write consent
+and per-call approval, and apply a scope ceiling to the released MCP profile.
+Preparing code is not permission to publish it or place a test call.
+
 TalkHint must be a separate connectable ChatGPT app/plugin. Route Leader is
 only a UX reference; never mix their projects, endpoints, identities or access.
 

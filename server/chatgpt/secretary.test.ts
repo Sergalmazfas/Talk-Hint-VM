@@ -23,6 +23,7 @@ import request from "supertest";
 import { registerChatGPTIntegration } from "./routes";
 import { digest } from "./security";
 import { testMarkerStore } from "./testSupport";
+import { mcpReleaseConfiguration } from "./releaseConfig";
 vi.mock("../auth", () => ({ authMiddleware: (_req: any, res: any) => res.sendStatus(401) }));
 const input = {
   phoneNumber: "+12025550123", instruction: "Ask for opening hours",
@@ -63,16 +64,18 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     const origin = "https://outbound-fixture.example.test", clientId = "talkhint-chatgpt";
     const resource = `${origin}/api/chatgpt/mcp`;
     const redirectUri = "https://chatgpt.com/connector_platform_oauth_redirect";
-    registerChatGPTIntegration(app, {
-      enabled: true, outboundEnabled: true, origin, clientId, redirectUri,
-      signingKey: () => "outbound-only-isolated-fixture-key-not-secret",
-    }, testMarkerStore(), secretaryBackend(dial), (req, res, next) => {
+    const config = mcpReleaseConfiguration({
+      CHATGPT_SECRETARY_ORIGIN: origin, CHATGPT_SECRETARY_REDIRECT_URI: redirectUri,
+      CHATGPT_SECRETARY_CALL_MODE: "owner-confirmed",
+    }, true, () => "outbound-only-isolated-fixture-key-not-secret");
+    expect(config.outboundEnabled).toBe(true);
+    registerChatGPTIntegration(app, config, testMarkerStore(), secretaryBackend(dial), (req, res, next) => {
       const id = req.header("x-fixture-owner");
       if (!id) return void res.sendStatus(401);
       req.user = { id } as any;
       next();
     });
-    const scope = "calls:read calls:transcript secretary:start offline_access";
+    const scope = "calls:read secretary:start offline_access";
     expect((await request(app).post("/api/chatgpt/connections").set("x-fixture-owner", "alice")
       .send({ approved: true, scope })).status).toBe(201);
     const verifier = "outbound-fixture-pkce-verifier-forty-three-characters-long";
@@ -109,8 +112,10 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     task.status = "finalizing";
     expect((await rpc("get_task", { id: task.id })).body.result.structuredContent.status).toBe("finalizing");
     task.status = "completed";
-    const result = await rpc("get_task", { id: task.id, includeTranscript: true });
-    expect(result.body.result.structuredContent).toMatchObject({ id: task.id, status: "completed", transcript: "private words" });
+    const result = await rpc("get_task", { id: task.id });
+    expect(result.body.result.structuredContent).toMatchObject({ id: task.id, status: "completed" });
+    expect(result.body.result.structuredContent).not.toHaveProperty("transcript");
+    expect((await rpc("get_task", { id: task.id, includeTranscript: true })).body.result.isError).toBe(true);
     // All persistence, clone lookup and provider dialing in this test are fakes.
     // The production Twilio dialer, database and worker are never imported.
   });

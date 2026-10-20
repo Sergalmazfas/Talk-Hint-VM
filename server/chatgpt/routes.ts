@@ -15,6 +15,8 @@ export interface IntegrationConfig {
   signingKey: () => string;
   /** Stage one is read-only. Never infer dialing permission from token scopes. */
   outboundEnabled?: boolean;
+  /** Optional transport-specific scope ceiling. It can only remove capabilities. */
+  allowedScopes?: readonly Scope[];
   /** Separate confidential client and audience. Never enable by inference from MCP. */
   actions?: { ownerId: string; clientSecret: () => string };
 }
@@ -80,7 +82,8 @@ export function registerChatGPTIntegration(
   const resource = `${base}${api}${config.actions ? "" : "/mcp"}`;
   const scopesSupported = (config.outboundEnabled === true ? [...SCOPES] :
     SCOPES.filter(scope => scope !== "secretary:start" && scope !== "incoming:read"))
-    .filter(scope => !config.actions || scope !== "incoming:read");
+    .filter(scope => (!config.actions || scope !== "incoming:read") &&
+      (!config.allowedScopes || config.allowedScopes.includes(scope)));
   // MCP clients fall back to ALL protected-resource scopes when a challenge
   // omits scope. Advertise only baseline rights, not every incremental capability.
   // The authorization/consent validator still accepts explicit supported upgrades.

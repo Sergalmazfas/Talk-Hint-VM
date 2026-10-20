@@ -84,6 +84,54 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       expect(mcpReleaseConfiguration({ CHATGPT_SECRETARY_REDIRECT_URI: url }, true, key).redirectUri).toBe("");
     }
   });
+  it("requires the new explicit outbound mode, a valid callback and an enabled integration", () => {
+    const mode = { CHATGPT_SECRETARY_CALL_MODE: "owner-confirmed" };
+    expect(mcpReleaseConfiguration(mode, true, key).outboundEnabled).toBe(false);
+    expect(mcpReleaseConfiguration({ ...mode, CHATGPT_SECRETARY_REDIRECT_URI: callback,
+      CHATGPT_SECRETARY_ENABLED: "false" }, true, key).outboundEnabled).toBe(false);
+    expect(mcpReleaseConfiguration({ ...mode, CHATGPT_SECRETARY_REDIRECT_URI: callback },
+      false, key).outboundEnabled).toBe(false);
+    const config = mcpReleaseConfiguration({ ...mode, CHATGPT_SECRETARY_REDIRECT_URI: callback }, true, key);
+    expect(config.outboundEnabled).toBe(true);
+    expect(config.allowedScopes).toEqual(["calls:read", "calls:transcript", "offline_access", "secretary:start"]);
+    expect(config.allowedScopes).not.toContain("incoming:read");
+    for (const value of ["true", "all", "enabled", ""])
+      expect(mcpReleaseConfiguration({ CHATGPT_SECRETARY_CALL_MODE: value,
+        CHATGPT_SECRETARY_REDIRECT_URI: callback }, true, key).outboundEnabled).toBe(false);
+  });
+  it("adds outbound tools only on opt-in, with separate scope escalation and no incoming permission", async () => {
+    const f = fixture(callback, { CHATGPT_SECRETARY_CALL_MODE: "owner-confirmed" });
+    const listed = await request(f.app).post("/api/chatgpt/mcp").send({
+      jsonrpc: "2.0", id: 1, method: "tools/list",
+    });
+    expect(listed.body.result.tools.map((tool: any) => tool.name)).toEqual([
+      "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "prepare_call", "start_call",
+    ]);
+    expect((await request(f.app).get("/api/chatgpt/readiness")).body.mode).toBe("outbound");
+    expect((await request(f.app).get("/.well-known/oauth-protected-resource")).body.scopes_supported)
+      .toEqual(["calls:read", "offline_access"]);
+    const base = await f.token("alice", ["calls:read", "offline_access"]);
+    const input = { phoneNumber: "+12025550123", instruction: "Ask only for opening hours",
+      clientRequestId: "56fa4264-8b0a-4692-bcb2-77b03c145631" };
+    const missingPermission = await f.rpc("prepare_call", input, base.value);
+    expect(missingPermission.body.result.isError).toBe(true);
+    expect(missingPermission.headers["www-authenticate"]).toContain(
+      'scope="calls:read offline_access secretary:start"');
+    expect(missingPermission.headers["www-authenticate"]).not.toContain("calls:transcript");
+    const write = await f.token("alice", ["calls:read", "offline_access", "secretary:start"]);
+    const preview = await f.rpc("prepare_call", input, write.value);
+    expect(preview.body.result.structuredContent).toMatchObject({
+      status: "owner_approval_required", call: input,
+    });
+    const { confirmation } = preview.body.result.structuredContent;
+    expect((await f.rpc("start_call", { confirmation }, write.value)).body.result.isError).toBe(true);
+    expect((await f.rpc("start_call", { confirmation, confirmed: true }, write.value)).body.result.isError).toBe(true);
+    expect((await request(f.app).post("/api/chatgpt/connections").set("x-test-owner", "alice")
+      .send({ approved: true, scope: "calls:read incoming:read" })).status).toBe(400);
+    expect((await f.rpc("get_incoming", {}, write.value)).body.result.isError).toBe(true);
+    expect(f.backend.start).not.toHaveBeenCalled();
+    expect(f.backend.incoming).not.toHaveBeenCalled();
+  });
   it("bootstraps discovery, initialization and five read-only tools before a callback is supplied", async () => {
     const f = fixture();
     for (const path of ["/.well-known/oauth-protected-resource",
