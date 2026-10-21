@@ -3,6 +3,30 @@ import UIKit
 @testable import TalkHint
 
 final class CallProfilesTests: XCTestCase {
+    func testCardProfileIsAQueryAndNotAnEncodedPath() throws {
+        for scope in CallProfileScope.allCases {
+            let url = try APIClient.requestURL("/api/cards", queryItems: [
+                URLQueryItem(name: "profile", value: scope.rawValue)
+            ])
+            XCTAssertEqual(url.path, "/api/cards")
+            XCTAssertEqual(url.scheme, "https")
+            XCTAssertFalse(url.absoluteString.contains("%3F"))
+            let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+            XCTAssertEqual(query.count, 1)
+            XCTAssertEqual(query.first?.name, "profile")
+            XCTAssertEqual(query.first?.value, scope.rawValue)
+        }
+    }
+
+    func testNonQueryPathsKeepTheirExistingDestination() throws {
+        for path in ["/api/call-profiles", "/api/call-profiles/work-number", "/api/cards"] {
+            let url = try APIClient.requestURL(path)
+            XCTAssertEqual(url.path, path)
+            XCTAssertNil(url.query)
+        }
+        XCTAssertThrowsError(try APIClient.requestURL("/api/cards?profile=work"))
+    }
+
     private let fixture = """
     {
       "profiles": [

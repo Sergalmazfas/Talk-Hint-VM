@@ -644,7 +644,8 @@ final class APIClient {
     /// services). Server route `/api/cards` is user-scoped and returns them in
     /// priority order (sortOrder asc, then most recently updated).
     func knowledgeCards(profileScope: CallProfileScope = .personal) async throws -> [KnowledgeCardItem] {
-        let data = try await request("/api/cards?profile=\(profileScope.rawValue)", method: "GET", json: nil, authenticated: true)
+        let data = try await request("/api/cards", method: "GET", json: nil, authenticated: true,
+                                     queryItems: [URLQueryItem(name: "profile", value: profileScope.rawValue)])
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let arr = obj["cards"] as? [[String: Any]] else {
             throw APIError.decoding
@@ -922,8 +923,23 @@ final class APIClient {
 
     // MARK: - Core request
 
-    private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool) async throws -> Data {
-        var req = URLRequest(url: AppConfig.baseURL.appendingPathComponent(path))
+    /// A URL path and its query must stay separate: appendingPathComponent
+    /// encodes "?" as %3F instead of creating a query, which produces a 404.
+    /// Internal visibility lets XCTest verify actual Foundation URL behavior.
+    static func requestURL(_ path: String, queryItems: [URLQueryItem] = []) throws -> URL {
+        guard !path.contains("?"), !path.contains("#"),
+              var components = URLComponents(url: AppConfig.baseURL.appendingPathComponent(path),
+                                             resolvingAgainstBaseURL: false) else {
+            throw APIError.decoding
+        }
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else { throw APIError.decoding }
+        return url
+    }
+
+    private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool,
+                         queryItems: [URLQueryItem] = []) async throws -> Data {
+        var req = URLRequest(url: try Self.requestURL(path, queryItems: queryItems))
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 

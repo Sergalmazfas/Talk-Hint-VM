@@ -30,12 +30,22 @@ describe("native personal/work integration wiring (not a simulator test)", () =>
     expect(screen).toContain("KnowledgeCardsViewController(profileScope: scope)");
   });
   it("passes the exact scope through reads, creates, edits and the editor", () => {
-    expect(api).toContain('"/api/cards?profile=\\(profileScope.rawValue)"');
+    expect(api).toContain('request("/api/cards", method: "GET", json: nil, authenticated: true,');
+    expect(api).toContain('queryItems: [URLQueryItem(name: "profile", value: profileScope.rawValue)]');
     expect(api).toContain('"profileScope": profileScope.rawValue');
     expect(api).toContain('payload["profileScope"] = profileScope.rawValue');
     expect(api).toContain("cards.allSatisfy({ $0.profileScope == profileScope })");
     expect(cards).toContain("self.profileScope = card?.profileScope ?? profileScope");
     expect(cards.match(/sortOrder: sortOrder, profileScope: profileScope/g)).toHaveLength(2);
+  });
+  it("keeps the query separate from the path and routes HTTP calls through the tested URL builder", () => {
+    expect(api).not.toContain('request("/api/cards?');
+    expect(api).toContain('components.queryItems = queryItems.isEmpty ? nil : queryItems');
+    expect(api).toContain('URLRequest(url: try Self.requestURL(path, queryItems: queryItems))');
+    expect(api).toContain('!path.contains("?")');
+    const nativeTests = read("ios/TalkHintTests/CallProfilesTests.swift");
+    expect(nativeTests).toContain('XCTAssertEqual(url.path, "/api/cards")');
+    expect(nativeTests).toContain('XCTAssertEqual(query.first?.value, scope.rawValue)');
   });
   it("uses native owner auth and keeps setup separate from ordinary calls", () => {
     const connection = api.slice(api.indexOf("func connectWorkNumber("), api.indexOf("struct KnowledgeCardItem"));

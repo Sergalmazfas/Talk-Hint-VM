@@ -31,3 +31,14 @@ urgent compatibility fixes, keeping required declarations in already-included
 sources is a justified exception to the one-file-per-controller preference.
 Avoid duplicate definitions when both old and regenerated projects are used;
 do not claim a native build passed based on source checks alone.
+
+Native API query parameters must be built with URLComponents/URLQueryItem,
+not included in a string passed to appendingPathComponent.
+
+**Why:** Foundation treats the query separator as part of the path and encodes
+it, turning an existing protected cards route into a different 404 route.
+Source-only wiring checks did not catch Foundation's behavior.
+
+**How to apply:** Test the actual resulting URL's path and decoded query in
+XCTest, including scoped card reads. Keep HTTP/source checks distinct from a
+successful native test run.

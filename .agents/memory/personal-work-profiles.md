@@ -27,6 +27,14 @@ cancel the provider number.
 **How to apply:** Use the approved CDL plan, preserve old history, and do not
 replace the owner's choice with another free number.
 
+Use the explicit in-app confirmation to attach the existing CDL line rather
+than buying a replacement or requiring web-only setup.
+
+**Why:** The user confirmed that this native number-attachment flow succeeded.
+
+**How to apply:** Preserve that setup flow while fixing cards or other profile
+features; do not ask the owner to reattach a working number.
+
 Personal/work numbers and cards must be reachable in the existing native iOS
 app. A web-only settings page does not fulfill the requested mobile experience.
 
