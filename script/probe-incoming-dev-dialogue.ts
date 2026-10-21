@@ -9,7 +9,8 @@ import {encodePcmu,floatToPcm16,resampleLinear} from "../client/src/lib/incoming
 async function syntheticSpeech(text:string){
   const response=await fetch("https://api.openai.com/v1/audio/speech",{
     method:"POST",headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`,"Content-Type":"application/json"},
-    body:JSON.stringify({model:"gpt-4o-mini-tts",voice:"alloy",input:text,response_format:"pcm"}),
+    body:JSON.stringify({model:"gpt-4o-mini-tts",voice:"alloy",input:text,response_format:"pcm",
+      instructions:"Clearly pronounce the supplied text in its language. Pronounce phone digits accurately; do not omit, merge or change digits."}),
     signal:AbortSignal.timeout(30000),
   });
   if(!response.ok)throw new Error(`Synthetic fixture generation HTTP ${response.status}`);
@@ -21,7 +22,12 @@ async function syntheticSpeech(text:string){
 async function main(){
   if(process.env.NODE_ENV!=="development")throw new Error("Development only");
   const audioMode=process.argv.includes("--audio");
-  const texts=audioMode?[
+  const texts=process.argv.includes("--uncertain-phone")?[
+    "Здравствуйте. Меня зовут Анна Тест. Номер пять пять пять ноль один ноль ноль. Код страны не помню, сначала уточните, не угадывайте.",
+    "Код страны один. Номер: два ноль два, пять пять пять, ноль один шесть два. Повторите перед сохранением.",
+    "Код страны один. Исправьте номер: два ноль два, пять пять пять, ноль один семь три. Прочитайте исправленный номер и спросите подтверждение.",
+    "Да, подтверждаю именно исправленный номер, который вы только что прочитали. Других данных пока нет.",
+  ]:audioMode?[
     "Hello. Please stop for a moment. My name is Ana Test.",
     "Здравствуйте, давайте по-русски. Меня зовут Анна Тест. Я хочу оставить заявку на массаж.",
     "Hola, ¿podemos hablar en español? Mi nombre es Ana Prueba. ¡Gracias!",
@@ -83,12 +89,20 @@ async function main(){
       await wait(()=>completedCount>before&&!active&&Date.now()-last>500);
       if(closed)break;
     }
+    if(process.argv.includes("--uncertain-phone")){
+      const fields=store.records.get("synthetic-dialogue")?.fields;
+      if(fields?.phone!=="+12025550173"||fields.callbackConfirmed!==true)
+        throw new Error("Phone correction and reconfirmation did not complete");
+    }
     console.log("PROBE_RESULT",JSON.stringify({errors,closed,audioBytes,clears,doneCount,
       savedFields:store.records.get("synthetic-dialogue")?.fields,
       recognizedCallerTexts:store.records.get("synthetic-dialogue")?.turns.filter(t=>t.role==="caller").map(t=>t.text),
       syntheticAudio:audioMode,phoneCalls:false,microphoneTested:false}));
-  }catch{
+  }catch(error){
     console.log("PROBE_STATE",JSON.stringify({closed,active,clears,doneCount,completedCount,audioBytes,errors,
+      failure:error instanceof Error&&error.message==="Phone correction and reconfirmation did not complete"?"phone_not_confirmed":"timeout_or_closed",
+      syntheticFields:store.records.get("synthetic-dialogue")?.fields,
+      syntheticCallerTexts:store.records.get("synthetic-dialogue")?.turns.filter(t=>t.role==="caller").map(t=>t.text),
       recentEvents:events.slice(-20)}));throw new Error("Probe did not complete");
   }finally{if(pump)clearInterval(pump);await c.stop("completed");}
 }

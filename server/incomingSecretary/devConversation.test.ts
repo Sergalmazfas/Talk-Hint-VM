@@ -135,3 +135,50 @@ it("interruption clears immediately and never starts a stale tool continuation d
   f.event({type:"input_audio_buffer.speech_stopped"});
   await f.conversation.stop("completed");
 });
+it.each([
+  {phone:"555-0100"},{phone:"+155500222"},{localDate:"tomorrow"},{localDate:"2026-02-31"},
+  {localTime:"8 pm"},{durationMinutes:"60"},{language:"ru-RU"},
+])("invalid or uncertain intake fields ask for correction without ending the conversation: %j",async patch=>{
+  const f=await fixture();f.tool("name",{name:"Ana",language:"ru"});
+  await vi.waitFor(()=>expect(f.record().fields.name).toBe("Ana"));
+  f.tool("bad",patch);
+  await vi.waitFor(()=>expect(f.sent.some(e=>e.item?.call_id==="bad")).toBe(true));
+  const result=JSON.parse(f.sent.find(e=>e.item?.call_id==="bad").item.output);
+  expect(result).toMatchObject({saved:false,bookingConfirmed:false});
+  expect(result.issues.length).toBeGreaterThan(0);
+  expect(f.record().fields.name).toBe("Ana");
+  expect(f.record().fields.phone).toBeUndefined();
+  expect(f.conversation.closed).toBe(false);expect(f.peer.close).not.toHaveBeenCalled();
+  expect(f.received.some(e=>e.type==="error")).toBe(false);
+  f.tool("corrected",{phone:"+15550000222",callbackConfirmed:false,language:"ru"});
+  await vi.waitFor(()=>expect(f.record().fields.phone).toBe("+15550000222"));
+  expect(f.record().fields.callbackConfirmed).toBe(false);
+  await f.conversation.stop("completed");
+});
+it("invalid JSON is recoverable and never echoes raw arguments or claims they were stored",async()=>{
+  const f=await fixture();
+  f.event({type:"response.function_call_arguments.done",response_id:"r",call_id:"bad",name:"save_request",
+    arguments:'{sensitive-raw-argument'});
+  await vi.waitFor(()=>expect(f.sent.some(e=>e.item?.call_id==="bad")).toBe(true));
+  expect(JSON.stringify(f.sent)).not.toContain("sensitive-raw-argument");
+  expect(f.conversation.closed).toBe(false);
+  expect(JSON.parse(f.sent.find(e=>e.item?.call_id==="bad").item.output).saved).toBe(false);
+  await f.conversation.stop("completed");
+});
+it("a failed acknowledgement after a successful write is not misreported as a failed write",async()=>{
+  const f=await fixture();
+  vi.spyOn(f.ai,"send").mockImplementation(e=>{
+    if(e.item?.type==="function_call_output")throw new Error("Transport failed");
+    return f.sent.push(e);
+  });
+  f.tool("save",{name:"Ana"});
+  await vi.waitFor(()=>expect(f.record().closed).toBe(true));
+  expect(f.record().fields.name).toBe("Ana");
+  expect(f.record().endReason).toBe("tool_ack_failed");
+  expect(f.received.find(e=>e.type==="error").error).toContain("Сведения сохранены");
+});
+it("records which transport failed instead of generic connection lost",async()=>{
+  const f=await fixture();f.event({type:"transport_closed",closeCode:1006});
+  await vi.waitFor(()=>expect(f.record().closed).toBe(true));
+  expect(f.record().endReason).toBe("openai_socket_closed:1006");
+});

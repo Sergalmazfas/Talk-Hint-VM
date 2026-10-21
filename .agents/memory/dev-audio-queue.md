@@ -18,3 +18,9 @@ Schedule a tool-result continuation only after the preceding response has ended 
 The owner explicitly confirmed the incoming Dev voice sounds excellent and the responses are fast. Preserve the selected voice/model while fixing connection/interruption issues.
 
 **Why:** The user confirmed these qualities after the first microphone test.
+
+Treat malformed/uncertain tool fields as recoverable validation errors, not database failure. Return saved=false, ask for clarification, and never broaden accepted phone/date formats or guess a country code just to avoid a rejection.
+
+**Why:** Normal spoken phone dictation can produce invalid structured arguments; the original broad save-error catch terminated an otherwise healthy conversation. A successfully committed write followed by an acknowledgement transport failure is a different case again.
+
+**How to apply:** Keep tool JSON-schema constraints aligned with intake validation. Test invalid input followed by correction, real write failure, and post-write transport failure separately.

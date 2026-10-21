@@ -100,6 +100,19 @@ delivery test. Fatal provider codes are retained in safe TEST diagnostics;
 raw provider messages/credentials/IDs are not logged. The browser shows an
 interruption counter and includes finished chunks in playback-time reports.
 
+Malformed tool JSON and invalid phone/date/time/language/duration fields are
+recoverable: the agent receives `saved:false` and safe field issue codes, asks
+for clarification, and keeps prior valid facts. No phone digits/country code
+are guessed. A real database failure remains an unconfirmed save, not success.
+A write that committed before a failed voice acknowledgement is reported
+separately. End reasons distinguish processing, provider socket and browser
+socket failures.
+
+`--uncertain-phone` exercises country-code clarification, correction and
+reconfirmation with fictional numbers; combine with `--audio` for synthetic
+spoken input. The probe fails unless the final corrected number is exact and
+confirmed. No owner data or real requests are used.
+
 Before any later telephone activation, the owner should test EN→RU, EN→ES,
 EN→RU→ES, ¿/¡ and Cyrillic, interruption, hold/resume, headphones versus
 speaker echo, corrected name/phone/address/date/time, final detail review,

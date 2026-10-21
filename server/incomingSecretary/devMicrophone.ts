@@ -126,8 +126,9 @@ export function handleIncomingDevSocket(ws:WebSocket,request:{headers:Record<str
   let entry:Entry|undefined,claiming=false,ended=false;
   const authTimer=setTimeout(()=>ws.close(1008,"Authentication timeout"),10000);authTimer.unref?.();
   const lifetime=setTimeout(()=>{if(entry)void stop(entry,"test time limit").catch(()=>{});ws.close();},15*60_000);lifetime.unref?.();
-  const finish=()=>{ended=true;clearTimeout(authTimer);clearTimeout(lifetime);if(entry)void stop(entry,"connection lost").catch(()=>{});};
-  ws.on("close",finish);ws.on("error",finish);
+  const finish=(reason:string)=>{ended=true;clearTimeout(authTimer);clearTimeout(lifetime);if(entry)void stop(entry,reason).catch(()=>{});};
+  ws.on("close",(code)=>finish(`browser_socket_closed:${Number.isInteger(code)?code:"unknown"}`));
+  ws.on("error",()=>finish("browser_socket_error"));
   ws.on("message",raw=>{
     if(ended)return;
     if(raw.toString().length>40000){ws.close(1009,"Message too large");return;}

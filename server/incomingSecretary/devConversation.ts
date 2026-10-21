@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { ZodError } from "zod";
 import { IncomingAudio } from "./audio";
 import { IntakeSession } from "./session";
 import { MODEL,VOICE,type RequestRecord } from "./policy";
@@ -24,7 +25,7 @@ export class DevConversation {
     if(this.closed)return;
     if(this.pending>=500){void this.stop("processing queue limit");return;}
     this.pending++;
-    this.tail=this.tail.then(fn).catch(()=>{void this.fail("Не удалось сохранить тестовую заявку. Успешное принятие не подтверждено.");})
+    this.tail=this.tail.then(fn).catch(()=>{void this.fail("Не удалось сохранить тестовую заявку. Успешное принятие не подтверждено.","storage_write_failed");})
       .finally(()=>{this.pending--;});
   }
   private flushContinuation(){
@@ -50,7 +51,7 @@ export class DevConversation {
       this.continuation=true;this.flushContinuation();
     }catch{
       if(this.closed)return;
-      await this.fail("Не удалось открыть требуемый OpenAI Realtime-сеанс: модель недоступна, соединение отклонено или конфигурация не подтверждена. Другой моделью он не заменялся.");
+      await this.fail("Не удалось открыть требуемый OpenAI Realtime-сеанс: модель недоступна, соединение отклонено или конфигурация не подтверждена. Другой моделью он не заменялся.","openai_connect_failed");
     }
   }
   input(e:any) {
@@ -85,7 +86,9 @@ export class DevConversation {
       void this.fail(`${message} Код: ${code}.`,`openai:${code}`);return;
     }
     if(["transport_error","transport_closed"].includes(e.type)){
-      void this.fail("Голосовое соединение прервано. Сохранённые тестовые сведения остаются в истории.");return;
+      const code=Number.isInteger(e.closeCode)?String(e.closeCode):"unknown";
+      void this.fail("Голосовое соединение прервано. Сохранённые тестовые сведения остаются в истории.",
+        e.type==="transport_closed"?`openai_socket_closed:${code}`:"openai_socket_error");return;
     }
     if(e.type==="input_audio_buffer.speech_started"){
       this.speaking=true;this.continuation=false;
@@ -134,22 +137,45 @@ export class DevConversation {
       try {
       if(this.closed)return;
       if(!["save_request","submit_request"].includes(e.name))throw new Error("Unsupported incoming tool");
+      let persisted=false;
       try {
         const result=await this.session.save(JSON.parse(e.arguments),e.name==="submit_request");
+        persisted=true;
         this.send({type:"request",request:result.request});
         this.ai?.send({type:"conversation.item.create",item:{type:"function_call_output",call_id:e.call_id,
           output:JSON.stringify({saved:true,status:result.request.status,fields:result.request.fields,
             missing:result.missing,warnings:result.warnings,bookingConfirmed:false})}});
         if(!this.blocked.has(String(e.response_id)))this.continuation=true;
-      }catch{
+      }catch(error){
+        if(!persisted&&(error instanceof ZodError||error instanceof SyntaxError)){
+          const issues=error instanceof ZodError?error.issues.map(issue=>({
+            field:issue.path.filter(p=>typeof p==="string"&&/^[a-zA-Z]+$/.test(p)).join(".")||"$",
+            code:issue.code,
+          })):[{field:"$",code:"invalid_json"}];
+          this.diagnostic("invalid_tool_arguments",false);
+          this.send({type:"notice",code:"invalid_tool_arguments",
+            message:"Секретарь уточняет формат данных. Разговор продолжается; успешное сохранение этих данных ещё не подтверждено."});
+          this.ai?.send({type:"conversation.item.create",item:{type:"function_call_output",call_id:e.call_id,
+            output:JSON.stringify({saved:false,bookingConfirmed:false,error:"Invalid field format, not a storage failure.",
+              issues,instructions:"Do not claim these fields were saved. Keep earlier valid facts. Clarify uncertain details in the caller's current language. A phone must be an unambiguous E.164 number with explicit country code; never guess digits or country. Dates YYYY-MM-DD, times HH:mm (24h), duration an integer. Use null for unknown fields and ask the caller. Confirm the corrected callback number again."})}});
+          if(!this.blocked.has(String(e.response_id)))this.continuation=true;
+          return;
+        }
+        if(persisted){
+          void this.fail("Сведения сохранены, но ответ не удалось передать в голосовой сеанс. Проверьте TEST-историю.","tool_ack_failed");
+          return;
+        }
         try{this.ai?.send({type:"conversation.item.create",item:{type:"function_call_output",call_id:e.call_id,
           output:JSON.stringify({saved:false,bookingConfirmed:false,error:"Storage failed. Do not claim successful acceptance."})}});}catch{}
-        void this.fail("Ошибка сохранения. Заявка не подтверждена как успешно принятая; проверьте сохранённую часть в истории.");
+        void this.fail("Ошибка сохранения. Заявка не подтверждена как успешно принятая; проверьте сохранённую часть в истории.","storage_write_failed");
       }
       }finally{this.pendingTools--;this.flushContinuation();}
     });}
   }
-  private async fail(message:string,reason="connection lost") {this.send({type:"error",error:message});await this.stop(reason);}
+  private async fail(message:string,reason="dev_processing_failed") {
+    console.warn(`[IncomingDev] stopping: ${reason}`);
+    this.send({type:"error",error:message,code:reason});await this.stop(reason);
+  }
   stop(reason:string):Promise<void> {
     if(this.closing)return this.closing;
     this.closed=true;this.ready=false;this.ai?.close();

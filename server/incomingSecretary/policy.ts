@@ -27,7 +27,9 @@ export function defaults(numberId: string): Settings {
 }
 const optionalText = (n: number) => z.string().trim().max(n).nullable().optional();
 export const fieldsSchema = z.object({
-  name: optionalText(160), phone: z.string().regex(/^\+[1-9]\d{7,14}$/).nullable().optional(),
+  name: optionalText(160), phone: z.string().regex(/^\+[1-9]\d{7,14}$/)
+    .refine(s=>!s.startsWith("+1")||/^\+1\d{10}$/.test(s),"Country code +1 requires ten national digits")
+    .nullable().optional(),
   callbackConfirmed: z.boolean().optional(), address: optionalText(500),
   localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(s => {
     const d = new Date(s + "T12:00:00Z"); return Number.isFinite(+d) && d.toISOString().slice(0, 10) === s;

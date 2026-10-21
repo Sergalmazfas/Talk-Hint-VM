@@ -73,6 +73,7 @@ function base64ToBytes(encoded: string) {
 export function IncomingSecretaryDevBench({ token, numberId }: Props) {
   const [status, setStatus] = useState<BenchStatus>("idle");
   const [error, setError] = useState("");
+  const [notice,setNotice]=useState("");
   const [interruptions,setInterruptions]=useState(0);
   const [info, setInfo] = useState<BenchInfo | null>(null);
   const [currentRequest, setCurrentRequest] = useState<TestRequest | null>(null);
@@ -202,6 +203,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
     startLockRef.current = true;
     const epoch = ++epochRef.current;
     setError("");
+    setNotice("");
     setInterruptions(0);completedPlaybackRef.current.clear();progressSentRef.current.clear();
     setCurrentRequest(null);
     setTranscript([]);
@@ -357,14 +359,19 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
           if(playbackRef.current.length)setInterruptions(count=>count+1);
           const responseId = String(message.responseId || "");
           clearScheduledAudio(playbackRef.current, audioGuardRef.current, responseId || undefined);
+        } else if(message.type==="notice"){
+          setNotice(safeErrorText(String(message.message||"Уточнение данных. Тест продолжается."),token,createdSession?.capability));
         } else if (message.type === "request" || message.type === "transcript") {
+          if(message.type==="request")setNotice("");
           const request = message.request as TestRequest;
           if (request) {
             setCurrentRequest(request);
             if (Array.isArray(request.turns)) setTranscript(request.turns);
           }
         } else if (message.type === "error") {
-          setError(safeErrorText(String(message.error || "Сессия вернула неизвестную ошибку."), token, createdSession?.capability));
+          const code=String(message.code||"");
+          setError(safeErrorText(String(message.error || "Сессия вернула неизвестную ошибку."), token, createdSession?.capability)
+            +(/^[a-z0-9_:]{1,100}$/i.test(code)?` [${code}]`:""));
           void stopSession(true);
           setStatus("error");
         } else if (message.type === "ended") {
@@ -402,9 +409,9 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
           setStatus("error");
         }
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         if (epochRef.current === epoch && sessionRef.current) {
-          setError("Поток Secretary закрылся до завершения теста.");
+          setError(`Канал браузера со стендом закрылся до завершения теста. Код: ${event.code}.`);
           void stopSession(true);
           setStatus("error");
         }
@@ -460,6 +467,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
         <div><p className="text-xs uppercase tracking-[0.17em] text-amber-200">Live bench / development only</p><h2 className="mt-1 text-2xl font-semibold">Сначала услышать. Потом решать.</h2>
           <p className="mt-1 max-w-2xl text-sm leading-6 text-[#a9bbb7]">Это реальный микрофон и реальный входящий Secretary runtime — не текстовая симуляция. Сессия резервирует TEST-заявку; телефонные вызовы, календарь и уведомления не запускаются.</p>
           <p aria-live="polite" className="mt-2 text-sm text-teal-100">Перебиваний со сбросом озвучки: {interruptions}</p></div>
+        {notice&&<p role="status" className="text-sm text-amber-100">{notice}</p>}
         <Badge variant="outline" className="w-fit border-amber-700 bg-[#302b20] text-amber-100">TEST · DEV</Badge>
       </div>
       <div className="grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">

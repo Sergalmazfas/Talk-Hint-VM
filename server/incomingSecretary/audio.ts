@@ -5,9 +5,12 @@ export const intakeTools = ["save_request", "submit_request"].map(name => ({
   type: "function", name, description: name === "save_request" ? "Persist collected/corrected request fields before acknowledging them." :
     "Save a reviewed request for owner confirmation, NEVER an appointment booking.",
   parameters: { type: "object", properties: {
-    name:{type:["string","null"]}, phone:{type:["string","null"]}, callbackConfirmed:{type:"boolean"},
-    address:{type:["string","null"]},localDate:{type:["string","null"]},localTime:{type:["string","null"]},
-    durationMinutes:{type:["number","null"]},language:{type:["string","null"],enum:["en","ru","es",null]},
+    name:{type:["string","null"]}, phone:{type:["string","null"],pattern:"^\\+(?:1\\d{10}|[2-9]\\d{7,14})$",
+      description:"E.164 with explicit country code, e.g. +12025550173. Country code +1 requires exactly ten national digits. If country/digits are uncertain, use null and ask; never guess, pad or discard digits."},
+    callbackConfirmed:{type:"boolean",description:"True only after caller confirms the exact current callback number; reconfirm any correction."},
+    address:{type:["string","null"]},localDate:{type:["string","null"],pattern:"^\\d{4}-\\d{2}-\\d{2}$",description:"A real calendar date YYYY-MM-DD in the business timezone; null if uncertain."},
+    localTime:{type:["string","null"],pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d$",description:"24-hour HH:mm in the business timezone; null if uncertain."},
+    durationMinutes:{type:["integer","null"],minimum:1,maximum:480},language:{type:["string","null"],enum:["en","ru","es",null]},
     notes:{type:["string","null"]},reviewed:{type:"boolean"},
   },additionalProperties:false },
 }));
@@ -41,7 +44,7 @@ export class IncomingAudio {
         this.event(e);
       });
       s.on("error",()=>{clearTimeout(timer);reject(new Error("Incoming AI connection failed"));this.event({type:"transport_error"});});
-      s.on("close",()=>{clearTimeout(timer);if(!ready)reject(new Error("Incoming AI closed"));this.event({type:"transport_closed"});});
+      s.on("close",(closeCode)=>{clearTimeout(timer);if(!ready)reject(new Error("Incoming AI closed"));this.event({type:"transport_closed",closeCode});});
     });
   }
   send(e: object) {
