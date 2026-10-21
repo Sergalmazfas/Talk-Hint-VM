@@ -5,6 +5,7 @@ import { registerChatGPTIntegration, type IntegrationConfig } from "./routes";
 import { Credentials, grantId, type Scope } from "./security";
 import { testMarkerStore } from "./testSupport";
 import { CALL_APPROVAL_RESOURCE } from "./callApprovalWidget";
+import { LEGACY_CALL_APPROVAL_RESOURCES, hostUiSupport, uiResourceLabel } from "./uiResources";
 
 vi.mock("../auth", () => ({ authMiddleware: (_req: any, res: any) => res.sendStatus(401) }));
 const config: IntegrationConfig = {
@@ -63,7 +64,7 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
   it("advertises a self-contained resource and app-only consequential tool", async () => {
     const initialized = await rpc("initialize");
     expect(initialized.body.result.capabilities.resources).toEqual({});
-    expect(initialized.body.result.serverInfo.version).toBe("1.5.0");
+    expect(initialized.body.result.serverInfo.version).toBe("1.5.1");
     const catalog = (await rpc("tools/list")).body.result.tools;
     const preview = catalog.find((t: any) => t.name === "prepare_call");
     expect(preview.inputSchema.properties.voiceProvider).toMatchObject({
@@ -81,6 +82,38 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect(resource._meta["openai/widgetCSP"].redirect_domains).toEqual([config.origin]);
     expect((await rpc("resources/read", { uri: "file:///etc/passwd" })).status).toBe(404);
     expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("keeps cached installed-plugin resource URIs working without new OAuth or a new draft", async () => {
+    const current = (await rpc("resources/read", { uri: CALL_APPROVAL_RESOURCE })).body.result.contents[0];
+    for (const uri of LEGACY_CALL_APPROVAL_RESOURCES) {
+      const reply = await rpc("resources/read", { uri });
+      expect(reply.status).toBe(200);
+      expect(reply.body.result.contents[0]).toMatchObject({
+        uri, mimeType: current.mimeType, text: current.text,
+      });
+      expect(reply.body.result.contents[0].text).toContain("Подтвердить и позвонить");
+    }
+    expect((await rpc("resources/templates/list")).body.result.resourceTemplates).toEqual([]);
+    const readiness = await request(app).get("/api/chatgpt/readiness");
+    expect(readiness.body.ui.compatibleResourceUris).toEqual([...LEGACY_CALL_APPROVAL_RESOURCES]);
+    expect(readiness.body.clientId).toBe(config.clientId);
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("never resolves arbitrary resources or logs input-derived secrets in diagnostic labels", async () => {
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      for (const uri of ["file:///etc/passwd", "https://attacker.test", "ui://talkhint/call-approval/v99.html",
+        "ui://talkhint/call-approval/v3.html?token=must-not-appear"]) {
+        expect((await rpc("resources/read", { uri })).status).toBe(404);
+        expect(uiResourceLabel(uri)).toBe("unknown");
+      }
+      await rpc("initialize", { clientInfo: { name: "must-not-appear" }, capabilities: {
+        extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } },
+      } });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("must-not-appear");
+      expect(log.mock.calls.some(([line]) => String(line).includes("ui=advertised"))).toBe(true);
+      expect(hostUiSupport({ capabilities: {} })).toBe("not-advertised");
+    } finally { log.mockRestore(); }
   });
   it("keeps the capability only in widget metadata and binds the recipient label", async () => {
     const { token } = await connect();

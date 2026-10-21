@@ -1,6 +1,6 @@
 /** Shared by MCP initialization and packaged skills: never installs or dials. */
 export const TALKHINT_PLUGIN_VERSION = "0.4.0";
-export const TALKHINT_MCP_VERSION = "1.5.0";
+export const TALKHINT_MCP_VERSION = "1.5.1";
 
 export function secretaryInstructions(outbound: boolean): string {
   const common = "TalkHint Secretary. Operate exclusively on the authenticated owner's records. " +

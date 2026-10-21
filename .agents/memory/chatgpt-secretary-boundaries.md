@@ -110,3 +110,9 @@ Do not infer that a text + structuredContent MCP result lacks a card: the UI is 
 **Why:** The owner observed a clone-only schema after the live server already advertised OpenAI, and repeatedly received text instead of an inline card. A source-code button or public resource HTTP 200 never proves the host mounted it.
 
 **How to apply:** Version UI resource URIs when changing the widget and require a connection metadata refresh after release. Verify rendering in actual ChatGPT separately from mock hosts. Recheck current official plan/mobile policies; a FAQ saying mobile cannot *connect* custom MCP is not proof of all runtime rendering restrictions. The owner does not accept website confirmation as a substitute for the required in-chat button.
+
+Keep exact historical UI resource URIs readable after publishing a new widget version; advertise the newest one, but never strand installed descriptor snapshots on 404.
+
+**Why:** The public server served the newest template successfully while older installed-template requests returned 404. A working current URI did not establish compatibility with the owner's cached plugin.
+
+**How to apply:** Resolve only explicitly known aliases to current safe HTML and return the requested URI in resource contents. Preserve current authorization/capability checks. Treat installed plugin, MCP server and template versions as independent; do not replace the owner's plugin identity to fix template caching.

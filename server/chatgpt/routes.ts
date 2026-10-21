@@ -12,6 +12,7 @@ import { CallMonitor, MONITOR_SCOPES } from "./monitor";
 import { selectCallTurns } from "./turns";
 import { CardApproval } from "./cardApproval";
 import { CALL_APPROVAL_RESOURCE, callApprovalWidgetHtml } from "./callApprovalWidget";
+import { callApprovalResource, hostUiSupport, LEGACY_CALL_APPROVAL_RESOURCES, uiResourceLabel } from "./uiResources";
 import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION } from "./pluginWorkflow";
 import { actionsExchange } from "./actionsOAuth";
 import { talkHintActionsSchema, registerActionOperations } from "./actionsSchema";
@@ -281,6 +282,7 @@ export function registerChatGPTIntegration(
     pluginVersion: TALKHINT_PLUGIN_VERSION, mcpVersion: TALKHINT_MCP_VERSION,
     confirmationMethod: cardEnabled ? "inline_card" : "unavailable",
     ui: cardEnabled ? { resourceUri: CALL_APPROVAL_RESOURCE, mimeType: "text/html;profile=mcp-app",
+      compatibleResourceUris: [...LEGACY_CALL_APPROVAL_RESOURCES],
       requiresMcpAppsHost: true, iphoneVerified: false } : undefined,
     uiTools: cardEnabled ? ["confirm_call_from_card", ...(monitorEnabled ? ["open_call_monitor"] : [])] : [],
     scopes: discoveryScopes,
@@ -499,20 +501,29 @@ export function registerChatGPTIntegration(
     if (rpc.method === "notifications/initialized" && rpc.id === undefined) return res.status(202).end();
     if (rpc.id === undefined) return fail(400, "JSON-RPC request ID required");
     let result: unknown;
-    if (rpc.method === "initialize") result = {
+    if (rpc.method === "initialize") {
+      // Do not log raw clientInfo, request IDs, headers, capabilities or arguments.
+      console.info(`[TalkHint MCP UI] initialize ui=${hostUiSupport(rpc.params)} version=${TALKHINT_MCP_VERSION}`);
+      result = {
       protocolVersion: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"].includes(String(rpc.params?.protocolVersion)) ?
         rpc.params!.protocolVersion : "2025-11-25",
       capabilities: { tools: {}, ...(cardEnabled ? { resources: {} } : {}) },
       serverInfo: { name: "talkhint-secretary", title: "TalkHint", version: TALKHINT_MCP_VERSION },
       instructions: secretaryInstructions(config.outboundEnabled === true),
-    };
+      };
+    }
     else if (rpc.method === "ping") result = {};
     else if (rpc.method === "resources/list") result = { resources: cardEnabled ? [{
       uri: CALL_APPROVAL_RESOURCE, name: "TalkHint call confirmation", mimeType: "text/html;profile=mcp-app",
     }] : [] };
+    else if (rpc.method === "resources/templates/list") result = { resourceTemplates: [] };
     else if (rpc.method === "resources/read") {
-      if (!cardEnabled || rpc.params?.uri !== CALL_APPROVAL_RESOURCE) return fail(404, "Resource not found");
-      result = { contents: [{ uri: CALL_APPROVAL_RESOURCE, mimeType: "text/html;profile=mcp-app",
+      const uri = cardEnabled ? callApprovalResource(rpc.params?.uri) : undefined;
+      console.info(`[TalkHint MCP UI] resource_read template=${uiResourceLabel(rpc.params?.uri)} result=${uri ? "ok" : "not-found"}`);
+      if (!uri) return fail(404, "Resource not found");
+      // Return the requested alias, not v4: hosts correlate contents to that URI.
+      // The HTML is current; it still needs a valid owner-bound approval capability.
+      result = { contents: [{ uri, mimeType: "text/html;profile=mcp-app",
         text: callApprovalWidgetHtml(), _meta: { ui: { prefersBorder: true,
           csp: { connectDomains: [base], resourceDomains: [] } },
           "openai/widgetCSP": { connect_domains: [base], resource_domains: [], redirect_domains: [base] },

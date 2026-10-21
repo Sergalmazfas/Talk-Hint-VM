@@ -114,6 +114,13 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     expect(renewed.body.scope).toBe(scope);
     accessToken = renewed.body.access_token;
     expect((await rpc("get_profile", {})).body.result.isError).toBe(false);
+    // Simulate an installed plugin's frozen descriptor, not a fresh tools scan.
+    const cachedTemplate = await request(app).post("/api/chatgpt/mcp")
+      .send({ jsonrpc: "2.0", id: 3, method: "resources/read",
+        params: { uri: "ui://talkhint/call-approval/v2.html" } });
+    expect(cachedTemplate.status).toBe(200);
+    expect(cachedTemplate.body.result.contents[0].uri).toBe("ui://talkhint/call-approval/v2.html");
+    expect(cachedTemplate.body.result.contents[0].text).toContain("Подтвердить и позвонить");
     const prepared = await rpc("prepare_call", selectedInput);
     expect(prepared.body.result.structuredContent.call).toEqual(selectedInput);
     expect(prepared.body.result.structuredContent.execution.provider).toBe(voiceProvider);
