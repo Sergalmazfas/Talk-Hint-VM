@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
-export const SCOPES = ["calls:read", "calls:transcript", "incoming:read", "secretary:start", "offline_access"] as const;
+// Append only: existing grant masks persist these positional bits.
+export const SCOPES = ["calls:read", "calls:transcript", "incoming:read", "secretary:start", "offline_access", "calls:listen"] as const;
 export type Scope = typeof SCOPES[number];
 /** Minimal MCP connection rights; transcript access is an explicit step-up. */
 export const MCP_BASE_SCOPES: readonly Scope[] = ["calls:read", "offline_access"];
@@ -14,7 +15,7 @@ export interface MarkerStore {
   expire(id: string, userId: string): Promise<void>;
 }
 export interface Claims {
-  type: "code" | "access" | "refresh" | "confirmation" | "card-approval";
+  type: "code" | "access" | "refresh" | "confirmation" | "card-approval" | "monitor";
   sub: string; grant: string; scopes: Scope[]; client: string; aud: string; iss: string;
   exp: number; nonce: string;
   redirect?: string; challenge?: string;
@@ -22,6 +23,7 @@ export interface Claims {
   approvalFor?: string;
   call?: { phoneNumber: string; instruction: string; clientRequestId: string; voiceProvider: "elevenlabs" | "cartesia"; translationLanguage: "ru" | "es" };
   recipient?: string;
+  taskId?: string;
 }
 export function fail(status: number, message: string): never {
   throw Object.assign(new Error(message), { status });

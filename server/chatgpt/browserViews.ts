@@ -148,7 +148,14 @@ export function renderBrowserPage(page: BrowserPage, nonce: string, api: "/api/c
       return shell("Вход", nonce, content, script);
     }
     case "consent": {
-      const scopeRows = page.scopes.map((scope) => `<li>${escapeHtml(scope)}</li>`).join("");
+      const scopeLabels: Record<string, string> = {
+        "calls:read": "Список, статусы и результаты собственных звонков",
+        "secretary:start": "Подготовка исходящих; каждый звонок подтверждается отдельно",
+        "calls:transcript": "Чтение текста разговора и доступных переводов",
+        "calls:listen": "Прослушивание обеих сторон собственных звонков вживую",
+        "offline_access": "Сохранять подключение без повторного входа при каждом звонке",
+      };
+      const scopeRows = page.scopes.map((scope) => `<li>${escapeHtml(scope)} — ${escapeHtml(scopeLabels[scope] ?? scope)}</li>`).join("");
       const content = `<article class="card">
         <p class="eyebrow">Запрос доступа</p>
         <h1>Разрешить подключение?</h1>

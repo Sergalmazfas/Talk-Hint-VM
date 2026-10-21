@@ -63,7 +63,7 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
   it("advertises a self-contained resource and app-only consequential tool", async () => {
     const initialized = await rpc("initialize");
     expect(initialized.body.result.capabilities.resources).toEqual({});
-    expect(initialized.body.result.serverInfo.version).toBe("1.2.1");
+    expect(initialized.body.result.serverInfo.version).toBe("1.3.0");
     const catalog = (await rpc("tools/list")).body.result.tools;
     const preview = catalog.find((t: any) => t.name === "prepare_call");
     expect(preview._meta.ui.resourceUri).toBe(CALL_APPROVAL_RESOURCE);
@@ -73,8 +73,9 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect(approval.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
     const resource = (await rpc("resources/read", { uri: CALL_APPROVAL_RESOURCE })).body.result.contents[0];
     expect(resource.mimeType).toBe("text/html;profile=mcp-app");
-    expect(resource.text).toContain("Подтвердить и позвонить один раз");
-    expect(resource._meta.ui.csp).toEqual({ connectDomains: [], resourceDomains: [] });
+    expect(resource.text).toContain("Подтвердить и позвонить");
+    expect(resource._meta.ui.csp).toEqual({ connectDomains: [config.origin], resourceDomains: [] });
+    expect(resource._meta["openai/widgetCSP"].redirect_domains).toEqual([config.origin]);
     expect((await rpc("resources/read", { uri: "file:///etc/passwd" })).status).toBe(404);
     expect(backend.start).not.toHaveBeenCalled();
   });

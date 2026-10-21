@@ -93,7 +93,7 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       false, key).outboundEnabled).toBe(false);
     const config = mcpReleaseConfiguration({ ...mode, CHATGPT_SECRETARY_REDIRECT_URI: callback }, true, key);
     expect(config.outboundEnabled).toBe(true);
-    expect(config.allowedScopes).toEqual(["calls:read", "calls:transcript", "offline_access", "secretary:start"]);
+    expect(config.allowedScopes).toEqual(["calls:read", "calls:transcript", "offline_access", "secretary:start", "calls:listen"]);
     expect(config.allowedScopes).not.toContain("incoming:read");
     for (const value of ["true", "all", "enabled", ""])
       expect(mcpReleaseConfiguration({ CHATGPT_SECRETARY_CALL_MODE: value,
@@ -105,7 +105,7 @@ describe("next-release MCP configuration (no environment mutations)", () => {
       jsonrpc: "2.0", id: 1, method: "tools/list",
     });
     expect(listed.body.result.tools.map((tool: any) => tool.name)).toEqual([
-      "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "prepare_call", "start_call", "confirm_call_from_card",
+      "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "read_call_turns", "prepare_call", "start_call", "confirm_call_from_card", "open_call_monitor",
     ]);
     expect((await request(f.app).get("/api/chatgpt/readiness")).body.mode).toBe("outbound");
     const initialized = await request(f.app).post("/api/chatgpt/mcp").send({
@@ -166,12 +166,13 @@ describe("next-release MCP configuration (no environment mutations)", () => {
     })).status).toBe(202);
     const listed = await request(f.app).post("/api/chatgpt/mcp").send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     expect(listed.body.result.tools.map((t: any) => t.name)).toEqual([
-      "get_profile", "list_calls", "get_call", "list_tasks", "get_task",
+      "get_profile", "list_calls", "get_call", "list_tasks", "get_task", "read_call_turns",
     ]);
     expect(listed.body.result.tools.every((t: any) =>
       t.annotations.readOnlyHint && t.securitySchemes[0].type === "oauth2")).toBe(true);
     for (const tool of listed.body.result.tools) {
-      expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: ["calls:read"] }]);
+      expect(tool.securitySchemes).toEqual([{ type: "oauth2", scopes: [
+        tool.name === "read_call_turns" ? "calls:transcript" : "calls:read"] }]);
       expect(tool._meta.securitySchemes).toEqual(tool.securitySchemes);
       if (["get_call", "get_task"].includes(tool.name))
         expect(tool.inputSchema.properties.includeTranscript.default).toBe(false);

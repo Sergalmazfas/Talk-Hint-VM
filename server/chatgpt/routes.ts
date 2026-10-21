@@ -6,7 +6,9 @@ import type { SecretaryBackend } from "./secretary";
 import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest } from "./browser";
 import { CallConfirmations } from "./confirmations";
 import { talkHintPluginPackage } from "./plugin";
-import { PUBLIC_TOOLS, publicToolMetadata, cardApprovalToolMetadata, type PublicTool } from "./toolMetadata";
+import { PUBLIC_TOOLS, publicToolMetadata, cardApprovalToolMetadata, monitorToolMetadata, type PublicTool } from "./toolMetadata";
+import { CallMonitor, MONITOR_SCOPES } from "./monitor";
+import { selectCallTurns } from "./turns";
 import { CardApproval } from "./cardApproval";
 import { CALL_APPROVAL_RESOURCE, callApprovalWidgetHtml } from "./callApprovalWidget";
 import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION } from "./pluginWorkflow";
@@ -41,6 +43,7 @@ const schemas = {
   get_call: z.object({ id: ID, includeTranscript: z.boolean().default(false) }).strict(),
   list_tasks: z.object({}).strict(),
   get_task: z.object({ id: ID, includeTranscript: z.boolean().default(false) }).strict(),
+  read_call_turns: z.object({ id: ID, afterTurnId: ID.optional(), limit: z.number().int().min(1).max(50).default(30) }).strict(),
   get_incoming: z.object({}).strict(),
   prepare_call: CALL.extend({ recipient: z.string().trim().min(1).max(200).optional() }),
   start_call: z.object({ confirmation: z.string().max(16000) }).strict(),
@@ -50,6 +53,7 @@ const permissions: Record<Tool, Scope> = {
   get_profile: "calls:read", list_calls: "calls:read", get_call: "calls:read",
   list_tasks: "calls:read", get_task: "calls:read", get_incoming: "incoming:read",
   prepare_call: "secretary:start", start_call: "secretary:start",
+  read_call_turns: "calls:transcript",
 };
 const uuidPattern = /^[a-f0-9-]{36}$/i;
 const TOKEN_MS = 10 * 60_000;
@@ -59,6 +63,8 @@ const TOOL_INPUTS: Record<Tool, object> = {
   get_profile: {}, list_calls: {}, list_tasks: {}, get_incoming: {},
   get_call: { id: { type: "string" }, includeTranscript: { type: "boolean", default: false } },
   get_task: { id: { type: "string" }, includeTranscript: { type: "boolean", default: false } },
+  read_call_turns: { id: { type: "string" }, afterTurnId: { type: "string" },
+    limit: { type: "integer", minimum: 1, maximum: 50, default: 30 } },
   prepare_call: {
     recipient: { type: "string", minLength: 1, maxLength: 200,
       description: "Recipient name supplied by the owner, never inferred from phone number." },
@@ -108,11 +114,15 @@ export function registerChatGPTIntegration(
     () => config.outboundEnabled === true, config.clientId);
   const cardApproval = new CardApproval(credentials, store, confirmations);
   const cardEnabled = !config.actions && availableTools.includes("prepare_call");
+  const monitorEnabled = cardEnabled && MONITOR_SCOPES.every(s => scopesSupported.includes(s));
+  const monitor = new CallMonitor(credentials, store, backend, base, () => config.enabled);
+  if (!config.actions) monitor.register(app);
   const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"` +
     (config.actions ? "" : `, scope="${MCP_BASE_SCOPES.join(" ")}"`);
-  const scopeChallenge = (scope: Scope) =>
+  const scopeChallenge = (scope: Scope | readonly Scope[]) =>
     `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="insufficient_scope", error_description="Additional TalkHint permission required", scope="${config.actions ?
-      scope : Array.from(new Set([...MCP_BASE_SCOPES, scope])).join(" ")}"`;
+      (Array.isArray(scope) ? scope.join(" ") : scope) :
+      Array.from(new Set([...MCP_BASE_SCOPES, ...(Array.isArray(scope) ? scope : [scope])])).join(" ")}"`;
   const resourceMetadataPaths = ["/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/api/chatgpt/mcp"];
   const paths = config.actions ? [api] :
@@ -183,7 +193,8 @@ export function registerChatGPTIntegration(
     (req, res) => { Promise.resolve().then(() => fn(req, res)).catch(error => {
       const status = error instanceof z.ZodError ? 400 : Number(error?.status) || 503;
       if (status === 401) res.set("WWW-Authenticate", challenge);
-      else if (error?.requiredScope) res.set("WWW-Authenticate", scopeChallenge(error.requiredScope));
+      else if (error?.requiredScopes || error?.requiredScope)
+        res.set("WWW-Authenticate", scopeChallenge(error.requiredScopes ?? error.requiredScope));
       if (res.headersSent) return;
       res.status(status >= 400 && status <= 503 ? status : 503).json({
         error: error instanceof z.ZodError ? "Invalid arguments" :
@@ -223,7 +234,7 @@ export function registerChatGPTIntegration(
   };
   const need = (claims: Claims, scope: Scope) => {
     if (!claims.scopes.includes(scope)) throw Object.assign(new Error(`Required scope: ${scope}`),
-      { status: 403, requiredScope: scope });
+      { status: 403, requiredScope: scope, requiredScopes: [...claims.scopes, scope] });
   };
   const owner = (req: Request) => {
     const id = req.user?.id ?? fail(401, "Owner authentication required");
@@ -267,7 +278,7 @@ export function registerChatGPTIntegration(
     tools: mcpTools,
     pluginVersion: TALKHINT_PLUGIN_VERSION, mcpVersion: TALKHINT_MCP_VERSION,
     confirmationMethod: cardEnabled ? "inline_card" : "unavailable",
-    uiTools: cardEnabled ? ["confirm_call_from_card"] : [],
+    uiTools: cardEnabled ? ["confirm_call_from_card", ...(monitorEnabled ? ["open_call_monitor"] : [])] : [],
     scopes: discoveryScopes,
     // No callback value, account details, signing keys or credentials.
   }));
@@ -435,6 +446,8 @@ export function registerChatGPTIntegration(
       case "list_tasks": return { tasks: await backend.tasks(claims.sub) };
       case "get_task": return backend.task(claims.sub, args.id, args.includeTranscript);
       case "get_incoming": return backend.incoming(claims.sub);
+      case "read_call_turns":
+        return selectCallTurns(await backend.task(claims.sub, args.id, true), args.afterTurnId, args.limit);
       case "prepare_call": {
         const { recipient, ...nativeArgs } = args;
         const call = CALL.parse(nativeArgs);
@@ -497,26 +510,41 @@ export function registerChatGPTIntegration(
       if (!cardEnabled || rpc.params?.uri !== CALL_APPROVAL_RESOURCE) return fail(404, "Resource not found");
       result = { contents: [{ uri: CALL_APPROVAL_RESOURCE, mimeType: "text/html;profile=mcp-app",
         text: callApprovalWidgetHtml(), _meta: { ui: { prefersBorder: true,
-          csp: { connectDomains: [], resourceDomains: [] } },
+          csp: { connectDomains: [base], resourceDomains: [] } },
+          "openai/widgetCSP": { connect_domains: [base], resource_domains: [], redirect_domains: [base] },
           "openai/widgetDescription": "Review the exact call and explicitly confirm once, without leaving this chat.",
         } }] };
     }
     else if (rpc.method === "tools/list") result = { tools: [...mcpTools.map(name =>
       publicToolMetadata(name, permissions[name], TOOL_INPUTS[name],
         name === "prepare_call" ? ["phoneNumber", "instruction", "clientRequestId"] :
-          name === "start_call" ? ["confirmation"] : ["get_call", "get_task"].includes(name) ? ["id"] : [])),
-      ...(cardEnabled ? [cardApprovalToolMetadata()] : [])] };
+        name === "start_call" ? ["confirmation"] : ["get_call", "get_task", "read_call_turns"].includes(name) ? ["id"] : [])),
+      ...(cardEnabled ? [cardApprovalToolMetadata()] : []),
+      ...(monitorEnabled ? [monitorToolMetadata()] : [])] };
     else if (rpc.method === "tools/call") {
       const name = rpc.params?.name as Tool;
       const cardRequest = (name as string) === "confirm_call_from_card" && cardEnabled;
-      if (!Object.hasOwn(schemas, name) && !cardRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
+      const monitorRequest = (name as string) === "open_call_monitor" && monitorEnabled;
+      if (!Object.hasOwn(schemas, name) && !cardRequest && !monitorRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         error: { code: -32602, message: "Unknown tool" } });
-      if (!(mcpTools as readonly string[]).includes(name) && !cardRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
+      if (!(mcpTools as readonly string[]).includes(name) && !cardRequest && !monitorRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         result: { isError: true, content: [{ type: "text", text: "Tool is unavailable in this plugin." }] } });
       try {
         let value: any;
         let meta: object | undefined;
-        if (cardRequest) {
+        if (monitorRequest) {
+          const claims = await claimsFor(req);
+          if (MONITOR_SCOPES.some(s => !claims.scopes.includes(s))) throw Object.assign(
+            new Error("Allow listening and transcript access once to monitor this call"), {
+              status: 403, requiredScopes: Array.from(new Set([...claims.scopes, ...MONITOR_SCOPES])),
+            });
+          if (MONITOR_SCOPES.some(s => !scopesSupported.includes(s))) return fail(403, "Monitor unavailable");
+          const args = z.object({ id: ID }).strict().parse(rpc.params?.arguments ?? {});
+          const ticket = await monitor.issue(claims, args.id);
+          meta = { "talkhint/monitor": ticket };
+          value = { task_id: args.id, expiresAt: ticket.expiresAt,
+            note: "UI-only live audio and text. No call is started or retried. ChatGPT does not hear the player." };
+        } else if (cardRequest) {
           const claims = await claimsFor(req);
           need(claims, "secretary:start");
           const args = CARD_DECISION.parse(rpc.params?.arguments ?? {});
@@ -525,6 +553,7 @@ export function registerChatGPTIntegration(
           else {
             const started = await backend.start(claims.sub, CALL.parse(decision.call));
             value = { ...started, task_id: started.task.id, asynchronous: true,
+              fallbackUrl: `${base}/api/chatgpt/secretary/tasks/${encodeURIComponent(started.task.id)}`,
               note: "Read get_task with this task_id. Never create a new call because the result is delayed." };
           }
         } else {
@@ -536,14 +565,20 @@ export function registerChatGPTIntegration(
             const displayCall = { ...preview.call, ...(recipient ? { recipient } : {}) };
             meta = { "talkhint/cardApproval": { ...await cardApproval.issue(value.confirmation), call: displayCall } };
             value = { ...preview, call: displayCall, confirmationMethod: "inline_card",
+              fallbackUrl: approval_url,
               note: "Confirm this exact call using the button in this chat. If the card is unavailable, stop. No call has started." };
           }
         }
-        result = { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value,
+        const text = name === "prepare_call" ?
+          `Call preview: ${value.call.recipient ?? "Recipient not supplied"}; ${value.call.phoneNumber}; ${value.call.instruction}. ` +
+          "No call has started. Use the inline card's single confirmation button. If this host shows only text/JSON, it has NOT displayed a confirmation card: explain the limitation and offer the protected TalkHint fallback link, never claim approval or invoke start_call." :
+          JSON.stringify(value);
+        result = { content: [{ type: "text", text }], structuredContent: value,
           isError: false, ...(meta ? { _meta: meta } : {}) };
       } catch (error: any) {
         if (error?.status === 401) res.set("WWW-Authenticate", challenge);
         const authenticate = error?.status === 401 ? challenge :
+          error?.requiredScopes ? scopeChallenge(error.requiredScopes) :
           error?.requiredScope ? scopeChallenge(error.requiredScope) : undefined;
         if (authenticate) res.set("WWW-Authenticate", authenticate);
         result = { isError: true, content: [{ type: "text", text: error instanceof z.ZodError ? "Invalid arguments" :

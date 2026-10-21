@@ -88,3 +88,17 @@ idempotency. MCP Apps supports inline confirmation and widget-only result
 metadata; keep the per-draft approval capability hidden from the model and
 limit its tool to the UI. Unsupported clients fail closed; do not promise
 iPhone/private-MCP availability from local mock success.
+
+## Live listening boundary
+
+The owner wants both call sides and live RU text in the same ChatGPT card, with
+an honest same-call fallback if the host cannot render/play it. This is not a
+request to make the ChatGPT model hear a player or follow it autonomously.
+
+**Why:** The user explicitly distinguishes owner listening from model access,
+requires a short approval path, and forbids real third-party test calls.
+
+**How to apply:** Keep audio UI-only and task-owner scoped; model text is a
+separate permissioned on-request operation. Reconnection/monitor-ticket expiry
+must never redial or imply that the telephone task ended. Permission upgrades
+must retain earlier approved capabilities instead of causing an OAuth loop.

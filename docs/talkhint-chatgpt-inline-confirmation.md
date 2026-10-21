@@ -1,5 +1,8 @@
 # TalkHint Secretary: confirmation inside ChatGPT
 
+> Current live-card preparation: [0.4.0 / MCP 1.3.0](talkhint-chatgpt-live-card.md).
+> The remainder documents the earlier approval-only preparation.
+
 Prepared 2026-10-20. Candidate plugin **0.3.1**, MCP **1.2.1**.
 Not a publication or proof of a real ChatGPT/iPhone/PSTN session.
 

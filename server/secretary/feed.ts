@@ -12,6 +12,15 @@ export type SecretaryFeedEvent =
 const MAX_FEED_BUFFER_BYTES = 512 * 1024;
 const MAX_PENDING_HANDOFF_BYTES = 256 * 1024;
 const subscribers = new Map<string, Set<SecretaryFeedSubscriber>>();
+const observers = new Map<string, Set<(event: SecretaryFeedEvent) => void>>();
+
+/** Read-only adapter tap; does not change the native WebSocket protocol. */
+export function observeSecretaryFeed(taskId: string, listener: (event: SecretaryFeedEvent) => void) {
+  const set = observers.get(taskId) ?? new Set();
+  set.add(listener);
+  observers.set(taskId, set);
+  return () => { set.delete(listener); if (!set.size) observers.delete(taskId); };
+}
 
 interface SecretaryFeedSubscriber {
   socket: WebSocket;
@@ -71,6 +80,9 @@ export function sendSecretaryFeedSnapshot(
 }
 
 export function publishSecretaryFeedEvent(taskId: string, event: SecretaryFeedEvent): void {
+  for (const listener of Array.from(observers.get(taskId) ?? [])) {
+    try { listener(event); } catch { observers.get(taskId)?.delete(listener); }
+  }
   const data = JSON.stringify(event);
   const recipients = subscribers.get(taskId);
   if (!recipients) return;
