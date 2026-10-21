@@ -1,4 +1,8 @@
 name: TalkHint
+configs:
+  Debug: debug
+  Release: release
+  NativeValidation: debug
 options:
   bundleIdPrefix: app.talkhint
   deploymentTarget:
@@ -12,6 +16,9 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
+  configs:
+    NativeValidation:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_NATIVE_VALIDATION"
 packages:
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
@@ -50,6 +57,16 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TalkHint.app/TalkHint"
         BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
+  TalkHintValidation:
+    build:
+      targets:
+        TalkHint: all
+        TalkHintTests: [test]
+    test:
+      config: NativeValidation
+      gatherCoverageData: false
+      targets:
+        - TalkHintTests
   TalkHint:
     build:
       targets:

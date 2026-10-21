@@ -1,0 +1,37 @@
+name: iOS native validation
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios-native.yml']
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios-native.yml']
+permissions:
+  contents: read
+concurrency:
+  group: ios-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+      - name: Generate, compile, and run native XCTest
+        run: bash ios/scripts/validate-native.sh
+      - name: Save native build logs and XCTest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-native-results
+          path: |
+            generated-artifacts/ios-native.*/*.log
+            generated-artifacts/ios-native.*/*.txt
+            generated-artifacts/ios-native.*/*.json
+            generated-artifacts/ios-native.*/*.xcresult
+          if-no-files-found: warn
+          retention-days: 7

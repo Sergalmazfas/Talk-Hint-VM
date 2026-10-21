@@ -42,3 +42,16 @@ Source-only wiring checks did not catch Foundation's behavior.
 **How to apply:** Test the actual resulting URL's path and decoded query in
 XCTest, including scoped card reads. Keep HTTP/source checks distinct from a
 successful native test run.
+
+Native validation must be isolated at compile time, not merely rely on an empty
+login or a runtime environment variable. Keep its backend on a reserved
+`.invalid` host and suppress automatic phone/push startup only in that validation
+configuration, leaving ordinary builds unchanged.
+
+**Why:** Hosted XCTest launches the real app before test setup runs. A saved
+session or controller created by a test could otherwise contact production
+before a network mock is installed.
+
+**How to apply:** Preserve this boundary when adding hosted native tests. Require
+successful execution of the isolation assertion in native results; skipped tests
+or a Linux source check cannot establish safety or a successful iOS build.
