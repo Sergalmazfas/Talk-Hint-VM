@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createIncomingSecretaryWorkletSource, decodePcmu, floatToPcm16, encodePcmu } from "@/lib/incoming-secretary-audio";
-import { acquireAndReserveLiveSession, clearScheduledAudio, closeLocalResources, ResponseAudioGuard } from "@/lib/incoming-secretary-dev-lifecycle";
+import { acquireAndReserveLiveSession, clearScheduledAudio, closeLocalResources, ResponseAudioGuard, playbackTotals } from "@/lib/incoming-secretary-dev-lifecycle";
 
 type Turn = { role: "caller" | "secretary"; text: string; language?: string };
 type TestRequest = {
@@ -73,6 +73,7 @@ function base64ToBytes(encoded: string) {
 export function IncomingSecretaryDevBench({ token, numberId }: Props) {
   const [status, setStatus] = useState<BenchStatus>("idle");
   const [error, setError] = useState("");
+  const [interruptions,setInterruptions]=useState(0);
   const [info, setInfo] = useState<BenchInfo | null>(null);
   const [currentRequest, setCurrentRequest] = useState<TestRequest | null>(null);
   const [model, setModel] = useState("");
@@ -97,6 +98,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
   const audioGuardRef = useRef(new ResponseAudioGuard());
   const progressTimerRef = useRef<number | null>(null);
   const progressSentRef = useRef(new Map<string, number>());
+  const completedPlaybackRef = useRef(new Map<string, number>());
   const statusRef = useRef(status);
   statusRef.current = status;
   const rememberRecoverableSession = useCallback((value: RecoverableSession | null) => {
@@ -200,6 +202,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
     startLockRef.current = true;
     const epoch = ++epochRef.current;
     setError("");
+    setInterruptions(0);completedPlaybackRef.current.clear();progressSentRef.current.clear();
     setCurrentRequest(null);
     setTranscript([]);
     setCardTitles([]);
@@ -308,11 +311,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
           progressTimerRef.current = window.setInterval(() => {
             if (socket.readyState !== WebSocket.OPEN) return;
             const now = context.currentTime;
-            const playedByResponse = new Map<string, number>();
-            playbackRef.current.forEach((entry) => {
-              const played = Math.max(0, Math.min(entry.duration, now - entry.startsAt));
-              playedByResponse.set(entry.responseId, (playedByResponse.get(entry.responseId) || 0) + played);
-            });
+            const playedByResponse = playbackTotals(playbackRef.current,completedPlaybackRef.current,now);
             playedByResponse.forEach((totalSeconds, responseId) => {
               if (!audioGuardRef.current.isCurrent(responseId)) return;
               const cappedMs = Math.floor(totalSeconds * 1000);
@@ -345,10 +344,17 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
             }
             const entry = { source: player, responseId, startsAt, duration: buffer.duration };
             playbackRef.current.push(entry);
-            player.onended = () => { playbackRef.current = playbackRef.current.filter((item) => item.source !== player); };
+            player.onended = () => {
+              if(epochRef.current===epoch&&playbackRef.current.includes(entry)){
+                const played=Math.max(0,Math.min(entry.duration,context.currentTime-entry.startsAt));
+                completedPlaybackRef.current.set(responseId,(completedPlaybackRef.current.get(responseId)||0)+played);
+              }
+              playbackRef.current = playbackRef.current.filter((item) => item.source !== player);
+            };
             player.start(startsAt);
           } catch { setError("Получен некорректный аудиофрагмент от Secretary."); }
         } else if (message.type === "clear") {
+          if(playbackRef.current.length)setInterruptions(count=>count+1);
           const responseId = String(message.responseId || "");
           clearScheduledAudio(playbackRef.current, audioGuardRef.current, responseId || undefined);
         } else if (message.type === "request" || message.type === "transcript") {
@@ -452,7 +458,8 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
     <section className="space-y-5" aria-label="Live microphone test">
       <div className="flex flex-col justify-between gap-3 border-b border-[#2d4145] pb-3 sm:flex-row sm:items-end">
         <div><p className="text-xs uppercase tracking-[0.17em] text-amber-200">Live bench / development only</p><h2 className="mt-1 text-2xl font-semibold">Сначала услышать. Потом решать.</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-[#a9bbb7]">Это реальный микрофон и реальный входящий Secretary runtime — не текстовая симуляция. Сессия резервирует TEST-заявку; телефонные вызовы, календарь и уведомления не запускаются.</p></div>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-[#a9bbb7]">Это реальный микрофон и реальный входящий Secretary runtime — не текстовая симуляция. Сессия резервирует TEST-заявку; телефонные вызовы, календарь и уведомления не запускаются.</p>
+          <p aria-live="polite" className="mt-2 text-sm text-teal-100">Перебиваний со сбросом озвучки: {interruptions}</p></div>
         <Badge variant="outline" className="w-fit border-amber-700 bg-[#302b20] text-amber-100">TEST · DEV</Badge>
       </div>
       <div className="grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">

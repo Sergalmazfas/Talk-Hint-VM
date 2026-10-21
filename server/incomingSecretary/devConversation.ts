@@ -12,6 +12,7 @@ export class DevConversation {
   private response="";private item="";private sentMs=0;private playedMs=0;
   private blocked=new Set<string>();private tools=new Set<string>();
   private pending=0;ready=false;closed=false;
+  private responseActive=false;private speaking=false;private continuation=false;private pendingTools=0;
   constructor(readonly session:IntakeSession,private instructions:string,private peer:DevPeer,
     private factory=(instructions:string,event:(e:any)=>void)=>new IncomingAudio(instructions,event)) {}
   private send(e:object) {
@@ -26,13 +27,27 @@ export class DevConversation {
     this.tail=this.tail.then(fn).catch(()=>{void this.fail("Не удалось сохранить тестовую заявку. Успешное принятие не подтверждено.");})
       .finally(()=>{this.pending--;});
   }
+  private flushContinuation(){
+    if(this.closed||!this.ready||this.responseActive||this.speaking||this.pendingTools||!this.continuation)return;
+    this.continuation=false;this.responseActive=true;
+    try{this.ai?.send({type:"response.create"});}
+    catch{void this.fail("Не удалось продолжить голосовой ответ.");}
+  }
+  private diagnostic(code:string,fatal:boolean){
+    // Codes only: no provider message, IDs, credentials or conversation text.
+    console.warn(`[IncomingDev] OpenAI ${fatal?"fatal":"recoverable"}: ${code}`);
+    this.enqueue(async()=>{await this.session.store.update(this.session.owner,this.session.callSid,r=>{
+      const previous=(r as RequestRecord&{devDiagnostics?:object[]}).devDiagnostics??[];
+      return {...r,devDiagnostics:[...previous.slice(-19),{code,fatal,at:new Date().toISOString()}]};
+    });});
+  }
   async start() {
     this.ai=this.factory(this.instructions,e=>this.event(e));
     try {
       await this.ai.connect();
       if(this.closed){this.ai.close();return;}
       this.ready=true;this.send({type:"ready",model:MODEL,voice:VOICE});
-      this.ai.send({type:"response.create"});
+      this.continuation=true;this.flushContinuation();
     }catch{
       if(this.closed)return;
       await this.fail("Не удалось открыть требуемый OpenAI Realtime-сеанс: модель недоступна, соединение отклонено или конфигурация не подтверждена. Другой моделью он не заменялся.");
@@ -55,25 +70,42 @@ export class DevConversation {
     if(this.closed)return;
     if(e.type==="error"){
       // Do not echo provider messages/URLs/request payloads.
-      const code=String(e.error?.code??"");
+      const rawCode=String(e.error?.code??"unknown");
+      const code=/^[a-z0-9_]{1,80}$/i.test(rawCode)?rawCode:"unknown";
+      if(["conversation_already_has_active_response","response_cancel_not_active"].includes(code)){
+        this.diagnostic(code,false);
+        this.send({type:"notice",code,message:"Синхронизация голосового ответа. Тест продолжается."});
+        return;
+      }
+      this.diagnostic(code,true);
       const message=["model_not_found","model_not_available","unsupported_model"].includes(code)?
         `Модель ${MODEL} недоступна этому аккаунту OpenAI. Другой моделью она не заменялась.`:
         code==="insufficient_quota"?"OpenAI сообщил об исчерпании квоты. Модель не заменялась.":
         "OpenAI отклонил голосовой сеанс или ответ. Требуемая модель не заменялась. Проверьте доступ модели и настройки API.";
-      void this.fail(message);return;
+      void this.fail(`${message} Код: ${code}.`,`openai:${code}`);return;
     }
     if(["transport_error","transport_closed"].includes(e.type)){
       void this.fail("Голосовое соединение прервано. Сохранённые тестовые сведения остаются в истории.");return;
     }
     if(e.type==="input_audio_buffer.speech_started"){
+      this.speaking=true;this.continuation=false;
       this.blocked.add(this.response);
       this.send({type:"clear",responseId:this.response});
-      try{if(this.item)this.ai?.send({type:"conversation.item.truncate",item_id:this.item,content_index:0,audio_end_ms:Math.floor(this.playedMs)});}
+      try{
+        // interrupt_response=true already cancels generation at the provider.
+        // A second cancel races with its acknowledgement and is unnecessary.
+        if(this.item)this.ai?.send({type:"conversation.item.truncate",item_id:this.item,content_index:0,audio_end_ms:Math.floor(this.playedMs)});
+      }
       catch{void this.fail("Не удалось остановить старый голосовой ответ.");return;}
       this.enqueue(async()=>{await this.session.callerStarted();});
     }
+    if(e.type==="input_audio_buffer.speech_stopped")this.speaking=false;
     if(e.type==="response.created"){
+      this.responseActive=true;this.continuation=false;
       this.response=String(e.response?.id??"");this.item="";this.sentMs=0;this.playedMs=0;
+    }
+    if(e.type==="response.done"&&(!e.response?.id||e.response.id===this.response)){
+      this.responseActive=false;this.flushContinuation();
     }
     if(e.type==="response.output_audio.delta"&&!this.blocked.has(String(e.response_id))){
       if(typeof e.delta!=="string"||e.delta.length>128000||e.delta.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(e.delta)){
@@ -95,9 +127,12 @@ export class DevConversation {
         this.send({type:"transcript",request});
       });
     }
-    if(e.type==="response.function_call_arguments.done"&&!this.blocked.has(String(e.response_id)))this.enqueue(async()=>{
-      if(this.closed||this.tools.has(e.call_id))return;
-      this.tools.add(e.call_id);
+    if(e.type==="response.function_call_arguments.done"&&!this.blocked.has(String(e.response_id))){
+      if(typeof e.call_id!=="string"||this.tools.has(e.call_id))return;
+      this.tools.add(e.call_id);this.pendingTools++;
+      this.enqueue(async()=>{
+      try {
+      if(this.closed)return;
       if(!["save_request","submit_request"].includes(e.name))throw new Error("Unsupported incoming tool");
       try {
         const result=await this.session.save(JSON.parse(e.arguments),e.name==="submit_request");
@@ -105,15 +140,16 @@ export class DevConversation {
         this.ai?.send({type:"conversation.item.create",item:{type:"function_call_output",call_id:e.call_id,
           output:JSON.stringify({saved:true,status:result.request.status,fields:result.request.fields,
             missing:result.missing,warnings:result.warnings,bookingConfirmed:false})}});
-        this.ai?.send({type:"response.create"});
+        if(!this.blocked.has(String(e.response_id)))this.continuation=true;
       }catch{
         try{this.ai?.send({type:"conversation.item.create",item:{type:"function_call_output",call_id:e.call_id,
           output:JSON.stringify({saved:false,bookingConfirmed:false,error:"Storage failed. Do not claim successful acceptance."})}});}catch{}
         void this.fail("Ошибка сохранения. Заявка не подтверждена как успешно принятая; проверьте сохранённую часть в истории.");
       }
-    });
+      }finally{this.pendingTools--;this.flushContinuation();}
+    });}
   }
-  private async fail(message:string) {this.send({type:"error",error:message});await this.stop("connection lost");}
+  private async fail(message:string,reason="connection lost") {this.send({type:"error",error:message});await this.stop(reason);}
   stop(reason:string):Promise<void> {
     if(this.closing)return this.closing;
     this.closed=true;this.ready=false;this.ai?.close();

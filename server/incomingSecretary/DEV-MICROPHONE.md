@@ -78,10 +78,27 @@ duplicate prevention, finalization failures, Unicode and language transitions,
 corrections/reconfirmation, interruption clear, stale audio rejection,
 generated worklet execution/resampling and microphone cleanup races.
 
-A real OpenAI connection accepted the exact model/voice/audio configuration
-and produced greeting audio and transcript with synthetic context. This is
-**not** a real browser microphone/acoustic or native push delivery test.
-The probe used an isolated memory store, not an owner's real request history.
+A real OpenAI connection accepted the exact model/voice/audio configuration.
+After a reproduced active-response conflict was fixed, a synthetic spoken
+EN→RU→ES dialogue produced actual ASR, voice replies, corrections and clear
+events without provider errors or session closure. Tool continuations wait
+for response completion and all tool outputs, and are suppressed during
+caller speech. The existing automatic provider interruption is used, rather
+than sending a redundant cancellation.
+
+Explicit development probes (paid OpenAI API use):
+`NODE_ENV=development npx tsx script/probe-incoming-dev-dialogue.ts` sends
+synthetic text turns; adding `--audio` generates synthetic caller fixtures
+with a separate TTS model and streams PCMU through the same Dev input path.
+This fixture TTS is not the Secretary voice/model and never a fallback.
+Silence keeps streaming between utterances, as a browser microphone would.
+Both probes use an isolated memory store, not an owner's request history,
+and have no dialing or notification transport.
+
+This is **not** a real browser microphone/headphone/acoustic or native push
+delivery test. Fatal provider codes are retained in safe TEST diagnostics;
+raw provider messages/credentials/IDs are not logged. The browser shows an
+interruption counter and includes finished chunks in playback-time reports.
 
 Before any later telephone activation, the owner should test EN→RU, EN→ES,
 EN→RU→ES, ¿/¡ and Cyrillic, interruption, hold/resume, headphones versus

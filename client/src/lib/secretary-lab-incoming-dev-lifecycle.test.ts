@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { acquireAndReserveLiveSession, clearScheduledAudio, closeLocalResources, ResponseAudioGuard } from "./incoming-secretary-dev-lifecycle";
+import { acquireAndReserveLiveSession, clearScheduledAudio, closeLocalResources, ResponseAudioGuard, playbackTotals } from "./incoming-secretary-dev-lifecycle";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -13,6 +13,13 @@ function fakeStream() {
 }
 
 describe("incoming dev bench start/stop lifecycle", () => {
+  it("counts already-finished audio when reporting interruption playback position",()=>{
+    const completed=new Map([["r",0.4]]);
+    const totals=playbackTotals([{responseId:"r",startsAt:1,duration:0.3},{responseId:"next",startsAt:2,duration:0.5}],completed,1.2);
+    expect(totals.get("r")).toBeCloseTo(0.6);
+    expect(totals.get("next")).toBe(0);
+    expect(completed.get("r")).toBe(0.4);
+  });
   it("stops a late microphone grant and never reserves after Start was cancelled", async () => {
     const permission = deferred<ReturnType<typeof fakeStream>["stream"]>();
     const { stream, stop } = fakeStream();

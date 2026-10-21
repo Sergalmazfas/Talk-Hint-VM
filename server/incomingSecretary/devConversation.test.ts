@@ -97,3 +97,41 @@ it("an unavailable required model fails explicitly without constructing a replac
   expect(events.find(e=>e.type==="error").error).toContain("Другой моделью он не заменялся");
   expect(store.records.get("d")?.closed).toBe(true);
 });
+it("waits for response.done and all tool outputs before requesting exactly one continuation",async()=>{
+  const f=await fixture();
+  f.event({type:"response.created",response:{id:"r"}});
+  f.tool("one",{name:"Ana"});f.tool("two",{address:"Example Street"});
+  await vi.waitFor(()=>expect(f.record().fields.address).toBe("Example Street"));
+  expect(f.sent.filter(e=>e.type==="response.create")).toHaveLength(1);
+  f.event({type:"response.done",response:{id:"r"}});
+  expect(f.sent.filter(e=>e.type==="response.create")).toHaveLength(2);
+  expect(f.sent.filter(e=>e.item?.type==="function_call_output")).toHaveLength(2);
+  f.event({type:"response.done",response:{id:"r"}});
+  expect(f.sent.filter(e=>e.type==="response.create")).toHaveLength(2);
+  await f.conversation.stop("completed");
+});
+it("an active-response race and redundant cancellation cannot terminate a healthy conversation",async()=>{
+  const f=await fixture();
+  for(const code of ["conversation_already_has_active_response","response_cancel_not_active"])
+    f.event({type:"error",error:{code,message:"RAW SENSITIVE PROVIDER MESSAGE"}});
+  f.conversation.input({type:"audio",audio:Buffer.alloc(160,255).toString("base64")});
+  await vi.waitFor(()=>expect((f.record() as any).devDiagnostics).toHaveLength(2));
+  expect(f.conversation.closed).toBe(false);expect(f.ai.close).not.toHaveBeenCalled();
+  expect(f.received.some(e=>e.type==="error")).toBe(false);
+  expect(JSON.stringify(f.received)).not.toContain("SENSITIVE");
+  expect(f.sent.some(e=>e.type==="input_audio_buffer.append")).toBe(true);
+  await f.conversation.stop("completed");
+});
+it("interruption clears immediately and never starts a stale tool continuation during caller speech",async()=>{
+  const f=await fixture();
+  f.event({type:"response.created",response:{id:"r"}});
+  f.tool("one",{name:"Ana"});
+  f.event({type:"input_audio_buffer.speech_started"});
+  expect(f.received.some(e=>e.type==="clear")).toBe(true);
+  expect(f.sent.some(e=>e.type==="response.cancel")).toBe(false);
+  f.event({type:"response.done",response:{id:"r",status:"cancelled"}});
+  await vi.waitFor(()=>expect(f.record().fields.name).toBe("Ana"));
+  expect(f.sent.filter(e=>e.type==="response.create")).toHaveLength(1);
+  f.event({type:"input_audio_buffer.speech_stopped"});
+  await f.conversation.stop("completed");
+});

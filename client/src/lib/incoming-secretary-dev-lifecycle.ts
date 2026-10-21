@@ -1,5 +1,15 @@
 export type LiveSessionIdentity = { sessionId: string; requestId: string };
 
+export function playbackTotals(queue:ReadonlyArray<{responseId:string;startsAt:number;duration:number}>,
+  completed:ReadonlyMap<string,number>,now:number){
+  const totals=new Map(completed);
+  for(const entry of queue){
+    const played=Math.max(0,Math.min(entry.duration,now-entry.startsAt));
+    totals.set(entry.responseId,(totals.get(entry.responseId)||0)+played);
+  }
+  return totals;
+}
+
 export class ResponseAudioGuard {
   private staleIds = new Set<string>();
   private currentId = "";
