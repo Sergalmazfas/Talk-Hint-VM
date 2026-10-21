@@ -61,7 +61,7 @@ export default function SecretaryLab() {
   const [loadError, setLoadError] = useState("");
   const [denied, setDenied] = useState(false);
   const [instruction, setInstruction] = useState("Поговори с собеседником на английском как дружелюбный и собранный секретарь. Помогай уточнять цель звонка и спокойно реагируй на возражения.");
-  const [provider, setProvider] = useState<VoiceProvider>("elevenlabs");
+  const [provider, setProvider] = useState<VoiceProvider>("openai");
   const [paidConsent, setPaidConsent] = useState(false);
   const [pending, setPending] = useState(false);
   const [active, setActive] = useState<LabReport | null>(null);
@@ -637,7 +637,7 @@ export default function SecretaryLab() {
               <div className="provider-section">
                 <div className="provider-title"><span>Голосовой провайдер</span><small>Проверяется на сервере</small></div>
                 <div className="provider-options">
-                  {(["elevenlabs", "cartesia", "openai"] as VoiceProvider[]).map((name) => {
+                  {(["openai", "elevenlabs", "cartesia"] as VoiceProvider[]).map((name) => {
                     const item = snapshot?.providers[name];
                     const source = name === "openai"
                       ? item?.source === "builtin" ? `${item.model} · ${item.voice}${!item.ready && item.reason ? ` · ${item.reason}` : ""}` : "Встроенный голос"

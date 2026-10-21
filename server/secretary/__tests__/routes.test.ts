@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => ({
   cancelSecretaryTask: vi.fn(),
   retrySecretaryTask: vi.fn(),
   startSecretaryWorker: vi.fn(),
+  requireAudioModel: vi.fn(),
+}));
+vi.mock("../voice", async () => ({
+  ...await vi.importActual<typeof import("../voice")>("../voice"),
+  requireSecretaryAudioModel: mocks.requireAudioModel,
 }));
 
 vi.mock("../../auth", () => ({
@@ -99,6 +104,7 @@ function app() {
 describe("Secretary owner-scoped routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.requireAudioModel.mockResolvedValue(undefined);
     process.env.SESSION_SECRET = "test-secret";
     process.env.OPENAI_API_KEY = "test-openai-key";
     mocks.createSecretaryTask.mockResolvedValue(task);
@@ -145,6 +151,19 @@ describe("Secretary owner-scoped routes", () => {
       instruction: "Ask about the returned deposit.",
       voiceProvider: "cartesia",
     });
+  });
+  it("uses OpenAI by default and refuses model unavailability before creating or dialing a task", async () => {
+    const body = { phoneNumber: "+19545551234", instruction: "Ask about the returned deposit.",
+      confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit.") };
+    const ok = await request(app()).post("/api/secretary/tasks").set("x-test-user-id", "owner-a").send(body);
+    expect(ok.status).toBe(201);
+    expect(mocks.requireAudioModel).toHaveBeenCalledOnce();
+    expect(mocks.createSecretaryTask.mock.calls[0][1]).toMatchObject({ voiceProvider: "openai" });
+    mocks.createSecretaryTask.mockClear();
+    mocks.requireAudioModel.mockRejectedValueOnce(Object.assign(new Error("Exact model unavailable"), { status: 503 }));
+    const no = await request(app()).post("/api/secretary/tasks").set("x-test-user-id", "owner-a").send(body);
+    expect(no.status).toBe(503);
+    expect(mocks.createSecretaryTask).not.toHaveBeenCalled();
   });
 
   it("refuses to queue a call without the owner's confirmed Prepare assignment", async () => {

@@ -63,9 +63,12 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
   it("advertises a self-contained resource and app-only consequential tool", async () => {
     const initialized = await rpc("initialize");
     expect(initialized.body.result.capabilities.resources).toEqual({});
-    expect(initialized.body.result.serverInfo.version).toBe("1.3.0");
+    expect(initialized.body.result.serverInfo.version).toBe("1.4.0");
     const catalog = (await rpc("tools/list")).body.result.tools;
     const preview = catalog.find((t: any) => t.name === "prepare_call");
+    expect(preview.inputSchema.properties.voiceProvider).toMatchObject({
+      enum: ["openai", "elevenlabs", "cartesia"], default: "openai",
+    });
     expect(preview._meta.ui.resourceUri).toBe(CALL_APPROVAL_RESOURCE);
     const approval = catalog.find((t: any) => t.name === "confirm_call_from_card");
     expect(approval._meta.ui.visibility).toEqual(["app"]);

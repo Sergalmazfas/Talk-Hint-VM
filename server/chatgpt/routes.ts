@@ -29,7 +29,7 @@ const CALL = z.object({
   phoneNumber: z.string().regex(/^\+1[2-9]\d{9}$/),
   instruction: z.string().trim().min(1).max(2000),
   clientRequestId: z.string().uuid(),
-  voiceProvider: z.enum(["elevenlabs", "cartesia"]).default("elevenlabs"),
+  voiceProvider: z.enum(["openai", "elevenlabs", "cartesia"]).default("openai"),
   translationLanguage: z.enum(["ru", "es"]).default("ru"),
 }).strict();
 const CARD_DECISION = z.object({
@@ -71,7 +71,8 @@ const TOOL_INPUTS: Record<Tool, object> = {
     phoneNumber: { type: "string", pattern: "^\\+1[2-9]\\d{9}$" },
     instruction: { type: "string", minLength: 1, maxLength: 2000 },
     clientRequestId: { type: "string", format: "uuid" },
-    voiceProvider: { type: "string", enum: ["elevenlabs", "cartesia"] },
+    voiceProvider: { type: "string", enum: ["openai", "elevenlabs", "cartesia"], default: "openai",
+      description: "Default: gpt-realtime-2.1 with built-in marin voice. Other providers must be selected explicitly." },
     translationLanguage: { type: "string", enum: ["ru", "es"] },
   },
   start_call: { confirmation: { type: "string" } },

@@ -4,6 +4,7 @@ import { db } from "../db";
 import { storage } from "../storage";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
+import { requireSecretaryAudioModel } from "../secretary/voice";
 import {
   createLiveSecretaryTask, getLiveSecretaryTaskByClientRequest,
   getSecretaryTaskById, listSecretaryTasks, attachSecretaryCall,
@@ -69,9 +70,12 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
       if (old) return started(old, true);
       const [number] = await db.select({ id: phoneNumbers.id }).from(phoneNumbers).where(eq(phoneNumbers.userId, userId)).limit(1);
       if (!number) return fail(409, "Assign a TalkHint number first");
-      const clone = await (input.voiceProvider === "cartesia" ? getCartesiaClone(userId) : getClone(userId));
-      requireReadyTranslatorClone(input.voiceProvider, clone,
-        input.voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
+      if (input.voiceProvider === "openai") await requireSecretaryAudioModel();
+      else {
+        const clone = await (input.voiceProvider === "cartesia" ? getCartesiaClone(userId) : getClone(userId));
+        requireReadyTranslatorClone(input.voiceProvider, clone,
+          input.voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
+      }
       if (!process.env.OPENAI_API_KEY) return fail(503, "Secretary is not configured");
       const result = await createLiveSecretaryTask(userId, input);
       if (result.created) {

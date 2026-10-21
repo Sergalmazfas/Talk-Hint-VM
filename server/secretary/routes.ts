@@ -6,6 +6,7 @@ import { phoneNumbers } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
+import { secretaryVoiceProvider, requireSecretaryAudioModel } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
 import {
   cancelSecretaryTask,
@@ -89,15 +90,18 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
       const [number] = await db.select({ id: phoneNumbers.id }).from(phoneNumbers)
         .where(eq(phoneNumbers.userId, userId)).limit(1);
       if (!number) throw Object.assign(new Error("Assign a TalkHint phone number before starting Secretary."), { status: 409 });
-      const provider = req.body?.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
-      const clone = await (provider === "cartesia" ? getCartesiaClone(userId) : getClone(userId));
-      try {
+      const provider = secretaryVoiceProvider(req.body?.voiceProvider);
+      if (provider === "openai") await requireSecretaryAudioModel();
+      else {
+        const clone = await (provider === "cartesia" ? getCartesiaClone(userId) : getClone(userId));
+        try {
         requireReadyTranslatorClone(
           provider, clone,
           provider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY,
         );
-      } catch {
-        throw Object.assign(new Error("Set up a ready voice clone before starting Secretary."), { status: 409 });
+        } catch {
+          throw Object.assign(new Error("Set up a ready voice clone before starting Secretary."), { status: 409 });
+        }
       }
       if (!process.env.OPENAI_API_KEY) {
         throw Object.assign(new Error("Secretary conversation service is not configured."), { status: 503 });
@@ -106,7 +110,7 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
         const result = await createLiveSecretaryTask(userId, {
           phoneNumber: req.body?.phoneNumber,
           instruction: req.body?.instruction,
-          voiceProvider: req.body?.voiceProvider,
+          voiceProvider: provider,
           clientRequestId: req.body?.clientRequestId,
           translationLanguage,
         });
@@ -144,7 +148,7 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
       const task = await createSecretaryTask(userId, {
         phoneNumber: req.body?.phoneNumber,
         instruction: req.body?.instruction,
-        voiceProvider: req.body?.voiceProvider,
+        voiceProvider: provider,
       });
       res.status(201).json({ task: toSecretaryTaskReport(task) });
     } catch (error) {

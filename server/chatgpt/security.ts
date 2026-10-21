@@ -21,7 +21,7 @@ export interface Claims {
   redirect?: string; challenge?: string;
   /** UI-only capability is bound to one exact signed draft, never a chat boolean. */
   approvalFor?: string;
-  call?: { phoneNumber: string; instruction: string; clientRequestId: string; voiceProvider: "elevenlabs" | "cartesia"; translationLanguage: "ru" | "es" };
+  call?: { phoneNumber: string; instruction: string; clientRequestId: string; voiceProvider: "openai" | "elevenlabs" | "cartesia"; translationLanguage: "ru" | "es" };
   recipient?: string;
   taskId?: string;
 }

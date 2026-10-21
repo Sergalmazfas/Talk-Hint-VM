@@ -5,7 +5,8 @@ import { phoneNumbers } from "@shared/schema";
 import { storage } from "../storage";
 import { resolveProductionBaseUrl } from "../baseUrl";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
-import { requireReadyTranslatorClone, type TranslatorCloneProvider } from "../translation/cloneSpeech";
+import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
+import { secretaryVoiceProvider, requireSecretaryAudioModel } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
 
 export interface SecretaryDialJob {
@@ -38,13 +39,13 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
     authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
     if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
-    const voiceProvider: TranslatorCloneProvider = job.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
-    const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(job.userId) : getClone(job.userId));
-    requireReadyTranslatorClone(
-      voiceProvider,
-      clone,
-      voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY,
-    );
+    const voiceProvider = secretaryVoiceProvider(job.voiceProvider);
+    if (voiceProvider === "openai") await requireSecretaryAudioModel();
+    else {
+      const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(job.userId) : getClone(job.userId));
+      requireReadyTranslatorClone(voiceProvider, clone,
+        voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
+    }
     if (!process.env.OPENAI_API_KEY) throw new Error("Secretary conversation model is not configured");
     const [number] = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(1);
     if (!number) throw new Error("Assign a TalkHint phone number before starting a Secretary call");
@@ -79,7 +80,8 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     direction: "outgoing",
     status: "ringing",
     transcript: "",
-    metadata: { mode: "secretary", secretaryTaskId: job.id },
+    metadata: { mode: "secretary", secretaryTaskId: job.id, voiceProvider: job.voiceProvider,
+      ...(job.voiceProvider === "openai" ? { model: "gpt-realtime-2.1", voice: "marin" } : {}) },
   });
   return { sid: created.sid, callId: call.id };
 }

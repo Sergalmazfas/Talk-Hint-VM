@@ -3,8 +3,10 @@ import {
   isSafeEnglishTranslation,
   synthesizeCartesiaCloneSpeech,
   synthesizeCloneSpeech,
-  type TranslatorCloneProvider,
 } from "../translation/cloneSpeech";
+import type { SecretaryVoiceProvider } from "./voice";
+import { OpenAISecretaryAudioSession } from "./nativeAudio";
+import { SecretaryNativePlayback } from "./nativePlayback";
 
 const OPENAI_MODEL = process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime";
 const CALL_LIMIT_MS = 5 * 60_000;
@@ -25,7 +27,7 @@ const MAX_OPENAI_SEND_BUFFER_BYTES = 512 * 1024;
 export interface SecretaryCallContext {
   instruction: string;
   ownerId: string;
-  voiceProvider: TranslatorCloneProvider;
+  voiceProvider: SecretaryVoiceProvider;
   cloneVoiceId: string;
 }
 
@@ -53,10 +55,15 @@ export type SecretaryRealtimeEvent =
   | { type: "speech_started" }
   | { type: "guest_transcript"; text: string }
   | { type: "response_text"; responseId: string; text: string }
+  | { type: "audio"; responseId: string; itemId: string; mulaw: Buffer }
+  | { type: "audio_done"; responseId: string }
+  | { type: "assistant_transcript"; responseId: string; text: string }
   | { type: "error"; message: string; fatal: boolean }
   | { type: "closed" };
 
 export interface SecretaryRealtimeSession {
+  readonly inputFormat?: "mulaw8k";
+  truncate?(itemId: string, audioEndMs: number): void;
   onEvent(listener: (event: SecretaryRealtimeEvent) => void): void;
   connect(): Promise<void>;
   sendAudio(pcm24: Buffer): void;
@@ -65,15 +72,16 @@ export interface SecretaryRealtimeSession {
   close(): void;
 }
 
-type RealtimeFactory = (instructions: string) => SecretaryRealtimeSession;
+type RealtimeFactory = (instructions: string, context?: SecretaryCallContext) => SecretaryRealtimeSession;
 type CloneSynthesizer = (
   voiceId: string,
   text: string,
   signal?: AbortSignal,
 ) => Promise<Buffer>;
 
-let realtimeFactory: RealtimeFactory = (instructions) =>
-  new OpenAISecretaryRealtimeSession(instructions);
+const defaultRealtimeFactory: RealtimeFactory = (instructions, context) => context?.voiceProvider === "openai"
+  ? new OpenAISecretaryAudioSession(instructions) : new OpenAISecretaryRealtimeSession(instructions);
+let realtimeFactory: RealtimeFactory = defaultRealtimeFactory;
 let elevenLabsSynthesizer: CloneSynthesizer = synthesizeCloneSpeech;
 let cartesiaSynthesizer: CloneSynthesizer = synthesizeCartesiaCloneSpeech;
 
@@ -83,8 +91,7 @@ export function configureSecretaryAgentForTests(services: {
   elevenLabsSynthesizer?: CloneSynthesizer;
   cartesiaSynthesizer?: CloneSynthesizer;
 } | undefined): void {
-  realtimeFactory = services?.realtimeFactory ?? ((instructions) =>
-    new OpenAISecretaryRealtimeSession(instructions));
+  realtimeFactory = services?.realtimeFactory ?? defaultRealtimeFactory;
   elevenLabsSynthesizer = services?.elevenLabsSynthesizer ?? synthesizeCloneSpeech;
   cartesiaSynthesizer = services?.cartesiaSynthesizer ?? synthesizeCartesiaCloneSpeech;
 }
@@ -430,6 +437,7 @@ export function handleSecretaryTwilioStream(
   let streamSid = "";
   let context: SecretaryCallContext | null = null;
   let realtime: SecretaryRealtimeSession | null = null;
+  let nativePlayback: SecretaryNativePlayback | undefined;
   let initialized = false;
   let finalized = false;
   let cloneOutputActive = false;
@@ -458,6 +466,7 @@ export function handleSecretaryTwilioStream(
   };
 
   const interruptPlayback = () => {
+    if (nativePlayback) { nativePlayback.interrupt(); deps.onDiagnostic?.("playback_cleared"); return; }
     const outputWasActive = cloneOutputActive;
     currentSpeech?.abort();
     currentSpeech = null;
@@ -477,6 +486,7 @@ export function handleSecretaryTwilioStream(
   const finish = async (reason?: string) => {
     if (finalized) return;
     finalized = true;
+    nativePlayback?.close();
     clearTimeout(callTimer);
     currentSpeech?.abort();
     currentSpeech = null;
@@ -630,8 +640,8 @@ export function handleSecretaryTwilioStream(
       return;
     }
     if (!authorizedContext?.ownerId || !authorizedContext.instruction?.trim() ||
-      !authorizedContext.cloneVoiceId?.trim() ||
-      (authorizedContext.voiceProvider !== "elevenlabs" && authorizedContext.voiceProvider !== "cartesia") ||
+      (authorizedContext.voiceProvider !== "openai" && !authorizedContext.cloneVoiceId?.trim()) ||
+      !["openai", "elevenlabs", "cartesia"].includes(authorizedContext.voiceProvider) ||
       finalized || ws.readyState !== WebSocket.OPEN) {
       failUnauthorized();
       return;
@@ -642,19 +652,32 @@ export function handleSecretaryTwilioStream(
       await finish("Secretary is unavailable because OpenAI Realtime is not configured");
       return;
     }
-    realtime = realtimeFactory(buildSecretaryInstructions(context.instruction));
+    realtime = realtimeFactory(buildSecretaryInstructions(context.instruction), context);
+    if (context.voiceProvider === "openai") nativePlayback = new SecretaryNativePlayback({
+      ws, streamSid: () => streamSid, waitMark: waitForMark,
+      truncate: (item, ms) => realtime?.truncate?.(item, ms),
+      playedText: text => queueTurn("secretary", text),
+      audio: payload => deps.onAudio?.(taskId, "secretary", payload),
+      fail: reason => { void finish(reason); },
+    });
     realtime.onEvent((event) => {
       if (finalized) return;
       if (event.type === "ready") {
         initialized = true;
         deps.onDiagnostic?.("realtime_ready");
         realtime?.startIntroduction();
-        for (const frame of earlyAudio.splice(0)) realtime?.sendAudio(mulaw8kToPcm24k(frame));
+        for (const frame of earlyAudio.splice(0)) realtime?.sendAudio(realtime.inputFormat === "mulaw8k" ? frame : mulaw8kToPcm24k(frame));
       } else if (event.type === "speech_started") {
         deps.onDiagnostic?.("guest_speech_started");
         interruptPlayback();
       } else if (event.type === "guest_transcript") {
         queueTurn("guest", event.text);
+      } else if (event.type === "audio") {
+        nativePlayback?.audio(event.responseId, event.itemId, event.mulaw);
+      } else if (event.type === "audio_done") {
+        nativePlayback?.done(event.responseId);
+      } else if (event.type === "assistant_transcript") {
+        nativePlayback?.transcript(event.responseId, event.text);
       } else if (event.type === "response_text") {
         deps.onDiagnostic?.("response_text_ready");
         void speak(event.responseId, event.text);
@@ -717,7 +740,7 @@ export function handleSecretaryTwilioStream(
         earlyAudio.push(frame);
         earlyAudioBytes += frame.length;
       } else {
-        realtime?.sendAudio(mulaw8kToPcm24k(frame));
+        realtime?.sendAudio(realtime.inputFormat === "mulaw8k" ? frame : mulaw8kToPcm24k(frame));
       }
       return;
     }

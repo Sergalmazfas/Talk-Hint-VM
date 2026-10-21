@@ -28,7 +28,8 @@ const TERMINAL_STATUSES = [
 ] as const;
 
 export type SecretaryOutcome = "resolved" | "needs_follow_up" | "not_reached" | "failed" | "unknown";
-export type SecretaryVoiceProvider = "elevenlabs" | "cartesia";
+export type { SecretaryVoiceProvider } from "./voice";
+import { secretaryVoiceProvider } from "./voice";
 export interface SecretaryTaskReport {
   id: string;
   mode?: "live";
@@ -370,12 +371,7 @@ export async function createSecretaryTask(
   if (!instruction) {
     throw Object.assign(new Error("The task is empty, too long, or contains protected card or authentication data."), { status: 400 });
   }
-  if (data.voiceProvider !== undefined &&
-    data.voiceProvider !== "cartesia" && data.voiceProvider !== "elevenlabs") {
-    throw Object.assign(new Error("Choose a supported Secretary voice provider."), { status: 400 });
-  }
-  const voiceProvider: SecretaryVoiceProvider =
-    data.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
+  const voiceProvider = secretaryVoiceProvider(data.voiceProvider);
   const [task] = await db.insert(secretaryTasks).values({
     userId,
     phoneNumber,
@@ -407,10 +403,7 @@ export async function createLiveSecretaryTask(
   if (!instruction) {
     throw Object.assign(new Error("The task is empty, too long, or contains protected card or authentication data."), { status: 400 });
   }
-  if (data.voiceProvider !== undefined && data.voiceProvider !== "cartesia" && data.voiceProvider !== "elevenlabs") {
-    throw Object.assign(new Error("Choose a supported Secretary voice provider."), { status: 400 });
-  }
-  const voiceProvider: SecretaryVoiceProvider = data.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
+  const voiceProvider = secretaryVoiceProvider(data.voiceProvider);
   try {
     return await db.transaction(async (tx) => {
     // Serialize starts for this owner even before a new task reaches the

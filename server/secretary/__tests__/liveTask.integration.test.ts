@@ -35,6 +35,11 @@ describe.skipIf(!DB_UP)("Secretary live owner lock (real Postgres; no phone call
     if (userId) await db.delete(users).where(eq(users.id, userId));
     await dbmod.pool?.end();
   });
+  it("persists OpenAI as the new default without changing existing explicit clone choices", async () => {
+    const created = await tasks.createLiveSecretaryTask(userId, intent());
+    try { expect(created.task.voiceProvider).toBe("openai"); }
+    finally { await db.update(secretaryTasks).set({ status: "completed" }).where(eq(secretaryTasks.id, created.task.id)); }
+  });
 
   it.each([
     ["completed", "completed"],

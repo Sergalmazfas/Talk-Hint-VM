@@ -47,6 +47,7 @@ import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
 import { createCopilotStream } from "./copilotStream";
 import { handleSecretaryTwilioStream } from "./secretary/agent";
+import { secretaryVoiceProvider } from "./secretary/voice";
 import {
   appendSecretaryTurn,
   beginSecretarySubtitleTranslation,
@@ -1013,7 +1014,8 @@ export function setupWebSocket(server: Server) {
           if (!verifySecretaryStream(taskId, callSid, streamAuth)) return null;
           const task = await getSecretaryTaskForCall(taskId, callSid);
           if (!task) return null;
-          const voiceProvider = task.voiceProvider === "cartesia" ? "cartesia" : "elevenlabs";
+          const voiceProvider = secretaryVoiceProvider(task.voiceProvider);
+          if (voiceProvider === "openai") return { instruction: task.instruction, ownerId: task.userId, voiceProvider, cloneVoiceId: "" };
           const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(task.userId) : getClone(task.userId));
           const cloneVoiceId = requireReadyTranslatorClone(
             voiceProvider, clone,
