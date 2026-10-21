@@ -9,13 +9,15 @@ import { IncomingStore } from "./store";
 import { IntakeSession } from "./session";
 import { allowedCards, buildInstructions, MODEL, VOICE } from "./policy";
 import { IncomingAudio } from "./audio";
+import { incomingRevocations } from "./revocation";
 
 export const incomingStore = new IncomingStore();
 export const runtimeEnabled = () => process.env.INCOMING_SECRETARY_RUNTIME_ENABLED === "true";
 const active = new Map<string, Set<() => void>>();
 const activeOwners = new Map<string,string>(), permissions = new Map<string,Set<string>>();
-export function stopIncomingNumber(id: string) { active.get(id)?.forEach(stop=>stop()); }
+export function stopIncomingNumber(id: string) { active.get(id)?.forEach(stop=>stop());incomingRevocations.emit("number",id); }
 export function stopIncomingCard(owner:string,cardId:string) {
+  incomingRevocations.emit("card",owner,cardId);
   activeOwners.forEach((userId,numberId)=>{
     if(userId===owner&&permissions.get(numberId)?.has(cardId))stopIncomingNumber(numberId);
   });

@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useOptionalAuth } from "@/lib/auth";
+import { IncomingSecretaryDevBench } from "@/components/incoming-secretary-dev-bench";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -491,6 +492,9 @@ export default function IncomingSecretary() {
                   </CardContent>
                 </Card>
               </section>
+            )}
+            {import.meta.env.DEV && !isOfflineDemoRoute && Boolean(user) && payload.previewAvailable === true && (
+              <IncomingSecretaryDevBench token={token || ""} numberId={selectedNumberId} />
             )}
             {!isPreviewAllowed && (
               <section aria-label="История входящих заявок">

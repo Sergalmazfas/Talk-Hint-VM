@@ -1,0 +1,99 @@
+import { it,expect,vi } from "vitest";
+vi.mock("../db",()=>({pool:null}));
+import { DevConversation } from "./devConversation";
+import { MemoryRequests } from "./store";
+import { IntakeSession } from "./session";
+import { buildInstructions,defaults } from "./policy";
+
+async function fixture() {
+  const store=new MemoryRequests(),settings={...defaults("work"),timeZone:"America/New_York"};
+  const intake=new IntakeSession("owner","dev-session",settings,store);await intake.begin();
+  const received:any[]=[],sent:any[]=[];
+  let event:(e:any)=>void=()=>{};
+  const peer={readyState:1,send:(s:string)=>received.push(JSON.parse(s)),close:vi.fn()};
+  const ai={connect:vi.fn(async()=>{}),send:(e:any)=>sent.push(e),close:vi.fn()};
+  const conversation=new DevConversation(intake,buildInstructions(settings,[]),peer,(_i,e)=>{event=e;return ai as any;});
+  await conversation.start();
+  const tool=(id:string,fields:object,submit=false)=>event({type:"response.function_call_arguments.done",response_id:"r",
+    call_id:id,name:submit?"submit_request":"save_request",arguments:JSON.stringify(fields)});
+  const record=()=>store.records.get("dev-session")!;
+  return {store,intake,received,sent,event:(e:any)=>event(e),peer,ai,conversation,tool,record};
+}
+it.each([["en","ru"],["en","es"],["en","ru","es"]])("uses the incoming multilingual intake through actual Dev event handling: %j",async(...langs)=>{
+  const f=await fixture();
+  const languages=langs.flat() as string[];
+  for(let i=0;i<languages.length;i++){
+    const language=languages[i],text=language==="ru"?"Здравствуйте, имя Анна":language==="es"?"¡Hola! ¿Puede ayudarme?":"Hello";
+    f.event({type:"input_audio_buffer.speech_started"});
+    f.event({type:"conversation.item.input_audio_transcription.completed",item_id:String(i),transcript:text});
+    f.tool(String(i),{language});
+  }
+  await vi.waitFor(()=>expect(f.record().turns).toHaveLength(languages.length));
+  await f.conversation.stop("completed");
+  expect(f.record().fields.language).toBe(languages.at(-1));
+  expect(f.record().turns.map(t=>t.text).join(" ")).toContain(languages.includes("ru")?"Анна":"¿");
+  expect(f.received.every(e=>e.testOnly===true)).toBe(true);expect(f.store.records.size).toBe(1);
+});
+it("never echoes microphone audio and clears stale speech on interruption before continuing",async()=>{
+  const f=await fixture(),audio=Buffer.alloc(160,255).toString("base64");
+  f.conversation.input({type:"audio",audio});
+  expect(f.sent).toContainEqual({type:"input_audio_buffer.append",audio});
+  expect(f.received.filter(e=>e.type==="audio")).toHaveLength(0);
+  f.event({type:"response.created",response:{id:"r1"}});
+  f.event({type:"response.output_audio.delta",response_id:"r1",item_id:"i",delta:audio});
+  await vi.waitFor(()=>expect(f.received.some(e=>e.type==="audio")).toBe(true));
+  f.conversation.input({type:"playback",responseId:"r1",playedMs:10000});
+  f.event({type:"input_audio_buffer.speech_started"});
+  f.event({type:"response.output_audio.delta",response_id:"r1",item_id:"i",delta:audio});
+  f.event({type:"response.created",response:{id:"r2"}});
+  f.event({type:"response.output_audio.delta",response_id:"r2",item_id:"i2",delta:audio});
+  await vi.waitFor(()=>expect(f.received.filter(e=>e.type==="audio")).toHaveLength(2));
+  expect(f.received.filter(e=>e.type==="audio").map(e=>e.responseId)).toEqual(["r1","r2"]);
+  expect(f.sent).toContainEqual(expect.objectContaining({type:"conversation.item.truncate",audio_end_ms:20}));
+  await f.conversation.stop("completed");
+});
+it("updates corrected details, requires phone reconfirmation, and deduplicates repeated tool delivery",async()=>{
+  const f=await fixture();
+  f.tool("first",{name:"Ana",phone:"+15550000111",callbackConfirmed:true,address:"Test A",localDate:"2026-11-03",localTime:"10:00",durationMinutes:60,language:"es",reviewed:true},true);
+  await vi.waitFor(()=>expect(f.record().status).toBe("pending_owner"));
+  f.tool("correct",{name:"Анна",phone:"+15550000222",address:"Test B",localDate:"2026-11-04",localTime:"11:00"});
+  f.tool("correct",{name:"WRONG"});
+  await vi.waitFor(()=>expect(f.record().fields.name).toBe("Анна"));
+  expect(f.record().fields).toMatchObject({address:"Test B",localDate:"2026-11-04",localTime:"11:00",callbackConfirmed:false,reviewed:false});
+  expect(f.sent.filter(e=>e.item?.call_id==="correct")).toHaveLength(1);
+  f.tool("review",{callbackConfirmed:true,reviewed:true},true);
+  await vi.waitFor(()=>expect(f.record().status).toBe("pending_owner"));
+  await f.conversation.stop("completed");
+  expect(f.store.records.size).toBe(1);
+  expect(f.received.filter(e=>e.type==="request").every(e=>!e.request.bookingConfirmed)).toBe(true);
+  expect(f.record().closed).toBe(true);expect(f.ai.close).toHaveBeenCalled();
+});
+it("returns an honest error and closes AI on failed persistence, never successful acceptance",async()=>{
+  const f=await fixture();f.tool("partial",{name:"Saved partial"});
+  await vi.waitFor(()=>expect(f.record().fields.name).toBe("Saved partial"));
+  f.store.failSave=true;f.tool("fail",{name:"Not saved"},true);
+  await vi.waitFor(()=>expect(f.peer.close).toHaveBeenCalled());
+  expect(f.received.some(e=>e.type==="error")).toBe(true);
+  expect(f.received.find(e=>e.type==="ended")?.error).toBeTruthy();
+  const result=f.sent.find(e=>e.item?.call_id==="fail");
+  expect(JSON.parse(result.item.output)).toMatchObject({saved:false,bookingConfirmed:false});
+  expect(f.record().fields.name).toBe("Saved partial");
+});
+it("keeps a hold phrase and resumes; disconnect persists a partial instead of booking",async()=>{
+  const f=await fixture();
+  f.event({type:"conversation.item.input_audio_transcription.completed",item_id:"hold",transcript:"Please hold"});
+  await vi.waitFor(()=>expect(f.record().turns).toHaveLength(1));
+  expect(f.conversation.ready).toBe(true);expect(f.conversation.closed).toBe(false);
+  f.tool("resume",{name:"Анна",language:"ru"});
+  await vi.waitFor(()=>expect(f.record().fields.name).toBe("Анна"));
+  await f.conversation.stop("connection lost");
+  expect(f.record().status).toBe("incomplete");expect(f.record().fields.name).toBe("Анна");
+});
+it("an unavailable required model fails explicitly without constructing a replacement",async()=>{
+  const store=new MemoryRequests(),session=new IntakeSession("o","d",defaults("w"),store);await session.begin();
+  const events:any[]=[],factory=vi.fn(()=>({connect:async()=>{throw new Error("Unavailable model");},close:vi.fn(),send:vi.fn()}) as any);
+  const c=new DevConversation(session,"incoming",{readyState:1,send:s=>events.push(JSON.parse(s)),close:vi.fn()},factory);
+  await c.start();expect(c.ready).toBe(false);expect(factory).toHaveBeenCalledTimes(1);
+  expect(events.find(e=>e.type==="error").error).toContain("Другой моделью он не заменялся");
+  expect(store.records.get("d")?.closed).toBe(true);
+});

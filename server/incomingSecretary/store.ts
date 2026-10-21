@@ -8,6 +8,7 @@ export interface RequestStore {
   update(owner: string, callSid: string, change: (r: RequestRecord) => RequestRecord): Promise<RequestRecord>;
 }
 export class IncomingStore implements RequestStore {
+  constructor(private readonly table: "incoming_secretary_requests"|"incoming_secretary_dev_requests"="incoming_secretary_requests") {}
   async settings(owner: string, numberId: string): Promise<Settings> {
     const r = await database().query("SELECT config,enabled FROM incoming_secretary_settings WHERE user_id=$1 AND number_id=$2", [owner,numberId]);
     return r.rows[0] ? { ...defaults(numberId), ...r.rows[0].config, enabled: r.rows[0].enabled, numberId } : defaults(numberId);
@@ -20,10 +21,11 @@ export class IncomingStore implements RequestStore {
   }
   async begin(owner: string, numberId: string, callSid: string) {
     const record: RequestRecord = { id: randomUUID(),callSid,userId:owner,numberId,status:"collecting",fields:{},
-      turns:[],missing:[],outcome:"Request collection started; no appointment booked.",updatedAt:new Date().toISOString() };
-    await database().query(`INSERT INTO incoming_secretary_requests(call_sid,id,user_id,number_id,payload)
+      turns:[],missing:[],outcome:"Request collection started; no appointment booked.",updatedAt:new Date().toISOString(),
+      ...(this.table==="incoming_secretary_dev_requests"?{testOnly:true}:{}) };
+    await database().query(`INSERT INTO ${this.table}(call_sid,id,user_id,number_id,payload)
       VALUES($1,$2,$3,$4,$5::jsonb) ON CONFLICT(call_sid) DO NOTHING`, [callSid,record.id,owner,numberId,JSON.stringify(record)]);
-    const r = await database().query("SELECT payload FROM incoming_secretary_requests WHERE call_sid=$1 AND user_id=$2 AND number_id=$3", [callSid,owner,numberId]);
+    const r = await database().query(`SELECT payload FROM ${this.table} WHERE call_sid=$1 AND user_id=$2 AND number_id=$3`, [callSid,owner,numberId]);
     if (!r.rows[0]) throw new Error("Call ownership conflict");
     return r.rows[0].payload as RequestRecord;
   }
@@ -31,16 +33,16 @@ export class IncomingStore implements RequestStore {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
-      const r = await client.query("SELECT payload FROM incoming_secretary_requests WHERE call_sid=$1 AND user_id=$2 FOR UPDATE", [callSid,owner]);
+      const r = await client.query(`SELECT payload FROM ${this.table} WHERE call_sid=$1 AND user_id=$2 FOR UPDATE`, [callSid,owner]);
       if (!r.rows[0]) throw new Error("Request not found");
       const old = r.rows[0].payload as RequestRecord;
       const next = { ...change(old), id: old.id, userId: old.userId, numberId: old.numberId, callSid: old.callSid, updatedAt: new Date().toISOString() };
-      await client.query("UPDATE incoming_secretary_requests SET payload=$3::jsonb,updated_at=now() WHERE call_sid=$1 AND user_id=$2", [callSid,owner,JSON.stringify(next)]);
+      await client.query(`UPDATE ${this.table} SET payload=$3::jsonb,updated_at=now() WHERE call_sid=$1 AND user_id=$2`, [callSid,owner,JSON.stringify(next)]);
       await client.query("COMMIT"); return next;
     } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
   }
   async list(owner: string) {
-    const r = await database().query("SELECT payload,notification_status FROM incoming_secretary_requests WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 50", [owner]);
+    const r = await database().query(`SELECT payload,notification_status FROM ${this.table} WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 50`, [owner]);
     return r.rows.map(x => ({...x.payload, notificationStatus:x.notification_status})) as RequestRecord[];
   }
 }

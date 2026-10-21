@@ -1,3 +1,9 @@
+# Live microphone Dev test
+
+See [DEV-MICROPHONE.md](DEV-MICROPHONE.md) for the new authenticated incoming-agent
+microphone bench, isolated TEST storage and ordinary APNs diagnostic limitations.
+It does not dial a phone or require enabling incoming AI on a real number.
+
 # Incoming Work Secretary: preparation-only first stage
 
 Separate from outgoing Secretary, Translator, Copilot and the outgoing voice lab.

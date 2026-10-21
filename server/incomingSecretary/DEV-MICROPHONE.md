@@ -1,0 +1,90 @@
+# Incoming Secretary: development microphone test
+
+This is the **new incoming** agent, not the outgoing Secretary lab.
+
+## Open and use
+
+Run the existing development workflow and open `/incoming-secretary` with
+the ordinary TalkHint owner account. Microphone controls are shown only in
+development to an account allowed by the existing benchmark admin gate.
+Choose an owned Work number, save its business timezone/settings and its
+explicit customer-disclosure card selection, then find the live microphone
+panel. Enabling AI on the number is **not** necessary for this test.
+
+Click Start, allow browser microphone access, and use fictional client
+details. Stop immediately closes local microphone tracks, scheduled speech
+and AudioContext; the server closes its Realtime connection and finalizes the
+test request. A lost connection is not an instruction to start another session.
+The owner can stop a reserved session after a lost HTTP response.
+
+No phone dialing, Twilio media bridge, SMS, calendar event or notification
+delivery is involved. No native iOS rebuild is needed for the web microphone
+test. HTTPS and browser microphone/audio permissions are needed.
+
+## Same agent, separate records
+
+Instructions, `gpt-realtime-2.1`, `marin`, PCMU 8 kHz, multilingual input
+transcription, tools and intake validation are shared with the prepared
+incoming telephone implementation. There is no provider/model fallback.
+Only the selected owner's explicitly allowed Work cards enter instructions.
+Sharing a card is not disclosure consent.
+
+Apply `dev-schema.sql` explicitly to the **development database only**.
+The separate `incoming_secretary_dev_requests` table is not part of the
+production schema. Each session has one unique call locator and persists TEST
+history independently of real requests and notification outboxes. There is
+no automatic TEST retention/deletion schedule.
+
+Owner-authenticated routes:
+
+- `GET /api/incoming-secretary/dev`: TEST history, current session locator,
+  safe ordinary-alert diagnostics.
+- `POST /api/incoming-secretary/dev/sessions`: reserve one session using an
+  owned Work `numberId`; returns a short-lived one-use capability in JSON.
+- `POST /api/incoming-secretary/dev/sessions/:id/stop`: idempotent owner stop.
+- `/incoming-secretary-dev-stream`: same-origin WebSocket, first-message
+  capability authentication; no token in the URL or local storage.
+
+All routes and the socket reject production use. Fresh card/settings checks
+precede AI connection, and permission changes stop active tests.
+Expired, interrupted or restarted sessions retain partial details and are
+recovered as incomplete, never booked. Failed writes show an error, not
+successful acceptance. A new explicit Start is a new TEST, not a reconnect.
+
+## APNs diagnostics
+
+The existing result notifier uses ordinary alert tokens (`ios_alert`) and
+separate `APNS_ALERT_CERT_PEM` / `APNS_ALERT_KEY_PEM`. VoIP credentials/tokens
+are not a substitute. The diagnostic parses PEM (including normalized
+newlines), validity and key pairing, and reports the owner's active ordinary
+device environments/bundles without token values. Basic PEM checks do not
+prove Apple acceptance or delivery.
+
+The runtime inspection in this development environment found both separate
+alert credentials absent. No credential was added or changed. To prepare a
+later notification test, the owner needs an ordinary APNs certificate and
+matching private key for the real app bundle, securely configured for Dev
+without changing shared/production settings. If no active ordinary token is
+shown, notification permission and registration in the matching native build
+need checking. Xcode/debug and TestFlight/App Store environments must match
+the stored device environment.
+
+No test push was sent. APNs is not required to run the microphone test.
+
+## Verification boundaries
+
+Automated tests cover Dev guards, owner/card isolation, one-use capability,
+duplicate prevention, finalization failures, Unicode and language transitions,
+corrections/reconfirmation, interruption clear, stale audio rejection,
+generated worklet execution/resampling and microphone cleanup races.
+
+A real OpenAI connection accepted the exact model/voice/audio configuration
+and produced greeting audio and transcript with synthetic context. This is
+**not** a real browser microphone/acoustic or native push delivery test.
+The probe used an isolated memory store, not an owner's real request history.
+
+Before any later telephone activation, the owner should test EN→RU, EN→ES,
+EN→RU→ES, ¿/¡ and Cyrillic, interruption, hold/resume, headphones versus
+speaker echo, corrected name/phone/address/date/time, final detail review,
+one TEST request, permission changes and connection loss in their browser.
+Real telephone testing and activation require separate approval.

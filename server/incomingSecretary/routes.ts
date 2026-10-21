@@ -7,7 +7,9 @@ import { incomingStore, runtimeEnabled, stopIncomingNumber, startIncomingNotific
 import { TEMPLATE, MODEL, VOICE, defaults, settingsSchema, fieldsSchema, allowedCards } from "./policy";
 import { IntakeSession } from "./session";
 import { MemoryRequests } from "./store";
+import { registerIncomingDevRoutes } from "./devMicrophone";
 export function registerIncomingRoutes(app:Express,auth:RequestHandler) {
+  registerIncomingDevRoutes(app,auth);
   const eligible=async(owner:string)=> (await storage.getUserPhoneNumbers(owner)).filter(n=>n.type==="work"&&n.userId===owner);
   const write:RequestHandler=(req,res,next)=>{
     if(!req.is("application/json"))return res.status(415).json({error:"JSON required"});

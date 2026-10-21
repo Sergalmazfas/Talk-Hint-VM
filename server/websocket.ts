@@ -15,6 +15,7 @@ import { handleTranslatorTwilioStream, subscribeTranslatorFeed } from "./transla
 import { storage } from "./storage";
 import { cardsForCall, profileForCall } from "./callProfiles/policy";
 import { handleIncomingSocket } from "./incomingSecretary/runtime";
+import { handleIncomingDevSocket } from "./incomingSecretary/devMicrophone";
 import { confirmedSecretaryOwnerName } from "./secretary/ownerIdentity";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
@@ -859,7 +860,7 @@ export function setupWebSocket(server: Server) {
       return;
     }
 
-    if (!["/incoming-secretary-stream", "/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/secretary-lab-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
+    if (!["/incoming-secretary-dev-stream", "/incoming-secretary-stream", "/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/secretary-lab-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -1008,6 +1009,8 @@ export function setupWebSocket(server: Server) {
     } else if (pathname === "/translator-twilio-stream") {
       // Deliberately separate from handleTwilioStream (Hint/Deepgram).
       handleTranslatorTwilioStream(ws);
+    } else if (pathname === "/incoming-secretary-dev-stream") {
+      handleIncomingDevSocket(ws,request);
     } else if (pathname === "/incoming-secretary-stream") {
       handleIncomingSocket(ws);
     } else if (pathname === "/secretary-stream") {

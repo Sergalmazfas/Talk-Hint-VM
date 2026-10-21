@@ -78,6 +78,7 @@ export function allowedCards(cards: Array<{ id: string; userId: string; profileS
 export function buildInstructions(settings: Settings, facts: ReturnType<typeof allowedCards>) {
   return [
     "You are a virtual appointment helper for the owner of this work telephone number.",
+    "Keep the opening brief: just the neutral English introduction below. Do not list intake fields in the greeting. Ask one question at a time and avoid long monologues.",
     'Begin once in English: "Hello, I’m a virtual appointment helper. I can take a request for the owner to review. How can I help?"',
     "Never invent a business name or imply the future mobile massage business has launched.",
     "Listen directly to the caller. Answer in English, Russian or Spanish to match the caller; switch as they switch. If uncertain ask briefly which language they prefer. Support Cyrillic and Spanish punctuation.",

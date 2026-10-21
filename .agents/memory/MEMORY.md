@@ -52,3 +52,4 @@
 - [ChatGPT widget recovery](chatgpt-widget-recovery.md) — host state and historical results are task locators only; refetch under current OAuth, never persist capabilities or auto-resume audio.
 - [Personal and work profiles](personal-work-profiles.md) — one app, separate numbers and knowledge; explicit sharing, separate calendars with private free/busy awareness.
 - [Incoming Secretary boundaries](incoming-secretary-boundaries.md) — future business request intake, explicit Work disclosure consent, no activation implicit in number/card setup.
+- [Dev audio queue timing](dev-audio-queue.md) — fast Realtime generation can fill a short playback queue during healthy speech; clear on interruption, not ordinary backlog.
