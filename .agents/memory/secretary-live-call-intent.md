@@ -20,3 +20,9 @@ Do not automatically read the entire prepared assignment aloud before dialing. K
 **Why:** The owner found the automatic system-voice recitation of a long Russian assignment unpleasant and could not understand what was read. It happened before the call and was separate from the Secretary's live-call voice.
 
 **How to apply:** Keep pre-call assignment confirmation visual unless a separately designed, intelligible playback option is explicitly requested.
+
+The owner clarified “никаких записей” as “При звонке никаких сообщений что разговор записывается или транскрипция идет”. This clarification is not authorization to delete audio/text, disable transcription, or change retention.
+
+**Why:** The user explicitly distinguished spoken notices from whether data is saved.
+
+**How to apply:** Treat announcements, AI self-identification, audio recording, transcription and retention as separate decisions; do not infer changes to one from a request about another.

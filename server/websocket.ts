@@ -837,12 +837,25 @@ class GPTRealtimeHandler {
 export function setupWebSocket(server: Server) {
   const secretarySubtitleTurnCounts = new Map<string, number>();
   const wss = new WebSocketServer({ noServer: true });
+  const labWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
 
   server.on("upgrade", (request, socket, head) => {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
 
-    if (!["/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
+    if (pathname === "/secretary-lab-stream") {
+      // Load before upgrading so the browser's first auth frame cannot race
+      // asynchronous imports. Bounds apply only to the lab, not live calls.
+      void Promise.all([import("./secretaryLab/routes"), import("./secretaryLab/runtime")])
+        .then(([{ handleSecretaryLabSocket }, { secretaryLab }]) => {
+          if (socket.destroyed) return;
+          labWss.handleUpgrade(request, socket, head, ws =>
+            handleSecretaryLabSocket(ws, request, secretaryLab));
+        }).catch(() => socket.destroy());
+      return;
+    }
+
+    if (!["/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/secretary-lab-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }

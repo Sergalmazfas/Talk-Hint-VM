@@ -43,6 +43,9 @@ export interface SecretaryStreamDependencies {
   ): Promise<void>;
   onStreamEnd(taskId: string, reason?: string, callSid?: string): Promise<void>;
   onAudio?(taskId: string, role: "secretary" | "guest", payload: string): void;
+  /** Optional lab telemetry only; never changes the native call policy. */
+  onDiagnostic?(event: "realtime_ready" | "guest_speech_started" | "response_text_ready" |
+    "tts_requested" | "tts_received" | "playback_cleared"): void;
 }
 
 export type SecretaryRealtimeEvent =
@@ -451,6 +454,7 @@ export function handleSecretaryTwilioStream(
     // send an explicit cancel/clear when Twilio is actually playing cloned
     // audio; otherwise this could cancel a response that has not started TTS.
     if (!outputWasActive) return;
+    deps.onDiagnostic?.("playback_cleared");
     realtime?.cancelResponse();
     if (streamSid && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ event: "clear", streamSid }));
@@ -529,7 +533,9 @@ export function handleSecretaryTwilioStream(
         const chunk = chunks[index];
         let pcm24k: Buffer;
         try {
+          deps.onDiagnostic?.("tts_requested");
           pcm24k = await synthesizer(context.cloneVoiceId, chunk, controller.signal);
+          deps.onDiagnostic?.("tts_received");
         } catch (error: any) {
           // A provider can speak even a short phrase slowly. Split again rather
           // than ending the call for an ordinary oversized audio response.
@@ -629,13 +635,16 @@ export function handleSecretaryTwilioStream(
       if (finalized) return;
       if (event.type === "ready") {
         initialized = true;
+        deps.onDiagnostic?.("realtime_ready");
         realtime?.startIntroduction();
         for (const frame of earlyAudio.splice(0)) realtime?.sendAudio(mulaw8kToPcm24k(frame));
       } else if (event.type === "speech_started") {
+        deps.onDiagnostic?.("guest_speech_started");
         interruptPlayback();
       } else if (event.type === "guest_transcript") {
         queueTurn("guest", event.text);
       } else if (event.type === "response_text") {
+        deps.onDiagnostic?.("response_text_ready");
         void speak(event.responseId, event.text);
       } else if (event.type === "error" && event.fatal) {
         void finish(event.message);

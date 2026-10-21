@@ -341,6 +341,9 @@ export default function AdminDiagnostics() {
           <h1 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
             TalkHint Diagnostics — LIVE Ears &amp; Brain Benchmark
           </h1>
+          <Button variant="ghost" size="sm" onClick={() => setLocation("/secretary-lab")} className="text-teal-300">
+            Secretary Lab
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setLocation("/dashboard")} className="text-gray-400">
             ← Dashboard
           </Button>

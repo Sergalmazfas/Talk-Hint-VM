@@ -165,6 +165,15 @@ export default function Dashboard() {
                 >
                   Voice Lab
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLocation("/secretary-lab")}
+                  className="border-teal-600 text-teal-400 hover:text-teal-300"
+                  data-testid="button-secretary-lab"
+                >
+                  Secretary Lab
+                </Button>
               </>
             )}
             <span className="text-gray-400 text-sm hidden sm:inline">{user?.email}</span>
