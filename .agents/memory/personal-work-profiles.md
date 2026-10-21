@@ -17,3 +17,12 @@ availability may use personal busy intervals without revealing event details.
 A promised booking requires a durable calendar acknowledgement, not merely a
 transcript or generated reply. Number setup is not permission to enable
 autonomous incoming answering or forwarding.
+
+The user confirmed their existing CDL line is theirs and selected it as Work,
+rejecting the alternative trial line. Keep that alternative in the pool; do not
+cancel the provider number.
+
+**Why:** The user explicitly corrected the initial number selection.
+
+**How to apply:** Use the approved CDL plan, preserve old history, and do not
+replace the owner's choice with another free number.

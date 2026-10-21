@@ -1,10 +1,11 @@
 import type { Express, RequestHandler } from "express";
-import { numberProfile, PROFILE_KEYS, verifyNumberRouting, WORK_NUMBER_CANDIDATE, WORK_NUMBER_OWNER } from "./policy";
+import { numberProfile, PROFILE_KEYS, verifyNumberRouting, WORK_NUMBER_CANDIDATE, WORK_NUMBER_OWNER, UNUSED_WORK_NUMBER } from "./policy";
 
 interface Dependencies {
   numbers(owner: string): Promise<Array<{ id: string; userId: string; twilioNumber: string; name: string; type: string; createdAt?: Date }>>;
   pool(): Promise<Array<{ id: string; twilioNumber: string; isAssigned: boolean }>>;
   inspect(number: string): Promise<Parameters<typeof verifyNumberRouting>[0]>;
+  canAdoptExisting?(): Promise<boolean>;
   assign(numberId: string, owner: string): Promise<{ id: string; twilioNumber: string; name: string; type: string }>;
 }
 
@@ -15,6 +16,8 @@ export function registerCallProfileRoutes(app: Express, auth: RequestHandler, de
       const owner = req.user!.id;
       const [numbers, pool] = await Promise.all([deps.numbers(owner), deps.pool()]);
       const candidate = pool.find(n => n.id === WORK_NUMBER_CANDIDATE.id && n.twilioNumber === WORK_NUMBER_CANDIDATE.phoneNumber);
+      const mayAdopt = owner === WORK_NUMBER_OWNER && !!candidate?.isAssigned &&
+        !!deps.canAdoptExisting && await deps.canAdoptExisting();
       res.json({
         profiles: PROFILE_KEYS.map(id => ({
           id, label: id === "personal" ? "Личное" : "Работа",
@@ -22,7 +25,8 @@ export function registerCallProfileRoutes(app: Express, auth: RequestHandler, de
             .map(n => ({ id: n.id, phoneNumber: n.twilioNumber, name: n.name, type: n.type })),
           secretaryOutboundReady: id === "personal" && numbers.some(n => numberProfile(n.type) === "personal"),
         })),
-        recommendedWorkNumber: { ...WORK_NUMBER_CANDIDATE, available: owner === WORK_NUMBER_OWNER && !!candidate && !candidate.isAssigned },
+        recommendedWorkNumber: { ...WORK_NUMBER_CANDIDATE, available: owner === WORK_NUMBER_OWNER && !!candidate && (!candidate.isAssigned || mayAdopt),
+          existingBindingMove: mayAdopt && !numbers.some(n => n.twilioNumber === WORK_NUMBER_CANDIDATE.phoneNumber) },
         incomingAiEnabled: false, calendarConnected: false,
       });
     } catch { res.status(503).json({ error: "Не удалось загрузить профили звонков." }); }
@@ -43,11 +47,12 @@ export function registerCallProfileRoutes(app: Express, auth: RequestHandler, de
         return res.status(400).json({ error: "Выберите предложенный свободный рабочий номер." });
       const owner = req.user!.id;
       const numbers = await deps.numbers(owner);
-      const existing = numbers.find(n => n.type === "work");
+      const existing = numbers.find(n => n.type === "work" && n.twilioNumber !== UNUSED_WORK_NUMBER);
       if (existing) {
         if (existing.twilioNumber !== WORK_NUMBER_CANDIDATE.phoneNumber)
           return res.status(409).json({ error: "Рабочий номер уже назначен. Переназначение не выполнялось." });
-        return res.json({ phoneNumber: { id: existing.id, phoneNumber: existing.twilioNumber, name: existing.name, type: existing.type }, reused: true });
+        if (!numbers.some(n => n.twilioNumber === UNUSED_WORK_NUMBER))
+          return res.json({ phoneNumber: { id: existing.id, phoneNumber: existing.twilioNumber, name: existing.name, type: existing.type }, reused: true });
       }
       // The provider is read before DB assignment. A disconnected/foreign route is a blocker, not an invitation to change it.
       const inspected = await deps.inspect(WORK_NUMBER_CANDIDATE.phoneNumber);

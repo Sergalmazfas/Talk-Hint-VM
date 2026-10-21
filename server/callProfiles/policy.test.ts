@@ -3,7 +3,7 @@ import { cardsForCall, defaultCallingNumber, profileForCall, validCardScope, ver
 
 describe("personal and work profiles", () => {
   const personal = { id: "p", userId: "owner", twilioNumber: "+19543200848", type: "personal", createdAt: new Date(1) };
-  const work = { id: "w", userId: "owner", twilioNumber: "+19548592875", type: "work", createdAt: new Date(0) };
+  const work = { id: "w", userId: "owner", twilioNumber: "+17867331025", type: "work", createdAt: new Date(0) };
   it("keeps personal caller ID regardless of result order and preserves work-only legacy accounts", () => {
     expect(defaultCallingNumber([work, personal])?.id).toBe("p");
     expect(defaultCallingNumber([personal, work])?.id).toBe("p");

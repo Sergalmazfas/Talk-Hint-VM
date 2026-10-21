@@ -2280,8 +2280,20 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),
     inspect: number => inspectExistingVoiceNumber(number),
-    assign: (numberId, owner) => storage.assignNumber(numberId, owner, "Рабочий", "work",
-      { singleWorkNumber: true, configureWebhook: false }),
+    canAdoptExisting: async () => {
+      const { pool, dbReady } = await import("./db");
+      await dbReady;
+      if (!pool) return false;
+      const { canAdoptCdl } = await import("./callProfiles/activateCdl");
+      return canAdoptCdl(pool);
+    },
+    assign: async (_numberId, owner) => {
+      const { pool, dbReady } = await import("./db");
+      await dbReady;
+      if (!pool) throw new Error("Database unavailable");
+      const { activateCdl } = await import("./callProfiles/activateCdl");
+      return activateCdl(pool, owner);
+    },
   });
 
   // Knowledge Cards ("Static Context") — per-user reusable project & company/

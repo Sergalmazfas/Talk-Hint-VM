@@ -51,7 +51,7 @@ interface CallProfile {
 
 interface CallProfilesResponse {
   profiles: CallProfile[];
-  recommendedWorkNumber: { id: string; phoneNumber: string; available: boolean };
+  recommendedWorkNumber: { id: string; phoneNumber: string; available: boolean; existingBindingMove?: boolean };
   incomingAiEnabled: false;
   calendarConnected: false;
 }
@@ -213,7 +213,10 @@ export default function CallProfiles() {
     const selected = recommended?.id === selectedNumberId
       ? recommended.phoneNumber
       : selectedNumberId;
-    const confirmed = window.confirm(`Подключить номер ${selected} к рабочему профилю?\n\nЛичный номер и активная линия не изменятся. Покупки не будет.`);
+    const moveNotice = recommended?.existingBindingMove
+      ? "\n\nCDL-линия перейдёт из вашего прежнего CDL-аккаунта в этот аккаунт: новые входящие будут приходить сюда. История прежнего аккаунта останется в нём."
+      : "";
+    const confirmed = window.confirm(`Сделать номер ${selected} рабочим?${moveNotice}\n\nЛичный номер не изменится. Ранее предложенный номер вернётся в пул, без отказа от него у оператора. Покупки не будет.`);
     if (!confirmed) return;
     setAttaching(true);
     try {
@@ -398,7 +401,7 @@ export default function CallProfiles() {
                           />
                           <span>
                             <span className="block font-mono text-lg text-white">{recommended.phoneNumber}</span>
-                            <span className="mt-1 block text-xs text-gray-400">Рекомендуемый доступный номер · без покупки</span>
+                            <span className="mt-1 block text-xs text-gray-400">Выбранная вами линия CDL · без покупки</span>
                           </span>
                         </label>
                       ) : (
@@ -406,7 +409,7 @@ export default function CallProfiles() {
                           Сейчас нет доступного номера для рабочего профиля.
                         </p>
                       )}
-                      <p className="text-xs leading-5 text-gray-500">Выбор применяется только после нажатия кнопки и подтверждения. Личный номер и активная линия не меняются.</p>
+                      <p className="text-xs leading-5 text-gray-500">Выбор применяется только после подтверждения. Личный номер сохраняется. Если CDL закреплён за вашим прежним аккаунтом, новые входящие перейдут в этот аккаунт; старая история не переносится и не удаляется. Во время активного звонка назначение блокируется.</p>
                       <Button onClick={attachWorkNumber} disabled={!recommended?.available || !selectedNumberId || attaching} className="w-full bg-purple-700 hover:bg-purple-600">
                         {attaching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
                         Подключить выбранный номер

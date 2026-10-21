@@ -11,14 +11,20 @@ delete or transfer its cards.
 - The personal number is retained. Default outgoing caller ID prefers personal
   regardless of database row order. Existing work-only accounts retain their
   previous single-number behavior.
-- An explicitly approved, existing pool number can be attached to the approved
-  owner as Work. The dedicated action does not buy numbers, restock the pool,
-  transfer another owner's line, modify provider webhooks or dial.
+- The owner chose their existing CDL line as Work, rejecting the initially
+  suggested trial line. Return the trial line to the pool, never cancel it at
+  the provider. The dedicated action never buys numbers, restocks, changes
+  provider webhooks or dials.
+- Only the owner's explicitly confirmed former CDL binding may move to the
+  main account. The exact previous account and binding are checked; unexpected
+  ownership blocks the operation. Preserve historical calls/reports under their
+  existing owners and detach old private prompts without deleting their contents.
 - Provider ownership, voice capability and existing TalkHint voice/status
   routing are verified before attachment. An unavailable provider or foreign
   route blocks setup instead of silently changing routing.
 - A transaction locks the owner and pool row. Concurrent setup requests return
-  the same binding; another owner's assignment cannot be taken.
+  the same binding; arbitrary other accounts' assignments cannot be taken.
+  Active calls block number changes.
 - Cards have `personal`, `work` or explicitly `shared` scope. Existing cards
   remain personal. The existing owner-only live-hint card loader derives the
   profile from the actual call and assigned number; unresolvable or foreign
@@ -44,8 +50,10 @@ delete or transfer its cards.
    code/schema does not copy a Dev number binding into production.
 3. Sign in to the existing TalkHint account, open `/settings/call-profiles`, and
    explicitly confirm the proposed Work number. The server checks actual
-   availability again. If it is occupied or already assigned elsewhere, stop;
-   there is no automatic substitution or transfer.
+   availability again. The confirmation explains that new incoming CDL calls
+   move to this account while old history stays in the previous account.
+   Only the specifically approved previous CDL binding may move; any changed
+   ownership blocks the action. There is no automatic substitution.
 4. Add Work cards explicitly. Shared cards should contain only facts intended
    for both contexts. Do not place passwords, payment credentials or sensitive
    private data in shared cards.

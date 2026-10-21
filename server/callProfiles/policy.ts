@@ -1,9 +1,16 @@
 export const PROFILE_KEYS = ["personal", "work"] as const;
 export type CallProfile = typeof PROFILE_KEYS[number];
 export type CardScope = CallProfile | "shared";
-export const WORK_NUMBER_CANDIDATE = { id: "f23589ca-5da1-465b-86a4-f5ac4616f9f8", phoneNumber: "+19548592875" } as const;
+export const WORK_NUMBER_CANDIDATE = { id: "c90c1882-5e04-4b03-84ac-6ed14aa2724a", phoneNumber: "+17867331025" } as const;
 // This is an owner-approved setup plan, not a new entitlement for every account.
 export const WORK_NUMBER_OWNER = "47704265";
+// The creator explicitly confirmed this CDL line is theirs. No other account
+// or number is eligible for this narrowly scoped adoption.
+export const CDL_PREVIOUS_BINDING = {
+  id: "9e2e1f21-f942-49a1-9833-e34270138b8f",
+  ownerId: "286328ea-a265-46f3-9970-98c22c7e060d",
+} as const;
+export const UNUSED_WORK_NUMBER = "+19548592875";
 
 export function validCardScope(value: unknown): value is CardScope {
   return value === "personal" || value === "work" || value === "shared";

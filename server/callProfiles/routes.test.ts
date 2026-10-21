@@ -7,10 +7,11 @@ import { WORK_NUMBER_CANDIDATE, WORK_NUMBER_OWNER } from "./policy";
 describe("owner-approved existing-pool work number setup; no dialing", () => {
   const personal = { id: "p", userId: WORK_NUMBER_OWNER, twilioNumber: "+19543200848", name: "Serg", type: "personal" };
   let app: express.Express, owner: string | undefined;
-  const deps = { numbers: vi.fn(), pool: vi.fn(), inspect: vi.fn(), assign: vi.fn() };
+  const deps = { numbers: vi.fn(), pool: vi.fn(), inspect: vi.fn(), assign: vi.fn(), canAdoptExisting: vi.fn() };
   beforeEach(() => {
     vi.resetAllMocks(); owner = WORK_NUMBER_OWNER; app = express(); app.use(express.json());
     deps.numbers.mockResolvedValue([personal]);
+    deps.canAdoptExisting.mockResolvedValue(false);
     deps.pool.mockResolvedValue([{ ...WORK_NUMBER_CANDIDATE, twilioNumber: WORK_NUMBER_CANDIDATE.phoneNumber, isAssigned: false }]);
     deps.inspect.mockResolvedValue({ foundOnMain: true, voiceEnabled: true, usesVoiceApplication: false, voiceMethod: "POST",
       voiceUrl: "https://talkhint.app/twilio/voice", statusCallback: "https://talkhint.app/twilio/status" });
@@ -39,9 +40,29 @@ describe("owner-approved existing-pool work number setup; no dialing", () => {
     expect(deps.assign).not.toHaveBeenCalled();
   });
   it("accepts only the approved candidate, not CDL or owner/caller-controlled changes", async () => {
-    expect((await attach({ numberId: "cdl-assigned" })).status).toBe(400);
+    expect((await attach({ numberId: "unapproved-number" })).status).toBe(400);
     expect((await attach({ numberId: WORK_NUMBER_CANDIDATE.id, userId: "other" })).status).toBe(400);
     expect(deps.inspect).not.toHaveBeenCalled(); expect(deps.assign).not.toHaveBeenCalled();
+  });
+  it("no longer offers or accepts the discarded 2875 number", async () => {
+    expect((await attach({ numberId: "f23589ca-5da1-465b-86a4-f5ac4616f9f8" })).status).toBe(400);
+    const r = await request(app).get("/api/call-profiles");
+    expect(r.body.recommendedWorkNumber.phoneNumber).toBe("+17867331025");
+    expect(deps.assign).not.toHaveBeenCalled();
+  });
+  it("shows the approved previous CDL binding as a move, not as a free line", async () => {
+    deps.pool.mockResolvedValue([{ id: WORK_NUMBER_CANDIDATE.id, twilioNumber: WORK_NUMBER_CANDIDATE.phoneNumber, isAssigned: true }]);
+    deps.canAdoptExisting.mockResolvedValueOnce(true);
+    const r = await request(app).get("/api/call-profiles");
+    expect(r.body.recommendedWorkNumber.available).toBe(true);
+    expect(r.body.recommendedWorkNumber.existingBindingMove).toBe(true);
+    deps.canAdoptExisting.mockResolvedValueOnce(false);
+    expect((await request(app).get("/api/call-profiles")).body.recommendedWorkNumber.available).toBe(false);
+  });
+  it("allows replacing only the discarded trial work line", async () => {
+    deps.numbers.mockResolvedValue([personal, { ...personal, id: "trial", twilioNumber: "+19548592875", type: "work" }]);
+    expect((await attach()).status).toBe(200);
+    expect(deps.assign).toHaveBeenCalledOnce();
   });
   it("requires provider preflight and assigns to the authenticated owner only", async () => {
     expect((await attach()).status).toBe(200);
