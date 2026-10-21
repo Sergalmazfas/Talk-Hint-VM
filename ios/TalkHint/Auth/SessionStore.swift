@@ -15,6 +15,21 @@ enum VoiceProviderPreference: String, Codable {
     case cartesia
 }
 
+/// Independent of the cloned-voice setting used by Translator and Copilot.
+enum SecretaryVoiceProviderPreference: String, Codable, CaseIterable {
+    case openai
+    case elevenlabs
+    case cartesia
+
+    var displayName: String {
+        switch self {
+        case .openai: return "OpenAI"
+        case .elevenlabs: return "ElevenLabs"
+        case .cartesia: return "Cartesia"
+        }
+    }
+}
+
 /// Holds the authenticated session (Bearer token + user id) used for all
 /// backend calls. The token is stored in the Keychain; the user id (not
 /// sensitive) in UserDefaults.
@@ -37,6 +52,7 @@ final class SessionStore {
     private let translatorVoiceKey = "talkhint.translator.voice"
     private let translatorPlaybackKey = "talkhint.translator.playback"
     private let voiceProviderKey = "talkhint.voice.provider"
+    private let secretaryVoiceProviderKey = "talkhint.secretary.voice.provider"
 
     /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
     /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
@@ -59,7 +75,7 @@ final class SessionStore {
         let instruction: String
         let confirmationToken: String
         let clientRequestId: UUID
-        var voiceProvider: VoiceProviderPreference
+        var voiceProvider: SecretaryVoiceProviderPreference
         var phoneNumber: String?
         var requestAttempted: Bool
     }
@@ -181,6 +197,17 @@ final class SessionStore {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: voiceProviderKey) }
     }
 
+    /// No migration from the shared clone preference: new Secretary calls default
+    /// to OpenAI, while Codable preserves providers on already persisted drafts.
+    var secretaryVoiceProvider: SecretaryVoiceProviderPreference {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: secretaryVoiceProviderKey),
+                  let value = SecretaryVoiceProviderPreference(rawValue: raw) else { return .openai }
+            return value
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: secretaryVoiceProviderKey) }
+    }
+
     /// How incoming calls are handled, persisted to the backend via
     /// `POST /api/user/call-mode` (enum live / forwarding / training). The
     /// backend exposes no GET for it, so this local copy is the display source
@@ -242,6 +269,7 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: translatorVoiceKey)
         UserDefaults.standard.removeObject(forKey: translatorPlaybackKey)
         UserDefaults.standard.removeObject(forKey: voiceProviderKey)
+        UserDefaults.standard.removeObject(forKey: secretaryVoiceProviderKey)
         clearPendingSecretaryCall()
     }
 }

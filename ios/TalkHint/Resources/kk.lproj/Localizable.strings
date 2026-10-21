@@ -396,6 +396,12 @@
 "common.edit" = "Өңдеу";
 "common.error.title" = "Бірдеңе дұрыс болмады";
 "settings.voice_provider.title" = "Дауыс провайдері";
+"settings.section.secretary" = "Secretary";
+"settings.secretary.openai" = "OpenAI · GPT-Realtime-2.1";
+"settings.secretary.openai.detail" = "Жаңа қоңыраулар үшін таңдалған · Дауыс: marin";
+"settings.secretary.clone.detail" = "Жаңа қоңыраулар үшін таңдалған · Бапталған дауыс клоныңыз";
+"settings.secretary.choose" = "Secretary моделі мен дауысы";
+"settings.secretary.footer" = "Әдепкіде — marin кірістірілген дауысы бар OpenAI GPT-Realtime-2.1. Басқа провайдерді таңдау үшін басыңыз. Тек жаңа Secretary қоңырауларына қатысты; Translator, Copilot және бұрынғы тапсырмалар өзгермейді.";
 "settings.voice_provider.elevenlabs" = "ElevenLabs";
 "settings.voice_provider.cartesia" = "Cartesia";
 "settings.footer.voice_provider" = "Бұл баптау келесі қоңыраудан бастап Translator және Copilot жүйелеріндегі клондалған ағылшын дауысыңызға қолданылады. Қонақтың және жүйелік дауыстар өзгермейді. Cartesia серверде дайын жеке клоныңызды қажет етеді.";

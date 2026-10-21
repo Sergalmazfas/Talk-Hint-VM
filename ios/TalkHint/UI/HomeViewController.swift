@@ -728,7 +728,7 @@ final class HomeViewController: UIViewController {
                     instruction: instruction,
                     confirmationToken: token,
                     clientRequestId: UUID(),
-                    voiceProvider: SessionStore.shared.voiceProvider,
+                    voiceProvider: SessionStore.shared.secretaryVoiceProvider,
                     phoneNumber: nil,
                     requestAttempted: false)
                 guard SessionStore.shared.savePendingSecretaryCall(draft) else {
@@ -877,7 +877,7 @@ final class HomeViewController: UIViewController {
         // Before the first request, use the current Settings selection. Once
         // attempted, keep the provider fixed to preserve request idempotency.
         if !confirmed.requestAttempted {
-            confirmed.voiceProvider = SessionStore.shared.voiceProvider
+            confirmed.voiceProvider = SessionStore.shared.secretaryVoiceProvider
         }
         let cleaned: String
         if confirmed.requestAttempted, let requestedPhone = confirmed.phoneNumber {

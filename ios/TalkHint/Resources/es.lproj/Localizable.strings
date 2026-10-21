@@ -396,6 +396,12 @@
 "common.edit" = "Editar";
 "common.error.title" = "Algo salió mal";
 "settings.voice_provider.title" = "Proveedor de voz";
+"settings.section.secretary" = "Secretary";
+"settings.secretary.openai" = "OpenAI · GPT-Realtime-2.1";
+"settings.secretary.openai.detail" = "Seleccionado para nuevas llamadas · Voz: marin";
+"settings.secretary.clone.detail" = "Seleccionado para nuevas llamadas · Su voz clonada configurada";
+"settings.secretary.choose" = "Modelo y voz de Secretary";
+"settings.secretary.footer" = "OpenAI GPT-Realtime-2.1 con la voz integrada marin es la opción predeterminada. Toque para elegir otro proveedor. Solo para nuevas llamadas de Secretary; Translator, Copilot y las tareas existentes no cambian.";
 "settings.voice_provider.elevenlabs" = "ElevenLabs";
 "settings.voice_provider.cartesia" = "Cartesia";
 "settings.footer.voice_provider" = "Se aplica a su voz clonada en inglés en Translator y Copilot desde la próxima llamada. No cambia la voz del invitado ni la del sistema. Cartesia requiere que su clon esté listo en el servidor.";

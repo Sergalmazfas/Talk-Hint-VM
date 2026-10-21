@@ -22,6 +22,7 @@ final class SettingsViewController: UITableViewController {
         case language
         case features
         case translator
+        case secretary
         case phone
         case account
     }
@@ -93,6 +94,7 @@ final class SettingsViewController: UITableViewController {
         case .language: return SessionStore.availableLanguages.count
         case .features: return FeatureRow.allCases.count
         case .translator: return TranslatorRow.allCases.count
+        case .secretary: return 1
         case .phone: return 1
         case .account: return 1
         }
@@ -103,6 +105,7 @@ final class SettingsViewController: UITableViewController {
         case .language: return NSLocalizedString("settings.section.hint_language", comment: "")
         case .features: return NSLocalizedString("settings.section.live_call", comment: "")
         case .translator: return NSLocalizedString("settings.section.translator", comment: "")
+        case .secretary: return NSLocalizedString("settings.section.secretary", comment: "")
         case .phone: return NSLocalizedString("settings.section.phone", comment: "")
         case .account: return NSLocalizedString("settings.section.account", comment: "")
         }
@@ -116,6 +119,8 @@ final class SettingsViewController: UITableViewController {
             return NSLocalizedString("settings.footer.features", comment: "")
         case .translator:
             return NSLocalizedString("settings.footer.voice_provider", comment: "")
+        case .secretary:
+            return NSLocalizedString("settings.secretary.footer", comment: "")
         case .phone, .account:
             return nil
         }
@@ -182,6 +187,21 @@ final class SettingsViewController: UITableViewController {
             }
             return cell
 
+        case .secretary:
+            let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+            let provider = SessionStore.shared.secretaryVoiceProvider
+            cell.textLabel?.text = provider == .openai
+                ? NSLocalizedString("settings.secretary.openai", comment: "")
+                : provider.displayName
+            cell.textLabel?.numberOfLines = 0
+            cell.detailTextLabel?.text = NSLocalizedString(
+                provider == .openai ? "settings.secretary.openai.detail" : "settings.secretary.clone.detail",
+                comment: "")
+            cell.detailTextLabel?.numberOfLines = 0
+            cell.accessoryType = .disclosureIndicator
+            cell.accessibilityIdentifier = "cell-secretary-voice-provider"
+            return cell
+
         case .phone:
             let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
             cell.textLabel?.text = NSLocalizedString("settings.my_number", comment: "")
@@ -215,6 +235,8 @@ final class SettingsViewController: UITableViewController {
             break // handled by the UISwitch valueChanged action
         case .translator:
             break // handled by the segmented control
+        case .secretary:
+            selectSecretaryProvider(at: indexPath)
         case .phone:
             navigationController?.pushViewController(NumbersViewController(), animated: true)
         case .account:
@@ -228,6 +250,27 @@ final class SettingsViewController: UITableViewController {
     }
 
     // MARK: - Feature toggles
+
+    private func selectSecretaryProvider(at indexPath: IndexPath) {
+        let sheet = UIAlertController(
+            title: NSLocalizedString("settings.secretary.choose", comment: ""),
+            message: nil, preferredStyle: .actionSheet)
+        for provider in SecretaryVoiceProviderPreference.allCases {
+            let title = provider == .openai
+                ? NSLocalizedString("settings.secretary.openai", comment: "")
+                : provider.displayName
+            sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
+                SessionStore.shared.secretaryVoiceProvider = provider
+                self?.tableView.reloadSections(IndexSet(integer: Section.secretary.rawValue), with: .none)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = tableView
+            popover.sourceRect = tableView.rectForRow(at: indexPath)
+        }
+        present(sheet, animated: true)
+    }
 
     private func featureCell(title: String, isOn: Bool, identifier: String, action: Selector) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)

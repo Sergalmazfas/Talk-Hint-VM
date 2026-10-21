@@ -713,7 +713,7 @@ final class APIClient {
 
     /// Explicitly creates/starts a task after the user reviews its confirmed goal.
     func createSecretaryTask(phoneNumber: String, instruction: String, confirmationToken: String,
-                             voiceProvider: VoiceProviderPreference, live: Bool = false,
+                             voiceProvider: SecretaryVoiceProviderPreference, live: Bool = false,
                              clientRequestId: UUID? = nil,
                              translationLanguage: String? = nil) async throws -> SecretaryTask {
         var body: [String: Any] = [
