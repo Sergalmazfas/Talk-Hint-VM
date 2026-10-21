@@ -8,6 +8,13 @@ delete or transfer its cards.
 
 - Owner-authenticated `/settings/call-profiles` in the existing web app, linked
   from Dashboard.
+- Native iOS Settings now exposes Personal number, Work number, and Personal &
+  Work cards. The native profile screen uses the same authenticated APIs and
+  provides explicit CDL setup confirmation. Card read/create/edit keep the
+  selected scope; failures are not presented as successful empty lists.
+- Native Swift screens require a new iOS binary. Republishing the backend alone
+  cannot add screens to an already installed app. Native XCTest additions need
+  Xcode/Simulator; source-contract checks are not an iPhone verification.
 - The personal number is retained. Default outgoing caller ID prefers personal
   regardless of database row order. Existing work-only accounts retain their
   previous single-number behavior.
@@ -54,6 +61,9 @@ delete or transfer its cards.
    move to this account while old history stays in the previous account.
    Only the specifically approved previous CDL binding may move; any changed
    ownership blocks the action. There is no automatic substitution.
+   With a new native iOS build, the same action is available under Settings →
+   Work number / Personal & Work cards. Never attach on screen load, never
+   change the selected calling line as a side effect.
 4. Add Work cards explicitly. Shared cards should contain only facts intended
    for both contexts. Do not place passwords, payment credentials or sensitive
    private data in shared cards.

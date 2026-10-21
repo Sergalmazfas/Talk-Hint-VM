@@ -567,49 +567,77 @@ final class APIClient {
 
     // MARK: - Knowledge Cards (Static Context)
 
+    func callProfiles() async throws -> CallProfilesSnapshot {
+        let data = try await request("/api/call-profiles", method: "GET", json: nil, authenticated: true)
+        let result = try JSONDecoder().decode(CallProfilesSnapshot.self, from: data)
+        guard result.profiles.count == 2,
+              Set(result.profiles.map(\.id)) == Set([CallProfileScope.personal, .work]) else {
+            throw APIError.decoding
+        }
+        return result
+    }
+
+    /// Explicit owner action only; never called from a page load or retry.
+    func connectWorkNumber(numberId: String) async throws -> CallProfileNumber {
+        struct Response: Decodable { let phoneNumber: CallProfileNumber }
+        let data = try await request("/api/call-profiles/work-number", method: "POST",
+                                     json: ["numberId": numberId], authenticated: true)
+        let response = try JSONDecoder().decode(Response.self, from: data)
+        guard response.phoneNumber.type == "work" else { throw APIError.decoding }
+        return response.phoneNumber
+    }
+
     struct KnowledgeCardItem {
         let id: String
         let cardType: String   // "project" | "company"
         let title: String
         let body: String
         let sortOrder: Int
+        let profileScope: CallProfileScope
     }
 
     /// Fetches the signed-in user's static-context cards (projects + company /
     /// services). Server route `/api/cards` is user-scoped and returns them in
     /// priority order (sortOrder asc, then most recently updated).
-    func knowledgeCards() async throws -> [KnowledgeCardItem] {
-        let data = try await request("/api/cards", method: "GET", json: nil, authenticated: true)
+    func knowledgeCards(profileScope: CallProfileScope = .personal) async throws -> [KnowledgeCardItem] {
+        let data = try await request("/api/cards?profile=\(profileScope.rawValue)", method: "GET", json: nil, authenticated: true)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let arr = obj["cards"] as? [[String: Any]] else {
             throw APIError.decoding
         }
-        return arr.compactMap { Self.parseCard($0) }
+        let cards = arr.compactMap { Self.parseCard($0) }
+        guard cards.count == arr.count, cards.allSatisfy({ $0.profileScope == profileScope }) else {
+            throw APIError.decoding
+        }
+        return cards
     }
 
     /// Creates a new card. Returns the stored row.
     @discardableResult
-    func createCard(cardType: String, title: String, body: String, sortOrder: Int) async throws -> KnowledgeCardItem {
-        let payload: [String: Any] = ["cardType": cardType, "title": title, "body": body, "sortOrder": sortOrder]
+    func createCard(cardType: String, title: String, body: String, sortOrder: Int, profileScope: CallProfileScope = .personal) async throws -> KnowledgeCardItem {
+        let payload: [String: Any] = ["cardType": cardType, "title": title, "body": body, "sortOrder": sortOrder, "profileScope": profileScope.rawValue]
         let data = try await request("/api/cards", method: "POST", json: payload, authenticated: true)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let card = obj["card"] as? [String: Any],
               let parsed = Self.parseCard(card) else {
             throw APIError.decoding
         }
+        guard parsed.profileScope == profileScope else { throw APIError.decoding }
         return parsed
     }
 
     /// Updates one card. Returns the stored row.
     @discardableResult
-    func updateCard(id: String, cardType: String, title: String, body: String, sortOrder: Int) async throws -> KnowledgeCardItem {
-        let payload: [String: Any] = ["cardType": cardType, "title": title, "body": body, "sortOrder": sortOrder]
+    func updateCard(id: String, cardType: String, title: String, body: String, sortOrder: Int, profileScope: CallProfileScope? = nil) async throws -> KnowledgeCardItem {
+        var payload: [String: Any] = ["cardType": cardType, "title": title, "body": body, "sortOrder": sortOrder]
+        if let profileScope = profileScope { payload["profileScope"] = profileScope.rawValue }
         let data = try await request("/api/cards/\(id)", method: "PUT", json: payload, authenticated: true)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let card = obj["card"] as? [String: Any],
               let parsed = Self.parseCard(card) else {
             throw APIError.decoding
         }
+        if let profileScope = profileScope, parsed.profileScope != profileScope { throw APIError.decoding }
         return parsed
     }
 
@@ -624,7 +652,8 @@ final class APIClient {
               let title = item["title"] as? String,
               let body = item["body"] as? String else { return nil }
         let sortOrder = (item["sortOrder"] as? Int) ?? 0
-        return KnowledgeCardItem(id: id, cardType: cardType, title: title, body: body, sortOrder: sortOrder)
+        guard let scope = CallProfileScope(rawValue: item["profileScope"] as? String ?? "personal") else { return nil }
+        return KnowledgeCardItem(id: id, cardType: cardType, title: title, body: body, sortOrder: sortOrder, profileScope: scope)
     }
 
     // MARK: - PREPARE stage (pre-call voice input)

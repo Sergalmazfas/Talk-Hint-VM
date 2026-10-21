@@ -1,3 +1,28 @@
+"profiles.cards_footer" = "Las sugerencias usan las tarjetas de este perfil y las que marcaste explícitamente como compartidas.";
+/* Perfiles personal y de trabajo */
+"profiles.title" = "Personal y trabajo";
+"profiles.personal" = "Personal";
+"profiles.work" = "Trabajo";
+"profiles.shared" = "Compartidas";
+"profiles.personal_number" = "Número personal";
+"profiles.work_number" = "Número de trabajo";
+"profiles.cards_entry" = "Tarjetas personales y de trabajo";
+"profiles.cards_title" = "Tarjetas: %@";
+"profiles.cards" = "Tarjetas";
+"profiles.not_connected" = "Sin conectar";
+"profiles.connect" = "Conectar número de trabajo";
+"profiles.confirm_title" = "Configurar número de trabajo";
+"profiles.confirm_message" = "¿Usar %@ como número de trabajo? Tu número personal no cambia. El número de prueba descartado vuelve al grupo; no se cancela ni compra ningún número.";
+"profiles.move_notice" = "Las nuevas llamadas entrantes de CDL llegarán a esta cuenta en lugar de la cuenta CDL anterior. El historial permanece en la cuenta anterior y no se elimina.";
+"profiles.confirm" = "Conectar número de trabajo";
+"profiles.connection_error" = "No se pudo confirmar la conexión";
+"profiles.load_failed" = "No se pudieron cargar los perfiles";
+"profiles.retry" = "Actualizar";
+"profiles.empty_cards" = "Aún no hay tarjetas. Pulsa + para añadir una.";
+"profiles.cards_load_failed" = "No se pudieron cargar las tarjetas. Desliza hacia abajo para reintentar.";
+"profiles.work_footer" = "Estas tarjetas se usan en las sugerencias para el propietario. La recepción automática de Secretary, sus llamadas desde el perfil de trabajo y las reservas en calendario aún no están habilitadas.";
+"profiles.shared_footer" = "Añade solo información que permitas usar tanto en las sugerencias personales como en las de trabajo.";
+
 /* TalkHint — es UI strings */
 "common.ok" = "OK";
 "common.cancel" = "Cancelar";

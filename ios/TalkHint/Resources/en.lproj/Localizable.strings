@@ -1,3 +1,28 @@
+"profiles.cards_footer" = "Live hints use this profile's cards and cards you explicitly marked as shared.";
+/* Personal and work profiles */
+"profiles.title" = "Personal & Work";
+"profiles.personal" = "Personal";
+"profiles.work" = "Work";
+"profiles.shared" = "Shared";
+"profiles.personal_number" = "Personal number";
+"profiles.work_number" = "Work number";
+"profiles.cards_entry" = "Personal & work cards";
+"profiles.cards_title" = "%@ cards";
+"profiles.cards" = "Knowledge cards";
+"profiles.not_connected" = "Not connected";
+"profiles.connect" = "Connect work number";
+"profiles.confirm_title" = "Set up work number";
+"profiles.confirm_message" = "Make %@ your work number? Your personal number stays unchanged. The rejected trial number returns to the pool; no number is canceled or purchased.";
+"profiles.move_notice" = "New incoming CDL calls will go to this account instead of your previous CDL account. Existing history stays in the previous account and is not deleted.";
+"profiles.confirm" = "Connect work number";
+"profiles.connection_error" = "Could not confirm number setup";
+"profiles.load_failed" = "Could not load profiles";
+"profiles.retry" = "Refresh";
+"profiles.empty_cards" = "No cards yet. Tap + to add one.";
+"profiles.cards_load_failed" = "Could not load cards. Pull down to retry.";
+"profiles.work_footer" = "These cards currently guide owner-facing hints. Automatic incoming Secretary, work-profile Secretary calls and calendar booking are not enabled.";
+"profiles.shared_footer" = "Only add facts you explicitly want available to both your personal and work hints.";
+
 /* TalkHint — en UI strings */
 "common.ok" = "OK";
 "common.cancel" = "Cancel";

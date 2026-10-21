@@ -26,3 +26,13 @@ cancel the provider number.
 
 **How to apply:** Use the approved CDL plan, preserve old history, and do not
 replace the owner's choice with another free number.
+
+Personal/work numbers and cards must be reachable in the existing native iOS
+app. A web-only settings page does not fulfill the requested mobile experience.
+
+**Why:** The user updated the server and iOS app but could not see the promised
+work number or cards because the first delivery only added web management.
+
+**How to apply:** Include actual native navigation and scoped read/create/edit
+behavior. Distinguish backend publication from installation of a new native
+build; do not describe source checks as a verified iPhone experience.

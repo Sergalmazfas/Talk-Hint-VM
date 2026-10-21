@@ -13,10 +13,14 @@ final class KnowledgeCardsViewController: UITableViewController {
 
     private var cards: [APIClient.KnowledgeCardItem] = []
     private var loaded = false
+    private var loadError: String?
+    private var loadGeneration = 0
+    private let profileScope: CallProfileScope
 
-    init() {
+    init(profileScope: CallProfileScope = .personal) {
+        self.profileScope = profileScope
         super.init(style: .insetGrouped)
-        title = NSLocalizedString("cards.title", comment: "")
+        title = String(format: NSLocalizedString("profiles.cards_title", comment: ""), profileScope.localizedName)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -39,11 +43,18 @@ final class KnowledgeCardsViewController: UITableViewController {
     }
 
     @objc private func reload() {
+        loadGeneration += 1
+        let generation = loadGeneration
         Task { @MainActor in
             do {
-                cards = try await APIClient.shared.knowledgeCards()
+                let result = try await APIClient.shared.knowledgeCards(profileScope: profileScope)
+                guard generation == loadGeneration else { return }
+                cards = result
+                loadError = nil
             } catch {
+                guard generation == loadGeneration else { return }
                 cards = []
+                loadError = error.localizedDescription
             }
             loaded = true
             tableView.refreshControl?.endRefreshing()
@@ -72,7 +83,7 @@ final class KnowledgeCardsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         section == groups.count - 1
-            ? NSLocalizedString("cards.footer", comment: "")
+            ? NSLocalizedString(profileScope == .shared ? "profiles.shared_footer" : "profiles.cards_footer", comment: "")
             : nil
     }
 
@@ -82,7 +93,10 @@ final class KnowledgeCardsViewController: UITableViewController {
         let group = cards(for: groups[indexPath.section].type)
 
         if group.isEmpty {
-            config.text = NSLocalizedString("cards.empty", comment: "")
+            config.text = NSLocalizedString(loadError == nil ? "profiles.empty_cards" : "profiles.cards_load_failed", comment: "")
+            config.secondaryText = loadError
+            config.textProperties.numberOfLines = 0
+            config.secondaryTextProperties.numberOfLines = 0
             config.textProperties.color = .secondaryLabel
             cell.accessoryType = .none
             cell.selectionStyle = .none
@@ -109,14 +123,14 @@ final class KnowledgeCardsViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         let group = cards(for: groups[indexPath.section].type)
         guard !group.isEmpty else { return }
-        let editor = KnowledgeCardEditorViewController(card: group[indexPath.row]) { [weak self] in
+        let editor = KnowledgeCardEditorViewController(card: group[indexPath.row], profileScope: profileScope) { [weak self] in
             self?.reload()
         }
         navigationController?.pushViewController(editor, animated: true)
     }
 
     @objc private func addTapped() {
-        let editor = KnowledgeCardEditorViewController(card: nil) { [weak self] in
+        let editor = KnowledgeCardEditorViewController(card: nil, profileScope: profileScope) { [weak self] in
             self?.reload()
         }
         navigationController?.pushViewController(editor, animated: true)
@@ -166,6 +180,8 @@ final class KnowledgeCardEditorViewController: UIViewController {
 
     private let card: APIClient.KnowledgeCardItem?
     private let onSave: () -> Void
+    private let profileScope: CallProfileScope
+    private var isSaving = false
 
     private let typeControl = UISegmentedControl(items: [
         NSLocalizedString("card_editor.type.project", comment: ""),
@@ -175,8 +191,9 @@ final class KnowledgeCardEditorViewController: UIViewController {
     private let bodyView = UITextView()
     private let sortField = UITextField()
 
-    init(card: APIClient.KnowledgeCardItem?, onSave: @escaping () -> Void) {
+    init(card: APIClient.KnowledgeCardItem?, profileScope: CallProfileScope = .personal, onSave: @escaping () -> Void) {
         self.card = card
+        self.profileScope = card?.profileScope ?? profileScope
         self.onSave = onSave
         super.init(nibName: nil, bundle: nil)
     }
@@ -222,7 +239,10 @@ final class KnowledgeCardEditorViewController: UIViewController {
         sortField.translatesAutoresizingMaskIntoConstraints = false
         sortField.accessibilityIdentifier = "input-card-sort-order"
 
+        let scopeLabel = makeLabel(String(format: NSLocalizedString("profiles.cards_title", comment: ""), profileScope.localizedName))
+        scopeLabel.accessibilityIdentifier = "label-card-profile"
         let stack = UIStackView(arrangedSubviews: [
+            scopeLabel,
             typeControl,
             titleLabel, titleField,
             bodyLabel, bodyView,
@@ -255,6 +275,7 @@ final class KnowledgeCardEditorViewController: UIViewController {
     }
 
     @objc private func save() {
+        guard !isSaving else { return }
         let cardType = typeControl.selectedSegmentIndex == 1 ? "company" : "project"
         let title = titleField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let body = bodyView.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -263,19 +284,21 @@ final class KnowledgeCardEditorViewController: UIViewController {
         guard !title.isEmpty else { return showError(NSLocalizedString("card_editor.error.title_required", comment: "")) }
         guard !body.isEmpty else { return showError(NSLocalizedString("card_editor.error.details_required", comment: "")) }
 
+        isSaving = true
         navigationItem.rightBarButtonItem?.isEnabled = false
         Task { @MainActor in
             do {
                 if let card = card {
                     _ = try await APIClient.shared.updateCard(
-                        id: card.id, cardType: cardType, title: title, body: body, sortOrder: sortOrder)
+                        id: card.id, cardType: cardType, title: title, body: body, sortOrder: sortOrder, profileScope: profileScope)
                 } else {
                     _ = try await APIClient.shared.createCard(
-                        cardType: cardType, title: title, body: body, sortOrder: sortOrder)
+                        cardType: cardType, title: title, body: body, sortOrder: sortOrder, profileScope: profileScope)
                 }
                 onSave()
                 navigationController?.popViewController(animated: true)
             } catch {
+                isSaving = false
                 navigationItem.rightBarButtonItem?.isEnabled = true
                 showError(error.localizedDescription)
             }

@@ -7,9 +7,8 @@ import UIKit
 ///   Phone     → the user's TalkHint number (opens number management)
 ///   Account   → account details / logout
 ///
-/// Telephony-grade options (call handling modes, call forwarding) and the
-/// assistant tools constructor were deliberately removed from Personal — they
-/// belong to a future Business tier, not here.
+/// Personal/work context lives in this app. AI answering and forwarding are
+/// still deliberately not enabled by profile setup.
 ///
 /// Persistence:
 ///   - Live-call toggles -> `GET`/`POST` call feature settings API.
@@ -45,6 +44,9 @@ final class SettingsViewController: UITableViewController {
 
     /// The user's TalkHint number, shown in the Phone section once loaded.
     private var myNumber: String?
+    private var workNumber: String?
+    private var profilesLoaded = false
+    private var profilesLoadFailed = false
 
     init() {
         super.init(style: .insetGrouped)
@@ -76,10 +78,19 @@ final class SettingsViewController: UITableViewController {
 
     private func loadMyNumber() {
         Task { @MainActor in
-            if let numbers = try? await APIClient.shared.numbers() {
-                myNumber = numbers.first?.number
-                tableView.reloadSections(IndexSet(integer: Section.phone.rawValue), with: .none)
+            do {
+                let profiles = try await APIClient.shared.callProfiles()
+                myNumber = profiles.profile(.personal)?.numbers.first?.phoneNumber
+                workNumber = profiles.profile(.work)?.numbers.first?.phoneNumber
+                profilesLoaded = true
+                profilesLoadFailed = false
+            } catch {
+                profilesLoadFailed = true
+                if let numbers = try? await APIClient.shared.numbers() {
+                    myNumber = numbers.first?.number
+                }
             }
+            tableView.reloadSections(IndexSet(integer: Section.phone.rawValue), with: .none)
         }
     }
 
@@ -95,7 +106,7 @@ final class SettingsViewController: UITableViewController {
         case .features: return FeatureRow.allCases.count
         case .translator: return TranslatorRow.allCases.count
         case .secretary: return 1
-        case .phone: return 1
+        case .phone: return 3
         case .account: return 1
         }
     }
@@ -204,12 +215,27 @@ final class SettingsViewController: UITableViewController {
 
         case .phone:
             let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
-            cell.textLabel?.text = NSLocalizedString("settings.my_number", comment: "")
-            cell.detailTextLabel?.text = myNumber ?? "—"
+            if indexPath.row == 0 {
+                cell.textLabel?.text = NSLocalizedString("profiles.personal_number", comment: "")
+                cell.detailTextLabel?.text = myNumber ?? "—"
+                cell.imageView?.image = UIImage(systemName: "phone")
+                cell.accessibilityIdentifier = "cell-my-number"
+            } else if indexPath.row == 1 {
+                cell.textLabel?.text = NSLocalizedString("profiles.work_number", comment: "")
+                let stateKey = profilesLoadFailed ? "profiles.load_failed" :
+                    (profilesLoaded ? "profiles.not_connected" : "common.loading")
+                cell.detailTextLabel?.text = profilesLoadFailed ? NSLocalizedString(stateKey, comment: "") :
+                    (workNumber ?? NSLocalizedString(stateKey, comment: ""))
+                cell.imageView?.image = UIImage(systemName: "briefcase")
+                cell.accessibilityIdentifier = "cell-work-number"
+            } else {
+                cell.textLabel?.text = NSLocalizedString("profiles.cards_entry", comment: "")
+                cell.textLabel?.numberOfLines = 0
+                cell.imageView?.image = UIImage(systemName: "rectangle.stack")
+                cell.accessibilityIdentifier = "cell-call-profiles"
+            }
             cell.detailTextLabel?.textColor = .secondaryLabel
-            cell.imageView?.image = UIImage(systemName: "phone")
             cell.accessoryType = .disclosureIndicator
-            cell.accessibilityIdentifier = "cell-my-number"
             return cell
 
         case .account:
@@ -238,7 +264,11 @@ final class SettingsViewController: UITableViewController {
         case .secretary:
             selectSecretaryProvider(at: indexPath)
         case .phone:
-            navigationController?.pushViewController(NumbersViewController(), animated: true)
+            if indexPath.row == 0 {
+                navigationController?.pushViewController(NumbersViewController(), animated: true)
+            } else {
+                navigationController?.pushViewController(CallProfilesViewController(), animated: true)
+            }
         case .account:
             let account = AccountViewController()
             account.onLoggedOut = {
