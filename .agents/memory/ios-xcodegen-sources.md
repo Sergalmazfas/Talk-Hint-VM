@@ -18,3 +18,16 @@ standalone files are fine and cleaner.
 `ios/TalkHint/UI/` (or the right subfolder). Can't compile/verify Swift on the Linux
 container, so keep new VCs consistent with existing patterns (UITableViewController
 list + async APIClient calls) and rely on review.
+
+An existing Mac checkout can contain updated old sources but omit new files or
+retain an old target source list. The XcodeGen glob only helps after both source
+sync and regeneration; do not assume either happened.
+
+**Why:** Real owner screenshots showed missing profile types/controllers after
+the update, with dependent compiler errors cascading from the missing symbols.
+
+**How to apply:** Confirm which declarations the Mac actually compiles. For
+urgent compatibility fixes, keeping required declarations in already-included
+sources is a justified exception to the one-file-per-controller preference.
+Avoid duplicate definitions when both old and regenerated projects are used;
+do not claim a native build passed based on source checks alone.

@@ -4,10 +4,24 @@ import { describe, expect, it } from "vitest";
 // Source-level contract checks only: these do NOT replace Xcode or iPhone tests.
 const read = (path: string) => readFileSync(path, "utf8");
 const api = read("ios/TalkHint/Networking/APIClient.swift");
-const screen = read("ios/TalkHint/UI/CallProfilesViewController.swift");
+const numbers = read("ios/TalkHint/UI/NumbersViewController.swift");
+const screen = numbers.slice(numbers.indexOf("final class CallProfilesViewController:"));
 const cards = read("ios/TalkHint/UI/KnowledgeCardsViewController.swift");
 const settings = read("ios/TalkHint/UI/SettingsViewController.swift");
 describe("native personal/work integration wiring (not a simulator test)", () => {
+  it("keeps required symbols in already-compiled sources when the new files are absent from a Mac target", () => {
+    for (const name of ["CallProfileScope", "CallProfileNumber", "CallProfileItem", "CallProfilesSnapshot"]) {
+      expect(api).toMatch(new RegExp(`(?:enum|struct) ${name}[: ]`));
+      expect(read("ios/TalkHint/Networking/CallProfilesModels.swift")).not.toMatch(new RegExp(`(?:enum|struct) ${name}[: ]`));
+    }
+    expect(numbers).toContain("final class CallProfilesViewController:");
+    expect(read("ios/TalkHint/UI/CallProfilesViewController.swift")).not.toContain("final class CallProfilesViewController:");
+    // Marker files can remain in regenerated projects without duplicate symbols.
+    const definitions = [api, numbers, read("ios/TalkHint/Networking/CallProfilesModels.swift"),
+      read("ios/TalkHint/UI/CallProfilesViewController.swift")].join("\n");
+    expect(definitions.match(/struct CallProfilesSnapshot:/g)).toHaveLength(1);
+    expect(definitions.match(/final class CallProfilesViewController:/g)).toHaveLength(1);
+  });
   it("exposes a work number and real native cards navigation from existing Settings", () => {
     expect(settings).toContain('case .phone: return 3');
     expect(settings).toContain('"cell-work-number"');

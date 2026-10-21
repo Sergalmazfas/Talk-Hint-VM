@@ -44,11 +44,22 @@ open TalkHint.xcodeproj
 ### Updating the personal/work screens
 
 Make sure the Mac has the latest **iOS source files**, not just a newly published
-backend. The native additions include `CallProfilesModels.swift` and
-`CallProfilesViewController.swift`. From the repository root, run `cd ios`,
-`xcodegen generate`, then `open TalkHint.xcodeproj` as above so these files are
-included. Select scheme **TalkHint**, your connected iPhone, and **Run**.
+backend. The required profile DTOs live in the existing `APIClient.swift`, and
+the profile controller lives in the existing `NumbersViewController.swift`.
+The similarly named standalone files are compatibility markers only, so both
+older and freshly generated Xcode source lists work without duplicate symbols.
+Update **all** iOS sources on the Mac, not just `SettingsViewController.swift`.
+From the repository root, run `cd ios`, `xcodegen generate`, then
+`open TalkHint.xcodeproj` as above. Select scheme **TalkHint**, your connected
+iPhone, and **Run**.
 Keep the existing signing team and bundle identifier; do not uninstall the app.
+
+For the specific `Cannot find CallProfilesSnapshot / CallProfilesViewController`
+failure, confirm the Mac copy contains `struct CallProfilesSnapshot` in
+`APIClient.swift` and `final class CallProfilesViewController` in
+`NumbersViewController.swift`. These declarations no longer depend on the new
+source files being included in Compile Sources. Regenerating the project cannot
+replace synchronizing the actual source contents.
 
 In the new build, open **Settings → Phone**. It should show the personal number,
 the work number, and **Personal & work cards**. Before explicitly connecting
