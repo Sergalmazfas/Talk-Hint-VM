@@ -27,7 +27,7 @@ function controlledSse() {
   };
 }
 
-function harness(options: { fetchResponse?: (url: string, init: any) => Promise<any>; audioContext?: any } = {}) {
+function harness(options: { fetchResponse?: (url: string, init: any) => Promise<any>; audioContext?: any; openai?: any } = {}) {
   const nodes = new Map<string, any>();
   const messages: any[] = [];
   const fetchCalls: any[] = [];
@@ -49,6 +49,7 @@ function harness(options: { fetchResponse?: (url: string, init: any) => Promise<
   const parent = { postMessage(message: any) { messages.push(message); } };
   const window: any = {
     parent,
+    openai: options.openai,
     addEventListener(type: string, fn: Function) { listeners.set(type, fn); },
     setTimeout(fn: Function) { timers.set(++timer, fn); return timer; },
     clearTimeout(id: number) { timers.delete(id); },
@@ -90,9 +91,149 @@ function harness(options: { fetchResponse?: (url: string, init: any) => Promise<
   const requests = () => messages.filter(m => m.method === "tools/call");
   const flush = async (count = 20) => { for (let i = 0; i < count; i++) await Promise.resolve(); };
   const runTimers = () => { for (const callback of [...timers.values()]) callback(); };
-  return { node, messages, fetchCalls, receive, initialize, card, show, click, requests, flush, timers, runTimers, window };
+  const dispatch = (type: string) => listeners.get(type)?.();
+  return { node, messages, fetchCalls, receive, initialize, card, show, click, requests, flush, timers, runTimers, window, dispatch };
 }
 describe("inline card bridge with simulated ChatGPT host", () => {
+  it("persists only a versioned task locator and restores it via a fresh owner-authorized read", async () => {
+    const saved: any[] = [];
+    const first = harness({ openai: { setWidgetState: (state: any) => saved.push(state) } });
+    first.initialize(); first.show(); first.click("approve");
+    first.receive({ id: first.requests()[0].id, result: { structuredContent: {
+      task_id: "mock-task-1", task: { status: "connected", summary: "Private old summary" },
+    } } });
+    await first.flush();
+    expect(saved).toEqual([{ version: 1, task_id: "mock-task-1" }]);
+    first.click("listenButton");
+    const ticket = first.requests()[1];
+    first.receive({ id: ticket.id, result: { structuredContent: {}, _meta: {
+      "talkhint/monitor": { task_id: "mock-task-1", url: "https://monitor.example.test/live", token: "never-persist-this" },
+    } } });
+    await first.flush();
+    expect(JSON.stringify(saved)).not.toMatch(/summary|token|capability|phoneNumber|confirmation|transcript/);
+
+    const h = harness({ openai: { widgetState: saved[0] } });
+    h.initialize(); h.show(); // Historical prepare replay is ignored.
+    h.click("approve"); h.click("listenButton");
+    expect(h.requests().map(r => r.params)).toEqual([{ name: "get_task", arguments: { id: "mock-task-1" } }]);
+    expect(h.node("resultCopy").textContent).toBe("");
+    expect(h.node("approve").disabled).toBe(true);
+    h.receive({ id: h.requests()[0].id, result: { structuredContent: {
+      id: "mock-task-1", status: "connected", summary: "Fresh server result",
+    } } });
+    await h.flush();
+    expect(h.node("resultTitle").textContent).toContain("Восстановлена задача");
+    expect(h.node("resultCopy").textContent).toContain("Fresh server result");
+    expect(h.fetchCalls).toHaveLength(0);
+    expect(h.messages.some(m => m.method === "ui/message")).toBe(false);
+    h.click("listenButton"); h.click("listenButton");
+    expect(h.requests().filter(r => r.params.name === "open_call_monitor")).toHaveLength(1);
+    expect(h.requests()[1].params.arguments).toEqual({ id: "mock-task-1" });
+  });
+  it("restores through the optional OpenAI bridge even without the standard bridge", async () => {
+    const calls: any[] = [];
+    const h = harness({ openai: {
+      widgetState: { version: 1, task_id: "mock-task-1" },
+      callTool: async (name: string, args: any) => {
+        calls.push([name, args]);
+        return { structuredContent: { id: "mock-task-1", status: "completed", summary: "Saved result" } };
+      },
+    } });
+    h.runTimers(); await h.flush();
+    expect(calls).toEqual([["get_task", { id: "mock-task-1" }]]);
+    expect(h.node("resultCopy").textContent).toContain("Saved result");
+    expect(h.node("listenButton").disabled).toBe(true);
+    expect(h.node("reconnectButton").disabled).toBe(true);
+    expect(h.node("approve").disabled).toBe(true);
+    expect(h.fetchCalls).toHaveLength(0);
+  });
+  it("recovers from reissued get_task output without trusting a historical snapshot or needing host state", async () => {
+    const h = harness(); h.initialize();
+    const output = { structuredContent: { id: "mock-task-1", status: "completed", summary: "Historical private summary" } };
+    h.show(output); h.show(output);
+    expect(h.requests()).toHaveLength(1);
+    expect(h.node("resultCopy").textContent).not.toContain("Historical");
+    h.receive({ id: h.requests()[0].id, result: { structuredContent: {
+      id: "mock-task-1", status: "completed", summary: "Current saved report", outcome: "Goal achieved", nextStep: "No action needed",
+    }, _meta: { "talkhint/task": { fallbackUrl: "https://talkhint.example/api/chatgpt/secretary/tasks/mock-task-1" } } } });
+    await h.flush();
+    expect(h.node("resultCopy").textContent).toContain("Current saved report");
+    expect(h.node("resultCopy").textContent).toContain("Goal achieved");
+    expect(h.node("resultCopy").textContent).toContain("No action needed");
+    expect(h.node("fallbackLink").href).toBe("https://talkhint.example/api/chatgpt/secretary/tasks/mock-task-1");
+    expect(h.node("listenButton").disabled).toBe(true);
+    h.click("reconnectButton"); h.click("approve");
+    expect(h.requests()).toHaveLength(1);
+    expect(h.node("compat").textContent).toContain("get_task");
+  });
+  it.each([
+    { version: 2, task_id: "mock-task-1" },
+    { version: 1, task_id: "../foreign" },
+    { version: 1, task_id: "" },
+    { version: 1, task_id: "a".repeat(129) },
+  ])("ignores invalid host state %j", state => {
+    const h = harness({ openai: { widgetState: state } }); h.initialize();
+    expect(h.requests()).toHaveLength(0);
+    expect(h.node("approve").disabled).toBe(true);
+  });
+  it.each(["logged out", "different account", "deleted task", "network timeout"])(
+    "fails closed for %s and allows only a manual read retry", async reason => {
+      const h = harness({ openai: { widgetState: { version: 1, task_id: "mock-task-1", token: "untrusted-ignored" } } });
+      h.initialize(); h.click("checkStatus");
+      expect(h.requests()).toHaveLength(1);
+      h.receive({ id: h.requests()[0].id, result: { isError: true, content: [{ type: "text", text: reason }] } });
+      await h.flush();
+      expect(h.node("resultCopy").textContent).toBe("");
+      expect(h.node("listenButton").disabled).toBe(true);
+      expect(h.node("fallback").hidden).toBe(true);
+      expect(h.node("approve").disabled).toBe(true);
+      h.click("approve"); h.click("checkStatus"); h.click("checkStatus");
+      expect(h.requests()).toHaveLength(2);
+      expect(h.requests().every(r => r.params.name === "get_task")).toBe(true);
+      h.receive({ id: h.requests()[1].id, result: { structuredContent: { id: "mock-task-1", status: "completed", summary: "Restored" } } });
+      await h.flush();
+      expect(h.node("resultCopy").textContent).toContain("Restored");
+    });
+  it.each([{ id: "foreign-task", status: "completed" }, { status: "completed" }])(
+    "does not accept a read result without the exact task identity: %j", async task => {
+      const h = harness({ openai: { widgetState: { version: 1, task_id: "mock-task-1" } } });
+      h.initialize();
+      h.receive({ id: h.requests()[0].id, result: { structuredContent: task } });
+      await h.flush();
+      expect(h.node("resultTitle").textContent).toBe("Задача недоступна");
+      expect(h.node("listenButton").disabled).toBe(true);
+    });
+  it("drops private data on background/logout and ignores late pre-suspension reads", async () => {
+    const h = harness({ openai: { widgetState: { version: 1, task_id: "mock-task-1" } } });
+    h.initialize();
+    const beforeHide = h.requests()[0];
+    h.dispatch("pagehide"); h.dispatch("pageshow");
+    expect(h.requests()).toHaveLength(2);
+    h.receive({ id: beforeHide.id, result: { structuredContent: { id: "mock-task-1", status: "connected", summary: "Old account" } } });
+    await h.flush();
+    expect(h.node("resultCopy").textContent).toBe("");
+    h.receive({ id: h.requests()[1].id, result: { isError: true } });
+    await h.flush();
+    expect(h.node("resultCopy").textContent).toBe("");
+    expect(h.node("listenButton").disabled).toBe(true);
+  });
+  it("discards late monitor capabilities after task access is invalidated", async () => {
+    const h = harness({ openai: { widgetState: { version: 1, task_id: "mock-task-1" } } });
+    h.initialize();
+    h.receive({ id: h.requests()[0].id, result: { structuredContent: { id: "mock-task-1", status: "connected", summary: "Private" } } });
+    await h.flush();
+    h.click("listenButton");
+    const monitor = h.requests()[1];
+    h.click("checkStatus");
+    h.receive({ id: h.requests()[2].id, result: { isError: true } });
+    await h.flush();
+    h.receive({ id: monitor.id, result: { _meta: { "talkhint/monitor": {
+      url: "https://monitor.example.test/stale", token: "stale-token", task_id: "mock-task-1",
+    } } } });
+    await h.flush();
+    expect(h.fetchCalls).toHaveLength(0);
+    expect(h.node("resultCopy").textContent).toBe("");
+  });
   it("does not invoke tools until explicit click, locks doubleclicks and reports only task_id to the model", async () => {
     const h = harness();
     h.initialize(); h.show();
@@ -122,7 +263,7 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     expect(h.requests()).toHaveLength(1);
     h.click("checkStatus");
     expect(h.requests()[1].params).toEqual({ name: "get_task", arguments: { id: "mock-task-1" } });
-    h.receive({ id: h.requests()[1].id, result: { structuredContent: { status: "completed", summary: "Open at nine" } } });
+    h.receive({ id: h.requests()[1].id, result: { structuredContent: { id: "mock-task-1", status: "completed", summary: "Open at nine" } } });
     await h.flush();
     expect(h.node("resultCopy").textContent).toContain("Open at nine");
     expect(h.requests().filter(r => r.params.name === "confirm_call_from_card")).toHaveLength(1);
@@ -170,7 +311,7 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     expect(html).toContain('fetch(monitorTicket.url');
     expect(html).toContain('ui/notifications/size-changed');
     expect(html).toContain('max-height:420px');
-    expect(CALL_APPROVAL_RESOURCE).toBe("ui://talkhint/call-approval/v3.html");
+    expect(CALL_APPROVAL_RESOURCE).toBe("ui://talkhint/call-approval/v4.html");
     expect(html).not.toContain("voiceProvider");
     expect(html).not.toContain("translationLanguage");
   });
@@ -363,7 +504,12 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     await h.flush();
     expect(h.node("monitorState").textContent).toContain("Разрешение на мониторинг отозвано");
     expect(h.node("checkStatus").disabled).toBe(false);
-    expect(h.node("reconnectButton").disabled).toBe(false);
+    expect(h.node("reconnectButton").disabled).toBe(true);
+    expect(transcript.children).toHaveLength(0);
+    h.click("checkStatus");
+    const recheck = h.requests().find(r => r.params.name === "get_task");
+    h.receive({ id: recheck.id, result: { structuredContent: { id: "mock-task-1", status: "connected" } } });
+    await h.flush();
     h.click("reconnectButton");
     const permissionRetry = h.requests().filter(r => r.params.name === "open_call_monitor")[3];
     expect(permissionRetry.params.arguments).toEqual({ id: "mock-task-1" });

@@ -1,4 +1,4 @@
-export const CALL_APPROVAL_RESOURCE = "ui://talkhint/call-approval/v3.html";
+export const CALL_APPROVAL_RESOURCE = "ui://talkhint/call-approval/v4.html";
 
 export function callApprovalWidgetHtml(): string {
   return `<!doctype html>
@@ -63,6 +63,7 @@ export function callApprovalWidgetHtml(): string {
     let current = null, decisionLocked = false, taskId = null, taskFallbackUrl = "", checking = false;
     let monitorTicket = null, monitorAbort = null, streamActive = false, streamSequence = 0, listening = false, audioContext = null, terminalTask = false, audioUnavailable = false, audioNeedsGesture = false;
     let monitorRequestSequence = 0, monitorRequestPending = false;
+    let taskVerified = false, restoreBootstrapped = false;
     let scheduledSources = [], audioNextAt = { secretary: 0, guest: 0 };
     const turns = new Map();
     function setStatus(message, kind) { statusNode.textContent = message; statusNode.className = "status" + (kind ? " " + kind : ""); statusNode.hidden = !message; }
@@ -94,13 +95,14 @@ export function callApprovalWidgetHtml(): string {
     }
     function terminalStatus(value) { return ["completed", "no_answer", "busy", "failed", "unknown", "cancelled"].includes(valueText(value).toLowerCase()); }
     function markTerminal(status) {
-      terminalTask = true; streamActive = false; stopAudio();
+      terminalTask = true; monitorTicket = null; streamActive = false; stopAudio();
       if (monitorAbort) { try { monitorAbort.abort(); } catch (_) {} monitorAbort = null; }
       streamSequence++; $("listenButton").disabled = true; $("listenButton").textContent = "Задача завершена";
       $("reconnectButton").disabled = true; $("listenButton").disabled = true; $("checkStatus").disabled = true;
       setMonitorState("Задача завершена (" + valueText(status) + "). Показан сохранённый результат; переподключение больше не требуется.");
     }
     function revealCard(card) {
+      if (taskId) return; // A replayed prepare result must never replace a restored task.
       if (current && current.confirmation === card.confirmation && decisionLocked) return;
       sequence++; current = card; decisionLocked = false; taskId = null; taskFallbackUrl = ""; checking = false; monitorTicket = null; terminalTask = false;
       monitorRequestSequence++; monitorRequestPending = false; audioUnavailable = false; audioNeedsGesture = false; stopStream(); clearTranscript();
@@ -182,19 +184,67 @@ export function callApprovalWidgetHtml(): string {
       if (fallbackAvailable && openai && typeof openai.sendFollowUpMessage === "function") { try { openai.sendFollowUpMessage({ prompt: text }); } catch (_) {} }
     }
     function validTaskId(value) { return typeof value === "string" && value.length > 0 && value.length <= 128 && /^[A-Za-z0-9_-]+$/.test(value); }
-    function summaryText(task) { return valueText(task && (task.summary || task.next_step || task.nextStep)).slice(0, 500); }
-    function showStarted(result, cardSequence) {
+    function summaryText(task) {
+      return [...new Set([task && task.summary, task && task.outcome, task && (task.next_step || task.nextStep)]
+        .map(valueText).filter(Boolean))].join(" · ").slice(0, 1500);
+    }
+    function rememberTask(id) {
+      // Host state is only an untrusted locator, never an authority or credential store.
+      const host = window.openai;
+      if (host && typeof host.setWidgetState === "function") {
+        try { host.setWidgetState({ version: 1, task_id: id }); return; } catch (_) {}
+      }
+      compatNode.textContent = "Это окно не сохранило состояние карточки. Чтобы вернуться к задаче, попросите ChatGPT вызвать get_task для task_id " + id + ". Не подготавливайте новый вызов.";
+      compatNode.hidden = false;
+    }
+    function savedTaskId() {
+      const state = plainRecord(window.openai && window.openai.widgetState);
+      return state && state.version === 1 && validTaskId(state.task_id) ? state.task_id : null;
+    }
+    function hideTaskData() {
+      taskVerified = false; terminalTask = false; monitorTicket = null; taskFallbackUrl = "";
+      current = null;
+      ["recipient", "phoneNumber", "instruction", "execution"].forEach(id => { $(id).textContent = ""; });
+      monitorRequestSequence++; monitorRequestPending = false; stopStream(); clearTranscript();
+      $("resultCopy").textContent = ""; $("callSummary").textContent = ""; $("callSummary").hidden = true;
+      $("fallback").hidden = true; $("fallbackLink").href = "#"; $("fallbackCopy").textContent = "";
+      $("monitor").hidden = true; $("listenButton").disabled = true; $("reconnectButton").disabled = true;
+    }
+    function restoreTask(id) {
+      if (!validTaskId(id) || taskId === id) return;
+      sequence++; current = null; taskId = id; decisionLocked = true; terminalTask = false; checking = false;
+      approveButton.disabled = true; denyButton.disabled = true; hideTaskData();
+      $("cardContainer").classList.toggle("started", true); resultNode.hidden = false;
+      $("resultTitle").textContent = "Восстановление задачи";
+      $("checkStatus").hidden = false; $("checkStatus").disabled = false;
+      checkTaskStatus();
+    }
+    function bootstrapRestore() {
+      if (restoreBootstrapped) return;
+      restoreBootstrapped = true;
+      const id = savedTaskId(); if (id) restoreTask(id);
+    }
+    function receiveTaskResult(structured) {
+      const data = plainRecord(structured), task = plainRecord(data && data.task);
+      const id = data && (data.task_id || data.id || (task && task.id));
+      if (!validTaskId(id)) return false;
+      // Historical tool output is a locator too: refetch under the CURRENT account.
+      restoreTask(id); return true;
+    }
+    function showStarted(result, cardSequence, restored) {
       if (sequence !== cardSequence) return;
       const data = plainRecord(result), task = plainRecord(data && data.task), id = data && data.task_id;
       if (!validTaskId(id)) { decisionLocked = true; approveButton.disabled = true; denyButton.disabled = true; setStatus("Не удалось однозначно подтвердить запуск. Не нажимайте кнопку повторно: проверьте задачи TalkHint.", "error"); return; }
-      taskId = id; taskFallbackUrl = safeTaskFallback(data.fallbackUrl, id); decisionLocked = true; approveButton.disabled = true; denyButton.disabled = true; resultNode.hidden = false;
+      taskId = id; taskVerified = true; rememberTask(id); taskFallbackUrl = safeTaskFallback(data.fallbackUrl, id); decisionLocked = true; approveButton.disabled = true; denyButton.disabled = true; resultNode.hidden = false;
+      if (current) current = { call: current.call }; // Drop the consumed approval capability.
       $("cardContainer").classList.toggle("started", true);
       $("callSummary").textContent = [current && current.call.recipient, current && current.call.phoneNumber,
         valueText(current && current.call.instruction).slice(0, 180)].filter(Boolean).join(" · ");
-      $("callSummary").hidden = false;
-      $("resultTitle").textContent = "Запрос принят · задача " + id;
+      $("callSummary").hidden = !$("callSummary").textContent;
+      $("resultTitle").textContent = (restored ? "Восстановлена задача " : "Запрос принят · задача ") + id;
       const status = valueText(task && task.status) || valueText(data.status) || "Статус пока не предоставлен", summary = summaryText(task);
-      $("resultCopy").textContent = "Текущий статус: " + status + (summary ? " · " + summary : "") + ". Это не означает, что задача завершена.";
+      $("resultCopy").textContent = "Текущий статус: " + status + (summary ? " · " + summary : "") +
+        (terminalStatus(status) ? ". Сохранённый результат." : ". Это не означает, что задача завершена.");
       $("checkStatus").hidden = false; $("monitor").hidden = false; $("listenButton").disabled = false; $("listenButton").textContent = "Слушать и показать реплики";
       $("reconnectButton").disabled = false; setMonitorState("Мониторинг ещё не запрашивался. Он относится только к задаче " + id + ".");
       if (taskFallbackUrl) showFallback(taskFallbackUrl, "Отчёт задачи уже сохранён TalkHint. Эта защищённая страница показывает сохранённый отчёт, а не встроенное live audio.", "Открыть сохранённый отчёт TalkHint");
@@ -202,7 +252,7 @@ export function callApprovalWidgetHtml(): string {
         markTerminal(status);
         setStatus("Задача уже завершена. Сохранённый результат доступен; мониторинг не требуется.", "success");
       } else setStatus("TalkHint вернул задачу. Мониторинг запускается отдельно, только по вашему запросу.", "success");
-      sendAssistantMessage(id);
+      if (!restored) sendAssistantMessage(id);
     }
     function showDenied(cardSequence) {
       if (sequence !== cardSequence) return;
@@ -227,14 +277,20 @@ export function callApprovalWidgetHtml(): string {
     }
     async function checkTaskStatus() {
       const id = taskId, cardSequence = sequence; if (!id || checking) return;
+      hideTaskData();
       checking = true; $("checkStatus").disabled = true; $("checkStatus").setAttribute("aria-busy", "true"); setStatus("Запрашиваем сохранённый статус задачи…");
       try {
-        const result = await callTool("get_task", { id }); if (sequence !== cardSequence || taskId !== id) return;
-        const task = plainRecord(result && result.task) || result, status = valueText(task.status) || valueText(result.status) || "Статус не предоставлен", summary = summaryText(task);
-        $("resultCopy").textContent = "Текущий статус: " + status + (summary ? " · " + summary : "") + ".";
-        if (terminalStatus(status)) markTerminal(status);
+        const response = responseContent(await callToolEnvelope("get_task", { id }));
+        if (sequence !== cardSequence || taskId !== id) return;
+        const result = response.structured, metadata = plainRecord(response.meta["talkhint/task"]);
+        const task = plainRecord(result && result.task) || result;
+        if (!task || task.id !== id) throw new Error("task mismatch");
+        showStarted({ task_id: id, task, fallbackUrl: metadata && metadata.fallbackUrl }, cardSequence, true);
         setStatus("Статус задачи обновлён.", "success");
-      } catch (_) { if (sequence === cardSequence) setStatus("Не удалось загрузить статус. Вызов повторно не запускается.", "error"); }
+      } catch (_) { if (sequence === cardSequence) {
+        hideTaskData(); $("resultTitle").textContent = "Задача недоступна";
+        setStatus("Не удалось загрузить задачу. Проверьте подключение и аккаунт TalkHint, затем повторите проверку статуса. Вызов повторно не запускается.", "error");
+      } }
       finally { if (sequence === cardSequence) { checking = false; $("checkStatus").disabled = terminalTask; $("checkStatus").removeAttribute("aria-busy"); } }
     }
     function clearTranscript() { turns.clear(); $("transcript").replaceChildren(); }
@@ -312,12 +368,13 @@ export function callApprovalWidgetHtml(): string {
       else if (event.type === "status") { setMonitorState("Статус TalkHint: " + valueText(event.status)); if (terminalStatus(event.status)) markTerminal(event.status); }
       else if (event.type === "ended") {
         if (valueText(event.reason).toLowerCase() === "completed") { markTerminal(event.reason); return; }
-        stopAudio(); streamActive = false; streamSequence++; if (monitorAbort) { try { monitorAbort.abort(); } catch (_) {} monitorAbort = null; }
+        stopAudio(); monitorTicket = null; streamActive = false; streamSequence++; if (monitorAbort) { try { monitorAbort.abort(); } catch (_) {} monitorAbort = null; }
         const reason = valueText(event.reason).toLowerCase();
+        if (reason === "revoked") hideTaskData();
         const message = reason === "expired" ? "Билет мониторинга истёк; задача не завершена. Переподключитесь вручную, чтобы получить новый билет." :
-          reason === "revoked" ? "Разрешение на мониторинг отозвано; задача не завершена. После обновления доступа переподключитесь вручную." :
+          reason === "revoked" ? "Разрешение на мониторинг отозвано; задача не завершена. Обновите доступ и проверьте статус задачи перед переподключением." :
           "Поток завершён: " + valueText(event.reason) + ". Задача не отмечена как завершённая; переподключение доступно вручную.";
-        setMonitorState(message); $("reconnectButton").disabled = false;
+        setMonitorState(message); $("monitor").hidden = false; $("reconnectButton").disabled = !taskVerified;
       }
     }
     async function readSse(response, id) {
@@ -344,6 +401,11 @@ export function callApprovalWidgetHtml(): string {
       try {
         const response = await fetch(monitorTicket.url, { method: "POST", headers: { Authorization: "Bearer " + monitorTicket.token, "Content-Type": "application/json" }, body: "{}", signal: monitorAbort.signal });
         if (streamId !== streamSequence) return;
+        if (response.status === 401 || response.status === 403 || response.status === 404) {
+          hideTaskData(); $("resultTitle").textContent = "Задача требует проверки доступа";
+          setStatus("Доступ к мониторингу недоступен. Проверьте аккаунт и статус задачи.", "error");
+          return;
+        }
         await readSse(response, streamId);
       } catch (_) {
         if (streamId !== streamSequence) return;
@@ -353,28 +415,29 @@ export function callApprovalWidgetHtml(): string {
       }
     }
     async function requestMonitorTicket(id, preserveTranscript) {
-      if (!validTaskId(id) || terminalTask || monitorRequestPending) return;
+      if (!validTaskId(id) || !taskVerified || terminalTask || monitorRequestPending) return;
       monitorRequestPending = true; const requestSequence = ++monitorRequestSequence;
       const reconnect = $("reconnectButton");
       reconnect.disabled = true; setMonitorState("Запрашиваем мониторинг только для задачи " + id + "…");
       try {
         const response = await callToolEnvelope("open_call_monitor", { id });
-        if (taskId !== id) return;
+        if (taskId !== id || requestSequence !== monitorRequestSequence || !taskVerified || terminalTask) return;
         monitorTicket = monitorMetadata(response, id);
         if (monitorTicket.fallbackUrl) showFallback(monitorTicket.fallbackUrl, "Мониторинг доступен отдельно. Ссылка открывает защищённый отчёт именно этой задачи, а не встраивает live audio.", "Открыть сохранённый отчёт TalkHint");
         if (requestSequence === monitorRequestSequence) monitorRequestPending = false;
         await openMonitorStream(id, preserveTranscript);
       } catch (_) {
-        if (taskId !== id) return;
+        if (taskId !== id || requestSequence !== monitorRequestSequence) return;
         if (listening) stopAudio();
+        hideTaskData();
         setMonitorState("Не удалось открыть мониторинг. ChatGPT запрашивает calls:listen и calls:transcript вместе; проверьте доступ и повторите только вручную. Никакой новый вызов не запускается.", true);
-        reconnect.disabled = false;
-        if (taskFallbackUrl) showFallback(taskFallbackUrl, "Встроенный мониторинг недоступен. Это сохранённый отчёт именно подтверждённой задачи; не live audio.", "Открыть сохранённый отчёт TalkHint");
+        $("monitor").hidden = false;
+        setStatus("Проверьте подключение и аккаунт, затем нажмите «Проверить статус задачи».", "error");
       } finally {
         if (requestSequence === monitorRequestSequence) monitorRequestPending = false;
       }
     }
-    function reconnectMonitor() { if (!taskId || terminalTask) return; stopStream(true); monitorTicket = null; requestMonitorTicket(taskId, true); }
+    function reconnectMonitor() { if (!taskId || !taskVerified || terminalTask) return; stopStream(true); monitorTicket = null; requestMonitorTicket(taskId, true); }
     function beginAudioFromGesture() {
       const AudioCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtor) {
@@ -407,15 +470,17 @@ export function callApprovalWidgetHtml(): string {
     }
     function listenClick() {
       if (listening) { stopAudio(); setMonitorState("Звук выключен; текстовый мониторинг продолжается."); return; }
-      if (!taskId || terminalTask) return;
+      if (!taskId || !taskVerified || terminalTask) return;
       beginAudioFromGesture();
       if (!monitorTicket || !streamActive) requestMonitorTicket(taskId, true);
     }
     function initialOpenAiPayload() {
       const openai = window.openai; if (!openai) return;
+      bootstrapRestore();
       const output = plainRecord(openai.toolOutput), responseMeta = plainRecord(openai.toolResponseMetadata), full = plainRecord(responseMeta && (responseMeta.mcp_tool_result || responseMeta.call_tool_result));
       const metadata = plainRecord(full && full._meta) || plainRecord(responseMeta && responseMeta._meta) || responseMeta || plainRecord(output && output._meta);
       const structured = plainRecord(output && output.structuredContent) || output;
+      if (receiveTaskResult(structured)) return;
       if (structured && metadata) { const card = readCard(structured, metadata); if (card) revealCard(card); }
     }
     function onMessage(event) {
@@ -423,10 +488,10 @@ export function callApprovalWidgetHtml(): string {
       const message = event.data;
       if (message.id && pending.has(message.id)) { const entry = pending.get(message.id); pending.delete(message.id); window.clearTimeout(entry.timer); if (message.error) entry.reject(new Error("rpc error")); else entry.resolve(message.result || {}); return; }
       if (message.id === "talkhint-initialize") {
-        if (!message.error && message.result) { standardAvailable = true; initialized = true; sendNotification("ui/notifications/initialized", {}); if (current) revealCard(current); else setStatus("Подключён ChatGPT MCP bridge; ожидаем запрос TalkHint."); reportSize(); }
+        if (!message.error && message.result) { standardAvailable = true; initialized = true; sendNotification("ui/notifications/initialized", {}); bootstrapRestore(); if (!taskId) { if (current) revealCard(current); else setStatus("Подключён ChatGPT MCP bridge; ожидаем запрос TalkHint."); } reportSize(); }
         return;
       }
-      if (message.method === "ui/notifications/tool-result") { const params = plainRecord(message.params); if (!params) return; const card = readCard(params.structuredContent, params._meta); if (card) revealCard(card); }
+      if (message.method === "ui/notifications/tool-result") { const params = plainRecord(message.params); if (!params) return; if (receiveTaskResult(params.structuredContent)) return; const card = readCard(params.structuredContent, params._meta); if (card) revealCard(card); }
     }
     approveButton.addEventListener("click", () => decide("approve")); denyButton.addEventListener("click", () => decide("deny"));
     $("checkStatus").addEventListener("click", checkTaskStatus);
@@ -439,7 +504,20 @@ export function callApprovalWidgetHtml(): string {
         event.preventDefault(); try { openai.openExternal({ url }); } catch (_) {}
       }
     });
-    window.addEventListener("message", onMessage); window.addEventListener("pagehide", () => { stopStream(); if (audioContext) { try { audioContext.close(); } catch (_) {} audioContext = null; } });
+    function suspendTask() {
+      sequence++; checking = false;
+      if (taskId) {
+        hideTaskData(); $("resultTitle").textContent = "Задача требует проверки доступа";
+        $("checkStatus").disabled = false;
+      } else stopStream();
+      if (audioContext) { try { audioContext.close(); } catch (_) {} audioContext = null; }
+    }
+    function resumeTask() { if (taskId && !taskVerified && !checking && (standardAvailable || fallbackAvailable)) checkTaskStatus(); }
+    window.addEventListener("message", onMessage);
+    window.addEventListener("pagehide", suspendTask); window.addEventListener("pageshow", resumeTask);
+    if (typeof document.addEventListener === "function") document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") suspendTask(); else resumeTask();
+    });
     try { if (window.parent !== window && typeof window.parent.postMessage === "function") window.parent.postMessage({ jsonrpc: "2.0", id: "talkhint-initialize", method: "ui/initialize", params: { protocolVersion: "2026-01-26", appInfo: { name: "talkhint-call-approval", version: "1.0.0" }, appCapabilities: {} } }, "*"); } catch (_) {}
     window.setTimeout(() => {
       if (initialized) return;

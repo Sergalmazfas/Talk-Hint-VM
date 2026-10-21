@@ -103,6 +103,40 @@ describe("owner-only ChatGPT live monitoring; native telephony untouched", () =>
     expect(upgrade._meta["mcp/www_authenticate"][0])
       .toContain('scope="calls:read offline_access secretary:start calls:listen calls:transcript"');
   });
+  it("reissues the same-task result and monitor only to the current owner after logout or account change", async () => {
+    const alice = await connect();
+    const oldTicket = (await ticket(alice.token))._meta["talkhint/monitor"].token;
+    const tools = (await request(app).post("/api/chatgpt/mcp").send({
+      jsonrpc: "2.0", id: 1, method: "tools/list",
+    })).body.result.tools;
+    const metadata = tools.find((t: any) => t.name === "get_task")._meta;
+    expect(metadata.ui.resourceUri).toBe(metadata["openai/outputTemplate"]);
+    expect(metadata.ui.resourceUri).toContain("/v4.html");
+    await store.expire(alice.grant, "alice");
+    for (const name of ["get_task", "open_call_monitor"]) {
+      expect((await tool(name, { id: "task-alice" }, alice.token)).body.result.isError).toBe(true);
+    }
+    expect((await request(app).post("/api/chatgpt/monitor").auth(oldTicket, { type: "bearer" }).send({})).status).toBe(401);
+    const bob = await connect("bob");
+    for (const name of ["get_task", "open_call_monitor"]) {
+      const denied = (await tool(name, { id: "task-alice" }, bob.token)).body.result;
+      expect(denied.isError).toBe(true);
+      expect(denied.structuredContent).toBeUndefined();
+      expect(denied._meta?.["talkhint/task"]).toBeUndefined();
+      expect(denied._meta?.["talkhint/monitor"]).toBeUndefined();
+    }
+    const reconnected = await connect("alice");
+    state = "completed";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = (await tool("get_task", { id: "task-alice" }, reconnected.token)).body.result;
+      expect(result.structuredContent).toMatchObject({ id: "task-alice", status: "completed", summary: "Hours confirmed" });
+      expect(result.structuredContent.transcriptTurns).toBeUndefined();
+      expect(result._meta["talkhint/task"].fallbackUrl).toBe("https://example.test/api/chatgpt/secretary/tasks/task-alice");
+    }
+    const freshTicket = (await ticket(reconnected.token))._meta["talkhint/monitor"].token;
+    expect(credentials.read(freshTicket, "monitor").grant).toBe(reconnected.grant);
+    expect(backend.start).not.toHaveBeenCalled();
+  });
   it("isolates owners and keeps short-lived tickets out of the model-visible result", async () => {
     const alice = await connect(), bob = await connect("bob");
     expect((await tool("open_call_monitor", { id: "task-alice" }, bob.token)).body.result.isError).toBe(true);

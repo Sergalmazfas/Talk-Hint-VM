@@ -522,7 +522,7 @@ export function registerChatGPTIntegration(
     else if (rpc.method === "tools/list") result = { tools: [...mcpTools.map(name =>
       publicToolMetadata(name, permissions[name], TOOL_INPUTS[name],
         name === "prepare_call" ? ["phoneNumber", "instruction", "clientRequestId"] :
-        name === "start_call" ? ["confirmation"] : ["get_call", "get_task", "read_call_turns"].includes(name) ? ["id"] : [])),
+        name === "start_call" ? ["confirmation"] : ["get_call", "get_task", "read_call_turns"].includes(name) ? ["id"] : [], cardEnabled)),
       ...(cardEnabled ? [cardApprovalToolMetadata()] : []),
       ...(monitorEnabled ? [monitorToolMetadata()] : [])] };
     else if (rpc.method === "tools/call") {
@@ -562,6 +562,12 @@ export function registerChatGPTIntegration(
           }
         } else {
           value = await execute(req, name, rpc.params?.arguments ?? {});
+          if (name === "get_task" && cardEnabled) {
+            // Only after execute has authenticated the current owner and read this task.
+            meta = { "talkhint/task": {
+              fallbackUrl: `${base}/api/chatgpt/secretary/tasks/${encodeURIComponent(value.id)}`,
+            } };
+          }
           if (name === "prepare_call") {
             // No approval URL or approval capability in model-visible content.
             const { approval_url, approvalEndpoint, note, ...preview } = value;
