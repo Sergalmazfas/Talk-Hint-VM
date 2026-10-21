@@ -63,7 +63,7 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
   it("advertises a self-contained resource and app-only consequential tool", async () => {
     const initialized = await rpc("initialize");
     expect(initialized.body.result.capabilities.resources).toEqual({});
-    expect(initialized.body.result.serverInfo.version).toBe("1.4.0");
+    expect(initialized.body.result.serverInfo.version).toBe("1.5.0");
     const catalog = (await rpc("tools/list")).body.result.tools;
     const preview = catalog.find((t: any) => t.name === "prepare_call");
     expect(preview.inputSchema.properties.voiceProvider).toMatchObject({
@@ -88,10 +88,24 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect(result.structuredContent.call.recipient).toBe("Reception");
     expect(result.structuredContent.confirmationMethod).toBe("inline_card");
     expect(result.structuredContent).not.toHaveProperty("approval_url");
+    expect(result.structuredContent).not.toHaveProperty("fallbackUrl");
     const cap = result._meta["talkhint/cardApproval"];
     expect(cap.call.recipient).toBe("Reception");
     expect(JSON.stringify([result.structuredContent, result.content])).not.toContain(cap.approvalToken);
     expect(result.structuredContent).not.toHaveProperty("approvalToken");
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("defaults to native OpenAI and reports the actual model/voice without clone identifiers", async () => {
+    const { token } = await connect();
+    const { voiceProvider: _ignored, ...draft } = input;
+    const result = await tool("prepare_call", draft, token);
+    expect(result.isError).toBe(false);
+    expect(result.structuredContent.call.voiceProvider).toBe("openai");
+    expect(result.structuredContent.execution).toEqual({
+      provider: "openai", model: "gpt-realtime-2.1", voice: "marin", mode: "native_audio",
+    });
+    expect(result.content[0].text).toContain("gpt-realtime-2.1");
+    expect(result.content[0].text).not.toContain("fallback link");
     expect(backend.start).not.toHaveBeenCalled();
   });
   it("one explicit click starts exactly the signed native parameters; status/result stay readable", async () => {

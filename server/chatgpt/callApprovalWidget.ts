@@ -1,4 +1,4 @@
-export const CALL_APPROVAL_RESOURCE = "ui://talkhint/call-approval/v2.html";
+export const CALL_APPROVAL_RESOURCE = "ui://talkhint/call-approval/v3.html";
 
 export function callApprovalWidgetHtml(): string {
   return `<!doctype html>
@@ -31,6 +31,7 @@ export function callApprovalWidgetHtml(): string {
         <p class="call-summary" id="callSummary" hidden></p>
         <section class="details" aria-label="Детали вызова">
           <div class="detail"><span class="detail-label">Получатель</span><span class="detail-value" id="recipient"></span></div>
+          <div class="detail"><span class="detail-label">Модель и голос</span><span class="detail-value" id="execution"></span></div>
           <div class="detail"><span class="detail-label">Номер</span><span class="detail-value" id="phoneNumber"></span></div>
           <div class="detail"><span class="detail-label">Краткая цель</span><span class="detail-value" id="instruction"></span></div>
         </section>
@@ -73,7 +74,8 @@ export function callApprovalWidgetHtml(): string {
       const data = plainRecord(structured), meta = plainRecord(metadata), approval = plainRecord(meta && meta["talkhint/cardApproval"]);
       const call = plainRecord(approval && approval.call) || plainRecord(data && data.call);
       if (!call) return null;
-      return { call, confirmation: valueText(approval && approval.confirmation), approvalToken: typeof (approval && approval.approvalToken) === "string" ? approval.approvalToken : "", expiresAt: data.expiresAt, fallbackUrl: data.fallbackUrl };
+      return { call, execution: plainRecord(approval && approval.execution) || plainRecord(data.execution),
+        confirmation: valueText(approval && approval.confirmation), approvalToken: typeof (approval && approval.approvalToken) === "string" ? approval.approvalToken : "", expiresAt: data.expiresAt };
     }
     function safeHttps(value) { try { const url = new URL(value); return url.protocol === "https:" ? url.href : ""; } catch (_) { return ""; } }
     function safeTaskFallback(value, id) {
@@ -106,9 +108,23 @@ export function callApprovalWidgetHtml(): string {
       approveButton.disabled = true; denyButton.disabled = true; resultNode.hidden = true; $("checkStatus").hidden = true; $("monitor").hidden = true; $("reconnectButton").disabled = true; $("listenButton").disabled = true; $("fallback").hidden = true; compatNode.hidden = true;
       putValue("recipient", card.call.recipient, "Получатель не указан"); putValue("phoneNumber", card.call.phoneNumber, "Номер не указан"); putValue("instruction", card.call.instruction || card.call.goal, "Цель не указана");
       const expiry = valueText(card.expiresAt); $("expiry").textContent = expiry ? "Запрос действует до: " + expiry : ""; $("expiry").hidden = !expiry;
+      const execution = card.execution;
+      $("execution").textContent = execution
+        ? valueText(execution.model) + " · " + (execution.voice === "owner_clone" ? "Ваш клон голоса" : valueText(execution.voice)) + " · " + valueText(execution.provider)
+        : "Модель не передана. Обновите подключение TalkHint в ChatGPT.";
+      if (expireCardIfNeeded(card)) return;
+      if (expiry) window.setTimeout(() => { if (current === card && !decisionLocked) expireCardIfNeeded(card); },
+        Math.max(0, Math.min(2147483647, Date.parse(expiry) - Date.now())));
       if (!card.confirmation || !card.approvalToken) { setStatus("Не удалось получить защищённые данные подтверждения. Не подтверждайте этот вызов.", "error"); compatNode.textContent = "Откройте запрос из TalkHint ещё раз. Токены не нужно вводить или пересылать вручную."; compatNode.hidden = false; return; }
       if (standardAvailable || fallbackAvailable) { approveButton.disabled = false; denyButton.disabled = false; setStatus("Проверьте получателя, номер и цель перед подтверждением."); }
-      else { setStatus("Подтверждение недоступно в этом окне.", "error"); compatNode.textContent = "В этом окне не обнаружен поддерживаемый ChatGPT bridge. Диагностика не подтверждает поддержку конкретного устройства."; compatNode.hidden = false; showFallback(card.fallbackUrl, "Встроенное подтверждение недоступно. Это защищённая страница подтверждения именно этого черновика; вызов не начнётся без вашего согласия.", "Открыть страницу подтверждения"); }
+      else { setStatus("Подтверждение недоступно в этом окне.", "error"); compatNode.textContent = "Этот клиент не подтвердил поддержку интерактивной карточки. Обновите подключение и проверьте его в ChatGPT web с поддержкой MCP Apps. Ничего не будет набрано; сайт и текстовое «да» не заменяют кнопку."; compatNode.hidden = false; }
+    }
+    function expireCardIfNeeded(card) {
+      const expires = Date.parse(valueText(card.expiresAt));
+      if (!Number.isFinite(expires) || expires > Date.now()) return false;
+      decisionLocked = true; approveButton.disabled = true; denyButton.disabled = true;
+      setStatus("Подтверждение истекло. Попросите подготовить новую карточку того же поручения. Звонок не запущен.", "error");
+      return true;
     }
     function sendNotification(method, params) { if (!standardAvailable) return false; try { window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"); return true; } catch (_) { return false; } }
     let lastReportedHeight = 0;
@@ -195,6 +211,7 @@ export function callApprovalWidgetHtml(): string {
     }
     async function decide(decision) {
       const card = current; if (!card || decisionLocked || approveButton.disabled || denyButton.disabled) return;
+      if (expireCardIfNeeded(card)) return;
       decisionLocked = true; const cardSequence = sequence; approveButton.disabled = true; denyButton.disabled = true;
       approveButton.setAttribute("aria-busy", "true"); denyButton.setAttribute("aria-busy", "true");
       setStatus(decision === "approve" ? "Передаём подтверждение в TalkHint…" : "Передаём отказ в TalkHint…");
@@ -427,8 +444,8 @@ export function callApprovalWidgetHtml(): string {
     window.setTimeout(() => {
       if (initialized) return;
       const openai = window.openai; fallbackAvailable = !!(openai && typeof openai.callTool === "function");
-      if (fallbackAvailable) { initialOpenAiPayload(); if (current && current.confirmation && current.approvalToken) { approveButton.disabled = false; denyButton.disabled = false; setStatus("Обнаружен ChatGPT tool bridge. Проверьте получателя, номер и цель."); } }
-      else if (current) { approveButton.disabled = true; denyButton.disabled = true; setStatus("Подтверждение недоступно в этом окне.", "error"); compatNode.textContent = "Диагностика: ChatGPT tool bridge не обнаружен. Поддержка iPhone этим не подтверждается."; compatNode.hidden = false; showFallback(current.fallbackUrl, "Встроенная карточка недоступна. Эта защищённая страница подтверждает только этот черновик; владелец должен отдельно подтвердить вызов.", "Открыть страницу подтверждения"); }
+      if (fallbackAvailable) { initialOpenAiPayload(); if (current && current.confirmation && current.approvalToken && !decisionLocked && !expireCardIfNeeded(current)) { approveButton.disabled = false; denyButton.disabled = false; setStatus("Обнаружен ChatGPT tool bridge. Проверьте получателя, номер и цель."); } }
+      else if (current) { approveButton.disabled = true; denyButton.disabled = true; setStatus("Подтверждение недоступно в этом окне.", "error"); compatNode.textContent = "Диагностика: ChatGPT tool bridge не обнаружен. Обновите метаданные подключения и проверьте карточку в ChatGPT web с поддержкой MCP Apps. Поддержка iPhone не подтверждена. Переход на сайт и текстовое «да» не заменяют карточку."; compatNode.hidden = false; }
       else { setStatus("Не удалось установить защищённое соединение с TalkHint.", "error"); compatNode.textContent = "Откройте запрос в поддерживаемом окне ChatGPT. Не передавайте токены."; compatNode.hidden = false; }
     }, 900);
   })();

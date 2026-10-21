@@ -7,6 +7,7 @@ import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest
 import { CallConfirmations } from "./confirmations";
 import { talkHintPluginPackage } from "./plugin";
 import { PUBLIC_TOOLS, publicToolMetadata, cardApprovalToolMetadata, monitorToolMetadata, type PublicTool } from "./toolMetadata";
+import { callPresentation } from "./callPresentation";
 import { CallMonitor, MONITOR_SCOPES } from "./monitor";
 import { selectCallTurns } from "./turns";
 import { CardApproval } from "./cardApproval";
@@ -279,6 +280,8 @@ export function registerChatGPTIntegration(
     tools: mcpTools,
     pluginVersion: TALKHINT_PLUGIN_VERSION, mcpVersion: TALKHINT_MCP_VERSION,
     confirmationMethod: cardEnabled ? "inline_card" : "unavailable",
+    ui: cardEnabled ? { resourceUri: CALL_APPROVAL_RESOURCE, mimeType: "text/html;profile=mcp-app",
+      requiresMcpAppsHost: true, iphoneVerified: false } : undefined,
     uiTools: cardEnabled ? ["confirm_call_from_card", ...(monitorEnabled ? ["open_call_monitor"] : [])] : [],
     scopes: discoveryScopes,
     // No callback value, account details, signing keys or credentials.
@@ -564,15 +567,17 @@ export function registerChatGPTIntegration(
             const { approval_url, approvalEndpoint, note, ...preview } = value;
             const recipient = credentials.read(value.confirmation, "confirmation").recipient;
             const displayCall = { ...preview.call, ...(recipient ? { recipient } : {}) };
+            const execution = callPresentation(displayCall.voiceProvider);
             meta = { "talkhint/cardApproval": { ...await cardApproval.issue(value.confirmation), call: displayCall } };
             value = { ...preview, call: displayCall, confirmationMethod: "inline_card",
-              fallbackUrl: approval_url,
+              execution,
               note: "Confirm this exact call using the button in this chat. If the card is unavailable, stop. No call has started." };
           }
         }
         const text = name === "prepare_call" ?
           `Call preview: ${value.call.recipient ?? "Recipient not supplied"}; ${value.call.phoneNumber}; ${value.call.instruction}. ` +
-          "No call has started. Use the inline card's single confirmation button. If this host shows only text/JSON, it has NOT displayed a confirmation card: explain the limitation and offer the protected TalkHint fallback link, never claim approval or invoke start_call." :
+          `Selected: ${value.execution.model}; voice: ${value.execution.voice}; provider: ${value.execution.provider}. ` +
+          "No call has started. Use the inline card's single confirmation button. If this host shows only text/JSON, it has NOT displayed a confirmation card: stop and explain the host limitation. Refresh connection metadata and test in ChatGPT web with MCP Apps support. Do not replace the card with a website or chat yes, claim approval or invoke start_call." :
           JSON.stringify(value);
         result = { content: [{ type: "text", text }], structuredContent: value,
           isError: false, ...(meta ? { _meta: meta } : {}) };

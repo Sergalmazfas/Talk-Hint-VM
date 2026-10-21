@@ -1,5 +1,6 @@
 import type { Scope } from "./security";
 import { CALL_APPROVAL_RESOURCE } from "./callApprovalWidget";
+import { CALL_PRESENTATION_SCHEMA } from "./callPresentation";
 
 export const PUBLIC_TOOLS = ["get_profile", "list_calls", "get_call", "list_tasks", "get_task",
   "prepare_call", "start_call", "read_call_turns"] as const;
@@ -30,8 +31,10 @@ export function publicToolMetadata(name: PublicTool, scope: Scope, properties: o
     _meta: { securitySchemes, ...(name === "get_profile" ? { "openai/profile": true } : {}),
       ...(name === "get_task" ? { "openai/widgetAccessible": true,
         ui: { visibility: ["model", "app"] } } : {}),
-      ...(preview ? { ui: { resourceUri: CALL_APPROVAL_RESOURCE },
-        "openai/outputTemplate": CALL_APPROVAL_RESOURCE } : {}) },
+      ...(preview ? { ui: { resourceUri: CALL_APPROVAL_RESOURCE, visibility: ["model", "app"] },
+        "openai/outputTemplate": CALL_APPROVAL_RESOURCE,
+        "openai/toolInvocation/invoking": "Готовим карточку звонка",
+        "openai/toolInvocation/invoked": "Проверьте номер и цель; подтвердите кнопкой" } : {}) },
     ...(name === "get_profile" ? { outputSchema: {
       type: "object", properties: { id: { type: "string", minLength: 1, pattern: "\\S",
         description: "Persisted profile identity, unchanged across refresh and reconnection." } },
@@ -44,8 +47,9 @@ export function publicToolMetadata(name: PublicTool, scope: Scope, properties: o
         confirmation: { type: "string" }, expiresAt: { type: "string", format: "date-time" },
         status: { type: "string", enum: ["owner_approval_required"] },
         confirmationMethod: { type: "string", enum: ["inline_card"] }, note: { type: "string" },
+        execution: CALL_PRESENTATION_SCHEMA,
         fallbackUrl: { type: "string", format: "uri" },
-      }, required: ["call", "confirmation", "expiresAt", "status", "confirmationMethod", "note"],
+      }, required: ["call", "confirmation", "expiresAt", "status", "confirmationMethod", "execution", "note"],
       additionalProperties: false,
     } } : {}),
   };

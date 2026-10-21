@@ -81,6 +81,7 @@ function harness(options: { fetchResponse?: (url: string, init: any) => Promise<
   const initialize = () => receive({ id: "talkhint-initialize", result: { protocolVersion: "2026-01-26" } });
   const card = {
     structuredContent: { call: { recipient: "Test recipient", phoneNumber: "+12025550123", instruction: "Ask hours" },
+      execution: { provider: "openai", model: "gpt-realtime-2.1", voice: "marin", mode: "native_audio" },
       fallbackUrl: "https://talkhint.example/draft/mock-draft", expiresAt: "2099-01-01T00:00:00Z" },
     _meta: { "talkhint/cardApproval": { confirmation: "fixture-draft", approvalToken: "fixture-hidden-capability" } },
   };
@@ -96,6 +97,7 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     const h = harness();
     h.initialize(); h.show();
     expect(h.node("phoneNumber").textContent).toBe("+12025550123");
+    expect(h.node("execution").textContent).toBe("gpt-realtime-2.1 · marin · openai");
     expect(h.requests()).toHaveLength(0);
     h.click("approve"); h.click("approve");
     expect(h.requests()).toHaveLength(1);
@@ -168,9 +170,24 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     expect(html).toContain('fetch(monitorTicket.url');
     expect(html).toContain('ui/notifications/size-changed');
     expect(html).toContain('max-height:420px');
-    expect(CALL_APPROVAL_RESOURCE).toBe("ui://talkhint/call-approval/v2.html");
+    expect(CALL_APPROVAL_RESOURCE).toBe("ui://talkhint/call-approval/v3.html");
     expect(html).not.toContain("voiceProvider");
     expect(html).not.toContain("translationLanguage");
+  });
+  it("does not substitute a website for an unsupported confirmation card", () => {
+    const h = harness(); h.show(); h.runTimers();
+    expect(h.node("approve").disabled).toBe(true);
+    expect(h.node("fallback").hidden).toBe(true);
+    expect(h.node("compat").textContent).toContain("ChatGPT web");
+    expect(h.requests()).toHaveLength(0);
+  });
+  it("disables expired confirmation even when a compatible host is present", () => {
+    const h = harness(); h.initialize();
+    h.show({ ...h.card, structuredContent: { ...h.card.structuredContent, expiresAt: "2000-01-01T00:00:00Z" } });
+    h.click("approve");
+    expect(h.node("approve").disabled).toBe(true);
+    expect(h.node("status").textContent).toContain("истекло");
+    expect(h.requests()).toHaveLength(0);
   });
   it("requests a monitor ticket only after the owner asks and confines it to the same approved task", async () => {
     const h = harness(); h.initialize(); h.show(); h.click("approve");
@@ -431,7 +448,7 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     expect(unsupported.node("approve").disabled).toBe(true);
     expect(unsupported.node("compat").textContent).toContain("ChatGPT tool bridge не обнаружен");
     expect(unsupported.node("compat").textContent).not.toContain("iPhone поддерживается");
-    expect(unsupported.node("fallbackLink").href).toBe("https://talkhint.example/draft/mock-draft");
+    expect(unsupported.node("fallback").hidden).toBe(true);
     expect(unsupported.requests()).toHaveLength(0);
   });
 });

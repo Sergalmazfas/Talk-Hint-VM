@@ -102,3 +102,11 @@ requires a short approval path, and forbids real third-party test calls.
 separate permissioned on-request operation. Reconnection/monitor-ticket expiry
 must never redial or imply that the telephone task ended. Permission upgrades
 must retain earlier approved capabilities instead of causing an OAuth loop.
+
+## Diagnosing missing inline confirmation
+
+Do not infer that a text + structuredContent MCP result lacks a card: the UI is linked by the tool descriptor and served as a separate resource. Compare the live descriptor with the connection's cached snapshot before changing the approval mechanism.
+
+**Why:** The owner observed a clone-only schema after the live server already advertised OpenAI, and repeatedly received text instead of an inline card. A source-code button or public resource HTTP 200 never proves the host mounted it.
+
+**How to apply:** Version UI resource URIs when changing the widget and require a connection metadata refresh after release. Verify rendering in actual ChatGPT separately from mock hosts. Recheck current official plan/mobile policies; a FAQ saying mobile cannot *connect* custom MCP is not proof of all runtime rendering restrictions. The owner does not accept website confirmation as a substitute for the required in-chat button.

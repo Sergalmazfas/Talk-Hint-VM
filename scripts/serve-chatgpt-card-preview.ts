@@ -8,6 +8,7 @@ import { callApprovalWidgetHtml } from "../server/chatgpt/callApprovalWidget";
 
 const fixture = {
   structuredContent: {
+    execution: { provider: "openai", model: "gpt-realtime-2.1", voice: "marin", mode: "native_audio" },
     call: { recipient: "Тестовая организация · имитация", phoneNumber: "+12025550123",
       instruction: "Уточнить часы работы. Это имитация: реальный номер не набирается.",
       voiceProvider: "fixture-only", translationLanguage: "ru" },

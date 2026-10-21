@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const f = vi.hoisted(() => ({
   create: vi.fn(), existing: vi.fn(), attach: vi.fn(), preDial: vi.fn(), getTask: vi.fn(), listTasks: vi.fn(),
   history: vi.fn(), getCall: vi.fn(), clone: vi.fn(), ready: vi.fn(), query: vi.fn(), feed: vi.fn(),
+  modelAvailable: vi.fn(),
+}));
+vi.mock("../secretary/voice", async importOriginal => ({
+  ...await importOriginal<typeof import("../secretary/voice")>(),
+  requireSecretaryAudioModel: f.modelAvailable,
 }));
 vi.mock("../db", () => ({ db: { select: () => ({
   from: () => ({ where: () => ({ limit: f.query, orderBy: () => ({ limit: f.query }) }) }),
@@ -48,13 +53,14 @@ beforeEach(() => {
   f.ready.mockReturnValue("fake");
 });
 import { afterEach } from "vitest";
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe("Secretary adapter uses durable native launch helpers", () => {
-  it("executes OAuth -> exact owner approval -> one native launch -> task result entirely on mocks", async () => {
+  it.each(["elevenlabs", "openai"] as const)("executes OAuth/refresh -> exact owner approval -> one %s mock launch -> task result", async voiceProvider => {
+    const selectedInput = { ...input, voiceProvider };
     const app = express();
     app.use(express.json());
     let won = false;
-    const task = { ...row };
+    const task = { ...row, ...selectedInput, summary: "" };
     f.create.mockImplementation(async () => {
       const created = !won; won = true;
       return { created, task };
@@ -87,8 +93,9 @@ describe("Secretary adapter uses durable native launch helpers", () => {
       code_verifier: verifier, code: new URL(authorized.headers.location).searchParams.get("code"),
     });
     expect(tokens.status).toBe(200);
+    let accessToken = tokens.body.access_token;
     const rpc = (name: string, args: object) => request(app).post("/api/chatgpt/mcp")
-      .set("Authorization", `Bearer ${tokens.body.access_token}`)
+      .set("Authorization", `Bearer ${accessToken}`)
       .send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } });
     f.listTasks.mockResolvedValue([{ ...row, id: "historical-failed", status: "failed",
       createdAt: new Date("2026-09-27T00:00:00Z") }]);
@@ -96,8 +103,20 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     expect(oldHistory.body.result.structuredContent.tasks[0]).toMatchObject({
       id: "historical-failed", status: "failed",
     });
-    const prepared = await rpc("prepare_call", input);
-    expect(prepared.body.result.structuredContent.call).toEqual(input);
+    // Expire the short-lived access token, then renew without another login or consent.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 601_000);
+    expect((await rpc("get_profile", {})).body.result.isError).toBe(true);
+    const renewed = await request(app).post("/api/chatgpt/oauth/token").type("form").send({
+      client_id: clientId, resource, grant_type: "refresh_token", refresh_token: tokens.body.refresh_token,
+    });
+    expect(renewed.status).toBe(200);
+    expect(renewed.body.scope).toBe(scope);
+    accessToken = renewed.body.access_token;
+    expect((await rpc("get_profile", {})).body.result.isError).toBe(false);
+    const prepared = await rpc("prepare_call", selectedInput);
+    expect(prepared.body.result.structuredContent.call).toEqual(selectedInput);
+    expect(prepared.body.result.structuredContent.execution.provider).toBe(voiceProvider);
     expect(prepared.body.result.structuredContent).not.toHaveProperty("approval_url");
     expect(prepared.body.result.structuredContent.confirmationMethod).toBe("inline_card");
     expect(f.create).not.toHaveBeenCalled();
@@ -113,9 +132,16 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     const confirmed = await rpc("confirm_call_from_card", { ...card, decision: "approve" });
     expect(confirmed.body.result.isError).toBe(false);
     expect(confirmed.body.result.structuredContent.task_id).toBe(task.id);
-    const repeatedClick = await rpc("confirm_call_from_card", { ...card, decision: "approve" });
-    expect(repeatedClick.body.result.isError).toBe(false);
-    expect(repeatedClick.body.result.structuredContent.task_id).toBe(task.id);
+    // Treat the first successful response as lost. Both a double click and a
+    // network retry must recover the same durable task, not dial another number.
+    const repeatedClicks = await Promise.all([
+      rpc("confirm_call_from_card", { ...card, decision: "approve" }),
+      rpc("confirm_call_from_card", { ...card, decision: "approve" }),
+    ]);
+    for (const repeated of repeatedClicks) {
+      expect(repeated.body.result.isError).toBe(false);
+      expect(repeated.body.result.structuredContent.task_id).toBe(task.id);
+    }
     const starts = await Promise.all([rpc("start_call", { confirmation }), rpc("start_call", { confirmation })]);
     for (const response of starts) {
       expect(response.body.result.isError).toBe(false);
@@ -124,12 +150,16 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     }
     await vi.waitFor(() => expect(f.attach).toHaveBeenCalledTimes(1));
     expect(dial).toHaveBeenCalledTimes(1);
-    expect(f.create).toHaveBeenCalledWith("alice", input);
+    expect(f.create).toHaveBeenCalledWith("alice", selectedInput);
+    expect(f.modelAvailable).toHaveBeenCalledTimes(voiceProvider === "openai" ? 1 + repeatedClicks.length + starts.length : 0);
     task.status = "finalizing";
     expect((await rpc("get_task", { id: task.id })).body.result.structuredContent.status).toBe("finalizing");
     task.status = "completed";
+    task.summary = "Fixture result: opening hours confirmed";
     const result = await rpc("get_task", { id: task.id });
-    expect(result.body.result.structuredContent).toMatchObject({ id: task.id, status: "completed" });
+    expect(result.body.result.structuredContent).toMatchObject({
+      id: task.id, status: "completed", summary: "Fixture result: opening hours confirmed",
+    });
     expect(result.body.result.structuredContent).not.toHaveProperty("transcript");
     expect((await rpc("get_task", { id: task.id, includeTranscript: true })).body.result.isError).toBe(true);
     // All persistence, clone lookup and provider dialing in this test are fakes.
