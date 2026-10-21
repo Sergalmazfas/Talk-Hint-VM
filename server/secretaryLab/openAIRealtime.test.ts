@@ -49,6 +49,10 @@ describe("Dev native OpenAI speech-to-speech — never a telephone call", () => 
     driver.startIntroduction(); driver.startIntroduction();
     expect(socket.sent.filter(e => e.type === "response.create")).toHaveLength(1);
     expect(socket.sent.find(e => e.type === "response.create").response.instructions).toContain("Ask about opening hours.");
+    expect(socket.sent.find(e => e.type === "response.create").response.instructions)
+      .toContain("trusted standard secretary introduction");
+    expect(socket.sent.find(e => e.type === "response.create").response.instructions)
+      .not.toContain("natural AI-assistant introduction");
   });
   it("actively requests a configuration ACK when joining an existing WebRTC call", async () => {
     await driver.connect(SDP);

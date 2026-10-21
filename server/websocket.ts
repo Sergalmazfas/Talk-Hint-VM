@@ -13,6 +13,7 @@ import { isValidSpikeToken, handleTranslatorSpikeStream, handleCopilotBenchStrea
 import { handleIOSTranslatorStream } from "./translation/iosTranslator";
 import { handleTranslatorTwilioStream, subscribeTranslatorFeed } from "./translation/twilioBridge";
 import { storage } from "./storage";
+import { confirmedSecretaryOwnerName } from "./secretary/ownerIdentity";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
 import type { DialogueEntry, DialogueLibrary } from "@shared/schema";
@@ -1015,13 +1016,14 @@ export function setupWebSocket(server: Server) {
           const task = await getSecretaryTaskForCall(taskId, callSid);
           if (!task) return null;
           const voiceProvider = secretaryVoiceProvider(task.voiceProvider);
-          if (voiceProvider === "openai") return { instruction: task.instruction, ownerId: task.userId, voiceProvider, cloneVoiceId: "" };
+          const ownerName = confirmedSecretaryOwnerName(task.userId);
+          if (voiceProvider === "openai") return { instruction: task.instruction, ownerId: task.userId, ownerName, voiceProvider, cloneVoiceId: "" };
           const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(task.userId) : getClone(task.userId));
           const cloneVoiceId = requireReadyTranslatorClone(
             voiceProvider, clone,
             voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY,
           );
-          return { instruction: task.instruction, ownerId: task.userId, voiceProvider, cloneVoiceId };
+          return { instruction: task.instruction, ownerId: task.userId, ownerName, voiceProvider, cloneVoiceId };
         },
         onTurn: async (taskId, role, text, callSid) => {
           const turnId = randomUUID();

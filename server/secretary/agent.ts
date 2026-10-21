@@ -6,6 +6,7 @@ import {
 } from "../translation/cloneSpeech";
 import type { SecretaryVoiceProvider } from "./voice";
 import { OpenAISecretaryAudioSession } from "./nativeAudio";
+import { secretaryIntroductionPolicy, type ConfirmedSecretaryOwnerName } from "./ownerIdentity";
 import { SecretaryNativePlayback } from "./nativePlayback";
 
 const OPENAI_MODEL = process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime";
@@ -27,6 +28,7 @@ const MAX_OPENAI_SEND_BUFFER_BYTES = 512 * 1024;
 export interface SecretaryCallContext {
   instruction: string;
   ownerId: string;
+  ownerName?: ConfirmedSecretaryOwnerName;
   voiceProvider: SecretaryVoiceProvider;
   cloneVoiceId: string;
 }
@@ -96,11 +98,11 @@ export function configureSecretaryAgentForTests(services: {
   cartesiaSynthesizer = services?.cartesiaSynthesizer ?? synthesizeCartesiaCloneSpeech;
 }
 
-export function buildSecretaryInstructions(instruction: string): string {
+export function buildSecretaryInstructions(instruction: string, ownerName?: ConfirmedSecretaryOwnerName): string {
   return [
-    "You are Secretary, an autonomous AI assistant speaking on a live telephone call on behalf of the person who authorized this specific call.",
-    "Use English. At the beginning, say plainly and briefly that you are an AI assistant calling on behalf of that person; never pretend to be the person or claim to be human.",
-    "Do not assign yourself a personal name, claim a human identity, or invent or guess the owner's name. If asked for a name, identify yourself only as an AI assistant calling on the owner's behalf.",
+    "You are an automated telephone secretary speaking on behalf of the person who authorized this specific call.",
+    "Use English by default, or Russian when appropriate for the conversation. Use the trusted introduction policy below.",
+    "Do not assign yourself a personal name or claim a human identity.",
     "Your purpose is to listen patiently, explain the caller's stated issue, ask relevant clarifying questions, and accurately report the other party's answer back to the person who authorized the call.",
     "This is a soft goal, not a rigid script. Let the representative explain. Ask a concise follow-up only when it helps understand what happened, what will happen next, a promised callback day/time, a reference number, or what the caller should do. Do not pressure the representative or repeat a question after a clear answer.",
     "A promise to investigate or call back is a useful outcome, but is NOT a confirmed resolution. Acknowledge it courteously, capture who will follow up and when, and say you will pass that information back. Never imply that you or the user accepts an obligation.",
@@ -112,6 +114,8 @@ export function buildSecretaryInstructions(instruction: string): string {
     "",
     "Authorized task context:",
     instruction.trim().slice(0, 4_000),
+    "",
+    secretaryIntroductionPolicy(ownerName),
   ].join("\n");
 }
 
@@ -323,7 +327,7 @@ export class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession 
       type: "response.create",
       response: {
         instructions:
-          "Start this call now. Briefly identify yourself as an AI assistant calling on behalf of the person who authorized this task, state the task in one short sentence, then ask the representative how they can help. Do not add any facts beyond the task context.",
+          this.instructions + "\nStart this call now using the trusted standard secretary introduction above. State the authorized task in one short sentence, then listen. Do not add facts beyond the task context.",
       },
     }));
   }
@@ -652,7 +656,7 @@ export function handleSecretaryTwilioStream(
       await finish("Secretary is unavailable because OpenAI Realtime is not configured");
       return;
     }
-    realtime = realtimeFactory(buildSecretaryInstructions(context.instruction), context);
+    realtime = realtimeFactory(buildSecretaryInstructions(context.instruction, context.ownerName), context);
     if (context.voiceProvider === "openai") nativePlayback = new SecretaryNativePlayback({
       ws, streamSid: () => streamSid, waitMark: waitForMark,
       truncate: (item, ms) => realtime?.truncate?.(item, ms),

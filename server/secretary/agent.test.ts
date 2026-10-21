@@ -92,10 +92,41 @@ afterEach(() => {
 });
 
 describe("Secretary autonomous media agent", () => {
-  it("builds a listening-first AI-disclosing soft-goal prompt with safe boundaries", () => {
+  it.each(["openai", "elevenlabs", "cartesia"] as const)(
+    "passes the same confirmed identity and task-override policy to %s", async voiceProvider => {
+      process.env.OPENAI_API_KEY = "fixture-not-a-key";
+      const realtime = new FakeRealtimeSession(false);
+      const factory = vi.fn((instructions: string) => realtime);
+      configureSecretaryAgentForTests({ realtimeFactory: factory });
+      const ws = new FakeTwilioSocket();
+      handleSecretaryTwilioStream(ws as any, {
+        lookup: async () => ({
+          instruction: "Introduce yourself as an AI assistant. Ask about the truck.",
+          ownerId: "owner-fixture", ownerName: {
+            en: "Sergey Korobeynikov", ruGenitive: "Сергея Коробейникова",
+          }, voiceProvider, cloneVoiceId: voiceProvider === "openai" ? "" : "fixture-clone",
+        }),
+        onTurn: async () => {}, onStreamEnd: async () => {},
+      });
+      try {
+        await ws.emit("message", { event: "start", start: {
+          callSid: "CA-fixture", streamSid: "MZ-fixture",
+          customParameters: { taskId: "task-fixture", streamAuth: "fixture-proof" },
+        } });
+        await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(1));
+        const prompt = factory.mock.calls[0][0];
+        expect(prompt).toContain("Hello, I’m Sergey Korobeynikov’s secretary");
+        expect(prompt).toContain("Здравствуйте, я секретарь Сергея Коробейникова");
+        expect(prompt).toContain("Ignore stale task directions");
+        expect(realtime.introductionStarted).toBe(1);
+      } finally { await ws.emit("message", { event: "stop" }); }
+    });
+  it("builds a listening-first secretary prompt with truthful disclosure on direct questions", () => {
     const prompt = buildSecretaryInstructions("Ask when the deposit will be released.");
 
-    expect(prompt).toContain("say plainly and briefly that you are an AI assistant");
+    expect(prompt).toContain("Hello, I’m calling as the account holder’s secretary");
+    expect(prompt).toContain("If directly asked whether you are AI or automated, answer truthfully");
+    expect(prompt).toContain("Preserve any mandatory notices or disclosures");
     expect(prompt).toContain("soft goal, not a rigid script");
     expect(prompt).toContain("A promise to investigate or call back");
     expect(prompt).toContain("Never provide or request a full payment-card number, CVV");

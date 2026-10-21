@@ -23,6 +23,14 @@ describe("Secretary actual OpenAI wire protocol — interruption is not a hangup
     socket.emit("open"); socket.message({ type: "session.updated" }); await connected;
   });
   afterEach(() => { session.close(); vi.unstubAllEnvs(); });
+  it("keeps full session instructions in the cloned-voice introduction without the old AI-assistant override", () => {
+    session.startIntroduction();
+    const introductions = socket.sent.filter(e => e.type === "response.create");
+    expect(introductions).toHaveLength(1);
+    expect(introductions[0].response.instructions).toContain("Fixture");
+    expect(introductions[0].response.instructions).toContain("trusted standard secretary introduction");
+    expect(introductions[0].response.instructions).not.toContain("identify yourself as an AI assistant");
+  });
   it("never cancels when only the external cloned voice is playing after response.done", () => {
     socket.message({ type: "response.created", response: { id: "r1" } });
     socket.message({ type: "response.output_text.done", response_id: "r1", text: "Hello." });

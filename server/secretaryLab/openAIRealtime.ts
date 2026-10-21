@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import WebSocket from "ws";
 import { buildSecretaryInstructions } from "../secretary/agent";
+import { confirmedSecretaryOwnerName, type ConfirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 
 export const LAB_REALTIME_MODEL = "gpt-realtime-2.1";
 export const LAB_REALTIME_VOICE = "marin";
@@ -26,11 +27,11 @@ export interface RealtimeNetwork {
 const network: RealtimeNetwork = { fetch, socket: (url, options) => new WebSocket(url, options) };
 
 /** No environment overrides or model fallback: this is an explicit comparison. */
-export function labRealtimeConfig(instruction: string) {
+export function labRealtimeConfig(instruction: string, ownerName?: ConfirmedSecretaryOwnerName) {
   return {
     type: "realtime", model: LAB_REALTIME_MODEL, output_modalities: ["audio"],
     reasoning: { effort: LAB_REASONING },
-    instructions: buildSecretaryInstructions(instruction) + "\n\n" + [
+    instructions: buildSecretaryInstructions(instruction, ownerName) + "\n\n" + [
       "This is an authorized private conversation test; there is no telephone dial operation.",
       "If the representative asks you to hold or transfer, acknowledge briefly ONCE and then wait quietly.",
       "Silence or hold music is not a new question, success or permission to end the conversation.",
@@ -86,7 +87,7 @@ export class OpenAILabRealtime implements LabRealtimeConnection {
     this.started = true;
     const form = new FormData();
     form.set("sdp", sdp);
-    form.set("session", JSON.stringify(labRealtimeConfig(this.instruction)));
+    form.set("session", JSON.stringify(labRealtimeConfig(this.instruction, confirmedSecretaryOwnerName(this.owner))));
     const response = await this.net.fetch(`${API}/realtime/calls`, {
       method: "POST", headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -116,7 +117,7 @@ export class OpenAILabRealtime implements LabRealtimeConnection {
     // Attaching to an EXISTING WebRTC session need not replay session.created.
     // Request an idempotent update and validate the full session.updated ACK.
     this.socket.on("open", () => this.send({
-      type: "session.update", session: { type: "realtime", instructions: labRealtimeConfig(this.instruction).instructions },
+      type: "session.update", session: { type: "realtime", instructions: labRealtimeConfig(this.instruction, confirmedSecretaryOwnerName(this.owner)).instructions },
     }));
     this.socket.on("message", raw => {
       let event: any; try { event = JSON.parse(raw.toString()); } catch { return; }
@@ -202,8 +203,8 @@ export class OpenAILabRealtime implements LabRealtimeConnection {
     this.introduced = true;
     this.send({ type: "response.create", response: {
       // Per-response instructions replace rather than append session instructions.
-      instructions: labRealtimeConfig(this.instruction).instructions +
-        "\nBegin with one brief natural AI-assistant introduction and this authorized task, then listen. Do not invent any details.",
+      instructions: labRealtimeConfig(this.instruction, confirmedSecretaryOwnerName(this.owner)).instructions +
+        "\nBegin with the trusted standard secretary introduction above and this authorized task, then listen. Do not invent any details.",
     } });
   }
   private fail(reason: string) {

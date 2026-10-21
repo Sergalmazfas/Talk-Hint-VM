@@ -1,4 +1,5 @@
 import { SecretaryLab } from "./service";
+import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import { handleSecretaryTwilioStream } from "../secretary/agent";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
@@ -23,7 +24,7 @@ export const secretaryLab = new SecretaryLab({
     const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(ownerId) : getClone(ownerId));
     const cloneVoiceId = requireReadyTranslatorClone(voiceProvider, clone,
       voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
-    return { ownerId, voiceProvider, cloneVoiceId };
+    return { ownerId, ownerName: confirmedSecretaryOwnerName(ownerId), voiceProvider, cloneVoiceId };
   },
   translate: text => translateTextSubtitle(text, "ru"),
   openAI: process.env.NODE_ENV === "development" ? {
