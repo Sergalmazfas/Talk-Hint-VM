@@ -168,8 +168,8 @@ On macOS it:
    not a text search, rejects duplicate types and unresolved symbols.
 5. Runs **all** `TalkHintTests` with `test-without-building`. It additionally checks
    the `.xcresult` for successful execution of the two real Foundation URL tests
-   in `CallProfilesTests` and the test-backend isolation assertion. Missing or
-   skipped required tests do not count as success.
+   in `CallProfilesTests`, the test-backend isolation assertion, and all required
+   `KnowledgeCardsTests`. Missing or skipped required tests do not count as success.
 6. Shuts down and deletes only the Simulator created by this invocation, even on
    failure. Logs and `.xcresult` stay in ignored `generated-artifacts/ios-native.*`.
 
@@ -181,6 +181,16 @@ restore a saved login, or route notifications. Test-created controllers still
 run the real code. Normal Debug/Release behavior and signing settings are unchanged.
 No publishing, archive, device installation, telephone calls, or real secrets are
 part of this gate. XCTest installs its host **only in the disposable Simulator**.
+
+`KnowledgeCardsTests` injects a per-client in-memory transport and a fake Bearer
+token into the real API client, profiles navigation, card list and editor.
+It checks scoped CRUD for personal/work/shared, exact URLs and JSON, missing
+auth, explicit 401/403/404/500 failures, malformed/cross-profile responses,
+offline retry without losing drafts, reopening the selected profile, and delayed
+reads (including reads that could resurrect a deleted card). The transport rejects
+every endpoint outside `/api/cards`; number attachment and telephone endpoints
+cannot be used by these tests. This is UIKit XCTest coverage, not XCUITest or
+proof of an installed iPhone build.
 
 ### CI setup and current verification status
 

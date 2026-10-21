@@ -67,20 +67,15 @@ class SourceMembershipTests(unittest.TestCase):
 
 
 class XCTestEvidenceTests(unittest.TestCase):
-    methods = [
-        "testNativeValidationUsesAnIsolatedBackend",
-        "testCardProfileIsAQueryAndNotAnEncodedPath",
-        "testNonQueryPathsKeepTheirExistingDestination",
-    ]
-
-    def run_evidence(self, status="succeeded", test_status="Success", omit=False):
+    def run_evidence(self, status="succeeded", test_status="Success", omit=False, omit_cards=False):
         root = {"actions": {"_values": [{"actionResult": {
             "status": {"_value": status}, "testsRef": {"id": {"_value": "tests"}}
         }}]}}
-        tests = {"identifier": {"_value": "CallProfilesTests"}, "subtests": {"_values": [
+        tests = [{"identifier": {"_value": suite}, "subtests": {"_values": [
             {"identifier": {"_value": method + "()"}, "testStatus": {"_value": test_status}}
-            for method in self.methods[1 if omit else 0:]
-        ]}}
+            for method in methods[(1 if omit and suite == "CallProfilesTests" else 0):]
+        ]}} for suite, methods in results.REQUIRED_TESTS.items()
+            if not (omit_cards and suite == "KnowledgeCardsTests")]
         with patch.object(results, "read_result", side_effect=[root, tests]):
             with contextlib.redirect_stdout(io.StringIO()):
                 results.verify("fixture.xcresult")
@@ -95,6 +90,10 @@ class XCTestEvidenceTests(unittest.TestCase):
     def test_missing_isolation_test_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing successful"):
             self.run_evidence(omit=True)
+
+    def test_missing_cards_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful KnowledgeCardsTests"):
+            self.run_evidence(omit_cards=True)
 
     def test_failed_action_fails(self):
         with self.assertRaisesRegex(ValueError, "did not succeed"):

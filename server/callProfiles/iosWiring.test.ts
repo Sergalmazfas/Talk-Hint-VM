@@ -27,7 +27,7 @@ describe("native personal/work integration wiring (not a simulator test)", () =>
     expect(settings).toContain('"cell-work-number"');
     expect(settings).toContain('"cell-call-profiles"');
     expect(settings).toContain("CallProfilesViewController()");
-    expect(screen).toContain("KnowledgeCardsViewController(profileScope: scope)");
+    expect(screen).toContain("KnowledgeCardsViewController(profileScope: scope, api: api)");
   });
   it("passes the exact scope through reads, creates, edits and the editor", () => {
     expect(api).toContain('request("/api/cards", method: "GET", json: nil, authenticated: true,');
@@ -58,7 +58,7 @@ describe("native personal/work integration wiring (not a simulator test)", () =>
     expect(screen).not.toContain("start_call");
     expect(screen).not.toContain("TwilioVoice");
     const load = screen.slice(screen.indexOf("private func loadProfiles"), screen.indexOf("private func rows"));
-    expect(load).toContain("APIClient.shared.callProfiles()");
+    expect(load).toContain("api.callProfiles()");
     expect(load).not.toContain("connectWorkNumber");
   });
   it("does not report network/authorization failures as an empty successful card list", () => {

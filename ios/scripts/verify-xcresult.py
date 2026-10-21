@@ -4,6 +4,27 @@ import json
 import subprocess
 import sys
 
+REQUIRED_TESTS = {
+    "CallProfilesTests": (
+        "testNativeValidationUsesAnIsolatedBackend",
+        "testCardProfileIsAQueryAndNotAnEncodedPath",
+        "testNonQueryPathsKeepTheirExistingDestination",
+    ),
+    "KnowledgeCardsTests": (
+        "testScopedCRUDUsesExactURLsBearerAndJSON",
+        "testMissingTokenNeverReachesTransport",
+        "testHTTPFailuresRemainExplicitForEveryCardOperation",
+        "testBadPayloadAndCrossScopeResponseFailClosed",
+        "testListShowsHTTPErrorsAndRecoversAfterDisconnect",
+        "testLateReadCannotOverwriteNewerReadOrResurrectDeletedCard",
+        "testLateSuccessCannotHideNewerError",
+        "testDelayedPersonalResponseCannotChangeWorkOrSharedScreen",
+        "testEditorKeepsDraftAndAllowsRetryAfterFailure",
+        "testDeleteFailurePreservesRowAndOffersRetry",
+        "testNativeNavigationCreateEditDeleteAndReopenKeepsScope",
+    ),
+}
+
 
 def read_result(bundle, ref=None):
     command = ["xcrun", "xcresulttool", "get", "object", "--legacy",
@@ -38,15 +59,11 @@ def verify(bundle):
         ref = result.get("testsRef", {}).get("id", {}).get("_value")
         if ref:
             passed.update(successful_tests(read_result(bundle, ref)))
-    required = (
-        "testNativeValidationUsesAnIsolatedBackend",
-        "testCardProfileIsAQueryAndNotAnEncodedPath",
-        "testNonQueryPathsKeepTheirExistingDestination",
-    )
-    for method in required:
-        if not any("CallProfilesTests" in p and method + "()" in p for p in passed):
-            raise ValueError(f"Missing successful CallProfilesTests/{method}()")
-    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation tests passed")
+    for suite, methods in REQUIRED_TESTS.items():
+        for method in methods:
+            if not any(suite in p and method + "()" in p for p in passed):
+                raise ValueError(f"Missing successful {suite}/{method}()")
+    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards tests passed")
 
 
 if __name__ == "__main__":

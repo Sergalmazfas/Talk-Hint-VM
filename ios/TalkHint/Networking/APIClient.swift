@@ -72,6 +72,16 @@ final class APIClient {
     private init() {}
 
     private let session = URLSession(configuration: .default)
+    typealias Transport = (URLRequest) async throws -> (Data, URLResponse)
+    private var transport: Transport?
+    private var tokenProvider: () -> String? = { SessionStore.shared.token }
+
+    /// Isolated clients exercise the real request/response logic without reading
+    /// Keychain or opening a connection. The production singleton is unchanged.
+    init(transport: @escaping Transport, tokenProvider: @escaping () -> String?) {
+        self.transport = transport
+        self.tokenProvider = tokenProvider
+    }
 
     // MARK: - Auth
 
@@ -1013,11 +1023,16 @@ final class APIClient {
         }
 
         if authenticated {
-            guard let token = SessionStore.shared.token else { throw APIError.notAuthenticated }
+            guard let token = tokenProvider() else { throw APIError.notAuthenticated }
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let (data, response) = try await session.data(for: req)
+        let (data, response): (Data, URLResponse)
+        if let transport = transport {
+            (data, response) = try await transport(req)
+        } else {
+            (data, response) = try await session.data(for: req)
+        }
         guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
         guard (200..<300).contains(http.statusCode) else {
             var message = ""

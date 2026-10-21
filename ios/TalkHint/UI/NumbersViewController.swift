@@ -155,8 +155,12 @@ final class CallProfilesViewController: UITableViewController {
     private var loading = false
     private var connecting = false
     private var loadError: String?
+    private let api: APIClient
 
-    init() { super.init(style: .insetGrouped) }
+    init(api: APIClient = .shared) {
+        self.api = api
+        super.init(style: .insetGrouped)
+    }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func viewDidLoad() {
@@ -195,7 +199,7 @@ final class CallProfilesViewController: UITableViewController {
             tableView.reloadData()
         }
         do {
-            snapshot = try await APIClient.shared.callProfiles()
+            snapshot = try await api.callProfiles()
             loadError = nil
         } catch {
             snapshot = nil
@@ -270,7 +274,7 @@ final class CallProfilesViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         switch rows(in: indexPath.section)[indexPath.row] {
         case .cards(let scope):
-            navigationController?.pushViewController(KnowledgeCardsViewController(profileScope: scope), animated: true)
+            navigationController?.pushViewController(KnowledgeCardsViewController(profileScope: scope, api: api), animated: true)
         case .connect(let candidate):
             confirm(candidate)
         case .incoming:
@@ -301,7 +305,7 @@ final class CallProfilesViewController: UITableViewController {
         Task { @MainActor in
             var failure: String?
             do {
-                _ = try await APIClient.shared.connectWorkNumber(numberId: candidate.id)
+                _ = try await api.connectWorkNumber(numberId: candidate.id)
             } catch { failure = error.localizedDescription }
             // Read-only recovery: never automatically repeat a POST.
             await loadProfiles()
