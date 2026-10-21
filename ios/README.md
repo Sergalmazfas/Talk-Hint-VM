@@ -41,6 +41,25 @@ xcodegen generate
 open TalkHint.xcodeproj
 ```
 
+### Updating the personal/work screens
+
+Make sure the Mac has the latest **iOS source files**, not just a newly published
+backend. The native additions include `CallProfilesModels.swift` and
+`CallProfilesViewController.swift`. From the repository root, run `cd ios`,
+`xcodegen generate`, then `open TalkHint.xcodeproj` as above so these files are
+included. Select scheme **TalkHint**, your connected iPhone, and **Run**.
+Keep the existing signing team and bundle identifier; do not uninstall the app.
+
+In the new build, open **Settings → Phone**. It should show the personal number,
+the work number, and **Personal & work cards**. Before explicitly connecting
+CDL, an unconfigured work number should say **Not connected**, not claim that
+setup succeeded. Open the profiles screen and confirm the server-proposed CDL
+number once; old account history is retained. Work cards must be created
+explicitly and are not copied from personal cards.
+
+Run `CallProfilesTests` on a Mac/Simulator before release. Source checks in the
+Linux workspace do not establish that the native binary compiled or ran.
+
 Xcode resolves the Twilio Voice Swift Package automatically on first open
 (File ▸ Packages ▸ Resolve Package Versions if needed).
 

@@ -36,3 +36,11 @@ work number or cards because the first delivery only added web management.
 **How to apply:** Include actual native navigation and scoped read/create/edit
 behavior. Distinguish backend publication from installation of a new native
 build; do not describe source checks as a verified iPhone experience.
+
+The owner builds and installs TalkHint through Xcode.
+
+**Why:** The user confirmed their actual iPhone update method.
+
+**How to apply:** For native changes, ensure the Mac has the updated sources,
+regenerate the XcodeGen project when new files are added, then build/install
+through the existing Xcode workflow. A backend deployment is not that update.
