@@ -29,6 +29,15 @@ function getTwilioClient(subaccountSid?: string, subaccountToken?: string) {
   return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
+/** Read-only provider preflight. No credentials/SIDs leave this boundary. */
+export async function inspectExistingVoiceNumber(phoneNumber: string) {
+  const [n] = await getTwilioClient().incomingPhoneNumbers.list({ phoneNumber, limit: 1 });
+  return { foundOnMain: !!n && n.accountSid === TWILIO_ACCOUNT_SID,
+    voiceEnabled: !!n?.capabilities.voice, voiceUrl: n?.voiceUrl ?? "",
+    statusCallback: n?.statusCallback ?? "", voiceMethod: n?.voiceMethod ?? "",
+    usesVoiceApplication: !!n?.voiceApplicationSid };
+}
+
 export async function searchAvailableNumbers(
   areaCode?: string,
   country: string = "US"

@@ -8,6 +8,7 @@ import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
 import { secretaryVoiceProvider, requireSecretaryAudioModel } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
+import { defaultCallingNumber } from "../callProfiles/policy";
 
 export interface SecretaryDialJob {
   id: string;
@@ -47,7 +48,8 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
         voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
     }
     if (!process.env.OPENAI_API_KEY) throw new Error("Secretary conversation model is not configured");
-    const [number] = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(1);
+    const ownedNumbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(100);
+    const number = defaultCallingNumber(ownedNumbers);
     if (!number) throw new Error("Assign a TalkHint phone number before starting a Secretary call");
     fromNumber = number.twilioNumber;
     origin = secretaryCallbackOrigin();

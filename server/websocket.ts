@@ -13,6 +13,7 @@ import { isValidSpikeToken, handleTranslatorSpikeStream, handleCopilotBenchStrea
 import { handleIOSTranslatorStream } from "./translation/iosTranslator";
 import { handleTranslatorTwilioStream, subscribeTranslatorFeed } from "./translation/twilioBridge";
 import { storage } from "./storage";
+import { cardsForCall, profileForCall } from "./callProfiles/policy";
 import { confirmedSecretaryOwnerName } from "./secretary/ownerIdentity";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
@@ -2850,9 +2851,16 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               staticCards = ""; // reset stale value before (re)loading for this call
               staticCardsReady = ownerContextReady
                 .then(async () => {
-                  if (!streamUserId) return;
-                  const cards = await storage.listKnowledgeCards(streamUserId);
-                  staticCards = formatStaticCards(cards);
+                  if (!streamUserId || !callSid) return;
+                  const sidForCards = callSid;
+                  const [cards, call, numbers] = await Promise.all([
+                    storage.listKnowledgeCards(streamUserId),
+                    storage.getCallByCallSid(sidForCards),
+                    storage.getUserPhoneNumbers(streamUserId),
+                  ]);
+                  if (sidForCards !== callSid) return;
+                  const profile = profileForCall(streamUserId, call, numbers);
+                  staticCards = formatStaticCards(cardsForCall(cards, streamUserId, profile));
                   if (staticCards) {
                     log(`[StaticCards] Loaded ${cards.length} card(s) for ${streamUserId} (${staticCards.length} chars)`, "twilio");
                   }

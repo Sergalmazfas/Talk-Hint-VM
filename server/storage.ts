@@ -305,7 +305,7 @@ export interface IStorage {
   // Available Numbers
   getAvailableNumbers(): Promise<AvailableNumber[]>;
   getAllAvailableNumbers(): Promise<AvailableNumber[]>;
-  assignNumber(numberId: string, userId: string, name: string, type: string): Promise<PhoneNumber>;
+  assignNumber(numberId: string, userId: string, name: string, type: string, options?: { configureWebhook?: boolean; singleWorkNumber?: boolean }): Promise<PhoneNumber>;
   seedAvailableNumber(data: { id: string; twilioNumber: string; twilioSid: string; country: string; subaccountSid: string; subaccountToken: string; subaccountName: string }): Promise<void>;
   
   // Calls
@@ -345,12 +345,14 @@ export interface IStorage {
     title: string;
     body: string;
     sortOrder?: number;
+    profileScope?: string;
   }): Promise<KnowledgeCard | undefined>;
   updateKnowledgeCardById(userId: string, id: string, fields: {
     cardType?: string;
     title?: string;
     body?: string;
     sortOrder?: number;
+    profileScope?: string;
   }): Promise<KnowledgeCard | undefined>;
   deleteKnowledgeCardById(userId: string, id: string): Promise<boolean>;
 
@@ -638,13 +640,29 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(availableNumbers);
   }
   
-  async assignNumber(numberId: string, userId: string, name: string, type: string): Promise<PhoneNumber> {
+  async assignNumber(numberId: string, userId: string, name: string, type: string, options?: { configureWebhook?: boolean; singleWorkNumber?: boolean }): Promise<PhoneNumber> {
     if (!pool) {
       throw new Error("Database not available");
     }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      if (options?.singleWorkNumber) {
+        if (type !== "work") throw new Error("Single work number requires work profile");
+        const owner = await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [userId]);
+        if (!owner.rows.length) throw new Error("Owner not found");
+        const candidate = await client.query('SELECT twilio_number FROM available_numbers WHERE id = $1', [numberId]);
+        const assigned = await client.query("SELECT * FROM phone_numbers WHERE user_id = $1 AND type = 'work' ORDER BY created_at, id LIMIT 1", [userId]);
+        if (assigned.rows.length) {
+          if (assigned.rows[0].twilio_number !== candidate.rows[0]?.twilio_number)
+            throw Object.assign(new Error("Work number already assigned"), { status: 409 });
+          await client.query('COMMIT');
+          const n = assigned.rows[0];
+          return { id: n.id, userId: n.user_id, twilioNumber: n.twilio_number,
+            twilioNumberSid: n.twilio_number_sid, name: n.name, type: n.type,
+            activePromptId: n.active_prompt_id, createdAt: n.created_at };
+        }
+      }
       
       const lockResult = await client.query(
         'SELECT * FROM available_numbers WHERE id = $1 AND is_assigned = false FOR UPDATE NOWAIT',
@@ -656,6 +674,8 @@ export class DatabaseStorage implements IStorage {
       }
       
       const avail = lockResult.rows[0];
+      const occupied = await client.query('SELECT id FROM phone_numbers WHERE twilio_number = $1 LIMIT 1', [avail.twilio_number]);
+      if (occupied.rows.length) throw Object.assign(new Error("Number already assigned"), { status: 409 });
       
       await client.query(
         'UPDATE available_numbers SET is_assigned = true WHERE id = $1',
@@ -684,6 +704,11 @@ export class DatabaseStorage implements IStorage {
       );
       
       await client.query('COMMIT');
+      if (options?.configureWebhook === false) {
+        return { id: phoneNumber.id, userId: phoneNumber.user_id, twilioNumber: phoneNumber.twilio_number,
+          twilioNumberSid: phoneNumber.twilio_number_sid ?? null, name: phoneNumber.name, type: phoneNumber.type,
+          activePromptId: phoneNumber.active_prompt_id ?? null, createdAt: phoneNumber.created_at };
+      }
       
       // Configure webhook for the assigned number (async, don't block).
       // Resolve the live production URL from env vars instead of guessing a
@@ -1029,6 +1054,7 @@ export class DatabaseStorage implements IStorage {
     title: string;
     body: string;
     sortOrder?: number;
+    profileScope?: string;
   }): Promise<KnowledgeCard | undefined> {
     if (!isDatabaseAvailable()) return undefined;
     try {
@@ -1039,6 +1065,7 @@ export class DatabaseStorage implements IStorage {
           title: data.title,
           body: data.body,
           sortOrder: data.sortOrder ?? 0,
+          profileScope: data.profileScope ?? "personal",
         })
         .returning();
       recordWriteSuccess("knowledge_cards");
@@ -1054,11 +1081,13 @@ export class DatabaseStorage implements IStorage {
     title?: string;
     body?: string;
     sortOrder?: number;
+    profileScope?: string;
   }): Promise<KnowledgeCard | undefined> {
     if (!isDatabaseAvailable()) return undefined;
     try {
       const set: Record<string, any> = { updatedAt: new Date() };
       if (fields.cardType !== undefined) set.cardType = fields.cardType;
+      if (fields.profileScope !== undefined) set.profileScope = fields.profileScope;
       if (fields.title !== undefined) set.title = fields.title;
       if (fields.body !== undefined) set.body = fields.body;
       if (fields.sortOrder !== undefined) set.sortOrder = fields.sortOrder;

@@ -236,6 +236,8 @@ export const knowledgeCards = pgTable("knowledge_cards", {
   cardType: text("card_type").notNull(),
   title: text("title").notNull(),
   body: text("body").notNull(),
+  // Old knowledge is private/personal; sharing is an explicit owner action.
+  profileScope: text("profile_scope").notNull().default("personal"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

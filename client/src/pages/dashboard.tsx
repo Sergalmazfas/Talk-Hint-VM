@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Phone, LogOut, Crown, Check, Webhook } from "lucide-react";
+import { Phone, LogOut, Crown, Check, Webhook, Settings2 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface PhoneNumber {
@@ -177,6 +177,17 @@ export default function Dashboard() {
               </>
             )}
             <span className="text-gray-400 text-sm hidden sm:inline">{user?.email}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLocation("/settings/call-profiles")}
+              className="border-cyan-700 text-cyan-300 hover:bg-cyan-950/40"
+              data-testid="button-call-profiles"
+            >
+              <Settings2 className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Профили звонков</span>
+              <span className="sm:hidden">Профили</span>
+            </Button>
             <Button
               variant="ghost"
               size="icon"

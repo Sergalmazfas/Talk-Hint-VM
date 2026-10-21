@@ -12,6 +12,7 @@ import SelectNumber from "@/pages/select-number";
 import AdminDiagnostics from "@/pages/admin-diagnostics";
 import VoiceLab from "@/pages/voice-lab";
 import SecretaryLab from "@/pages/secretary-lab";
+import CallProfiles from "@/pages/call-profiles";
 
 function Router() {
   return (
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/" component={Landing} />
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/dashboard" component={Dashboard} />
+      <Route path="/settings/call-profiles" component={CallProfiles} />
       <Route path="/select-number" component={SelectNumber} />
       <Route path="/admin/diagnostics" component={AdminDiagnostics} />
       <Route path="/voice-lab" component={VoiceLab} />

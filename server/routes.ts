@@ -1,4 +1,7 @@
 import type { Express } from "express";
+import { registerCallProfileRoutes } from "./callProfiles/routes";
+import { defaultCallingNumber, validCardScope } from "./callProfiles/policy";
+import { inspectExistingVoiceNumber } from "./twilioService";
 import { createServer, type Server } from "http";
 import { storage, getContactMemoryHealth, getWriteHealth, checkSchemaDrift } from "./storage";
 import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, setCallOwner, clearCallOwner, getHintFallbackStats } from "./websocket";
@@ -1399,8 +1402,8 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       const resolvedPlayback = resolveTranslatorPlayback(translatorPlayback);
       let callerId = TWILIO_PHONE_NUMBER || "";
       try {
-        const numbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, ownerId)).limit(1);
-        callerId = numbers[0]?.twilioNumber || callerId;
+        const numbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, ownerId)).limit(100);
+        callerId = defaultCallingNumber(numbers)?.twilioNumber || callerId;
       } catch { /* no caller id is a closed failure below */ }
       if (!callerId) {
         twimlResponse.hangup();
@@ -1664,9 +1667,10 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         console.log(`[TwiML Voice] Registered call owner ${userId} for ${callSid}`);
         console.log(`[TwiML Voice] Looking up number for user: ${userId}`);
         try {
-          const userNumbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, userId)).limit(1);
-          if (userNumbers.length > 0) {
-            userCallerId = userNumbers[0].twilioNumber;
+          const userNumbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, userId)).limit(100);
+          const defaultNumber = defaultCallingNumber(userNumbers);
+          if (defaultNumber) {
+            userCallerId = defaultNumber.twilioNumber;
             console.log(`[TwiML Voice] Found user number: ${userCallerId}`);
           } else {
             console.log(`[TwiML Voice] No numbers found for user ${userId}, using default`);
@@ -2272,6 +2276,14 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  registerCallProfileRoutes(app, authMiddleware, {
+    numbers: owner => storage.getUserPhoneNumbers(owner),
+    pool: () => storage.getAllAvailableNumbers(),
+    inspect: number => inspectExistingVoiceNumber(number),
+    assign: (numberId, owner) => storage.assignNumber(numberId, owner, "Рабочий", "work",
+      { singleWorkNumber: true, configureWebhook: false }),
+  });
+
   // Knowledge Cards ("Static Context") — per-user reusable project & company/
   // services facts injected into every live hint. Scoped to the owning user.
   const CARD_TYPES = ["project", "company"];
@@ -2282,7 +2294,9 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     try {
       const user = (req as any).user;
       const cards = await storage.listKnowledgeCards(user.id);
-      res.json({ cards });
+      const profile = req.query.profile ?? "personal";
+      if (!validCardScope(profile)) return res.status(400).json({ error: "Invalid card profile" });
+      res.json({ cards: cards.filter(c => (c.profileScope ?? "personal") === profile) });
     } catch (error: any) {
       console.error("[Cards] List error:", error);
       res.status(500).json({ error: error.message });
@@ -2293,6 +2307,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     try {
       const user = (req as any).user;
       const { cardType, title, body, sortOrder } = req.body ?? {};
+      const profileScope = req.body?.profileScope ?? "personal";
+      if (!validCardScope(profileScope)) return res.status(400).json({ error: "Invalid card profile" });
       if (!CARD_TYPES.includes(cardType)) {
         return res.status(400).json({ error: "cardType must be 'project' or 'company'" });
       }
@@ -2306,6 +2322,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         return res.status(400).json({ error: "sortOrder must be an integer" });
       }
       const created = await storage.createKnowledgeCard({
+        profileScope,
         userId: user.id,
         cardType,
         title: title.trim().slice(0, MAX_CARD_TITLE),
@@ -2328,6 +2345,8 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const user = (req as any).user;
       const { id } = req.params;
       const { cardType, title, body, sortOrder } = req.body ?? {};
+      if (req.body?.profileScope !== undefined && !validCardScope(req.body.profileScope))
+        return res.status(400).json({ error: "Invalid card profile" });
       if (cardType !== undefined && !CARD_TYPES.includes(cardType)) {
         return res.status(400).json({ error: "cardType must be 'project' or 'company'" });
       }
@@ -2341,6 +2360,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         return res.status(400).json({ error: "sortOrder must be an integer" });
       }
       const updated = await storage.updateKnowledgeCardById(user.id, id, {
+        ...(req.body?.profileScope !== undefined ? { profileScope: req.body.profileScope } : {}),
         ...(cardType !== undefined ? { cardType } : {}),
         ...(title !== undefined ? { title: title.trim().slice(0, MAX_CARD_TITLE) } : {}),
         ...(body !== undefined ? { body: body.trim().slice(0, MAX_CARD_BODY) } : {}),
