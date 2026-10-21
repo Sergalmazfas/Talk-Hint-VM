@@ -116,6 +116,9 @@ extension SecretaryAlertManager: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let payload = response.notification.request.content.userInfo
+        if payload["type"] as? String == "incoming_secretary_request" {
+            Task { @MainActor in SecretaryNotificationRouter.openIncoming() }
+        }
         if payload["type"] as? String == "secretary_result",
            let taskId = payload["taskId"] as? String,
            !taskId.isEmpty {
@@ -132,6 +135,12 @@ extension SecretaryAlertManager: UNUserNotificationCenterDelegate {
 /// the authenticated Secretary API.
 enum SecretaryNotificationRouter {
     private static var pendingTaskID: String?
+    private static var incomingPending = false
+
+    @MainActor static func openIncoming() {
+        incomingPending = true
+        _ = openPendingIfPossible()
+    }
 
     @MainActor
     static func open(taskID: String) {
@@ -142,6 +151,19 @@ enum SecretaryNotificationRouter {
     @MainActor
     @discardableResult
     static func openPendingIfPossible() -> Bool {
+        if incomingPending {
+            for scene in UIApplication.shared.connectedScenes {
+                guard let scene = scene as? UIWindowScene,
+                      let window = scene.windows.first(where: { $0.isKeyWindow }),
+                      let tabs = window.rootViewController as? UITabBarController,
+                      let navigation = tabs.viewControllers?.dropFirst(3).first as? UINavigationController else { continue }
+                tabs.selectedIndex = 3
+                incomingPending = false
+                navigation.pushViewController(IncomingSecretaryViewController(), animated: true)
+                return true
+            }
+            return false
+        }
         guard let taskID = pendingTaskID else { return false }
         for scene in UIApplication.shared.connectedScenes {
             guard let windowScene = scene as? UIWindowScene,

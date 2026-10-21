@@ -51,3 +51,4 @@
 - [Personal GPT Actions](chatgpt-actions-constraints.md) — confidential OAuth distinct from MCP; Plus new-GPT restrictions and mobile use require current official checks.
 - [ChatGPT widget recovery](chatgpt-widget-recovery.md) — host state and historical results are task locators only; refetch under current OAuth, never persist capabilities or auto-resume audio.
 - [Personal and work profiles](personal-work-profiles.md) — one app, separate numbers and knowledge; explicit sharing, separate calendars with private free/busy awareness.
+- [Incoming Secretary boundaries](incoming-secretary-boundaries.md) — future business request intake, explicit Work disclosure consent, no activation implicit in number/card setup.

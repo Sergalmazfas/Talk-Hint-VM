@@ -256,6 +256,25 @@ export type KnowledgeCard = typeof knowledgeCards.$inferSelect;
 export const KNOWLEDGE_CARD_TYPES = ["project", "company"] as const;
 export type KnowledgeCardType = (typeof KNOWLEDGE_CARD_TYPES)[number];
 
+// Incoming Work Secretary: independent opt-in; never changes ordinary/outbound calls.
+export const incomingSecretarySettings = pgTable("incoming_secretary_settings", {
+  numberId: varchar("number_id").primaryKey().references(() => phoneNumbers.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  enabled: boolean("enabled").notNull().default(false),
+  config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export const incomingSecretaryRequests = pgTable("incoming_secretary_requests", {
+  callSid: varchar("call_sid").primaryKey(),
+  id: varchar("id").notNull().unique(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  numberId: varchar("number_id").notNull().references(() => phoneNumbers.id),
+  payload: jsonb("payload").notNull(),
+  notificationStatus: text("notification_status").notNull().default("pending"),
+  notificationAttempts: integer("notification_attempts").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Auto-built call dialogue library: per-user, per-goal collection of ready-made
 // question→answer lines served as the PRIMARY hint source during a call (falls
 // through to the live LLM hint path on a miss — no UI change). The whole library

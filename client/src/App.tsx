@@ -13,6 +13,7 @@ import AdminDiagnostics from "@/pages/admin-diagnostics";
 import VoiceLab from "@/pages/voice-lab";
 import SecretaryLab from "@/pages/secretary-lab";
 import CallProfiles from "@/pages/call-profiles";
+import IncomingSecretary from "@/pages/incoming-secretary";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
       <Route path="/onboarding" component={Onboarding} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/settings/call-profiles" component={CallProfiles} />
+      <Route path="/incoming-secretary" component={IncomingSecretary} />
       <Route path="/select-number" component={SelectNumber} />
       <Route path="/admin/diagnostics" component={AdminDiagnostics} />
       <Route path="/voice-lab" component={VoiceLab} />
@@ -31,14 +33,13 @@ function Router() {
 }
 
 function App() {
+  const publicPreview = typeof window !== "undefined" && window.location.pathname === "/incoming-secretary-preview";
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        {publicPreview ? <IncomingSecretary /> : <AuthProvider><Router /></AuthProvider>}
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }

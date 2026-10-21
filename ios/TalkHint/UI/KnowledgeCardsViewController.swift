@@ -182,6 +182,7 @@ final class KnowledgeCardEditorViewController: UIViewController {
     private let onSave: () -> Void
     private let profileScope: CallProfileScope
     private var isSaving = false
+    private let templateBody: String?
 
     private let typeControl = UISegmentedControl(items: [
         NSLocalizedString("card_editor.type.project", comment: ""),
@@ -191,8 +192,9 @@ final class KnowledgeCardEditorViewController: UIViewController {
     private let bodyView = UITextView()
     private let sortField = UITextField()
 
-    init(card: APIClient.KnowledgeCardItem?, profileScope: CallProfileScope = .personal, onSave: @escaping () -> Void) {
+    init(card: APIClient.KnowledgeCardItem?, profileScope: CallProfileScope = .personal, templateBody: String? = nil, onSave: @escaping () -> Void) {
         self.card = card
+        self.templateBody = templateBody
         self.profileScope = card?.profileScope ?? profileScope
         self.onSave = onSave
         super.init(nibName: nil, bundle: nil)
@@ -209,12 +211,12 @@ final class KnowledgeCardEditorViewController: UIViewController {
             barButtonSystemItem: .save, target: self, action: #selector(save))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-card-save"
 
-        typeControl.selectedSegmentIndex = (card?.cardType == "company") ? 1 : 0
+        typeControl.selectedSegmentIndex = (card?.cardType == "company" || templateBody != nil) ? 1 : 0
         typeControl.translatesAutoresizingMaskIntoConstraints = false
         typeControl.accessibilityIdentifier = "segment-card-type"
 
         let titleLabel = makeLabel(NSLocalizedString("card_editor.field.title", comment: ""))
-        titleField.text = card?.title
+        titleField.text = card?.title ?? (templateBody == nil ? nil : NSLocalizedString("incoming.template", comment: ""))
         titleField.placeholder = NSLocalizedString("card_editor.field.title.placeholder", comment: "")
         titleField.borderStyle = .roundedRect
         titleField.backgroundColor = .secondarySystemGroupedBackground
@@ -222,7 +224,7 @@ final class KnowledgeCardEditorViewController: UIViewController {
         titleField.accessibilityIdentifier = "input-card-title"
 
         let bodyLabel = makeLabel(NSLocalizedString("card_editor.field.details", comment: ""))
-        bodyView.text = card?.body
+        bodyView.text = card?.body ?? templateBody
         bodyView.font = .preferredFont(forTextStyle: .body)
         bodyView.backgroundColor = .secondarySystemGroupedBackground
         bodyView.layer.cornerRadius = 10

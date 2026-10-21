@@ -14,6 +14,7 @@ import { handleIOSTranslatorStream } from "./translation/iosTranslator";
 import { handleTranslatorTwilioStream, subscribeTranslatorFeed } from "./translation/twilioBridge";
 import { storage } from "./storage";
 import { cardsForCall, profileForCall } from "./callProfiles/policy";
+import { handleIncomingSocket } from "./incomingSecretary/runtime";
 import { confirmedSecretaryOwnerName } from "./secretary/ownerIdentity";
 import { db } from "./db";
 import { pendingCalls } from "@shared/schema";
@@ -858,7 +859,7 @@ export function setupWebSocket(server: Server) {
       return;
     }
 
-    if (!["/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/secretary-lab-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
+    if (!["/incoming-secretary-stream", "/twilio-stream", "/media", "/secretary-stream", "/secretary-feed", "/secretary-lab-stream", "/translator-twilio-stream", "/translator-feed", "/honor-stream", "/ui", "/translator", "/translator-spike-stream", "/copilot-bench-stream", "/copilot-stream"].includes(pathname)) {
       socket.destroy();
       return;
     }
@@ -1007,6 +1008,8 @@ export function setupWebSocket(server: Server) {
     } else if (pathname === "/translator-twilio-stream") {
       // Deliberately separate from handleTwilioStream (Hint/Deepgram).
       handleTranslatorTwilioStream(ws);
+    } else if (pathname === "/incoming-secretary-stream") {
+      handleIncomingSocket(ws);
     } else if (pathname === "/secretary-stream") {
       // Never pass Secretary media to Hint or the owner-facing UI. The Twilio
       // start event supplies a task/SID pair which the bridge rechecks in DB

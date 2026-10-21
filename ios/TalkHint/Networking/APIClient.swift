@@ -621,6 +621,70 @@ final class APIClient {
         return result
     }
 
+    struct IncomingSettings: Codable {
+        struct Business: Codable {
+            var days: [Int]
+            var opens: String
+            var closes: String
+            var travelMinutes: Int
+        }
+        var numberId: String
+        var enabled: Bool
+        var timeZone: String
+        var cardIds: [String]
+        var business: Business
+    }
+    struct IncomingSnapshot: Decodable {
+        struct Number: Decodable { let id: String; let phoneNumber: String; let name: String }
+        struct Card: Decodable { let id: String; let title: String; let body: String }
+        struct Intake: Decodable {
+            struct Fields: Decodable {
+                let name: String?
+                let phone: String?
+                let callbackConfirmed: Bool?
+                let address: String?
+                let localDate: String?
+                let localTime: String?
+                let durationMinutes: Int?
+                let language: String?
+                let notes: String?
+                let reviewed: Bool?
+            }
+            struct Turn: Decodable { let role: String; let text: String; let language: String? }
+            let id: String
+            let numberId: String
+            let status: String
+            let fields: Fields
+            let missing: [String]
+            let turns: [Turn]
+            let outcome: String
+            let updatedAt: String
+            let notificationStatus: String?
+            let timeZone: String?
+        }
+        let settings: [IncomingSettings]
+        let numbers: [Number]
+        let cards: [Card]
+        let requests: [Intake]
+        let runtimeEnabled: Bool
+        let calendarConnected: Bool
+        let templateText: String
+        let model: String
+        let voice: String
+    }
+    func incomingSecretary() async throws -> IncomingSnapshot {
+        let data = try await request("/api/incoming-secretary", method: "GET", json: nil, authenticated: true)
+        return try JSONDecoder().decode(IncomingSnapshot.self, from: data)
+    }
+    func saveIncomingSettings(_ settings: IncomingSettings) async throws {
+        guard var payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any] else {
+            throw APIError.decoding
+        }
+        payload.removeValue(forKey: "numberId")
+        _ = try await request("/api/incoming-secretary/settings/\(settings.numberId)", method: "PUT",
+                              json: payload, authenticated: true)
+    }
+
     /// Explicit owner action only; never called from a page load or retry.
     func connectWorkNumber(numberId: String) async throws -> CallProfileNumber {
         struct Response: Decodable { let phoneNumber: CallProfileNumber }

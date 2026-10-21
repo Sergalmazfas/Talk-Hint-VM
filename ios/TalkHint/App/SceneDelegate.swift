@@ -20,6 +20,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         if let response = connectionOptions.notificationResponse {
             let payload = response.notification.request.content.userInfo
+            if payload["type"] as? String == "incoming_secretary_request" {
+                Task { @MainActor in SecretaryNotificationRouter.openIncoming() }
+            }
             if payload["type"] as? String == "secretary_result",
                let taskID = payload["taskId"] as? String,
                !taskID.isEmpty {

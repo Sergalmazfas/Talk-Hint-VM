@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
+import { registerIncomingRoutes } from "./incomingSecretary/routes";
+import { tryIncomingSecretary, stopIncomingCard } from "./incomingSecretary/runtime";
 import { defaultCallingNumber, validCardScope } from "./callProfiles/policy";
 import { inspectExistingVoiceNumber } from "./twilioService";
 import { createServer, type Server } from "http";
@@ -1448,6 +1450,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     // Try phoneNumbers table first (user-assigned), then available_numbers (line pool)
     let ownerUserId: string | null = null;
     let ownerPhoneNumberId: string | null = null;
+    let ownerPhoneNumberType: string | null = null;
     let lineId: number | null = null;
     let lineName: string | null = null;
     
@@ -1458,6 +1461,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         if (phoneNumber) {
           ownerUserId = phoneNumber.userId;
           ownerPhoneNumberId = phoneNumber.id;
+          ownerPhoneNumberType = phoneNumber.type;
           console.log("[TwiML Voice] INCOMING: Found owner userId:", ownerUserId);
         } else {
           // Second try: available_numbers pool (line-based)
@@ -1529,6 +1533,8 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         twimlResponse.hangup();
       }
     } else if (ownerUserId) {
+      // Opt-in AI Work handling must return BEFORE legacy push/SMS/hold logic.
+      if (await tryIncomingSecretary(req, res, ownerUserId, ownerPhoneNumberId, ownerPhoneNumberType, callSid)) return;
       // INCOMING CALL: Send push notification and HOLD the call
       console.log("[TwiML Voice] INCOMING CALL from", fromNumber, "to", toNumber);
       
@@ -2276,6 +2282,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  registerIncomingRoutes(app, authMiddleware);
   registerCallProfileRoutes(app, authMiddleware, {
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),
@@ -2381,6 +2388,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       if (!updated) {
         return res.status(404).json({ error: "Card not found" });
       }
+      stopIncomingCard(user.id,id);
       console.log(`[Cards] User ${user.id} updated card ${id}`);
       res.json({ success: true, card: updated });
     } catch (error: any) {
@@ -2394,6 +2402,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const user = (req as any).user;
       const { id } = req.params;
       const deleted = await storage.deleteKnowledgeCardById(user.id, id);
+      if(deleted)stopIncomingCard(user.id,id);
       if (!deleted) {
         return res.status(404).json({ error: "Card not found" });
       }

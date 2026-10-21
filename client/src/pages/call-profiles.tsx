@@ -338,6 +338,9 @@ export default function CallProfiles() {
           <p className="mt-2 text-sm leading-6 text-gray-300 sm:text-base">
             Настройте, какой номер и какие знания относятся к каждому контексту. Это первый этап настройки номера и контекста, а не полноценная система записи на встречи.
           </p>
+          <Button variant="outline" onClick={() => setLocation("/incoming-secretary")} className="mt-4 border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">
+            Настройки входящего Secretary
+          </Button>
         </section>
 
         <section aria-label="Профили">
