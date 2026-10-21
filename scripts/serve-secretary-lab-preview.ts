@@ -14,6 +14,7 @@ const fixture = {
   providers: {
     elevenlabs: { ready: true, source: "linked_existing" },
     cartesia: { ready: true, source: "linked_existing" },
+    openai: { ready: true, source: "builtin", model: "gpt-realtime-2.1", voice: "marin" },
   },
   models: { realtime: "gpt-realtime", stt: "gpt-4o-mini-transcribe" },
   sessions: [],

@@ -112,7 +112,11 @@ describe("Secretary autonomous media agent", () => {
     expect(pcm.readInt16LE(4)).toBe(pcm.readInt16LE(0));
     expect(pcm.readInt16LE(6)).toBeGreaterThan(0);
     expect(pcm24kToMulaw8k(pcm)).toEqual(input);
-    expect(() => pcm24kToMulaw8k(Buffer.alloc(2))).toThrow(/complete 24kHz sample groups/);
+    // A provider may end with one or two extra PCM samples. They are not a
+    // corrupt format; downsampling discards only the sub-8kHz-sample tail.
+    expect(pcm24kToMulaw8k(Buffer.alloc(962))).toHaveLength(160);
+    expect(pcm24kToMulaw8k(Buffer.alloc(964))).toHaveLength(160);
+    expect(() => pcm24kToMulaw8k(Buffer.alloc(3))).toThrow(/whole PCM16 samples/);
   });
 
   it("splits long replies without dropping words or exceeding the per-phrase budget", () => {

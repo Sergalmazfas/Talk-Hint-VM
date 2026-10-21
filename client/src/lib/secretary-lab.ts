@@ -1,4 +1,4 @@
-export type VoiceProvider = "elevenlabs" | "cartesia";
+export type VoiceProvider = "elevenlabs" | "cartesia" | "openai";
 export type LabStatus = "awaiting_connection" | "running" | "ended";
 
 export interface LabTurn {
@@ -7,6 +7,7 @@ export interface LabTurn {
   text: string;
   translation?: string;
   atMs: number;
+  interrupted?: boolean;
 }
 
 export interface LabEvent {
@@ -22,6 +23,9 @@ export interface LabReport {
   endedAt?: string;
   reason?: string;
   voiceProvider: VoiceProvider;
+  model?: string;
+  voice?: string;
+  transport?: "webrtc" | "simulated_twilio";
   instruction: string;
   turns: LabTurn[];
   events: LabEvent[];
@@ -35,7 +39,9 @@ export interface LabReport {
 }
 
 export interface LabSnapshot {
-  providers: Record<VoiceProvider, { ready: boolean; source: "linked_existing" | "sample_clone" | "unavailable" }>;
+  providers: Record<"elevenlabs" | "cartesia", { ready: boolean; source: "linked_existing" | "sample_clone" | "unavailable" }> & {
+    openai?: { ready: boolean; source: "builtin"; model: string; voice: string; reason?: string; checkedAt?: string };
+  };
   models: { realtime: string; stt: string };
   sessions: LabReport[];
   limits: { durationSeconds: number; historyMinutes: number };
@@ -46,6 +52,7 @@ export const LAB_API = "/api/admin/secretary-lab";
 export const MULAW_FRAME_BYTES = 160;
 export const MIC_QUEUE_MAX_FRAMES = 150;
 export const PLAYBACK_QUEUE_MAX_SECONDS = 2;
+export const PLAYBACK_PREFILL_SECONDS = 0.18;
 export const ULAW_SILENCE_FRAME = new Uint8Array(MULAW_FRAME_BYTES).fill(0xff);
 
 export class UlawFrameQueue {
@@ -101,6 +108,31 @@ export function markPlaybackDecision(contextState: AudioContextState | "missing"
 
 export function playbackWouldExceedLimit(currentTime: number, playbackCursor: number, nextDuration: number, maxSeconds = PLAYBACK_QUEUE_MAX_SECONDS): boolean {
   return Math.max(0, playbackCursor - currentTime) + nextDuration > maxSeconds;
+}
+
+/** A small jitter reserve, applied once per underrun, NOT to every 20ms frame. */
+export function scheduleLabPlayback(currentTime: number, playbackCursor: number, duration: number) {
+  const startAt = playbackCursor > currentTime ? playbackCursor : currentTime + PLAYBACK_PREFILL_SECONDS;
+  return { startAt, endAt: startAt + duration };
+}
+
+export function labEndReasonLabel(reason?: string): string {
+  const labels: Record<string, string> = {
+    user_stop: "Остановлено пользователем",
+    browser_disconnected: "Прервано соединение с браузером",
+    audio_suspended: "Браузер приостановил звук",
+    audio_decode_error: "Не удалось декодировать звук",
+    audio_queue_limit: "Слишком большая очередь воспроизведения",
+    audio_input_backpressure: "Слишком большая очередь отправки микрофона",
+    microphone_error: "Ошибка микрофона",
+    client_error: "Ошибка браузерной сессии",
+    duration_limit: "Достигнут лимит времени",
+    playback_ack_timeout: "Браузер не подтвердил воспроизведение",
+    webrtc_error: "Ошибка аудио WebRTC",
+    webrtc_disconnected: "Соединение WebRTC потеряно",
+    audio_autoplay_blocked: "Браузер заблокировал воспроизведение аудио",
+  };
+  return reason ? labels[reason] ?? `Причина завершения: ${reason}` : "Сессия завершена — причина не установлена";
 }
 
 export async function labRequest<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {

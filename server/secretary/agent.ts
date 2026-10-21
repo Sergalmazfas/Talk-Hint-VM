@@ -125,8 +125,8 @@ export function mulaw8kToPcm24k(input: Buffer): Buffer {
 
 /** Downsample mono 24kHz PCM to 8kHz μ-law for Twilio's outbound media frames. */
 export function pcm24kToMulaw8k(input: Buffer): Buffer {
-  if (input.length % 6 !== 0) {
-    throw new Error("Secretary cloned speech must contain complete 24kHz sample groups");
+  if (input.length % 2 !== 0) {
+    throw new Error("Secretary cloned speech must contain whole PCM16 samples");
   }
   const samples = input.length / 2;
   const output = Buffer.alloc(Math.floor(samples / 3));
@@ -176,7 +176,7 @@ function encodeMulaw(sample: number): number {
   return (~(sign | (exponent << 4) | ((magnitude >> (exponent + 3)) & 0x0f))) & 0xff;
 }
 
-class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession {
+export class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession {
   private socket: WebSocket | null = null;
   private listeners: Array<(event: SecretaryRealtimeEvent) => void> = [];
   private responseText = new Map<string, string>();
@@ -185,7 +185,11 @@ class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession {
   private ready = false;
   private closed = false;
 
-  constructor(private readonly instructions: string) {}
+  constructor(
+    private readonly instructions: string,
+    private readonly socketFactory: (url: string, options: { headers: Record<string, string> }) => WebSocket =
+      (url, options) => new WebSocket(url, options),
+  ) {}
 
   onEvent(listener: (event: SecretaryRealtimeEvent) => void): void {
     this.listeners.push(listener);
@@ -197,7 +201,7 @@ class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession {
     }
     const url = `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(OPENAI_MODEL)}`;
     await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(url, {
+      const socket = this.socketFactory(url, {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
       });
       this.socket = socket;
@@ -250,6 +254,12 @@ class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession {
           return;
         }
         if (message.type === "error") {
+          // Server VAD may already have cancelled/completed the response.
+          // This acknowledgement race is NOT a failed audio session.
+          if (settled && this.ready && message.error?.code === "response_cancel_not_active") {
+            this.emit({ type: "error", message: "Secretary response cancellation was already settled", fatal: false });
+            return;
+          }
           const error = message.error?.message || "Secretary Realtime reported an error";
           if (!settled) {
             settled = true;
@@ -312,8 +322,10 @@ class OpenAISecretaryRealtimeSession implements SecretaryRealtimeSession {
   }
 
   cancelResponse(): void {
-    if (this.ready && this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: "response.cancel" }));
+    // Cloned speech plays AFTER response.done; usually there is no active model
+    // response left to cancel. Aborting TTS + clearing playback is sufficient.
+    if (this.ready && this.socket?.readyState === WebSocket.OPEN && this.currentResponseId) {
+      this.socket.send(JSON.stringify({ type: "response.cancel", response_id: this.currentResponseId }));
     }
   }
 
@@ -551,7 +563,7 @@ export function handleSecretaryTwilioStream(
           throw error;
         }
         if (controller.signal.aborted || finalized || !streamSid || ws.readyState !== WebSocket.OPEN) return;
-        if (!pcm24k.length || pcm24k.length % 6 !== 0) {
+        if (!pcm24k.length || pcm24k.length % 2 !== 0) {
           throw new Error("Secretary cloned voice returned invalid 24kHz PCM");
         }
         const mulaw8k = pcm24kToMulaw8k(pcm24k);

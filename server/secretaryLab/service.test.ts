@@ -114,6 +114,68 @@ describe("Secretary Lab — real agent, fake transports and providers, never PST
     expect(after.turns.every(t => t.translation === "Тестовый перевод")).toBe(true);
     expect(JSON.stringify(after)).not.toContain("payload");
   });
+  it("isolates the OpenAI WebRTC mode from clone context, audio and owner crossover", async () => {
+    let cb: any;
+    const connection = { connect: vi.fn(async () => "v=0\r\nm=audio answer"), startIntroduction: vi.fn(), stop: vi.fn(async () => {}) };
+    deps.context = vi.fn(deps.context);
+    deps.startEngine = vi.fn(deps.startEngine);
+    deps.openAI = { isAvailable: async () => true, create: (_owner, _instruction, callbacks) => { cb = callbacks; return connection; } };
+    created = await lab.create("alice", { ...input, voiceProvider: "openai" });
+    lab.connect(created.ticket!, e => output.push(e), () => {});
+    expect(output.some(e => e.type === "rtc_offer_required")).toBe(true);
+    expect(output.some(e => e.type === "ready")).toBe(false);
+    expect(deps.context).not.toHaveBeenCalled(); expect(deps.startEngine).not.toHaveBeenCalled();
+    await expect(lab.negotiate("bob", created.id, "v=0\r\nm=audio fake")).rejects.toMatchObject({ status: 404 });
+    await lab.negotiate("alice", created.id, "v=0\r\nm=audio fake");
+    await expect(lab.negotiate("alice", created.id, "v=0\r\nm=audio repeated")).rejects.toMatchObject({ status: 409 });
+    expect(connection.connect).toHaveBeenCalledTimes(1);
+    cb.ready("gpt-realtime-2.1", "marin");
+    expect(output.find(e => e.type === "ready")).toMatchObject({ model: "gpt-realtime-2.1", voice: "marin" });
+    cb.turn("guest", "Hello");
+    cb.turn("secretary", "Hello, how can I help?", true);
+    expect(lab.reports("alice")[0]).toMatchObject({ modelVerified: true, transport: "webrtc", voiceProvider: "openai", instruction: input.instruction });
+    expect(lab.reports("alice")[0].turns[1].interrupted).toBe(true);
+    expect(lab.reports("bob")).toEqual([]);
+    await lab.stop("alice", created.id);
+    expect(connection.stop).toHaveBeenCalled();
+  });
+  it("does not substitute a clone or another model if exact OpenAI availability fails", async () => {
+    deps.context = vi.fn(deps.context);
+    deps.openAI = { isAvailable: async () => false, create: vi.fn() };
+    await expect(lab.create("alice", { ...input, voiceProvider: "openai" })).rejects.toMatchObject({ status: 409 });
+    expect(deps.context).not.toHaveBeenCalled(); expect(deps.openAI.create).not.toHaveBeenCalled();
+  });
+  it("records a real browser audio failure, not a misleading user stop", async () => {
+    deps.onEnd = vi.fn();
+    const id = await start();
+    lab.receive(id, { type: "client_error", reason: "arbitrary-provider-data" });
+    expect(lab.reports("alice")[0].status).toBe("running");
+    lab.receive(id, { type: "client_error", reason: "audio_suspended" });
+    await tick(); await lab.stop("alice", id);
+    expect(lab.reports("alice")[0].reason).toBe("audio_suspended");
+    expect(deps.onEnd).toHaveBeenCalledTimes(1);
+  });
+  it("continues several replies when valid PCM ends with one or two extra samples", async () => {
+    let synthesis = 0;
+    configureSecretaryAgentForTests({
+      realtimeFactory: () => realtime,
+      elevenLabsSynthesizer: async () => Buffer.alloc([962, 964, 960][synthesis++]),
+    });
+    const id = await start();
+    for (let turn = 0; turn < 3; turn++) {
+      if (turn > 0) realtime.emit({ type: "guest_transcript", text: turn === 1 ? "Hello" : "Please continue." });
+      realtime.emit({ type: "response_text", responseId: `r${turn}`, text: "Hello. How can I help?" });
+      await tick();
+      const marks = output.filter(e => e.type === "mark");
+      expect(marks).toHaveLength(turn + 1);
+      lab.receive(id, { type: "mark", name: marks.at(-1).name }); await tick();
+      expect(lab.reports("alice")[0].status).toBe("running");
+    }
+    const report = lab.reports("alice")[0];
+    expect(report.metrics.guestTurns).toBe(2);
+    expect(report.metrics.secretaryTurns).toBe(3);
+    expect(realtime.closeCount).toBe(0);
+  });
   it("interruption clears playback and does not save an unheard response", async () => {
     await start();
     realtime.emit({ type: "response_text", responseId: "r", text: "I would like to ask a question." });

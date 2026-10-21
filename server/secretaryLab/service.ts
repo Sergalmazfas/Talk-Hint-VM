@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomBytes, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import type { SecretaryCallContext, SecretaryStreamDependencies } from "../secretary/agent";
+import { LAB_REALTIME_MODEL, LAB_REALTIME_VOICE, type LabRealtimeCallbacks, type LabRealtimeConnection } from "./openAIRealtime";
 
 export interface LabTurn {
   id: string;
@@ -9,6 +10,7 @@ export interface LabTurn {
   text: string;
   translation?: string;
   atMs: number;
+  interrupted?: boolean;
 }
 export interface LabReport {
   id: string;
@@ -16,7 +18,11 @@ export interface LabReport {
   createdAt: string;
   endedAt?: string;
   reason?: string;
-  voiceProvider: "elevenlabs" | "cartesia";
+  voiceProvider: "elevenlabs" | "cartesia" | "openai";
+  model: string;
+  voice: string;
+  transport: "webrtc" | "simulated_twilio";
+  modelVerified: boolean;
   instruction: string;
   turns: LabTurn[];
   events: Array<{ type: string; atMs: number; detail?: string }>;
@@ -32,6 +38,19 @@ export interface LabDependencies {
   context(owner: string, provider: "elevenlabs" | "cartesia"): Promise<Omit<SecretaryCallContext, "instruction">>;
   translate(text: string): Promise<{ translation?: string; unavailableReason?: string }>;
   now?: () => number;
+  onEnd?(report: LabReport): void;
+  openAI?: {
+    isAvailable(): Promise<boolean>;
+    create(owner: string, instruction: string, callbacks: LabRealtimeCallbacks): LabRealtimeConnection;
+  };
+}
+export const LAB_CLIENT_STOP_REASONS = [
+  "user_stop", "browser_disconnected", "audio_suspended", "audio_decode_error",
+  "audio_queue_limit", "audio_input_backpressure", "microphone_error", "client_error",
+  "webrtc_error", "webrtc_disconnected", "audio_autoplay_blocked",
+] as const;
+export function isLabClientStopReason(reason: unknown): reason is typeof LAB_CLIENT_STOP_REASONS[number] {
+  return typeof reason === "string" && (LAB_CLIENT_STOP_REASONS as readonly string[]).includes(reason);
 }
 type Sender = (message: Record<string, unknown>) => void;
 /** An in-memory Twilio protocol peer. It has NO phone/provider dial operation. */
@@ -54,7 +73,10 @@ interface Session {
   ticket: string | null;
   ticketUntil: number;
   report: LabReport;
-  context: SecretaryCallContext;
+  context: SecretaryCallContext | null;
+  realtime?: LabRealtimeConnection;
+  negotiating?: boolean;
+  negotiated?: boolean;
   started: number;
   send?: Sender;
   peer?: LabPeer;
@@ -113,11 +135,34 @@ export class SecretaryLab {
     if (s.report.events.length > 300) s.report.events.shift();
     s.send?.({ type: "event", event });
   }
+  private addTurn(s: Session, role: "guest" | "secretary", text: string, interrupted?: boolean) {
+    if (s.report.status === "ended") return;
+    if (s.report.turns.length >= 200) { void this.stop(s.owner, s.report.id, "turn_limit"); return; }
+    const turn: LabTurn = { id: randomUUID(), role, text: text.slice(0, 1500), atMs: this.now() - s.started,
+      ...(interrupted ? { interrupted: true } : {}) };
+    s.report.turns.push(turn);
+    if (role === "guest") {
+      s.report.metrics.guestTurns++;
+      // Native speech-to-speech may answer before optional display STT finishes.
+      if (s.report.voiceProvider !== "openai") { s.lastGuestTurn = this.now(); s.firstAudioForTurn = true; }
+      s.send?.({ type: "state", state: "thinking", atMs: turn.atMs });
+    } else {
+      s.report.metrics.secretaryTurns++;
+      s.send?.({ type: "state", state: "listening", atMs: turn.atMs });
+    }
+    s.send?.({ type: "turn", turn });
+    void this.deps.translate(text).then(result => {
+      if (result.translation) {
+        turn.translation = result.translation.slice(0, 4000);
+        s.send?.({ type: "subtitle", turnId: turn.id, translation: turn.translation });
+      } else this.event(s, "subtitle_unavailable", "Translation unavailable; audio continues");
+    }).catch(() => this.event(s, "subtitle_unavailable", "Translation unavailable; audio continues"));
+  }
   async create(owner: string, input: any) {
     this.prune();
     if (!owner) fail(401, "Authentication required");
     if (input?.consent !== true) fail(400, "Confirm paid AI/audio processing before starting a test");
-    if (input.voiceProvider !== "elevenlabs" && input.voiceProvider !== "cartesia") fail(400, "Select a voice provider");
+    if (!["elevenlabs", "cartesia", "openai"].includes(input.voiceProvider)) fail(400, "Select a voice provider");
     if (typeof input.instruction !== "string" || input.instruction.trim().length < 8 || input.instruction.length > 4000) {
       fail(400, "Instruction must contain 8–4000 characters");
     }
@@ -137,17 +182,23 @@ export class SecretaryLab {
       owner, ticket: randomBytes(32).toString("hex"), ticketUntil: now + 30_000,
       started: now, pendingMarks: new Set(), inputReady: false, firstAudioForTurn: true,
       inputWindow: now, inputBytes: 0,
-      context: { instruction: input.instruction.trim(), ownerId: owner, voiceProvider: input.voiceProvider, cloneVoiceId: "" },
+      context: null,
       report: { id, status: "awaiting_connection", createdAt: new Date(now).toISOString(),
         instruction: input.instruction.trim(), voiceProvider: input.voiceProvider, turns: [], events: [],
+        model: input.voiceProvider === "openai" ? LAB_REALTIME_MODEL : process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime",
+        voice: input.voiceProvider === "openai" ? LAB_REALTIME_VOICE : `Owner-linked ${input.voiceProvider} voice`,
+        transport: input.voiceProvider === "openai" ? "webrtc" : "simulated_twilio", modelVerified: false,
         metrics: { guestTurns: 0, secretaryTurns: 0 } },
     };
     this.sessions.set(id, s);
     try {
-      s.context = { ...await this.deps.context(owner, input.voiceProvider), instruction: s.report.instruction };
+      if (input.voiceProvider === "openai") {
+        if (!this.deps.openAI || !await this.deps.openAI.isAvailable()) throw new Error("Exact OpenAI model unavailable");
+      } else s.context = { ...await this.deps.context(owner, input.voiceProvider), instruction: s.report.instruction };
     } catch {
       this.sessions.delete(id);
-      fail(409, "The selected owner voice or OpenAI service is unavailable; configure it in Voice Lab");
+      fail(409, input.voiceProvider === "openai" ? "Exact gpt-realtime-2.1 model is unavailable in this Dev environment; no fallback"
+        : "The selected owner voice or OpenAI service is unavailable; configure it in Voice Lab");
     }
     if (s.report.status === "ended") fail(409, "Lab session was cancelled");
     this.attempts.set(owner, [...times, now]);
@@ -165,6 +216,36 @@ export class SecretaryLab {
     clearTimeout(s.timer);
     s.report.status = "running";
     s.send({ type: "state", state: "connecting", atMs: this.now() - s.started });
+    if (s.report.voiceProvider === "openai") {
+      try {
+        s.realtime = this.deps.openAI!.create(s.owner, s.report.instruction, {
+          ready: (model, voice) => {
+            if (s.report.status === "ended") return;
+            s.report.model = model; s.report.voice = voice; s.report.modelVerified = true;
+            s.send?.({ type: "ready", model, voice, transport: "webrtc" });
+          },
+          turn: (role, text, interrupted) => this.addTurn(s, role, text, interrupted),
+          clear: responseId => s.send?.({ type: "clear", responseId }),
+          state: state => s.send?.({ type: "state", state, atMs: this.now() - s.started }),
+          event: type => {
+            this.event(s, type);
+            if (type === "guest_speech_stopped") { s.lastGuestTurn = this.now(); s.firstAudioForTurn = true; }
+            if (type === "output_audio_started") {
+              s.report.metrics.firstAudioMs ??= this.now() - s.started;
+              if (s.lastGuestTurn !== undefined && s.firstAudioForTurn) {
+                s.report.metrics.lastTurnToAudioMs = this.now() - s.lastGuestTurn; s.firstAudioForTurn = false;
+              }
+              s.send?.({ type: "metrics", metrics: { ...s.report.metrics } });
+            }
+          },
+          end: reason => { this.end(s, s.stopReason ?? reason); close(); },
+        });
+        s.send({ type: "rtc_offer_required" });
+        s.timer = setTimeout(() => { void this.stop(s.owner, s.report.id, "duration_limit"); }, 300_000);
+        s.timer.unref?.();
+      } catch { this.end(s, "openai_setup_error"); close(); }
+      return s.report.id;
+    }
     const streamSid = `lab-stream-${s.report.id}`;
     s.peer = new LabPeer(message => {
       if (s.report.status === "ended") return;
@@ -198,26 +279,7 @@ export class SecretaryLab {
             : event === "guest_speech_started" || event === "realtime_ready" ? "listening" : "thinking";
           s.send?.({ type: "state", state, atMs: this.now() - s.started });
         },
-        onTurn: async (_id, role, text) => {
-          if (s.report.turns.length >= 200) { void this.stop(s.owner, s.report.id, "turn_limit"); return; }
-          const turn: LabTurn = { id: randomUUID(), role, text: text.slice(0, 1500), atMs: this.now() - s.started };
-          s.report.turns.push(turn);
-          if (role === "guest") {
-            s.report.metrics.guestTurns++;
-            s.lastGuestTurn = this.now(); s.firstAudioForTurn = true;
-            s.send?.({ type: "state", state: "thinking", atMs: turn.atMs });
-          } else {
-            s.report.metrics.secretaryTurns++;
-            s.send?.({ type: "state", state: "listening", atMs: turn.atMs });
-          }
-          s.send?.({ type: "turn", turn });
-          void this.deps.translate(text).then(result => {
-            if (result.translation) {
-              turn.translation = result.translation.slice(0, 4000);
-              s.send?.({ type: "subtitle", turnId: turn.id, translation: turn.translation });
-            } else this.event(s, "subtitle_unavailable", "Translation unavailable; audio continues");
-          }).catch(() => this.event(s, "subtitle_unavailable", "Translation unavailable; audio continues"));
-        },
+        onTurn: async (_id, role, text) => { this.addTurn(s, role, text); },
         onStreamEnd: async (_id, reason) => finish(reason),
       });
       s.peer.inject({ event: "start", start: { callSid: `lab-${s.report.id}`, streamSid,
@@ -229,10 +291,32 @@ export class SecretaryLab {
     }
     return s.report.id;
   }
+  async negotiate(owner: string, id: string, sdp: unknown) {
+    const s = this.sessions.get(id);
+    if (!s || s.owner !== owner) fail(404, "Lab session not found");
+    if (s.report.status !== "running" || !s.realtime) fail(409, "No active OpenAI lab connection");
+    if (typeof sdp !== "string" || sdp.length > 24_000 || !/^v=0\r?\n/.test(sdp) || !sdp.includes("m=audio")) fail(400, "Invalid audio SDP");
+    if (s.negotiating || s.negotiated) fail(409, "WebRTC negotiation is single-use");
+    s.negotiating = true;
+    try {
+      const answer = await s.realtime.connect(sdp);
+      if (s.report.endedAt) fail(409, "Lab session ended during negotiation");
+      s.negotiated = true;
+      return { sdp: answer, model: s.report.model, voice: s.report.voice };
+    } catch {
+      this.end(s, "openai_setup_error");
+      fail(409, "OpenAI WebRTC negotiation failed; no provider fallback");
+    } finally { s.negotiating = false; }
+  }
   receive(id: string, input: any) {
     const s = this.sessions.get(id);
     if (!s || s.report.status !== "running") return;
+    if (input?.type === "rtc_connected") { s.realtime?.startIntroduction(); return; }
     if (input?.type === "user_stop") { void this.stop(s.owner, id); return; }
+    if (input?.type === "client_error") {
+      if (isLabClientStopReason(input.reason)) void this.stop(s.owner, id, input.reason);
+      return;
+    }
     if (input?.type === "mark") {
       if (typeof input.name !== "string" || !s.pendingMarks.delete(input.name)) return;
       s.peer?.inject({ event: "mark", mark: { name: input.name } });
@@ -277,7 +361,9 @@ export class SecretaryLab {
     s.peer?.close();
     s.send?.({ type: "ended", report: structuredClone(s.report) });
     s.send = undefined;
-    s.context.cloneVoiceId = "";
+    if (s.context) s.context.cloneVoiceId = "";
+    void s.realtime?.stop();
+    try { this.deps.onEnd?.(structuredClone(s.report)); } catch { /* Reporting cannot keep audio running. */ }
     s.resolveStop?.(structuredClone(s.report));
   }
 }

@@ -1,11 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+  scheduleLabPlayback,
   MIC_QUEUE_MAX_FRAMES, MULAW_FRAME_BYTES, ULAW_SILENCE_FRAME,
   UlawFrameQueue, floatToUlaw, makeHoldMusic, markPlaybackDecision,
   pcmToUlaw, playbackWouldExceedLimit, selectOutboundFrame, ulawToPcm,
 } from "./secretary-lab";
+import "./secretary-lab-rtc.test";
 
 describe("Secretary Lab μ-law helpers", () => {
+  it("absorbs ordinary network jitter without gaps between the 20ms voice frames", () => {
+    let cursor = 0;
+    for (let frame = 0; frame < 50; frame++) {
+      const arrival = frame * 0.02 + (frame % 4 === 0 ? 0.08 : 0);
+      const next = scheduleLabPlayback(arrival, cursor, 0.02);
+      if (frame > 0) expect(next.startAt).toBeCloseTo(cursor, 6);
+      cursor = next.endAt;
+    }
+    expect(cursor).toBeCloseTo(1.26, 6);
+  });
+  it("re-buffers after a genuine underrun rather than speeding up or changing the voice", () => {
+    const next = scheduleLabPlayback(2, 1.5, 0.02);
+    expect(next.startAt).toBeCloseTo(2.18, 6);
+    expect(next.endAt).toBeCloseTo(2.20, 6);
+  });
   it("round-trips μ-law silence and preserves polarity for representative PCM samples", () => {
     expect(pcmToUlaw(0)).toBe(0xff);
     expect(ulawToPcm(pcmToUlaw(0))).toBe(0);

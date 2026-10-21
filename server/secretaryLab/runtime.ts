@@ -3,6 +3,17 @@ import { handleSecretaryTwilioStream } from "../secretary/agent";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
 import { translateTextSubtitle } from "../translation/textSubtitle";
+import { checkLabRealtimeModel, OpenAILabRealtime, LAB_REALTIME_MODEL, LAB_REALTIME_VOICE } from "./openAIRealtime";
+
+let modelCheck: Promise<{ ready: boolean; reason?: string }> | undefined;
+let modelCheckedAt = 0;
+function availability() {
+  if (process.env.NODE_ENV !== "development") return Promise.resolve({ ready: false, reason: "OpenAI comparison is Dev-only" });
+  if (!modelCheck || Date.now() - modelCheckedAt > 60_000) {
+    modelCheckedAt = Date.now(); modelCheck = checkLabRealtimeModel();
+  }
+  return modelCheck;
+}
 
 /** Does not import the telephone dialer, tasks worker or call storage. */
 export const secretaryLab = new SecretaryLab({
@@ -15,12 +26,22 @@ export const secretaryLab = new SecretaryLab({
     return { ownerId, voiceProvider, cloneVoiceId };
   },
   translate: text => translateTextSubtitle(text, "ru"),
+  openAI: process.env.NODE_ENV === "development" ? {
+    isAvailable: async () => (await availability()).ready,
+    create: (owner, instruction, callbacks) => new OpenAILabRealtime(owner, instruction, callbacks),
+  } : undefined,
+  onEnd: report => console.info("[SecretaryLab] ended", JSON.stringify({
+    session: report.id, reason: report.reason, guestTurns: report.metrics.guestTurns,
+    secretaryTurns: report.metrics.secretaryTurns,
+    // No transcript, audio, owner identity, ticket or voice identifier in logs.
+    lastStage: report.events.at(-2)?.type ?? "unknown",
+  })),
 });
 // Periodic cleanup prevents untouched reports retaining text indefinitely.
 setInterval(() => secretaryLab.sweep(), 60_000).unref();
 
 export async function secretaryLabReadiness(owner: string) {
-  const [elevenlabs, cartesia] = await Promise.all([getClone(owner), getCartesiaClone(owner)]);
+  const [elevenlabs, cartesia, openAI] = await Promise.all([getClone(owner), getCartesiaClone(owner), availability()]);
   const status = (clone: typeof elevenlabs, configured: boolean) => ({
     ready: !!(process.env.OPENAI_API_KEY && configured && clone?.status === "ready" && clone.voiceId?.trim()),
     source: !clone || clone.status !== "ready" ? "unavailable"
@@ -30,6 +51,8 @@ export async function secretaryLabReadiness(owner: string) {
     providers: {
       elevenlabs: status(elevenlabs, !!process.env.ELEVENLABS_API_KEY),
       cartesia: status(cartesia, !!process.env.CARTESIA_API_KEY),
+      openai: { ...openAI, source: "builtin", model: LAB_REALTIME_MODEL, voice: LAB_REALTIME_VOICE,
+        checkedAt: modelCheckedAt ? new Date(modelCheckedAt).toISOString() : undefined },
     },
     models: { realtime: process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime", stt: "gpt-4o-mini-transcribe" },
     limits: { durationSeconds: 300, historyMinutes: 60 },

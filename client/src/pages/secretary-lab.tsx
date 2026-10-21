@@ -8,10 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   LAB_API, LabReport, LabSnapshot, LabTurn, VoiceProvider, UlawFrameQueue,
   base64ToBytes, bytesToBase64, floatToUlaw, formatLabTime, labRequest,
-  makeHoldMusic, markPlaybackDecision, playbackWouldExceedLimit,
+  makeHoldMusic, markPlaybackDecision, playbackWouldExceedLimit, scheduleLabPlayback, labEndReasonLabel,
   selectOutboundFrame, socketUrl, ulawToPcm, ULAW_SILENCE_FRAME,
   MIC_QUEUE_MAX_FRAMES, MULAW_FRAME_BYTES, PLAYBACK_QUEUE_MAX_SECONDS,
 } from "@/lib/secretary-lab";
+import { createLabRtcController, LabRtcController, OPENAI_LAB_MODEL, OPENAI_LAB_VOICE } from "@/lib/secretary-lab-rtc";
 import { AlertCircle, ArrowDownToLine, AudioLines, Check, CircleStop, Headphones, LoaderCircle, Mic, MicOff, Radio, RefreshCw, ShieldAlert, Volume2, Wifi } from "lucide-react";
 import "@/lib/secretary-lab.css";
 
@@ -75,6 +76,7 @@ export default function SecretaryLab() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const rtcRef = useRef<LabRtcController | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -96,6 +98,7 @@ export default function SecretaryLab() {
   const firstAudioScheduledRef = useRef(false);
   const lastGuestTurnContextTimeRef = useRef<number | null>(null);
   const markTimersRef = useRef<Map<string, number>>(new Map());
+  const holdUiTimerRef = useRef<number | null>(null);
   const closingRef = useRef(false);
   const currentReportRef = useRef<LabReport | null>(null);
 
@@ -105,7 +108,7 @@ export default function SecretaryLab() {
     try {
       const result = await labRequest<LabSnapshot>(LAB_API, token);
       setSnapshot(result);
-      setProvider((previous) => result.providers[previous].ready ? previous : result.providers.elevenlabs.ready ? "elevenlabs" : "cartesia");
+       setProvider((previous) => previous === "openai" || result.providers[previous]?.ready ? previous : result.providers.elevenlabs.ready ? "elevenlabs" : "cartesia");
     } catch (cause) {
       const e = cause as Error & { status?: number };
       if (e.status === 403) setDenied(true);
@@ -130,6 +133,7 @@ export default function SecretaryLab() {
   }, [active?.id, active?.status]);
 
   const cleanupMedia = useCallback(() => {
+    rtcRef.current?.close(); rtcRef.current = null;
     processorRef.current?.disconnect(); processorRef.current = null;
     sourceRef.current?.disconnect(); sourceRef.current = null;
     if (micSendTimerRef.current !== null) window.clearInterval(micSendTimerRef.current);
@@ -143,18 +147,23 @@ export default function SecretaryLab() {
     playbackNodesRef.current.clear();
     markTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     markTimersRef.current.clear();
+    if (holdUiTimerRef.current !== null) window.clearTimeout(holdUiTimerRef.current);
+    holdUiTimerRef.current = null;
     const context = contextRef.current;
     contextRef.current = null;
     if (context && context.state !== "closed") void context.close().catch(() => undefined);
   }, []);
 
-  const stopServer = useCallback(async (userInitiated = true) => {
+  const stopServer = useCallback(async (userInitiated = true, clientReason = "browser_disconnected") => {
     const session = currentReportRef.current;
     closingRef.current = true;
     if (userInitiated && socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: "user_stop" }));
       socketRef.current.close(1000, "user_stop");
     } else if (socketRef.current && socketRef.current.readyState < WebSocket.CLOSING) {
+      if (socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "client_error", reason: clientReason }));
+      }
       socketRef.current.close();
     }
     socketRef.current = null;
@@ -162,7 +171,9 @@ export default function SecretaryLab() {
     setSocketConnected(false); setPlayingHold(false); micPausedRef.current = false; setMicPaused(false); setLiveState("ended");
     if (session && token) {
       try {
-        const result = await labRequest<{ report: LabReport }>(`${LAB_API}/sessions/${encodeURIComponent(session.id)}`, token, { method: "DELETE" });
+        const result = await labRequest<{ report: LabReport }>(`${LAB_API}/sessions/${encodeURIComponent(session.id)}`, token, {
+          method: "DELETE", body: JSON.stringify({ reason: userInitiated ? "user_stop" : clientReason }),
+        });
         setReport(result.report); setActive(null); setRating("");
         currentReportRef.current = result.report;
         setSnapshot((old) => old ? { ...old, sessions: [result.report, ...old.sessions.filter((item) => item.id !== result.report.id)] } : old);
@@ -208,6 +219,8 @@ export default function SecretaryLab() {
     const processor = context.createScriptProcessor(4096, 1, 1);
     processorRef.current = processor;
     processor.onaudioprocess = (event) => {
+      const output = event.outputBuffer.getChannelData(0);
+      output.fill(0);
       if (!micPausedRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
         const converted = floatToUlaw(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
         const combined = new Uint8Array(micCarryRef.current.length + converted.length);
@@ -217,11 +230,12 @@ export default function SecretaryLab() {
         if (completeLength) micQueueRef.current.pushBytes(combined.subarray(0, completeLength));
         micCarryRef.current = combined.slice(completeLength);
       }
-      const output = event.outputBuffer.getChannelData(0);
-      output.fill(0);
     };
+    const silentSink = context.createGain();
+    silentSink.gain.value = 0;
     source.connect(processor);
-    processor.connect(context.destination);
+    processor.connect(silentSink);
+    silentSink.connect(context.destination);
   }, []);
 
   const scheduleMarkAck = useCallback((socket: WebSocket, name: string) => {
@@ -239,7 +253,7 @@ export default function SecretaryLab() {
       if (decision === "stop") {
         markTimersRef.current.delete(name);
         setError("Аудиоконтекст приостановлен до завершения воспроизведения. Сессия остановлена без подтверждения маркера.");
-        void stopServer(false);
+        void stopServer(false, "audio_suspended");
         return;
       }
       if (decision === "ack") {
@@ -315,14 +329,64 @@ export default function SecretaryLab() {
         if (!attemptIsCurrent() || socket.readyState !== WebSocket.OPEN) return;
         socket.send(JSON.stringify({ type: "auth", ticket: created.ticket }));
       };
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
         if (!attemptIsCurrent() || closingRef.current) return;
         let message: WireMessage;
         try { message = JSON.parse(event.data); } catch { return; }
-        if (message.type === "ready") {
+        if (message.type === "rtc_offer_required" && provider === "openai") {
+          if (rtcRef.current) return;
+          try {
+            const rtc = createLabRtcController({
+              stream: stream!,
+              sendSocket: (payload) => {
+                if (socket.readyState === WebSocket.OPEN && !closingRef.current) socket.send(JSON.stringify(payload));
+              },
+              onReady: () => {
+                if (!attemptIsCurrent()) return;
+                setSocketConnected(true);
+                setLiveState("listening");
+                updateReport((old) => ({ ...old, status: "running" }));
+              },
+              onConnectionState: (connected, modelReady) => {
+                if (!attemptIsCurrent()) return;
+                setSocketConnected(connected && modelReady);
+                setLiveState(connected && modelReady ? "listening" : "connecting");
+              },
+              onError: (reason, detail) => {
+                if (!attemptIsCurrent()) return;
+                setError(`${detail} Сессия остановлена; автоматического переподключения нет.`);
+                void stopServer(false, reason);
+              },
+            });
+            rtcRef.current = rtc;
+            await rtc.negotiate((sdp) => labRequest<{ sdp: string; model: string; voice: string }>(
+              `${LAB_API}/sessions/${encodeURIComponent(created.id)}/webrtc`,
+              token,
+              { method: "POST", body: JSON.stringify({ sdp }) },
+            ));
+            if (!attemptIsCurrent() || closingRef.current || rtcRef.current !== rtc) return;
+          } catch (cause) {
+            if (!attemptIsCurrent() || closingRef.current || !rtcRef.current) return;
+            setError(cause instanceof Error ? cause.message : "Не удалось согласовать WebRTC.");
+            void stopServer(false, "webrtc_error");
+          }
+        } else if (message.type === "metrics" && provider === "openai") {
+          updateReport(old => ({ ...old, metrics: { ...message.metrics } }));
+        } else if (message.type === "ready") {
           if (!context || context.state !== "running") {
             setError("Аудиоконтекст не работает. Сессия остановлена, чтобы не терять звук.");
-            void stopServer(false);
+            void stopServer(false, "audio_suspended");
+            return;
+          }
+          if (provider === "openai") {
+            if (message.modelVerified === false ||
+              (message.model !== undefined && message.model !== OPENAI_LAB_MODEL) ||
+              (message.voice !== undefined && message.voice !== OPENAI_LAB_VOICE)) {
+              setError("Сервер не подтвердил ожидаемую модель OpenAI. Сессия остановлена.");
+              void stopServer(false, "webrtc_error");
+              return;
+            }
+            rtcRef.current?.markModelReady();
             return;
           }
           setSocketConnected(true);
@@ -334,12 +398,12 @@ export default function SecretaryLab() {
             if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN || closingRef.current) return;
             if (context!.state !== "running") {
               setError("Аудиоконтекст приостановлен. Сессия остановлена без имитации услышанного звука.");
-              void stopServer(false);
+              void stopServer(false, "audio_suspended");
               return;
             }
             if (activeSocket.bufferedAmount > 24_000) {
               setError("Очередь аудио превысила безопасный предел. Сессия остановлена.");
-              void stopServer(false);
+              void stopServer(false, "audio_input_backpressure");
               return;
             }
             if (musicRef.current && musicOffsetRef.current >= musicRef.current.length) {
@@ -363,11 +427,12 @@ export default function SecretaryLab() {
         } else if (message.type === "state") {
           const state = message.state as LiveState;
           if (["connecting", "listening", "thinking", "speaking"].includes(state)) setLiveState(state);
-        } else if (message.type === "audio") {
+        } else if (message.type === "audio" && provider !== "openai") {
           void playAudio(message.payload, Number(message.atMs) || 0);
         } else if (message.type === "mark") {
           scheduleMarkAck(socket, String(message.name || ""));
         } else if (message.type === "clear") {
+          if (provider === "openai") rtcRef.current?.clearInterruptedOutput(String(message.responseId || message.response_id || ""));
           playbackNodesRef.current.forEach((node) => { try { node.stop(); } catch {} });
           playbackNodesRef.current.clear();
           playbackCursorRef.current = contextRef.current?.currentTime ?? 0;
@@ -395,7 +460,7 @@ export default function SecretaryLab() {
           socketRef.current = null; cleanupMedia();
         } else if (message.type === "error") {
           setError(typeof message.error === "string" ? message.error : "Ошибка живой сессии.");
-          void stopServer(false);
+          void stopServer(false, "client_error");
         }
       };
       socket.onerror = () => { if (attemptIsCurrent()) setError("Ошибка соединения с живой сессией."); };
@@ -433,10 +498,10 @@ export default function SecretaryLab() {
   const playAudio = useCallback(async (payload: string, atMs: number) => {
     void atMs;
     const context = contextRef.current;
-    if (!context) { setError("Аудиоконтекст разговора недоступен."); void stopServer(false); return; }
+    if (!context) { setError("Аудиоконтекст разговора недоступен."); void stopServer(false, "audio_suspended"); return; }
     if (context.state !== "running") {
       setError("Воспроизведение заблокировано или аудиоконтекст приостановлен. Сессия остановлена, чтобы не терять ответы секретаря.");
-      void stopServer(false);
+      void stopServer(false, "audio_suspended");
       return;
     }
     try {
@@ -444,7 +509,7 @@ export default function SecretaryLab() {
       const duration = bytes.length / 8000;
       if (playbackWouldExceedLimit(context.currentTime, playbackCursorRef.current, duration, PLAYBACK_QUEUE_MAX_SECONDS)) {
         setError(`Очередь воспроизведения превысила ${PLAYBACK_QUEUE_MAX_SECONDS} секунды. Сессия остановлена, звук не будет считаться услышанным.`);
-        void stopServer(false);
+        void stopServer(false, "audio_queue_limit");
         return;
       }
       const buffer = context.createBuffer(1, bytes.length, 8000);
@@ -452,9 +517,9 @@ export default function SecretaryLab() {
       for (let i = 0; i < bytes.length; i++) samples[i] = ulawToPcm(bytes[i]) / 32768;
       const node = context.createBufferSource();
       node.buffer = buffer; node.connect(context.destination);
-      const startAt = Math.max(context.currentTime + 0.015, playbackCursorRef.current);
+      const { startAt, endAt } = scheduleLabPlayback(context.currentTime, playbackCursorRef.current, buffer.duration);
       node.start(startAt);
-      playbackCursorRef.current = startAt + buffer.duration;
+      playbackCursorRef.current = endAt;
       playbackNodesRef.current.add(node);
       node.onended = () => {
         playbackNodesRef.current.delete(node);
@@ -469,7 +534,7 @@ export default function SecretaryLab() {
       }
     } catch {
       setError("Не удалось декодировать аудио. Сессия остановлена.");
-      void stopServer(false);
+      void stopServer(false, "audio_decode_error");
     }
   }, [stopServer, updateReport]);
 
@@ -479,13 +544,35 @@ export default function SecretaryLab() {
     const context = contextRef.current;
     if (!context || context.state !== "running") {
       setError("Аудиоконтекст приостановлен: остановите сессию и запустите её снова.");
-      void stopServer(false); return;
+      void stopServer(false, "audio_suspended"); return;
     }
     micPausedBeforeMusicRef.current = micPausedRef.current;
     micQueueRef.current.clear();
     micCarryRef.current = new Uint8Array(0);
     micPausedRef.current = true;
     setMicPaused(true);
+    if (provider === "openai") {
+      try {
+        const rtc = rtcRef.current;
+        if (!rtc) throw new Error("Соединение WebRTC недоступно.");
+        setPlayingHold(true);
+        void rtc.startHold(context, holdDuration).then(() => {
+          holdUiTimerRef.current = window.setTimeout(() => {
+            const restorePaused = micPausedBeforeMusicRef.current;
+            micPausedRef.current = restorePaused;
+            setMicPaused(restorePaused);
+            setPlayingHold(false);
+          }, holdDuration * 1000);
+        }).catch((cause: unknown) => {
+          setError(cause instanceof Error ? cause.message : "Не удалось включить тест ожидания.");
+          stopHold();
+        });
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Не удалось включить тест ожидания.");
+        stopHold();
+      }
+      return;
+    }
     musicRef.current = makeHoldMusic(holdDuration);
     musicOffsetRef.current = 0;
     setPlayingHold(true);
@@ -496,6 +583,13 @@ export default function SecretaryLab() {
   };
 
   const stopHold = () => {
+    if (holdUiTimerRef.current !== null) window.clearTimeout(holdUiTimerRef.current);
+    holdUiTimerRef.current = null;
+    if (provider === "openai") {
+      void rtcRef.current?.stopHold().catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Не удалось восстановить микрофон после теста ожидания.");
+      });
+    }
     musicRef.current = null;
     musicOffsetRef.current = 0;
     micQueueRef.current.clear();
@@ -543,17 +637,22 @@ export default function SecretaryLab() {
               <div className="provider-section">
                 <div className="provider-title"><span>Голосовой провайдер</span><small>Проверяется на сервере</small></div>
                 <div className="provider-options">
-                  {(["elevenlabs", "cartesia"] as VoiceProvider[]).map((name) => {
+                  {(["elevenlabs", "cartesia", "openai"] as VoiceProvider[]).map((name) => {
                     const item = snapshot?.providers[name];
-                    const source = item?.source === "linked_existing" ? "Связанный голос" : item?.source === "sample_clone" ? "Клон из образца" : "Недоступен";
+                    const source = name === "openai"
+                      ? item?.source === "builtin" ? `${item.model} · ${item.voice}${!item.ready && item.reason ? ` · ${item.reason}` : ""}` : "Встроенный голос"
+                      : item?.source === "linked_existing" ? "Связанный голос" : item?.source === "sample_clone" ? "Клон из образца" : "Недоступен";
                     return <button key={name} type="button" onClick={() => { setProvider(name); setPaidConsent(false); }} disabled={!!active || pending || !item?.ready} className={`provider-option ${provider === name ? "selected" : ""} ${!item?.ready ? "unavailable" : ""}`}>
                       <span className="provider-radio">{provider === name && <Check size={12} />}</span>
-                      <span className="provider-label"><b>{name === "elevenlabs" ? "ElevenLabs" : "Cartesia"}</b><small>{source}</small></span>
-                      <span className={`provider-ready ${item?.ready ? "ready" : ""}`}>{item?.ready ? "ГОТОВ" : "НЕТ"}</span>
+                      <span className="provider-label"><b>{name === "elevenlabs" ? "ElevenLabs" : name === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"}</b><small>{source}</small></span>
+                      <span className={`provider-ready ${item?.ready ? "ready" : ""}`}>{item?.ready ? name === "openai" ? "ДОСТУПЕН" : "ГОТОВ" : "НЕТ"}</span>
                     </button>;
                   })}
                 </div>
-                {snapshot?.providers[provider]?.source === "linked_existing" && <p className="provider-disclaimer">Связанный голосовой ID не подтверждает, что провайдер использует именно клон Secretary.</p>}
+                {snapshot?.providers.openai?.reason && <p className="provider-disclaimer">OpenAI доступность: {snapshot.providers.openai.reason}</p>}
+                {provider === "openai" && <p className="provider-disclaimer">Голос marin — встроенный голос OpenAI, не клон владельца. Браузер передаёт микрофон напрямую через WebRTC; без синтеза ElevenLabs или Cartesia.</p>}
+                {provider === "openai" && <p className="provider-disclaimer">Экспериментальный Dev-режим. Доступность модели не означает проверку полного разговора на вашем iPhone. При блокировке звука или соединения появится ошибка; другой провайдер автоматически не включается.</p>}
+                {provider !== "openai" && snapshot?.providers[provider]?.source === "linked_existing" && <p className="provider-disclaimer">Связанный голосовой ID не подтверждает, что провайдер использует именно клон Secretary.</p>}
                 <label className={`consent-row ${!providerReady ? "muted" : ""}`}><input type="checkbox" checked={paidConsent} onChange={(event) => setPaidConsent(event.target.checked)} disabled={!!active || pending || !providerReady} /><span>Я понимаю, что разговор может использовать платные услуги AI и генерации голоса.</span></label>
               </div>
               <div className="start-row">
@@ -572,7 +671,7 @@ export default function SecretaryLab() {
             <CardContent>
               <div className="conversation-state">
                 <div className={`voice-orb ${liveState}`}><AudioLines size={24} /></div>
-                <div><b>{stateLabel(liveState)}</b><small>{active ? "Микрофон передаёт звук напрямую в живую сессию" : "Транскрипт появится после подключения"}</small></div>
+                <div><b>{stateLabel(liveState)}</b><small>{active?.voiceProvider === "openai" ? socketConnected ? "WebRTC соединено; аудио идёт напрямую в модель" : "WebRTC ещё не соединено или восстанавливается" : active ? "Микрофон передаёт звук напрямую в живую сессию" : "Транскрипт появится после подключения"}</small></div>
               </div>
               <div className="transcript-list" aria-live="polite">
                 {(active?.turns ?? visibleReport?.turns ?? []).length === 0 ? <div className="transcript-empty"><span>ОЖИДАНИЕ ПЕРВОЙ РЕПЛИКИ</span><p>Здесь появятся реальные реплики разговора. Аудио не записывается.</p></div> :
@@ -583,6 +682,7 @@ export default function SecretaryLab() {
                   const next = !micPausedRef.current;
                   micPausedRef.current = next;
                   if (next) { micQueueRef.current.clear(); micCarryRef.current = new Uint8Array(0); }
+                   rtcRef.current?.setMicPaused(next);
                   setMicPaused(next);
                 }}><MicOff size={14} /> {micPaused ? "Включить микрофон" : "Тишина микрофона"}</Button>
                 <div className="hold-controls"><Headphones size={15} /><span>Тест музыки ожидания</span><select value={holdDuration} onChange={(event) => setHoldDuration(Number(event.target.value))} disabled={playingHold}><option value={15}>15 сек.</option><option value={60}>60 сек.</option><option value={180}>180 сек.</option></select>
@@ -603,9 +703,9 @@ export default function SecretaryLab() {
             <CardContent>
               <div className="metric"><span>Реплики собеседника</span><b>{(active ?? visibleReport)?.metrics.guestTurns ?? 0}</b></div>
               <div className="metric"><span>Реплики секретаря</span><b>{(active ?? visibleReport)?.metrics.secretaryTurns ?? 0}</b></div>
-              <div className="metric"><span>Первое аудио · планирование</span><b>{formatMs((active ?? visibleReport)?.metrics.firstAudioMs)}</b></div>
-              <div className="metric"><span>Финальная STT → аудио запланировано</span><b>{formatMs((active ?? visibleReport)?.metrics.lastTurnToAudioMs)}</b></div>
-              <div className="model-note"><span>REALTIME</span><b>{snapshot?.models.realtime ?? "—"}</b><span>РЕЧЬ · STT</span><b>{snapshot?.models.stt ?? "—"}</b></div>
+              <div className="metric"><span>{(active ?? visibleReport)?.voiceProvider === "openai" ? "Первое аудио · выход RTP" : "Первое аудио · планирование"}</span><b>{formatMs((active ?? visibleReport)?.metrics.firstAudioMs)}</b></div>
+              <div className="metric"><span>{(active ?? visibleReport)?.voiceProvider === "openai" ? "Конец речи (VAD) → выход RTP" : "Финальная STT → аудио запланировано"}</span><b>{formatMs((active ?? visibleReport)?.metrics.lastTurnToAudioMs)}</b></div>
+               <div className="model-note"><span>ФАКТИЧЕСКАЯ МОДЕЛЬ</span><b>{(active ?? visibleReport)?.model ?? (provider === "openai" ? snapshot?.providers.openai?.model : snapshot?.models.realtime) ?? "—"}</b><span>ГОЛОС / ТРАНСПОРТ</span><b>{(active ?? visibleReport)?.voice ?? (provider === "openai" ? snapshot?.providers.openai?.voice : "—")} · {(active ?? visibleReport)?.transport ?? (provider === "openai" ? "webrtc" : "—")}</b><span>РЕЧЬ · STT</span><b>{snapshot?.models.stt ?? "—"}</b></div>
             </CardContent>
           </Card>
 
@@ -624,14 +724,15 @@ export default function SecretaryLab() {
             <CardContent>
               {loading && !snapshot ? <div className="history-skeleton"><div /><div /><div /></div> :
                 history.length === 0 ? <div className="history-empty">История пока пуста.<small>Завершённые сессии появятся здесь на срок до часа.</small></div> :
-                <div className="history-list">{history.slice(0, 8).map((item) => <button key={item.id} className={`history-item ${visibleReport?.id === item.id ? "current" : ""}`} onClick={() => { setReport(item); setActive(null); setRating(""); }}>
-                  <span className={`history-dot ${item.status}`} /><span className="history-detail"><b>{item.voiceProvider === "elevenlabs" ? "ElevenLabs" : "Cartesia"} · {item.metrics.guestTurns + item.metrics.secretaryTurns} реплик</b><small>{formatLabTime(item.createdAt)}</small></span><span className="history-arrow">→</span>
+                 <div className="history-list">{history.slice(0, 8).map((item) => <button key={item.id} className={`history-item ${visibleReport?.id === item.id ? "current" : ""}`} onClick={() => { setReport(item); setActive(null); setRating(""); }}>
+                   <span className={`history-dot ${item.status}`} /><span className="history-detail"><b>{item.voiceProvider === "elevenlabs" ? "ElevenLabs" : item.voiceProvider === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"} · {item.metrics.guestTurns + item.metrics.secretaryTurns} реплик</b><small>{formatLabTime(item.createdAt)} · {item.instruction}</small></span><span className="history-arrow">→</span>
                 </button>)}</div>}
-              {visibleReport && <div className="report-actions">
-                <div className="report-title"><b>Отчёт выбран</b><span>{visibleReport.reason || "Сессия завершена"}</span></div>
+               {visibleReport && <div className="report-actions">
+                 <div className="report-title"><b>Отчёт выбран · {visibleReport.model ?? visibleReport.voiceProvider}</b><span>{visibleReport.voice ?? "голос не указан"} · {visibleReport.transport ?? "транспорт не указан"} · {labEndReasonLabel(visibleReport.reason)}</span></div>
+                 <div className="report-instruction"><b>Инструкция сессии</b><p>{visibleReport.instruction}</p></div>
                 <Button variant="outline" size="sm" onClick={() => downloadReport({ ...visibleReport, rating: rating || undefined })}><ArrowDownToLine size={14} /> JSON</Button>
                 <label className="rating-label">Оценка секретаря <select value={rating} onChange={(event) => setRating(event.target.value)}><option value="">Не оценено</option><option>Убедительно</option><option>Нужна доработка</option><option>Не справился</option></select><small>Локальная заметка — не отправляется на сервер</small></label>
-                {!active && <Button className="new-session" onClick={() => { setReport(null); setInstruction("Поговори с собеседником на английском как дружелюбный и собранный секретарь. Помогай уточнять цель звонка и спокойно реагируй на возражения."); setPaidConsent(false); setError(""); }}><Mic size={15} /> Новая сессия</Button>}
+                 {!active && <Button className="new-session" onClick={() => { setReport(null); setPaidConsent(false); setError(""); }}><Mic size={15} /> Новая сессия</Button>}
               </div>}
             </CardContent>
           </Card>
@@ -652,5 +753,5 @@ function stateLabel(state: LiveState) {
 }
 
 function TranscriptTurn({ turn }: { turn: LabTurn }) {
-  return <div className={`transcript-turn ${turn.role}`}><span className="turn-role">{turn.role === "guest" ? "СОБЕСЕДНИК" : "СЕКРЕТАРЬ"}<small> · {new Date(turn.atMs).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</small></span><p>{turn.text}</p>{turn.translation && <small className="translation">{turn.translation}</small>}</div>;
+  return <div className={`transcript-turn ${turn.role}`}><span className="turn-role">{turn.role === "guest" ? "СОБЕСЕДНИК" : "СЕКРЕТАРЬ"}<small> · {new Date(turn.atMs).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}{turn.interrupted ? " · ПРЕРВАНО" : ""}</small></span><p>{turn.text}</p>{turn.translation && <small className="translation">{turn.translation}</small>}</div>;
 }

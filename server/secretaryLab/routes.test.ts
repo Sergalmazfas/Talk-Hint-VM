@@ -61,11 +61,20 @@ describe("Secretary Lab HTTP and WebSocket boundaries", () => {
     clients.push(ws); return ws;
   };
   const closed = (ws: WebSocket) => new Promise<number>(resolve => ws.once("close", code => resolve(code)));
+  it("does not accept arbitrary diagnostic data as a stop reason", async () => {
+    const response = await request(app).delete("/api/admin/secretary-lab/sessions/missing")
+      .set("Authorization", "Bearer alice").send({ reason: "untrusted-raw-provider-response" });
+    expect(response.status).toBe(400);
+    expect(engine).not.toHaveBeenCalled();
+  });
   it("requires authentication and existing admin allowlist on every HTTP action", async () => {
     expect((await request(app).get("/api/admin/secretary-lab")).status).toBe(401);
     expect((await request(app).get("/api/admin/secretary-lab").set("Authorization", "Bearer ordinary")).status).toBe(403);
     expect((await request(app).post("/api/admin/secretary-lab/sessions").send(input)).status).toBe(401);
     expect((await request(app).delete("/api/admin/secretary-lab/sessions/missing")).status).toBe(401);
+    expect((await request(app).post("/api/admin/secretary-lab/sessions/missing/webrtc").send({ sdp: "v=0\r\nm=audio" })).status).toBe(401);
+    expect((await request(app).post("/api/admin/secretary-lab/sessions/missing/webrtc")
+      .set("Authorization", "Bearer alice").send({ sdp: "v=0\r\nm=audio" })).status).toBe(404);
     expect(engine).not.toHaveBeenCalled();
   });
   it("isolates admin accounts and never returns tickets in history", async () => {

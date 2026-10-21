@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import type { IncomingMessage } from "node:http";
 import WebSocket from "ws";
 import { requireBenchmarkAdmin } from "../benchmark/adminGate";
-import type { SecretaryLab } from "./service";
+import { isLabClientStopReason, type SecretaryLab } from "./service";
 
 export function registerSecretaryLabRoutes(
   app: Express,
@@ -10,7 +10,7 @@ export function registerSecretaryLabRoutes(
   readiness: (owner: string) => Promise<unknown>,
 ) {
   const base = "/api/admin/secretary-lab";
-  app.use(base, requireBenchmarkAdmin, express.json({ limit: "12kb" }), (_req, res, next) => {
+  app.use(base, requireBenchmarkAdmin, express.json({ limit: "32kb" }), (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store"); next();
   });
   const error = (res: express.Response, e: unknown) => {
@@ -24,8 +24,16 @@ export function registerSecretaryLabRoutes(
   app.post(`${base}/sessions`, async (req, res) => {
     try { res.status(201).json(await lab.create(req.user!.id, req.body)); } catch (e) { error(res, e); }
   });
+  app.post(`${base}/sessions/:id/webrtc`, async (req, res) => {
+    try {
+      if (!req.body || Object.keys(req.body).some(key => key !== "sdp")) return res.status(400).json({ error: "Only SDP is accepted" });
+      res.json(await lab.negotiate(req.user!.id, req.params.id, req.body.sdp));
+    } catch (e) { error(res, e); }
+  });
   app.delete(`${base}/sessions/:id`, async (req, res) => {
-    try { res.json({ report: await lab.stop(req.user!.id, req.params.id) }); } catch (e) { error(res, e); }
+    const reason = req.body?.reason ?? "user_stop";
+    if (!isLabClientStopReason(reason)) return res.status(400).json({ error: "Invalid lab stop reason" });
+    try { res.json({ report: await lab.stop(req.user!.id, req.params.id, reason) }); } catch (e) { error(res, e); }
   });
 }
 
