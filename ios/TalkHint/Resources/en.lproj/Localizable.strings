@@ -1,4 +1,14 @@
 "profiles.setup" = "Choose numbers";
+"incoming.calendar_title" = "Work calendar";
+"incoming.calendar_notice" = "Read-only connection, no events or phone activation. Hours and conditions come only from permitted Work cards.";
+"incoming.calendar_manage" = "Manage in browser (sign in to the same TalkHint account). Refresh here after returning.";
+"incoming.calendar_setup_required" = "Google Calendar setup required";
+"incoming.calendar_disconnected" = "Calendar not connected";
+"incoming.calendar_selection_required" = "Choose a separate Work calendar";
+"incoming.calendar_connected" = "Work calendar connected · read-only";
+"incoming.calendar_reconnect_required" = "Reconnect Google Calendar";
+"incoming.calendar_unavailable" = "Calendar status unavailable";
+"incoming.calendar_loading" = "Loading calendar status…";
 "profiles.setup_notice" = "Existing numbers stay unchanged. Two missing numbers are assigned together or not at all. No call or AI activation.";
 "profiles.choice.frames" = "Frames only";
 "profiles.choice.work" = "Work only";

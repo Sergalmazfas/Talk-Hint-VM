@@ -14,6 +14,15 @@ excluding publication, activation on a real number and real calls at this stage.
 Keep client disclosure permission distinct from Shared visibility: only explicitly
 authorized, owner-owned Work facts may enter the incoming agent.
 
+Existing permitted Work cards are the **only** source of business facts, hours
+and service conditions; calendar authorization must not introduce a second questionnaire.
+
+**Why:** The owner explicitly specified cards as the single source for the common
+Work-only product, including when adding individual calendar connections.
+
+**How to apply:** Calendar metadata and OAuth consent establish technical access,
+not commercial rules, availability promises, answering activation or booking consent.
+
 The first business is future mobile massage at the client's address, not an
 already launched operation. Without a real calendar, collect requests only;
 the owner confirms the final time. An approved request is never a calendar booking.

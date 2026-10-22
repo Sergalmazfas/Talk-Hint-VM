@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { Link, useLocation } from "wouter";
 import { useOptionalAuth } from "@/lib/auth";
 import { IncomingSecretaryDevBench } from "@/components/incoming-secretary-dev-bench";
+import { WorkCalendarSettings } from "@/components/work-calendar-settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -347,12 +348,14 @@ export default function IncomingSecretary() {
                   <CardHeader><p className="text-xs uppercase tracking-[0.16em] text-teal-300">03 / Ограничения</p><CardTitle className="text-xl">Пока нет бронирования</CardTitle></CardHeader>
                   <CardContent className="space-y-3 text-sm leading-6 text-[#afc0bc]">
                     <p className="flex gap-2"><Clock3 className="mt-1 h-4 w-4 shrink-0 text-amber-200" />Секретарь может только собрать пожелания для проверки владельцем; цены и свободное время неизвестны.</p>
-                    <p className="flex gap-2"><CalendarDays className="mt-1 h-4 w-4 shrink-0 text-amber-200" />Календарь {payload.calendarConnected ? "подключён по данным API" : "не подключён"}. Никакая встреча не создаётся и не подтверждается.</p>
+                    <p className="flex gap-2"><CalendarDays className="mt-1 h-4 w-4 shrink-0 text-amber-200" />Подключение календаря настроено отдельно ниже; события не читаются, встречи не создаются и не подтверждаются.</p>
                     <p className="rounded-lg border border-[#5d513a] bg-[#322d22] p-3 text-xs text-[#d7c9a9]">Будущая функция. Сохранение enabled не означает, что звонки уже направляются секретарю.</p>
                   </CardContent>
                 </Card>
               </div>
             </section>
+
+            {selectedNumberId && <WorkCalendarSettings key={selectedNumberId} numberId={selectedNumberId} token={token} offlinePreview={isOfflineDemoRoute} />}
 
             {isPreviewAllowed && (
               <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">

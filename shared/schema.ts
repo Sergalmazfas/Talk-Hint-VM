@@ -264,6 +264,24 @@ export const incomingSecretarySettings = pgTable("incoming_secretary_settings", 
   config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+// Independent per-owner OAuth grants. Only encrypted credentials are stored.
+export const secretaryCalendarGrants = pgTable("secretary_calendar_grants", {
+  numberId: varchar("number_id").primaryKey().references(() => phoneNumbers.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  secret: text("secret").notNull(),
+  calendarId: text("calendar_id"),
+  revision: varchar("revision").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export const secretaryCalendarAttempts = pgTable("secretary_calendar_attempts", {
+  numberId: varchar("number_id").primaryKey().references(() => phoneNumbers.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  stateHash: text("state_hash").notNull().unique(),
+  browserHash: text("browser_hash").notNull(),
+  secret: text("secret").notNull(),
+  consumed: boolean("consumed").notNull().default(false),
+  expiresAt: timestamp("expires_at").notNull(),
+});
 export const incomingSecretaryRequests = pgTable("incoming_secretary_requests", {
   callSid: varchar("call_sid").primaryKey(),
   id: varchar("id").notNull().unique(),

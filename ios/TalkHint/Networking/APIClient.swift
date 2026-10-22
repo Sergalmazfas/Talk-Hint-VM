@@ -686,6 +686,16 @@ final class APIClient {
         let data = try await request("/api/incoming-secretary", method: "GET", json: nil, authenticated: true)
         return try JSONDecoder().decode(IncomingSnapshot.self, from: data)
     }
+    struct WorkCalendarStatus: Decodable {
+        struct Calendar: Decodable { let id: String; let summary: String; let timeZone: String }
+        let state: String
+        let calendar: Calendar?
+    }
+    func workCalendarStatus(numberId: String) async throws -> WorkCalendarStatus {
+        guard let id = numberId.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { throw APIError.decoding }
+        let data = try await request("/api/incoming-secretary/calendar/\(id)", method: "GET", json: nil, authenticated: true)
+        return try JSONDecoder().decode(WorkCalendarStatus.self, from: data)
+    }
     func saveIncomingSettings(_ settings: IncomingSettings) async throws {
         guard var payload = try JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any] else {
             throw APIError.decoding

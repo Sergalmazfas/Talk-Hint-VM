@@ -1,4 +1,14 @@
 "profiles.setup" = "Нөмірлерді таңдау";
+"incoming.calendar_title" = "Жұмыс күнтізбесі";
+"incoming.calendar_notice" = "Тек оқу: оқиғалар жасалмайды, нөмір қосылмайды. Жұмыс уақыты мен шарттар тек рұқсат етілген Work карточкаларынан алынады.";
+"incoming.calendar_manage" = "Браузерде басқару (сол TalkHint аккаунтына кіріңіз). Оралған соң экранды жаңартыңыз.";
+"incoming.calendar_setup_required" = "Google Calendar баптауы қажет";
+"incoming.calendar_disconnected" = "Күнтізбе қосылмаған";
+"incoming.calendar_selection_required" = "Бөлек жұмыс күнтізбесін таңдаңыз";
+"incoming.calendar_connected" = "Жұмыс күнтізбесі қосылды · тек оқу";
+"incoming.calendar_reconnect_required" = "Google Calendar қызметін қайта қосыңыз";
+"incoming.calendar_unavailable" = "Күнтізбе күйі қолжетімсіз";
+"incoming.calendar_loading" = "Күнтізбе күйі жүктелуде…";
 "profiles.setup_notice" = "Қолданыстағы нөмірлер сақталады. Екі жаңа нөмір бірге тағайындалады немесе ешқайсысы тағайындалмайды. Қоңырау мен AI қосылмайды.";
 "profiles.choice.frames" = "Тек фреймдер";
 "profiles.choice.work" = "Тек жұмыс";

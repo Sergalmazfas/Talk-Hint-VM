@@ -1,4 +1,14 @@
 "profiles.setup" = "Elegir números";
+"incoming.calendar_title" = "Calendario de trabajo";
+"incoming.calendar_notice" = "Solo lectura, sin crear eventos ni activar números. Horarios y condiciones solo de las tarjetas Work autorizadas.";
+"incoming.calendar_manage" = "Gestionar en el navegador (inicia sesión con la misma cuenta TalkHint). Actualiza al volver.";
+"incoming.calendar_setup_required" = "Hay que configurar Google Calendar";
+"incoming.calendar_disconnected" = "Calendario no conectado";
+"incoming.calendar_selection_required" = "Elige un calendario de trabajo separado";
+"incoming.calendar_connected" = "Calendario de trabajo conectado · solo lectura";
+"incoming.calendar_reconnect_required" = "Vuelve a conectar Google Calendar";
+"incoming.calendar_unavailable" = "Estado del calendario no disponible";
+"incoming.calendar_loading" = "Cargando el estado del calendario…";
 "profiles.setup_notice" = "Se conservan los números existentes. Los dos números pendientes se asignan juntos o ninguno. No se inicia una llamada ni se activa IA.";
 "profiles.choice.frames" = "Solo frames";
 "profiles.choice.work" = "Solo trabajo";

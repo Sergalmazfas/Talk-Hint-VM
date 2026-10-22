@@ -1,4 +1,14 @@
 "profiles.setup" = "Вибрати номери";
+"incoming.calendar_title" = "Робочий календар";
+"incoming.calendar_notice" = "Лише читання, без створення подій та активації номера. Години роботи й умови — лише з дозволених Work-карток.";
+"incoming.calendar_manage" = "Керувати в браузері (увійдіть у той самий акаунт TalkHint). Після повернення оновіть екран.";
+"incoming.calendar_setup_required" = "Потрібно налаштувати Google Calendar";
+"incoming.calendar_disconnected" = "Календар не підключено";
+"incoming.calendar_selection_required" = "Виберіть окремий робочий календар";
+"incoming.calendar_connected" = "Робочий календар підключено · лише читання";
+"incoming.calendar_reconnect_required" = "Підключіть Google Calendar знову";
+"incoming.calendar_unavailable" = "Стан календаря недоступний";
+"incoming.calendar_loading" = "Завантаження стану календаря…";
 "profiles.setup_notice" = "Чинні номери зберігаються. Два відсутні номери призначаються разом або жоден. Дзвінок та AI не вмикаються.";
 "profiles.choice.frames" = "Лише для фреймів";
 "profiles.choice.work" = "Лише робочий";

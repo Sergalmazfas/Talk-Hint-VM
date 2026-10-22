@@ -365,6 +365,8 @@ final class IncomingSecretaryViewController: UITableViewController {
     private var snapshot: APIClient.IncomingSnapshot?
     private var draft: APIClient.IncomingSettings?
     private var loading = false
+    private var calendarStatus: APIClient.WorkCalendarStatus?
+    private var calendarError = false
     private let zone = UITextField(), opens = UITextField(), closes = UITextField(), travel = UITextField()
     private func l(_ key: String) -> String { NSLocalizedString("incoming." + key, comment: "") }
     init() { super.init(style: .insetGrouped) }
@@ -403,8 +405,21 @@ final class IncomingSecretaryViewController: UITableViewController {
                     fillFields()
                 }
                 tableView.backgroundView = nil
+                await loadCalendar()
             } catch { showError(error) }
         }
+    }
+    @MainActor private func loadCalendar() async {
+        calendarStatus = nil; calendarError = false
+        guard let numberId = draft?.numberId else { return }
+        do {
+            let result = try await APIClient.shared.workCalendarStatus(numberId: numberId)
+            guard draft?.numberId == numberId else { return }
+            calendarStatus = result
+        } catch {
+            if draft?.numberId == numberId { calendarError = true }
+        }
+        tableView.reloadData()
     }
     private func fillFields() {
         zone.text = draft?.timeZone; opens.text = draft?.business.opens
@@ -432,16 +447,16 @@ final class IncomingSecretaryViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         if section == 0 { return 1 }
         if section == 1 { return 2 }
-        if section == 2 { return 0 }
+        if section == 2 { return draft == nil ? 0 : 1 }
         if section == 3 { return (snapshot?.cards.count ?? 0) + 1 }
         return max(1, snapshot?.requests.count ?? 0)
     }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        section == 2 ? nil : l(["mode", "settings", "hours", "cards", "requests"][section])
+        section == 2 ? l("calendar_title") : l(["mode", "settings", "hours", "cards", "requests"][section])
     }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         if section == 0 { return l("gate_notice") }
-        if section == 2 { return l("future_notice") }
+        if section == 2 { return l("calendar_notice") }
         if section == 3 { return l("cards_notice") }
         if section == 4 { return l("request_notice") }
         return nil
@@ -467,16 +482,13 @@ final class IncomingSecretaryViewController: UITableViewController {
                 cell.accessoryView = control
             } else { cell.textLabel?.text = l("timezone"); cell.accessoryView = zone }
         case 2:
-            if indexPath.row < 7 {
-                let day = indexPath.row
-                cell.textLabel?.text = DateFormatter().weekdaySymbols[day]
-                let control = UISwitch(); control.tag = day; control.isOn = draft?.business.days.contains(day) ?? false
-                control.addTarget(self, action: #selector(toggleDay(_:)), for: .valueChanged)
-                cell.accessoryView = control
-            } else {
-                let fields = [opens, closes, travel], keys = ["opens", "closes", "travel"]
-                cell.textLabel?.text = l(keys[indexPath.row - 7]); cell.accessoryView = fields[indexPath.row - 7]
-            }
+            let state = calendarError ? "unavailable" : (calendarStatus?.state ?? "loading")
+            let known = ["setup_required", "disconnected", "selection_required", "connected", "reconnect_required", "unavailable", "loading"]
+            cell.textLabel?.text = l("calendar_" + (known.contains(state) ? state : "unavailable"))
+            cell.detailTextLabel?.text = [calendarStatus?.calendar?.summary, calendarStatus?.calendar?.timeZone, l("calendar_manage")]
+                .compactMap { $0 }.joined(separator: "\n")
+            cell.accessoryType = .disclosureIndicator; cell.selectionStyle = .default
+            cell.accessibilityIdentifier = "incoming-work-calendar"
         case 3:
             if let cards = snapshot?.cards, indexPath.row < cards.count {
                 let card = cards[indexPath.row]
@@ -507,12 +519,18 @@ final class IncomingSecretaryViewController: UITableViewController {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let snapshot = snapshot else { return }
+        if indexPath.section == 2 {
+            // Browser login is independent; no app bearer token or OAuth credential in the URL.
+            UIApplication.shared.open(AppConfig.baseURL.appendingPathComponent("incoming-secretary"))
+            return
+        }
         if indexPath.section == 1 && indexPath.row == 0 {
             let alert = UIAlertController(title: l("settings"), message: nil, preferredStyle: .alert)
             for number in snapshot.numbers {
                 alert.addAction(UIAlertAction(title: number.phoneNumber, style: .default) { [weak self] _ in
                     self?.draft = snapshot.settings.first { $0.numberId == number.id }
-                    self?.fillFields(); self?.tableView.reloadData()
+                    self?.fillFields(); self?.calendarStatus = nil; self?.calendarError = false; self?.tableView.reloadData()
+                    Task { @MainActor [weak self] in await self?.loadCalendar() }
                 })
             }
             alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
