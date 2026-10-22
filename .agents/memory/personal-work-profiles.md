@@ -8,21 +8,6 @@ separate numbers and logical profiles, rather than a second business app.
 Cards belong to the logical profile, not the physical telephone number.
 Personal knowledge is not automatically copied to Work; sharing is explicit.
 
-Secretary is a universal product, not a massage-specific application. Massage
-is one example of a filled business card; another owner or profile may run a
-children's business, repair shop or a different service.
-
-**Why:** The user explicitly corrected the product direction: business behavior
-must follow the filled card and its hours, rather than one hardcoded industry.
-
-**How to apply:** Obtain services, hours, timezone, location/visit mode, required
-intake fields and business conditions from the selected owner's Work profile.
-Keep business-specific templates separate from the shared agent and access
-rules. The massage example's Tuesday–Sunday hours and 30-minute travel rule
-are not universal defaults. Never require an on-site address or appointment
-duration when the business scenario does not need them. Missing business facts
-remain unknown; cards cannot override privacy, authorization or action safety.
-
 **Why:** The user explicitly approved the two-number, one-app approach after
 rejecting the need for a separate business application.
 
@@ -32,6 +17,23 @@ availability may use personal busy intervals without revealing event details.
 A promised booking requires a durable calendar acknowledgement, not merely a
 transcript or generated reply. Number setup is not permission to enable
 autonomous incoming answering or forwarding.
+
+«Ты видишь только карточки, которые заполняются. Одно заполнение решает,
+кто он, откуда и зачем. Ничего более. Мы знакомы же только карточкой».
+Secretary is universal because the filled card is its sole source of knowledge
+about the represented person or business, not because of separate industry
+profiles, questionnaires or service catalogs.
+
+**Why:** The user repeated and narrowed the requirement after the agent
+incorrectly proposed parallel business-profile settings and a separate catalog.
+
+**How to apply:** One card entry supplies identity, purpose and whatever business
+facts the owner actually entered. Do not require the same information again in
+another questionnaire, catalog or business-settings form. Industry, services,
+hours, location and conditions must not be inferred or supplied by global
+industry defaults. If absent from the card, they are unknown. Personal/Work
+remain access boundaries, not additional sources of business knowledge. Cards
+remain business data and cannot bypass account authorization or action safety.
 
 The owner selected a new dedicated Google Calendar named “TalkHint — Work”,
 with business timezone America/New_York, rather than writing appointments to
