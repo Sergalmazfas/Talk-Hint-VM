@@ -42,6 +42,7 @@ import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, r
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
 import { registerSecretaryRoutes } from "./secretary/routes";
+import { registerMobileSecretary } from "./mobileSecretary/routes";
 import { registerLegacyTestCallRoute } from "./secretary/legacyRoute";
 import { registerChatGPTIntegration } from "./chatgpt/routes";
 import { mcpReleaseConfiguration } from "./chatgpt/releaseConfig";
@@ -291,6 +292,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   registerAdminWebBoundary(app);
+  registerMobileSecretary(app);
   setupWebSocket(httpServer);
   registerChatGPTIntegration(app, mcpReleaseConfiguration(
     process.env, process.env.NODE_ENV === "production", () => process.env.SESSION_SECRET ?? "",

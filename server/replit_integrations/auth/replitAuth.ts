@@ -208,6 +208,8 @@ export async function setupAuth(app: Express) {
         console.error("[OAuth] Auth failed:", err);
         return failRedirect("auth_failed");
       }
+      // Capture before Passport rotates the session on login.
+      const mobileReturn = (await import("../../mobileSecretary/routes")).mobileBrowserReturn(req);
       
       req.login(user, async (loginErr) => {
         if (loginErr) {
@@ -233,6 +235,7 @@ export async function setupAuth(app: Express) {
             return failRedirect("user_not_found");
           }
           
+          if (!wantsIos && mobileReturn) return res.redirect(mobileReturn);
           if (!wantsIos && !mayEnterAdminWeb(dbUser, claims)) {
             return res.redirect("/admin/login?error=access_denied");
           }

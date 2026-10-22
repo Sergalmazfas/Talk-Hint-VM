@@ -59,3 +59,4 @@
 - [Public Secretary direction](public-secretary-direction.md) — owner chose teal, rejected blue; single account/card, honest demos, no parallel portal or revived SMS work.
 - [Client launch data boundaries](client-launch-boundaries.md) — no permanent requests CRM; retention periods unapproved; history deletion does not cancel Calendar or delete CRM copies.
 - [Client product modes](client-product-modes.md) — three modes; no Copilot in client plan; versioned Terms before number assignment and separate channel/participant consent.
+- [Standalone Secretary client](standalone-secretary-client.md) — separate Expo client, not migration; Swift/admin remain the owner's lab; reproduce the Secretary workflow.
