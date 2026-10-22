@@ -45,10 +45,11 @@ beforeEach(() => vi.stubEnv("BENCHMARK_ADMIN_EMAILS", "owner@example.test"));
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe("entire existing web workspace is owner-only", () => {
-  it("serves a minimal public root and Google-only entry, with no old phone UI", async () => {
+  it("serves the public Secretary home and separate Google-only admin entry, with no old phone UI", async () => {
     const home = await request(app()).get("/");
     expect(home.status).toBe(200);
-    expect(home.text).toContain('href="/admin"');
+    expect(home.text).toContain("Your secretary.");
+    expect(home.text).not.toContain('href="/admin"');
     expect(home.text).not.toContain("existing full workspace");
     const login = await request(app()).get("/admin/login");
     expect(login.status).toBe(200);

@@ -1,6 +1,7 @@
 import type { Express, RequestHandler } from "express";
 import { requireBenchmarkAdmin } from "./benchmark/adminGate";
 import { issueAdminWebTicket } from "./adminWebTickets";
+import { registerPublicSite } from "./publicSite";
 
 const html = (title: string, body: string) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -10,10 +11,6 @@ main{max-width:620px;margin:12vh auto;padding:32px}h1{font-size:36px;letter-spac
 a{display:inline-block;color:#fff;background:#183955;padding:12px 20px;border-radius:12px;text-decoration:none}
 p{color:#526175}</style></head><body><main>${body}</main></body></html>`;
 
-export const PUBLIC_HOME = html("TalkHint",
-  `<h1>TalkHint</h1><p>The public website is being prepared.</p>
-  <p>The existing workspace is available only to the project administrator.</p>
-  <a href="/admin">Administrator sign-in</a>`);
 export const ADMIN_LOGIN = html("Administrator sign-in",
   `<h1>TalkHint workspace</h1><p>Sign in with the existing project administrator account.
   Signing in with another Google account does not grant access.</p>
@@ -48,7 +45,7 @@ export const adminActionOrigin: RequestHandler = (req, res, next) => {
 };
 
 export function registerAdminWebBoundary(app: Express) {
-  app.get("/", (_req, res) => res.set("Cache-Control", "no-store").type("html").send(PUBLIC_HOME));
+  registerPublicSite(app);
   app.get("/index.html", (_req, res) => res.redirect("/"));
   app.get("/admin/login", (_req, res) => res.set("Cache-Control", "no-store").type("html").send(ADMIN_LOGIN));
   app.use("/api/admin", requireBenchmarkAdmin, adminActionOrigin);

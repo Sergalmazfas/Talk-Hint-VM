@@ -56,3 +56,4 @@
 - [Dev audio queue timing](dev-audio-queue.md) — fast Realtime generation can fill a short playback queue during healthy speech; clear on interruption, not ordinary backlog.
 - [Secretary Live rollout](incoming-live-dev.md) — owner approved GPT-Live after microphone trial; native protocol, shared protected intake; release and phone activation remain separate.
 - [Owner-only web workspace](admin-web-boundary.md) — keep the entire current web UI private, not just labs; native and integration clients remain separate.
+- [Public Secretary direction](public-secretary-direction.md) — owner chose teal, rejected blue; single account/card, honest demos, no parallel portal or revived SMS work.

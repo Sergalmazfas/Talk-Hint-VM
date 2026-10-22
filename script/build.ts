@@ -116,6 +116,8 @@ async function buildAll() {
   console.log("copying TalkHint UI...");
   await cp("talkhint/ui", join(out, "talkhint/ui"), { recursive: true });
   console.log(`copied TalkHint UI to ${out}/talkhint/ui`);
+  await cp("talkhint/public-site", join(out, "talkhint/public-site"), { recursive: true });
+  console.log(`copied public Secretary website to ${out}/talkhint/public-site`);
 }
 
 buildAll().catch((err) => {

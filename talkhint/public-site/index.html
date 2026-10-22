@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#faf9f6">
+  <meta name="description" content="TalkHint is a calm, conversational phone secretary for independent businesses, managed through ChatGPT.">
+  <title>TalkHint — Your secretary. Always on.</title>
+  <link rel="stylesheet" href="/site/styles.css">
+  <script src="/site/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="/" aria-label="TalkHint home">
+        <svg class="brand-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="38" height="38" rx="12" fill="#E8F5F1"/>
+          <path d="M7 20h6l2.2-5.2L19 27l3.3-14 3.1 12 2.5-5H33" stroke="#087F73" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>TalkHint</span>
+      </a>
+      <nav class="nav-links" id="primary-nav" aria-label="Main navigation">
+        <a href="/#how">How it works</a>
+        <a href="/#listen">Listen</a>
+        <a href="/#faq">FAQ</a>
+        <a class="mobile-account" href="/account">Log in</a>
+      </nav>
+      <div class="nav-actions">
+        <a href="/account">Log in</a>
+        <a class="button button-primary" href="/start">Get started <span aria-hidden="true">↗</span></a>
+      </div>
+      <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="primary-nav">
+        <span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <div id="home-view">
+      <section class="hero">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Your AI phone secretary</p>
+            <h1>Your secretary.<br><span>Always on.</span></h1>
+            <p class="hero-subtitle">Answers calls. Makes calls for you. Managed through ChatGPT.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="/start">Try your secretary <span aria-hidden="true">↗</span></a>
+              <a class="button button-secondary" href="#listen">Hear a demo <span aria-hidden="true">↓</span></a>
+            </div>
+            <p class="hero-note">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5 13 3.3v4.1c0 3.1-2.1 5.6-5 7.1-2.9-1.5-5-4-5-7.1V3.3L8 1.5Z" stroke="currentColor" stroke-width="1.3"/><path d="m5.8 7.8 1.5 1.5 3-3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              No app download needed.
+            </p>
+          </div>
+
+          <div class="hero-card" aria-label="Illustrative secretary conversation">
+            <div class="card-top">
+              <span><i class="live-dot"></i>Illustrative demo</span>
+              <span>Call time unavailable</span>
+            </div>
+            <div class="demo-tabs" role="tablist" aria-label="Demo direction">
+              <button class="tab-button" type="button" role="tab" id="hero-incoming-tab" aria-selected="true" aria-controls="hero-demo-content" data-demo="incoming">Incoming call</button>
+              <button class="tab-button" type="button" role="tab" id="hero-outgoing-tab" aria-selected="false" aria-controls="hero-demo-content" data-demo="outgoing">Outgoing task</button>
+            </div>
+            <div class="wave-wrap" aria-hidden="true">
+              <div class="wave">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </div>
+            <div class="playback-empty">
+              <button type="button" disabled aria-describedby="hero-audio-reason"><span aria-hidden="true">▶</span> Play demo</button>
+              <span id="hero-audio-reason">Approved recording pending · duration —</span>
+            </div>
+            <div class="demo-panel" id="hero-demo-content" role="tabpanel" aria-labelledby="hero-incoming-tab" tabindex="0">
+              <p class="panel-label" data-demo-kind>Demo conversation · Incoming</p>
+              <div class="dialogue" data-demo-dialogue>
+                <div class="line"><strong>Caller</strong><span>What are your Saturday hours?</span></div>
+                <div class="line"><strong>Secretary</strong><span>We’re open Saturday from 9 am to 2 pm.</span></div>
+              </div>
+            </div>
+            <div class="demo-summary">
+              <div class="summary-copy">
+                <span class="summary-icon" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 3.5h8M4 6.5h8M4 9.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M2.5 2.5v10a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-10" stroke="currentColor" stroke-width="1.2"/></svg>
+                </span>
+                <span><b>Call summary</b><small data-demo-summary>Asked about Saturday hours. Told 9 am–2 pm.</small></span>
+              </div>
+              <span class="demo-unavailable">Audio preview unavailable<br>Play is disabled</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section steps-section" id="how">
+        <div class="wrap steps-grid">
+          <div class="section-heading">
+            <p class="eyebrow">Your business, understood</p>
+            <h2>Hear it.<br>Make it yours.</h2>
+            <p>Your verified business card gives your secretary its identity—not a long setup form.</p>
+          </div>
+          <div class="step-list">
+            <article class="step"><span class="step-num">01 / TELL</span><h3>Tell us about your business</h3><p>Share what you do through ChatGPT. Your existing business card is the source of truth.</p></article>
+            <article class="step"><span class="step-num">02 / SHAPE</span><h3>Choose a voice and greeting</h3><p>Set the way your secretary introduces itself and speaks for your business.</p></article>
+            <article class="step"><span class="step-num">03 / TRY</span><h3>Try a conversation</h3><p>Test the experience in your browser before you decide what to do next.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section listen-section" id="listen">
+        <div class="wrap">
+          <div class="section-heading">
+            <p class="eyebrow">A real conversation, plainly shown</p>
+            <h2>Listen before<br>you decide.</h2>
+            <p>Illustrative examples show the call and the useful result—without pretending there’s a recording to play.</p>
+          </div>
+          <div class="listen-layout">
+            <section class="listen-controls" aria-labelledby="voice-heading">
+              <h3 id="voice-heading">Choose a voice</h3>
+              <p>Available choices are limited to what’s verified today.</p>
+              <div class="voice-filters" role="group" aria-label="Filter voice choices">
+                <button class="filter-button" type="button" data-voice-filter="all" aria-pressed="true">All voices</button>
+                <button class="filter-button" type="button" data-voice-filter="female" aria-pressed="false">Female</button>
+                <button class="filter-button" type="button" data-voice-filter="male" aria-pressed="false">Male</button>
+              </div>
+              <div class="voice-list" id="voice-list" aria-live="polite">
+                <div class="empty-voice">No recording or unverified voice choice is shown. Check the current verified options when you’re ready.</div>
+              </div>
+              <button class="filter-button" type="button" data-load-capabilities>Check verified voice details</button>
+              <details class="details-note">
+                <summary>What powers the current voice?</summary>
+                <p id="capability-facts">Implementation details will load when available. Voice playback is not available in this demo.</p>
+              </details>
+            </section>
+            <section class="listen-preview" aria-labelledby="listen-preview-title">
+              <div class="listen-preview-header">
+                <div><p class="eyebrow">Illustrative demo</p><h3 id="listen-preview-title">Incoming call</h3></div>
+                <span class="audio-status">Recording unavailable<br>Play disabled</span>
+              </div>
+              <div class="playback-empty">
+                <button type="button" disabled aria-describedby="listen-audio-reason"><span aria-hidden="true">▶</span> Play conversation</button>
+                <span id="listen-audio-reason">No approved audio · duration —</span>
+              </div>
+              <div class="preview-wave" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              </div>
+              <div class="demo-tabs" role="tablist" aria-label="Listen to a call example">
+                <button class="tab-button" type="button" role="tab" id="listen-incoming-tab" aria-selected="true" aria-controls="listen-dialogue" data-listen="incoming">Incoming</button>
+                <button class="tab-button" type="button" role="tab" id="listen-outgoing-tab" aria-selected="false" aria-controls="listen-dialogue" data-listen="outgoing">Outgoing</button>
+              </div>
+              <div class="dialogue" id="listen-dialogue" role="tabpanel" aria-labelledby="listen-incoming-tab" tabindex="0">
+                <div class="line"><strong>Caller</strong><span>What are your Saturday hours?</span></div>
+                <div class="line"><strong>Secretary</strong><span>We’re open Saturday from 9 am to 2 pm.</span></div>
+              </div>
+              <div class="summary-box"><h4>Call summary</h4><p id="listen-summary">Asked about Saturday hours. Told 9 am–2 pm.</p></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="section value-section">
+        <div class="wrap">
+          <div class="value-band">
+            <div>
+              <p class="eyebrow">Small-business friendly</p>
+              <h2>Your work card.<br>Your call history.</h2>
+              <p>The secretary uses your verified business details, then leaves a record you can review through ChatGPT.</p>
+            </div>
+            <div class="value-points">
+              <div class="value-point"><b>Grounded in your card</b><span>Services, address, hours, prices and business rules.</span></div>
+              <div class="value-point"><b>Unknown means unknown</b><span>If the card doesn’t say, your secretary won’t make up an answer.</span></div>
+              <div class="value-point"><b>Calls and tasks</b><span>Handle incoming questions or ask it to make an outgoing call.</span></div>
+              <div class="value-point"><b>History to review</b><span>Transcripts and summaries, with owner notifications subject to availability.</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section personal-section" id="your-secretary">
+        <div class="wrap personal-grid">
+          <div class="section-heading">
+            <p class="eyebrow">One account. Your existing card.</p>
+            <h2>Not another form.<br>A conversation.</h2>
+            <p>Describe your business in ChatGPT by voice or text. Your existing TalkHint card remains the single place for the facts your secretary may share.</p>
+            <a class="button button-primary" href="/start">Explore your setup <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="setup-outline">
+            <ol>
+              <li><strong>Connect your account</strong><span>Use the existing TalkHint authorization flow in ChatGPT. Google sign-in does not grant Calendar or Gmail access.</span></li>
+              <li><strong>Review the same business card</strong><span>Services, address, hours, prices, rules and what to do when an answer is missing. No duplicate business directory.</span></li>
+              <li><strong>Make the greeting yours</strong><span>Choose an available voice, review the proposed greeting and explicitly confirm it before use.</span></li>
+              <li><strong>Try, adjust, repeat</strong><span>The future personal browser test must use those same settings, with TEST results only. Real-number activation is a separate, explicit step.</span></li>
+            </ol>
+            <details class="details-note"><summary>What is still being connected?</summary><p>This is a guided preview. Customer web sign-in, ChatGPT card-editing tools, greeting approval and a safe customer microphone test are not connected to this page yet. Nothing is saved or activated. Private technical laboratories stay private.</p></details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section language-section" id="languages">
+        <div class="wrap personal-grid">
+          <div class="section-heading">
+            <p class="eyebrow">A more natural conversation</p>
+            <h2>More languages.<br>The same business facts.</h2>
+            <p>The configured OpenAI voice path is designed for English, Russian and Spanish. It uses the same permitted card, whichever language is spoken.</p>
+          </div>
+          <div class="language-panel">
+            <div class="language-chips"><span>English</span><span>Русский</span><span>Español</span></div>
+            <p>Language handling is implemented in the Secretary branch. Automatic switching, accents and noisy phone calls still need controlled live verification for the selected voice; they are not a public guarantee.</p>
+            <p class="support-pending">This page does not run a multilingual audio test. No unverified languages or alternative voice providers are advertised as ready.</p>
+          </div>
+        </div>
+      </section>
+
+      <section hidden id="pricing" aria-hidden="true"><!-- Pricing awaits owner approval. No public prices or ChatGPT checkout. --></section>
+
+      <section class="section faq-section" id="faq">
+        <div class="wrap faq-layout">
+          <div class="section-heading">
+            <p class="eyebrow">Good to know</p>
+            <h2>Clear answers.<br>No fine print theatre.</h2>
+            <p>A few practical details before you get started.</p>
+          </div>
+          <div class="faq-list">
+            <details><summary>Do I need an app?</summary><p>No app download is needed for this experience. TalkHint is managed through ChatGPT, with the secretary and its history available there when the supported connection is set up.</p></details>
+            <details><summary>Why do I need both an account and ChatGPT?</summary><p>Your existing TalkHint account links to ChatGPT using its supported custom MCP connection and account-authorization flow. Availability depends on your ChatGPT plan and feature access; not every free account supports custom connections.</p></details>
+            <details><summary>Can it answer incoming calls and make outgoing calls?</summary><p>Both directions are part of the secretary concept. This website demo is illustrative only; it does not place or receive a real call, activate a phone number, or book appointments.</p></details>
+            <details><summary>What if my business card doesn’t have the answer?</summary><p>It should say it doesn’t have that information, rather than invent a policy, price, opening time, or promise. Keeping the verified card current is how you shape what it knows.</p></details>
+            <details><summary>Is the browser test a real call?</summary><p>No. A personal browser test is a test experience, not a telephone call. Safe microphone access and business-card editing tools are not yet connected to this public setup flow.</p></details>
+            <details><summary>Which languages and voices are supported?</summary><p>English, Russian and Spanish are intended for built-in language support. Language switching requires controlled live tests and is not a guarantee that every voice or call will work in each language. Voice choices depend on verified implementation capabilities.</p></details>
+            <details><summary>Will it email me, text customers, or book my calendar?</summary><p>Do not rely on those workflows. Owner notifications depend on availability; email, SMS and calendar booking are not promised as ready features here.</p></details>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing">
+        <div class="wrap closing-card">
+          <div><h2>A calmer way to stay on the phone.</h2><p>Start with the business card you already have.</p></div>
+          <a class="button" href="/start">See how to get started <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+    </div>
+    <div id="route-view" hidden></div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <a class="footer-brand" href="/">
+        <svg class="brand-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="1" y="1" width="38" height="38" rx="12" fill="#E8F5F1"/><path d="M7 20h6l2.2-5.2L19 27l3.3-14 3.1 12 2.5-5H33" stroke="#087F73" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        TalkHint
+      </a>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/support">Support</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+      </nav>
+      <span class="footer-copy">A phone secretary for independent businesses.</span>
+    </div>
+  </footer>
+</body>
+</html>
