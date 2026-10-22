@@ -23,7 +23,8 @@ Number onboarding must offer two optional purposes, in the user's words:
 frames number, only Work, or both. Do not assume that both numbers are required.
 
 **Why:** The user explicitly specified all three onboarding choices and the
-corresponding independent flows.
+corresponding independent flows, then confirmed the complete scheme with
+«Да именно так».
 
 **How to apply:** Work-only goes directly to the Work card-based setup without
 requiring another number first. Frames-only follows that number's flow. When
