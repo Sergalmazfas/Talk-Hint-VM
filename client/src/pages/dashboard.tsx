@@ -30,7 +30,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!isLoading && !user) {
-      setLocation("/");
+      setLocation("/login");
       return;
     }
     if (token) {
@@ -107,11 +107,11 @@ export default function Dashboard() {
 
   async function handleLogout() {
     await logout();
-    setLocation("/");
+    setLocation("/login");
   }
 
   function openTalkHint(numberId?: string) {
-    const url = numberId ? `/app?number=${numberId}` : "/app";
+    const url = numberId ? `/admin/app/?number=${encodeURIComponent(numberId)}` : "/admin/app/";
     window.location.href = url;
   }
 
@@ -138,7 +138,7 @@ export default function Dashboard() {
             ) : (
               <Button
                 size="sm"
-                onClick={() => setLocation("/pricing")}
+                onClick={() => setLocation("/onboarding")}
                 className="bg-gradient-to-r from-cyan-500 to-purple-600"
                 data-testid="button-subscribe"
               >
@@ -150,7 +150,7 @@ export default function Dashboard() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setLocation("/admin/diagnostics")}
+                  onClick={() => setLocation("/diagnostics")}
                   className="border-cyan-600 text-cyan-400 hover:text-cyan-300"
                   data-testid="button-admin"
                 >
@@ -200,6 +200,24 @@ export default function Dashboard() {
           </div>
         </div>
       </header>
+
+      {user?.isAdmin && (
+        <nav aria-label="Administrator surfaces" className="border-b border-gray-700 bg-gray-900/70">
+          <div className="mx-auto flex max-w-4xl flex-wrap gap-2 px-4 py-3">
+            <Button variant="outline" size="sm" onClick={() => setLocation("/")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Cabinet</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/diagnostics")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Diagnostics</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/settings/call-profiles")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Call profiles</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/voice-lab")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Voice Lab</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/secretary-lab")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Secretary Lab</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/incoming-secretary")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Incoming dev</Button>
+            <a href="/admin/translator-spike" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Translator stand</a>
+            <a href="/admin/health" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Health</a>
+            <a href="/admin/expo" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Expo</a>
+            <a href="/admin/tutor" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Tutor</a>
+            <a href="/admin/app/" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Full telephony</a>
+          </div>
+        </nav>
+      )}
 
       <main className="max-w-4xl mx-auto px-4 py-8">
         <section>
@@ -359,7 +377,7 @@ export default function Dashboard() {
           <DialogFooter className="flex-col gap-2 sm:flex-col">
             <Button 
               className="w-full bg-gradient-to-r from-cyan-500 to-purple-600"
-              onClick={() => setLocation("/pricing")}
+              onClick={() => setLocation("/onboarding")}
             >
               Subscribe Now - $15/mo
             </Button>

@@ -224,7 +224,10 @@ async function trial(c,candidate,repeat,pcm){
   inputMs:Math.round(pcm.length/24),source:'',streaming:'',final:'',turns:[],events:[],
   translationBeforeSource:false,firstTextAt:null,finalAt:null,errors:[]};
  const proto=location.protocol==='https:'?'wss:':'ws:';
- const ws=new WebSocket(proto+'//'+location.host+'/copilot-bench-stream?token='+encodeURIComponent(TOKEN));
+ const ticketResponse=await fetch('/api/admin/websocket-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+ if(!ticketResponse.ok)throw new Error('Administrator session required');
+ const adminTicket=(await ticketResponse.json()).ticket;
+ const ws=new WebSocket(proto+'//'+location.host+'/copilot-bench-stream?token='+encodeURIComponent(TOKEN)+'&adminTicket='+encodeURIComponent(adminTicket));
  ws.binaryType='arraybuffer';
  let ready,fail,speechDetected=false,committed=0,lastActivity=Date.now(),fatalError=null;
  const sources=new Map(),finalTimes=new Map(),responseItems=new Map(),eventStart=Date.now();

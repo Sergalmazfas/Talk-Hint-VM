@@ -32,7 +32,7 @@ function ErrorPage({ title, detail, onHome }: { title: string; detail: string; o
     <p className="eyebrow">TALKHINT / SECRETARY LAB</p>
     <h1>{title}</h1><p>{detail}</p>
     <div className="denied-links">
-      <Link href="/admin/diagnostics">Диагностика</Link>
+      <Link href="/diagnostics">Диагностика</Link>
       <Link href="/voice-lab">Voice Lab</Link>
       <Button variant="outline" onClick={onHome}>На главную</Button>
     </div>
@@ -615,8 +615,8 @@ export default function SecretaryLab() {
 
   return <div className="lab-shell">
     <header className="lab-header">
-      <Link href="/admin/diagnostics" className="lab-brand"><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
-      <nav className="lab-nav"><Link href="/admin/diagnostics">Диагностика</Link><Link href="/voice-lab">Voice Lab</Link><Link href="/incoming-secretary">Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
+      <Link href="/diagnostics" className="lab-brand"><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
+      <nav className="lab-nav"><Link href="/diagnostics">Диагностика</Link><Link href="/voice-lab">Voice Lab</Link><Link href="/incoming-secretary">Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
     </header>
     <main className="lab-main">
       <section className="lab-intro">

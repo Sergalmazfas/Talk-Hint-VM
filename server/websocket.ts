@@ -9,6 +9,7 @@ import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
 import { UtteranceGate } from "./utteranceGate";
 import { getSessionUserId } from "./auth";
+import { consumeAdminWebTicket } from "./adminWebTickets";
 import { isValidSpikeToken, handleTranslatorSpikeStream, handleCopilotBenchStream } from "./translation/spike";
 import { handleIOSTranslatorStream } from "./translation/iosTranslator";
 import { handleTranslatorTwilioStream, subscribeTranslatorFeed } from "./translation/twilioBridge";
@@ -868,7 +869,8 @@ export function setupWebSocket(server: Server) {
     // Dev-only Translator Realtime Spike stand. Uses its own per-boot page
     // token (not a user session); hard-rejected in production.
     if (pathname === "/translator-spike-stream" || pathname === "/copilot-bench-stream") {
-      if (!isValidSpikeToken(parsedUrl.searchParams.get("token"))) {
+      if (!isValidSpikeToken(parsedUrl.searchParams.get("token")) ||
+          !consumeAdminWebTicket(request, parsedUrl.searchParams.get("adminTicket"))) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;

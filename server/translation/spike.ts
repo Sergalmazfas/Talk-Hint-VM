@@ -1097,7 +1097,10 @@ async function start(){
     workletNode=new AudioWorkletNode(ctx,'capture-processor');
     srcNode.connect(workletNode);
     const proto=location.protocol==='https:'?'wss:':'ws:';
-    ws=new WebSocket(proto+'//'+location.host+'/translator-spike-stream?token='+encodeURIComponent(TOKEN));
+    const ticketResponse=await fetch('/api/admin/websocket-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(!ticketResponse.ok)throw new Error('Administrator session required');
+    const adminTicket=(await ticketResponse.json()).ticket;
+    ws=new WebSocket(proto+'//'+location.host+'/translator-spike-stream?token='+encodeURIComponent(TOKEN)+'&adminTicket='+encodeURIComponent(adminTicket));
     ws.binaryType='arraybuffer';
     ws.onopen=()=>{ ws.send(JSON.stringify(controlsMsg())); setStatus('connecting to provider…'); if(!sessionStartTs) sessionStartTs=Date.now(); };
     ws.onmessage=onMsg;

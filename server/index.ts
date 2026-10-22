@@ -40,7 +40,7 @@ function loadSeedConfig() {
 async function seedAvailableNumbers() {
   console.log("[Seed] Starting seed check...");
   console.log("[Seed] NODE_ENV:", process.env.NODE_ENV);
-  console.log("[Seed] DATABASE_URL prefix:", process.env.DATABASE_URL?.substring(0, 50) + "...");
+  console.log("[Seed] Database connection configured:", Boolean(process.env.DATABASE_URL));
   
   try {
     const existing = await storage.getAllAvailableNumbers();

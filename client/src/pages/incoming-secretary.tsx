@@ -91,7 +91,7 @@ export default function IncomingSecretary() {
   const user = auth?.user ?? null;
   const token = auth?.token ?? null;
   const authLoading = auth?.isLoading ?? false;
-  const publicPreview = typeof window !== "undefined" && window.location.pathname === "/incoming-secretary-preview";
+  const publicPreview = typeof window !== "undefined" && window.location.pathname === "/admin/incoming-secretary-preview";
   const isOfflineDemoRoute = publicPreview && import.meta.env.DEV;
   const localPreviewId = useRef(1);
   const [payload, setPayload] = useState<Payload | null>(null);

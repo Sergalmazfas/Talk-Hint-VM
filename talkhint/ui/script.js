@@ -208,7 +208,7 @@ async function checkPendingCalls() {
     showPushIncomingCall(fromNumberFromUrl || 'Unknown', callSidFromUrl);
     // Clean up URL without refresh
     if (window.history.replaceState) {
-      window.history.replaceState({}, document.title, '/app');
+      window.history.replaceState({}, document.title, '/admin/app/');
     }
     return;
   }
@@ -3930,7 +3930,7 @@ async function registerServiceWorker() {
   }
   
   try {
-    const registration = await navigator.serviceWorker.register('/app/sw.js');
+    const registration = await navigator.serviceWorker.register('/admin/app/sw.js');
     log('Service worker registered');
     
     // Listen for updates

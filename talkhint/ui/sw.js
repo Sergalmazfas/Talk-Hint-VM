@@ -43,8 +43,8 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'TalkHint',
     body: 'You have a notification',
-    icon: '/app/icon-192.png',
-    badge: '/app/badge-72.png',
+    icon: '/admin/app/icon-192.png',
+    badge: '/admin/app/badge-72.png',
     data: {}
   };
   
@@ -58,8 +58,8 @@ self.addEventListener('push', (event) => {
   
   const options = {
     body: data.body,
-    icon: data.icon || '/app/icon-192.png',
-    badge: data.badge || '/app/badge-72.png',
+    icon: data.icon || '/admin/app/icon-192.png',
+    badge: data.badge || '/admin/app/badge-72.png',
     vibrate: [200, 100, 200, 100, 200],
     tag: data.tag || 'talkhint-notification',
     requireInteraction: data.requireInteraction !== false,
@@ -104,9 +104,9 @@ self.addEventListener('notificationclick', (event) => {
   }
   
   // Open or focus the app - include callSid in URL for new windows
-  let urlToOpen = notificationData.url || '/app';
+  let urlToOpen = notificationData.url || '/admin/app/';
   if (callSid) {
-    urlToOpen = '/app?callSid=' + encodeURIComponent(callSid) + '&from=' + encodeURIComponent(notificationData.fromNumber || '');
+    urlToOpen = '/admin/app/?callSid=' + encodeURIComponent(callSid) + '&from=' + encodeURIComponent(notificationData.fromNumber || '');
   }
   
   event.waitUntil(

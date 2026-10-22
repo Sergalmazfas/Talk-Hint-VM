@@ -36,6 +36,7 @@ import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
+import { registerAdminWebBoundary } from "./adminWeb";
 import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices, resolveTranslatorPlayback } from "./translation/twilioBridge";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
@@ -168,6 +169,7 @@ function timingSafeEqualStr(a: string, b: string): boolean {
 }
 
 async function healthAccessAllowed(req: express.Request): Promise<boolean> {
+  if (isBenchmarkAdmin((req.user as any)?.email)) return true;
   // Frictionless outside production.
   if (process.env.NODE_ENV !== "production") return true;
 
@@ -287,6 +289,7 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  registerAdminWebBoundary(app);
   setupWebSocket(httpServer);
   registerChatGPTIntegration(app, mcpReleaseConfiguration(
     process.env, process.env.NODE_ENV === "production", () => process.env.SESSION_SECRET ?? "",
@@ -405,9 +408,11 @@ export async function registerRoutes(
   // In production, use cwd-relative path; in dev, use __dirname-relative
   const talkhintUiPath = process.env.NODE_ENV === "production"
     ? path.join(process.cwd(), "dist/talkhint/ui")
-    : path.join(__dirnameResolved, "../dist/talkhint/ui");
+    : path.join(__dirnameResolved, "../talkhint/ui");
   console.log("[TalkHint] Serving UI from:", talkhintUiPath);
-  app.use("/app", express.static(talkhintUiPath));
+  app.use("/admin/app", express.static(talkhintUiPath, {
+    index: "index.html", setHeaders: res => res.setHeader("Cache-Control", "no-store"),
+  }));
 
   app.get("/api/expo-url", (_req, res) => {
     let url = "";
@@ -2069,6 +2074,17 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       await deleteSession(authHeader.substring(7));
+    }
+    // Web access now uses the existing Passport session as well as the app
+    // token. Signing out must close both; native clients keep the same reply.
+    if (typeof req.logout === "function") {
+      return req.logout(() => {
+        if (req.session) return req.session.destroy(() => {
+          res.clearCookie("connect.sid");
+          res.json({ success: true });
+        });
+        res.json({ success: true });
+      });
     }
     res.json({ success: true });
   });
