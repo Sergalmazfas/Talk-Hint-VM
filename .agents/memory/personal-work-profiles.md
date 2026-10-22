@@ -18,6 +18,19 @@ A promised booking requires a durable calendar acknowledgement, not merely a
 transcript or generated reply. Number setup is not permission to enable
 autonomous incoming answering or forwarding.
 
+Number onboarding must offer two optional purposes, in the user's words:
+«один для фреймов, другой только рабочий». The user may select only the
+frames number, only Work, or both. Do not assume that both numbers are required.
+
+**Why:** The user explicitly specified all three onboarding choices and the
+corresponding independent flows.
+
+**How to apply:** Work-only goes directly to the Work card-based setup without
+requiring another number first. Frames-only follows that number's flow. When
+both are selected, each number follows its corresponding flow. This is the
+general user onboarding requirement, not a special entitlement for the creator.
+Do not silently reinterpret the user's term «фреймы» as a different app mode.
+
 «Ты видишь только карточки, которые заполняются. Одно заполнение решает,
 кто он, откуда и зачем. Ничего более. Мы знакомы же только карточкой».
 Secretary is universal because the filled card is its sole source of knowledge
