@@ -6,7 +6,7 @@
 - [Twilio auth token vs SID mis-paste](twilio-auth-token-gotcha.md) — 401 code 20003 came from pasting the Account SID (34ch, "AC…") into TWILIO_AUTH_TOKEN; real token is 32ch, no "AC".
 - [Secrets audit findings](secrets-audit.md) — Twilio/VAPID ok; APNS PEMs stored single-line (normalize in code, never Buffer.from raw); Stripe secret=TEST vs publishable=LIVE mismatch + webhook secret missing.
 - [Call-history recording lifecycle](call-history-recording.md) — records created in /twilio/voice, finalized in /twilio/status; outbound final-status unreliable (statusCallback is number-level); /api/calls is auth-scoped.
-- [Diagnostic recording scope](diagnostic-recording-scope.md) — only the admin-enabled diagnostic profile may record; its incoming and outgoing calls are silent, with no global switch.
+- [Diagnostic recording consent](diagnostic-recording-scope.md) — admin flag is not participant consent; unverified recording stays blocked without blocking voice.
 - [Deepgram Flux (v2) STT](deepgram-flux-stt.md) — Flux owns turn detection (TurnInfo events); gate is a thin commitTurn finalizer; μ-law 8kHz native; no KeepAlive; eager off.
 - [Production rollout / DB schema strategy](prod-rollout-strategy.md) — Reserved VM + managed PG: prod schema goes via Publish flow, NOT prod-migrate.ts; Twilio sig check force-enabled in prod.
 - [iOS XcodeGen source globbing](ios-xcodegen-sources.md) — new .swift files under ios/TalkHint auto-included via project.yml; no pbxproj edits, prefer one file per VC.
@@ -57,3 +57,4 @@
 - [Secretary Live rollout](incoming-live-dev.md) — owner approved GPT-Live after microphone trial; native protocol, shared protected intake; release and phone activation remain separate.
 - [Owner-only web workspace](admin-web-boundary.md) — keep the entire current web UI private, not just labs; native and integration clients remain separate.
 - [Public Secretary direction](public-secretary-direction.md) — owner chose teal, rejected blue; single account/card, honest demos, no parallel portal or revived SMS work.
+- [Client launch data boundaries](client-launch-boundaries.md) — no permanent requests CRM; retention periods unapproved; history deletion does not cancel Calendar or delete CRM copies.

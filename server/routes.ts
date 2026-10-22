@@ -24,6 +24,7 @@ import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
+import { recordingPermitted, sendSmsSafely } from "./communications/safety";
 import { deriveOtherPartyPhone, formatStaticCards } from "./contactMemory";
 import { pendingCalls, users, phoneNumbers, deviceTokens, DIALOGUE_ENTRY_TYPES } from "@shared/schema";
 import type { DialogueEntry, DialogueEntryType } from "@shared/schema";
@@ -1152,7 +1153,9 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         // diagnostic-flagged owner are recorded via native Twilio recording.
         // Fail-closed helper — any error means "don't record"; a recording
         // failure can never stop or degrade the call.
-        const diagRecording = !copilotCall && await isDiagnosticRecordingUser(pendingCall.userId);
+        const diagRecording = !copilotCall &&
+          recordingPermitted(isIosConferenceClientType(pendingCall.clientType) ? "incoming_conference" : "incoming_browser") &&
+          await isDiagnosticRecordingUser(pendingCall.userId);
         if (diagRecording) {
           void stampRecordingPolicy(callSid);
         }
@@ -1592,15 +1595,14 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         try {
           const [user] = await db.select().from(users).where(eq(users.id, ownerUserId));
           if (user?.forwardingPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-            const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+            const recipient = user.forwardingPhone;
             const protocol = req.get("x-forwarded-proto") || "https";
             const appUrl = `${protocol}://${host}/app`;
-            await twilioClient.messages.create({
+            await sendSmsSafely("incoming_call_notification", () => twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN).messages.create({
               body: `📞 Incoming call from ${fromNumber}. Answer in app: ${appUrl}`,
               from: toNumber, // Use the Twilio number that received the call
-              to: user.forwardingPhone
-            });
-            console.log(`[TwiML Voice] SMS sent to ${user.forwardingPhone}`);
+              to: recipient
+            }));
           } else {
             console.log("[TwiML Voice] No forwarding phone for SMS notification");
           }
@@ -1739,14 +1741,13 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
        // (Task #173). Fail-closed: any error means "don't record"; recording
        // never alters call routing, streaming, or hints in any way.
       let diagnosticTestRecording = false;
-      if (fromNumber && fromNumber.startsWith("client:user-")) {
+      if (fromNumber && fromNumber.startsWith("client:user-") && recordingPermitted("outgoing_browser")) {
         diagnosticTestRecording = await isDiagnosticRecordingUser(
           fromNumber.replace("client:user-", ""),
         );
       }
-      // Recording is controlled only by the per-user admin capability. The
-      // legacy global env toggle is intentionally ignored so no other user or
-      // line can turn recording on.
+      // Capability is necessary, never consent. The independent safety gate
+      // above denies unverified participant consent, including for admins.
       const shouldRecord = !copilotMode && diagnosticTestRecording;
       if (shouldRecord) {
         // The admin-enabled diagnostic profile records silently regardless of
@@ -1802,7 +1803,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
           await storage.updateCall(call.id, { metadata });
           console.log(`[Recording] Stored recording metadata for ${callSid}`);
           // Every diagnostic user's call is a test: auto-send to the benchmark.
-          if (call.userId && await isDiagnosticRecordingUser(call.userId)) {
+          if (call.userId && recordingPermitted("recording_callback") && await isDiagnosticRecordingUser(call.userId)) {
             scheduleAutoBenchmark(callSid);
           }
         }

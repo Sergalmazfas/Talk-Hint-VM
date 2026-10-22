@@ -163,7 +163,11 @@ describe("GET /api/health", () => {
       expect(res.body.alertChannels.sms).toEqual({
         configured: false,
         ready: false,
-        missing: [],
+        missing: [
+          "sender_readiness_unverified",
+          "recipient_sms_consent_unverified",
+          "suppression_check_unavailable",
+        ],
       });
       expect(res.body.alertChannels.email).toEqual({
         configured: false,

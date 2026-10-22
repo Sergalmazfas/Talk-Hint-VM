@@ -45,6 +45,17 @@ beforeEach(() => vi.stubEnv("BENCHMARK_ADMIN_EMAILS", "owner@example.test"));
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe("entire existing web workspace is owner-only", () => {
+  it("keeps communication readiness admin-only and reports denial rather than fake readiness", async () => {
+    const path = "/api/admin/communications/readiness";
+    expect((await request(app()).get(path)).status).toBe(401);
+    expect((await request(app()).get(path).set("x-test-oauth", "regular")).status).toBe(403);
+    const response = await request(app()).get(path).set("x-test-oauth", "owner");
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.body.sms.allowed).toBe(false);
+    expect(response.body.recording.allowed).toBe(false);
+    expect(response.body.transcriptionConsentImplemented).toBe(false);
+  });
   it("serves the public Secretary home and separate Google-only admin entry, with no old phone UI", async () => {
     const home = await request(app()).get("/");
     expect(home.status).toBe(200);

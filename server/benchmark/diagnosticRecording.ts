@@ -1,10 +1,8 @@
 // Diagnostic call recording policy (Task #173).
 //
-// For users explicitly flagged with users.diagnostic_recording_enabled, every
-// telephone call is recorded via NATIVE Twilio Voice Recording (dual-channel
-// where supported) so the real call can later be run through the LIVE Ears &
-// Brain Benchmark (#172). OFF for all normal users. NOT tied to admin role —
-// it is a separate backend capability flag.
+// Legacy capability only. A separate communication safety gate in routes.ts
+// currently denies every new recording until participant consent, disclosure,
+// purpose and retention can be verified. Capability is NOT participant consent.
 //
 // Hard invariants:
 // - A recording failure must NEVER stop or degrade the live call. Every check
@@ -18,10 +16,8 @@ import { parseTranscriptText } from "../airatomaWebhook";
 
 // ---------------------------------------------------------------------------
 // Recording policy.
-// Twilio does NOT announce recording automatically. The per-user admin
-// capability is the only recording authority, and an enabled diagnostic user's
-// calls are always silent in both directions. The policy is persisted with
-// each recording for auditability.
+// Twilio does NOT announce recording automatically. The legacy metadata version
+// remains readable for existing recordings, not authority to start a new one.
 // ---------------------------------------------------------------------------
 export const DIAGNOSTIC_RECORDING_POLICY_VERSION = "silent-diagnostic-v1";
 

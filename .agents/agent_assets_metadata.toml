@@ -355,3 +355,17 @@ mtime_ms = 1792471617832
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b74f4ac8-3e5b-4451-8795-7034fddd692e/dfbdec8a-013c-4ef3-bbb1-3aab90a31ace"
 storage_version_token = "1792471618754770"
 content_type = "text/html"
+
+[[outputs]]
+id = "Uc9tiPdj_co-BU3ZOLNxg"
+uri = "file://docs/roadmap/talkhint-client-readiness.md"
+type = "text"
+title = "TalkHint — roadmap клиентской готовности"
+description = "10 этапов, зависимости, решения владельца и результаты проверки этапа №1 в Dev. Этапы №2–10 не запущены."
+logical_id = "f438cb81-c557-429a-b0b9-1afd6311f196"
+content_hash = "sha256:079260f9f8608279c1f34434ef2774d6059a0c1014b2858658ef6c83e22bc50d"
+size = 34219
+mtime_ms = 1792691711596
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f438cb81-c557-429a-b0b9-1afd6311f196/bd622a03-92d4-4c07-9f90-f2246537965e"
+storage_version_token = "1792691720833580"
+content_type = "text/markdown"

@@ -2,6 +2,7 @@ import type { Express, RequestHandler } from "express";
 import { requireBenchmarkAdmin } from "./benchmark/adminGate";
 import { issueAdminWebTicket } from "./adminWebTickets";
 import { registerPublicSite } from "./publicSite";
+import { communicationReadiness } from "./communications/safety";
 
 const html = (title: string, body: string) => `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -49,6 +50,8 @@ export function registerAdminWebBoundary(app: Express) {
   app.get("/index.html", (_req, res) => res.redirect("/"));
   app.get("/admin/login", (_req, res) => res.set("Cache-Control", "no-store").type("html").send(ADMIN_LOGIN));
   app.use("/api/admin", requireBenchmarkAdmin, adminActionOrigin);
+  app.get("/api/admin/communications/readiness", (_req, res) =>
+    res.set("Cache-Control", "no-store").json(communicationReadiness()));
   app.post("/api/admin/websocket-ticket", (req, res) => {
     const ticket = issueAdminWebTicket(req.user!.email);
     if (!ticket) return res.status(503).json({ error: "Administrator transport unavailable" });
