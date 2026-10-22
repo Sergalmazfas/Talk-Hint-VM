@@ -1,5 +1,27 @@
 # Incoming Secretary: development microphone test
 
+## GPT-Live 1 comparison
+
+The existing bench now has a Dev-only model selector, initially GPT-Live 1.
+Realtime-2.1 remains selectable and the API's omitted-model behavior stays unchanged.
+GPT-Live uses its native `/v1/live/sessions` protocol with PCMU 8 kHz, Marin,
+Responses delegation to `gpt-6.1-sol` (medium reasoning), and `store:false`.
+No provider-side audio recording is requested. Backend tools are only the shared
+`save_request` / `submit_request`; no dial, SMS, calendar or hosted tools.
+
+The same explicit owner-approved Work-card snapshot, one-use capability,
+owner isolation, permission revocation and separate TEST table apply to both.
+Selected voice/backend metadata is retained in each new TEST request for comparison.
+Native Live manages full-duplex speech; its adapter never sends Realtime truncate
+or cancel events. Local queued audio is cleared on a new recognized caller fragment;
+this is not proof of real-device interruption/noise performance.
+
+Run `NODE_ENV=development npx tsx script/probe-incoming-live.ts --audio` for
+synthetic spoken EN → RU → ES input, Monday-hours lookup and corrected name
+saved in memory. It uses real OpenAI voice/backend sessions, not a real mic,
+telephone, owner data or persistent owner request. TTS is only the simulated caller.
+No microphone/iPhone/headphone quality claim follows from this probe.
+
 This is the **new incoming** agent, not the outgoing Secretary lab.
 
 ## Open and use

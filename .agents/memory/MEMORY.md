@@ -53,3 +53,4 @@
 - [Personal and work profiles](personal-work-profiles.md) — one app, separate numbers and knowledge; explicit sharing, separate calendars with private free/busy awareness.
 - [Incoming Secretary boundaries](incoming-secretary-boundaries.md) — future business request intake, explicit Work disclosure consent, no activation implicit in number/card setup.
 - [Dev audio queue timing](dev-audio-queue.md) — fast Realtime generation can fill a short playback queue during healthy speech; clear on interruption, not ordinary backlog.
+- [Incoming Live comparison](incoming-live-dev.md) — native Live protocol and independent backend lifecycle; same protected intake, Dev only, no automatic telephone replacement.

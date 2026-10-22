@@ -15,9 +15,9 @@ Schedule a tool-result continuation only after the preceding response has ended 
 
 **How to apply:** Exercise multi-turn real provider dialogue, not only the initial greeting, when changing the Dev coordinator. Keep provider error codes in safe diagnostics, never raw provider payloads.
 
-The owner explicitly confirmed the incoming Dev voice sounds excellent and the responses are fast. Preserve the selected voice/model while fixing connection/interruption issues.
+The owner liked the Marin voice and response speed, but later rejected Realtime-2.1's conversational behavior after noisy-room and closed-day tests. Preserve that distinction: good voice is not approval of the agent's dialogue or model.
 
-**Why:** The user confirmed these qualities after the first microphone test.
+**Why:** The later feedback changed the model preference, not the earlier positive assessment of the voice.
 
 Treat malformed/uncertain tool fields as recoverable validation errors, not database failure. Return saved=false, ask for clarification, and never broaden accepted phone/date formats or guess a country code just to avoid a rejection.
 

@@ -2,7 +2,7 @@ import express from "express";
 import request from "supertest";
 import { EventEmitter } from "node:events";
 import { beforeEach,afterEach,it,expect,vi } from "vitest";
-const mocks=vi.hoisted(()=>({voices:0,instructions:""}));
+const mocks=vi.hoisted(()=>({voices:0,liveVoices:0,instructions:""}));
 vi.mock("../db",()=>({pool:null,db:{}}));
 vi.mock("../benchmark/adminGate",()=>({isBenchmarkAdmin:()=>true}));
 vi.mock("./devNotifications",()=>({incomingDevNotifications:async()=>({credentialsUsable:false,issues:[],deliveryTested:false})}));
@@ -23,6 +23,13 @@ vi.mock("./devConversation",()=>({DevConversation:class {
   input(){}
   async stop(reason:string){this.closed=true;await this.session.end(reason);}
 }}));
+vi.mock("./liveConversation",()=>({LiveConversation:class{
+  closed=false;
+  constructor(readonly session:any,instructions:string,_p:any){mocks.instructions=instructions;mocks.liveVoices++;}
+  async start(){}
+  input(){}
+  async stop(reason:string){this.closed=true;await this.session.end(reason);}
+}}));
 import { registerIncomingDevRoutes,handleIncomingDevSocket,incomingDevStore } from "./devMicrophone";
 import { MemoryRequests } from "./store";
 import { defaults } from "./policy";
@@ -36,7 +43,7 @@ class Peer extends EventEmitter{
   message(e:object){this.emit("message",Buffer.from(JSON.stringify(e)));}
 }
 beforeEach(()=>{
-  vi.stubEnv("NODE_ENV","development");mocks.voices=0;mocks.instructions="";
+  vi.stubEnv("NODE_ENV","development");mocks.voices=0;mocks.liveVoices=0;mocks.instructions="";
   const memory=new MemoryRequests();
   vi.spyOn(incomingDevStore,"settings").mockImplementation(async(_owner,id)=>({...defaults(id),cardIds:["approved","shared","foreign","personal"],timeZone:"America/New_York"}));
   vi.spyOn(incomingDevStore,"begin").mockImplementation((...args)=>memory.begin(...args));
@@ -47,11 +54,37 @@ afterEach(async()=>{
   for(const id of ids.splice(0))await request(app).post(`/api/incoming-secretary/dev/sessions/${id}/stop`).set("x-owner","owner").send({});
   vi.restoreAllMocks();vi.unstubAllEnvs();
 });
-async function create() {
-  const r=await request(app).post("/api/incoming-secretary/dev/sessions").set("x-owner","owner").send({numberId:"work"});
+async function create(model?:string) {
+  const r=await request(app).post("/api/incoming-secretary/dev/sessions").set("x-owner","owner").send({numberId:"work",...(model?{model}:{})});
   if(r.body.sessionId)ids.push(r.body.sessionId);
   return r;
 }
+it("offers Live only in Dev, freezes the reserved model, scopes its cards and rejects duplicates/foreign stop",async()=>{
+  const r=await create("gpt-live-1");expect(r.status).toBe(200);
+  expect(r.body).toMatchObject({model:"gpt-live-1",voice:"marin",backend:"gpt-6.1-sol",testOnly:true});
+  expect(mocks.liveVoices).toBe(0);
+  const peer=new Peer();handleIncomingDevSocket(peer as any,{headers:{origin:"https://dev.test",host:"dev.test"}});
+  peer.message({type:"connect",sessionId:r.body.sessionId,capability:r.body.capability,model:"gpt-realtime-2.1"});
+  await vi.waitFor(()=>expect(mocks.liveVoices).toBe(1));expect(mocks.voices).toBe(0);
+  expect(mocks.instructions).toContain("Future service");
+  for(const text of ["Unapproved secret","Shared secret","Personal secret","Foreign secret"])expect(mocks.instructions).not.toContain(text);
+  const repeat=new Peer();handleIncomingDevSocket(repeat as any,{headers:{origin:"https://dev.test",host:"dev.test"}});
+  repeat.message({type:"connect",sessionId:r.body.sessionId,capability:r.body.capability});
+  await vi.waitFor(()=>expect(repeat.readyState).toBe(3));expect(mocks.liveVoices).toBe(1);
+  expect((await request(app).post(`/api/incoming-secretary/dev/sessions/${r.body.sessionId}/stop`).set("x-owner","other").send({})).status).toBe(404);
+  const history=(await request(app).get("/api/incoming-secretary/dev").set("x-owner","owner")).body;
+  expect(history.requests[0].devModel).toBe("gpt-live-1");
+  incomingRevocations.emit("card","owner","approved");
+  await vi.waitFor(async()=>{
+    const result=(await request(app).get("/api/incoming-secretary/dev").set("x-owner","owner")).body;
+    expect(result.activeSession).toBeNull();
+    expect(result.requests.find((r:any)=>r.id===history.requests[0].id).closed).toBe(true);
+  });
+});
+it("does not silently replace an unsupported requested model",async()=>{
+  expect((await create("gpt-4o")).status).toBe(400);
+  expect(mocks.voices+mocks.liveVoices).toBe(0);
+});
 it("is Dev-only and requires authenticated owner/admin",async()=>{
   expect((await request(app).get("/api/incoming-secretary/dev")).status).toBe(401);
   vi.stubEnv("NODE_ENV","production");

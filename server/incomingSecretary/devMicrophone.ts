@@ -9,12 +9,14 @@ import { IncomingStore } from "./store";
 import { IntakeSession } from "./session";
 import { MODEL,VOICE,allowedCards,buildInstructions,type Settings } from "./policy";
 import { DevConversation } from "./devConversation";
+import { LiveConversation } from "./liveConversation";
+import { LIVE_MODEL,LIVE_VOICE,LIVE_BACKEND } from "./liveAudio";
 import { incomingDevNotifications } from "./devNotifications";
 import { incomingRevocations } from "./revocation";
 
 export const incomingDevStore=new IncomingStore("incoming_secretary_dev_requests");
 type Entry={id:string;owner:string;numberId:string;hash:Buffer;expires:number;used:boolean;closed:boolean;
-  session:IntakeSession;settings:Settings;facts:ReturnType<typeof allowedCards>;voice?:DevConversation;timer?:ReturnType<typeof setTimeout>;
+  model:string;session:IntakeSession;settings:Settings;facts:ReturnType<typeof allowedCards>;voice?:DevConversation|LiveConversation;timer?:ReturnType<typeof setTimeout>;
   stopping?:Promise<void>;finalized?:boolean};
 const sessions=new Map<string,Entry>();
 const digest=(text:string)=>createHash("sha256").update(text).digest();
@@ -79,18 +81,21 @@ export function registerIncomingDevRoutes(app:Express,auth:RequestHandler){
       const requests=await incomingDevStore.list(req.user!.id);
       const active=Array.from(sessions.values()).find(e=>e.owner===req.user!.id&&!e.closed&&!e.voice?.closed);
       res.json({requests,activeSession:active?{sessionId:active.id,requestId:active.session?(await active.session.begin()).id:null}:null,
-        notifications:await incomingDevNotifications(req.user!.id),model:MODEL,voice:VOICE,testOnly:true});
+        notifications:await incomingDevNotifications(req.user!.id),model:MODEL,voice:VOICE,testOnly:true,
+        models:[{id:LIVE_MODEL,voice:LIVE_VOICE,backend:LIVE_BACKEND,label:"GPT‑Live 1 · естественный диалог"},
+          {id:MODEL,voice:VOICE,backend:null,label:"GPT‑Realtime‑2.1 · прежний вариант"}]});
     }catch{res.status(503).json({error:"Dev-хранилище или диагностика недоступны. Тестовые заявки не выдаются за реальные."});}
   });
   app.post("/api/incoming-secretary/dev/sessions",guard,auth,admin,json,async(req,res)=>{
-    const input=z.object({numberId:z.string().min(1).max(100)}).strict().safeParse(req.body);
-    if(!input.success)return res.status(400).json({error:"Выберите собственный рабочий номер."});
+    const input=z.object({numberId:z.string().min(1).max(100),model:z.enum([MODEL,LIVE_MODEL]).optional()}).strict().safeParse(req.body);
+    if(!input.success)return res.status(400).json({error:"Выберите собственный рабочий номер и поддерживаемую Dev-модель."});
     const owner=req.user!.id;
     const existing=Array.from(sessions.values()).find(e=>e.owner===owner&&!e.closed&&!e.voice?.closed);
     if(existing)return res.status(409).json({error:"Уже есть тестовая сессия. Остановите её перед новым тестом.",sessionId:existing.id});
     // Reservation is installed before the first await so concurrent starts cannot win twice.
     const id=randomUUID(),secret=randomBytes(32).toString("base64url");
-    const provisional={id,owner,numberId:input.data.numberId,hash:digest(secret),expires:Date.now()+120000,used:false,closed:false} as Entry;
+    const model=input.data.model??MODEL;
+    const provisional={id,owner,model,numberId:input.data.numberId,hash:digest(secret),expires:Date.now()+120000,used:false,closed:false} as Entry;
     sessions.set(id,provisional);
     try{
       const s=await snapshot(owner,input.data.numberId);
@@ -98,11 +103,14 @@ export function registerIncomingDevRoutes(app:Express,auth:RequestHandler){
       const session=new IntakeSession(owner,`dev-microphone:${id}`,s.settings,incomingDevStore);
       Object.assign(provisional,s,{session});
       const record=await session.begin();
+      await incomingDevStore.update(owner,session.callSid,r=>({...r,devModel:model,devVoice:model===LIVE_MODEL?LIVE_VOICE:VOICE,
+        devBackend:model===LIVE_MODEL?LIVE_BACKEND:null}));
       if(provisional.closed){await session.end("cancelled");throw new Error("Session cancelled");}
       if(!unchanged(provisional,await snapshot(owner,input.data.numberId)))throw new Error("Permissions changed");
       provisional.timer=setTimeout(()=>void stop(provisional,"unused session expired").catch(()=>{}),120000);
       provisional.timer.unref?.();
-      res.json({sessionId:id,capability:secret,requestId:record.id,model:MODEL,voice:VOICE,
+      res.json({sessionId:id,capability:secret,requestId:record.id,model,voice:model===LIVE_MODEL?LIVE_VOICE:VOICE,
+        backend:model===LIVE_MODEL?LIVE_BACKEND:null,
         cardTitles:s.facts.map(c=>c.title),testOnly:true});
     }catch{
       if(provisional.session)await stop(provisional,"setup failed").catch(()=>{});
@@ -145,7 +153,8 @@ export function handleIncomingDevSocket(ws:WebSocket,request:{headers:Record<str
       if(!unchanged(candidate,await snapshot(candidate.owner,candidate.numberId)))throw new Error("Permissions changed");
       if(ended||candidate.closed)return;
       clearTimeout(candidate.timer);
-      candidate.voice=new DevConversation(candidate.session,buildInstructions(candidate.settings,candidate.facts),ws);
+      const Conversation=candidate.model===LIVE_MODEL?LiveConversation:DevConversation;
+      candidate.voice=new Conversation(candidate.session,buildInstructions(candidate.settings,candidate.facts),ws);
       await candidate.voice.start();
     })().catch(()=>{if(ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:"error",error:"Dev-сессия недоступна, истекла или разрешения изменились. Начните новый тест вручную."}));ws.close();});
   });

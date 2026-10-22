@@ -9,15 +9,16 @@ import { acquireAndReserveLiveSession, clearScheduledAudio, closeLocalResources,
 type Turn = { role: "caller" | "secretary"; text: string; language?: string };
 type TestRequest = {
   id: string; numberId: string; status: string; fields?: Record<string, unknown>; missing?: string[];
+  devModel?:string;devVoice?:string;devBackend?:string|null;
   turns?: Turn[]; outcome?: string; updatedAt: string; callSid?: string; notificationStatus?: string;
 };
 type NotificationHealth = {
   certificateConfigured: boolean; keyConfigured: boolean; credentialsUsable: boolean; issues: string[];
   activeAlertDevices: number; deviceEnvironments: string[]; bundleIds: string[]; deliveryTested: false;
 };
-type SessionResponse = { sessionId: string; capability: string; requestId: string; model: string; voice: string; cardTitles: string[]; testOnly: true };
+type SessionResponse = { sessionId: string; capability: string; requestId: string; model: string; voice: string; backend?:string|null;cardTitles: string[]; testOnly: true };
 type RecoverableSession = { sessionId: string; requestId: string };
-type BenchInfo = { requests: TestRequest[]; notifications: NotificationHealth; model: string; voice: string; testOnly: true; activeSession?: RecoverableSession | null };
+type BenchInfo = { requests: TestRequest[]; notifications: NotificationHealth; model: string; voice: string; models?:Array<{id:string;voice:string;backend:string|null;label:string}>;testOnly: true; activeSession?: RecoverableSession | null };
 type BenchStatus = "idle" | "requesting" | "connecting" | "ready" | "stopping" | "error";
 type Props = { token: string; numberId: string };
 
@@ -78,6 +79,8 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
   const [info, setInfo] = useState<BenchInfo | null>(null);
   const [currentRequest, setCurrentRequest] = useState<TestRequest | null>(null);
   const [model, setModel] = useState("");
+  const [selectedModel,setSelectedModel]=useState("gpt-live-1");
+  const [backend,setBackend]=useState("");
   const [voice, setVoice] = useState("");
   const [cardTitles, setCardTitles] = useState<string[]>([]);
   const [transcript, setTranscript] = useState<Turn[]>([]);
@@ -231,7 +234,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
         reserve: async () => {
           const response = await fetch("/api/incoming-secretary/dev/sessions", {
             method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ numberId }),
+            body: JSON.stringify({ numberId,model:selectedModel }),
           });
           if (!response.ok) {
             const details = await readErrorBody(response, "Сервер не смог зарезервировать тестовую заявку.", token);
@@ -271,6 +274,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
       setInfo((previous) => previous ? { ...previous, activeSession: { sessionId: createdSession!.sessionId, requestId: createdSession!.requestId } } : previous);
       setCurrentRequest({ id: createdSession.requestId, numberId, status: "test_session_reserved", updatedAt: new Date().toISOString(), fields: {}, missing: [], turns: [], outcome: "TEST · awaiting live session" });
       setModel(createdSession.model);
+      setBackend(createdSession.backend||"");
       setVoice(createdSession.voice);
       setCardTitles(createdSession.cardTitles);
       setStatus("connecting");
@@ -299,6 +303,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
         let message: Record<string, unknown>;
         try { message = JSON.parse(String(event.data)); } catch { setError("Сервер прислал некорректное сообщение."); return; }
         if (message.type === "ready") {
+          setBackend(String(message.backend||""));
           setModel(String(message.model || createdSession!.model));
           setVoice(String(message.voice || createdSession!.voice));
           setStatus("ready");
@@ -445,7 +450,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
         if (startedContext && startedContext.state !== "closed") void startedContext.close().catch(() => undefined);
       }
     }
-  }, [closeAudio, loadHistory, numberId, rememberRecoverableSession, stopSession, token]);
+  }, [closeAudio, loadHistory, numberId, selectedModel,rememberRecoverableSession, stopSession, token]);
 
   async function reload() {
     setReloadBusy(true);
@@ -482,6 +487,15 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
               <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[#9db2ad]">Выбранный номер ID</span><code className="break-all text-teal-100">{numberId || "Номер не выбран"}</code></div>
               <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${statusTone}`} role="status" aria-live="polite">{statusCopy[status]}</div>
               {model && <div className="mt-3 grid gap-2 sm:grid-cols-2"><p><span className="text-xs text-[#91a8a2]">Модель из runtime</span><span className="block font-mono text-sm text-[#dce9e4]">{model}</span></p><p><span className="text-xs text-[#91a8a2]">Голос из runtime</span><span className="block font-mono text-sm text-[#dce9e4]">{voice}</span></p></div>}
+              <label className="mt-3 block text-sm text-[#c4d8d1]">Вариант разговора
+                <select value={selectedModel} disabled={sessionIsLive||status==="stopping"} onChange={e=>setSelectedModel(e.target.value)}
+                  className="mt-2 block w-full rounded-lg border border-[#526c68] bg-[#14292a] p-3 text-white">
+                  {(info?.models||[{id:"gpt-live-1",label:"GPT‑Live 1 · естественный диалог"},{id:"gpt-realtime-2.1",label:"GPT‑Realtime‑2.1 · прежний вариант"}]).map(option=>
+                    <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
+              </label>
+              <p className="mt-2 text-xs text-[#a9bbb7]">{selectedModel==="gpt-live-1"?"GPT‑Live 1 · Marin; заявки обрабатывает gpt-6.1-sol. Только Dev: запись сессии выключена (store:false), телефонного набора нет.":"Прежняя прямая связка Realtime‑2.1 · Marin. Только Dev."}</p>
+              {backend&&<p className="mt-2 text-xs text-teal-100">Backend из runtime: {backend}</p>}
               {cardTitles.length > 0 && <p className="mt-3 text-xs leading-5 text-[#b9cbc5]">Используемые карточки: {cardTitles.join(" · ")}</p>}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -537,6 +551,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
               <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline" className="border-amber-700 text-amber-100">TEST</Badge><span className="text-xs text-[#93aaa2]">{new Date(request.updatedAt).toLocaleString()}</span></div>
               <p className="mt-2 text-sm font-medium">{request.outcome || request.status}</p>
               <p className="mt-1 text-xs text-[#91a7a1]">ID: {request.id} · номер: {request.numberId} · статус: {request.status}</p>
+              <p className="mt-1 text-xs text-teal-100">{request.devModel?`${request.devModel} · ${request.devVoice||"—"}${request.devBackend?` · backend ${request.devBackend}`:""}`:"Модель в старой записи не сохранена"}</p>
               {request.missing?.length ? <p className="mt-1 text-xs text-amber-100">Missing: {request.missing.join(", ")}</p> : null}
               {request.turns?.length ? <div className="mt-2 space-y-1 border-t border-[#3e4a45] pt-2">{request.turns.map((turn, index) => <p key={`${request.id}-${index}`} className="text-xs leading-5 text-[#c3d0ca]"><strong>{turn.role === "caller" ? "Caller" : "Secretary"}:</strong> {turn.text}</p>)}</div> : <p className="mt-2 text-xs text-[#849890]">Transcript пока отсутствует.</p>}
             </article>) : info ? <div className="rounded-xl border border-dashed border-[#40585c] px-4 py-7 text-center text-sm text-[#a9bbb7]">История тестовых заявок пуста.</div> : <div className="h-24 animate-pulse rounded-xl bg-[#21383a]" />}
