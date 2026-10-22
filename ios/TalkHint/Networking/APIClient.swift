@@ -36,7 +36,7 @@ struct CallProfilesSnapshot: Decodable {
         let existingBindingMove: Bool?
     }
     let profiles: [CallProfileItem]
-    let recommendedWorkNumber: RecommendedNumber
+    let recommendedWorkNumber: RecommendedNumber?
     let incomingAiEnabled: Bool
     let calendarConnected: Bool
 
@@ -696,6 +696,13 @@ final class APIClient {
     }
 
     /// Explicit owner action only; never called from a page load or retry.
+    func connectProfileNumbers(choice: String) async throws {
+        guard ["frames", "work", "both"].contains(choice) else { throw APIError.decoding }
+        _ = try await request("/api/call-profiles/connect", method: "POST",
+                              json: ["choice": choice], authenticated: true)
+    }
+
+    /// Compatibility for previously installed clients.
     func connectWorkNumber(numberId: String) async throws -> CallProfileNumber {
         struct Response: Decodable { let phoneNumber: CallProfileNumber }
         let data = try await request("/api/call-profiles/work-number", method: "POST",

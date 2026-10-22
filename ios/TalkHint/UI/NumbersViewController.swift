@@ -103,7 +103,7 @@ final class NumbersViewController: UIViewController, UITableViewDataSource, UITa
     }
 
     @objc private func addTapped() {
-        navigationController?.pushViewController(AvailableNumbersViewController(), animated: true)
+        navigationController?.pushViewController(CallProfilesViewController(), animated: true)
     }
 
     // MARK: - UITableViewDataSource / Delegate
@@ -172,9 +172,12 @@ final class CallProfilesViewController: UITableViewController {
         let refresh = UIRefreshControl()
         refresh.addTarget(self, action: #selector(reload), for: .valueChanged)
         tableView.refreshControl = refresh
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: NSLocalizedString("profiles.retry", comment: ""), style: .plain,
-            target: self, action: #selector(reload))
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(title: NSLocalizedString("profiles.setup", comment: ""), style: .plain,
+                            target: self, action: #selector(choosePurpose)),
+            UIBarButtonItem(title: NSLocalizedString("profiles.retry", comment: ""), style: .plain,
+                            target: self, action: #selector(reload))
+        ]
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-refresh-profiles"
     }
 
@@ -186,6 +189,43 @@ final class CallProfilesViewController: UITableViewController {
     @objc private func reload() {
         guard !loading, !connecting else { return }
         Task { @MainActor in await loadProfiles() }
+    }
+
+    @objc private func choosePurpose() {
+        guard !loading, !connecting, presentedViewController == nil else { return }
+        let alert = UIAlertController(title: NSLocalizedString("profiles.setup", comment: ""),
+                                      message: NSLocalizedString("profiles.setup_notice", comment: ""), preferredStyle: .alert)
+        for choice in ["frames", "work", "both"] {
+            alert.addAction(UIAlertAction(title: NSLocalizedString("profiles.choice." + choice, comment: ""), style: .default) { [weak self] _ in
+                self?.connectChoice(choice)
+            })
+        }
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func connectChoice(_ choice: String) {
+        guard !loading, !connecting else { return }
+        connecting = true
+        tableView.reloadData()
+        Task { @MainActor in
+            var failure: String?
+            do { try await api.connectProfileNumbers(choice: choice) }
+            catch { failure = error.localizedDescription }
+            // Recover state through GET; never automatically repeat allocation.
+            await loadProfiles()
+            connecting = false
+            tableView.reloadData()
+            if let failure = failure {
+                let alert = UIAlertController(title: NSLocalizedString("profiles.connection_error", comment: ""),
+                                              message: failure, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+                present(alert, animated: true)
+            } else if choice != "both" {
+                let scope: CallProfileScope = choice == "work" ? .work : .personal
+                navigationController?.pushViewController(KnowledgeCardsViewController(profileScope: scope, api: api), animated: true)
+            }
+        }
     }
 
     @MainActor private func loadProfiles() async {
@@ -212,8 +252,7 @@ final class CallProfilesViewController: UITableViewController {
         if scope == .shared { return [.cards(.shared)] }
         let numbers = snapshot?.profile(scope)?.numbers ?? []
         var result: [Row] = numbers.isEmpty ? [.missing] : numbers.map { .number($0) }
-        if scope == .work, numbers.isEmpty, let candidate = snapshot?.recommendedWorkNumber,
-           candidate.available { result.append(.connect(candidate)) }
+        // All users enter the same three-purpose setup, not a creator-specific candidate.
         result.append(.cards(scope))
         if scope == .work { result.append(.incoming) }
         return result
@@ -373,10 +412,9 @@ final class IncomingSecretaryViewController: UITableViewController {
     }
     @objc private func save() {
         guard !loading, var value = draft else { return }
-        value.timeZone = zone.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        value.business.opens = opens.text ?? ""; value.business.closes = closes.text ?? ""
-        guard let minutes = Int(travel.text ?? "") else { return }
-        value.business.travelMinutes = minutes
+        // Business knowledge is entered once in the existing card, not here.
+        value.timeZone = ""
+        value.business = APIClient.IncomingSettings.Business(days: [], opens: "", closes: "", travelMinutes: 0)
         loading = true
         navigationItem.rightBarButtonItems?.forEach { $0.isEnabled = false }
         Task { @MainActor in
@@ -393,13 +431,13 @@ final class IncomingSecretaryViewController: UITableViewController {
     override func numberOfSections(in tableView: UITableView) -> Int { 5 }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         if section == 0 { return 1 }
-        if section == 1 { return 3 }
-        if section == 2 { return draft == nil ? 0 : 10 }
+        if section == 1 { return 2 }
+        if section == 2 { return 0 }
         if section == 3 { return (snapshot?.cards.count ?? 0) + 1 }
         return max(1, snapshot?.requests.count ?? 0)
     }
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        l(["mode", "settings", "hours", "cards", "requests"][section])
+        section == 2 ? nil : l(["mode", "settings", "hours", "cards", "requests"][section])
     }
     override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
         if section == 0 { return l("gate_notice") }

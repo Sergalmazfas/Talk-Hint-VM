@@ -1,3 +1,8 @@
+"profiles.setup" = "Choose numbers";
+"profiles.setup_notice" = "Existing numbers stay unchanged. Two missing numbers are assigned together or not at all. No call or AI activation.";
+"profiles.choice.frames" = "Frames only";
+"profiles.choice.work" = "Work only";
+"profiles.choice.both" = "Both numbers";
 "incoming.title" = "Incoming AI secretary";
 "incoming.mode" = "Work calls";
 "incoming.settings" = "Number and consent";
@@ -5,7 +10,7 @@
 "incoming.cards" = "Allowed client information";
 "incoming.requests" = "Incoming requests";
 "incoming.gate_notice" = "Preferences do not activate the real number by themselves. A separate server release permission is required. Personal and outgoing calls are unchanged.";
-"incoming.future_notice" = "Future mobile massage business, not launched. End sessions by closing; allow at least 30 minutes travel. Prices, durations, area and cancellation rules are not defined.";
+"incoming.future_notice" = "Identity, services, prices, hours and instructions come only from your selected Work cards. Missing facts are unknown.";
 "incoming.cards_notice" = "Only checked Work cards may be disclosed to clients. Shared cards are not permission. Save your selection explicitly.";
 "incoming.request_notice" = "No calendar connected. Every item is a request, not a confirmed appointment. Pull down to refresh.";
 "incoming.runtime_ready" = "Server launch permission enabled";
@@ -16,7 +21,7 @@
 "incoming.opens" = "Opens (HH:mm)";
 "incoming.closes" = "Closes (HH:mm)";
 "incoming.travel" = "Travel minutes";
-"incoming.template" = "Future mobile massage";
+"incoming.template" = "Create a Work card";
 "incoming.saved" = "Preferences saved";
 "incoming.collecting" = "Collecting details";
 "incoming.pending_owner" = "Awaiting owner review";

@@ -126,6 +126,12 @@ export function useAuth() {
   return context;
 }
 
+/** Dev synthetic UI only; no token lookup, registration, login or network effects. */
+export function LocalPreviewAuth({children}:{children:ReactNode}) {
+  const unavailable=async()=>{throw new Error("Synthetic preview: account actions are unavailable");};
+  return <AuthContext.Provider value={{user:null,token:null,isLoading:false,login:unavailable,register:unavailable,logout:async()=>{}}}>{children}</AuthContext.Provider>;
+}
+
 export function useOptionalAuth() {
   return useContext(AuthContext);
 }

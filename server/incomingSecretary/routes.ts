@@ -36,7 +36,10 @@ export function registerIncomingRoutes(app:Express,auth:RequestHandler) {
       const parsed=settingsSchema.parse(req.body);
       const allowed=allowedCards(await storage.listKnowledgeCards(owner),owner,parsed.cardIds);
       if(allowed.length!==parsed.cardIds.length)return res.status(403).json({error:"Only explicitly selected own Work cards may be used; Shared is not permission."});
-      const settings={...parsed,numberId:number.id};
+      const previous=await incomingStore.settings(owner,number.id);
+      // Preserve legacy data without using it as Secretary knowledge or asking for it again.
+      const noLegacyInput=!parsed.timeZone&&!parsed.business.days.length&&!parsed.business.opens&&!parsed.business.closes&&!parsed.business.travelMinutes;
+      const settings={...parsed,...(noLegacyInput?{timeZone:previous.timeZone,business:previous.business}:{}),numberId:number.id};
       await incomingStore.saveSettings(owner,settings);stopIncomingNumber(number.id);
       res.json({settings,runtimeEnabled:runtimeEnabled(),activated:runtimeEnabled()&&settings.enabled,calendarConnected:false});
     }catch(e){res.status(e instanceof z.ZodError?400:503).json({error:e instanceof z.ZodError?e.issues[0]?.message:"Could not save incoming settings"});}

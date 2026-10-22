@@ -19,7 +19,8 @@ function setup(){
     return json(state.malformed?{}:{calendars:{[WORK_CALENDAR_ID]:{busy:state.busy,errors:state.errors}}});
   });
   const calendar=new WorkCalendar(proxy,()=>Date.parse("2026-10-21T12:00Z"));
-  const settings={...defaults("work"),timeZone:WORK_TIMEZONE};
+  // Explicit standalone calendar fixture, NOT a universal Secretary default.
+  const settings={...defaults("work"),timeZone:WORK_TIMEZONE,business:{days:[0,2,3,4,5,6],opens:"08:00",closes:"22:00",travelMinutes:30}};
   return {state,proxy,calendar,settings,check:(date="2026-10-23T09:00",duration=60)=>calendar.availability(state.primary,true,settings,date,duration)};
 }
 describe("Dev Work Calendar — private, owner scoped, occupancy only, no events",()=>{

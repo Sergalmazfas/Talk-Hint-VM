@@ -14,3 +14,9 @@ ALTER TABLE incoming_secretary_dev_requests
   DROP CONSTRAINT IF EXISTS incoming_secretary_dev_requests_number_id_fkey,
   ADD CONSTRAINT incoming_secretary_dev_requests_number_id_fkey
     FOREIGN KEY(number_id) REFERENCES phone_numbers(id) ON DELETE CASCADE;
+-- A browser-only session has no phone number. Existing numbered TEST rows retain their FK.
+ALTER TABLE incoming_secretary_dev_requests ALTER COLUMN number_id DROP NOT NULL;
+CREATE TABLE IF NOT EXISTS incoming_secretary_dev_sandbox_settings (
+  user_id varchar PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  config jsonb NOT NULL DEFAULT '{}'::jsonb
+);

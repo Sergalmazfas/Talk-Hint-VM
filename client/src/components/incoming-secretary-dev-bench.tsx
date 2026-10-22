@@ -19,7 +19,8 @@ type NotificationHealth = {
 };
 type SessionResponse = { sessionId: string; capability: string; requestId: string; model: string; voice: string; backend?:string|null;cardTitles: string[]; testOnly: true };
 type RecoverableSession = { sessionId: string; requestId: string };
-type BenchInfo = { requests: TestRequest[]; notifications: NotificationHealth; model: string; voice: string; models?:Array<{id:string;voice:string;backend:string|null;label:string}>;testOnly: true; activeSession?: RecoverableSession | null };
+type BenchInfo = { requests: TestRequest[]; notifications: NotificationHealth; model: string; voice: string; models?:Array<{id:string;voice:string;backend:string|null;label:string}>;testOnly: true; activeSession?: RecoverableSession | null;
+  sandbox?:{settings:{cardIds:string[]};cards:Array<{id:string;title:string}>;cardTitles:string[]} };
 type BenchStatus = "idle" | "requesting" | "connecting" | "ready" | "stopping" | "error";
 type Props = { token: string; numberId: string };
 
@@ -78,6 +79,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
   const [notice,setNotice]=useState("");
   const [interruptions,setInterruptions]=useState(0);
   const [info, setInfo] = useState<BenchInfo | null>(null);
+  const [savingCards,setSavingCards]=useState(false);
   const [currentRequest, setCurrentRequest] = useState<TestRequest | null>(null);
   const [model, setModel] = useState("");
   const [selectedModel,setSelectedModel]=useState("gpt-live-1");
@@ -481,11 +483,11 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
           <CardHeader>
             <div className="flex items-center gap-2 text-teal-200"><Mic className="h-4 w-4" /><p className="text-xs uppercase tracking-[0.15em]">Incoming line listening bench</p></div>
             <CardTitle className="text-xl">Проверка живого голоса</CardTitle>
-            <CardDescription className="text-[#a9bbb7]">Используется выбранный номер и сохранённые сервером права/настройки. Несохранённые изменения формы не применяются.</CardDescription>
+            <CardDescription className="text-[#a9bbb7]">Используются сохранённые разрешения на существующие карточки. Самостоятельному Dev-тесту телефонный номер не нужен.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-xl border border-[#3b5557] bg-[#122328] p-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[#9db2ad]">Выбранный номер ID</span><code className="break-all text-teal-100">{numberId || "Номер не выбран"}</code></div>
+              <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[#9db2ad]">{numberId==="dev-sandbox"?"Самостоятельный Dev-тест":"Выбранный номер ID"}</span><code className="break-all text-teal-100">{numberId==="dev-sandbox"?"Без телефонного номера":numberId || "Номер не выбран"}</code></div>
               <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${statusTone}`} role="status" aria-live="polite">{statusCopy[status]}</div>
               {model && <div className="mt-3 grid gap-2 sm:grid-cols-2"><p><span className="text-xs text-[#91a8a2]">Модель из runtime</span><span className="block font-mono text-sm text-[#dce9e4]">{model}</span></p><p><span className="text-xs text-[#91a8a2]">Голос из runtime</span><span className="block font-mono text-sm text-[#dce9e4]">{voice}</span></p></div>}
               <label className="mt-3 block text-sm text-[#c4d8d1]">Вариант разговора
@@ -515,7 +517,26 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
             </div>
             {error && <div role="alert" className="flex gap-2 rounded-xl border border-rose-900 bg-rose-950/30 p-3 text-sm leading-5 text-rose-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
             {status === "ready" && <p className="flex items-center gap-2 text-xs text-teal-200"><CheckCircle2 className="h-4 w-4" />Живой поток активен. Скажите обычную фразу, чтобы услышать ответ Secretary.</p>}
-            <IncomingSecretaryCalendar token={token} numberId={numberId}/>
+            {numberId==="dev-sandbox" && <fieldset className="space-y-2 rounded-xl border border-[#40585c] p-3">
+              <legend>Карточки самостоятельного Dev-теста</legend>
+              <p className="text-xs text-[#b9cbc5]">Телефонный номер не нужен. Выберите существующие Work-карточки; новых бизнес-анкет нет.</p>
+              {info?.sandbox?.cards.map(card=><label key={card.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" disabled={sessionIsLive||!!pendingSession||savingCards}
+                  checked={info.sandbox!.settings.cardIds.includes(card.id)}
+                  onChange={async()=>{
+                    setSavingCards(true);
+                    const old=info.sandbox!.settings.cardIds;
+                    const cardIds=old.includes(card.id)?old.filter(id=>id!==card.id):[...old,card.id];
+                    try{
+                      const r=await fetch("/api/incoming-secretary/dev/settings",{method:"POST",
+                        headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({cardIds})});
+                      if(!r.ok)throw new Error(await readError(r,"Не удалось сохранить разрешения карточек.",token));
+                    }catch(e){setError(e instanceof Error?e.message:"Не удалось сохранить карточки.");}
+                    finally{await reload();setSavingCards(false);}
+                  }}/>{card.title}</label>)}
+              {!info?.sandbox?.cards.length&&<p className="text-xs">Разрешённых рабочих карточек пока нет. Добавьте сведения один раз в разделе Work cards.</p>}
+            </fieldset>}
+            {numberId!=="dev-sandbox"&&<IncomingSecretaryCalendar token={token} numberId={numberId}/>}
           </CardContent>
         </Card>
         <Card className="border-[#344b4f] bg-[#17282d] text-[#e8efec]">

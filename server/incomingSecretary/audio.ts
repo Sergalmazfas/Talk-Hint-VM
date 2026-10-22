@@ -11,7 +11,7 @@ export const intakeTools = ["save_request", "submit_request"].map(name => ({
     address:{type:["string","null"]},localDate:{type:["string","null"],pattern:"^\\d{4}-\\d{2}-\\d{2}$",description:"A real calendar date YYYY-MM-DD in the business timezone; null if uncertain."},
     localTime:{type:["string","null"],pattern:"^(?:[01]\\d|2[0-3]):[0-5]\\d$",description:"24-hour HH:mm in the business timezone; null if uncertain."},
     durationMinutes:{type:["integer","null"],minimum:1,maximum:480},language:{type:["string","null"],enum:["en","ru","es",null]},
-    notes:{type:["string","null"]},reviewed:{type:"boolean"},
+    notes:{type:["string","null"],description:"Short purpose of the caller's request and relevant details. Required to submit a complete follow-up request; no industry-specific assumptions."},reviewed:{type:"boolean"},
   },additionalProperties:false },
 }));
 export function audioConfig(instructions: string) {

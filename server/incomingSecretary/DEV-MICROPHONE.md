@@ -54,9 +54,16 @@ This is the **new incoming** agent, not the outgoing Secretary lab.
 Run the existing development workflow and open `/incoming-secretary` with
 the ordinary TalkHint owner account. Microphone controls are shown only in
 development to an account allowed by the existing benchmark admin gate.
-Choose an owned Work number, save its business timezone/settings and its
-explicit customer-disclosure card selection, then find the live microphone
-panel. Enabling AI on the number is **not** necessary for this test.
+The independent Dev panel needs no telephone number. Select existing Work cards
+and explicitly allow their customer-facing use for this test, then start the
+microphone. Permission selection is stored separately per owner. No second
+business questionnaire is used: identity, activity, services, prices, hours and
+timezone come only from the selected cards. An empty selection means unknown
+business facts, not a default massage business or schedule.
+
+The existing number-bound panel also remains available. Enabling AI on a real
+number is **not** necessary for either microphone test. Legacy settings are
+retained as data but are not an additional Secretary knowledge source.
 
 Click Start, allow browser microphone access, and use fictional client
 details. Stop immediately closes local microphone tracks, scheduled speech
@@ -70,7 +77,7 @@ test. HTTPS and browser microphone/audio permissions are needed.
 
 ## Same agent, separate records
 
-Instructions, `gpt-realtime-2.1`, `marin`, PCMU 8 kHz, multilingual input
+Instructions, `gpt-live-1`, `marin`, PCMU 8 kHz, multilingual input
 transcription, tools and intake validation are shared with the prepared
 incoming telephone implementation. There is no provider/model fallback.
 Only the selected owner's explicitly allowed Work cards enter instructions.

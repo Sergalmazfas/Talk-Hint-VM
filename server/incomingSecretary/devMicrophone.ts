@@ -7,7 +7,7 @@ import { storage } from "../storage";
 import { isBenchmarkAdmin } from "../benchmark/adminGate";
 import { IncomingStore } from "./store";
 import { IntakeSession } from "./session";
-import { MODEL,VOICE,allowedCards,buildInstructions,type Settings } from "./policy";
+import { MODEL,VOICE,allowedCards,buildInstructions,defaults,type Settings } from "./policy";
 import { LiveConversation } from "./liveConversation";
 import { LIVE_MODEL,LIVE_VOICE,LIVE_BACKEND } from "./liveAudio";
 import { incomingDevNotifications } from "./devNotifications";
@@ -31,6 +31,13 @@ function stop(e:Entry,reason:string):Promise<void>{
   return e.stopping;
 }
 async function snapshot(owner:string,numberId:string){
+  if(numberId==="dev-sandbox") {
+    if(!pool)throw new Error("Dev storage unavailable");
+    const r=await pool.query("SELECT config FROM incoming_secretary_dev_sandbox_settings WHERE user_id=$1",[owner]);
+    const ids=z.array(z.string().min(1).max(100)).max(40).parse(r.rows[0]?.config?.cardIds??[]);
+    const settings={...defaults("dev-sandbox"),cardIds:ids};
+    return {settings,facts:allowedCards(await storage.listKnowledgeCards(owner),owner,ids)};
+  }
   const number=await storage.getPhoneNumber(numberId);
   if(!number||number.userId!==owner||number.type!=="work")throw new Error("Work number unavailable");
   const settings=await incomingDevStore.settings(owner,numberId);
@@ -79,10 +86,28 @@ export function registerIncomingDevRoutes(app:Express,auth:RequestHandler){
           AND NOT(call_sid=ANY($2::varchar[])) AND updated_at < now()-interval '5 seconds'`,[req.user!.id,live]);
       const requests=await incomingDevStore.list(req.user!.id);
       const active=Array.from(sessions.values()).find(e=>e.owner===req.user!.id&&!e.closed&&!e.voice?.closed);
+      const sandbox=await snapshot(req.user!.id,"dev-sandbox");
       res.json({requests,activeSession:active?{sessionId:active.id,requestId:active.session?(await active.session.begin()).id:null}:null,
+        sandbox:{numberId:"dev-sandbox",settings:sandbox.settings,cardTitles:sandbox.facts.map(c=>c.title),
+          cards:allowedCards(await storage.listKnowledgeCards(req.user!.id),req.user!.id,
+            (await storage.listKnowledgeCards(req.user!.id)).map(c=>c.id))},
         notifications:await incomingDevNotifications(req.user!.id),model:LIVE_MODEL,voice:LIVE_VOICE,testOnly:true,
         models:[{id:LIVE_MODEL,voice:LIVE_VOICE,backend:LIVE_BACKEND,label:"GPT‑Live 1 · естественный диалог"}]});
     }catch{res.status(503).json({error:"Dev-хранилище или диагностика недоступны. Тестовые заявки не выдаются за реальные."});}
+  });
+  app.post("/api/incoming-secretary/dev/settings",guard,auth,admin,json,async(req,res)=>{
+    const input=z.object({cardIds:z.array(z.string().min(1).max(100)).max(40)}).strict().safeParse(req.body);
+    if(!input.success||new Set(input.data.cardIds).size!==input.data.cardIds.length)return res.sendStatus(400);
+    try{
+      const owner=req.user!.id,cards=allowedCards(await storage.listKnowledgeCards(owner),owner,input.data.cardIds);
+      if(cards.length!==input.data.cardIds.length)return res.status(403).json({error:"Only your explicitly selected Work cards may be used."});
+      if(!pool)throw new Error("Dev storage unavailable");
+      await pool.query(`INSERT INTO incoming_secretary_dev_sandbox_settings(user_id,config) VALUES($1,$2::jsonb)
+        ON CONFLICT(user_id) DO UPDATE SET config=EXCLUDED.config`,[owner,JSON.stringify(input.data)]);
+      await Promise.all(Array.from(sessions.values()).filter(e=>e.owner===owner&&e.numberId==="dev-sandbox"&&!e.closed)
+        .map(e=>stop(e,"permissions changed")));
+      res.json({saved:true,testOnly:true,cardTitles:cards.map(c=>c.title)});
+    }catch{res.status(503).json({error:"Dev card permissions could not be saved."});}
   });
   app.post("/api/incoming-secretary/dev/sessions",guard,auth,admin,json,async(req,res)=>{
     const input=z.object({numberId:z.string().min(1).max(100),model:z.literal(LIVE_MODEL).optional()}).strict().safeParse(req.body);

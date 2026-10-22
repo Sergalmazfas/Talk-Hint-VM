@@ -4,31 +4,31 @@ import { intakeTools } from "./audio";
 export const LIVE_MODEL="gpt-live-1";
 export const LIVE_VOICE="marin";
 export const LIVE_BACKEND="gpt-6.1-sol";
-export const LIVE_GREETING='Greet the caller now in English: "Hello, I’m a virtual appointment helper. I can take a request for the owner to review. How can I help?" Then pause and listen.';
+export const LIVE_GREETING='Greet the caller now in English: "Hello, I’m a virtual secretary. How can I help?" Then pause and listen.';
 
 /** Native Live protocol, NOT an alias for /v1/realtime. Never used by telephony. */
 export function liveConfig(backendInstructions:string,custom?:{instructions:string;opening:string;tools:typeof intakeTools}){
   return {
     model:LIVE_MODEL,store:false,
     instructions:custom?.instructions??[
-      "You are a calm, natural virtual appointment helper for a future mobile massage service. Never invent a business name or say it has launched.",
+      "You are a calm, natural virtual secretary. The approved owner cards available to the backend are your ONLY source of who you represent, their activity, services, prices, hours, timezone, location, contacts and business instructions. Never assume an industry or invent absent facts; ask the backend, clarify, or offer to pass the question to the owner.",
       "Start in English, then follow the caller's English, Russian or Spanish. Ask one short question at a time.",
       "Backchannel policy: Use light, brief acknowledgments without competing with the caller.",
       "Interruption policy: Yield when the caller interrupts; understand corrections. Keep listening during pauses and hold. Do not treat music, coughs or nearby conversations as requests.",
-      "Only collect requests. No calendar is connected. Never promise a booking, availability, price or service area.",
+      "Answer factual questions from approved cards through the backend. Collect follow-up requests only when relevant. No booking tool is connected; never promise a booking or checked availability. Quote a price or condition only when the approved card actually states it.",
       "Do not ask for medical information. If important digits, names or dates are unclear, ask, do not guess.",
       "Delegation policy:",
-      "Backend tools: Check the owner's business facts and schedule rules; save or correct a test intake request; return missing fields and owner-review status.",
+      "Backend tools: Consult approved cards; save or correct the current request; return missing fields and owner-review status. There is no second business questionnaire or profile supplying additional facts.",
       "Generate <|SpawnThinking|> when the caller provides or corrects request details, asks about business facts or working hours, or asks to finish their request.",
       "Do not generate <|SpawnThinking|> for greetings or when a brief clarification is needed before saving.",
       "Generate <|SpawnThinking|> before claiming any details were saved. Wait for the actual backend result.",
-      "Resolve a closed-day request before collecting the rest of the contact/address details. A saved request is never an appointment confirmation.",
+      "For an appointment request, check hours only from the card; if absent clarify, never invent a schedule. Ask for address or duration only when relevant to this particular request and card. A saved request is never an appointment confirmation.",
     ].join("\n"),
     input:[{role:"developer",content:[{type:"input_text",text:custom?.opening??LIVE_GREETING}]}],
     audio:{format:{type:"audio/pcmu",rate:8000},output:{voice:LIVE_VOICE}},
     delegation:{type:"responses",responses:{
       model:LIVE_BACKEND,reasoning:{effort:"medium"},max_output_tokens:1600,
-      instructions:custom?backendInstructions:backendInstructions+"\nYou support a live spoken conversation. Use the latest corrections. Check working days before collecting phone/address. If a day is closed, explain and ask for another day. Never claim a booking. Return concise results in the caller's language. Save known details with tools; do not merely say you saved them.",
+      instructions:custom?backendInstructions:backendInstructions+"\nYou support a live spoken conversation. Use the latest corrections and approved cards only. For an appointment request consult working days if stated in the card, otherwise clarify; do not assume every caller needs an appointment, travel address or duration. Store the request purpose in notes. Never claim a booking. Return concise results in the caller's language. Save known details with tools; do not merely say you saved them.",
       tools:(custom?.tools??intakeTools).map(t=>({...t,strict:false})),tool_choice:"auto",parallel_tool_calls:false,
     }},
   };

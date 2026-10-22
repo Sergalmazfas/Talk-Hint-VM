@@ -2286,20 +2286,13 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   registerCallProfileRoutes(app, authMiddleware, {
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),
-    inspect: number => inspectExistingVoiceNumber(number),
-    canAdoptExisting: async () => {
-      const { pool, dbReady } = await import("./db");
-      await dbReady;
-      if (!pool) return false;
-      const { canAdoptCdl } = await import("./callProfiles/activateCdl");
-      return canAdoptCdl(pool);
-    },
-    assign: async (_numberId, owner) => {
+    user: owner => storage.getUser(owner),
+    connect: async (owner, choice, selected, name) => {
       const { pool, dbReady } = await import("./db");
       await dbReady;
       if (!pool) throw new Error("Database unavailable");
-      const { activateCdl } = await import("./callProfiles/activateCdl");
-      return activateCdl(pool, owner);
+      const { assignProfiles } = await import("./callProfiles/assign");
+      return assignProfiles(pool, owner, choice, inspectExistingVoiceNumber, selected, name);
     },
   });
 
@@ -2966,21 +2959,20 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         return res.status(400).json({ error: "Number ID and name required" });
       }
       
-      const existingNumbers = await storage.getUserPhoneNumbers(req.user!.id);
-      const user = await storage.getUser(req.user!.id);
-      
-      // SIMPLIFIED: Only subscribers can have phone numbers
-      const hasSubscription = user?.plan && user.plan !== "free" && user.plan !== "none";
-      if (!hasSubscription) {
-        return res.status(400).json({ error: "Please subscribe to get a phone number." });
+      const purpose=type??"personal";
+      if(!["personal","work"].includes(purpose)||typeof numberId!=="string"||typeof name!=="string"||name.length>120)
+        return res.status(400).json({error:"Invalid number purpose or name"});
+      if(req.get("origin")){
+        try{if(new URL(req.get("origin")!).host!==req.get("host"))return res.sendStatus(403);}
+        catch{return res.sendStatus(403);}
       }
-      // Basic plan: 1 number only
-      if (existingNumbers.length >= 1) {
-        return res.status(400).json({ error: "Basic plan allows only 1 number." });
-      }
-      
-      const phoneNumber = await storage.assignNumber(numberId, req.user!.id, name, type || "personal");
-      res.json({ phoneNumber });
+      const {pool,dbReady}=await import("./db");await dbReady;
+      if(!pool)throw new Error("Database unavailable");
+      const {assignProfiles}=await import("./callProfiles/assign");
+      const result=await assignProfiles(pool,req.user!.id,purpose==="work"?"work":"frames",
+        inspectExistingVoiceNumber,{[purpose]:numberId},name);
+      const phoneNumber=result.phoneNumbers.find(n=>n.type===purpose);
+      res.json({phoneNumber:{...phoneNumber,twilioNumber:phoneNumber?.phoneNumber},reused:result.reused});
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -2988,7 +2980,13 @@ USER'S NATIVE LANGUAGE: ${langName}`;
 
   app.put("/api/numbers/:id", authMiddleware, async (req, res) => {
     try {
+      const owned=await storage.getPhoneNumber(req.params.id);
+      if(!owned||owned.userId!==req.user!.id)return res.status(404).json({error:"Number not found"});
       const { name, activePromptId } = req.body;
+      if(activePromptId){
+        const prompts=await storage.getUserPrompts(req.user!.id);
+        if(!prompts.some(p=>p.id===activePromptId))return res.status(404).json({error:"Prompt not found"});
+      }
       const updated = await storage.updatePhoneNumber(req.params.id, { name, activePromptId });
       if (!updated) {
         return res.status(404).json({ error: "Number not found" });

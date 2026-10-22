@@ -54,7 +54,7 @@ it("never echoes microphone audio and clears stale speech on interruption before
 });
 it("updates corrected details, requires phone reconfirmation, and deduplicates repeated tool delivery",async()=>{
   const f=await fixture();
-  f.tool("first",{name:"Ana",phone:"+15550000111",callbackConfirmed:true,address:"Test A",localDate:"2026-11-03",localTime:"10:00",durationMinutes:60,language:"es",reviewed:true},true);
+  f.tool("first",{name:"Ana",phone:"+15550000111",callbackConfirmed:true,address:"Test A",localDate:"2026-11-03",localTime:"10:00",durationMinutes:60,language:"es",notes:"Please contact me",reviewed:true},true);
   await vi.waitFor(()=>expect(f.record().status).toBe("pending_owner"));
   f.tool("correct",{name:"Анна",phone:"+15550000222",address:"Test B",localDate:"2026-11-04",localTime:"11:00"});
   f.tool("correct",{name:"WRONG"});

@@ -2,12 +2,17 @@ import express from "express";
 import request from "supertest";
 import { EventEmitter } from "node:events";
 import { beforeEach,afterEach,it,expect,vi } from "vitest";
-const mocks=vi.hoisted(()=>({voices:0,liveVoices:0,instructions:""}));
-vi.mock("../db",()=>({pool:null,db:{}}));
+const mocks=vi.hoisted(()=>({voices:0,liveVoices:0,instructions:"",numberReads:0,sandbox:new Map<string,any>()}));
+vi.mock("../db",()=>({pool:{query:async(sql:string,args:any[])=>{
+  if(sql.includes("INSERT INTO incoming_secretary_dev_sandbox_settings"))mocks.sandbox.set(args[0],JSON.parse(args[1]));
+  if(sql.startsWith("SELECT config FROM incoming_secretary_dev_sandbox_settings"))
+    return {rows:mocks.sandbox.has(args[0])?[{config:mocks.sandbox.get(args[0])}]:[]};
+  return {rows:[],rowCount:0};
+}},db:{}}));
 vi.mock("../benchmark/adminGate",()=>({isBenchmarkAdmin:()=>true}));
 vi.mock("./devNotifications",()=>({incomingDevNotifications:async()=>({credentialsUsable:false,issues:[],deliveryTested:false})}));
 vi.mock("../storage",()=>({storage:{
-  getPhoneNumber:async(id:string)=>({id,userId:id==="other-work"?"other":"owner",type:id==="personal"?"personal":"work"}),
+  getPhoneNumber:async(id:string)=>{mocks.numberReads++;return {id,userId:id==="other-work"?"other":"owner",type:id==="personal"?"personal":"work"};},
   listKnowledgeCards:async()=>[
     {id:"approved",userId:"owner",profileScope:"work",title:"Allowed",body:"Future service"},
     {id:"not-approved",userId:"owner",profileScope:"work",title:"NO",body:"Unapproved secret"},
@@ -44,6 +49,7 @@ class Peer extends EventEmitter{
 }
 beforeEach(()=>{
   vi.stubEnv("NODE_ENV","development");mocks.voices=0;mocks.liveVoices=0;mocks.instructions="";
+  mocks.numberReads=0;mocks.sandbox.clear();
   const memory=new MemoryRequests();
   vi.spyOn(incomingDevStore,"settings").mockImplementation(async(_owner,id)=>({...defaults(id),cardIds:["approved","shared","foreign","personal"],timeZone:"America/New_York"}));
   vi.spyOn(incomingDevStore,"begin").mockImplementation((...args)=>memory.begin(...args));
@@ -59,6 +65,25 @@ async function create(model?:string) {
   if(r.body.sessionId)ids.push(r.body.sessionId);
   return r;
 }
+it("uses an independent card-based sandbox without any phone lookup or assignment",async()=>{
+  const save=await request(app).post("/api/incoming-secretary/dev/settings").set("x-owner","owner").send({cardIds:["approved"]});
+  expect(save.status).toBe(200);
+  const r=await request(app).post("/api/incoming-secretary/dev/sessions").set("x-owner","owner").send({numberId:"dev-sandbox"});
+  expect(r.status).toBe(200);ids.push(r.body.sessionId);
+  expect(r.body.cardTitles).toEqual(["Allowed"]);expect(mocks.numberReads).toBe(0);
+  const peer=new Peer();handleIncomingDevSocket(peer as any,{headers:{host:"dev.example",origin:"https://dev.example"}});
+  peer.message({type:"connect",sessionId:r.body.sessionId,capability:r.body.capability});
+  await vi.waitFor(()=>expect(mocks.liveVoices).toBe(1));
+  expect(mocks.instructions).toContain("Future service");expect(mocks.numberReads).toBe(0);
+});
+it("rejects foreign/personal/shared sandbox permissions and keeps owner choices isolated",async()=>{
+  for(const id of ["foreign","personal","shared"])
+    expect((await request(app).post("/api/incoming-secretary/dev/settings").set("x-owner","owner").send({cardIds:[id]})).status).toBe(403);
+  await request(app).post("/api/incoming-secretary/dev/settings").set("x-owner","owner").send({cardIds:["approved"]});
+  const other=await request(app).get("/api/incoming-secretary/dev").set("x-owner","other");
+  expect(other.status).toBe(200);expect(other.body.sandbox.settings.cardIds).toEqual([]);
+  expect(other.body.sandbox.cards.map((c:any)=>c.id)).toEqual(["foreign"]);
+});
 it("offers Live only in Dev, freezes the reserved model, scopes its cards and rejects duplicates/foreign stop",async()=>{
   const r=await create("gpt-live-1");expect(r.status).toBe(200);
   expect(r.body).toMatchObject({model:"gpt-live-1",voice:"marin",backend:"gpt-6.1-sol",testOnly:true});

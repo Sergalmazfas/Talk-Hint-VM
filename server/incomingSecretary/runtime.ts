@@ -49,7 +49,6 @@ export async function tryIncomingSecretary(req:Request,res:Response,owner:string
   try {
     const settings=await incomingStore.settings(owner,numberId);
     if(!settings.enabled)return false;
-    if(!settings.timeZone)throw new Error("Business timezone required");
     const request=await incomingStore.begin(owner,numberId,callSid);
     if(request.closed){unavailable(res);return true;}
     // Normal number-level status callback remains unchanged.
@@ -76,7 +75,7 @@ export function handleIncomingSocket(ws:WebSocket) {
     const owned=await storage.getPhoneNumber(number);
     if(!owned||owned.type!=="work")throw new Error("Not a work line");
     const settings=await incomingStore.settings(owned.userId,number);
-    if(!settings.enabled||!settings.timeZone)throw new Error("Incoming not configured/enabled");
+    if(!settings.enabled)throw new Error("Incoming not configured/enabled");
     const session=new IntakeSession(owned.userId,call,settings,incomingStore);await session.begin();
     await incomingStore.update(owned.userId,call,r=>{
       if(r.streamStarted||r.closed)throw new Error("Stream already claimed");

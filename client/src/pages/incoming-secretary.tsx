@@ -34,23 +34,19 @@ type Payload = {
   previewAvailable: boolean;
 };
 
-const weekdays = [
-  { value: 1, label: "Пн" }, { value: 2, label: "Вт" }, { value: 3, label: "Ср" },
-  { value: 4, label: "Чт" }, { value: 5, label: "Пт" }, { value: 6, label: "Сб" }, { value: 0, label: "Вс" },
-];
-const defaultBusiness: BusinessHours = { days: [0, 2, 3, 4, 5, 6], opens: "08:00", closes: "22:00", travelMinutes: 30 };
+const defaultBusiness: BusinessHours = { days: [], opens: "", closes: "", travelMinutes: 0 };
 const languageLabels: Record<Language, string> = { en: "English", ru: "Русский", es: "Español" };
 const publicPreviewFixture: Payload = {
-  settings: [{ numberId: "demo-work-line", enabled: false, timeZone: "America/Los_Angeles", cardIds: ["demo-work-card"], business: { days: [0, 2, 3, 4, 5, 6], opens: "08:00", closes: "22:00", travelMinutes: 45 } }],
+  settings: [{ numberId: "demo-work-line", enabled: false, timeZone: "", cardIds: ["demo-work-card"], business: { days: [], opens: "", closes: "", travelMinutes: 0 } }],
   numbers: [{ id: "demo-work-line", phoneNumber: "+14155550100", name: "Demo work line" }],
-  cards: [{ id: "demo-work-card", title: "Mobile massage · synthetic context", body: "Sample-only service context. Availability, price, duration, travel area, and cancellation terms must be confirmed by the owner.", profileScope: "work" }],
+  cards: [{ id: "demo-work-card", title: "Example business · synthetic context", body: "Sample-only context. The owner supplies business identity, services, contact details, and instructions in their selected Work card. No hours or service promises are assumed.", profileScope: "work" }],
   requests: [{
     id: "demo-request-01", numberId: "demo-work-line", callSid: "DEMO-CALL-001", status: "pending_owner_confirmation",
-    fields: { name: "Morgan Example", phone: "+14155550127", callbackConfirmed: true, address: "12 Example Street", localDate: "2025-06-14", localTime: "15:00", durationMinutes: 60, language: "en", reviewed: false, notes: "Synthetic fixture only." },
+    fields: { name: "Morgan Example", phone: "+14155550127", callbackConfirmed: true, address: "12 Example Street", localDate: "2025-06-14", localTime: "15:00", language: "en", reviewed: false, notes: "Synthetic fixture only." },
     missing: [], turns: sampleTurns("en"), outcome: "Synthetic request · owner review pending", updatedAt: "2025-06-14T16:00:00.000Z", notificationStatus: "not_sent_demo",
   }],
   runtimeEnabled: false, calendarConnected: false,
-  templateText: "Synthetic preview only. Ask for the caller's name, callback number, requested address and preferred time. Do not quote prices, duration, service area or cancellation terms. Tell the caller the owner must confirm.",
+  templateText: "Synthetic preview only. Use only the selected Work card for business details. If an answer is not in that card, do not invent it; collect a message for the owner to review.",
   previewAvailable: true,
 };
 
@@ -69,21 +65,21 @@ function emptyFields(language: Language): Fields {
 
 function sampleTurns(language: Language, correction = false): Turn[] {
   if (language === "ru") return [
-    { role: "caller", text: correction ? "Здравствуйте, хочу узнать про выездной массаж." : "Здравствуйте, хочу узнать про выездной массаж.", language },
+    { role: "caller", text: "Здравствуйте, подскажите, пожалуйста, о вашей компании.", language },
     { role: "secretary", text: "Подскажите, пожалуйста, как к вам обращаться и по какому номеру можно перезвонить?", language },
-    { role: "caller", text: correction ? "Меня зовут Анна, номер +74951234567. Сначала я сказала 12 июня, но правильная дата — 14 июня, после 15:00." : "Анна, +74951234567. Хотела бы 14 июня после 15:00.", language },
+    { role: "caller", text: correction ? "Меня зовут Анна, номер +74951234567. Исправлю номер: +74951234568." : "Анна, +74951234567. Можно передать вопрос владельцу?", language },
     { role: "secretary", text: "Записала пожелания. Владелец должен проверить возможность и подтвердить детали.", language },
   ];
   if (language === "es") return [
-    { role: "caller", text: "Hola, quisiera preguntar por un masaje a domicilio.", language },
+    { role: "caller", text: "Hola, quisiera preguntar por su negocio.", language },
     { role: "secretary", text: "¿Me indica su nombre y un número para devolverle la llamada?", language },
-    { role: "caller", text: "Soy Elena, +34600123456. El sábado por la tarde, por favor.", language },
+    { role: "caller", text: "Soy Elena, +34600123456. ¿Puede enviarme más información?", language },
     { role: "secretary", text: "Anoto su solicitud para que la revise el propietario. No es una reserva confirmada.", language },
   ];
   return [
-    { role: "caller", text: "Hi, I'm interested in an in-home massage.", language },
+    { role: "caller", text: "Hi, I have a question about your business.", language },
     { role: "secretary", text: "May I have your name and the best number for a callback?", language },
-    { role: "caller", text: correction ? "I'm Morgan Example, +14155550127. I first said Friday, but I meant Saturday around 2 pm." : "Morgan Example, +14155550127. Is Saturday around 2 pm possible?", language },
+    { role: "caller", text: correction ? "I'm Morgan Example. I need to correct my callback number: +14155550128." : "Morgan Example, +14155550127. Could the owner call me back?", language },
     { role: "secretary", text: "I’ll note your request for the owner to review. This is not a confirmed booking.", language },
   ];
 }
@@ -102,13 +98,9 @@ export default function IncomingSecretary() {
   const [loadError, setLoadError] = useState("");
   const [selectedNumberId, setSelectedNumberId] = useState("");
   const [enabled, setEnabled] = useState(false);
-  const [timeZone, setTimeZone] = useState("");
   const [cardIds, setCardIds] = useState<string[]>([]);
-  const [business, setBusiness] = useState<BusinessHours>(defaultBusiness);
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
-  const [creatingCard, setCreatingCard] = useState(false);
-  const [cardMessage, setCardMessage] = useState("");
   const [turns, setTurns] = useState<Turn[]>(sampleTurns("en"));
   const [fields, setFields] = useState<Fields>({
     language: "en", name: "Morgan Example", phone: "+14155550127", callbackConfirmed: true,
@@ -162,9 +154,7 @@ export default function IncomingSecretary() {
   );
   useEffect(() => {
     setEnabled(currentSetting?.enabled ?? false);
-    setTimeZone(currentSetting?.timeZone ?? "");
     setCardIds(currentSetting?.cardIds ?? []);
-    setBusiness(currentSetting?.business ?? defaultBusiness);
     setSettingsMessage("");
   }, [currentSetting]);
 
@@ -174,8 +164,7 @@ export default function IncomingSecretary() {
   const selectedRequest = activeRequests.find((request) => request.id === selectedRequestId) ?? activeRequests[0];
   const previewUser = user as (typeof user & { isOwner?: boolean }) | null;
   const isPreviewAllowed = Boolean(isOfflineDemoRoute || (import.meta.env.DEV && payload?.previewAvailable === true && (previewUser?.isAdmin || previewUser?.isOwner)));
-  const timezoneReady = Boolean(timeZone.trim());
-  const saveDisabled = savingSettings || !selectedNumberId || (enabled && !timezoneReady) || business.travelMinutes < 30;
+  const saveDisabled = savingSettings || !selectedNumberId;
 
   function updateField<K extends keyof Fields>(key: K, value: Fields[K]) {
     setFields((previous) => ({ ...previous, [key]: value }));
@@ -200,7 +189,7 @@ export default function IncomingSecretary() {
       const response = await fetch(`/api/incoming-secretary/settings/${encodeURIComponent(selectedNumberId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ enabled, timeZone: timeZone.trim(), cardIds, business }),
+        body: JSON.stringify({ enabled, timeZone: "", cardIds, business: defaultBusiness }),
       });
       if (!response.ok) throw new Error(await responseError(response, "Не удалось сохранить настройки."));
       setSettingsMessage("Настройки сохранены. Сохранение не включает обработку входящих звонков.");
@@ -209,30 +198,6 @@ export default function IncomingSecretary() {
       setSettingsMessage(error instanceof Error ? error.message : "Не удалось сохранить настройки.");
     } finally {
       setSavingSettings(false);
-    }
-  }
-
-  async function createTemplateCard() {
-    if (isOfflineDemoRoute) {
-      setCardMessage("Offline demo only. Карточка не создана и не сохранена.");
-      return;
-    }
-    if (!token || !payload || creatingCard) return;
-    setCreatingCard(true);
-    setCardMessage("");
-    try {
-      const response = await fetch("/api/cards", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ cardType: "company", title: "Выездной массаж — подготовка", body: payload.templateText, profileScope: "work" }),
-      });
-      if (!response.ok) throw new Error(await responseError(response, "Не удалось создать карточку."));
-      setCardMessage("Рабочая карточка создана. Она не выбрана в настройках автоматически.");
-      await load();
-    } catch (error) {
-      setCardMessage(error instanceof Error ? error.message : "Не удалось создать карточку.");
-    } finally {
-      setCreatingCard(false);
     }
   }
 
@@ -317,7 +282,7 @@ export default function IncomingSecretary() {
           <div>
             <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#496761] bg-[#203a39] px-3 py-1 text-xs font-medium text-[#c2e7d9]"><ShieldCheck className="h-3.5 w-3.5" />Подготовка, не активация</p>
             <h2 className="max-w-2xl text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">Соберите рабочий контекст для будущих входящих.</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-[#a9bbb7] sm:text-base">Вы задаёте часы, рабочие карточки и границы разговора. Сейчас это только настройки и текстовая симуляция — Secretary не отвечает на реальные звонки.</p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-[#a9bbb7] sm:text-base">Рабочие сведения поступают только из выбранных вами карточек. Здесь вы управляете доступом линии к этим карточкам и уведомлениями; сохранение не включает Secretary на реальных звонках.</p>
           </div>
           <div className="rounded-2xl border border-[#725f3f] bg-[#332d21] p-4">
             <div className="flex items-center gap-2 text-amber-200"><AlertTriangle className="h-4 w-4" /><strong className="text-sm">Обработка отключена</strong></div>
@@ -354,42 +319,12 @@ export default function IncomingSecretary() {
                         <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} className="mt-1 accent-teal-400" />
                         <span><span className="block text-sm font-semibold">Подготовить Secretary для этой линии</span><span className="mt-1 block text-xs leading-5 text-[#9eb2ae]">Это сохранит предпочтение, но не запускает runtime в текущем продукте.</span></span>
                       </label>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="timezone" className="text-[#dce8e4]">Часовой пояс IANA</Label>
-                          <Input id="timezone" list="incoming-timezones" value={timeZone} onChange={(event) => setTimeZone(event.target.value)} placeholder="Например, America/Los_Angeles" className="border-[#40585c] bg-[#102025] text-white placeholder:text-[#748985]" />
-                          <datalist id="incoming-timezones"><option value="America/Los_Angeles" /><option value="America/New_York" /><option value="America/Chicago" /><option value="Europe/Moscow" /><option value="Europe/Madrid" /></datalist>
-                          {enabled && !timezoneReady && <p className="text-xs text-amber-200">Укажите часовой пояс, прежде чем сохранить включённую настройку.</p>}
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="travel-minutes" className="text-[#dce8e4]">Время на дорогу</Label>
-                          <div className="relative"><Input id="travel-minutes" type="number" min={30} step={5} value={business.travelMinutes} onChange={(event) => setBusiness((previous) => ({ ...previous, travelMinutes: Number(event.target.value) }))} className="border-[#40585c] bg-[#102025] pr-16 text-white" /><span className="absolute right-3 top-2.5 text-xs text-[#8fa49f]">минут</span></div>
-                          <p className="text-xs text-[#8fa49f]">Минимум 30 минут между выездами.</p>
-                        </div>
-                      </div>
                       <fieldset className="space-y-2">
-                        <legend className="flex items-center gap-2 text-sm font-medium text-[#dce8e4]"><CalendarDays className="h-4 w-4 text-teal-300" />Рабочие дни</legend>
-                        <div className="flex flex-wrap gap-2">
-                          {weekdays.map((day) => {
-                            const checked = business.days.includes(day.value);
-                            return <label key={day.value} className={`flex min-h-10 min-w-11 cursor-pointer items-center justify-center rounded-lg border px-3 text-sm transition-colors ${checked ? "border-teal-500 bg-[#1d4744] text-teal-100" : "border-[#40585c] bg-[#102025] text-[#9eb2ae] hover:border-[#68817b]"}`}>
-                              <input type="checkbox" className="sr-only" checked={checked} onChange={() => setBusiness((previous) => ({ ...previous, days: checked ? previous.days.filter((value) => value !== day.value) : [...previous.days, day.value] }))} aria-label={`${day.label}, день недели ${day.value}`} />
-                              {day.label}
-                            </label>;
-                          })}
-                        </div>
-                        <p className="text-xs text-[#829793]">Нумерация JavaScript: воскресенье — 0, понедельник — 1.</p>
-                      </fieldset>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="space-y-2"><Label htmlFor="opens" className="text-[#dce8e4]">Открытие</Label><Input id="opens" type="time" value={business.opens} onChange={(event) => setBusiness((previous) => ({ ...previous, opens: event.target.value }))} className="border-[#40585c] bg-[#102025] text-white" /></div>
-                        <div className="space-y-2"><Label htmlFor="closes" className="text-[#dce8e4]">Закрытие</Label><Input id="closes" type="time" value={business.closes} onChange={(event) => setBusiness((previous) => ({ ...previous, closes: event.target.value }))} className="border-[#40585c] bg-[#102025] text-white" /></div>
-                      </div>
-                      <fieldset className="space-y-2">
-                        <legend className="text-sm font-medium text-[#dce8e4]">Рабочие карточки для disclosure</legend>
+                         <legend className="text-sm font-medium text-[#dce8e4]">Выберите источник сведений</legend>
                         {workCards.length ? <div className="space-y-2">{workCards.map((card) => <label key={card.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-[#344b4f] bg-[#122328] p-3"><input type="checkbox" checked={cardIds.includes(card.id)} onChange={() => setCardIds((previous) => previous.includes(card.id) ? previous.filter((id) => id !== card.id) : [...previous, card.id])} className="mt-1 accent-teal-400" /><span><span className="block text-sm font-medium">{card.title}</span><span className="mt-1 block line-clamp-2 text-xs leading-5 text-[#9eb2ae]">{card.body}</span></span></label>)}</div> : <p className="rounded-lg border border-dashed border-[#40585c] p-3 text-sm text-[#9eb2ae]">Рабочих карточек пока нет. Общие карточки не предлагаются и не используются.</p>}
                       </fieldset>
                       <div className="flex flex-col gap-3 border-t border-[#30474b] pt-4 sm:flex-row sm:items-center sm:justify-between">
-                        <p className="text-xs leading-5 text-[#8fa49f]">Неизвестны цены, длительность услуги, зона выезда и условия отмены. Secretary не должен обещать их от имени владельца.</p>
+                         <p className="text-xs leading-5 text-[#8fa49f]">Данные о компании, услугах, контактах, часах и инструкциях берутся только из выбранных рабочих карточек. Неподтверждённое не додумывается.</p>
                         <Button type="submit" disabled={saveDisabled} className="shrink-0 bg-[#28756a] text-white hover:bg-[#328b7c]"><Check className="mr-2 h-4 w-4" />{savingSettings ? "Сохраняем…" : "Сохранить настройки"}</Button>
                       </div>
                       {settingsMessage && <p role="status" className="text-sm text-teal-200">{settingsMessage}</p>}
@@ -400,12 +335,11 @@ export default function IncomingSecretary() {
 
               <div className="space-y-5">
                 <Card className="border-[#344b4f] bg-[#17282d] text-[#e8efec]">
-                  <CardHeader><p className="text-xs uppercase tracking-[0.16em] text-teal-300">02 / Сведения</p><CardTitle className="text-xl">Подготовительная карточка</CardTitle><CardDescription className="text-[#a9bbb7]">Создать можно только явно. Карточка останется рабочей, не общей.</CardDescription></CardHeader>
+                  <CardHeader><p className="text-xs uppercase tracking-[0.16em] text-teal-300">02 / Источник контекста</p><CardTitle className="text-xl">Только ваши рабочие карточки</CardTitle><CardDescription className="text-[#a9bbb7]">Secretary использует только сведения, которые владелец уже добавил и выбрал.</CardDescription></CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="rounded-xl border border-[#3c5355] bg-[#122328] p-4"><p className="mb-2 flex items-center gap-2 text-sm font-semibold"><FileText className="h-4 w-4 text-teal-300" />Предлагаемый текст</p><p className="whitespace-pre-wrap text-sm leading-6 text-[#bdcbc7]">{payload.templateText || "Шаблон пока не предоставлен сервером."}</p></div>
-                    <Button onClick={() => void createTemplateCard()} disabled={!payload.templateText || creatingCard} variant="outline" className="w-full border-[#53716a] text-teal-100 hover:bg-[#203a39]">{creatingCard ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}Создать рабочую карточку</Button>
-                    {cardMessage && <p role="status" className="text-sm text-teal-200">{cardMessage}</p>}
-                    <p className="text-xs leading-5 text-[#899e99]">Создание не включает карточку в disclosure — выберите её вручную в настройках выше. Общие и личные карточки не доступны здесь.</p>
+                    <div className="rounded-xl border border-[#3c5355] bg-[#122328] p-4"><p className="mb-2 flex items-center gap-2 text-sm font-semibold"><FileText className="h-4 w-4 text-teal-300" />Нет второй анкеты</p><p className="text-sm leading-6 text-[#bdcbc7]">Добавьте или обновите бизнес-информацию в существующих рабочих карточках. Здесь можно только выбрать, какие из них относятся к этой линии; личные и общие карточки не используются.</p></div>
+                    <Link href="/settings/call-profiles" className="inline-flex text-sm text-teal-200 underline underline-offset-4 hover:text-white">Открыть рабочие карточки</Link>
+                    <p className="text-xs leading-5 text-[#899e99]">Сохранение списка карточек не включает обработку реальных звонков.</p>
                   </CardContent>
                 </Card>
 
@@ -493,8 +427,8 @@ export default function IncomingSecretary() {
                 </Card>
               </section>
             )}
-            {import.meta.env.DEV && !isOfflineDemoRoute && Boolean(user) && payload.previewAvailable === true && (
-              <IncomingSecretaryDevBench token={token || ""} numberId={selectedNumberId} />
+            {import.meta.env.DEV && !isOfflineDemoRoute && Boolean(user) && (
+              <IncomingSecretaryDevBench token={token || ""} numberId="dev-sandbox" />
             )}
             {!isPreviewAllowed && (
               <section aria-label="История входящих заявок">

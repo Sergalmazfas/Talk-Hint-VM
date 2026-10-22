@@ -7,7 +7,7 @@ export class IntakeSession {
   async begin() {
     const r=await this.store.begin(this.owner,this.settings.numberId,this.callSid);
     if(r.timeZone!==undefined||r.closed)return r;
-    return this.store.update(this.owner,this.callSid,r=>({...r,timeZone:this.settings.timeZone||null,
+    return this.store.update(this.owner,this.callSid,r=>({...r,timeZone:null,
       missing:missingFields(r.fields,this.settings)}));
   }
   async turn(turn: Turn) {
