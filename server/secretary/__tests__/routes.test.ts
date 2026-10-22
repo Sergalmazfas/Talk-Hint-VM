@@ -142,14 +142,14 @@ describe("Secretary owner-scoped routes", () => {
         userId: "owner-b",
         phoneNumber: "+19545551234",
         instruction: "Ask about the returned deposit.",
-        voiceProvider: "cartesia",
+        voiceProvider: "openai",
         confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit."),
       });
     expect(response.status).toBe(201);
     expect(mocks.createSecretaryTask).toHaveBeenCalledWith("owner-a", {
       phoneNumber: "+19545551234",
       instruction: "Ask about the returned deposit.",
-      voiceProvider: "cartesia",
+      voiceProvider: "openai",
     });
   });
   it("uses OpenAI by default and refuses model unavailability before creating or dialing a task", async () => {

@@ -114,30 +114,26 @@ describe("Secretary Lab — real agent, fake transports and providers, never PST
     expect(after.turns.every(t => t.translation === "Тестовый перевод")).toBe(true);
     expect(JSON.stringify(after)).not.toContain("payload");
   });
-  it("isolates the OpenAI WebRTC mode from clone context, audio and owner crossover", async () => {
-    let cb: any;
+  it("uses GPT-Live through the shared phone agent with no legacy WebRTC session or owner crossover", async () => {
     const connection = { connect: vi.fn(async () => "v=0\r\nm=audio answer"), startIntroduction: vi.fn(), stop: vi.fn(async () => {}) };
     deps.context = vi.fn(deps.context);
     deps.startEngine = vi.fn(deps.startEngine);
-    deps.openAI = { isAvailable: async () => true, create: (_owner, _instruction, callbacks) => { cb = callbacks; return connection; } };
+    const legacyCreate=vi.fn(()=>connection);
+    deps.openAI = { isAvailable: async () => true, create:legacyCreate };
     created = await lab.create("alice", { ...input, voiceProvider: "openai" });
     lab.connect(created.ticket!, e => output.push(e), () => {});
-    expect(output.some(e => e.type === "rtc_offer_required")).toBe(true);
-    expect(output.some(e => e.type === "ready")).toBe(false);
-    expect(deps.context).not.toHaveBeenCalled(); expect(deps.startEngine).not.toHaveBeenCalled();
+    expect(output.some(e => e.type === "rtc_offer_required")).toBe(false);
+    expect(deps.context).toHaveBeenCalledWith("alice","openai");expect(deps.startEngine).toHaveBeenCalledOnce();
+    await vi.waitFor(()=>expect(output.some(e=>e.type==="ready")).toBe(true));
+    expect(legacyCreate).not.toHaveBeenCalled();
     await expect(lab.negotiate("bob", created.id, "v=0\r\nm=audio fake")).rejects.toMatchObject({ status: 404 });
-    await lab.negotiate("alice", created.id, "v=0\r\nm=audio fake");
-    await expect(lab.negotiate("alice", created.id, "v=0\r\nm=audio repeated")).rejects.toMatchObject({ status: 409 });
-    expect(connection.connect).toHaveBeenCalledTimes(1);
-    cb.ready("gpt-realtime-2.1", "marin");
-    expect(output.find(e => e.type === "ready")).toMatchObject({ model: "gpt-realtime-2.1", voice: "marin" });
-    cb.turn("guest", "Hello");
-    cb.turn("secretary", "Hello, how can I help?", true);
-    expect(lab.reports("alice")[0]).toMatchObject({ modelVerified: true, transport: "webrtc", voiceProvider: "openai", instruction: input.instruction });
-    expect(lab.reports("alice")[0].turns[1].interrupted).toBe(true);
+    await expect(lab.negotiate("alice", created.id, "v=0\r\nm=audio fake")).rejects.toMatchObject({ status: 409 });
+    expect(connection.connect).not.toHaveBeenCalled();
+    expect(output.find(e => e.type === "ready")).toMatchObject({model:"gpt-live-1",voice:"marin"});
+    expect(lab.reports("alice")[0]).toMatchObject({ modelVerified: true, transport: "simulated_twilio", voiceProvider: "openai", instruction: input.instruction });
     expect(lab.reports("bob")).toEqual([]);
     await lab.stop("alice", created.id);
-    expect(connection.stop).toHaveBeenCalled();
+    expect(connection.stop).not.toHaveBeenCalled();
   });
   it("does not substitute a clone or another model if exact OpenAI availability fails", async () => {
     deps.context = vi.fn(deps.context);

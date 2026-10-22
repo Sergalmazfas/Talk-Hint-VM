@@ -285,7 +285,7 @@ final class SettingsViewController: UITableViewController {
         let sheet = UIAlertController(
             title: NSLocalizedString("settings.secretary.choose", comment: ""),
             message: nil, preferredStyle: .actionSheet)
-        for provider in SecretaryVoiceProviderPreference.allCases {
+        for provider in [SecretaryVoiceProviderPreference.openai] {
             let title = provider == .openai
                 ? NSLocalizedString("settings.secretary.openai", comment: "")
                 : provider.displayName

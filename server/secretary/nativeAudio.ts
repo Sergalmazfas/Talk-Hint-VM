@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import type { SecretaryRealtimeEvent, SecretaryRealtimeSession } from "./agent";
-import { SECRETARY_AUDIO_MODEL, SECRETARY_AUDIO_VOICE } from "./voice";
+// Retained only for historical protocol tests; new phone sessions use liveAudio.ts.
+const SECRETARY_AUDIO_MODEL="gpt-realtime-2.1",SECRETARY_AUDIO_VOICE="marin";
 
 /** Direct OpenAI speech↔speech, using the SAME G.711 format as Twilio. */
 export class OpenAISecretaryAudioSession implements SecretaryRealtimeSession {

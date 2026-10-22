@@ -6,7 +6,7 @@ import { storage } from "../storage";
 import { resolveProductionBaseUrl } from "../baseUrl";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
-import { secretaryVoiceProvider, requireSecretaryAudioModel } from "./voice";
+import { secretaryVoiceProvider, requireSecretaryAudioModel, SECRETARY_AUDIO_MODEL,SECRETARY_AUDIO_VOICE } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
 import { defaultCallingNumber } from "../callProfiles/policy";
 
@@ -83,7 +83,7 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     status: "ringing",
     transcript: "",
     metadata: { mode: "secretary", secretaryTaskId: job.id, voiceProvider: job.voiceProvider,
-      ...(job.voiceProvider === "openai" ? { model: "gpt-realtime-2.1", voice: "marin" } : {}) },
+      ...(job.voiceProvider === "openai" ? { model: SECRETARY_AUDIO_MODEL, voice: SECRETARY_AUDIO_VOICE } : {}) },
   });
   return { sid: created.sid, callId: call.id };
 }

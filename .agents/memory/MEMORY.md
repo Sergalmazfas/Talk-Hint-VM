@@ -51,6 +51,7 @@
 - [Personal GPT Actions](chatgpt-actions-constraints.md) — confidential OAuth distinct from MCP; Plus new-GPT restrictions and mobile use require current official checks.
 - [ChatGPT widget recovery](chatgpt-widget-recovery.md) — host state and historical results are task locators only; refetch under current OAuth, never persist capabilities or auto-resume audio.
 - [Personal and work profiles](personal-work-profiles.md) — one app, separate numbers and knowledge; explicit sharing, separate calendars with private free/busy awareness.
+- [Calendar connector boundary](calendar-connector-boundary.md) — workspace Google authorization is not per-user app OAuth; owner binding and booking activation must stay explicit.
 - [Incoming Secretary boundaries](incoming-secretary-boundaries.md) — future business request intake, explicit Work disclosure consent, no activation implicit in number/card setup.
 - [Dev audio queue timing](dev-audio-queue.md) — fast Realtime generation can fill a short playback queue during healthy speech; clear on interruption, not ordinary backlog.
-- [Incoming Live comparison](incoming-live-dev.md) — native Live protocol and independent backend lifecycle; same protected intake, Dev only, no automatic telephone replacement.
+- [Secretary Live rollout](incoming-live-dev.md) — owner approved GPT-Live after microphone trial; native protocol, shared protected intake; release and phone activation remain separate.

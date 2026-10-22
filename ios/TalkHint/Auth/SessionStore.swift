@@ -201,11 +201,10 @@ final class SessionStore {
     /// to OpenAI, while Codable preserves providers on already persisted drafts.
     var secretaryVoiceProvider: SecretaryVoiceProviderPreference {
         get {
-            guard let raw = UserDefaults.standard.string(forKey: secretaryVoiceProviderKey),
-                  let value = SecretaryVoiceProviderPreference(rawValue: raw) else { return .openai }
-            return value
+            // New Secretary calls use GPT-Live only. Keep legacy enum decoding for history.
+            return .openai
         }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: secretaryVoiceProviderKey) }
+        set { UserDefaults.standard.set(SecretaryVoiceProviderPreference.openai.rawValue, forKey: secretaryVoiceProviderKey) }
     }
 
     /// How incoming calls are handled, persisted to the backend via

@@ -8,6 +8,21 @@ separate numbers and logical profiles, rather than a second business app.
 Cards belong to the logical profile, not the physical telephone number.
 Personal knowledge is not automatically copied to Work; sharing is explicit.
 
+Secretary is a universal product, not a massage-specific application. Massage
+is one example of a filled business card; another owner or profile may run a
+children's business, repair shop or a different service.
+
+**Why:** The user explicitly corrected the product direction: business behavior
+must follow the filled card and its hours, rather than one hardcoded industry.
+
+**How to apply:** Obtain services, hours, timezone, location/visit mode, required
+intake fields and business conditions from the selected owner's Work profile.
+Keep business-specific templates separate from the shared agent and access
+rules. The massage example's Tuesday–Sunday hours and 30-minute travel rule
+are not universal defaults. Never require an on-site address or appointment
+duration when the business scenario does not need them. Missing business facts
+remain unknown; cards cannot override privacy, authorization or action safety.
+
 **Why:** The user explicitly approved the two-number, one-app approach after
 rejecting the need for a separate business application.
 
@@ -17,6 +32,16 @@ availability may use personal busy intervals without revealing event details.
 A promised booking requires a durable calendar acknowledgement, not merely a
 transcript or generated reply. Number setup is not permission to enable
 autonomous incoming answering or forwarding.
+
+The owner selected a new dedicated Google Calendar named “TalkHint — Work”,
+with business timezone America/New_York, rather than writing appointments to
+the primary calendar.
+
+**Why:** This was the owner's explicit calendar and timezone choice.
+
+**How to apply:** Keep client appointments separate from personal events.
+Do not treat connector authorization or calendar creation as activation of
+phone answering, voice-agent booking tools or a launched business.
 
 The user confirmed their existing CDL line is theirs and selected it as Work,
 rejecting the alternative trial line. Keep that alternative in the pool; do not

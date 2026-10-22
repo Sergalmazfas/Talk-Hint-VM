@@ -3,13 +3,13 @@ name: Secretary voice choice policy
 description: Owner-approved default and boundaries for direct OpenAI Secretary audio.
 ---
 
-The owner requested GPT-Realtime-2.1 with the built-in OpenAI voice as the default Secretary combination, while keeping ElevenLabs and Cartesia selectable. They consider it better and faster; that is their preference, not a measured PSTN benchmark.
+After personally testing GPT-Live 1 with Marin in the incoming microphone bench, the owner said it worked magnificently and requested only this combination throughout Secretary, including iOS and ChatGPT. This supersedes the earlier Realtime-2.1/default-with-clone-options choice. It is a confirmed microphone experience, not a PSTN benchmark.
 
 **Why:** The user explicitly chose this combination after the Dev comparison. Their priority is an intelligent, natural-speaking Secretary, not cost reduction.
 
-**How to apply:** Default only newly prepared Secretary calls with no explicit choice to direct OpenAI audio. Preserve providers on existing tasks, signed approvals and explicit client selections. Never silently substitute another model if access fails. Do not change Translator/Copilot voice defaults to implement this Secretary-specific decision.
+**How to apply:** New Secretary calls use GPT-Live 1 with built-in Marin and the tested Sol reasoning backend, with no silent fallback or new clone-provider choices. Keep historical provider decoding and existing task data; reject obsolete new-call choices instead of silently changing their approved parameters. Translator/Copilot remain independent.
 
-Old native clients explicitly send the shared cloned-voice preference. Respect it rather than interpreting it as an omitted server default. The owner subsequently requested that native Settings also clearly show the Secretary default, separate from Translator/Copilot.
+Older native clients may explicitly send cloned-voice choices. Require a fresh preparation under the current Secretary choice rather than silently rerouting a signed old request. Native Settings must clearly identify the Secretary model separately from Translator/Copilot.
 
 **Why:** Overriding an explicit client value would silently change the caller's selected voice, including already approved requests.
 

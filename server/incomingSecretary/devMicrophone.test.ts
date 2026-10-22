@@ -25,7 +25,7 @@ vi.mock("./devConversation",()=>({DevConversation:class {
 }}));
 vi.mock("./liveConversation",()=>({LiveConversation:class{
   closed=false;
-  constructor(readonly session:any,instructions:string,_p:any){mocks.instructions=instructions;mocks.liveVoices++;}
+  constructor(readonly session:any,instructions:string,_p:any){mocks.instructions=instructions;mocks.liveVoices++;mocks.voices++;}
   async start(){}
   input(){}
   async stop(reason:string){this.closed=true;await this.session.end(reason);}
@@ -65,7 +65,7 @@ it("offers Live only in Dev, freezes the reserved model, scopes its cards and re
   expect(mocks.liveVoices).toBe(0);
   const peer=new Peer();handleIncomingDevSocket(peer as any,{headers:{origin:"https://dev.test",host:"dev.test"}});
   peer.message({type:"connect",sessionId:r.body.sessionId,capability:r.body.capability,model:"gpt-realtime-2.1"});
-  await vi.waitFor(()=>expect(mocks.liveVoices).toBe(1));expect(mocks.voices).toBe(0);
+  await vi.waitFor(()=>expect(mocks.liveVoices).toBe(1));expect(mocks.voices).toBe(1);
   expect(mocks.instructions).toContain("Future service");
   for(const text of ["Unapproved secret","Shared secret","Personal secret","Foreign secret"])expect(mocks.instructions).not.toContain(text);
   const repeat=new Peer();handleIncomingDevSocket(repeat as any,{headers:{origin:"https://dev.test",host:"dev.test"}});

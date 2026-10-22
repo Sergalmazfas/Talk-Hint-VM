@@ -68,7 +68,7 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     const catalog = (await rpc("tools/list")).body.result.tools;
     const preview = catalog.find((t: any) => t.name === "prepare_call");
     expect(preview.inputSchema.properties.voiceProvider).toMatchObject({
-      enum: ["openai", "elevenlabs", "cartesia"], default: "openai",
+      enum: ["openai"], default: "openai",
     });
     expect(preview._meta.ui.resourceUri).toBe(CALL_APPROVAL_RESOURCE);
     const approval = catalog.find((t: any) => t.name === "confirm_call_from_card");
@@ -135,9 +135,9 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect(result.isError).toBe(false);
     expect(result.structuredContent.call.voiceProvider).toBe("openai");
     expect(result.structuredContent.execution).toEqual({
-      provider: "openai", model: "gpt-realtime-2.1", voice: "marin", mode: "native_audio",
+      provider: "openai", model: "gpt-live-1", voice: "marin", mode: "native_audio",reasoningModel:"gpt-6.1-sol",
     });
-    expect(result.content[0].text).toContain("gpt-realtime-2.1");
+    expect(result.content[0].text).toContain("gpt-live-1");
     expect(result.content[0].text).not.toContain("fallback link");
     expect(backend.start).not.toHaveBeenCalled();
   });

@@ -10,6 +10,8 @@ import { IntakeSession } from "./session";
 import { allowedCards, buildInstructions, MODEL, VOICE } from "./policy";
 import { IncomingAudio } from "./audio";
 import { incomingRevocations } from "./revocation";
+import { handleIncomingLivePhone } from "./livePhone";
+import { LIVE_MODEL,LIVE_VOICE,LIVE_BACKEND } from "./liveAudio";
 
 export const incomingStore = new IncomingStore();
 export const runtimeEnabled = () => process.env.INCOMING_SECRETARY_RUNTIME_ENABLED === "true";
@@ -67,6 +69,35 @@ export async function tryIncomingSecretary(req:Request,res:Response,owner:string
 }
 /** Phone media only. No SMS, outgoing dialer, calendar or automatic transfer imports. */
 export function handleIncomingSocket(ws:WebSocket) {
+  handleIncomingLivePhone(ws,async(start,stop)=>{
+    if(!runtimeEnabled())throw new Error("Incoming runtime disabled");
+    const number=String(start?.customParameters?.numberId??""),call=String(start?.callSid??"");
+    if(!validStreamToken(call,number,start?.customParameters?.auth))throw new Error("Unauthorized stream");
+    const owned=await storage.getPhoneNumber(number);
+    if(!owned||owned.type!=="work")throw new Error("Not a work line");
+    const settings=await incomingStore.settings(owned.userId,number);
+    if(!settings.enabled||!settings.timeZone)throw new Error("Incoming not configured/enabled");
+    const session=new IntakeSession(owned.userId,call,settings,incomingStore);await session.begin();
+    await incomingStore.update(owned.userId,call,r=>{
+      if(r.streamStarted||r.closed)throw new Error("Stream already claimed");
+      return {...r,streamStarted:true,execution:{model:LIVE_MODEL,voice:LIVE_VOICE,reasoningModel:LIVE_BACKEND}};
+    });
+    const set=active.get(number)??new Set();set.add(stop);active.set(number,set);
+    activeOwners.set(number,owned.userId);permissions.set(number,new Set(settings.cardIds));
+    const cleanup=()=>{
+      active.get(number)?.delete(stop);
+      if(!active.get(number)?.size){active.delete(number);activeOwners.delete(number);permissions.delete(number);}
+    };
+    try{
+      const cards=allowedCards(await storage.listKnowledgeCards(owned.userId),owned.userId,settings.cardIds);
+      const latest=await incomingStore.settings(owned.userId,number);
+      if(JSON.stringify(latest)!==JSON.stringify(settings))throw new Error("Permissions changed");
+      return {session,instructions:buildInstructions(settings,cards),cleanup};
+    }catch(error){cleanup();await session.end("setup or permissions failed");throw error;}
+  });
+}
+/** Retired Realtime transport; retained for historical protocol regression coverage only. */
+function handleIncomingRealtimeSocket(ws:WebSocket) {
   let session:IntakeSession|undefined, ai:IncomingAudio|undefined, sid="",number="",closed=false,ready=false;
   let queue=Promise.resolve(), response="",item="",playedMs=0;
   let mediaTimestamp=0, responseStartedAt:number|undefined;

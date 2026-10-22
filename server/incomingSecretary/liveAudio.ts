@@ -7,10 +7,10 @@ export const LIVE_BACKEND="gpt-6.1-sol";
 export const LIVE_GREETING='Greet the caller now in English: "Hello, I’m a virtual appointment helper. I can take a request for the owner to review. How can I help?" Then pause and listen.';
 
 /** Native Live protocol, NOT an alias for /v1/realtime. Never used by telephony. */
-export function liveConfig(backendInstructions:string){
+export function liveConfig(backendInstructions:string,custom?:{instructions:string;opening:string;tools:typeof intakeTools}){
   return {
     model:LIVE_MODEL,store:false,
-    instructions:[
+    instructions:custom?.instructions??[
       "You are a calm, natural virtual appointment helper for a future mobile massage service. Never invent a business name or say it has launched.",
       "Start in English, then follow the caller's English, Russian or Spanish. Ask one short question at a time.",
       "Backchannel policy: Use light, brief acknowledgments without competing with the caller.",
@@ -24,12 +24,12 @@ export function liveConfig(backendInstructions:string){
       "Generate <|SpawnThinking|> before claiming any details were saved. Wait for the actual backend result.",
       "Resolve a closed-day request before collecting the rest of the contact/address details. A saved request is never an appointment confirmation.",
     ].join("\n"),
-    input:[{role:"developer",content:[{type:"input_text",text:LIVE_GREETING}]}],
+    input:[{role:"developer",content:[{type:"input_text",text:custom?.opening??LIVE_GREETING}]}],
     audio:{format:{type:"audio/pcmu",rate:8000},output:{voice:LIVE_VOICE}},
     delegation:{type:"responses",responses:{
       model:LIVE_BACKEND,reasoning:{effort:"medium"},max_output_tokens:1600,
-      instructions:backendInstructions+"\nYou support a live spoken conversation. Use the latest corrections. Check working days before collecting phone/address. If a day is closed, explain and ask for another day. Never claim a booking. Return concise results in the caller's language. Save known details with tools; do not merely say you saved them.",
-      tools:intakeTools.map(t=>({...t,strict:false})),tool_choice:"auto",parallel_tool_calls:false,
+      instructions:custom?backendInstructions:backendInstructions+"\nYou support a live spoken conversation. Use the latest corrections. Check working days before collecting phone/address. If a day is closed, explain and ask for another day. Never claim a booking. Return concise results in the caller's language. Save known details with tools; do not merely say you saved them.",
+      tools:(custom?.tools??intakeTools).map(t=>({...t,strict:false})),tool_choice:"auto",parallel_tool_calls:false,
     }},
   };
 }
@@ -42,12 +42,12 @@ export class LiveAudio implements LiveConnection {
   constructor(private instructions:string,private event:(e:any)=>void,
     private factory=()=>new WebSocket("wss://api.openai.com/v1/live/sessions",{
       headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`},
-    })){}
+    }),private configuration?:ReturnType<typeof liveConfig>){}
   async connect(){
     await new Promise<void>((resolve,reject)=>{
       const socket=this.socket=this.factory();let started=false;
       const timer=setTimeout(()=>{socket.terminate();reject(new Error("Live startup timed out"));},15000);timer.unref?.();
-      socket.on("open",()=>this.send({type:"session.start",session:liveConfig(this.instructions)}));
+      socket.on("open",()=>this.send({type:"session.start",session:this.configuration??liveConfig(this.instructions)}));
       socket.on("message",raw=>{
         let e:any;try{e=JSON.parse(raw.toString())}catch{return}
         if(e.type==="session.started"){

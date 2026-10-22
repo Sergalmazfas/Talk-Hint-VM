@@ -6,7 +6,7 @@ import { phoneNumbers } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
-import { secretaryVoiceProvider, requireSecretaryAudioModel } from "./voice";
+import { selectedSecretaryVoiceProvider as secretaryVoiceProvider, requireSecretaryAudioModel } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
 import {
   cancelSecretaryTask,

@@ -4,14 +4,16 @@ import { handleSecretaryTwilioStream } from "../secretary/agent";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
 import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
 import { translateTextSubtitle } from "../translation/textSubtitle";
-import { checkLabRealtimeModel, OpenAILabRealtime, LAB_REALTIME_MODEL, LAB_REALTIME_VOICE } from "./openAIRealtime";
+import { OpenAILabRealtime } from "./openAIRealtime";
+import { requireSecretaryAudioModel,SECRETARY_AUDIO_MODEL as LAB_REALTIME_MODEL,SECRETARY_AUDIO_VOICE as LAB_REALTIME_VOICE } from "../secretary/voice";
 
 let modelCheck: Promise<{ ready: boolean; reason?: string }> | undefined;
 let modelCheckedAt = 0;
 function availability() {
   if (process.env.NODE_ENV !== "development") return Promise.resolve({ ready: false, reason: "OpenAI comparison is Dev-only" });
   if (!modelCheck || Date.now() - modelCheckedAt > 60_000) {
-    modelCheckedAt = Date.now(); modelCheck = checkLabRealtimeModel();
+    modelCheckedAt = Date.now(); modelCheck = requireSecretaryAudioModel().then(()=>({ready:true}))
+      .catch(()=>({ready:false,reason:"GPT-Live 1 / gpt-6.1-sol access unconfirmed; no fallback"}));
   }
   return modelCheck;
 }
@@ -21,6 +23,7 @@ export const secretaryLab = new SecretaryLab({
   startEngine: handleSecretaryTwilioStream,
   context: async (ownerId, voiceProvider) => {
     if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI unavailable");
+    if(voiceProvider==="openai")return{ownerId,ownerName:confirmedSecretaryOwnerName(ownerId),voiceProvider,cloneVoiceId:""};
     const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(ownerId) : getClone(ownerId));
     const cloneVoiceId = requireReadyTranslatorClone(voiceProvider, clone,
       voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
@@ -55,7 +58,7 @@ export async function secretaryLabReadiness(owner: string) {
       openai: { ...openAI, source: "builtin", model: LAB_REALTIME_MODEL, voice: LAB_REALTIME_VOICE,
         checkedAt: modelCheckedAt ? new Date(modelCheckedAt).toISOString() : undefined },
     },
-    models: { realtime: process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime", stt: "gpt-4o-mini-transcribe" },
+    models: { realtime: LAB_REALTIME_MODEL, stt: "GPT-Live native EN/RU/ES" },
     limits: { durationSeconds: 300, historyMinutes: 60 },
     note: "No telephone calls. Paid AI/audio processing. No audio recording; temporary text reports expire after one hour or server restart. Linked existing voices are not proof of a personal clone.",
     sessions: secretaryLab.reports(owner),

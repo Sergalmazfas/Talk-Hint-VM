@@ -464,11 +464,11 @@
 "common.error.title" = "Щось пішло не так";
 "settings.voice_provider.title" = "Провайдер голосу";
 "settings.section.secretary" = "Secretary";
-"settings.secretary.openai" = "OpenAI · GPT-Realtime-2.1";
-"settings.secretary.openai.detail" = "Вибрано для нових дзвінків · Голос: marin";
+"settings.secretary.openai" = "OpenAI · GPT-Live 1";
+"settings.secretary.openai.detail" = "Голос: Marin · Обробка: gpt-6.1-sol";
 "settings.secretary.clone.detail" = "Вибрано для нових дзвінків · Ваш налаштований клон голосу";
 "settings.secretary.choose" = "Модель і голос Secretary";
-"settings.secretary.footer" = "За замовчуванням — OpenAI GPT-Realtime-2.1 із вбудованим голосом marin. Натисніть, щоб вибрати іншого провайдера. Лише для нових дзвінків Secretary; Translator, Copilot і наявні завдання не змінюються.";
+"settings.secretary.footer" = "Нові дзвінки Secretary використовують GPT-Live 1, вбудований голос Marin і gpt-6.1-sol. Без автоматичної підміни моделі. Translator, Copilot та історія наявних завдань не змінюються.";
 "settings.voice_provider.elevenlabs" = "ElevenLabs";
 "settings.voice_provider.cartesia" = "Cartesia";
 "settings.footer.voice_provider" = "Застосовується до вашого клонованого англійського голосу в Translator і Copilot, починаючи з наступного дзвінка. Голос співрозмовника та системний голос не змінюються. Для Cartesia ваш клон має бути готовий на сервері.";

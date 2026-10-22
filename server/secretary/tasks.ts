@@ -29,7 +29,7 @@ const TERMINAL_STATUSES = [
 
 export type SecretaryOutcome = "resolved" | "needs_follow_up" | "not_reached" | "failed" | "unknown";
 export type { SecretaryVoiceProvider } from "./voice";
-import { secretaryVoiceProvider } from "./voice";
+import { selectedSecretaryVoiceProvider as secretaryVoiceProvider } from "./voice";
 export interface SecretaryTaskReport {
   id: string;
   mode?: "live";

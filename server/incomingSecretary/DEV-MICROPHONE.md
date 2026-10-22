@@ -2,8 +2,8 @@
 
 ## GPT-Live 1 comparison
 
-The existing bench now has a Dev-only model selector, initially GPT-Live 1.
-Realtime-2.1 remains selectable and the API's omitted-model behavior stays unchanged.
+After the owner's successful microphone trial, new bench sessions use GPT-Live 1 only.
+Realtime-2.1 is no longer offered; omitted-model requests also select GPT-Live.
 GPT-Live uses its native `/v1/live/sessions` protocol with PCMU 8 kHz, Marin,
 Responses delegation to `gpt-6.1-sol` (medium reasoning), and `store:false`.
 No provider-side audio recording is requested. Backend tools are only the shared
@@ -15,6 +15,31 @@ Selected voice/backend metadata is retained in each new TEST request for compari
 Native Live manages full-duplex speech; its adapter never sends Realtime truncate
 or cancel events. Local queued audio is cleared on a new recognized caller fragment;
 this is not proof of real-device interruption/noise performance.
+
+The gated incoming phone runtime now uses the same Live conversation coordinator,
+and outgoing Secretary uses a task-specific Live configuration without intake tools.
+This does not activate an incoming number, publish a server or install an iOS build.
+Calendar remains disconnected: intake is still a request, never a confirmed booking.
+
+## Work Calendar preparation
+
+The owner approved a separate Google calendar, TalkHint — Work, in
+America/New_York. The collapsed Calendar panel in the Dev bench tests metadata
+access and occupancy only. It does not add tools to the voice agent, insert
+events, activate phone answering, send messages or confirm appointments.
+
+The workspace connector is not per-user app OAuth. Calendar routes require
+the existing app admin role, ownership of the selected Work number, and an exact
+match between the authenticated app email and the connected Google primary
+calendar owner. The exact approved Work resource and connection are pinned;
+there is no primary-calendar or first-connection fallback. Revalidate privacy
+ACLs and fail closed on permissions/errors. No personal event data is read.
+
+The Work profile timezone must explicitly match the calendar. Checks honor
+working days/hours, end-before-closing and at least 30 minutes travel. Slot
+occupancy does not prove that a service, duration or travel address is offered.
+Voice-agent calendar tools and durable booking still require a separate
+implementation and business setup; do not describe this panel as booking.
 
 Run `NODE_ENV=development npx tsx script/probe-incoming-live.ts --audio` for
 synthetic spoken EN → RU → ES input, Monday-hours lookup and corrected name

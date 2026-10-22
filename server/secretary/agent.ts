@@ -5,7 +5,7 @@ import {
   synthesizeCloneSpeech,
 } from "../translation/cloneSpeech";
 import type { SecretaryVoiceProvider } from "./voice";
-import { OpenAISecretaryAudioSession } from "./nativeAudio";
+import { OpenAISecretaryLiveSession } from "./liveAudio";
 import { secretaryIntroductionPolicy, type ConfirmedSecretaryOwnerName } from "./ownerIdentity";
 import { SecretaryNativePlayback } from "./nativePlayback";
 
@@ -65,6 +65,7 @@ export type SecretaryRealtimeEvent =
 
 export interface SecretaryRealtimeSession {
   readonly inputFormat?: "mulaw8k";
+  readonly continuousAudio?:boolean;
   truncate?(itemId: string, audioEndMs: number): void;
   onEvent(listener: (event: SecretaryRealtimeEvent) => void): void;
   connect(): Promise<void>;
@@ -82,7 +83,7 @@ type CloneSynthesizer = (
 ) => Promise<Buffer>;
 
 const defaultRealtimeFactory: RealtimeFactory = (instructions, context) => context?.voiceProvider === "openai"
-  ? new OpenAISecretaryAudioSession(instructions) : new OpenAISecretaryRealtimeSession(instructions);
+  ? new OpenAISecretaryLiveSession(instructions) : new OpenAISecretaryRealtimeSession(instructions);
 let realtimeFactory: RealtimeFactory = defaultRealtimeFactory;
 let elevenLabsSynthesizer: CloneSynthesizer = synthesizeCloneSpeech;
 let cartesiaSynthesizer: CloneSynthesizer = synthesizeCartesiaCloneSpeech;
@@ -659,6 +660,7 @@ export function handleSecretaryTwilioStream(
     realtime = realtimeFactory(buildSecretaryInstructions(context.instruction, context.ownerName), context);
     if (context.voiceProvider === "openai") nativePlayback = new SecretaryNativePlayback({
       ws, streamSid: () => streamSid, waitMark: waitForMark,
+      continuous:realtime.continuousAudio,
       truncate: (item, ms) => realtime?.truncate?.(item, ms),
       playedText: text => queueTurn("secretary", text),
       audio: payload => deps.onAudio?.(taskId, "secretary", payload),

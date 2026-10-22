@@ -4,12 +4,15 @@ import { z } from "zod";
 import { storage } from "../storage";
 import { isBenchmarkAdmin } from "../benchmark/adminGate";
 import { incomingStore, runtimeEnabled, stopIncomingNumber, startIncomingNotifications } from "./runtime";
-import { TEMPLATE, MODEL, VOICE, defaults, settingsSchema, fieldsSchema, allowedCards } from "./policy";
+import { TEMPLATE, defaults, settingsSchema, fieldsSchema, allowedCards } from "./policy";
+import { LIVE_MODEL as MODEL,LIVE_VOICE as VOICE } from "./liveAudio";
 import { IntakeSession } from "./session";
 import { MemoryRequests } from "./store";
 import { registerIncomingDevRoutes } from "./devMicrophone";
+import { registerCalendarDevRoutes } from "./calendarRoutes";
 export function registerIncomingRoutes(app:Express,auth:RequestHandler) {
   registerIncomingDevRoutes(app,auth);
+  registerCalendarDevRoutes(app,auth);
   const eligible=async(owner:string)=> (await storage.getUserPhoneNumbers(owner)).filter(n=>n.type==="work"&&n.userId===owner);
   const write:RequestHandler=(req,res,next)=>{
     if(!req.is("application/json"))return res.status(415).json({error:"JSON required"});

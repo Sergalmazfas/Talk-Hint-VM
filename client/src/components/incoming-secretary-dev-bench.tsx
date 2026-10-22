@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Headphones, Mic, MicOff, RefreshCw, Square, Volume2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { IncomingSecretaryCalendar } from "./incoming-secretary-calendar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createIncomingSecretaryWorkletSource, decodePcmu, floatToPcm16, encodePcmu } from "@/lib/incoming-secretary-audio";
@@ -490,7 +491,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
               <label className="mt-3 block text-sm text-[#c4d8d1]">Вариант разговора
                 <select value={selectedModel} disabled={sessionIsLive||status==="stopping"} onChange={e=>setSelectedModel(e.target.value)}
                   className="mt-2 block w-full rounded-lg border border-[#526c68] bg-[#14292a] p-3 text-white">
-                  {(info?.models||[{id:"gpt-live-1",label:"GPT‑Live 1 · естественный диалог"},{id:"gpt-realtime-2.1",label:"GPT‑Realtime‑2.1 · прежний вариант"}]).map(option=>
+                  {(info?.models||[{id:"gpt-live-1",label:"GPT‑Live 1 · естественный диалог"}]).map(option=>
                     <option key={option.id} value={option.id}>{option.label}</option>)}
                 </select>
               </label>
@@ -514,6 +515,7 @@ export function IncomingSecretaryDevBench({ token, numberId }: Props) {
             </div>
             {error && <div role="alert" className="flex gap-2 rounded-xl border border-rose-900 bg-rose-950/30 p-3 text-sm leading-5 text-rose-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
             {status === "ready" && <p className="flex items-center gap-2 text-xs text-teal-200"><CheckCircle2 className="h-4 w-4" />Живой поток активен. Скажите обычную фразу, чтобы услышать ответ Secretary.</p>}
+            <IncomingSecretaryCalendar token={token} numberId={numberId}/>
           </CardContent>
         </Card>
         <Card className="border-[#344b4f] bg-[#17282d] text-[#e8efec]">

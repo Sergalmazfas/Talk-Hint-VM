@@ -464,11 +464,11 @@
 "common.error.title" = "Something went wrong";
 "settings.voice_provider.title" = "Voice provider";
 "settings.section.secretary" = "Secretary";
-"settings.secretary.openai" = "OpenAI · GPT-Realtime-2.1";
-"settings.secretary.openai.detail" = "Selected for new calls · Voice: marin";
+"settings.secretary.openai" = "OpenAI · GPT-Live 1";
+"settings.secretary.openai.detail" = "Voice: Marin · Reasoning: gpt-6.1-sol";
 "settings.secretary.clone.detail" = "Selected for new calls · Your configured cloned voice";
 "settings.secretary.choose" = "Secretary model and voice";
-"settings.secretary.footer" = "OpenAI GPT-Realtime-2.1 with the built-in marin voice is the default. Tap to choose another provider. Applies to new Secretary calls only; Translator, Copilot and existing tasks are unchanged.";
+"settings.secretary.footer" = "New Secretary calls use GPT-Live 1 with the built-in Marin voice and gpt-6.1-sol reasoning. No automatic fallback. Translator, Copilot and existing task history are unchanged.";
 "settings.voice_provider.elevenlabs" = "ElevenLabs";
 "settings.voice_provider.cartesia" = "Cartesia";
 "settings.footer.voice_provider" = "This setting applies to your cloned English voice in Translator and Copilot, starting with the next call. Guest and system voices are unchanged. Cartesia requires your own ready Cartesia clone on the server.";

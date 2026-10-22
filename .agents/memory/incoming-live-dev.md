@@ -3,9 +3,9 @@ name: Incoming Live comparison boundary
 description: Why GPT-Live uses its own Dev transport but the same protected intake workflow.
 ---
 
-GPT-Live is an explicitly selected incoming microphone Dev comparison, not an automatic replacement of telephone Secretary. Keep Realtime available for fair comparison and keep phone activation separate.
+The owner approved GPT-Live as the sole model for new Secretary calls after a successful microphone trial, then requested rollout preparation across incoming/outgoing, iOS and ChatGPT. Keep publication, native installation and incoming-number activation separate from implementation.
 
-**Why:** The owner asked to try a different conversation model without changing existing telephony or production.
+**Why:** The later successful trial superseded the comparison-only scope, but did not itself publish a server or activate a phone number.
 
 Use the native Live protocol, not renamed Realtime events. Voice conversation and delegated backend work have independent lifecycles; caller interruption must not cancel or repeat a saved business action.
 

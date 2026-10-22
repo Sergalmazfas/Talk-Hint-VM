@@ -19,11 +19,12 @@ export class LiveConversation{
   private responses=new Map<string,{id:string;done:boolean;calls:number;outputs:number;continued:boolean}>();
   private lastResponse="";
   constructor(readonly session:IntakeSession,private instructions:string,private peer:DevPeer,
-    private factory=(text:string,event:(e:any)=>void):LiveConnection=>new LiveAudio(text,event)){}
+    private factory=(text:string,event:(e:any)=>void):LiveConnection=>new LiveAudio(text,event),
+    private testOnly=true){}
   private send(e:object){
     if(this.peer.readyState!==1)return;
     if((this.peer.bufferedAmount??0)>512000){void this.stop("client_audio_backpressure");return;}
-    this.peer.send(JSON.stringify({...e,testOnly:true}));
+    this.peer.send(JSON.stringify({...e,testOnly:this.testOnly}));
   }
   private enqueue(fn:()=>Promise<void>){
     if(this.closed)return;

@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { secretaryVoiceProvider } from "./voice";
+import { secretaryVoiceProvider,selectedSecretaryVoiceProvider } from "./voice";
 describe("Secretary-only voice defaults and pre-dial availability", () => {
+  it("allows only GPT-Live for new assignments while decoding historical providers unchanged",()=>{
+    expect(selectedSecretaryVoiceProvider(undefined)).toBe("openai");
+    expect(selectedSecretaryVoiceProvider("openai")).toBe("openai");
+    for(const legacy of ["elevenlabs","cartesia"]){
+      expect(()=>selectedSecretaryVoiceProvider(legacy)).toThrow(/GPT-Live 1 only/);
+      expect(secretaryVoiceProvider(legacy)).toBe(legacy);
+    }
+  });
   beforeEach(() => { vi.resetModules(); vi.stubEnv("OPENAI_API_KEY", "fixture-not-a-real-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
   it("defaults new requests to OpenAI and preserves explicit older provider choices", () => {
@@ -11,12 +19,13 @@ describe("Secretary-only voice defaults and pre-dial availability", () => {
     expect(() => secretaryVoiceProvider(null)).toThrow();
   });
   it("verifies exact model access once before dialing, without requiring a clone", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "gpt-realtime-2.1" }), { status: 200 }));
+    const fetch = vi.fn().mockImplementation(async(url:string)=>new Response(JSON.stringify({id:url.split("/").at(-1)}),{status:200}));
     vi.stubGlobal("fetch", fetch);
     const { requireSecretaryAudioModel } = await import("./voice");
     await requireSecretaryAudioModel(); await requireSecretaryAudioModel();
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(fetch.mock.calls[0][0]).toBe("https://api.openai.com/v1/models/gpt-realtime-2.1");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[0][0]).toBe("https://api.openai.com/v1/models/gpt-live-1");
+    expect(fetch.mock.calls[1][0]).toBe("https://api.openai.com/v1/models/gpt-6.1-sol");
   });
   it("rejects unavailable or substituted models, never silently selects ElevenLabs", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "gpt-realtime" }), { status: 200 })));
