@@ -383,3 +383,17 @@ mtime_ms = 1792693887556
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8b70d32f-65f7-492c-9740-d69905bbd7cb/34c67a04-fe7f-481a-8faa-e988d4800dec"
 storage_version_token = "1792694814517471"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "36H8ogDC-tG9Eyhi72bEI"
+uri = "file://generated-artifacts/talkhint-secretary-mobile.zip"
+type = "unspecified"
+title = "TalkHint Secretary — пакет для отдельного мобильного проекта"
+description = "ZIP для импорта в новый Replit-проект: готовый Expo-клиент iOS/Android, инструкции и публичный адрес Dev backend. Без сервера, секретов и переноса лаборатории. Это исходный пакет, не подписанная сборка для установки."
+logical_id = "ded919ff-7d37-4f71-a778-a8ebb63cc601"
+content_hash = "sha256:ae7da44de9b9c981825aedb2a62ffdbbea5991feeaabfd638aa8d4eaa746a6cf"
+size = 118052
+mtime_ms = 1792705439062
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ded919ff-7d37-4f71-a778-a8ebb63cc601/f800b5c1-e117-4325-8bbd-11eca6a0aabc"
+storage_version_token = "1792705445719633"
+content_type = "application/octet-stream"

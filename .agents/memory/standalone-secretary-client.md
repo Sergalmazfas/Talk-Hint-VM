@@ -17,3 +17,13 @@ Secretary-only, with the selected direct OpenAI chain, no telephone session on
 the device and no clone/provider selectors. Provided iOS screenshots are the
 visual reference, not permission to add the other laboratory tabs. Test actions
 must remain distinct from real calls until separately authorized.
+
+The owner approved preparing the already-built client for a **separate Replit
+mobile project**, without migrating the existing project.
+
+**Why:** The existing web project's Deploy does not produce a native install or
+provide the mobile Apple/Expo signing flow.
+
+**How to apply:** Keep the backend/laboratory intact. Treat a downloadable client
+export as preparation for import, never as proof that a separate project was
+created or a native build succeeded.
