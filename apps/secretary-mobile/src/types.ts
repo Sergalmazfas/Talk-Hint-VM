@@ -9,7 +9,7 @@ export type Review = {
   model?: string; voice?: string;
 };
 export type SecretaryTask = {
-  id: string; status: string; testOnly: true; review?: Review; summary?: string;
+  id: string; status: string; testOnly: boolean; review?: Review; summary?: string; warning?: string;
   transcript?: string; createdAt?: string; expiresAt?: string;
 };
 export type IncomingSetting = { numberId: string; cardIds: string[]; enabled: boolean; timeZone?: string };
@@ -26,7 +26,7 @@ export type HistoryItem = {
 };
 export type HistoryDetail = { call?: Record<string, unknown>; task?: SecretaryTask };
 export type MeResponse = {
-  user: User; model: ModelSettings; testOnly: boolean;
+  user: User; model: ModelSettings; testOnly: boolean; callingMode?: 'live' | 'test';
   legal: { approved: boolean };
 };
 export type AuthResponse = { token: string; user: User };

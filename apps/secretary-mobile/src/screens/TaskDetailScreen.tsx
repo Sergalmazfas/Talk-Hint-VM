@@ -31,7 +31,14 @@ export function TaskDetailScreen() {
     catch (e) { setError(e instanceof Error ? e.message : 'Could not load test task.'); }
     finally { setLoading(false); }
   }, [taskId]);
-  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    void load();
+    const timer = setInterval(() => {
+      if (taskRef.current?.testOnly === false &&
+        ['starting', 'ringing', 'connected', 'finalizing'].includes(taskRef.current.status)) void load();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [load]));
   const confirm = async () => {
     setWorking(true); setError('');
     try {
@@ -60,11 +67,11 @@ export function TaskDetailScreen() {
   return <ScrollPage>
     <Row style={{ justifyContent: 'space-between' }}>
       <Heading eyebrow="Secretary · Review">Task review</Heading>
-      <Pill tone={task.status === 'completed' ? 'green' : 'amber'}>TEST · {task.status.toUpperCase()}</Pill>
+      <Pill tone={task.status === 'completed' ? 'green' : 'amber'}>{task.testOnly ? 'TEST' : 'CALL'} · {task.status.toUpperCase()}</Pill>
     </Row>
     <Surface style={{ backgroundColor: colors.amberPale, shadowOpacity: 0 }}>
-      <Text style={{ color: colors.amber, fontSize: 17, fontWeight: '800' }}>No calls are placed.</Text>
-      <Body style={{ color: '#755320' }}>Confirming changes only this server-side test task status.</Body>
+      <Text style={{ color: colors.amber, fontSize: 17, fontWeight: '800' }}>{task.testOnly ? 'No calls are placed.' : 'Real telephone call'}</Text>
+      <Body style={{ color: '#755320' }}>{task.testOnly ? 'Confirming changes only this server-side test task status.' : 'Confirming will call the exact number below. Refreshing or reopening this task will not start another call.'}</Body>
     </Surface>
     <Surface>
       <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '800', letterSpacing: 1 }}>RECIPIENT</Text>
@@ -88,22 +95,23 @@ export function TaskDetailScreen() {
     </Surface>
     {task.summary ? <Surface><Text style={{ color: colors.ink, fontWeight: '800' }}>Server summary</Text><Body>{task.summary}</Body></Surface> : null}
     {task.transcript ? <Surface><Text style={{ color: colors.ink, fontWeight: '800' }}>Server transcript</Text><Body>{task.transcript}</Body></Surface> : null}
+    {task.warning ? <Surface style={{ backgroundColor: colors.amberPale }}><Body>{task.warning}</Body></Surface> : null}
     {error ? <ErrorNotice message={error} onRetry={() => void load()} /> : null}
     {prepared ? <>
       {confirming ? <Surface style={{ backgroundColor: colors.greenPale, shadowOpacity: 0 }}>
-        <Text style={{ color: colors.green, fontSize: 17, fontWeight: '800' }}>Confirm this TEST task?</Text>
-        <Body style={{ color: '#356C52' }}>This only advances the test-task status. No call or conversation is started.</Body>
-        <Button title="Yes, confirm test task" onPress={() => void confirm()} loading={working} tone="green" />
+        <Text style={{ color: colors.green, fontSize: 17, fontWeight: '800' }}>{task.testOnly ? 'Confirm this TEST task?' : `Call ${task.review?.phoneNumber}?`}</Text>
+        <Body style={{ color: '#356C52' }}>{task.testOnly ? 'This only advances the test-task status. No call or conversation is started.' : 'I authorize Secretary to place this real call using exactly the instruction and selected cards shown above.'}</Body>
+        <Button title={task.testOnly ? 'Yes, confirm test task' : 'Confirm and call now'} onPress={() => void confirm()} loading={working} tone="green" />
         <Button title="Go back to review" onPress={() => setConfirming(false)} disabled={working} tone="quiet" />
-      </Surface> : <Button title="Review complete · confirm test task" onPress={() => setConfirming(true)} tone="green" />}
+      </Surface> : <Button title={task.testOnly ? 'Review complete · confirm test task' : 'Review complete · confirm call'} onPress={() => setConfirming(true)} tone="green" />}
       {cancelling ? <Surface style={{ backgroundColor: colors.amberPale, shadowOpacity: 0 }}>
-        <Text style={{ color: colors.amber, fontSize: 16, fontWeight: '800' }}>Cancel this test task?</Text>
+        <Text style={{ color: colors.amber, fontSize: 16, fontWeight: '800' }}>Cancel this review?</Text>
         <Body style={{ color: '#755320' }}>It will remain in server history as cancelled.</Body>
         <Button title="Yes, cancel task" onPress={() => void cancel()} disabled={working} tone="danger" />
         <Button title="Keep reviewing" onPress={() => setCancelling(false)} disabled={working} tone="quiet" />
-      </Surface> : <Button title="Cancel test task" onPress={() => setCancelling(true)} disabled={working} tone="quiet" />}
+      </Surface> : <Button title="Cancel review" onPress={() => setCancelling(true)} disabled={working} tone="quiet" />}
     </> : <Button title="Back" onPress={() => nav.goBack()} tone="quiet" />}
-    {PlatformNote()}
+    {task.testOnly ? PlatformNote() : <Body>Results appear here and in call history. No automatic redial.</Body>}
   </ScrollPage>;
 }
 

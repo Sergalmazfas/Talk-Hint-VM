@@ -9,6 +9,9 @@ export class ApiError extends Error {
 export class BrowserApprovalPendingError extends Error {}
 
 let apiOrigin = defaultApiOrigin();
+let liveMode = false;
+export const isLiveMode = () => liveMode;
+const taskPath = (id: string) => `${id.startsWith('live:') ? '/live-reviews' : '/test-tasks'}/${encodeURIComponent(id)}`;
 export function getApiOrigin(): string { return apiOrigin; }
 export function resolveBackendUrl(value: string): string {
   if (!apiOrigin) throw new Error('Set a development backend origin before opening this link.');
@@ -20,6 +23,7 @@ export async function setApiOrigin(value: string): Promise<string> {
   const clean = validateOrigin(value);
   await originStorage.set(clean);
   apiOrigin = clean;
+  liveMode = false;
   return apiOrigin;
 }
 export async function loadSavedApiOrigin(): Promise<void> {
@@ -65,7 +69,11 @@ const json = (method: string, value?: unknown): RequestInit => ({
 export const api = {
   login: (email: string, password: string) => request<AuthResponse>('/login', json('POST', { email, password }), false),
   exchange: (sessionToken: string) => request<AuthResponse>('/exchange', json('POST', { sessionToken }), false),
-  me: () => request<MeResponse>('/me'),
+  me: async () => {
+    const result = await request<MeResponse>('/me');
+    liveMode = result.callingMode === 'live' && result.testOnly === false;
+    return result;
+  },
   refresh: () => request<AuthResponse>('/refresh', json('POST', {})),
   logout: () => request<void>('/logout', json('POST', {})),
   cards: () => request<{ cards: Card[] }>('/cards'),
@@ -77,25 +85,26 @@ export const api = {
   history: () => request<{ items?: HistoryItem[]; calls?: HistoryItem[]; tasks?: HistoryItem[] }>('/history'),
   historyDetail: (id: string) => request<HistoryDetail>(`/history/${encodeURIComponent(id)}`),
   taskReport: (id: string) => request<{ task: SecretaryTask }>(`/tasks/${encodeURIComponent(id)}`),
-  testTasks: () => request<{ tasks: SecretaryTask[] }>('/test-tasks'),
+  testTasks: () => request<{ tasks: SecretaryTask[] }>(liveMode ? '/live-reviews' : '/test-tasks'),
   prepare: (payload: { clientRequestId: string; recipient: string; phoneNumber: string; instruction: string; cardIds: string[] }) =>
-    request<{ id: string; review: SecretaryTask['review']; status: 'prepared'; expiresAt: string }>('/prepare', json('POST', payload)),
+    request<{ id: string; review: SecretaryTask['review']; status: 'prepared'; expiresAt: string; testOnly: boolean }>(liveMode ? '/live/prepare' : '/prepare', json('POST', payload)),
   prepareMessage: (payload: { conversationId: string; clientMessageId: string; text: string }) =>
     request<{ reply: string; proposedGoal: string; model: string }>('/prepare/message', json('POST', payload)),
   resetPreparation: (conversationId: string) =>
     request<void>('/prepare/reset', json('POST', { conversationId })),
-  confirmTask: (id: string) => request<{ task: SecretaryTask }>(`/test-tasks/${encodeURIComponent(id)}/confirm`, json('POST', {})),
+  confirmTask: (id: string) => request<{ task: SecretaryTask }>(`${taskPath(id)}/confirm`, json('POST', id.startsWith('live:') ? { confirmRealCall: true } : {})),
   task: async (id: string) => {
-    try { return await request<{ task: SecretaryTask }>(`/test-tasks/${encodeURIComponent(id)}`); }
+    try { return await request<{ task: SecretaryTask }>(taskPath(id)); }
     catch (error) {
       if (!(error instanceof ApiError) || error.status !== 404) throw error;
+      if (id.startsWith('live:')) throw error;
       const { tasks } = await request<{ tasks: SecretaryTask[] }>('/test-tasks');
       const task = tasks.find(item => item.id === id);
       if (!task) throw error;
       return { task };
     }
   },
-  cancelTask: (id: string) => request<{ task: SecretaryTask }>(`/test-tasks/${encodeURIComponent(id)}/cancel`, json('POST', {})),
+  cancelTask: (id: string) => request<{ task: SecretaryTask }>(`${taskPath(id)}/cancel`, json('POST', {})),
   transcribe: (audio: string, mimeType: string) => request<{ text: string }>('/transcribe', json('POST', { audio, mimeType })),
   calendar: (numberId: string) => request<Record<string, unknown>>(`/calendar/${encodeURIComponent(numberId)}`),
   calendars: (numberId: string) => request<{ calendars: Array<{ id: string; summary: string }> }>(`/calendar/${encodeURIComponent(numberId)}/calendars`),

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "apps/secretary-mobile"
 
 
-def package(backend_origin: str, output: Path) -> dict:
+def package(backend_origin: str, output: Path, production: bool = False) -> dict:
     url = urlsplit(backend_origin)
     if (
         url.scheme != "https"
@@ -21,8 +21,8 @@ def package(backend_origin: str, output: Path) -> dict:
         or url.path not in ("", "/")
         or url.query
         or url.fragment
-        or url.hostname == "talkhint.app"
-        or url.hostname.endswith(".talkhint.app")
+        or ((url.hostname == "talkhint.app" or url.hostname.endswith(".talkhint.app")) and not production)
+        or (production and url.hostname != "talkhint.app")
     ):
         raise ValueError("Supply a development HTTPS origin only, not production.")
     origin = f"https://{url.netloc}"
@@ -88,6 +88,28 @@ Separate-origin web API access is deliberately denied by the existing backend
 CORS guard. Do not weaken that guard. Use native preview; the existing backend
 also hosts a same-origin web preview at {origin}/secretary-preview/.
 """.encode()
+    if production:
+        contents["README.md"] = (ROOT / "docs/roadmap/mobile-production-handoff.md").read_bytes()
+        contents[".env.example"] = (
+            "# Public backend origin, NOT an API key. No server secrets in the app.\n"
+            f"EXPO_PUBLIC_API_ORIGIN={origin}\n"
+        ).encode()
+        contents["AGENTS.md"] = f"""# Existing TalkHint Secretary mobile client
+
+This is an update/reference bundle for an ALREADY CREATED separate Expo project.
+Do not migrate the original backend or overwrite newer mobile-project changes
+without comparing them. Preserve the existing app IDs, design, accounts and
+native mobile registration/build configuration.
+
+Read README.md for the production API contract. Use
+EXPO_PUBLIC_API_ORIGIN={origin}. Existing TEST IDs remain TEST; live reviews have
+the live: prefix and require explicit confirmRealCall:true after exact review.
+Discover live capability through authenticated /me; no automatic call on login.
+Reuse /api/mobile-secretary/*, not widget capabilities or backend credentials.
+No model substitution, number assignment, recording/SMS activation or provider
+changes. Native builds/signing are distinct from backend publication. Do not
+start calls, paid builds or store submissions as an automated validation step.
+""".encode()
     hashes = {
         name: hashlib.sha256(data).hexdigest()
         for name, data in sorted(contents.items())
@@ -120,5 +142,7 @@ if __name__ == "__main__":
         "--output", type=Path,
         default=ROOT / "generated-artifacts/talkhint-secretary-mobile.zip",
     )
+    parser.add_argument("--production", action="store_true",
+        help="Export an owner-authorized permanent talkhint.app client update.")
     args = parser.parse_args()
-    print(json.dumps(package(args.backend_origin, args.output.resolve())))
+    print(json.dumps(package(args.backend_origin, args.output.resolve(), args.production)))

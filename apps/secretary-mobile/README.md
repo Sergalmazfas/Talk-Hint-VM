@@ -1,6 +1,6 @@
 # TalkHint Secretary client
 
-An independent Expo SDK 54 client for the Secretary workflow. It contains only the Secretary, Cards, History, and Settings areas. Every displayed task is marked TEST; preparing and confirming a task never initiates a phone call. Google Calendar connect/disconnect and calendar selection are supported, but appointment booking is unavailable.
+An independent Expo SDK 54 client for the Secretary workflow. It contains only the Secretary, Cards, History, and Settings areas. The permanent backend is `https://talkhint.app`. Production advertises live calling; Dev defaults to TEST. Real calls require an immutable review and explicit `confirmRealCall:true` confirmation. Google Calendar connect/disconnect and calendar selection are supported, but appointment booking is unavailable.
 
 ## Run
 
@@ -12,15 +12,17 @@ npm run typecheck
 npm run export:web
 ```
 
-The web export is emitted to `dist/` and is intended to be hosted by the app at `/secretary-preview/`. Web requests use the current same-origin host and token storage uses `sessionStorage` (not durable storage); the Settings screen states this limitation. On native, enter a development HTTPS backend origin in Settings. Production `talkhint.app` origins are rejected.
+The web export is emitted to `dist/` and hosted by the Dev app at `/secretary-preview/`. Native clients use `EXPO_PUBLIC_API_ORIGIN=https://talkhint.app` or the address entered on sign-in. Tokens use native SecureStore; web uses sessionStorage. Separate-origin browser API requests remain restricted by CORS; use native builds or the existing same-origin Dev preview.
 
 ## Development builds
 
-`eas.json` contains internal development and preview profiles only. No production/release profile or production credentials are configured. Configure a development backend before signing in. Sign in with account email/password or use the optional PKCE browser handoff: the browser requires an existing account login and explicit approval. The client never displays or asks the user to paste a raw session token.
+`eas.json` contains internal development and preview profiles only. No store/release credentials are configured. Sign in with account email/password or the PKCE browser handoff using the existing Google flow and explicit approval. No raw token needs to be pasted. Connecting to the permanent backend is distinct from publishing an App Store release.
 
 ## Current API expectations
 
-The client calls `/api/mobile-secretary/*` only. It does not call the live `/api/secretary/tasks` endpoint. The matching Dev-only adapter is implemented in `server/mobileSecretary/`; it is mounted by the existing TalkHint server. Run the root `npm run dev`, then open `/secretary-preview/` after `npm run export:web` here. Actual calls are deliberately unavailable in this stage.
+The client calls `/api/mobile-secretary/*` only. The compatible adapter in `server/mobileSecretary/` is mounted in Dev and production. Production scoped state uses the additive `mobile_secretary_state` table; existing Dev state remains separate. Live confirmation reuses the SAME `secretaryBackend(dialSecretaryTask)` as ChatGPT, preserving model/voice, number selection, callbacks, isolation and recording/SMS guards. No dialing occurs on mount, login, prepare, GET, refresh or retry.
+
+See `docs/roadmap/mobile-production-handoff.md` in the original backend workspace for the exact API and separate-project update instructions. Existing `/prepare` and `/test-tasks/*` remain TEST even in production. Ambiguous live starts are read/reconciled, never automatically redialed. Real reports remain in existing call history after temporary review state expires.
 
 For a local native development build, first set the existing Dev backend:
 
@@ -37,7 +39,7 @@ credentials are created by these commands in this workspace. The checked-in
 native configuration is not proof of a successful device build. Expo Go is not
 the claimed validation target; use development builds.
 
-Task preparation uses a conversation-scoped clarification panel backed by `/prepare/message`; both typed text and explicitly recorded/transcribed speech enter that same preparation conversation. Server replies and suggested goals are shown with an explicit “Use as instruction” action, never auto-confirmed or replaced by a fallback model. Preparation persists request/message IDs and conversation state. Task confirmation is explicit and does not place calls. Voice recording requires microphone permission and surfaces service/permission errors without fabricating a transcript.
+Task preparation uses a conversation-scoped clarification panel backed by `/prepare/message`; typed and explicitly recorded/transcribed instructions enter the same preparation flow. Suggested goals require “Use as instruction”, never auto-confirmation or model fallback. Production call confirmation explicitly starts a real call; Dev TEST confirmation does not. Microphone failures are visible; no transcript is fabricated.
 
 ## Verification gaps
 

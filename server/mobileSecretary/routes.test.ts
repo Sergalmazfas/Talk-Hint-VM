@@ -19,6 +19,7 @@ vi.mock("../storage",()=>({storage:{
 vi.mock("../secretary/tasks",()=>({
   validateSecretaryInstruction:(v:string)=>v.length>0?v:null,
   validateSecretaryPhoneNumber:(v:string)=>/^\+1[2-9]\d{9}$/.test(v)?v:null,
+  getLiveSecretaryTaskByClientRequest:vi.fn(async()=>undefined),
 }));
 const transport=vi.hoisted(()=>({dial:vi.fn(),sms:vi.fn(),push:vi.fn(),calendarWrite:vi.fn()}));
 vi.mock("../chatgpt/secretary",()=>({secretaryBackend:()=>({
@@ -38,8 +39,11 @@ class MemoryStore extends MobileStore {
   async get(id:string,owner?:string){const r=this.rows.get(id);return r&&r.expires>new Date()&&(!owner||r.owner===owner)?r:undefined;}
   async put(r:RecordRow){if(!this.rows.has(r.id))this.rows.set(r.id,structuredClone(r));return this.rows.get(r.id)!;}
   async remove(id:string,o:string){if((await this.get(id,o)))this.rows.delete(id);}
+  async consume(id:string,o:string){if(!await this.get(id,o))return false;this.rows.delete(id);return true;}
   async list(o:string,k:string){return [...this.rows.values()].filter(r=>r.owner===o&&r.kind===k);}
   async transition(id:string,o:string,status:string){const r=await this.get(id,o);if(r?.kind==="task"&&r.payload.status==="prepared"){r.payload={...r.payload,status};return r;}}
+  async claimLive(id:string,o:string,status:"starting"|"cancelled"){const r=await this.get(id,o);if(r?.kind==="live-review"&&r.payload.status==="prepared"){r.payload={...r.payload,status};return structuredClone(r);}}
+  async linkLive(id:string,o:string,taskId:string){const r=await this.get(id,o);if(r?.kind==="live-review"&&r.payload.status==="starting")r.payload={...r.payload,taskId};}
 }
 let app:express.Express,store:MemoryStore;
 const path="/api/mobile-secretary";
@@ -92,9 +96,10 @@ describe("isolated mobile Secretary Dev client",()=>{
     await request(app).post(path+`/test-tasks/${p.body.id}/cancel`).auth(t,{type:"bearer"}).send({});
     expect((await request(app).post(path+`/test-tasks/${p.body.id}/confirm`).auth(t,{type:"bearer"}).send({})).body.task.status).toBe("cancelled");
   });
-  it("does not expose routes in production",async()=>{
+  it("mounts scoped APIs in production, but keeps guest access closed",async()=>{
     vi.stubEnv("NODE_ENV","production");const prod=express();registerMobileSecretary(prod,store);
-    expect((await request(prod).get(path+"/me")).status).toBe(404);
+    expect((await request(prod).get(path+"/me")).status).toBe(401);
+    expect((await request(prod).get("/secretary-preview/")).status).toBe(404);
   });
   it("returns real model and unavailable booking, never fake calendar authorization",async()=>{
     const t=await login();
@@ -118,5 +123,72 @@ describe("isolated mobile Secretary Dev client",()=>{
     const result=await request(app).post(path+"/prepare").auth(t,{type:"bearer"}).send(assignment);
     expect(result.status).toBe(503);
     expect((await store.list("owner","task")).length).toBe(0);
+  });
+});
+
+describe("mobile confirmed live calls reuse the existing engine",()=>{
+  let deps:any,created:Map<string,any>;
+  beforeEach(()=>{
+    created=new Map();
+    deps={backend:{
+      start:vi.fn(async(userId:string,input:any)=>{
+        const task={id:"engine-task",userId,status:"starting",...input,summary:null,transcript:""};
+        created.set(input.clientRequestId,task);return{task,reused:false};
+      }),
+      task:vi.fn(async(_owner:string,id:string)=>[...created.values()].find(t=>t.id===id)),
+    },lookup:vi.fn(async(_owner:string,id:string)=>created.get(id))};
+    app=express();app.use(express.json());registerMobileSecretary(app,store,deps);
+  });
+  it("requires exact real-call consent and never starts during preparation or GET",async()=>{
+    const t=await login(),p=await request(app).post(path+"/live/prepare").auth(t,{type:"bearer"}).send(assignment);
+    expect(p.status).toBe(200);expect(p.body.testOnly).toBe(false);
+    await request(app).get(path+`/live-reviews/${encodeURIComponent(p.body.id)}`).auth(t,{type:"bearer"});
+    expect(deps.backend.start).not.toHaveBeenCalled();
+    expect((await request(app).post(path+`/live-reviews/${encodeURIComponent(p.body.id)}/confirm`).auth(t,{type:"bearer"}).send({})).status).toBe(400);
+    expect(deps.backend.start).not.toHaveBeenCalled();
+  });
+  it("starts only once on parallel confirm, retry and restart with exact approved context",async()=>{
+    const t=await login(),p=await request(app).post(path+"/live/prepare").auth(t,{type:"bearer"}).send(assignment);
+    const confirm=()=>request(app).post(path+`/live-reviews/${encodeURIComponent(p.body.id)}/confirm`).auth(t,{type:"bearer"}).send({confirmRealCall:true});
+    const results=await Promise.all(Array.from({length:6},confirm));
+    expect(results.every(r=>r.status===200)).toBe(true);expect(deps.backend.start).toHaveBeenCalledTimes(1);
+    const sent=deps.backend.start.mock.calls[0][1];
+    expect(sent).toMatchObject({voiceProvider:"openai",phoneNumber:assignment.phoneNumber,clientRequestId:assignment.clientRequestId});
+    expect(sent.instruction).toContain("Approved facts");expect(sent.instruction).not.toContain("Private facts");
+    app=express();app.use(express.json());registerMobileSecretary(app,store,deps);
+    expect((await confirm()).body.task.taskId).toBe("engine-task");
+    expect(deps.backend.start).toHaveBeenCalledTimes(1);
+    expect((await request(app).post(path+"/live/prepare").auth(t,{type:"bearer"}).send({...assignment,phoneNumber:"+12025550124"})).status).toBe(409);
+  });
+  it("blocks foreign users, foreign cards, expired and cancelled review starts",async()=>{
+    const t=await login(),other=await login(true);
+    expect((await request(app).post(path+"/live/prepare").auth(other,{type:"bearer"}).send(assignment)).status).toBe(403);
+    const p=await request(app).post(path+"/live/prepare").auth(t,{type:"bearer"}).send(assignment);
+    const endpoint=path+`/live-reviews/${encodeURIComponent(p.body.id)}`;
+    expect((await request(app).post(endpoint+"/confirm").auth(other,{type:"bearer"}).send({confirmRealCall:true})).status).toBe(404);
+    (await store.get(p.body.id))!.payload.expiresAt=new Date(0).toISOString();
+    expect((await request(app).post(endpoint+"/confirm").auth(t,{type:"bearer"}).send({confirmRealCall:true})).status).toBe(410);
+    (await store.get(p.body.id))!.payload.expiresAt=new Date(Date.now()+50000).toISOString();
+    await request(app).post(endpoint+"/cancel").auth(t,{type:"bearer"}).send({});
+    expect((await request(app).post(endpoint+"/confirm").auth(t,{type:"bearer"}).send({confirmRealCall:true})).body.task.status).toBe("cancelled");
+    expect(deps.backend.start).not.toHaveBeenCalled();
+  });
+  it("recovers a saved engine task after acknowledgement failure without redial",async()=>{
+    const t=await login(),p=await request(app).post(path+"/live/prepare").auth(t,{type:"bearer"}).send(assignment);
+    const original=store.linkLive.bind(store);
+    vi.spyOn(store,"linkLive").mockRejectedValueOnce(Error("Temporary write failure")).mockImplementation(original);
+    const endpoint=path+`/live-reviews/${encodeURIComponent(p.body.id)}`;
+    await request(app).post(endpoint+"/confirm").auth(t,{type:"bearer"}).send({confirmRealCall:true});
+    expect((await request(app).get(endpoint).auth(t,{type:"bearer"})).body.task.taskId).toBe("engine-task");
+    await request(app).post(endpoint+"/confirm").auth(t,{type:"bearer"}).send({confirmRealCall:true});
+    expect(deps.backend.start).toHaveBeenCalledTimes(1);
+  });
+  it("does not retry an ambiguous start that never returned a task",async()=>{
+    deps.backend.start.mockRejectedValue(Error("Transport timeout"));
+    const t=await login(),p=await request(app).post(path+"/live/prepare").auth(t,{type:"bearer"}).send(assignment);
+    const endpoint=path+`/live-reviews/${encodeURIComponent(p.body.id)}/confirm`;
+    expect((await request(app).post(endpoint).auth(t,{type:"bearer"}).send({confirmRealCall:true})).status).toBe(202);
+    await request(app).post(endpoint).auth(t,{type:"bearer"}).send({confirmRealCall:true});
+    expect(deps.backend.start).toHaveBeenCalledTimes(1);
   });
 });

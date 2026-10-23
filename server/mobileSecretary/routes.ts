@@ -10,13 +10,13 @@ import { secretaryBackend } from "../chatgpt/secretary";
 import { incomingStore } from "../incomingSecretary/runtime";
 import { ownerCalendar } from "../incomingSecretary/ownerCalendar";
 import { prepareMessage, clearPrepareState, PREPARE_MODEL, PrepareUnavailableError } from "../prepare";
+import { registerMobileLive, liveDependencies, type LiveDependencies } from "./live";
 
 const model={model:SECRETARY_AUDIO_MODEL,voice:SECRETARY_AUDIO_VOICE,reasoningModel:SECRETARY_REASONING_MODEL};
 const publicUser=(u:any)=>({id:u.id,email:u.email,language:u.language});
 const failure=(status:number,message:string)=>Object.assign(new Error(message),{status});
 /** One-time Dev browser return; no access token is put in its URL. */
 export function mobileBrowserReturn(req:Request):string|undefined {
-  if(process.env.NODE_ENV!=="development")return;
   const session=req.session as any;
   const id=session?.mobileSecretaryReturn;
   if(session)delete session.mobileSecretaryReturn;
@@ -27,9 +27,7 @@ const input=z.object({clientRequestId:z.string().uuid(),recipient:z.string().tri
   instruction:z.string().refine(v=>!!validateSecretaryInstruction(v),"Invalid assignment"),
   cardIds:z.array(z.string().min(1).max(100)).max(40)}).strict();
 
-export function registerMobileSecretary(app:Express,store=new MobileStore()) {
-  // No new endpoints/static preview are mounted in production.
-  if(process.env.NODE_ENV!=="development")return;
+export function registerMobileSecretary(app:Express,store=new MobileStore(),live?:LiveDependencies) {
   const router=express.Router();
   router.use((req,res,next)=>{
     res.set({"Cache-Control":"no-store","Referrer-Policy":"no-referrer"});
@@ -87,13 +85,13 @@ export function registerMobileSecretary(app:Express,store=new MobileStore()) {
   router.get("/browser/approve",(req,res,next)=>{
     if(req.user)return next();
     const id=typeof req.query.id==="string"&&/^[A-Za-z0-9_-]{43}$/.test(req.query.id)?req.query.id:"";
-    res.set("Cache-Control","no-store").type("html").send(`<meta name="viewport" content="width=device-width"><h1>TalkHint Secretary Dev</h1><p>Sign in with your existing account to authorize this Dev client.</p><a href="/api/mobile-secretary/browser/login?id=${id}">Continue with Google</a>`);
+    res.set("Cache-Control","no-store").type("html").send(`<meta name="viewport" content="width=device-width"><h1>TalkHint Secretary</h1><p>Sign in with your existing account to authorize this mobile client.</p><a href="/api/mobile-secretary/browser/login?id=${id}">Continue with Google</a>`);
   },authMiddleware,wrap(async(req,res)=>{
     const id=z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(req.query.id);
     const pending=await store.get("browser:"+id);
     if(!pending||pending.kind!=="browser")throw failure(410,"Authorization expired");
     // GET only shows a form; ownership approval requires explicit POST.
-    res.type("html").send(`<meta name="viewport" content="width=device-width"><h1>TalkHint Secretary Dev</h1><p>Authorize this client for TEST and your Dev data only. No calls or number activation.</p><form method="post" action="/api/mobile-secretary/browser/approve-form"><input type="hidden" name="id" value="${id}"><button>Authorize Dev client</button></form>`);
+    res.set("Cache-Control","no-store").type("html").send(`<meta name="viewport" content="width=device-width"><h1>TalkHint Secretary</h1><p>Authorize this client to access your cards, profiles and call history. Real calls require a separate explicit call confirmation. This does not assign numbers or activate incoming AI.</p><form method="post" action="/api/mobile-secretary/browser/approve-form"><input type="hidden" name="id" value="${id}"><button>Authorize mobile client</button></form>`);
   }));
   // Form is separately mounted below (JSON API otherwise rejects form requests).
   app.post("/api/mobile-secretary/browser/approve-form",express.urlencoded({extended:false}),authMiddleware,wrap(async(req,res)=>{
@@ -110,7 +108,7 @@ export function registerMobileSecretary(app:Express,store=new MobileStore()) {
       return res.redirect(url);
     }
     await store.put({id:"approved:"+id,owner:req.user!.id,kind:"approved",payload:pending.payload,expires:pending.expires});
-    res.set("Cache-Control","no-store").type("html").send("Dev client authorized. Return to the Secretary app.");
+    res.set("Cache-Control","no-store").type("html").send("Mobile client authorized. Return to the Secretary app.");
   }));
   router.post("/browser/exchange",wrap(async(req,res)=>{
     const {id,verifier}=z.object({id:z.string().regex(/^[A-Za-z0-9_-]{43}$/),verifier:z.string().min(43).max(128)}).strict().parse(req.body);
@@ -118,9 +116,7 @@ export function registerMobileSecretary(app:Express,store=new MobileStore()) {
     if(!row)return res.status(202).json({pending:true});
     if(digest(verifier)!==row.payload.challenge)throw failure(403,"Invalid verifier");
     // Atomic consumption avoids replay across workers.
-    const {pool}=await import("../db");
-    const won=await pool!.query("DELETE FROM mobile_secretary_dev WHERE id=$1 AND owner=$2 RETURNING id",[row.id,row.owner]);
-    if(!won.rowCount)throw failure(410,"Authorization already consumed");
+    if(!await store.consume(row.id,row.owner))throw failure(410,"Authorization already consumed");
     await store.remove("browser:"+id,"pending");
     res.json(await mint(row.owner));
   }));
@@ -135,7 +131,9 @@ export function registerMobileSecretary(app:Express,store=new MobileStore()) {
     next();
   })().catch(e=>res.status(e.status??503).json({error:e.status?e.message:"Mobile Dev authentication unavailable"}));});
   const owner=(r:Request)=>r.user!.id;
-  router.get("/me",wrap(async(req,res)=>res.json({user:publicUser(req.user),model,testOnly:true,legal:{approved:false}})));
+  router.get("/me",wrap(async(req,res)=>res.json({user:publicUser(req.user),model,
+    testOnly:process.env.NODE_ENV!=="production",callingMode:process.env.NODE_ENV==="production"?"live":"test",
+    legal:{approved:false}})));
   router.post("/refresh",wrap(async(req,res)=>{
     const token=await mint(owner(req));await store.remove((req as any).mobileSession.id,owner(req));res.json(token);
   }));
@@ -236,6 +234,8 @@ export function registerMobileSecretary(app:Express,store=new MobileStore()) {
     if(!r.ok)throw failure(502,"Transcription unavailable; no fallback");
     res.json({text:(await r.json()).text});
   }));
+  registerMobileLive(router,store,wrap,live??liveDependencies());
   app.use("/api/mobile-secretary",router);
-  app.use("/secretary-preview",express.static(resolve("apps/secretary-mobile/dist"),{index:"index.html"}));
+  if(process.env.NODE_ENV!=="production")
+    app.use("/secretary-preview",express.static(resolve("apps/secretary-mobile/dist"),{index:"index.html"}));
 }

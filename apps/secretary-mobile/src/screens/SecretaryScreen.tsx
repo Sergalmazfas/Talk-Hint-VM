@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { api } from '../api';
+import { api, isLiveMode } from '../api';
 import type { SecretaryTask } from '../types';
 import { taskStorage } from '../storage';
 import { Button, ErrorNotice, Heading, LoadingRows, Pill, ScrollPage, Surface, Body, Row } from '../components';
@@ -13,7 +13,7 @@ function TaskTile({ task, onPress }: { task: SecretaryTask; onPress: () => void 
   return <Pressable onPress={onPress} accessibilityRole="button">
     <Surface style={{ padding: 17 }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Pill tone={task.status === 'completed' ? 'green' : 'amber'}>TEST · {task.status.toUpperCase()}</Pill>
+        <Pill tone={task.status === 'completed' ? 'green' : 'amber'}>{task.testOnly ? 'TEST' : 'CALL'} · {task.status.toUpperCase()}</Pill>
         <Text style={{ color: colors.blue, fontSize: 20, fontWeight: '700' }}>›</Text>
       </Row>
       <Text numberOfLines={2} style={{ color: colors.ink, fontWeight: '700', fontSize: 16 }}>
@@ -70,13 +70,13 @@ export function SecretaryScreen() {
   };
   return <ScrollPage refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.blue} />}>
     <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-      <Heading eyebrow="Secretary · Test mode">Follow-up desk</Heading>
-      <Pill tone="amber">TEST</Pill>
+      <Heading eyebrow="Secretary">Follow-up desk</Heading>
+      <Pill tone={isLiveMode() ? 'blue' : 'amber'}>{isLiveMode() ? 'LIVE' : 'TEST'}</Pill>
     </Row>
     <Surface style={{ backgroundColor: colors.bluePale, shadowOpacity: 0 }}>
-      <Text style={{ color: colors.blue, fontWeight: '800', fontSize: 17 }}>No calls are placed.</Text>
-      <Body style={{ color: '#345C9E' }}>Tasks are prepared for review. A task completes only after you explicitly confirm it.</Body>
-      <Button title="Prepare a test task" onPress={() => nav.navigate('Prepare')} />
+      <Text style={{ color: colors.blue, fontWeight: '800', fontSize: 17 }}>{isLiveMode() ? 'Your secretary can call for you.' : 'No calls are placed.'}</Text>
+      <Body style={{ color: '#345C9E' }}>{isLiveMode() ? 'Review the exact number, instruction and cards. A real call starts only after your explicit confirmation.' : 'Tasks are prepared for review. A task completes only after you explicitly confirm it.'}</Body>
+      <Button title={isLiveMode() ? 'Prepare a call' : 'Prepare a test task'} onPress={() => nav.navigate('Prepare')} />
     </Surface>
     {restored ? <>
       <Text style={{ color: colors.ink, fontSize: 17, fontWeight: '800', marginTop: 3 }}>Continue where you left off</Text>
@@ -86,7 +86,7 @@ export function SecretaryScreen() {
       <Body style={{ color: colors.amber }}>{restoreNotice}</Body>
     </Surface> : null}
     <Row style={{ justifyContent: 'space-between' }}>
-      <Text style={{ color: colors.ink, fontSize: 19, fontWeight: '800' }}>Recent test tasks</Text>
+      <Text style={{ color: colors.ink, fontSize: 19, fontWeight: '800' }}>{isLiveMode() ? 'Recent call tasks' : 'Recent test tasks'}</Text>
       <Text style={{ color: colors.muted, fontSize: 12 }}>SERVER DATA</Text>
     </Row>
     {loading ? <LoadingRows /> : error ? <ErrorNotice message={error} onRetry={() => void load()} /> :

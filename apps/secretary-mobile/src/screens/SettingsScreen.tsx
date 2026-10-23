@@ -63,7 +63,7 @@ export function SettingsScreen() {
       if (next !== getApiOrigin()) await auth.changeOrigin(next);
       const clean = getApiOrigin();
       setOrigin(clean);
-      setOriginMessage('Development origin saved. Sign in again to create a session for this backend.');
+      setOriginMessage('Backend address saved. Sign in again to create a session for this backend.');
     } catch (e) { setOriginMessage(e instanceof Error ? e.message : 'Could not save origin.'); }
   };
   const connect = async (numberId: string) => {
@@ -127,10 +127,10 @@ export function SettingsScreen() {
     <Surface>
       <Label>DEVELOPMENT SERVER</Label>
       <Field label="Backend origin" value={origin} onChangeText={setOrigin} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
-      <Button title="Save development origin" onPress={updateOrigin} tone="quiet" />
+      <Button title="Save backend address" onPress={updateOrigin} tone="quiet" />
       {originMessage ? <Body style={{ color: colors.muted }}>{originMessage}</Body> : null}
       <Body style={{ color: colors.muted, fontSize: 12 }}>
-        Production talkhint.app is blocked. Native clients require HTTPS except loopback. Changing the origin clears the current account session; sign in again for the selected backend.
+        The permanent backend is https://talkhint.app. Native clients require HTTPS except loopback. Changing the origin clears the current session; sign in again for the selected backend.
       </Body>
       {Platform.OS === 'web' ? <Body style={{ color: colors.amber, fontSize: 12 }}>
         Web preview: sessionStorage is temporary and only lasts for this browser tab/session. This is not secure durable token storage.

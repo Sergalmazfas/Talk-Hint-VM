@@ -18,6 +18,17 @@ the device and no clone/provider selectors. Provided iOS screenshots are the
 visual reference, not permission to add the other laboratory tabs. Test actions
 must remain distinct from real calls until separately authorized.
 
+The owner subsequently authorized a permanent connection to the published
+backend and real outgoing Secretary calls after explicit in-app confirmation,
+not TEST-only production access.
+
+**Why:** Existing ChatGPT Secretary calling is already in active use; the mobile
+client should reuse that engine rather than restart the product validation.
+
+**How to apply:** Preserve explicit exact-assignment approval and no-redial
+recovery. Keep old TEST requests test-only. Do not make calls as the agent or
+change provider/recording/number settings just to verify the integration.
+
 The owner approved preparing the already-built client for a **separate Replit
 mobile project**, without migrating the existing project.
 

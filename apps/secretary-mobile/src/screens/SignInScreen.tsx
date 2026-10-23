@@ -61,11 +61,11 @@ export function SignInScreen() {
       <View style={{ gap: 17 }}>
         <Pill tone="amber">DEVELOPMENT CLIENT</Pill>
         <Heading eyebrow="TalkHint / Secretary">A quieter way to follow up.</Heading>
-        <Body style={{ color: colors.muted }}>Sign in with an existing TalkHint account. This client is test-only and does not place calls.</Body>
+        <Body style={{ color: colors.muted }}>Sign in with your existing TalkHint account. Real calls require a separate review and your explicit confirmation.</Body>
       </View>
       <Surface>
-        <Field label="Development backend origin" value={origin} onChangeText={setOrigin}
-          placeholder="https://dev-api.example.test" autoCapitalize="none" autoCorrect={false} keyboardType="url" />
+        <Field label="TalkHint backend address" value={origin} onChangeText={setOrigin}
+          placeholder="https://talkhint.app" autoCapitalize="none" autoCorrect={false} keyboardType="url" />
         <Field label="Email" value={email} onChangeText={setEmail} placeholder="you@example.com"
           autoCapitalize="none" autoCorrect={false} keyboardType="email-address" />
         <Field label="Password" value={password} onChangeText={setPassword} placeholder="Your account password" secureTextEntry />

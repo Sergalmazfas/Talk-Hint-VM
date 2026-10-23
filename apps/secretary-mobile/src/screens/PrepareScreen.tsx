@@ -5,7 +5,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { api } from '../api';
+import { api, isLiveMode } from '../api';
 import type { Card, SecretaryTask } from '../types';
 import { taskStorage } from '../storage';
 import { Body, Button, ErrorNotice, Field, Heading, Label, Pill, Row, ScrollPage, Surface } from '../components';
@@ -195,7 +195,7 @@ export function PrepareScreen() {
       const result = await api.prepare({ clientRequestId: requestId.current, recipient: recipient.trim(), phoneNumber: phone.trim(),
         instruction: instruction.trim(), cardIds: selected });
       const preparedTask: SecretaryTask = {
-        id: result.id, status: result.status, testOnly: true, review: result.review, expiresAt: result.expiresAt,
+        id: result.id, status: result.status, testOnly: result.testOnly, review: result.review, expiresAt: result.expiresAt,
       };
       await taskStorage.set({ id: result.id, clientRequestId: requestId.current, status: result.status,
         expiresAt: result.expiresAt, task: preparedTask });
@@ -207,8 +207,8 @@ export function PrepareScreen() {
   return <ScrollPage>
     <Heading eyebrow="Test task · Step 1 of 2">Write the brief</Heading>
     <Surface style={{ backgroundColor: colors.amberPale, shadowOpacity: 0 }}>
-      <Row><Pill tone="amber">TEST ONLY</Pill><Text style={{ color: colors.amber, fontWeight: '800' }}>No phone call will be placed</Text></Row>
-      <Body style={{ color: '#755320' }}>This creates a reviewable test task. Nothing is sent until you confirm on the next screen.</Body>
+      <Row><Pill tone={isLiveMode() ? 'blue' : 'amber'}>{isLiveMode() ? 'CALL REVIEW' : 'TEST ONLY'}</Pill><Text style={{ color: colors.amber, fontWeight: '800' }}>{isLiveMode() ? 'Nothing is dialed until you confirm' : 'No phone call will be placed'}</Text></Row>
+      <Body style={{ color: '#755320' }}>{isLiveMode() ? 'This prepares a real call for review. The number is dialed only after your explicit confirmation on the next screen.' : 'This creates a reviewable test task. Nothing is sent until you confirm on the next screen.'}</Body>
     </Surface>
     <Surface>
       <Row style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -264,7 +264,7 @@ export function PrepareScreen() {
             <Button title={selected.includes(card.id) ? 'Selected' : 'Add'} onPress={() => toggle(card.id)}
               tone={selected.includes(card.id) ? 'green' : 'quiet'} compact />
           </Row>
-        </View>) : <Body style={{ color: colors.muted }}>No cards are available. You can still prepare the test task.</Body>}
+        </View>) : <Body style={{ color: colors.muted }}>No cards are available. You can still prepare an instruction for review.</Body>}
     </Surface>
     {error ? <ErrorNotice message={error} /> : null}
     <Button title="Prepare review" onPress={() => void prepare()} loading={working} disabled={chatWorking} />

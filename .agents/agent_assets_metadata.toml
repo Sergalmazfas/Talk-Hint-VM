@@ -397,3 +397,31 @@ mtime_ms = 1792705439062
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ded919ff-7d37-4f71-a778-a8ebb63cc601/f800b5c1-e117-4325-8bbd-11eca6a0aabc"
 storage_version_token = "1792705445719633"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3jNQooDK1gizf1kLQE5_B"
+uri = "file://generated-artifacts/talkhint-secretary-permanent-backend.zip"
+type = "unspecified"
+title = "Обновление мобильного клиента для talkhint.app"
+description = "Передайте Agent уже созданного мобильного проекта: обновлённый клиент и контракт постоянного API. Не нужно переносить backend или создавать проект заново. Сверить изменения перед применением."
+logical_id = "961fbf20-c4da-4686-a8df-13da8fa54ab7"
+content_hash = "sha256:6f2fb62c0c91005d30ffbfc46503f00e79dcf85dd2c18e1cf61b555af7a3425d"
+size = 118100
+mtime_ms = 1792782069762
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/961fbf20-c4da-4686-a8df-13da8fa54ab7/1765c3da-f237-4e16-83c6-52d8195bdc3d"
+storage_version_token = "1792782089085998"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "9eSQUYyiZpu8CYWd5QyrH"
+uri = "file://docs/roadmap/mobile-production-handoff.md"
+type = "text"
+title = "Постоянное подключение мобильного TalkHint — инструкция"
+description = "Адрес, точные маршруты review/confirm/status, порядок обновления отдельного проекта и результаты проверок."
+logical_id = "f09fb805-3521-460a-9a2f-b7b29e73bd17"
+content_hash = "sha256:31e5ea87a3b7a9a055f34df8187bb4f64d26f0e2242862da0be77e904493a76a"
+size = 9420
+mtime_ms = 1792782059318
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f09fb805-3521-460a-9a2f-b7b29e73bd17/2557e9e7-b378-45b1-a29d-4a0ece19566c"
+storage_version_token = "1792782089758172"
+content_type = "text/markdown"
