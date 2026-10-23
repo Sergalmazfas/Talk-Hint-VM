@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import request from "supertest";
+import { createServer } from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { existsSync } from "node:fs";
 vi.mock("../db",()=>({db:{},dbReady:Promise.resolve(),pool:{query:vi.fn()}}));
 vi.mock("../auth",()=>({
   loginUser:vi.fn(async(email:string,password:string)=>{if(password!=="test-password")throw Error();return{id:email==="other@example.test"?"other":"owner",email,language:"en"};}),
   getSessionUserId:vi.fn(async()=>undefined),
-  authMiddleware:(_r:any,s:any)=>s.sendStatus(401),
+  authMiddleware:(r:any,s:any,next:any)=>r.user?next():s.sendStatus(401),
 }));
 vi.mock("../storage",()=>({storage:{
   getUser:vi.fn(async(id:string)=>({id,email:id+"@example.test",language:"en",plan:null})),
@@ -33,7 +37,7 @@ vi.mock("../incomingSecretary/ownerCalendar",()=>({ownerCalendar:{
   status:async()=>({state:"setup_required",bookingEnabled:false,mode:"read_only"}),
 }}));
 import { registerMobileSecretary } from "./routes";
-import { MobileStore, type RecordRow } from "./store";
+import { MobileStore, digest, type RecordRow } from "./store";
 class MemoryStore extends MobileStore {
   rows=new Map<string,RecordRow>();
   async get(id:string,owner?:string){const r=this.rows.get(id);return r&&r.expires>new Date()&&(!owner||r.owner===owner)?r:undefined;}
@@ -124,6 +128,95 @@ describe("isolated mobile Secretary Dev client",()=>{
     expect(result.status).toBe(503);
     expect((await store.list("owner","task")).length).toBe(0);
   });
+});
+
+describe("mobile browser approval Origin protection",()=>{
+  const id="a".repeat(43),verifier="v".repeat(64);
+  beforeEach(async()=>{
+    app=express();
+    app.use(express.json());
+    // Synthetic Passport identity, confined to this fixture (no real login).
+    app.use((req,_res,next)=>{
+      req.user={id:"owner",email:"owner@example.test",language:"en",plan:null};
+      next();
+    });
+    registerMobileSecretary(app,store);
+    await store.put({id:"browser:"+id,owner:"pending",kind:"browser",
+      payload:{challenge:digest(verifier)},expires:new Date(Date.now()+300000)});
+  });
+  it("keeps the approval form's Origin without leaking its id in Referer",async()=>{
+    const page=await request(app).get(path+"/browser/approve?id="+id);
+    expect(page.status).toBe(200);
+    expect(page.headers["referrer-policy"]).toBe("strict-origin");
+    expect(page.headers["cache-control"]).toBe("no-store");
+    expect(page.text).toContain('action="/api/mobile-secretary/browser/approve-form"');
+  });
+  it.each([undefined,"null","https://attacker.test","https://localhost","http://localhost:8081"])(
+    "rejects approval with missing, opaque, foreign or wrong-scheme Origin (%s)",async(origin)=>{
+      let post=request(app).post(path+"/browser/approve-form").set("Host","localhost");
+      if(origin!==undefined)post=post.set("Origin",origin);
+      const res=await post.type("form").send({id});
+      expect(res.status).toBe(403);
+      expect(await store.get("approved:"+id)).toBeUndefined();
+    });
+  it("requires explicit same-origin approval and the verifier, then consumes authorization once",async()=>{
+    const exchange=(value=verifier)=>request(app).post(path+"/browser/exchange").send({id,verifier:value});
+    await request(app).get(path+"/browser/approve?id="+id);
+    expect((await exchange()).status).toBe(202);
+    const approved=await request(app).post(path+"/browser/approve-form")
+      .set("Host","localhost").set("Origin","http://localhost").type("form").send({id});
+    expect(approved.status).toBe(200);
+    expect((await exchange("x".repeat(64))).status).toBe(403);
+    const token=await exchange();
+    expect(token.status).toBe(200);
+    expect(token.body.token).toMatch(/^thmobile\./);
+    expect((await request(app).get(path+"/me").auth(token.body.token,{type:"bearer"})).status).toBe(200);
+    expect((await exchange()).status).toBe(202);
+    expect(await store.get("approved:"+id)).toBeUndefined();
+    expect(await store.get("browser:"+id)).toBeUndefined();
+  });
+  it.skipIf(!existsSync("/repl/tools/bin/chromium"))(
+    "reproduces the rejected browser POST under no-referrer and submits the real fixed form",async()=>{
+      const seen:Array<{origin?:string;referer?:string;status:number}>=[];
+      const fixture=express();
+      fixture.use((req,res,next)=>{
+        if(req.method==="POST")res.on("finish",()=>seen.push({
+          origin:req.get("origin"),referer:req.get("referer"),status:res.statusCode,
+        }));
+        if(req.path===path+"/browser/approve"){
+          const send=res.send.bind(res);
+          res.send=((html:any)=>{
+            if(req.query.legacy==="1")res.set("Referrer-Policy","no-referrer");
+            return send(html+'<script>document.forms[0].submit()</script>');
+          }) as typeof res.send;
+        }
+        next();
+      });
+      fixture.use(app);
+      const server=createServer(fixture);
+      await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+      const origin=`http://127.0.0.1:${(server.address() as any).port}`;
+      try {
+        for(const legacy of [true,false]){
+          await promisify(execFile)("/repl/tools/bin/chromium",[
+            "--headless","--no-sandbox","--disable-gpu","--disable-background-networking",
+            "--no-first-run","--no-default-browser-check","--dump-dom","--virtual-time-budget=1500",
+            `${origin}${path}/browser/approve?id=${id}${legacy?"&legacy=1":""}`,
+          ],{timeout:20000,maxBuffer:1024*1024});
+        }
+        expect(seen).toEqual([
+          {origin:"null",referer:undefined,status:403},
+          {origin,referer:origin+"/",status:200},
+        ]);
+        expect(await store.get("approved:"+id)).toBeDefined();
+        expect(transport.dial).not.toHaveBeenCalled();
+        expect(transport.sms).not.toHaveBeenCalled();
+        expect(transport.push).not.toHaveBeenCalled();
+        expect(transport.calendarWrite).not.toHaveBeenCalled();
+      } finally {
+        await new Promise<void>(resolve=>server.close(()=>resolve()));
+      }
+    },45000);
 });
 
 describe("mobile confirmed live calls reuse the existing engine",()=>{

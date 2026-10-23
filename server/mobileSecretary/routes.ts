@@ -90,6 +90,9 @@ export function registerMobileSecretary(app:Express,store=new MobileStore(),live
     const id=z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(req.query.id);
     const pending=await store.get("browser:"+id);
     if(!pending||pending.kind!=="browser")throw failure(410,"Authorization expired");
+    // no-referrer makes HTML form POSTs send Origin: null. Preserve the
+    // same-origin check below without exposing this page's approval id in Referer.
+    res.set("Referrer-Policy","strict-origin");
     // GET only shows a form; ownership approval requires explicit POST.
     res.set("Cache-Control","no-store").type("html").send(`<meta name="viewport" content="width=device-width"><h1>TalkHint Secretary</h1><p>Authorize this client to access your cards, profiles and call history. Real calls require a separate explicit call confirmation. This does not assign numbers or activate incoming AI.</p><form method="post" action="/api/mobile-secretary/browser/approve-form"><input type="hidden" name="id" value="${id}"><button>Authorize mobile client</button></form>`);
   }));
