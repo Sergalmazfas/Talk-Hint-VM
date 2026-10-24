@@ -28,3 +28,20 @@ number-level statusCallback for outbound end.
 `GET /api/calls` and `/api/calls/:id` are now `authMiddleware`-scoped to the
 caller (`getUserCalls`, plus `userId` ownership check returning 404). The iOS
 client-side filter is now redundant defense-in-depth.
+
+## Native monitoring is not the PSTN call lifetime
+
+Closing or losing the native Secretary monitor does not establish that the
+server-side phone call ended. Do not create a replacement call merely because
+the iPhone UI disappeared.
+
+**Why:** A reported immediate app exit coincided with a provider-confirmed
+five-minute call; task creation and successful webhook HTTP responses alone
+could not establish its final outcome.
+
+**How to apply:** Recover the same task/request first and, when local state is
+inconclusive, read the exact provider call's status, duration and end time.
+Keep callback acceptance, application state and provider state distinct.
+Check the installed Twilio MCP's actual capabilities: search/retrieve tools may
+return API documentation rather than live call records. Use an authenticated
+read-only SDK GET if needed, without logging credentials or contact details.

@@ -352,64 +352,19 @@ final class PrepareViewController: UIViewController {
     /// Goal-proposal card: compact goal + "✓ Всё верно / Изменить". The goal is
     /// NOT active until the user confirms; "Изменить" just continues the dialog.
     private func addGoalProposal(_ goal: String) {
-        let card = UIView()
-        card.backgroundColor = Theme.purpleBg
-        card.layer.cornerRadius = 16
-        card.layer.borderWidth = 1
-        card.layer.borderColor = Theme.purple.withAlphaComponent(0.35).cgColor
-        card.accessibilityIdentifier = "card-goal-proposal"
-
-        let header = UILabel()
-        header.text = NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_header" : "prepare.goal_header", comment: "")
-        header.font = .preferredFont(forTextStyle: .caption1)
-        header.textColor = Theme.purple
-
-        let goalLabel = UILabel()
-        goalLabel.text = goal
-        goalLabel.numberOfLines = 0
-        goalLabel.font = .preferredFont(forTextStyle: .body)
-
-        let confirmationQuestion = UILabel()
-        confirmationQuestion.text = NSLocalizedString("secretary.prepare.confirm_question", comment: "")
-        confirmationQuestion.numberOfLines = 0
-        confirmationQuestion.font = .preferredFont(forTextStyle: .subheadline)
-        confirmationQuestion.textColor = .secondaryLabel
-        confirmationQuestion.accessibilityIdentifier = "label-secretary-confirm-question"
-
-        let confirmButton = UIButton(type: .system)
-        confirmButton.setTitle(NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_confirm" : "prepare.goal_confirm", comment: ""), for: .normal)
-        confirmButton.setTitleColor(.white, for: .normal)
-        confirmButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        confirmButton.backgroundColor = Theme.purple
-        confirmButton.layer.cornerRadius = 20
-        confirmButton.accessibilityIdentifier = "button-goal-confirm"
-
-        let editButton = UIButton(type: .system)
-        editButton.setTitle(NSLocalizedString(mode == .secretary ? "secretary.prepare.goal_edit" : "prepare.goal_edit", comment: ""), for: .normal)
-        editButton.setTitleColor(Theme.ink, for: .normal)
-        editButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        editButton.backgroundColor = .systemBackground
-        editButton.layer.cornerRadius = 20
-        editButton.layer.borderWidth = 1
-        editButton.layer.borderColor = Theme.line.cgColor
-        editButton.accessibilityIdentifier = "button-goal-edit"
-
-        let buttons = UIStackView(arrangedSubviews: [confirmButton, editButton])
-        buttons.axis = .horizontal
-        buttons.distribution = .fillEqually
-        buttons.spacing = 8
-        buttons.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        let card = PrepareGoalProposalView(goal: goal, secretary: mode == .secretary)
+        let buttons = card.buttons
         pendingGoalButtons = buttons
         pendingProposalGoal = goal
 
-        confirmButton.addAction(UIAction { [weak self, weak buttons] _ in
+        card.confirmButton.addAction(UIAction { [weak self, weak buttons] _ in
             guard let self = self else { return }
             buttons?.removeFromSuperview()
             self.pendingProposalGoal = nil
             self.confirmGoal(goal)
         }, for: .touchUpInside)
 
-        editButton.addAction(UIAction { [weak self, weak buttons] _ in
+        card.editButton.addAction(UIAction { [weak self, weak buttons] _ in
             buttons?.removeFromSuperview()
             self?.pendingProposalGoal = nil
             self?.textField.placeholder = NSLocalizedString(
@@ -417,20 +372,6 @@ final class PrepareViewController: UIViewController {
             self?.textField.becomeFirstResponder()
         }, for: .touchUpInside)
 
-        var proposalViews: [UIView] = [header, goalLabel]
-        if mode == .secretary { proposalViews.append(confirmationQuestion) }
-        proposalViews.append(buttons)
-        let stack = UIStackView(arrangedSubviews: proposalViews)
-        stack.axis = .vertical
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
-        ])
         appendToFeed(card)
     }
 
