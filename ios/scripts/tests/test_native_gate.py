@@ -25,6 +25,15 @@ entitlements = load("verify-native-entitlements")
 
 
 class SimulatorSigningTests(unittest.TestCase):
+    def test_runtime_rights_are_extracted_from_main_macho_not_codesign(self):
+        script = (Path(__file__).resolve().parents[1] / "validate-native.sh").read_text()
+        command = 'xcrun segedit "$APP/TalkHint" -extract __TEXT __entitlements "$OUT/simulator-entitlements.plist"'
+        self.assertIn(command, script)
+        self.assertIn('> "$OUT/codesign-entitlements.plist"', script)
+        check = 'python3 scripts/verify-native-entitlements.py "$OUT/simulator-entitlements.plist"'
+        self.assertLess(script.index(command), script.index(check))
+        self.assertLess(script.index(check), script.index("test-without-building"))
+
     def test_runner_uses_only_local_simulator_signing(self):
         script = (Path(__file__).resolve().parents[1] / "validate-native.sh").read_text()
         common = "COMMON=(" + script.split("COMMON=(", 1)[1].split("\n# Compiles", 1)[0]
@@ -60,6 +69,13 @@ class SimulatorSigningTests(unittest.TestCase):
 
     def test_isolated_simulator_signature_is_accepted(self):
         self.verify()
+
+    def test_xml_runtime_section_with_nul_padding_is_accepted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "runtime.plist"
+            path.write_bytes(plistlib.dumps(self.data) + b"\x00" * 16)
+            with contextlib.redirect_stdout(io.StringIO()):
+                entitlements.verify(path)
 
     def test_unsigned_host_is_rejected(self):
         self.data = {}

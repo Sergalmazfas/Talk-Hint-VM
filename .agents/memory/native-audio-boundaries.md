@@ -58,9 +58,13 @@ never a skip, memory fallback, or reason to weaken normal authentication.
 A simulator `errSecMissingEntitlement` does not establish that the user's
 iPhone credentials or production account are broken.
 
-**Why:** The Mac validation host lacked embedded Keychain entitlements while
-all other native tests passed. Its ad-hoc signature alone was insufficient.
+**Why:** Mac validation returned missing-entitlement errors while other native
+tests passed. Xcode simulator runtime rights can reside in the main Mach-O
+`__TEXT,__entitlements` section even when codesign reports an empty dictionary;
+checking only the signature can falsely reject a correctly configured host.
 
 **How to apply:** Keep signing repairs local to simulator validation, inspect
-the built host's actual entitlements before testing, and leave phone signing,
-APNs rights, account settings and production authentication unchanged.
+the built main executable's runtime rights separately from signature integrity,
+and still require real Keychain XCTest. Do not substitute the debug dylib or
+an intermediate build plist for runtime evidence. Leave phone signing, APNs
+rights, account settings and production authentication unchanged.
