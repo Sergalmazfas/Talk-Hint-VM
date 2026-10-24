@@ -15,11 +15,18 @@ final class SecretaryPersonalityUITests: XCTestCase {
     private var server: SecretaryPersonalityFixture!
     private var previousDefaults: [String: Any] = [:]
     private var previousDraft: SessionStore.SecretaryCallDraft?
+    private var previousToken: String?
+    private var previousUserId: String?
+    private var previousEmail: String?
+    private var scopedTestOwners: [String] = []
 
     override func setUp() async throws {
         try await super.setUp()
         previousDefaults = UserDefaults.standard.dictionaryRepresentation()
         previousDraft = SessionStore.shared.pendingSecretaryCall
+        previousToken = SessionStore.shared.token
+        previousUserId = SessionStore.shared.userId
+        previousEmail = SessionStore.shared.email
         SessionStore.shared.clearPendingSecretaryCall()
         SessionStore.shared.secretaryOutgoingNumberId = nil
         SessionStore.shared.secretaryVoiceProvider = .openai
@@ -39,12 +46,20 @@ final class SecretaryPersonalityUITests: XCTestCase {
         window.isHidden = true
         window.rootViewController = nil
         window = nil; nav = nil; settings = nil; api = nil; server = nil
+        for ownerId in scopedTestOwners {
+            SessionStore.shared.save(token: "native-fixture", userId: ownerId, email: "fixture@example.invalid")
+            SessionStore.shared.clearPendingSecretaryCall()
+        }
+        scopedTestOwners = []
+        SessionStore.shared.clear()
+        if let previousToken, let previousUserId, let previousEmail {
+            SessionStore.shared.save(token: previousToken, userId: previousUserId, email: previousEmail)
+        }
         SessionStore.shared.clearPendingSecretaryCall()
         if let previousDraft { XCTAssertTrue(SessionStore.shared.savePendingSecretaryCall(previousDraft)) }
-        // Restore only preferences modified by these tests.
+        // Restore preferences and session identity after isolated account-switch cases.
         let current = UserDefaults.standard.dictionaryRepresentation()
-        for key in Set(current.keys).union(previousDefaults.keys)
-            where key.hasPrefix("talkhint.secretary.") {
+        for key in Set(current.keys).union(previousDefaults.keys) {
             if let value = previousDefaults[key] { UserDefaults.standard.set(value, forKey: key) }
             else { UserDefaults.standard.removeObject(forKey: key) }
         }
@@ -105,6 +120,8 @@ final class SecretaryPersonalityUITests: XCTestCase {
             clientRequestId: UUID(), voiceProvider: .retell, phoneNumber: "+12025550103", requestAttempted: attempted)
         draft.secretaryNumberId = "personal-line"
         draft.secretaryBackendOrigin = AppConfig.baseURL.absoluteString
+        draft.ownerId = SessionStore.shared.userId
+        draft.environmentOrigin = AppConfig.baseURL.absoluteString
         return draft
     }
 
@@ -141,6 +158,72 @@ final class SecretaryPersonalityUITests: XCTestCase {
         XCTAssertEqual(body["cardIds"] as? [String], ["personal-card"])
         XCTAssertEqual(Set(body.keys), ["personalityId", "version", "cardIds"])
         XCTAssertFalse(requests.contains { $0.url?.path.hasPrefix("/api/secretary/tasks") == true })
+    }
+
+    func testPendingSecretaryDraftIsIsolatedAcrossOwnerAccounts() {
+        let ownerA = "native-fixture-a-\(UUID().uuidString)"
+        let ownerB = "native-fixture-b-\(UUID().uuidString)"
+        scopedTestOwners = [ownerA, ownerB]
+
+        SessionStore.shared.save(token: "native-fixture", userId: ownerA, email: "a@example.invalid")
+        let pending = draft(attempted: true)
+        XCTAssertTrue(SessionStore.shared.savePendingSecretaryCall(pending))
+
+        SessionStore.shared.save(token: "native-fixture", userId: ownerB, email: "b@example.invalid")
+        XCTAssertNil(SessionStore.shared.pendingSecretaryCall, "An uncertain request must not follow a login to another owner")
+
+        SessionStore.shared.save(token: "native-fixture", userId: ownerA, email: "a@example.invalid")
+        XCTAssertEqual(
+            SessionStore.shared.pendingSecretaryCall?.clientRequestId,
+            pending.clientRequestId,
+            "The original owner can resume the same idempotent request in its original scope")
+    }
+
+    func testPendingDraftStorageSeparatesDevelopmentAndProductionOrigins() {
+        let owner = "native-fixture-owner"
+        let devKey = SessionStore.pendingSecretaryCallStorageKey(
+            ownerId: owner, backendOrigin: "https://dev.example.invalid")
+        let productionKey = SessionStore.pendingSecretaryCallStorageKey(
+            ownerId: owner, backendOrigin: "https://talkhint.app")
+        let anotherOwnerKey = SessionStore.pendingSecretaryCallStorageKey(
+            ownerId: "another-owner", backendOrigin: "https://dev.example.invalid")
+
+        XCTAssertNotEqual(devKey, productionKey)
+        XCTAssertNotEqual(devKey, anotherOwnerKey)
+    }
+
+    func testHomePreconfirmSummaryIncludesExactTaskAndRetellRuntime() {
+        let pending = SessionStore.SecretaryCallDraft(
+            instruction: "Ask whether the appointment is available tomorrow.",
+            confirmationToken: "fixture",
+            clientRequestId: UUID(),
+            voiceProvider: .retell,
+            phoneNumber: "+12025550199",
+            requestAttempted: false)
+        let setup = SecretaryOutgoingSetup(
+            protocolVersion: 1,
+            numberId: "personal-line",
+            scope: "personal",
+            fromNumber: "+12025550101",
+            cardIds: [],
+            cards: [],
+            assignment: nil,
+            provider: "retell",
+            engine: "gpt-6.1-sol",
+            reasoning: "medium")
+        let home = HomeViewController(secretary: true, api: api)
+        let summary = home.secretaryCallPreconfirmSummary(
+            draft: pending,
+            destination: "+12025550199",
+            setup: setup,
+            lineName: "Personal line")
+
+        XCTAssertTrue(summary.contains("+12025550199"))
+        XCTAssertTrue(summary.contains(pending.instruction))
+        XCTAssertTrue(summary.contains("Personal line"))
+        XCTAssertTrue(summary.contains("gpt-6.1-sol"))
+        XCTAssertTrue(summary.contains("medium"))
+        XCTAssertTrue(summary.contains(AppConfig.bundleId))
     }
 
     func testPersonalWorkLineSheetAndPermissionsStaySeparate() async throws {
@@ -331,6 +414,69 @@ final class SecretaryPersonalityUITests: XCTestCase {
         XCTAssertFalse(requests.contains { $0.httpMethod == "POST" })
         XCTAssertEqual(SessionStore.shared.pendingSecretaryCall?.clientRequestId, pending.clientRequestId)
         XCTAssertTrue(SessionStore.shared.pendingSecretaryCall?.requestAttempted == true)
+    }
+
+    func testCallReviewShowsVerifiedOwnerLineCatalogVersionAndRuntime() async throws {
+        SessionStore.shared.secretaryOutgoingNumberId = "work-line"
+        SessionStore.shared.secretaryVoiceProvider = .retell
+        _ = try await api.saveSecretaryOutgoingSetup(
+            numberId: "work-line", personalityId: "katya-fixture",
+            version: 2, cardIds: ["work-card"])
+
+        let review = SecretaryTaskReviewViewController(
+            phoneNumber: "+12025550103", instruction: "Ask about the appointment",
+            confirmationToken: "fixture-only", api: api)
+        nav.pushViewController(review, animated: false)
+        review.loadViewIfNeeded()
+        try await waitUntil {
+            (self.descendant(review.view, id: "summary-secretary-configuration") as? UILabel)?
+                .text?.contains("gpt-6.1-sol") == true
+        }
+        let summary = try XCTUnwrap(
+            (descendant(review.view, id: "summary-secretary-configuration") as? UILabel)?.text)
+        XCTAssertTrue(summary.contains("app.talkhint"))
+        XCTAssertTrue(summary.contains("+12025550102"))
+        XCTAssertTrue(summary.contains("Катя"))
+        XCTAssertTrue(summary.contains("2"))
+        XCTAssertTrue(summary.contains("medium"))
+        XCTAssertTrue(summary.contains("Debug · Dev"))
+        let start = try XCTUnwrap(descendant(review.view, id: "button-secretary-start") as? UIButton)
+        XCTAssertTrue(start.isEnabled, "Only a verified saved setup may enable the call action")
+        let requests = await server.recorded()
+        XCTAssertTrue(requests.contains {
+            $0.url?.path == "/api/secretary-personalities/numbers/work-line/outgoing" &&
+                $0.httpMethod == "GET"
+        })
+        XCTAssertFalse(requests.contains { $0.url?.path == "/api/secretary/tasks" },
+                       "Reviewing configuration must not create a task")
+    }
+
+    func testRemovedSavedLineIsNotSilentlyReplaced() async throws {
+        SessionStore.shared.secretaryOutgoingNumberId = "removed-line"
+        select(settings, 3, 1)
+        try await waitUntil { self.nav.topViewController is SecretaryPersonalityViewController }
+        let screen = try XCTUnwrap(nav.topViewController as? SecretaryPersonalityViewController)
+        screen.loadViewIfNeeded()
+        try await waitUntil { screen.presentedViewController is UIAlertController }
+        XCTAssertEqual(cell(screen, 1).textLabel?.text,
+                       NSLocalizedString("secretary.personality.no_numbers", comment: ""))
+        let requests = await server.recorded()
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/outgoing") == true },
+                       "A stale line must not be replaced by the first available line")
+    }
+
+    func testReviewBlocksRetellWithoutSavedOutgoingLine() throws {
+        SessionStore.shared.secretaryOutgoingNumberId = nil
+        SessionStore.shared.secretaryVoiceProvider = .retell
+        let review = SecretaryTaskReviewViewController(
+            phoneNumber: "+12025550103", instruction: "Fixture only",
+            confirmationToken: "fixture-only", api: api)
+        review.loadViewIfNeeded()
+        let start = try XCTUnwrap(descendant(review.view, id: "button-secretary-start") as? UIButton)
+        XCTAssertFalse(start.isEnabled)
+        let summary = try XCTUnwrap(
+            (descendant(review.view, id: "summary-secretary-configuration") as? UILabel)?.text)
+        XCTAssertTrue(summary.contains(NSLocalizedString("secretary.review.setup_unavailable", comment: "")))
     }
 }
 #endif

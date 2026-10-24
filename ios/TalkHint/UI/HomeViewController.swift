@@ -730,7 +730,7 @@ final class HomeViewController: UIViewController {
             let prepare = PrepareViewController(mode: .secretary, initialMessage: rejected?.instruction)
             prepare.onSecretaryTaskConfirmed = { [weak self] instruction, token in
                 guard let self else { return }
-                let draft = SessionStore.SecretaryCallDraft(
+                var draft = SessionStore.SecretaryCallDraft(
                     instruction: instruction,
                     confirmationToken: token,
                     // Re-confirmation after an explicit rejection must retain
@@ -739,6 +739,8 @@ final class HomeViewController: UIViewController {
                     voiceProvider: SessionStore.shared.secretaryVoiceProvider,
                     phoneNumber: rejected?.phoneNumber,
                     requestAttempted: false)
+                draft.ownerId = SessionStore.shared.userId
+                draft.environmentOrigin = AppConfig.baseURL.absoluteString
                 guard SessionStore.shared.savePendingSecretaryCall(draft) else {
                     self.showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
                     return
@@ -891,6 +893,7 @@ final class HomeViewController: UIViewController {
             showSecretaryError(NSLocalizedString("secretary.prepare.confirmation.missing", comment: ""))
             return
         }
+        let isNewRequest = !confirmed.requestAttempted
         // Before the first request, use the current Settings selection. Once
         // attempted, keep the provider fixed to preserve request idempotency.
         if !confirmed.requestAttempted {
@@ -923,7 +926,6 @@ final class HomeViewController: UIViewController {
             return
         }
         confirmed.phoneNumber = cleaned
-        confirmed.requestAttempted = true
         guard SessionStore.shared.savePendingSecretaryCall(confirmed) else {
             showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
             return
@@ -936,6 +938,52 @@ final class HomeViewController: UIViewController {
         callButton.configuration?.title = NSLocalizedString("home.connecting", comment: "")
         Task {
             do {
+                var summarySetup: SecretaryOutgoingSetup?
+                var summaryLineName: String?
+                // Retell calls must use the owner's currently saved, per-line
+                // setup. Never infer a line or silently fall back to a catalog
+                // default. This preflight is only for a new request; retries of
+                // an ambiguous request keep their original id and binding.
+                if isNewRequest, confirmed.voiceProvider == .retell {
+                    guard let numberId = confirmed.secretaryNumberId,
+                          confirmed.secretaryBackendOrigin == AppConfig.baseURL.absoluteString else {
+                        throw SecretaryOutgoingSetupUnavailable()
+                    }
+                    let context = try await api.secretaryPersonalityContext()
+                    guard let selectedLine = context.numbers.first(where: { $0.id == numberId }) else {
+                        throw SecretaryOutgoingSetupUnavailable()
+                    }
+                    let setup = try await api.secretaryOutgoingSetup(numberId: numberId)
+                    guard setup.numberId == numberId, setup.protocolVersion == 1,
+                          setup.provider == "retell", !setup.engine.isEmpty,
+                          !setup.reasoning.isEmpty, setup.scope == selectedLine.type else {
+                        throw SecretaryOutgoingSetupUnavailable()
+                    }
+                    summarySetup = setup
+                    summaryLineName = selectedLine.friendlyName ?? selectedLine.twilioNumber
+                }
+                if isNewRequest {
+                    let summary = secretaryCallPreconfirmSummary(
+                        draft: confirmed,
+                        destination: cleaned,
+                        setup: summarySetup,
+                        lineName: summaryLineName)
+                    await MainActor.run {
+                        self.isCreatingSecretaryTask = false
+                        self.confirmedSecretaryTask = confirmed
+                        self.renderCallButtonIdle()
+                    }
+                    guard await confirmSecretaryCall(summary: summary) else { return }
+                }
+                // Lock the exact request only when every read-only capability
+                // check has passed and immediately before its first POST.
+                if isNewRequest {
+                    confirmed.requestAttempted = true
+                    guard SessionStore.shared.savePendingSecretaryCall(confirmed) else {
+                        throw SecretaryOutgoingSetupUnavailable()
+                    }
+                    await MainActor.run { self.confirmedSecretaryTask = confirmed }
+                }
                 let task = try await api.createSecretaryTask(
                     phoneNumber: cleaned,
                     instruction: confirmed.instruction,
@@ -1009,6 +1057,76 @@ final class HomeViewController: UIViewController {
                     self.showSecretaryError(message)
                 }
             }
+        }
+    }
+
+    func secretaryCallPreconfirmSummary(
+        draft: SessionStore.SecretaryCallDraft,
+        destination: String,
+        setup: SecretaryOutgoingSetup?,
+        lineName: String?
+    ) -> String {
+        let bundle = Bundle.main.bundleIdentifier ?? AppConfig.bundleId
+        #if DEBUG
+        let environmentKey = AppConfig.baseURL.host == URL(string: "https://talkhint.app")?.host
+            ? "secretary.review.environment.debug_production"
+            : "secretary.review.environment.dev"
+        #else
+        let environmentKey = "secretary.review.environment.production"
+        #endif
+        var lines = [
+            String(format: NSLocalizedString("secretary.review.bundle", comment: ""), bundle),
+            String(
+                format: NSLocalizedString("secretary.review.environment", comment: ""),
+                NSLocalizedString(environmentKey, comment: "")),
+            String(format: NSLocalizedString("secretary.review.destination", comment: ""), destination),
+            String(format: NSLocalizedString("secretary.review.instruction", comment: ""), draft.instruction),
+        ]
+        if draft.voiceProvider == .retell, let setup {
+            let persona = setup.assignment.map {
+                "\($0.snapshot.name) · \(String(format: NSLocalizedString("secretary.review.version", comment: ""), $0.version))"
+            } ?? NSLocalizedString("secretary.review.no_persona", comment: "")
+            lines.append(String(
+                format: NSLocalizedString("secretary.review.line", comment: ""),
+                "\(lineName ?? setup.fromNumber) · \(setup.fromNumber)"))
+            lines.append(String(format: NSLocalizedString("secretary.review.persona", comment: ""), persona))
+            lines.append(String(
+                format: NSLocalizedString("secretary.review.model", comment: ""),
+                setup.engine, setup.reasoning))
+        } else {
+            lines.append(NSLocalizedString("secretary.review.openai", comment: ""))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    @MainActor
+    private func confirmSecretaryCall(summary: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let alert = UIAlertController(
+                title: NSLocalizedString("secretary.review.title", comment: ""),
+                message: "\(NSLocalizedString("secretary.review.preconfirm.note", comment: ""))\n\n\(summary)",
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel) { [weak self] _ in
+                guard let self else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                self.isCreatingSecretaryTask = false
+                self.renderCallButtonIdle()
+                continuation.resume(returning: false)
+            })
+            alert.addAction(UIAlertAction(
+                title: NSLocalizedString("secretary.review.start", comment: ""),
+                style: .default) { [weak self] _ in
+                    guard let self else {
+                        continuation.resume(returning: false)
+                        return
+                    }
+                    self.isCreatingSecretaryTask = true
+                    self.renderCallButtonConnecting()
+                    continuation.resume(returning: true)
+                })
+            present(alert, animated: true)
         }
     }
 

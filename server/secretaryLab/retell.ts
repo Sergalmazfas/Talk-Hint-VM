@@ -311,6 +311,20 @@ export class RetellSecretaryLab {
         this.finish(s, reason);
         return this.priced(s);
       } catch (e) {
+        // Provider events/polling can finish while the stop POST is in flight.
+        if (terminal(s) && !s.uncertain) return this.priced(s);
+        if (e instanceof RetellApiError && e.status === 404) {
+          try {
+            const call = await this.api.request(`/v2/get-call/${encodeURIComponent(s.report.callId)}`);
+            if (call.call_id === s.report.callId && call.call_type === "web_call" &&
+                ["ended", "error", "not_connected"].includes(call.call_status)) {
+              s.uncertain = false;
+              this.event(s, "stop_already_ended", String(call.call_status));
+              this.finish(s, reason);
+              return this.priced(s);
+            }
+          } catch { /* 404 alone is not proof of a completed call. Keep retry available. */ }
+        }
         s.report.status = "stop_failed"; s.report.reason = "stop_not_confirmed";
         this.event(s, "stop_failed", (e as Error).message); throw e;
       } finally { s.stop = undefined; }

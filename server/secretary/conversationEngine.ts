@@ -8,6 +8,7 @@ import type { LabTokenUsage } from "../../shared/secretaryLabCost";
 import { applyPersonality, outgoingFactsPrompt, type PersonalityBinding } from "./personalities/types";
 import type { OutgoingContext } from "./personalities/outgoing";
 import type { LabPersonalitySummary } from "../../shared/secretaryLabPersonality";
+import { secretaryEndTool, parseSecretaryEndRequest, type SecretaryEndRequest } from "./callEnding";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -27,6 +28,9 @@ export const secretaryTestTools = [
     startsAt: { type: "string" }, note: { type: "string", maxLength: 1000 },
   }, ["startsAt", "note"]),
 ];
+// Telephone has no browser TEST/business tools. This only prepares the end of
+// the current conversation; Retell must finish playback and discard on barge-in.
+export const secretaryPhoneTools = [{ ...secretaryEndTool, type: "function" as const, strict: false }];
 /** The voice provider receives text; our OpenAI account does all model generation. No Retell LLM. */
 export async function* streamSecretaryResponse(request: EngineRequest,
   options: { reasoning?: "medium" | "low"; tools?: typeof secretaryTestTools } = {}): AsyncGenerator<EngineChunk> {
@@ -62,7 +66,7 @@ export class SecretaryConversationEngine {
   readonly report = {
     provider: "OpenAI via TalkHint", model: SECRETARY_REASONING_MODEL, testOnly: true,
     personality: null as LabPersonalitySummary | null,
-    context: SECRETARY_TEST_CONTEXT, actions: [] as TestAction[],
+    context: SECRETARY_TEST_CONTEXT as Record<string, unknown>, actions: [] as TestAction[],
     events: [] as Array<{ type: string; at: string }>, connected: false,
     usage: { requests: 0, measuredRequests: 0, input: 0, cachedInput: 0, output: 0 } as LabTokenUsage,
   };
@@ -75,6 +79,8 @@ export class SecretaryConversationEngine {
     const characterName = process.env.NODE_ENV === "development" ? personality?.snapshot.name : undefined;
     if (telephone) {
       this.report.testOnly = false;
+      this.report.context = { id: "authorized-telephone-assignment", permissions: ["conversation", "prepare_call_end"],
+        restrictions: ["No calendar writes", "No notifications", "No business action tools"] };
       this.instructions = applyPersonality(buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner), characterName) +
         outgoingFactsPrompt(facts) +
         "\nThis is the owner's authorized telephone call, not a test or a fictional business. " +
@@ -82,6 +88,8 @@ export class SecretaryConversationEngine {
         "Never claim to have sent, booked, saved a business action or verified outside facts. The conversation itself is retained by TalkHint. " +
         "Speak briefly and naturally in the other party's language (EN/RU/ES). Yield to interruptions and incorporate corrections. " +
         "Do not hang up for silence, hold music or transfer. Summarize the actual outcome and next step; do not invent agreement. " +
+        "Only after the other party accepts the summary/next step or explicitly declines, you may use prepare_call_end. " +
+        "After a successful preparation say exactly the supplied farewell, and nothing else. New speech cancels the prepared end. " +
         "Current time: " + new Date().toISOString(), personality);
       return;
     }
@@ -126,11 +134,13 @@ export class SecretaryConversationEngine {
     return result;
   }
   async respond(turns: SpokenTurn[], signal: AbortSignal, emit: (text: string) => void, reminder = false) {
+    let preparedEnd: SecretaryEndRequest | undefined;
     const input: any[] = turns.map(t => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content }));
     if (!this.telephone)
       input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
     if (reminder) input.push({ role: "developer", content: "Briefly check if the caller is still there; do not invent a request or end for silence." });
     for (let round = 0; round < 4 && !signal.aborted; round++) {
+      let spoken = "";
       let completion: Extract<EngineChunk, { type: "complete" }> | undefined;
       this.report.usage.requests++;
       let measured = false;
@@ -147,18 +157,30 @@ export class SecretaryConversationEngine {
           continue;
         }
         if (signal.aborted) return;
-        if (chunk.type === "text") emit(chunk.text);
+        if (chunk.type === "text") { spoken += chunk.text; emit(chunk.text); }
         else completion = chunk;
       }
       if (signal.aborted) return;
       if (!completion) throw new Error("Engine stream did not complete");
-      if (!completion.tools.length) return;
+      if (!completion.tools.length) {
+        // Never attach end_call to a different/unfinished response.
+        if (preparedEnd && spoken.trim() === preparedEnd.farewell) return preparedEnd;
+        return;
+      }
       input.push(...completion.output);
       for (const tool of completion.tools) {
         if (signal.aborted) return;
         let result: any;
-        try { result = this.execute(tool.name, tool.arguments, signal); }
-        catch { result = { ok: false, testOnly: true, error: "Action denied or invalid; no action was performed" }; this.record("tool_denied"); }
+        try {
+          if (this.telephone && tool.name === "prepare_call_end") {
+            const value = parseSecretaryEndRequest(JSON.parse(tool.arguments));
+            if (!value) throw Error("Invalid farewell");
+            preparedEnd = value;
+            result = { prepared: true, instruction: "Say exactly the supplied farewell now, with no additions. Do not claim the call has ended." };
+          } else result = this.execute(tool.name, tool.arguments, signal);
+        }
+        catch { result = { ok: false, ...(!this.telephone ? { testOnly: true } : {}),
+          error: "Action denied or invalid; no action was performed" }; this.record("tool_denied"); }
         input.push({ type: "function_call_output", call_id: tool.call_id, output: JSON.stringify(result) });
       }
     }

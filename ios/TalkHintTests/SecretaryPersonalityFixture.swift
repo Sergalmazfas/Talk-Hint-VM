@@ -90,7 +90,7 @@ actor SecretaryPersonalityFixture {
                 "fromNumber": scope == "work" ? "+12025550102" : "+12025550101",
                 "cardIds": [], "assignment": NSNull(),
                 "cards": [["id": cardID, "title": "\(scope) facts", "description": "Explicit fixture facts"]],
-                "provider": "retell", "engine": "fixture-engine", "reasoning": "medium",
+                "provider": "retell", "engine": "gpt-6.1-sol", "reasoning": "medium",
             ]
             if method == "PUT" {
                 if let status = nextSaveStatus {

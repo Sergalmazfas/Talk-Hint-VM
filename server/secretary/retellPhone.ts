@@ -4,7 +4,7 @@ import { db } from "../db";
 import { storage } from "../storage";
 import { RetellApi } from "../secretaryLab/retellApi";
 import { RetellEngineRegistry } from "../secretaryLab/retellEngine";
-import { streamSecretaryResponse, type SpokenTurn } from "./conversationEngine";
+import { streamSecretaryResponse, secretaryPhoneTools, type SpokenTurn } from "./conversationEngine";
 import { getSecretaryTaskForCall } from "./tasks";
 import { publishSecretaryFeedEvent } from "./feed";
 import { createHash } from "node:crypto";
@@ -103,7 +103,7 @@ async function saveTranscript(taskId: string, turns: SpokenTurn[]) {
   return next;
 }
 export const retellPhoneRegistry = new RetellEngineRegistry(
-  request => streamSecretaryResponse(request, { tools: [], reasoning: "medium" }), {
+  request => streamSecretaryResponse(request, { tools: secretaryPhoneTools, reasoning: "medium" }), {
     phone: true,
     onTranscript: saveTranscript,
     onFailure: id => { void failPhone(id).catch(() => console.error("[Secretary Retell] Failure cleanup could not complete")); },
@@ -159,6 +159,7 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
         metadata: sql`coalesce(${calls.metadata}, '{}'::jsonb) || ${JSON.stringify({
           retellPhone: { state: "registered", taskId, callId: call.call_id, agentId,
             model: "gpt-6.1-sol", voice: "retell-Merritt",
+            reasoning: "medium", environment: process.env.NODE_ENV === "development" ? "development" : "production",
             personality: personality ? { id: personality.personalityId, version: personality.version, mode: personality.mode } : null },
         })}::jsonb`,
       }).where(and(eq(calls.callSid, callSid), eq(calls.userId, task.userId)));

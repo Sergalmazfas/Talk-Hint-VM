@@ -41,7 +41,12 @@ final class SecretaryPersonalityViewController: UITableViewController {
                 guard epoch == self.generation, SessionStore.shared.userId == self.owner else { return }
                 self.numbers = context.numbers
                 let saved = SessionStore.shared.secretaryOutgoingNumberId
-                if let number = context.numbers.first(where: { $0.id == saved }) ?? context.numbers.first {
+                if let saved, !context.numbers.contains(where: { $0.id == saved }) {
+                    self.busy = false
+                    self.setup = nil
+                    self.tableView.reloadData()
+                    self.error(self.text("line_stale"))
+                } else if let number = context.numbers.first(where: { $0.id == saved }) ?? context.numbers.first {
                     await self.load(number.id)
                 } else {
                     self.busy = false; self.setup = nil; self.tableView.reloadData()
@@ -49,7 +54,7 @@ final class SecretaryPersonalityViewController: UITableViewController {
             } catch {
                 guard epoch == self.generation else { return }
                 self.busy = false; self.setup = nil; self.tableView.reloadData()
-                self.error(self.text("dev_required") + "\n\n" + error.localizedDescription)
+                self.error(error.localizedDescription)
             }
         }
     }
@@ -91,8 +96,10 @@ final class SecretaryPersonalityViewController: UITableViewController {
         cell.textLabel?.numberOfLines = 0; cell.detailTextLabel?.numberOfLines = 0
         switch indexPath.section {
         case 0:
-            cell.textLabel?.text = "Retell + TalkHint Engine"
-            cell.detailTextLabel?.text = "Merritt · \(setup?.engine ?? "gpt-6.1-sol") · \(setup?.reasoning ?? "medium")\n\(AppConfig.baseURL.absoluteString)"
+            cell.textLabel?.text = NSLocalizedString("secretary.summary.retell", comment: "")
+            cell.detailTextLabel?.text = setup.map {
+                "Merritt · \($0.engine) · \($0.reasoning)\n\(AppConfig.baseURL.absoluteString)"
+            } ?? (busy ? text("loading") : text("setup_unavailable"))
             cell.selectionStyle = .none
         case 1:
             cell.textLabel?.text = setup?.fromNumber ?? (busy ? text("loading") : text("no_numbers"))
@@ -169,7 +176,8 @@ final class SecretaryPersonalityViewController: UITableViewController {
                     numberId: setup.numberId, personalityId: id, version: version, cardIds: cardIds)
                 guard SessionStore.shared.userId == self.owner else { return }
                 guard result.protocolVersion == 1, result.numberId == setup.numberId,
-                      result.provider == "retell" else { throw APIError.decoding }
+                      result.provider == "retell", !result.engine.isEmpty,
+                      !result.reasoning.isEmpty else { throw APIError.decoding }
                 if var draft = SessionStore.shared.pendingSecretaryCall, !draft.requestAttempted {
                     draft.secretaryNumberId = result.numberId
                     draft.secretaryBackendOrigin = AppConfig.baseURL.absoluteString

@@ -37,8 +37,9 @@ function repository(): ComparisonRepository {
   const rows = new Map<string, SavedComparison>();
   return {
     async save(_owner, content) {
-      const item = { ...structuredClone(content), id: randomUUID(), createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() };
+      const now = Date.now();
+      const item = { ...structuredClone(content), id: randomUUID(), createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 30 * 86400_000).toISOString() };
       rows.set(item.id, item); return structuredClone(item);
     },
     async list() { return structuredClone([...rows.values()]); },

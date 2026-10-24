@@ -39,7 +39,7 @@ final class SessionStore {
     static let shared = SessionStore()
 
     private let tokenKey = "talkhint.session.token"
-    private let pendingSecretaryCallKey = "talkhint.secretary.pending.call"
+    private let legacyPendingSecretaryCallKey = "talkhint.secretary.pending.call"
     private let userIdKey = "talkhint.user.id"
     private let emailKey = "talkhint.user.email"
     private let activeNumberIdKey = "talkhint.active.number.id"
@@ -84,6 +84,10 @@ final class SessionStore {
         var confirmationRejected: Bool? = nil
         var secretaryNumberId: String? = nil
         var secretaryBackendOrigin: String? = nil
+        // Added for owner/environment isolation. Optional for legacy Keychain
+        // decoding; unscoped legacy storage is discarded rather than replayed.
+        var ownerId: String? = nil
+        var environmentOrigin: String? = nil
 
         var needsPreparation: Bool {
             // Never discard an ambiguous attempt merely because its token
@@ -116,18 +120,46 @@ final class SessionStore {
 
     var pendingSecretaryCall: SecretaryCallDraft? {
         guard let stored = Keychain.get(pendingSecretaryCallKey),
-              let data = Data(base64Encoded: stored) else { return nil }
-        return try? JSONDecoder().decode(SecretaryCallDraft.self, from: data)
+              let data = Data(base64Encoded: stored),
+              let draft = try? JSONDecoder().decode(SecretaryCallDraft.self, from: data) else {
+            // Legacy global drafts have no trustworthy owner/environment scope.
+            // Discard rather than risk replaying a task into another account.
+            Keychain.delete(legacyPendingSecretaryCallKey)
+            return nil
+        }
+        guard draft.ownerId == userId,
+              draft.environmentOrigin == AppConfig.baseURL.absoluteString else {
+            Keychain.delete(pendingSecretaryCallKey)
+            return nil
+        }
+        return draft
     }
 
     @discardableResult
     func savePendingSecretaryCall(_ draft: SecretaryCallDraft) -> Bool {
-        guard let data = try? JSONEncoder().encode(draft) else { return false }
+        guard draft.ownerId == userId,
+              draft.environmentOrigin == AppConfig.baseURL.absoluteString,
+              let data = try? JSONEncoder().encode(draft) else { return false }
         return Keychain.set(data.base64EncodedString(), for: pendingSecretaryCallKey)
     }
 
     func clearPendingSecretaryCall() {
         Keychain.delete(pendingSecretaryCallKey)
+        Keychain.delete(legacyPendingSecretaryCallKey)
+    }
+
+    private var pendingSecretaryCallKey: String {
+        Self.pendingSecretaryCallStorageKey(
+            ownerId: userId,
+            backendOrigin: AppConfig.baseURL.absoluteString)
+    }
+
+    static func pendingSecretaryCallStorageKey(ownerId: String?, backendOrigin: String) -> String {
+        let owner = ownerId ?? "signed-out"
+        let origin = backendOrigin
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        return "talkhint.secretary.pending.call.\(owner).\(origin)"
     }
 
     /// The phone number the user has chosen as their active line. The backend has
@@ -300,6 +332,7 @@ final class SessionStore {
 
     func clear() {
         Keychain.delete(tokenKey)
+        clearPendingSecretaryCall()
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: emailKey)
         UserDefaults.standard.removeObject(forKey: activeNumberIdKey)
@@ -315,6 +348,5 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: translatorPlaybackKey)
         UserDefaults.standard.removeObject(forKey: voiceProviderKey)
         UserDefaults.standard.removeObject(forKey: secretaryVoiceProviderKey)
-        clearPendingSecretaryCall()
     }
 }

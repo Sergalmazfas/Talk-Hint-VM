@@ -4,6 +4,12 @@ struct SecretaryBackendMismatch: LocalizedError {
     var errorDescription: String? { NSLocalizedString("secretary.personality.origin_changed", comment: "") }
 }
 
+struct SecretaryOutgoingSetupUnavailable: LocalizedError {
+    var errorDescription: String? {
+        NSLocalizedString("secretary.personality.setup_unavailable", comment: "")
+    }
+}
+
 struct SecretaryPersonalityItem: Decodable {
     let id: String
     let slug: String

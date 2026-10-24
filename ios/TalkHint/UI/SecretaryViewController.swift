@@ -581,18 +581,27 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
 
 }
 
-private final class SecretaryTaskReviewViewController: UIViewController {
+final class SecretaryTaskReviewViewController: UIViewController {
     private let phoneNumber: String
     private let instruction: String
     private let confirmationToken: String
     private let phoneField = UITextField()
     private let startButton = UIButton(type: .system)
     private let activity = UIActivityIndicatorView(style: .medium)
+    private let summaryLabel = UILabel()
+    private let setupButton = UIButton(type: .system)
+    private let api: APIClient
+    private var outgoingSetup: SecretaryOutgoingSetup?
+    private var setupLoading = false
+    private var setupFailed = false
+    private var activeDraft: SessionStore.SecretaryCallDraft?
 
-    init(phoneNumber: String, instruction: String, confirmationToken: String) {
+    init(phoneNumber: String, instruction: String, confirmationToken: String,
+         api: APIClient = .shared) {
         self.phoneNumber = phoneNumber
         self.instruction = instruction
         self.confirmationToken = confirmationToken
+        self.api = api
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -603,6 +612,7 @@ private final class SecretaryTaskReviewViewController: UIViewController {
         title = NSLocalizedString("secretary.review.title", comment: "")
         view.backgroundColor = .systemBackground
         buildReview()
+        loadOutgoingSetup()
     }
 
     private func buildReview() {
@@ -653,6 +663,27 @@ private final class SecretaryTaskReviewViewController: UIViewController {
         instructionCard.layer.masksToBounds = true
         stack.addArrangedSubview(instructionCard)
 
+        let summaryHeading = UILabel()
+        summaryHeading.text = NSLocalizedString("secretary.review.configuration", comment: "")
+        summaryHeading.font = .preferredFont(forTextStyle: .headline)
+        stack.addArrangedSubview(summaryHeading)
+
+        summaryLabel.font = .preferredFont(forTextStyle: .subheadline)
+        summaryLabel.textColor = .secondaryLabel
+        summaryLabel.numberOfLines = 0
+        summaryLabel.backgroundColor = .secondarySystemBackground
+        summaryLabel.layer.cornerRadius = 12
+        summaryLabel.layer.masksToBounds = true
+        summaryLabel.text = NSLocalizedString("common.loading", comment: "")
+        summaryLabel.accessibilityIdentifier = "summary-secretary-configuration"
+        stack.addArrangedSubview(summaryLabel)
+
+        setupButton.setTitle(NSLocalizedString("secretary.review.configure", comment: ""), for: .normal)
+        setupButton.contentHorizontalAlignment = .leading
+        setupButton.accessibilityIdentifier = "button-secretary-review-setup"
+        setupButton.addTarget(self, action: #selector(configureSetupTapped), for: .touchUpInside)
+        stack.addArrangedSubview(setupButton)
+
         let noStart = UILabel()
         noStart.text = NSLocalizedString("secretary.review.no_start", comment: "")
         noStart.font = .preferredFont(forTextStyle: .footnote)
@@ -672,6 +703,121 @@ private final class SecretaryTaskReviewViewController: UIViewController {
         startButton.addTarget(self, action: #selector(startTapped), for: .touchUpInside)
         startButton.accessibilityIdentifier = "button-secretary-start"
         stack.addArrangedSubview(buttonRow)
+        startButton.isEnabled = false
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if isViewLoaded, !setupLoading, outgoingSetup == nil, activeDraft == nil {
+            loadOutgoingSetup()
+        }
+    }
+
+    private var selectedProvider: SecretaryVoiceProviderPreference {
+        activeDraft?.voiceProvider ?? SessionStore.shared.secretaryVoiceProvider
+    }
+
+    private func loadOutgoingSetup() {
+        guard !setupLoading, activeDraft == nil else { return }
+        let provider = SessionStore.shared.secretaryVoiceProvider
+        guard provider == .retell else {
+            outgoingSetup = nil
+            setupFailed = false
+            updateConfigurationSummary()
+            return
+        }
+        guard let numberId = SessionStore.shared.secretaryOutgoingNumberId else {
+            outgoingSetup = nil
+            setupFailed = true
+            updateConfigurationSummary()
+            return
+        }
+        setupLoading = true
+        startButton.isEnabled = false
+        updateConfigurationSummary()
+        Task { @MainActor in
+            do {
+                let context = try await api.secretaryPersonalityContext()
+                guard let selectedLine = context.numbers.first(where: { $0.id == numberId }) else {
+                    throw SecretaryOutgoingSetupUnavailable()
+                }
+                let result = try await api.secretaryOutgoingSetup(numberId: numberId)
+                guard result.protocolVersion == 1, result.provider == "retell",
+                      result.numberId == numberId, !result.engine.isEmpty,
+                      !result.reasoning.isEmpty, result.scope == selectedLine.type else {
+                    throw SecretaryOutgoingSetupUnavailable()
+                }
+                outgoingSetup = result
+                setupFailed = false
+            } catch {
+                outgoingSetup = nil
+                setupFailed = true
+            }
+            setupLoading = false
+            updateConfigurationSummary()
+        }
+    }
+
+    private func updateConfigurationSummary() {
+        let provider = selectedProvider
+        let bundle = Bundle.main.bundleIdentifier ?? AppConfig.bundleId
+        #if DEBUG
+        let environmentKey = AppConfig.baseURL.host == URL(string: "https://talkhint.app")?.host
+            ? "secretary.review.environment.debug_production"
+            : "secretary.review.environment.dev"
+        let environment = NSLocalizedString(environmentKey, comment: "")
+        #else
+        let environment = NSLocalizedString("secretary.review.environment.production", comment: "")
+        #endif
+        var lines = [
+            String(format: NSLocalizedString("secretary.review.bundle", comment: ""), bundle),
+            String(format: NSLocalizedString("secretary.review.environment", comment: ""), environment),
+        ]
+        if provider == .retell {
+            if let outgoingSetup {
+                let persona = outgoingSetup.assignment.map {
+                    "\($0.snapshot.name) · \(String(format: NSLocalizedString("secretary.review.version", comment: ""), $0.version))"
+                } ?? NSLocalizedString("secretary.review.no_persona", comment: "")
+                lines.append(String(format: NSLocalizedString("secretary.review.line", comment: ""), outgoingSetup.fromNumber))
+                lines.append(String(format: NSLocalizedString("secretary.review.persona", comment: ""), persona))
+                lines.append(String(format: NSLocalizedString("secretary.review.model", comment: ""),
+                                    outgoingSetup.engine, outgoingSetup.reasoning))
+                startButton.isEnabled = true
+                setupButton.isHidden = false
+                setupButton.setTitle(NSLocalizedString("secretary.review.configure", comment: ""), for: .normal)
+            } else {
+                lines.append(NSLocalizedString(
+                    setupLoading ? "secretary.review.setup_loading" :
+                        (setupFailed ? "secretary.review.setup_unavailable" : "secretary.review.setup_unavailable"),
+                    comment: ""))
+                startButton.isEnabled = false
+                setupButton.isHidden = false
+                if setupFailed, SessionStore.shared.secretaryOutgoingNumberId != nil {
+                    setupButton.setTitle(NSLocalizedString("secretary.review.retry_setup", comment: ""), for: .normal)
+                } else {
+                    setupButton.setTitle(NSLocalizedString("secretary.review.configure", comment: ""), for: .normal)
+                }
+            }
+        } else {
+            lines.append(NSLocalizedString("secretary.review.openai", comment: ""))
+            startButton.isEnabled = true
+            setupButton.isHidden = true
+        }
+        summaryLabel.text = lines.joined(separator: "\n")
+        if activeDraft != nil {
+            phoneField.isEnabled = false
+            startButton.setTitle(NSLocalizedString("secretary.live.retry_safe", comment: ""), for: .normal)
+        }
+    }
+
+    @objc private func configureSetupTapped() {
+        guard !setupLoading else { return }
+        if setupFailed, SessionStore.shared.secretaryOutgoingNumberId != nil {
+            loadOutgoingSetup()
+            return
+        }
+        outgoingSetup = nil
+        navigationController?.pushViewController(SecretaryPersonalityViewController(api: api), animated: true)
     }
 
     private func sectionLabel(_ key: String) -> UILabel {
@@ -691,23 +837,71 @@ private final class SecretaryTaskReviewViewController: UIViewController {
             showError(NSLocalizedString("secretary.phone.invalid", comment: ""))
             return
         }
+        if activeDraft == nil, selectedProvider == .retell, outgoingSetup == nil {
+            showError(NSLocalizedString("secretary.review.setup_unavailable", comment: ""))
+            return
+        }
         startButton.isEnabled = false
         activity.startAnimating()
         Task {
             do {
-                _ = try await APIClient.shared.createSecretaryTask(
-                    phoneNumber: number, instruction: instruction, confirmationToken: confirmationToken,
-                    voiceProvider: SessionStore.shared.secretaryVoiceProvider,
-                    secretaryNumberId: SessionStore.shared.secretaryOutgoingNumberId,
-                    secretaryBackendOrigin: SessionStore.shared.secretaryOutgoingNumberId == nil ? nil : AppConfig.baseURL.absoluteString)
+                var draft: SessionStore.SecretaryCallDraft
+                if let activeDraft {
+                    draft = activeDraft
+                } else {
+                    let provider = SessionStore.shared.secretaryVoiceProvider
+                    draft = SessionStore.SecretaryCallDraft(
+                        instruction: instruction, confirmationToken: confirmationToken,
+                        clientRequestId: UUID(), voiceProvider: provider,
+                        phoneNumber: number, requestAttempted: true)
+                    draft.ownerId = SessionStore.shared.userId
+                    draft.environmentOrigin = AppConfig.baseURL.absoluteString
+                    if provider == .retell {
+                        draft.secretaryNumberId = outgoingSetup?.numberId
+                        draft.secretaryBackendOrigin = AppConfig.baseURL.absoluteString
+                    }
+                    guard SessionStore.shared.savePendingSecretaryCall(draft) else {
+                        throw APIError.decoding
+                    }
+                    activeDraft = draft
+                }
+                draft.requestAttempted = true
+                guard SessionStore.shared.savePendingSecretaryCall(draft) else {
+                    throw APIError.decoding
+                }
+                activeDraft = draft
+                let task = try await api.createSecretaryTask(
+                    phoneNumber: draft.phoneNumber ?? number, instruction: draft.instruction,
+                    confirmationToken: draft.confirmationToken, voiceProvider: draft.voiceProvider,
+                    live: true, clientRequestId: draft.clientRequestId,
+                    secretaryNumberId: draft.secretaryNumberId,
+                    secretaryBackendOrigin: draft.secretaryBackendOrigin)
+                guard task.mode?.lowercased() == "live" else {
+                    SessionStore.shared.clearPendingSecretaryCall()
+                    activeDraft = nil
+                    await MainActor.run {
+                        self.activity.stopAnimating()
+                        self.navigationController?.pushViewController(
+                            SecretaryTaskDetailViewController(task: task), animated: true)
+                    }
+                    return
+                }
                 await MainActor.run {
                     self.activity.stopAnimating()
-                    self.navigationController?.popToRootViewController(animated: true)
+                    SessionStore.shared.clearPendingSecretaryCall()
+                    let monitor = SecretaryLiveCallViewController(task: task)
+                    monitor.onCallEnded = { [weak self] in
+                        guard let self else { return }
+                        self.navigationController?.popToRootViewController(animated: false)
+                    }
+                    self.navigationController?.pushViewController(monitor, animated: true)
                 }
             } catch {
                 await MainActor.run {
                     self.activity.stopAnimating()
-                    self.startButton.isEnabled = true
+                    self.startButton.isEnabled = self.activeDraft != nil || self.outgoingSetup != nil ||
+                        SessionStore.shared.secretaryVoiceProvider == .openai
+                    self.updateConfigurationSummary()
                     self.showError(error.localizedDescription)
                 }
             }

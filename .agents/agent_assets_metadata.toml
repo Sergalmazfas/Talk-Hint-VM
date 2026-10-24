@@ -579,3 +579,17 @@ mtime_ms = 1792872177923
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1b012579-a82a-4093-aae6-184a883f48b0/c43d2148-1154-4a45-9239-62a2a102711d"
 storage_version_token = "1792873290196222"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "if0gtA2YVx2oEdRUYhl6J"
+uri = "file://docs/secretary-xcode-dev-readiness-2026-10-24.html"
+type = "html"
+title = "Secretary: готовность Dev и инструкция Xcode"
+description = "Что изменено, таблица готовности, перенос на Mac, сценарий проверки обоих голосов на iPhone и оставшиеся ограничения. 24.10.2026."
+logical_id = "01ec3dc9-90cb-4c99-b6e3-51bf19cb3fd3"
+content_hash = "sha256:bd8fd8619e93662f5d98315c4612e57573ce6e89a37aa67660b2772a9c4e00f5"
+size = 21624
+mtime_ms = 1792883171529
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/01ec3dc9-90cb-4c99-b6e3-51bf19cb3fd3/f3654ea0-356b-4be3-a56f-8e7b0964b7f0"
+storage_version_token = "1792883272862553"
+content_type = "text/html"

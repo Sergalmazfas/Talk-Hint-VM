@@ -24,6 +24,9 @@ REQUIRED_TESTS = {
         "testSavingNewSetupCannotRewriteAmbiguousRequestAndBackendMismatchNeverSends",
         "testHomeRestoresAmbiguousRequestAfterLostResponseWithoutAnotherCall",
         "testHomeBackendChangeShowsErrorWithoutSendingOrUnlockingDraft",
+        "testPendingSecretaryDraftIsIsolatedAcrossOwnerAccounts",
+        "testPendingDraftStorageSeparatesDevelopmentAndProductionOrigins",
+        "testHomePreconfirmSummaryIncludesExactTaskAndRetellRuntime",
     ),
     "SecretaryMonitorAudioTests": (
         "testTranscriptConnectionDoesNotClaimAudioIsPlaying",
@@ -71,6 +74,10 @@ REQUIRED_TESTS = {
         "testLegacyTranscriptSnapshotRestoresWithoutDuplicates",
         "testLiveUpdateAfterRecoveryReusesTheExistingCard",
         "testEmptyTurnsDoNotCreateCards",
+        "testUnavailableTwilioSourceDoesNotOfferRecreationOrDisableEnd",
+        "testSourceTrackReceiptIsNotPresentedAsAudibleProof",
+        "testLegacyServerWithoutMonitoringCapabilityKeepsExistingFeedBehavior",
+        "testReappearingFeedDiscoversSourceThatStartedWhileMonitorWasHidden",
     ),
     "CallAudioDeviceRouterTests": (
         "testOrdinaryCallsUseOnlyStandardDeviceAndWaitForCallKit",

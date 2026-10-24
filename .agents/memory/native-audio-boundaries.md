@@ -75,3 +75,14 @@ the built main executable's runtime rights separately from signature integrity,
 and still require real Keychain XCTest. Do not substitute the debug dylib or
 an intermediate build plist for runtime evidence. Leave phone signing, APNs
 rights, account settings and production authentication unchanged.
+
+Keep read-only feed recovery separate from audio-source recovery. An absent
+source must not prevent re-reading status/transcript or ending the owned call.
+
+**Why:** a source can start while the monitor is hidden; gating feed subscription
+on the previously observed missing-source state makes the screen unable to learn
+that audio has become available.
+
+**How to apply:** screen re-entry may refresh the feed, never create a new call
+or promise to recreate a missing Twilio source. Treat receipt of both tracks,
+local playback callbacks, and human-confirmed audibility as separate evidence.

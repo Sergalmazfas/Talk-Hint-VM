@@ -66,7 +66,7 @@ import {
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
 import { verifySecretaryStream } from "./secretary/streamAuth";
-import { handleRetellPhoneMonitor } from "./secretary/retellMonitor";
+import { handleRetellPhoneMonitor, retellPhoneMonitoring } from "./secretary/retellMonitor";
 import { retellPhoneRegistry } from "./secretary/retellPhone";
 import { signSecretaryConfirmation } from "./secretary/confirmation";
 import {
@@ -1013,7 +1013,8 @@ export function setupWebSocket(server: Server) {
             if (!sendSecretaryFeedSnapshot(
               secretaryTaskId,
               ws,
-              buildSecretaryFeedSnapshot(toSecretaryTaskReport(task)),
+              { ...buildSecretaryFeedSnapshot(toSecretaryTaskReport(task)),
+                ...(task.voiceProvider === "retell" ? { monitoring: retellPhoneMonitoring(task.id) } : {}) },
             )) {
               if (ws.readyState === WebSocket.OPEN) ws.close(1011, "Secretary feed snapshot could not be sent");
               return;

@@ -153,6 +153,7 @@ export class RetellEngineRegistry {
       abort(); entry.responseId = id; entry.handled.add(id);
       entry.pending = id;
       const epoch = entry.epoch, controller = new AbortController(); entry.abort = controller;
+      let endCall = false;
       const current = () => !entry.closed && entry.socket === ws && epoch === entry.epoch;
       const timeout = setTimeout(() => {
         if (current()) {
@@ -164,7 +165,9 @@ export class RetellEngineRegistry {
       entry.engine.record("response_started");
       void entry.engine.respond(turns, controller.signal, text => {
         if (current() && !controller.signal.aborted) send({ response_type: "response", response_id: id, content: text, content_complete: false });
-      }, reminder).catch(() => {
+      }, reminder).then(end => {
+        endCall = !!(this.options.phone && end && current() && !controller.signal.aborted);
+      }).catch(() => {
         if (current() && !controller.signal.aborted) {
           entry.engine.record("engine_error");
           send({ response_type: "response", response_id: id, content: "Извините, сейчас не удалось получить ответ. Никакие реальные действия не выполнены.", content_complete: false });
@@ -172,7 +175,8 @@ export class RetellEngineRegistry {
       }).finally(() => {
         clearTimeout(timeout);
         // Interrupted/old responses never resume; a timeout still closes the CURRENT response.
-        if (current()) { entry.pending = undefined; send({ response_type: "response", response_id: id, content: "", content_complete: true }); entry.engine.record("response_complete"); }
+        if (current()) { entry.pending = undefined; send({ response_type: "response", response_id: id, content: "", content_complete: true,
+          ...(endCall ? { end_call: true } : {}) }); entry.engine.record("response_complete"); }
       });
     };
     send({ response_type: "config", config: { auto_reconnect: true, call_details: true } });

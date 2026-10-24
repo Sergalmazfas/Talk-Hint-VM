@@ -117,4 +117,93 @@ final class SecretaryTranscriptRenderingTests: XCTestCase {
         controller.renderSnapshot(["status": "connected", "transcript": ""])
         XCTAssertEqual(try feed(controller).arrangedSubviews.count, 0)
     }
+
+    func testUnavailableTwilioSourceDoesNotOfferRecreationOrDisableEnd() throws {
+        let controller = makeController()
+        controller.applyMonitoring([
+            "transport": "twilio-both-tracks",
+            "sourceConnected": false,
+            "sourceReconnectSupported": false,
+            "guestReceived": false,
+            "secretaryReceived": false,
+        ])
+        let source = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "text-secretary-source-status"
+        } as? UILabel)
+        let end = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "button-secretary-live-end"
+        } as? UIButton)
+        XCTAssertFalse(source.isHidden)
+        XCTAssertEqual(source.text, NSLocalizedString("secretary.live.source.unavailable", comment: ""))
+        XCTAssertTrue(end.isEnabled)
+    }
+
+    func testSourceTrackReceiptIsNotPresentedAsAudibleProof() throws {
+        let controller = makeController()
+        controller.applyMonitoring([
+            "transport": "twilio-both-tracks",
+            "sourceConnected": true,
+            "sourceReconnectSupported": false,
+            "guestReceived": true,
+            "secretaryReceived": true,
+        ])
+        let source = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "text-secretary-source-status"
+        } as? UILabel)
+        let expected = String(
+            format: NSLocalizedString("secretary.live.source.connected", comment: ""),
+            "twilio-both-tracks",
+            NSLocalizedString("secretary.live.source.received", comment: ""),
+            NSLocalizedString("secretary.live.source.received", comment: ""))
+        XCTAssertEqual(source.text, expected)
+    }
+
+    func testLegacyServerWithoutMonitoringCapabilityKeepsExistingFeedBehavior() {
+        let controller = makeController()
+        XCTAssertTrue(descendants(controller.view).contains {
+            $0.accessibilityIdentifier == "text-secretary-source-status" &&
+                $0.isHidden
+        })
+    }
+
+    func testReappearingFeedDiscoversSourceThatStartedWhileMonitorWasHidden() throws {
+        let controller = makeController()
+        var feedSubscriptions = 0
+        var playbackStarts = 0
+        controller.onFeedSubscriptionRequested = { feedSubscriptions += 1 }
+        controller.audioPlaybackConfigurationForTesting = {
+            playbackStarts += 1
+            return true
+        }
+
+        controller.applyMonitoring([
+            "transport": "twilio-both-tracks",
+            "sourceConnected": false,
+            "sourceReconnectSupported": false,
+            "guestReceived": false,
+            "secretaryReceived": false,
+        ])
+        controller.viewDidAppear(false)
+        XCTAssertEqual(feedSubscriptions, 1, "An absent source must not block the read-only feed")
+        XCTAssertEqual(playbackStarts, 0, "Do not start local playback until source connection is reported")
+
+        controller.viewWillDisappear(false)
+        controller.applyMonitoring([
+            "transport": "twilio-both-tracks",
+            "sourceConnected": true,
+            "sourceReconnectSupported": false,
+            "guestReceived": true,
+            "secretaryReceived": true,
+        ])
+        XCTAssertEqual(playbackStarts, 0, "Hidden updates must not activate audio")
+
+        controller.viewDidAppear(false)
+        XCTAssertEqual(feedSubscriptions, 2, "Visibility re-entry must refresh the read-only feed")
+        XCTAssertEqual(playbackStarts, 1, "An existing source discovered on re-entry may start local playback")
+        let end = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "button-secretary-live-end"
+        } as? UIButton)
+        XCTAssertTrue(end.isEnabled)
+        controller.viewWillDisappear(false)
+    }
 }

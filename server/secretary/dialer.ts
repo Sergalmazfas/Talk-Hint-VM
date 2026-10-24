@@ -98,5 +98,17 @@ export async function hangupSecretaryCall(callSid: string): Promise<void> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
-  await twilio(accountSid, authToken).calls(callSid).update({ status: "completed" });
+  const call = twilio(accountSid, authToken).calls(callSid);
+  try {
+    await call.update({ status: "completed" });
+  } catch (error) {
+    // A callback/peer hangup can win the race. Provider failure or 404 alone
+    // cannot prove completion; verify the same SID before accepting a retry.
+    try {
+      const current = await call.fetch();
+      if (current.sid === callSid &&
+          ["completed", "busy", "no-answer", "failed", "canceled"].includes(current.status)) return;
+    } catch { /* Preserve uncertain outcome and allow an explicit retry. */ }
+    throw error;
+  }
 }

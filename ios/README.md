@@ -61,6 +61,67 @@ failure, confirm the Mac copy contains `struct CallProfilesSnapshot` in
 source files being included in Compile Sources. Regenerating the project cannot
 replace synchronizing the actual source contents.
 
+### Owner Secretary telephone-test setup (manual, on the owner's Mac)
+
+The existing generated project is **`ios/TalkHint.xcodeproj`**, the XcodeGen
+spec is **`ios/project.yml`**, and the existing runnable scheme is **`TalkHint`**.
+There is no separately named `TalkHint-Dev` scheme or Dev build configuration.
+Use the existing **Debug** configuration and direct that run to the owner's
+intended Dev HTTPS origin:
+
+1. Sync the complete `ios/` directory, then from the repository root run
+   `cd ios && xcodegen generate && open TalkHint.xcodeproj`.
+2. In Xcode select scheme **TalkHint**, a connected owner iPhone, and
+   **Edit Scheme → Run → Arguments → Environment Variables**. Add
+   `TALKHINT_API_BASE_URL` with the exact HTTPS Dev origin (origin only: no path,
+   query, or fragment). Confirm the Run build configuration is **Debug**.
+   `AppConfig` reads this variable only in Debug. Without it, Debug currently
+   defaults to `https://talkhint.app`; Release ignores the variable and uses
+   production. The Secretary review identifies a Debug Dev endpoint, a Debug
+   production endpoint, or Release production before a call can be started.
+3. Install/run and sign in with the owner's **Dev/test account** (not the
+   production account). Keep credentials in the app's normal login flow; do not
+   put passwords, tokens, or other secrets in source, the URL, or Xcode project
+   files. In **Settings → Secretary**, select
+   **Retell + TalkHint Engine** or the existing **OpenAI** GPT option. For Retell,
+   open **Personality & outgoing line**, select the owner's own line, choose a
+   catalog persona/version if desired, explicitly select only approved shared
+   cards, and Save. The review reads back the saved owner/line setup; it does not
+   invent a persona or assume a missing/stale setup is valid.
+ 4. In Secretary, prepare a task, then review the destination, instruction, bundle,
+    selected outgoing line, catalog persona/version, actual Retell engine and
+    reasoning level (Merritt / `gpt-6.1-sol` / `medium` when returned by Dev), and
+    backend environment in the pre-start review. If setup cannot be read or the
+    line is stale, start stays unavailable. The Home confirmation path performs
+    the same read-only setup check and shows the exact destination/task/runtime
+    before its final Start action. A confirmed start creates the task and opens
+    the live monitor. Leaving the monitor does not end the server call; only its
+    confirmed End action does.
+5. For Retell, the monitor separately reports server-side Twilio source/track
+   receipt and local playback evidence. Track receipt is not proof of audible
+    playback. If Dev reports `sourceConnected: false` with
+    `sourceReconnectSupported: false`, the app never recreates the Twilio source.
+    It keeps the read-only feed available for transcript/status and resubscribes
+    that feed when the monitor becomes visible again; this can discover a source
+    that independently started while hidden, but cannot start one. End remains
+    available throughout.
+ 6. Pending request identity is scoped to the signed-in owner and exact backend
+    origin. Switching owner or Debug origin cannot replay an uncertain request
+    into the new scope; returning to the original owner+origin can recover its
+    same idempotent request. Unscoped drafts left by older builds are discarded
+    rather than attributed to whichever account logs in next.
+
+**Telephone tests are real calls.** No telephone call, notification permission,
+production request, publish, or GitHub action was performed as part of this
+source change. Before a human starts a Dev test, independently verify the
+configured origin and destination number on the review screen. Do not point the
+Debug scheme at production for a test.
+
+For a no-network, no-call native check on a Mac, use the existing isolated scheme
+and command below. `TalkHintValidation` uses the reserved `.invalid` host and
+fixture-only API transport; it does not validate a real Dev server or real
+telephone audio. Its XCTest execution requires Xcode and an iOS Simulator.
+
 In the new build, open **Settings → Phone**. It should show the personal number,
 the work number, and **Personal & work cards**. Before explicitly connecting
 CDL, an unconfigured work number should say **Not connected**, not claim that
@@ -221,6 +282,16 @@ are called directly (no private UIAlertAction/KVC invocation).
   A repeated API create uses the same request body and one fake task.
 - A previous-backend draft displays an error and never sends a POST to the new
   backend or unlocks the attempted request.
+- Owner-switch and origin-key tests keep uncertain drafts in their original
+  account/environment scope, and the Home preconfirm summary is checked for the
+  exact destination, task, bundle, line, engine and reasoning.
+- The pre-call review reads back the selected owner's line setup and shows the
+  configured bundle, environment, catalog snapshot/version, engine and reasoning;
+  viewing it never creates a task. A removed saved line is not silently replaced.
+- The monitor lifecycle regression simulates an absent Twilio source while
+  hidden, then an independently started source before re-entry. It verifies a
+  read-only feed resubscribe still occurs and local playback is configured only
+  after the server reports the source connected.
 
 All HTTP goes to an injected in-memory `SecretaryPersonalityFixture`; it permits
 only explicit fixture routes and the reserved validation host. Task recovery is

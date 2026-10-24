@@ -145,6 +145,28 @@ describe("Retell web Secretary bench — never PSTN", () => {
     api.request.mockImplementation(original);
     expect((await lab.stop("alice", created.id)).status).toBe("ended");
   });
+  it.each(["ended", "ongoing", "missing"])("checks provider evidence after stop 404 (%s), without a new admission", async status => {
+    const created = await lab.create("alice", input());
+    const original = api.request.getMockImplementation();
+    api.request.mockImplementation(async (...args: any[]) => {
+      if (args[0] === "/v2/stop-call/web-call") throw new RetellApiError(404, "Not found");
+      if (args[0] === "/v2/get-call/web-call") {
+        if (status === "missing") throw new RetellApiError(404, "Not found");
+        return { call_id: "web-call", call_type: "web_call", call_status: status };
+      }
+      return original(...args);
+    });
+    if (status === "ended") {
+      expect((await lab.stop("alice", created.id)).status).toBe("ended");
+      await lab.stop("alice", created.id);
+      expect(api.request.mock.calls.filter((c: any[]) => c[0] === "/v2/stop-call/web-call")).toHaveLength(1);
+    } else {
+      await expect(lab.stop("alice", created.id)).rejects.toMatchObject({ status: 404 });
+      expect(lab.report("alice", created.id).report.status).toBe("stop_failed");
+      await expect(lab.create("alice", input())).rejects.toMatchObject({ status: 409 });
+    }
+    expect(calls.filter(c => c.path === "/v3/create-web-call")).toHaveLength(1);
+  });
   it("ends on provider evidence, not transcript disconnection, and does not redial", async () => {
     const { id } = await lab.create("alice", input());
     await lab.connected("alice", id);
