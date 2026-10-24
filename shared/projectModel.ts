@@ -19,6 +19,18 @@ export const detailFields = {
   success: "Успех", failure: "Ошибка", unknown: "Неизвестное", metrics: "Показатели / критерии успеха",
   source: "Источник / URL", sourceDate: "Дата источника", region: "Регион", comparability: "Сопоставимость",
   acceptance: "Критерии приёмки", evidence: "Основание / результаты проверок",
+  benchmarkType: "Тип материала бенчмаркинга", benchmarkSubject: "Участник сравнения", benchmarkStep: "Сценарий сравнения",
+  proofStatus: "Статус доказательства", limitations: "Ограничения", practicalTest: "Практическая проверка",
+  features: "Функции", aiVoiceChat: "AI / голос / чат", callsBooking: "Звонки и запись", marketing: "Маркетинг",
+  billing: "Счета и оплаты", analytics: "Аналитика и учёт", pricing: "Тарифы / доплаты", comparison: "Сравнение с TalkHint",
+  recheckedAt: "Дата повторного чтения", provenance: "Происхождение", researchDate: "Дата исходной проверки",
+} as const;
+export const benchmarkSubjects = { talkhint: "TalkHint", jobber: "Jobber", "housecall-pro": "Housecall Pro", zenmaid: "ZenMaid" } as const;
+export const benchmarkSteps = {
+  incoming: "Входящий звонок", intake: "Выяснение запроса", quote: "Расчёт",
+  approval: "Одобрение владельцем", booking: "Запись", execution: "Статус выполнения",
+  payment: "Счёт / оплата", repeat: "Повторный заказ", voice: "Голосовое поручение",
+  marketing: "Маркетинг", analytics: "Бизнес-аналитика", coordination: "Согласования и межролевая передача",
 } as const;
 export interface ElementInput {
   title: string;
@@ -56,6 +68,7 @@ export interface ProjectModelState {
   documents: ModelDocument[]; proposals: ModelProposal[]; decisions: ModelDecision[]; taskDrafts: ModelTaskDraft[];
 }
 export type ModelCommand =
+  | { type: "createElement"; id: string; element: ElementInput }
   | { type: "saveElement"; id?: string; element: ElementInput }
   | { type: "saveProposal"; id?: string; targetId: string; source: string; rationale: string; relatedIds: string[]; change: ElementInput }
   | { type: "approveProposal"; id: string }

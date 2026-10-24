@@ -1,0 +1,38 @@
+/** Paraphrases, not copies of vendor documents. Research date is supplied by owner. */
+export const researchDate = "2026-10-23";
+export const recheckedAt = "2026-10-24";
+export const materialSources = [
+  { key: "jobber-faq", title: "Jobber — FAQ", url: "https://www.getjobber.com/faq/", subjects: ["COMP-JOBBER"], type: "official",
+    summary: "FSM для соло и команд; запросы, расчёты, расписание, задания, счета, платежи, маркетинг. Home/commercial services: cleaning, HVAC, electrical и другие. Клиентский portal, повторные работы, QuickBooks. Это документация поставщика, не независимый тест." },
+  { key: "jobber-workflow", title: "Jobber — Workflow Overview", url: "https://getjobber.zendesk.com/hc/en-us/articles/360056046054-Jobber-Workflow-Overview", subjects: ["COMP-JOBBER"], type: "official",
+    summary: "Request → Quote → Job → Invoice → Payment. Не каждый шаг обязателен. Клиент может одобрить quote; это не доказательство обязательного одобрения владельцем каждого AI-действия." },
+  { key: "jobber-ai", title: "Jobber — AI Voice and Chat (Beta)", url: "https://help.getjobber.com/en/articles/jobber-ai-voice-and-chat-beta/", subjects: ["COMP-JOBBER"], type: "official",
+    summary: "Статья обновлена 22.10.2026. Beta. Voice в мобильном приложении: расчёты, счета, расписание, заметки и другие действия; Chat — советы, анализ клиентов/работ/счетов/сотрудников, маркетинговый текст. Marketing content только Chat, не Voice. Бизнес-действия и вопросы — admin; non-admin ограничен product support. По статье создание новых записей доступно в Voice, а не в текстовом Chat. Голосовое управление бизнесом не уникально для TalkHint." },
+  { key: "jobber-reception", title: "Jobber — Receptionist", url: "https://help.getjobber.com/en/articles/receptionistpowered-by-jobber-ai/", subjects: ["COMP-JOBBER"], type: "official",
+    summary: "24/7 приём по звонкам и тексту, ответы и booking, настройка разрешённых действий. Нужен dedicated phone number; доступ зависит от плана и admin. При повторном чтении указаны Plus с unlimited и add-on select plans $29/мес за 30 conversations, $0.79 сверх; единицу conversation и полную стоимость нужно проверить в конкретном плане, это не цена всей системы." },
+  { key: "jobber-pricing", title: "Jobber — Pricing", url: "https://www.getjobber.com/pricing/", subjects: ["COMP-JOBBER"], type: "official",
+    summary: "Планы, число пользователей, месяц/год и акции меняют цену. Receptionist/Marketing Suite и платежные комиссии учитывать отдельно. Единую цену полной связки в этом исследовании не установили. Рекламное «от» не TCO." },
+  { key: "hcp-main", title: "Housecall Pro — продукт", url: "https://www.housecallpro.com/", subjects: ["COMP-HOUSECALL-PRO"], type: "official",
+    summary: "Home services: cleaning, electrical, HVAC, plumbing и другие; управление работами, расписанием/dispatch, расчётами, счетами, оплатами и отчётами. Рекламные показатели роста не являются независимым эффектом." },
+  { key: "hcp-ai", title: "Housecall Pro — AI Team", url: "https://www.housecallpro.com/features/ai-team/", subjects: ["COMP-HOUSECALL-PRO"], type: "official",
+    summary: "CSR AI — обращения/booking; Analyst AI — данные, выручка, работы; Coach AI — рост, цены, найм; Marketing AI — тексты/кампании. Телефонный CSR AI продаётся отдельно. Есть противоречие: calls/chats/texts (coming soon), а FAQ включает CSR chat на всех планах. Доступность chat/text требует проверки. Название AI Team не доказывает общую автономную Crew, CEO-координацию и межагентную передачу. Рекламные 2x/35%/часы экономии не независимое доказательство." },
+  { key: "hcp-pricing", title: "Housecall Pro — Pricing", url: "https://www.housecallpro.com/pricing/", subjects: ["COMP-HOUSECALL-PRO"], type: "official",
+    summary: "Цена зависит от плана, команды, срока и promotions; телефонный CSR AI отдельно. Сумма под одинаковый сценарий, комиссии и лимиты не установлены. Видимый annual Basic $59 не является ценой полного AI-комплекта." },
+  { key: "zen-pricing", title: "ZenMaid — Pricing", url: "https://get.zenmaid.com/pricing", subjects: ["COMP-ZENMAID"], type: "official",
+    summary: "Starter $19/мес, до 40 appointments; Pro $39; Pro Max $49 при базовой конфигурации. SMS не включены. Scheduling, SMS/email templates, мобильный доступ, invoices/payments. Reports/payroll перечислены в Pro; Pro Max — export и интеграции. Не приравнивать payroll к полному бухгалтерскому/налоговому учёту; QuickBooks на странице имеет coming soon." },
+  { key: "zen-cost", title: "ZenMaid — How Much Does ZenMaid Cost?", url: "https://www.zenmaid.com/answers/en/articles/2423512-how-much-does-zenmaid-cost", subjects: ["COMP-ZENMAID"], type: "official",
+    summary: "Статья 04.06.2026: только Owner входит в base. Дополнительный активный профиль — $4/$14/$24 в Starter/Pro/Pro Max; SMS bundles от $14 за 125. Charges SMS зависят от использования. Сравнивать состав команды, объём записей, SMS и платежные комиссии. Ни отсутствие AI, ни качество голосового приёма по этим страницам не доказаны." },
+  { key: "beauty", title: "Предварительно — Beauty establishments", url: "https://www.demographics-atlas.com/pages/statistic/beauty-salons-establishments", subjects: ["MARKET-BEAUTY"], type: "secondary",
+    summary: "Исходная заметка: Beauty 2023 с сотрудниками — Miami-Dade 970, Palm Beach 817, сумма 1787 БЕЗ Broward. Страница повторно открыта, но первичная сверка CBP не выполнена; год/NAICS/единицу необходимо подтвердить. Это не TAM/SAM и не число уникальных покупателей." },
+  { key: "cleaning", title: "Предварительно — Cleaning South Florida", url: "https://www.groundworkdemographics.com/markets/house-cleaning/florida/miami-fort-lauderdale-west-palm-beach-metro", subjects: ["MARKET-CLEANING"], type: "secondary",
+    summary: "Сводка указывает 2035 payroll establishments 2023, janitorial+carpet cleaning. Исходная разбивка владельца: Miami-Dade 718, Broward 694, Palm Beach 623; отдельные страницы округов в этой проверке не сверены. Категория шире residential cleaning, соло исключены; 655 map listings Sep2026 — иной набор, не складывать." },
+  { key: "scoutway", title: "НЕ ПЕРЕПРОВЕРЕНО — Scoutway cleaning", url: "https://scoutwayai.com/opportunity/miami-dade-county-fl/cleaning-services", subjects: ["MARKET-SCOUTWAY"], type: "secondary",
+    summary: "Источник заявляет NAICS561720, 2023: 686 с сотрудниками +43833 без =44519 Miami-Dade. Страница открыта, но числа по Census не перепроверены. Не складывать с 718 из другой категории/охвата. Не выводить спрос или плательщиков из суммы establishments." },
+  { key: "cbp", title: "Следующая проверка — Census CBP", url: "https://www.census.gov/programs-surveys/cbp.html", subjects: ["REQ-MARKET-VERIFY"], type: "primary-to-check",
+    summary: "План первичной сверки employer establishments по году/округам/NAICS. Первичные выгрузки ещё не исследованы." },
+  { key: "nes", title: "Следующая проверка — Census NES", url: "https://www.census.gov/programs-surveys/nonemployer-statistics.html", subjects: ["REQ-MARKET-VERIFY"], type: "primary-to-check",
+    summary: "План отдельной сверки nonemployer; не смешивать с числом работников, лицензий, филиалов и покупающих аккаунтов." },
+  { key: "fl-health", title: "Следующая проверка — Florida HealthSource", url: "https://flhealthsource.gov/data-portal/", subjects: ["REQ-MARKET-VERIFY"], type: "primary-to-check",
+    summary: "Data portal доступен; лицензионные выгрузки не сверены. Массаж распределён по 621399/812199; HVAC 238220 включает plumbing/heating. Лицензии, выпускники и работники не равны бизнесам-покупателям." },
+] as const;
+export function sourceUrls(...keys: string[]) { return materialSources.filter(s => keys.includes(s.key)).map(s => s.url).join("\n"); }

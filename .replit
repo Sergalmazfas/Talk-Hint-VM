@@ -39,8 +39,11 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev"
+args = "env -u ADMIN_PROVISION_USER -u ADMIN_SET_PASSWORD DISABLE_AUTO_WEBHOOK_REPOINT=true npm run dev"
 waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [[workflows.workflow]]
 name = "test"

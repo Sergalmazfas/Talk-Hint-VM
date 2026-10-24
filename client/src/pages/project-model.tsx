@@ -13,6 +13,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { modelRequest } from "@/lib/project-model-api";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import Benchmark from "@/components/project-model/Benchmark";
 import "./project-model.css";
 
 type Tab = "overview" | "links" | "documents";
@@ -36,7 +37,9 @@ export default function ProjectModel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState("");
-  const [section, setSection] = useState<ElementInput["section"]>("Обзор");
+  const [section, setSection] = useState<ElementInput["section"]>(() =>
+    new URLSearchParams(window.location.search).get("view") === "benchmark" ? "Рынок и конкуренты" : "Обзор",
+  );
   const [tab, setTab] = useState<Tab>("overview");
   const [editor, setEditor] = useState<{ id?: string; value: ElementInput } | null>(null);
   const [relationDraft, setRelationDraft] = useState<{ id?: string; from: string; to: string; label: string }>({ from: "", to: "", label: "" });
@@ -47,7 +50,8 @@ export default function ProjectModel() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [proposalEditorOpen, setProposalEditorOpen] = useState(false);
   const [deepLinkError, setDeepLinkError] = useState("");
-  const deepLinkId = useMemo(() => new URLSearchParams(window.location.search).get("element")?.trim() ?? "", []);
+  const benchmarkView = useMemo(() => new URLSearchParams(window.location.search).get("view") === "benchmark", []);
+  const deepLinkId = useMemo(() => benchmarkView ? "" : new URLSearchParams(window.location.search).get("element")?.trim() ?? "", [benchmarkView]);
   const deepLinkHandled = useRef("");
 
   const load = useCallback(async (showLoading = true) => {
@@ -247,9 +251,12 @@ export default function ProjectModel() {
           <p className="pm-overline">Project model / 01</p>
           <nav className="pm-nav">
             {sections.map((item, index) => (
-              <button type="button" key={item} onClick={() => { setSection(item); setTab("overview"); }} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}>
-                <span className="pm-nav-index">{String(index + 1).padStart(2, "0")}</span>{item}
-              </button>
+              <div className="pm-nav-group" key={item}>
+                <button type="button" onClick={() => { setSection(item); setTab("overview"); }} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}>
+                  <span className="pm-nav-index">{String(index + 1).padStart(2, "0")}</span>{item}
+                </button>
+                {item === "Рынок и конкуренты" && <a className={`pm-nav-subitem ${benchmarkView && section === item ? "active" : ""}`} href="/admin/project-model?view=benchmark" aria-current={benchmarkView && section === item ? "page" : undefined}>Конкурентный бенчмаркинг</a>}
+              </div>
             ))}
           </nav>
           <div className="pm-side-note">Только планирование TalkHint. Содержимое этой модели не добавляется в инструкции телефонного агента.</div>
@@ -302,6 +309,8 @@ export default function ProjectModel() {
                 })}
               </div>}
 
+              {section === "Рынок и конкуренты" && benchmarkView && state && <Benchmark state={state} openElement={openElement} />}
+
               {section === "Обзор" && <section className="pm-gap-summary" aria-label="Сводка пробелов модели">
                 <div className="pm-section-list-head"><h2>Что ещё требует внимания</h2><span className="pm-help">Актуально по текущей версии</span></div>
                 <div className="pm-gap-metrics">
@@ -313,7 +322,7 @@ export default function ProjectModel() {
                 {incompleteActions.length > 0 && <div className="pm-gap-detail">Не заполнено у: {incompleteActions.slice(0, 4).map(({ element, missing }) => `${element.title} (${missing.map((key) => detailFields[key]).join(", ")})`).join(" · ")}</div>}
               </section>}
 
-              {!isFocusedTasks && !isFocusedHistory && <section className="pm-section-list">
+              {!isFocusedTasks && !isFocusedHistory && !(section === "Рынок и конкуренты" && benchmarkView) && <section className="pm-section-list">
                 <div className="pm-section-list-head">
                   <h2>{section}</h2>
                   <button className="pm-btn small" type="button" onClick={() => openElement()}><Plus size={12} /> Добавить элемент</button>

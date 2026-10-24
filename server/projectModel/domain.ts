@@ -15,6 +15,7 @@ export const elementSchema = z.object({
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("createElement"), id: id.regex(/^[A-Z][A-Z0-9-]{2,90}$/), element: elementSchema }).strict(),
   z.object({ type: z.literal("saveElement"), id: id.optional(), element: elementSchema }).strict(),
   z.object({ type: z.literal("saveProposal"), id: id.optional(), targetId: id, source: nonempty(20000), rationale: nonempty(12000), relatedIds: ids, change: elementSchema }).strict(),
   z.object({ type: z.literal("approveProposal"), id }).strict(),
@@ -51,12 +52,14 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     affected.forEach(id => { element(id).needsReview = true; });
   }
   switch (c.type) {
+    case "createElement":
     case "saveElement": {
       if (c.element.contentStatus === "confirmed") fail("Подтверждение сведений возможно только через предложение", 409);
-      const existing = c.id ? element(c.id) : undefined;
+      if (c.type === "createElement" && s.elements.some(e => e.id === c.id)) fail("Постоянный ID уже существует", 409);
+      const existing = c.type === "saveElement" && c.id ? element(c.id) : undefined;
       if (existing?.contentStatus === "confirmed") fail("Утверждённое описание меняется только через предложение", 409);
       if (!existing && s.elements.length >= 500) fail("Достигнут лимит элементов");
-      const updated: ModelElement = { ...c.element, id: existing?.id ?? newId("TH"), version: (existing?.version ?? 0) + 1, updatedAt: now, needsReview: false };
+      const updated: ModelElement = { ...c.element, id: existing?.id ?? (c.type === "createElement" ? c.id : newId("TH")), version: (existing?.version ?? 0) + 1, updatedAt: now, needsReview: false };
       if (existing) { s.elements[s.elements.indexOf(existing)] = updated; impact(existing.id); }
       else s.elements.push(updated);
       log(existing ? "Изменён черновик" : "Создан элемент", "Ручное редактирование, не подтверждение", [updated.id], { before: existing, after: updated });
