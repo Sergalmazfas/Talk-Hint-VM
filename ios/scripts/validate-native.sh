@@ -60,6 +60,7 @@ COMMON=(-project TalkHint.xcodeproj -scheme TalkHintValidation -configuration Na
 xcodebuild "${COMMON[@]}" build-for-testing 2>&1 | tee "$OUT/build.log"
 # No filters: run the entire TalkHintTests target, not just CallProfilesTests.
 xcodebuild "${COMMON[@]}" test-without-building -parallel-testing-enabled NO \
+  -testLanguage en -testRegion US \
   -resultBundlePath "$OUT/TalkHintTests.xcresult" 2>&1 | tee "$OUT/tests.log"
 python3 scripts/verify-xcresult.py "$OUT/TalkHintTests.xcresult"
 echo "PASS: native app/test compilation and XCTest execution (see $OUT)"

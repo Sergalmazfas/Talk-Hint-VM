@@ -5,6 +5,10 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "SecretaryVoicePreferenceTests": (
+        "testDefaultDoesNotInheritTranslatorProvider",
+        "testOldPersistedDraftStillDecodesItsExplicitProvider",
+    ),
     "CallProfilesTests": (
         "testNativeValidationUsesAnIsolatedBackend",
         "testCardProfileIsAQueryAndNotAnEncodedPath",
