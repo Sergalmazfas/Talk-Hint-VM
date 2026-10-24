@@ -56,3 +56,9 @@ Retell's Custom LLM WebSocket does not send authentication headers. Do not assum
 **Why:** The provider's setup guide explicitly requires endpoint admission protection; authenticating ordinary webhooks does not authenticate model sockets.
 
 **How to apply:** Require a short-lived per-session capability plus the registered web-call identity, reject production callbacks, and never expose capabilities in browser admissions, report exports or URL logs.
+
+The owner approved “ElevenLabs + Engine” only as a fourth existing-Dev-browser comparison, keeping the other modes. Reuse the owner's existing clone; never create a new one or silently substitute a catalog voice.
+
+**Why:** The comparison is their existing voice versus an explicit catalog voice with TalkHint retaining generation, context, permissions and tools—not a separate ElevenLabs business agent.
+
+**How to apply:** Reuse the common Engine through an adapter, do not rewrite it. Use the shared persistent reports repository, not another store. Do not call an in-memory action or “I will pass it on” a saved result. If the required common integration is unavailable, report the dependency and stop rather than shipping a falsely ready stand. Keep live headphone/iPhone quality and interruption claims unconfirmed until actually heard.

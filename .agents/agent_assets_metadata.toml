@@ -439,3 +439,17 @@ mtime_ms = 1792802039124
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e13c43ee-7648-4539-a849-d5a0d782b018/6411493a-0002-4e53-8f3c-f21e1f2b3542"
 storage_version_token = "1792802078553778"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "CO8O1fZRy67Mrwt901n-W"
+uri = "file://docs/evidence/elevenlabs-engine-preflight-2026-10-24.md"
+type = "text"
+title = "ElevenLabs + Engine: проверка и сценарии"
+description = "Фактическое подключение, найденный клон, официальные источники, блокер общего хранилища и одинаковые сценарии для двух голосов. Это не отчёт о готовом стенде."
+logical_id = "956ca383-c646-4e9c-92f0-2fdef433fe9e"
+content_hash = "sha256:d7e822d8480d6acd727938f3190e89b9ff8ad65c4ff944d4377edc961ba115a4"
+size = 12779
+mtime_ms = 1792862294227
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/956ca383-c646-4e9c-92f0-2fdef433fe9e/c9d3be20-4291-4f88-b505-f7643d1aed3b"
+storage_version_token = "1792862316117426"
+content_type = "text/markdown"
