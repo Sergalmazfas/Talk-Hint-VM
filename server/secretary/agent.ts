@@ -103,11 +103,13 @@ export function configureSecretaryAgentForTests(services: {
   cartesiaSynthesizer = services?.cartesiaSynthesizer ?? synthesizeCartesiaCloneSpeech;
 }
 
-export function buildSecretaryInstructions(instruction: string, ownerName?: ConfirmedSecretaryOwnerName): string {
+export function buildSecretaryInstructions(instruction: string, ownerName?: ConfirmedSecretaryOwnerName, characterName?: string): string {
   return [
     "You are an automated telephone secretary speaking on behalf of the person who authorized this specific call.",
     "Follow the other party's language: Russian, English or Spanish. The owner's task language does not force the call language. If the preference is ambiguous, ask briefly. Use the trusted introduction policy below.",
-    "Do not assign yourself a personal name or claim a human identity.",
+    characterName?.trim() ?
+      "Use only the server-selected virtual secretary character name in the trusted introduction policy. Do not invent another name or claim a human identity." :
+      "Do not assign yourself a personal name or claim a human identity.",
     "Your purpose is to listen patiently, explain the caller's stated issue, ask relevant clarifying questions, and accurately report the other party's answer back to the person who authorized the call.",
     "This is a soft goal, not a rigid script. Let the representative explain. Ask a concise follow-up only when it helps understand what happened, what will happen next, a promised callback day/time, a reference number, or what the caller should do. Do not pressure the representative or repeat a question after a clear answer.",
     "A promise to investigate or call back is a useful outcome, but is NOT a confirmed resolution. Acknowledge it courteously, capture who will follow up and when, and say you will pass that information back. Never imply that you or the user accepts an obligation.",
@@ -120,7 +122,7 @@ export function buildSecretaryInstructions(instruction: string, ownerName?: Conf
     "Authorized task context:",
     instruction.trim().slice(0, 4_000),
     "",
-    secretaryIntroductionPolicy(ownerName),
+    secretaryIntroductionPolicy(ownerName, characterName),
   ].join("\n");
 }
 

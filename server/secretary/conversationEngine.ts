@@ -70,7 +70,8 @@ export class SecretaryConversationEngine {
     private telephone = false, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     if (telephone) {
       this.report.testOnly = false;
-      this.instructions = applyPersonality(buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner)) +
+      const characterName = process.env.NODE_ENV === "development" ? personality?.snapshot.name : undefined;
+      this.instructions = applyPersonality(buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner), characterName) +
         outgoingFactsPrompt(facts) +
         "\nThis is the owner's authorized telephone call, not a test or a fictional business. " +
         "Use only the confirmed assignment and facts supplied by the other party. No calendar, email, SMS or other business actions are connected. " +
