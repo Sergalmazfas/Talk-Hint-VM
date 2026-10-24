@@ -25,6 +25,9 @@ cleanup must not stop a newer monitor's shared player.
 notifications and delayed deinitialization otherwise compete with the next
 call. Audio-start failure must not be overwritten by a networking
 “Connecting” state.
+The owner confirmed a successful autonomous Secretary conversation with visible
+live transcription on iPhone but no audible monitoring. A successful remote
+conversation or connected transcript feed is not evidence of owner-side sound.
 
 **How to apply:** Release local resources on disappearance without hanging up
 the autonomous server call, guard lifecycle callbacks, and preserve explicit
