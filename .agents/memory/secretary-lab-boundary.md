@@ -103,6 +103,8 @@ The owner subsequently confirmed that ElevenLabs + Engine works with a normal, c
 
 The owner later confirmed improved ElevenLabs response speed, but still rated the conversation 3.5/5 and preferred Retell for conversational responsiveness. The saved conversation they described used the baseline profile, not the Flash optimized profile.
 
+In a subsequent live optimized/Flash trial, the owner confirmed better responsiveness and successful language switching, but reported long initial silence and some unfinished spoken replies.
+
 **Why:** This is live user confirmation of audibility after startup fixes, not a measured recognition, interruption or latency comparison.
 
 **How to apply:** Treat basic live audibility as user-confirmed; investigate response timing by stage and keep Retell as the user's responsiveness reference. Do not silently downgrade the common Engine to improve a voice-provider comparison.

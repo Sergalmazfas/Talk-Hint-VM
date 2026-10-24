@@ -467,3 +467,31 @@ mtime_ms = 1792871712668
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/086566c2-af4f-4fbd-86c0-ac4abb3760cd/791f135b-8bcd-4a20-9ee9-c012b5e18653"
 storage_version_token = "1792871729319050"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "UtP0MsZ2q5ByhHGO9Qq9M"
+uri = "file://generated-artifacts/eleven-report-b015404f-90e2-4feb-92a7-8ba4fbb35084.json"
+type = "unspecified"
+title = "ElevenLabs Flash — последний разговор, 16:10"
+description = "Сохранённый Dev TEST-отчёт 24 октября: оптимизированный профиль, транскрипция, события перебивания и метрики. Содержит продиктованные тестовые контактные данные."
+logical_id = "665c437d-297a-456f-a70f-b5f6b67f9f50"
+content_hash = "sha256:4fefc7dc9e48284cc01ea7b16fbf2346bb1d7bd76c64f748b848383b60e74f4a"
+size = 23221
+mtime_ms = 1792872862699
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/665c437d-297a-456f-a70f-b5f6b67f9f50/458aebe3-db4b-4444-b2ee-6aed4401e165"
+storage_version_token = "1792872930288946"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "9CpwBIioMfbL0fyJOnEOY"
+uri = "file://generated-artifacts/eleven-report-90dcd720-2bb2-4278-916e-9447ad31c092.json"
+type = "unspecified"
+title = "ElevenLabs Flash — предыдущий разговор, 16:08"
+description = "Второй сохранённый отчёт того же оптимизированного профиля для проверки начальной паузы и переключения языка."
+logical_id = "48b1b9be-4ddb-4382-87be-68f7f1ba7f37"
+content_hash = "sha256:159d5581898dde5445e3c8078f50b5b976bcfb8344cfef9103ad1af3d67b53b4"
+size = 14837
+mtime_ms = 1792872862703
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/48b1b9be-4ddb-4382-87be-68f7f1ba7f37/72df7a70-4381-4ece-bed6-f01fe511ad84"
+storage_version_token = "1792872930997936"
+content_type = "application/octet-stream"
