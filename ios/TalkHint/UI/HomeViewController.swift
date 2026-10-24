@@ -19,10 +19,12 @@ final class HomeViewController: UIViewController {
     private var activeSecretaryTask: APIClient.SecretaryTask?
     private var recoveredSecretaryTask: APIClient.SecretaryTask?
     private var isCreatingSecretaryTask = false
+    private let api: APIClient
 
-    init(mode: CallManager.CallMode = .hint, secretary: Bool = false) {
+    init(mode: CallManager.CallMode = .hint, secretary: Bool = false, api: APIClient = .shared) {
         callMode = mode
         secretaryMode = secretary
+        self.api = api
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -54,11 +56,13 @@ final class HomeViewController: UIViewController {
         view.backgroundColor = .systemBackground
         navigationController?.setNavigationBarHidden(true, animated: false)
         buildUI()
+        #if !TALKHINT_NATIVE_VALIDATION
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(outgoingCallStateChanged(_:)),
             name: CallManager.outgoingCallStateDidChange,
             object: CallManager.shared)
+        #endif
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -523,7 +527,7 @@ final class HomeViewController: UIViewController {
     private func loadActiveSecretaryTask() {
         Task {
             do {
-                let tasks = try await APIClient.shared.secretaryTasks()
+                let tasks = try await api.secretaryTasks()
                 await MainActor.run {
                     if let draft = self.confirmedSecretaryTask,
                        let recovered = tasks.first(where: {
@@ -652,7 +656,7 @@ final class HomeViewController: UIViewController {
     // MARK: - Actions
 
     @objc private func settingsTapped() {
-        navigationController?.pushViewController(SettingsViewController(), animated: true)
+        navigationController?.pushViewController(SettingsViewController(api: api), animated: true)
     }
 
     private func copilotLanguageTitle() -> String {
@@ -932,7 +936,7 @@ final class HomeViewController: UIViewController {
         callButton.configuration?.title = NSLocalizedString("home.connecting", comment: "")
         Task {
             do {
-                let task = try await APIClient.shared.createSecretaryTask(
+                let task = try await api.createSecretaryTask(
                     phoneNumber: cleaned,
                     instruction: confirmed.instruction,
                     confirmationToken: confirmed.confirmationToken,

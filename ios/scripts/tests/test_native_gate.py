@@ -189,6 +189,30 @@ class XCTestEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing successful SecretaryVoicePreferenceTests"):
             self.run_evidence(omit_suite="SecretaryVoicePreferenceTests")
 
+    def test_missing_secretary_personality_contract_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful SecretaryPersonalityTests"):
+            self.run_evidence(omit_suite="SecretaryPersonalityTests")
+
+    def test_missing_secretary_personality_ui_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful SecretaryPersonalityUITests"):
+            self.run_evidence(omit_suite="SecretaryPersonalityUITests")
+
+    def test_every_personality_scenario_is_required_and_cannot_be_skipped(self):
+        for suite in ("SecretaryPersonalityTests", "SecretaryPersonalityUITests"):
+            for method in results.REQUIRED_TESTS[suite]:
+                with self.subTest(suite=suite, method=method):
+                    root = {"actions": {"_values": [{"actionResult": {
+                        "status": {"_value": "succeeded"}, "testsRef": {"id": {"_value": "tests"}}
+                    }}]}}
+                    tests = [{"identifier": {"_value": name}, "subtests": {"_values": [
+                        {"identifier": {"_value": test + "()"}, "testStatus": {
+                            "_value": "Skipped" if (name, test) == (suite, method) else "Success"
+                        }} for test in methods
+                    ]}} for name, methods in results.REQUIRED_TESTS.items()]
+                    with patch.object(results, "read_result", side_effect=[root, tests]):
+                        with self.assertRaisesRegex(ValueError, f"Missing successful {suite}/{method}"):
+                            results.verify("fixture.xcresult")
+
     def test_missing_caption_recovery_suite_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing successful InCallCaptionTests"):
             self.run_evidence(omit_suite="InCallCaptionTests")

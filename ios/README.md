@@ -192,6 +192,51 @@ every endpoint outside `/api/cards`; number attachment and telephone endpoints
 cannot be used by these tests. This is UIKit XCTest coverage, not XCUITest or
 proof of an installed iPhone build.
 
+### Secretary personality scenarios (fixture-only)
+
+The same gate now requires every `SecretaryPersonalityTests` and
+`SecretaryPersonalityUITests` scenario in `scripts/verify-xcresult.py` to have
+**Success** in the Mac `.xcresult`; missing/failed/skipped scenarios fail the
+gate. No extra minimum-iOS matrix or physical-device run is added here.
+
+`SecretaryPersonalityUITests` is a **hosted UIKit XCTest suite, not XCUITest**.
+It constructs the real Settings → Secretary → Personality & outgoing number
+navigation, drives table delegates and the real picker, and inspects cells,
+character text, permission checkmarks, alerts and persisted state. Line/provider
+sheet options are inspected, then the same methods used by their action handlers
+are called directly (no private UIAlertAction/KVC invocation).
+
+- Katya is not auto-selected; selecting her displays rules, examples and the
+  appropriate personal/work guidance without implicitly granting any cards.
+- Personal/work lines have separate card grants; Save, reopen and revoke read
+  back the fixture's stored state.
+- HTTP 500 preserves the unsaved selection, leaves local provider/line unchanged
+  and allows retry. API tests additionally require explicit 401/403/404 failures,
+  exact Bearer/query/JSON construction and rejection of invalid bindings.
+- GPT clears the future Retell line without deleting server assignments;
+  switching providers or saving a new setup cannot rewrite an attempted draft.
+- Home restores an ambiguous, expired-token request with its original UUID,
+  provider, destination and line after a simulated accepted-but-lost response.
+  Reopening resolves it via fake history without another create or monitoring.
+  A repeated API create uses the same request body and one fake task.
+- A previous-backend draft displays an error and never sends a POST to the new
+  backend or unlocks the attempted request.
+
+All HTTP goes to an injected in-memory `SecretaryPersonalityFixture`; it permits
+only explicit fixture routes and the reserved validation host. Task recovery is
+separately opt-in and returns terminal fake tasks; no phone SDK, websocket,
+notifications, real network, production data or publication is involved.
+Singleton draft/preferences are touched only under the compile-time
+`TALKHINT_NATIVE_VALIDATION` guard and restored after each test. Test-created Home
+does not initialize CallManager in that configuration. Ordinary builds keep
+their default shared API and startup behavior.
+
+**Verification status:** these Swift additions have not been compiled or run in
+the Linux workspace. Python gate helper tests only validate the result checker;
+only a successful Mac/Xcode run with its logs and `.xcresult` confirms native
+compilation and execution. Run the existing command above or the linked
+[iOS native validation workflow](../.github/workflows/ios-native.yml).
+
 ### CI setup and current verification status
 
 No existing CI configuration or accessible Mac runner was present when this gate

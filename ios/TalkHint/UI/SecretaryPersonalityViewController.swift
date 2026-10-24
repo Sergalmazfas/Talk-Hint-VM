@@ -14,7 +14,11 @@ final class SecretaryPersonalityViewController: UITableViewController {
     private let owner = SessionStore.shared.userId
     private func text(_ key: String) -> String { NSLocalizedString("secretary.personality." + key, comment: "") }
 
-    init() { super.init(style: .insetGrouped) }
+    private let api: APIClient
+    init(api: APIClient = .shared) {
+        self.api = api
+        super.init(style: .insetGrouped)
+    }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -33,7 +37,7 @@ final class SecretaryPersonalityViewController: UITableViewController {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let context = try await APIClient.shared.secretaryPersonalityContext()
+                let context = try await self.api.secretaryPersonalityContext()
                 guard epoch == self.generation, SessionStore.shared.userId == self.owner else { return }
                 self.numbers = context.numbers
                 let saved = SessionStore.shared.secretaryOutgoingNumberId
@@ -49,13 +53,13 @@ final class SecretaryPersonalityViewController: UITableViewController {
             }
         }
     }
-    @MainActor private func load(_ numberId: String) async {
+    @MainActor func load(_ numberId: String) async {
         generation += 1
         let epoch = generation
         busy = true; setup = nil; character = nil; selectedId = nil; selectedVersion = nil
         selectedCards = []; tableView.reloadData()
         do {
-            let result = try await APIClient.shared.secretaryOutgoingSetup(numberId: numberId)
+            let result = try await api.secretaryOutgoingSetup(numberId: numberId)
             guard epoch == generation, SessionStore.shared.userId == owner else { return }
             setup = result
             selectedId = result.assignment?.personalityId
@@ -136,7 +140,7 @@ final class SecretaryPersonalityViewController: UITableViewController {
             present(sheet, animated: true)
         case 2:
             guard setup != nil else { return }
-            let picker = SecretaryPersonalityPickerViewController()
+            let picker = SecretaryPersonalityPickerViewController(api: api)
             picker.onSelected = { [weak self] id, content in
                 guard let self else { return }
                 self.selectedId = id; self.selectedVersion = content?.version; self.character = content
@@ -161,7 +165,7 @@ final class SecretaryPersonalityViewController: UITableViewController {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let result = try await APIClient.shared.saveSecretaryOutgoingSetup(
+                let result = try await self.api.saveSecretaryOutgoingSetup(
                     numberId: setup.numberId, personalityId: id, version: version, cardIds: cardIds)
                 guard SessionStore.shared.userId == self.owner else { return }
                 guard result.protocolVersion == 1, result.numberId == setup.numberId,
