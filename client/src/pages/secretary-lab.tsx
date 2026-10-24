@@ -16,6 +16,8 @@ import { createLabRtcController, LabRtcController, OPENAI_LAB_MODEL, OPENAI_LAB_
 import { AlertCircle, ArrowDownToLine, AudioLines, Check, CircleStop, Headphones, LoaderCircle, Mic, MicOff, Radio, RefreshCw, ShieldAlert, Volume2, Wifi } from "lucide-react";
 import "@/lib/secretary-lab.css";
 import RetellBench from "@/components/secretary-lab/RetellBench";
+import ElevenEngineBench from "@/components/secretary-lab/ElevenEngineBench";
+import EngineFixtures from "@/components/secretary-lab/EngineFixtures";
 import { useStandReadiness } from "@/components/secretary-lab/stand-readiness";
 import "@/components/secretary-lab/stand-readiness.css";
 import { secretaryStand, secretaryStandPath, chooseSecretaryStand, type SecretaryStand } from "@/lib/secretary-lab-modes";
@@ -660,8 +662,8 @@ export default function SecretaryLab() {
 
   return <div className="lab-shell">
     <header className="lab-header">
-      <Link href="/diagnostics" className="lab-brand"><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
-      <nav className="lab-nav"><Link href="/diagnostics">Диагностика</Link><Link href="/voice-lab">Voice Lab</Link><Link href="/incoming-secretary">Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
+      <Link href="/diagnostics" className="lab-brand" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
+      <nav className="lab-nav"><Link href="/diagnostics" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}>Диагностика</Link><Link href="/voice-lab" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}>Voice Lab</Link><Link href="/incoming-secretary" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}>Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
     </header>
     <main className="lab-main">
       <section className="lab-intro">
@@ -678,6 +680,7 @@ export default function SecretaryLab() {
           <div><b>GPT</b><span className={snapshot?.providers.openai?.ready ? "ready" : "not-ready"}>{loading ? "Проверяется" : snapshot?.providers.openai?.ready ? "Настроен" : "Не готов"}</span><small>{snapshot?.providers.openai?.reason || snapshot?.providers.openai?.model || "Нет подтверждения конфигурации"}</small></div>
           <div><b>Retell</b><span className={readiness.retell?.ready ? "ready" : "not-ready"}>{readiness.retellError ? "Ошибка проверки" : !readiness.retell ? "Проверяется" : readiness.retell.ready ? "Настроен" : "Не готов"}</span><small>{readiness.retellError || [readiness.retell?.stage, readiness.retell?.reason || (readiness.retell?.ready ? `${readiness.retell.model || "Модель подтверждена"} · голос ${readiness.retell.voice || "—"}` : "Ответ API Retell")].filter(Boolean).join(" · ")}</small></div>
           <div><b>Retell + Engine</b><span className={readiness.engine?.ready ? "ready" : "not-ready"}>{readiness.engineError ? "Ошибка проверки" : !readiness.engine ? "Проверяется" : readiness.engine.ready ? "Настроен" : "Не готов"}</span><small>{readiness.engineError || [readiness.engine?.stage || readiness.engine?.engine?.stage, readiness.engine?.reason || (readiness.engine?.ready ? `${readiness.engine.engine?.provider || "OpenAI via TalkHint"} · ${readiness.engine.engine?.model || "модель подтверждена"}` : "Ответ API engine")].filter(Boolean).join(" · ")}</small></div>
+          <div><b>ElevenLabs + Engine</b><span className={readiness.elevenEngine?.ready ? "ready" : "not-ready"}>{readiness.elevenEngineError ? "Ошибка проверки" : !readiness.elevenEngine ? "Проверяется" : readiness.elevenEngine.ready ? "Настроен" : "Не готов"}</span><small>{readiness.elevenEngineError || (readiness.elevenEngine ? `${readiness.elevenEngine.model} · ${readiness.elevenEngine.ttsModel} · ${readiness.elevenEngine.asr}` : "Проверяется сервером")}</small></div>
         </div>
         <p>«Настроен» отражает ответ readiness API, а не подключение браузерной сессии. Реальное подключение отображается только в отчёте активного прогона.</p>
       </section>
@@ -687,6 +690,7 @@ export default function SecretaryLab() {
         <button type="button" className={stand === "gpt" ? "selected" : ""} aria-pressed={stand === "gpt"} disabled={standBusy} onClick={() => selectStand("gpt")}><AudioLines size={15} /> GPT <small>текущий</small></button>
         <button type="button" className={stand === "retell" ? "selected" : ""} aria-pressed={stand === "retell"} disabled={standBusy} onClick={() => selectStand("retell")}><Radio size={15} /> Retell <small>live web</small></button>
         <button type="button" className={stand === "retell-engine" ? "selected" : ""} aria-pressed={stand === "retell-engine"} disabled={standBusy} onClick={() => selectStand("retell-engine")}><AudioLines size={15} /> Retell + Engine <small>TalkHint LLM</small></button>
+        <button type="button" className={stand === "eleven-engine" ? "selected" : ""} aria-pressed={stand === "eleven-engine"} disabled={standBusy} onClick={() => selectStand("eleven-engine")}><AudioLines size={15} /> ElevenLabs + Engine <small>TalkHint LLM</small></button>
         {standBusy && <small className="stand-lock">{uncertainStop ? "Состояние сессии не подтверждено · смена стенда заблокирована" : "Стенд заблокирован во время сессии"}{uncertainStop && currentReportRef.current && <button type="button" onClick={() => void stopServer(false, "client_error")}>Повторить остановку</button>}</small>}
       </nav>
 
@@ -694,7 +698,9 @@ export default function SecretaryLab() {
       {error && <div className="lab-alert" role="alert"><AlertCircle size={18} /><span>{error}</span><button onClick={() => setError("")} aria-label="Закрыть">×</button></div>}
       {notice && <div className="lab-notice"><span>{notice}</span><button onClick={() => setNotice("")}>Понятно</button></div>}
 
-      {stand !== "gpt" ? <RetellBench key={stand} mode={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
+      {(stand === "retell-engine" || stand === "eleven-engine") && <EngineFixtures />}
+      {stand === "eleven-engine" ? <ElevenEngineBench key={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
+      stand !== "gpt" ? <RetellBench key={stand} mode={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
       <div className="lab-layout">
         <div className="lab-primary">
           <Card className="control-card">

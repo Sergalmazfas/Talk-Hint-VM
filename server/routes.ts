@@ -420,10 +420,13 @@ export async function registerRoutes(
         return (pool.query as any)(...args);
       },
     });
+    const { registerElevenEngineRoutes } = await import("./secretaryLab/elevenRoutes");
+    const elevenLab = registerElevenEngineRoutes(app, store);
     registerComparisonRoutes(app, store, owner => [
       ...secretaryLab.reports(owner).map(report => ({ mode: "gpt" as const, report })),
       ...retellSecretaryLab.reports(owner).map(report => ({ mode: "retell" as const, report })),
       ...retellEngineLab.reports(owner).map(report => ({ mode: "retell-engine" as const, report })),
+      ...elevenLab.history(owner).map(report => ({ mode: "eleven-engine" as const, report })),
     ]);
     const purge = () => store.purge().catch(() => console.error("[SecretaryLab] Comparison expiry cleanup failed"));
     void purge();

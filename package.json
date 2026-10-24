@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
+    "@elevenlabs/client": "^1.30.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@parse/node-apn": "^8.1.0",

@@ -9,6 +9,7 @@ export function comparisonText(value: unknown, max = 4000): string {
   return (typeof value === "string" ? value : "")
     .replace(/(?:https?|wss?):\/\/[^\s<>"'`]+/gi, "[URL removed]")
     .replace(/\/retell-engine-stream\/[^\s<>"'`]+/gi, "[capability removed]")
+    .replace(/\/eleven-engine-(?:audio|llm)\/[^\s<>"'`]+/gi, "[capability removed]")
     .replace(/\bBearer\s+[^\s"',;}]+/gi, "Bearer [removed]")
     .replace(/((?:access[_ -]?token|talkhint_engine_ticket|capability|api[_ -]?key|authorization)\s*["']?\s*[:=]\s*["']?)[^\s"',;}]+/gi, "$1[removed]")
     .replace(/\b[a-f0-9]{64}\b/gi, "[opaque credential removed]")
@@ -24,7 +25,8 @@ export function comparisonSnapshot(mode: ComparisonMode, report: LabReport | Ret
   const snapshot: ComparisonRun = {
     mode, id: report.id,
     runtime: gpt ? `TalkHint / ${gpt.transport} / ${gpt.voiceProvider}` :
-      mode === "retell-engine" ? "Retell voice / TalkHint text Engine" : "Retell managed runtime",
+      mode === "eleven-engine" ? "ElevenLabs conversational audio / TalkHint text Engine" :
+        mode === "retell-engine" ? "Retell voice / TalkHint text Engine" : "Retell managed runtime",
     model: comparisonText(retell?.engine?.model ?? report.model, 160),
     voice: comparisonText(report.voice, 160),
     instruction: comparisonText(report.instruction),

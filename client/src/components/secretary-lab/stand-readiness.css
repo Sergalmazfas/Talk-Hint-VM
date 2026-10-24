@@ -8,7 +8,7 @@
 .readiness-heading { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:10px; }
 .readiness-heading span { color:#75827b; font:9px "DM Mono",monospace; letter-spacing:.1em; }
 .readiness-heading small { color:#97a199; font-size:9px; }
-.readiness-items { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.readiness-items { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
 .readiness-items > div { display:grid; grid-template-columns:auto 1fr; gap:4px 8px; min-width:0; padding:9px 10px; border:1px solid #e6ebe4; border-radius:6px; background:#f6f8f3; }
 .readiness-items b { color:#53635c; font-size:10px; }
 .readiness-items span { justify-self:end; color:#9b493b; font:8px "DM Mono",monospace; text-align:right; }

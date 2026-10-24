@@ -5,6 +5,7 @@ import type { ComparisonEvaluation, ComparisonRun, SavedComparison } from "../..
 export const COMPARISON_RETENTION_DAYS = 30;
 type ComparisonContent = Pick<SavedComparison, "title" | "instruction" | "evaluation" | "runs">;
 export interface ComparisonRepository {
+  checkpoint?(owner: string, id: string, content: ComparisonContent): Promise<SavedComparison>;
   save(owner: string, content: ComparisonContent): Promise<SavedComparison>;
   list(): Promise<SavedComparison[]>;
   get(id: string): Promise<SavedComparison | undefined>;
@@ -22,6 +23,20 @@ const record = (r: Row): SavedComparison => ({
  * live provider/agent/registry and contains no phone/calendar delivery methods. */
 export class PgComparisonRepository implements ComparisonRepository {
   constructor(private pool: Pick<Pool, "query">) {}
+  /** Same opt-in archive and retention. Stable task ID, no secondary result store.
+   * Checkpointing never changes owner, consent timestamp or original expiry. */
+  async checkpoint(owner: string, id: string, content: ComparisonContent) {
+    const { rows } = await this.pool.query(
+      `INSERT INTO secretary_lab_comparisons (id, owner_id, title, instruction, evaluation, runs, consent_at, expires_at)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,now(),now() + interval '30 days')
+       ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title,instruction=EXCLUDED.instruction,
+         runs=EXCLUDED.runs
+       WHERE secretary_lab_comparisons.owner_id=EXCLUDED.owner_id AND secretary_lab_comparisons.expires_at > now()
+       RETURNING *`,
+      [id, owner, content.title, content.instruction, JSON.stringify(content.evaluation), JSON.stringify(content.runs)]);
+    if (!rows[0]) throw new Error("Expired or foreign comparison cannot be checkpointed");
+    return record(rows[0]);
+  }
   async save(owner: string, content: ComparisonContent) {
     const { rows } = await this.pool.query(
       `INSERT INTO secretary_lab_comparisons (id, owner_id, title, instruction, evaluation, runs, consent_at, expires_at)

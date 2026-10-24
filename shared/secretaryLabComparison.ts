@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const comparisonMode = z.enum(["gpt", "retell", "retell-engine"]);
+export const comparisonMode = z.enum(["gpt", "retell", "retell-engine", "eleven-engine"]);
 export const comparisonEvaluation = z.object({
   score: z.number().int().min(1).max(5).nullable(),
   note: z.string().max(4000),

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { labRequest, formatLabTime } from "@/lib/secretary-lab";
 import "./saved-comparisons.css";
 
-type Mode = "gpt" | "retell" | "retell-engine";
+type Mode = "gpt" | "retell" | "retell-engine" | "eleven-engine";
 type Evaluation = { score: number | null; note: string };
 type RunIdentity = { mode: Mode; id: string; runtime: string; model: string; voice: string };
 type Candidate = RunIdentity & { instruction: string; createdAt: string; status: "ended" | "failed" };
@@ -32,7 +32,7 @@ type SavedRun = RunIdentity & {
 type SavedComparison = Omit<Summary, "runs"> & { runs: SavedRun[] };
 
 const API = "/api/admin/secretary-lab/comparisons";
-const modeLabel: Record<Mode, string> = { gpt: "GPT", retell: "Retell", "retell-engine": "Retell + Engine" };
+const modeLabel: Record<Mode, string> = { gpt: "GPT", retell: "Retell", "retell-engine": "Retell + Engine", "eleven-engine": "ElevenLabs + Engine" };
 const candidateKey = (candidate: Pick<Candidate, "mode" | "id">) => `${candidate.mode}:${candidate.id}`;
 const humanDate = (date: string) => formatLabTime(date);
 const pretty = (value: unknown) => value === undefined ? "Не сообщено" : JSON.stringify(value, null, 2);

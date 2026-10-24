@@ -841,10 +841,20 @@ export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ noServer: true });
   const labWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
   const retellEngineWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const elevenEngineWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   server.on("upgrade", (request, socket, head) => {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
+    if (pathname.startsWith("/eleven-engine-audio/")) {
+      if (process.env.NODE_ENV !== "development" || parsedUrl.search) { socket.destroy(); return; }
+      const ticket = /^\/eleven-engine-audio\/([a-f0-9]{64})$/.exec(pathname)?.[1];
+      void import("./secretaryLab/elevenRoutes").then(({ elevenEngineLab }) => {
+        if (!ticket || socket.destroyed || !elevenEngineLab?.permitsAudio(ticket)) { socket.destroy(); return; }
+        elevenEngineWss.handleUpgrade(request, socket, head, ws => elevenEngineLab.attachAudio(ws, ticket));
+      }).catch(() => socket.destroy());
+      return;
+    }
     if (pathname.startsWith("/retell-engine-stream/")) {
       if (process.env.NODE_ENV !== "development" || parsedUrl.search) { socket.destroy(); return; }
       void import("./secretaryLab/retellEngine").then(({ retellEngineRegistry }) => {

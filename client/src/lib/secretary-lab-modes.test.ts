@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { secretaryStand, secretaryStandPath, retellStandApi, chooseSecretaryStand, type SecretaryStand } from "./secretary-lab-modes";
-describe("Three Secretary browser stands", () => {
-  const modes: SecretaryStand[] = ["gpt", "retell", "retell-engine"];
+describe("Four Secretary browser stands", () => {
+  const modes: SecretaryStand[] = ["gpt", "retell", "retell-engine", "eleven-engine"];
   it.each(modes)("deep links and refresh restore exactly %s without substituting another mode", mode => {
     const path = secretaryStandPath(mode);
     expect(secretaryStand(path.slice(path.indexOf("?")))).toBe(mode);

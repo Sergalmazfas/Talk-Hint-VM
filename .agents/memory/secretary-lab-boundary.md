@@ -68,3 +68,15 @@ The owner approved “ElevenLabs + Engine” only as a fourth existing-Dev-brows
 **Why:** The comparison is their existing voice versus an explicit catalog voice with TalkHint retaining generation, context, permissions and tools—not a separate ElevenLabs business agent.
 
 **How to apply:** Reuse the common Engine through an adapter, do not rewrite it. Use the shared persistent reports repository, not another store. Do not call an in-memory action or “I will pass it on” a saved result. If the required common integration is unavailable, report the dependency and stop rather than shipping a falsely ready stand. Keep live headphone/iPhone quality and interruption claims unconfirmed until actually heard.
+
+For the ElevenLabs catalog comparison, the owner specified a female American-accent voice capable of Russian and language switching.
+
+**Why:** This is the owner's explicit comparison requirement, superseding the earlier male catalog candidate.
+
+**How to apply:** Keep clone/catalog choices explicit and verify live multilingual speech rather than inferring it from the voice's English label.
+
+An existing Instant Voice Clone can be ready for TTS and accessible via Voices API but still be prohibited with ElevenLabs Agents Custom LLM.
+
+**Why:** Actual agent creation rejected the owner's saved IVC while the catalog voice accepted exactly the same Custom LLM configuration. This was provider eligibility, not an invalid key or a missing clone.
+
+**How to apply:** Preserve that clone, show the provider restriction, and never bypass it by silently selecting a managed LLM/catalog voice or making a new clone. Ordinary TTS plus another speech transport would be a separately approved architecture.
