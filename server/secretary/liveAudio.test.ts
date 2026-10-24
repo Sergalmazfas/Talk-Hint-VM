@@ -15,11 +15,31 @@ class Socket extends EventEmitter{
   terminate(){this.close()}
 }
 afterEach(()=>vi.useRealTimers());
+it("forwards an explicit native Live closing decision and guest activity without dialing", async()=>{
+  const socket=new Socket(),events:SecretaryRealtimeEvent[]=[];
+  const live=new OpenAISecretaryLiveSession("Authorized task",()=>{
+    queueMicrotask(()=>socket.emit("open"));return socket as any;
+  });
+  live.onEvent(e=>events.push(e));await live.connect();
+  const native=(event:object)=>socket.message({type:"response.event",event});
+  native({type:"response.created",response:{id:"closing-review"}});
+  const request={reason:"follow_up",farewell:"Gracias, adiós."};
+  native({type:"response.output_item.done",response_id:"closing-review",item:{
+    type:"function_call",call_id:"close-1",name:"prepare_call_end",arguments:JSON.stringify(request),
+  }});
+  expect(events.filter(e=>e.type==="end_requested")).toEqual([{type:"end_requested",request}]);
+  expect(socket.sent.some(e=>e.type==="response.item.create"&&JSON.parse(e.item.output).prepared)).toBe(true);
+  native({type:"response.completed",response:{id:"closing-review"}});
+  expect(socket.sent.at(-1).type).toBe("response.create");
+  socket.message({type:"session.input_transcript.delta",event_id:"guest-continues",start_ms:0,end_ms:100,delta:"Espere"});
+  expect(events.some(e=>e.type==="guest_activity")).toBe(true);
+  live.close();
+});
 it("uses native Live, the authorized task and no intake/booking or clone tools",()=>{
   const config=outgoingLiveConfig("Trusted identity: Example Owner's secretary. Ask about repair status.");
   expect(config).toMatchObject({model:"gpt-live-1",store:false,audio:{format:{type:"audio/pcmu",rate:8000},output:{voice:"marin"}}});
   expect(config.delegation.responses.model).toBe("gpt-6.1-sol");
-  expect(config.delegation.responses.tools).toEqual([]);
+  expect(config.delegation.responses.tools.map(tool => tool.name)).toEqual(["prepare_call_end"]);
   expect(config.instructions).toContain("repair status");
   expect(config.instructions).not.toContain("massage");
   expect(config.delegation.responses.instructions).toContain("Trusted identity");

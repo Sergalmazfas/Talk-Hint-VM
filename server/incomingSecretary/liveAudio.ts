@@ -7,7 +7,9 @@ export const LIVE_BACKEND="gpt-6.1-sol";
 export const LIVE_GREETING='Greet the caller now in English: "Hello, I’m a virtual secretary. How can I help?" Then pause and listen.';
 
 /** Native Live protocol, NOT an alias for /v1/realtime. Never used by telephony. */
-export function liveConfig(backendInstructions:string,custom?:{instructions:string;opening:string;tools:typeof intakeTools}){
+type LiveFunctionTool = { type: string; name: string; description: string; parameters: object };
+export function liveConfig<T extends LiveFunctionTool = typeof intakeTools[number]>(
+  backendInstructions:string,custom?:{instructions:string;opening:string;tools:T[]}){
   return {
     model:LIVE_MODEL,store:false,
     instructions:custom?.instructions??[

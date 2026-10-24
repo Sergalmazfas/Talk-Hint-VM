@@ -901,9 +901,6 @@ private final class SecretaryTaskDetailViewController: UIViewController {
             let speakerKey = turn.role.lowercased() == "guest"
                 ? "secretary.report.other_party" : "secretary.title"
             var lines = ["\(NSLocalizedString(speakerKey, comment: "")): \(text)"]
-            if let translation = nonEmpty(turn.translation) {
-                lines.append("↳ \(translation)")
-            }
             return lines.joined(separator: "\n")
         }
         if !turns.isEmpty { return turns.joined(separator: "\n\n") }

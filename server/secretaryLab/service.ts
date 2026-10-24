@@ -288,6 +288,7 @@ export class SecretaryLab {
         },
         onTurn: async (_id, role, text) => { this.addTurn(s, role, text); },
         onStreamEnd: async (_id, reason) => finish(reason),
+        onEndCall: async () => finish(), // Simulated lab transport only; never a provider operation.
       });
       s.peer.inject({ event: "start", start: { callSid: `lab-${s.report.id}`, streamSid,
         customParameters: { taskId: s.report.id, streamAuth: "isolated-lab" } } });

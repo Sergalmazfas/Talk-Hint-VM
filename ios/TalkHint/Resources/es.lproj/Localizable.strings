@@ -1,3 +1,8 @@
+"secretary.live.transcript_only" = "Transcripción conectada · esperando audio";
+"secretary.live.audio_receiving" = "Audio recibido · esperando reproducción";
+"secretary.live.audio_playing" = "Reproduciendo audio en directo";
+"secretary.live.audio_missing" = "Transcripción conectada, pero no llega audio. Vuelve a conectar la escucha.";
+
 "profiles.setup" = "Elegir números";
 "incoming.calendar_title" = "Calendario de trabajo";
 "incoming.calendar_notice" = "Solo lectura, sin crear eventos ni activar números. Horarios y condiciones solo de las tarjetas Work autorizadas.";

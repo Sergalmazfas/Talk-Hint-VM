@@ -9,7 +9,31 @@ The owner explicitly confirmed: “Только один звонок сразу
 
 **How to apply:** Keep the live monitoring feed read-only (no owner microphone) and separate from the legacy queued-task mechanism. For timeout and restart recovery, identify the original attempt durably rather than creating a new one.
 
-The Secretary must conduct the entire conversation autonomously. The owner only sets the assignment and number, then listens and reads the two-party dialogue and native-language subtitles; they do not speak or send live hints to the Secretary. The Hint interface is a reference for assignment entry and design, not a feature to extend for Secretary work.
+The Secretary must conduct the entire conversation autonomously. The owner only sets the assignment and number, then listens and reads the two-party dialogue; they do not speak or send live hints to the Secretary. The Hint interface is a reference for assignment entry and design, not a feature to extend for Secretary work.
+
+The Secretary should respond in the interlocutor's language: Russian to Russian,
+English to English, Spanish to Spanish.
+Secretary shows the original transcription, without translated subtitles.
+This applies to Secretary only, not Hint or Translator.
+
+**Why:** The owner explicitly described this as the expected conversational
+behavior; the assignment's language is not necessarily the call's language.
+
+**How to apply:** Keep spoken-language selection distinct from transcription
+and any owner-side translation setting. Do not infer that translated subtitles
+show which language was actually spoken.
+
+The Secretary should finish the telephone call itself after reviewing the
+outcome/next step with the other party and exchanging a polite closing, rather
+than requiring the other party to hang up.
+
+**Why:** The owner approved autonomous closing but does not want the Secretary
+to cut off a continuing conversation.
+
+**How to apply:** Reaching the task goal alone is not an end signal. Wait for
+the farewell to finish playing and allow a short response pause; new guest
+speech cancels the pending end. Hold, transfer and loss of owner monitoring
+are not reasons to end the autonomous call.
 
 Live listening on the iPhone is mandatory in the existing owner's Swift/Xcode app, including assignments dictated or typed directly in that app, not only tasks created through ChatGPT. This requirement does not automatically expand the separate Expo client's scope.
 

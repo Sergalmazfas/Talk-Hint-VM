@@ -233,7 +233,7 @@ final class HomeViewController: UIViewController {
         secretaryLanguageButton.contentHorizontalAlignment = .leading
         secretaryLanguageButton.accessibilityIdentifier = "secretary-translation-language-picker"
         secretaryLanguageButton.addTarget(self, action: #selector(secretaryLanguageTapped), for: .touchUpInside)
-        secretaryLanguageButton.isHidden = !secretaryMode
+        secretaryLanguageButton.isHidden = true // Secretary displays original transcription only.
         updateSecretaryLanguageButton()
 
         // Call button.
@@ -928,8 +928,7 @@ final class HomeViewController: UIViewController {
                     confirmationToken: confirmed.confirmationToken,
                     voiceProvider: confirmed.voiceProvider,
                     live: true,
-                    clientRequestId: confirmed.clientRequestId,
-                    translationLanguage: SessionStore.shared.secretaryTranslationLanguage)
+                    clientRequestId: confirmed.clientRequestId)
                 await MainActor.run {
                     self.isCreatingSecretaryTask = false
                     guard task.mode?.lowercased() == "live" else {

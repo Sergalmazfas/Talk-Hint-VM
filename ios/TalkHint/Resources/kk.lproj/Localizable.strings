@@ -1,3 +1,8 @@
+"secretary.live.transcript_only" = "Транскрипция қосылды · дыбыс күтілуде";
+"secretary.live.audio_receiving" = "Аудио келіп жатыр · ойнату күтілуде";
+"secretary.live.audio_playing" = "Әңгіме дыбысы ойнатылып жатыр";
+"secretary.live.audio_missing" = "Транскрипция қосылған, бірақ дыбыс келмейді. Тыңдауды қайта қосыңыз.";
+
 "profiles.setup" = "Нөмірлерді таңдау";
 "incoming.calendar_title" = "Жұмыс күнтізбесі";
 "incoming.calendar_notice" = "Тек оқу: оқиғалар жасалмайды, нөмір қосылмайды. Жұмыс уақыты мен шарттар тек рұқсат етілген Work карточкаларынан алынады.";

@@ -5,6 +5,13 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "SecretaryMonitorAudioTests": (
+        "testTranscriptConnectionDoesNotClaimAudioIsPlaying",
+        "testAudioRequiresPacketsThenPlaybackEvidence",
+        "testReconnectCannotReuseOldPlaybackEvidence",
+        "testPartyNodesUseDifferentMixerInputsWithoutStartingAudio",
+        "testMuLawDecodeSilenceAndBothPolarities",
+    ),
     "NativeSessionStorageTests": (
         "testRealKeychainCanStoreReadAndDeleteSessionToken",
     ),

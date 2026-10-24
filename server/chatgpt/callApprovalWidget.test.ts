@@ -407,7 +407,7 @@ describe("inline card bridge with simulated ChatGPT host", () => {
     expect(h.requests().filter(r => r.params.name === "open_call_monitor")).toHaveLength(0);
     expect(h.requests().filter(r => r.params.name === "get_task")).toHaveLength(0);
   });
-  it("parses live SSE, renders snapshot translations, bounds transcript DOM, plays both roles only after Listen, and reconnects only the same task", async () => {
+  it("parses live SSE, ignores legacy translations, bounds transcript DOM, plays both roles only after Listen, and reconnects only the same task", async () => {
     const firstStream = controlledSse(), secondStream = controlledSse(), thirdStream = controlledSse(), fourthStream = controlledSse();
     const streams = [firstStream, secondStream, thirdStream, fourthStream];
     const audioInstances: any[] = [];
@@ -465,7 +465,8 @@ describe("inline card bridge with simulated ChatGPT host", () => {
 
     expect(h.node("resultCopy").textContent).toBe("Статус: in_progress.");
     const transcript = h.node("transcript");
-    expect(transcript.children[0].children[2].textContent).toContain("Перевод · русский: Перевод реплики");
+    expect(transcript.children[0].children[2].hidden).toBe(true);
+    expect(transcript.children[0].children[2].textContent).not.toContain("Перевод реплики");
     expect(transcript.children.some((turn: any) => turn.children[1].textContent === "Фактическая реплика секретаря")).toBe(true);
     expect(audioInstances[0].sources).toHaveLength(2);
     expect(audioInstances[0].sources.every((source: any) => source.startTime > audioInstances[0].currentTime)).toBe(true);

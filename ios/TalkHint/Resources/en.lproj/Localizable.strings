@@ -1,3 +1,8 @@
+"secretary.live.transcript_only" = "Transcript connected · waiting for audio";
+"secretary.live.audio_receiving" = "Audio received · waiting for playback";
+"secretary.live.audio_playing" = "Live audio playing";
+"secretary.live.audio_missing" = "Transcript connected, but no live audio. Reconnect listening.";
+
 "profiles.setup" = "Choose numbers";
 "incoming.calendar_title" = "Work calendar";
 "incoming.calendar_notice" = "Read-only connection, no events or phone activation. Hours and conditions come only from permitted Work cards.";

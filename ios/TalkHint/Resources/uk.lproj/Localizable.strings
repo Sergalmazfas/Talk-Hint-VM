@@ -1,3 +1,8 @@
+"secretary.live.transcript_only" = "Транскрипцію підключено · очікуємо звук";
+"secretary.live.audio_receiving" = "Аудіо надходить · очікуємо відтворення";
+"secretary.live.audio_playing" = "Звук розмови відтворюється";
+"secretary.live.audio_missing" = "Транскрипцію підключено, але звук не надходить. Перепідключіть прослуховування.";
+
 "profiles.setup" = "Вибрати номери";
 "incoming.calendar_title" = "Робочий календар";
 "incoming.calendar_notice" = "Лише читання, без створення подій та активації номера. Години роботи й умови — лише з дозволених Work-карток.";
