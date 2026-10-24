@@ -68,7 +68,7 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     const catalog = (await rpc("tools/list")).body.result.tools;
     const preview = catalog.find((t: any) => t.name === "prepare_call");
     expect(preview.inputSchema.properties.voiceProvider).toMatchObject({
-      enum: ["openai", "elevenlabs", "cartesia"], default: "openai",
+      enum: ["openai"], default: "openai",
     });
     expect(preview._meta.ui.resourceUri).toBe(CALL_APPROVAL_RESOURCE);
     const approval = catalog.find((t: any) => t.name === "confirm_call_from_card");
@@ -135,9 +135,9 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect(result.isError).toBe(false);
     expect(result.structuredContent.call.voiceProvider).toBe("openai");
     expect(result.structuredContent.execution).toEqual({
-      provider: "openai", model: "gpt-realtime-2.1", voice: "marin", mode: "native_audio",
+      provider: "openai", model: "gpt-live-1", voice: "marin", mode: "native_audio",reasoningModel:"gpt-6.1-sol",
     });
-    expect(result.content[0].text).toContain("gpt-realtime-2.1");
+    expect(result.content[0].text).toContain("gpt-live-1");
     expect(result.content[0].text).not.toContain("fallback link");
     expect(backend.start).not.toHaveBeenCalled();
   });
@@ -181,6 +181,35 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect((await tool("confirm_call_from_card", { ...args, decision: "approve" }, token)).isError).toBe(true);
     expect((await tool("start_call", { confirmation: cap.confirmation }, token)).isError).toBe(true);
     expect(backend.start).not.toHaveBeenCalled();
+  });
+  it("allows a new card with the same request key after a pre-start 403, without bypassing owner review", async () => {
+    const { token } = await connect();
+    const first = (await prepare(token))._meta["talkhint/cardApproval"];
+    const other = (await prepare(token, { instruction: "A different goal" }))._meta["talkhint/cardApproval"];
+    const rejected = await tool("confirm_call_from_card", {
+      confirmation: first.confirmation, approvalToken: other.approvalToken, decision: "approve",
+    }, token);
+    expect(rejected.structuredContent).toMatchObject({
+      code: "CALL_APPROVAL_REJECTED", requestNotStarted: true,
+    });
+    expect(backend.start).not.toHaveBeenCalled();
+    const fresh = (await prepare(token))._meta["talkhint/cardApproval"];
+    expect(fresh.call.clientRequestId).toBe(input.clientRequestId);
+    expect(backend.start).not.toHaveBeenCalled();
+    const approved = await tool("confirm_call_from_card", {
+      confirmation: fresh.confirmation, approvalToken: fresh.approvalToken, decision: "approve",
+    }, token);
+    expect(approved.structuredContent.task_id).toBe("mock-task-1");
+    expect(backend.start).toHaveBeenCalledExactlyOnceWith("alice", input);
+  });
+  it("does not advertise safe re-preparation after a 403 from the call backend itself", async () => {
+    const { token } = await connect();
+    const { call, ...cap } = (await prepare(token))._meta["talkhint/cardApproval"];
+    backend.start.mockRejectedValueOnce(Object.assign(new Error("Backend refused"), { status: 403 }));
+    const result = await tool("confirm_call_from_card", { ...cap, decision: "approve" }, token);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(backend.start).toHaveBeenCalledTimes(1);
   });
   it("rejects missing OAuth, wrong owner/grant, read-only scope and revoked grants", async () => {
     const alice = await connect();

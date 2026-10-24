@@ -23,7 +23,9 @@ export function serveStatic(app: Express) {
   const talkHintPath = path.resolve(__dirnameResolved, "talkhint/ui");
   if (fs.existsSync(talkHintPath)) {
     console.log("[TalkHint] Serving UI from:", talkHintPath);
-    app.use("/app", express.static(talkHintPath));
+    app.use("/admin/app", express.static(talkHintPath, {
+      setHeaders: res => res.setHeader("Cache-Control", "no-store"),
+    }));
   }
 
   app.use(express.static(distPath));

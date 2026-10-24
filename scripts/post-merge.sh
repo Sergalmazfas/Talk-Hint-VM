@@ -15,4 +15,7 @@ set -e
 echo "[post-merge] Installing dependencies..."
 npm install --no-audit --no-fund
 
+echo "[post-merge] Preparing per-owner calendar storage (development only)..."
+npx --no-install tsx scripts/ensure-owner-calendar-schema.ts
+
 echo "[post-merge] Done."

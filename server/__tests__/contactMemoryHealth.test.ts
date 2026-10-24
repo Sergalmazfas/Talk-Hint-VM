@@ -95,6 +95,8 @@ const TABLE_DEFS: Record<string, any> = {
   tutor_call_memories: schema.tutorCallMemories,
   voice_lab_clones: schema.voiceLabClones,
   voice_lab_runs: schema.voiceLabRuns,
+  secretary_calendar_grants: schema.secretaryCalendarGrants,
+  secretary_calendar_attempts: schema.secretaryCalendarAttempts,
 };
 
 const columnsFor = (table: any): string[] =>

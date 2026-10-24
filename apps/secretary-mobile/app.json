@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "TalkHint Secretary",
+    "slug": "talkhint-secretary-client",
+    "scheme": "talkhintsecretaryclient",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.talkhint.secretaryclient.dev",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Record only when you tap the voice input button to transcribe a task instruction."
+      }
+    },
+    "android": {
+      "package": "com.talkhint.secretaryclient.dev",
+      "permissions": ["android.permission.RECORD_AUDIO"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "experiments": {
+      "typedRoutes": false,
+      "baseUrl": "/secretary-preview"
+    }
+  }
+}

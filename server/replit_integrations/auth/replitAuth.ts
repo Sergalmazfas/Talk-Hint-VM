@@ -7,6 +7,7 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPgSimple from "connect-pg-simple";
 import { authStorage } from "./storage";
+import { mayEnterAdminWeb } from "../../adminIdentity";
 
 // Create PG session store class at module scope
 const PgSession = connectPgSimple(session);
@@ -161,6 +162,7 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
+    res.clearCookie("ios_oauth");
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
@@ -198,7 +200,7 @@ export async function setupAuth(app: Express) {
         res.clearCookie("ios_oauth");
         return res.redirect(`talkhint://auth?error=${reason}`);
       }
-      return res.redirect(`/?error=${reason}`);
+      return res.redirect(`/admin/login?error=${reason}`);
     };
 
     passport.authenticate(`replitauth:${req.hostname}`, async (err: any, user: any) => {
@@ -206,6 +208,8 @@ export async function setupAuth(app: Express) {
         console.error("[OAuth] Auth failed:", err);
         return failRedirect("auth_failed");
       }
+      // Capture before Passport rotates the session on login.
+      const mobileReturn = (await import("../../mobileSecretary/routes")).mobileBrowserReturn(req);
       
       req.login(user, async (loginErr) => {
         if (loginErr) {
@@ -231,6 +235,10 @@ export async function setupAuth(app: Express) {
             return failRedirect("user_not_found");
           }
           
+          if (!wantsIos && mobileReturn) return res.redirect(mobileReturn);
+          if (!wantsIos && !mayEnterAdminWeb(dbUser, claims)) {
+            return res.redirect("/admin/login?error=access_denied");
+          }
           const token = await createSession(dbUser.id);
           console.log("[OAuth] Created session token for user:", dbUser.id);
           
@@ -238,7 +246,7 @@ export async function setupAuth(app: Express) {
             res.clearCookie("ios_oauth");
             return res.redirect(`talkhint://auth?token=${token}`);
           }
-          res.redirect(`/?token=${token}`);
+          res.redirect(`/admin?token=${token}`);
         } catch (error) {
           console.error("[OAuth] Token creation failed:", error);
           return failRedirect("token_failed");

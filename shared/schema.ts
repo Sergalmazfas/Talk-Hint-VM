@@ -256,6 +256,43 @@ export type KnowledgeCard = typeof knowledgeCards.$inferSelect;
 export const KNOWLEDGE_CARD_TYPES = ["project", "company"] as const;
 export type KnowledgeCardType = (typeof KNOWLEDGE_CARD_TYPES)[number];
 
+// Incoming Work Secretary: independent opt-in; never changes ordinary/outbound calls.
+export const incomingSecretarySettings = pgTable("incoming_secretary_settings", {
+  numberId: varchar("number_id").primaryKey().references(() => phoneNumbers.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  enabled: boolean("enabled").notNull().default(false),
+  config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+// Independent per-owner OAuth grants. Only encrypted credentials are stored.
+export const secretaryCalendarGrants = pgTable("secretary_calendar_grants", {
+  numberId: varchar("number_id").primaryKey().references(() => phoneNumbers.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  secret: text("secret").notNull(),
+  calendarId: text("calendar_id"),
+  revision: varchar("revision").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export const secretaryCalendarAttempts = pgTable("secretary_calendar_attempts", {
+  numberId: varchar("number_id").primaryKey().references(() => phoneNumbers.id, { onDelete: "cascade" }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  stateHash: text("state_hash").notNull().unique(),
+  browserHash: text("browser_hash").notNull(),
+  secret: text("secret").notNull(),
+  consumed: boolean("consumed").notNull().default(false),
+  expiresAt: timestamp("expires_at").notNull(),
+});
+export const incomingSecretaryRequests = pgTable("incoming_secretary_requests", {
+  callSid: varchar("call_sid").primaryKey(),
+  id: varchar("id").notNull().unique(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  numberId: varchar("number_id").notNull().references(() => phoneNumbers.id),
+  payload: jsonb("payload").notNull(),
+  notificationStatus: text("notification_status").notNull().default("pending"),
+  notificationAttempts: integer("notification_attempts").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Auto-built call dialogue library: per-user, per-goal collection of ready-made
 // question→answer lines served as the PRIMARY hint source during a call (falls
 // through to the live LLM hint path on a miss — no UI change). The whole library
@@ -582,3 +619,25 @@ export const voiceLabRuns = pgTable("voice_lab_runs", {
 }, (t) => ({
   userCreatedIdx: index("voice_lab_runs_user_created_idx").on(t.userId, t.createdAt),
 }));
+
+// Both names must exist in the Dev schema used by Publish. Runtime selection
+// still isolates Dev from production; an absent production-only table otherwise
+// looks like a deletion/rename when Publish compares the two databases.
+const mobileSecretaryStateColumns = () => ({
+  id: text("id").primaryKey(),
+  owner: text("owner").notNull(),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").notNull(),
+  expires: timestamp("expires", { withTimezone: true }).notNull(),
+});
+
+export const mobileSecretaryState = pgTable("mobile_secretary_state", mobileSecretaryStateColumns());
+export const mobileSecretaryDev = pgTable("mobile_secretary_dev", mobileSecretaryStateColumns());
+
+// Independent owner-admin model storage, never a rename of mobile state.
+export const talkhintProjectModels = pgTable("talkhint_project_models", {
+  ownerKey: text("owner_key").primaryKey(),
+  revision: integer("revision").notNull(),
+  state: jsonb("state").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

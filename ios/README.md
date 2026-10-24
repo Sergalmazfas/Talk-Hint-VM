@@ -68,8 +68,9 @@ setup succeeded. Open the profiles screen and confirm the server-proposed CDL
 number once; old account history is retained. Work cards must be created
 explicitly and are not copied from personal cards.
 
-Run `CallProfilesTests` on a Mac/Simulator before release. Source checks in the
-Linux workspace do not establish that the native binary compiled or ran.
+Run the native validation command below on a Mac/Simulator before release.
+Source checks in the Linux workspace do not establish that the native binary
+compiled or ran.
 
 Xcode resolves the Twilio Voice Swift Package automatically on first open
 (File ▸ Packages ▸ Resolve Package Versions if needed).
@@ -136,6 +137,88 @@ PushKit/CallKit do not work in the Simulator — use a physical iPhone.
 
 ## Tests
 
+### Reproducible native gate (before installing on an iPhone)
+
+From the **repository root**, on a Mac:
+
+```bash
+# One-time setup: Xcode 16.4, its command-line tools, and an iOS Simulator runtime.
+# Xcode Settings → Components: install an iOS Simulator if none is available.
+brew install xcodegen
+DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer \
+  bash ios/scripts/validate-native.sh
+```
+
+Python 3 must be available (`python3`; provided by Xcode command-line tools or
+install separately). Other Xcode versions may work locally, but CI selects
+Xcode 16.4 on `macos-15`. The script logs the actual Xcode/XcodeGen versions.
+Swift Package resolution needs access to GitHub for the public Twilio dependency;
+no TalkHint service, credentials, signing account, or physical device is needed.
+
+The command fails immediately on Linux; that is **not** a successful iOS check.
+On macOS it:
+
+1. Runs `xcodegen generate` from the current checkout (never reuses a stale project).
+2. Reads the generated project's actual Compile Sources phases. Every Swift file
+   under `TalkHint/` and `TalkHintTests/` must be present exactly once in its own
+   target; missing, foreign, or duplicate entries fail the check.
+3. Creates a disposable iPhone **Simulator**, selecting an installed compatible
+   iOS runtime. It never selects a physical device.
+4. Runs `xcodebuild build-for-testing` for the app and test bundle. Swift compilation,
+   not a text search, rejects duplicate types and unresolved symbols.
+5. Runs **all** `TalkHintTests` with `test-without-building`. It additionally checks
+   the `.xcresult` for successful execution of the two real Foundation URL tests
+   in `CallProfilesTests`, the test-backend isolation assertion, and all required
+   `KnowledgeCardsTests`. Missing or skipped required tests do not count as success.
+6. Shuts down and deletes only the Simulator created by this invocation, even on
+   failure. Logs and `.xcresult` stay in ignored `generated-artifacts/ios-native.*`.
+
+The dedicated `TalkHintValidation` scheme uses `NativeValidation`, not the
+ordinary device configuration. Both app and tests receive
+`TALKHINT_NATIVE_VALIDATION`: the backend/WebSocket host becomes a reserved
+`.invalid` name, and automatic launch does not initialize phone/push services,
+restore a saved login, or route notifications. Test-created controllers still
+run the real code. Normal Debug/Release behavior and signing settings are unchanged.
+No publishing, archive, device installation, telephone calls, or real secrets are
+part of this gate. XCTest installs its host **only in the disposable Simulator**.
+
+`KnowledgeCardsTests` injects a per-client in-memory transport and a fake Bearer
+token into the real API client, profiles navigation, card list and editor.
+It checks scoped CRUD for personal/work/shared, exact URLs and JSON, missing
+auth, explicit 401/403/404/500 failures, malformed/cross-profile responses,
+offline retry without losing drafts, reopening the selected profile, and delayed
+reads (including reads that could resurrect a deleted card). The transport rejects
+every endpoint outside `/api/cards`; number attachment and telephone endpoints
+cannot be used by these tests. This is UIKit XCTest coverage, not XCUITest or
+proof of an installed iPhone build.
+
+### CI setup and current verification status
+
+No existing CI configuration or accessible Mac runner was present when this gate
+was added. The current workspace is Linux: **native compilation and XCTest have
+not been run here**. Python helper tests or TypeScript/source checks are not
+substitutes for that evidence.
+
+The repository now includes [iOS native validation](../.github/workflows/ios-native.yml)
+for GitHub Actions: iOS pull requests, pushes to `main`, and manual runs. It uses
+a GitHub-hosted macOS runner with read-only repository permissions, no secrets,
+and uploads logs/`.xcresult` even after failure.
+
+**Owner action required:** connect/sync this repository to GitHub and enable
+Actions with access to the `macos-15` runner (or provision a Mac runner in your
+existing CI and run the same script). Run **iOS native validation** and inspect
+the `ios-native-results` artifact. Until a Mac run succeeds, the native build is
+**unverified**, not green. To block merges, make this workflow's `native` job a
+required status check in branch protection after its first run.
+
+Helper self-tests, usable on Linux or Mac (they test the gate, not the iOS app):
+
+```bash
+python3 -m unittest discover -s ios/scripts/tests -v
+```
+
+### Test target
+
 `TalkHintTests` is a hosted unit-test target (declared in `project.yml`, sources
 in `TalkHintTests/`). `InCallCaptionTests` guards the live-caption logic in
 `InCallViewController` so the per-speaker upsert/finalize flow and the pinned
@@ -152,12 +235,9 @@ point (the same path the `/ui` WebSocket feeds) and inspect the rendered view
 hierarchy by `accessibilityIdentifier`, so they exercise production code rather
 than a copy of it.
 
-```bash
-cd ios
-xcodegen generate
-xcodebuild test -scheme TalkHint \
-  -destination 'platform=iOS Simulator,name=iPhone 15'
-```
+Use `bash ios/scripts/validate-native.sh` from the repository root to run these
+tests safely. Avoid running the ordinary hosted-test scheme against a saved
+production login.
 
 > Like the rest of the app, these tests build only on a Mac with Xcode — they
 > cannot be compiled or run on Replit (Linux).

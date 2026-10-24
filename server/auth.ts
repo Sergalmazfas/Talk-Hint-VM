@@ -69,7 +69,7 @@ export async function createSession(userId: string): Promise<string> {
 export async function getSessionUserId(token: string): Promise<string | undefined> {
   // Integration revocation/consent markers are not login sessions, even if an
   // attacker knows a marker ID. Only the isolated adapter may resolve them.
-  if (token.startsWith("chatgpt:") || token.startsWith("thcg.")) return undefined;
+  if (token.startsWith("chatgpt:") || token.startsWith("thcg.") || token.startsWith("thmobile.")) return undefined;
   const session = await storage.getSession(token);
   return session?.userId;
 }
@@ -79,6 +79,11 @@ export async function deleteSession(token: string): Promise<void> {
 }
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  // A scoped TEST client credential cannot inherit a browser's wider Passport
+  // authority when accidentally sent to a legacy calling/assignment endpoint.
+  if (req.headers.authorization?.startsWith("Bearer thmobile.")) {
+    return res.status(401).json({ error: "Mobile TEST credentials are restricted to the mobile Dev API" });
+  }
   // First check if user is already set by Replit Auth (passport session)
   if (req.user) {
     const passportUser = req.user as any;

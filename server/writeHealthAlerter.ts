@@ -1,5 +1,6 @@
 import twilio from "twilio";
 import { getWriteHealth } from "./storage";
+import { communicationReadiness, sendSmsSafely } from "./communications/safety";
 
 // ---------------------------------------------------------------------------
 // Write-health alerter
@@ -128,8 +129,8 @@ export function getAlertChannelStatus(): AlertChannelsStatus {
   }
   const sms: AlertChannelStatus = {
     configured: smsConfigured,
-    ready: smsConfigured && smsMissing.length === 0,
-    missing: smsMissing,
+    ready: false,
+    missing: [...smsMissing, ...communicationReadiness().sms.reasons],
   };
 
   // "configured" reflects raw intent (the env var is set) so a malformed value
@@ -158,9 +159,8 @@ export function getAlertChannelStatus(): AlertChannelsStatus {
   };
 }
 
-// Try to deliver the alert by SMS. Returns true if SMS was configured and an
-// attempt was made (regardless of Twilio success), false if SMS is not
-// configured at all. Never throws.
+// An SMS transport attempt requires the shared safety gate. Missing credentials
+// or unverified sender/consent/suppression returns false. Never throws.
 async function trySendSms(body: string): Promise<boolean> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
@@ -177,9 +177,9 @@ async function trySendSms(body: string): Promise<boolean> {
   }
 
   try {
-    const client = twilio(accountSid, authToken);
-    await client.messages.create({ body, from, to });
-    console.log(`[WriteHealthAlert] SMS sent to ${to}`);
+    const result = await sendSmsSafely("write_health_alert",
+      () => twilio(accountSid, authToken).messages.create({ body, from, to }));
+    return result.sent;
   } catch (err: any) {
     console.error(
       `[WriteHealthAlert] Failed to send SMS: ${err?.message ?? err}`,
@@ -267,7 +267,7 @@ export async function sendWriteHealthAlert(body: string): Promise<void> {
 
   if (!smsAttempted && !emailAttempted) {
     console.warn(
-      "[WriteHealthAlert] No alert channel configured (set WRITE_HEALTH_ALERT_PHONE and/or WRITE_HEALTH_ALERT_EMAIL) — alert logged only.",
+      "[WriteHealthAlert] No permitted delivery channel available — alert logged only; check alert-channel readiness.",
     );
   }
 }

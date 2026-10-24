@@ -32,7 +32,7 @@ function ErrorPage({ title, detail, onHome }: { title: string; detail: string; o
     <p className="eyebrow">TALKHINT / SECRETARY LAB</p>
     <h1>{title}</h1><p>{detail}</p>
     <div className="denied-links">
-      <Link href="/admin/diagnostics">Диагностика</Link>
+      <Link href="/diagnostics">Диагностика</Link>
       <Link href="/voice-lab">Voice Lab</Link>
       <Button variant="outline" onClick={onHome}>На главную</Button>
     </div>
@@ -108,7 +108,7 @@ export default function SecretaryLab() {
     try {
       const result = await labRequest<LabSnapshot>(LAB_API, token);
       setSnapshot(result);
-       setProvider((previous) => previous === "openai" || result.providers[previous]?.ready ? previous : result.providers.elevenlabs.ready ? "elevenlabs" : "cartesia");
+       setProvider("openai");
     } catch (cause) {
       const e = cause as Error & { status?: number };
       if (e.status === 403) setDenied(true);
@@ -378,7 +378,7 @@ export default function SecretaryLab() {
             void stopServer(false, "audio_suspended");
             return;
           }
-          if (provider === "openai") {
+          if (created.report.transport === "webrtc") {
             if (message.modelVerified === false ||
               (message.model !== undefined && message.model !== OPENAI_LAB_MODEL) ||
               (message.voice !== undefined && message.voice !== OPENAI_LAB_VOICE)) {
@@ -391,7 +391,12 @@ export default function SecretaryLab() {
           }
           setSocketConnected(true);
           setLiveState("listening");
-          updateReport((old) => ({ ...old, status: "running" }));
+          if(provider==="openai"&&(message.model!=="gpt-live-1"||message.voice!=="marin"||message.modelVerified!==true)){
+            setError("GPT-Live 1 и Marin не подтверждены сервером. Автоматической подмены нет.");
+            void stopServer(false,"client_error");return;
+          }
+          updateReport((old) => ({ ...old, status: "running",model:message.model??old.model,
+            voice:message.voice??old.voice,modelVerified:message.modelVerified===true }));
           if (micSendTimerRef.current !== null) window.clearInterval(micSendTimerRef.current);
           micSendTimerRef.current = window.setInterval(() => {
             const activeSocket = socketRef.current;
@@ -427,12 +432,12 @@ export default function SecretaryLab() {
         } else if (message.type === "state") {
           const state = message.state as LiveState;
           if (["connecting", "listening", "thinking", "speaking"].includes(state)) setLiveState(state);
-        } else if (message.type === "audio" && provider !== "openai") {
+        } else if (message.type === "audio" && created.report.transport !== "webrtc") {
           void playAudio(message.payload, Number(message.atMs) || 0);
         } else if (message.type === "mark") {
           scheduleMarkAck(socket, String(message.name || ""));
         } else if (message.type === "clear") {
-          if (provider === "openai") rtcRef.current?.clearInterruptedOutput(String(message.responseId || message.response_id || ""));
+          if (created.report.transport === "webrtc") rtcRef.current?.clearInterruptedOutput(String(message.responseId || message.response_id || ""));
           playbackNodesRef.current.forEach((node) => { try { node.stop(); } catch {} });
           playbackNodesRef.current.clear();
           playbackCursorRef.current = contextRef.current?.currentTime ?? 0;
@@ -551,7 +556,7 @@ export default function SecretaryLab() {
     micCarryRef.current = new Uint8Array(0);
     micPausedRef.current = true;
     setMicPaused(true);
-    if (provider === "openai") {
+    if (active?.transport === "webrtc") {
       try {
         const rtc = rtcRef.current;
         if (!rtc) throw new Error("Соединение WebRTC недоступно.");
@@ -585,7 +590,7 @@ export default function SecretaryLab() {
   const stopHold = () => {
     if (holdUiTimerRef.current !== null) window.clearTimeout(holdUiTimerRef.current);
     holdUiTimerRef.current = null;
-    if (provider === "openai") {
+    if (active?.transport === "webrtc") {
       void rtcRef.current?.stopHold().catch((cause: unknown) => {
         setError(cause instanceof Error ? cause.message : "Не удалось восстановить микрофон после теста ожидания.");
       });
@@ -610,8 +615,8 @@ export default function SecretaryLab() {
 
   return <div className="lab-shell">
     <header className="lab-header">
-      <Link href="/admin/diagnostics" className="lab-brand"><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
-      <nav className="lab-nav"><Link href="/admin/diagnostics">Диагностика</Link><Link href="/voice-lab">Voice Lab</Link><span className="admin-chip">ADMIN</span></nav>
+      <Link href="/diagnostics" className="lab-brand"><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
+      <nav className="lab-nav"><Link href="/diagnostics">Диагностика</Link><Link href="/voice-lab">Voice Lab</Link><Link href="/incoming-secretary">Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
     </header>
     <main className="lab-main">
       <section className="lab-intro">
@@ -637,20 +642,20 @@ export default function SecretaryLab() {
               <div className="provider-section">
                 <div className="provider-title"><span>Голосовой провайдер</span><small>Проверяется на сервере</small></div>
                 <div className="provider-options">
-                  {(["openai", "elevenlabs", "cartesia"] as VoiceProvider[]).map((name) => {
+                  {(["openai"] as VoiceProvider[]).map((name) => {
                     const item = snapshot?.providers[name];
                     const source = name === "openai"
                       ? item?.source === "builtin" ? `${item.model} · ${item.voice}${!item.ready && item.reason ? ` · ${item.reason}` : ""}` : "Встроенный голос"
                       : item?.source === "linked_existing" ? "Связанный голос" : item?.source === "sample_clone" ? "Клон из образца" : "Недоступен";
                     return <button key={name} type="button" onClick={() => { setProvider(name); setPaidConsent(false); }} disabled={!!active || pending || !item?.ready} className={`provider-option ${provider === name ? "selected" : ""} ${!item?.ready ? "unavailable" : ""}`}>
                       <span className="provider-radio">{provider === name && <Check size={12} />}</span>
-                      <span className="provider-label"><b>{name === "elevenlabs" ? "ElevenLabs" : name === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"}</b><small>{source}</small></span>
+                      <span className="provider-label"><b>OpenAI · GPT-Live 1</b><small>{source}</small></span>
                       <span className={`provider-ready ${item?.ready ? "ready" : ""}`}>{item?.ready ? name === "openai" ? "ДОСТУПЕН" : "ГОТОВ" : "НЕТ"}</span>
                     </button>;
                   })}
                 </div>
                 {snapshot?.providers.openai?.reason && <p className="provider-disclaimer">OpenAI доступность: {snapshot.providers.openai.reason}</p>}
-                {provider === "openai" && <p className="provider-disclaimer">Голос marin — встроенный голос OpenAI, не клон владельца. Браузер передаёт микрофон напрямую через WebRTC; без синтеза ElevenLabs или Cartesia.</p>}
+                {provider === "openai" && <p className="provider-disclaimer">Marin — встроенный голос OpenAI, не клон. Микрофон → TalkHint → GPT-Live 1; обработка gpt-6.1-sol. Та же голосовая ветка, что у телефонного Secretary, но без набора номера и без ElevenLabs/Cartesia.</p>}
                 {provider === "openai" && <p className="provider-disclaimer">Экспериментальный Dev-режим. Доступность модели не означает проверку полного разговора на вашем iPhone. При блокировке звука или соединения появится ошибка; другой провайдер автоматически не включается.</p>}
                 {provider !== "openai" && snapshot?.providers[provider]?.source === "linked_existing" && <p className="provider-disclaimer">Связанный голосовой ID не подтверждает, что провайдер использует именно клон Secretary.</p>}
                 <label className={`consent-row ${!providerReady ? "muted" : ""}`}><input type="checkbox" checked={paidConsent} onChange={(event) => setPaidConsent(event.target.checked)} disabled={!!active || pending || !providerReady} /><span>Я понимаю, что разговор может использовать платные услуги AI и генерации голоса.</span></label>
@@ -671,7 +676,7 @@ export default function SecretaryLab() {
             <CardContent>
               <div className="conversation-state">
                 <div className={`voice-orb ${liveState}`}><AudioLines size={24} /></div>
-                <div><b>{stateLabel(liveState)}</b><small>{active?.voiceProvider === "openai" ? socketConnected ? "WebRTC соединено; аудио идёт напрямую в модель" : "WebRTC ещё не соединено или восстанавливается" : active ? "Микрофон передаёт звук напрямую в живую сессию" : "Транскрипт появится после подключения"}</small></div>
+                <div><b>{stateLabel(liveState)}</b><small>{active ? "Микрофон → TalkHint → GPT-Live 1. Телефонного набора нет." : "Транскрипт появится после подключения"}</small></div>
               </div>
               <div className="transcript-list" aria-live="polite">
                 {(active?.turns ?? visibleReport?.turns ?? []).length === 0 ? <div className="transcript-empty"><span>ОЖИДАНИЕ ПЕРВОЙ РЕПЛИКИ</span><p>Здесь появятся реальные реплики разговора. Аудио не записывается.</p></div> :
@@ -703,8 +708,8 @@ export default function SecretaryLab() {
             <CardContent>
               <div className="metric"><span>Реплики собеседника</span><b>{(active ?? visibleReport)?.metrics.guestTurns ?? 0}</b></div>
               <div className="metric"><span>Реплики секретаря</span><b>{(active ?? visibleReport)?.metrics.secretaryTurns ?? 0}</b></div>
-              <div className="metric"><span>{(active ?? visibleReport)?.voiceProvider === "openai" ? "Первое аудио · выход RTP" : "Первое аудио · планирование"}</span><b>{formatMs((active ?? visibleReport)?.metrics.firstAudioMs)}</b></div>
-              <div className="metric"><span>{(active ?? visibleReport)?.voiceProvider === "openai" ? "Конец речи (VAD) → выход RTP" : "Финальная STT → аудио запланировано"}</span><b>{formatMs((active ?? visibleReport)?.metrics.lastTurnToAudioMs)}</b></div>
+              <div className="metric"><span>Первое аудио · планирование</span><b>{formatMs((active ?? visibleReport)?.metrics.firstAudioMs)}</b></div>
+              <div className="metric"><span>Реплика → аудио, если измерено</span><b>{formatMs((active ?? visibleReport)?.metrics.lastTurnToAudioMs)}</b></div>
                <div className="model-note"><span>ФАКТИЧЕСКАЯ МОДЕЛЬ</span><b>{(active ?? visibleReport)?.model ?? (provider === "openai" ? snapshot?.providers.openai?.model : snapshot?.models.realtime) ?? "—"}</b><span>ГОЛОС / ТРАНСПОРТ</span><b>{(active ?? visibleReport)?.voice ?? (provider === "openai" ? snapshot?.providers.openai?.voice : "—")} · {(active ?? visibleReport)?.transport ?? (provider === "openai" ? "webrtc" : "—")}</b><span>РЕЧЬ · STT</span><b>{snapshot?.models.stt ?? "—"}</b></div>
             </CardContent>
           </Card>

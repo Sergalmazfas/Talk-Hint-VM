@@ -18,6 +18,17 @@ vi.mock("../storage", () => ({
   getWriteHealth: h.getWriteHealth,
 }));
 
+// These existing unit tests exercise delivery errors/cooldown/recovery with a
+// synthetic approved transport. Production has no such approval source.
+// communications/safety.test.ts separately tests the REAL gate and alerter.
+vi.mock("../communications/safety", async (original) => ({
+  ...await original<typeof import("../communications/safety")>(),
+  sendSmsSafely: async (_path: string, deliver: () => Promise<unknown>) => {
+    await deliver();
+    return { sent: true };
+  },
+}));
+
 vi.mock("twilio", () => ({
   default: vi.fn(() => ({
     messages: { create: h.messagesCreate },
@@ -420,7 +431,7 @@ describe("sendWriteHealthAlert", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(
       warn.mock.calls.some((c) =>
-        String(c[0]).includes("No alert channel configured"),
+        String(c[0]).includes("No permitted delivery channel available"),
       ),
     ).toBe(true);
   });

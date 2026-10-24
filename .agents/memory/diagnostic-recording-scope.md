@@ -1,12 +1,12 @@
 ---
-name: Diagnostic recording scope
-description: User-approved limits for diagnostic call recording and when a spoken notice may be skipped.
+name: Diagnostic recording consent boundary
+description: Administrative diagnostic capability is not consent; unverified recording must stay blocked.
 ---
 
 # Diagnostic recording scope
 
-Recording is enabled only through the existing per-user admin diagnostic capability; no global environment switch may enable it for other users or lines. Every incoming and outgoing call belonging to an enabled diagnostic profile is recorded silently, regardless of the counterpart number.
+An administrative diagnostic flag is not participant consent. Unverified participant consent, disclosure, purpose or retention must block new audio recording without blocking the underlying voice call. No global environment switch may bypass this boundary.
 
-**Why:** The user explicitly corrected the narrower counterpart-number rule: the admin-enabled diagnostic profile itself is the boundary for silent recording, and no other number may enable recording.
+**Why:** On 2026-10-22 the owner explicitly superseded the earlier silent-diagnostic rule with a requirement for verified grounds and fail-closed recording; administrative authority alone is insufficient.
 
-**How to apply:** Keep the server-side capability check fail-closed: a missing/disabled user capability means no recording. The global benchmark toggle must never bypass the per-user capability. Cover both outbound and incoming paths with tests.
+**How to apply:** Capability remains necessary but never sufficient. Future consent work must cover participants and the specific recording, not infer consent from SMS, Google login, card permissions or a call-start approval. Preserve historical data unless separately instructed.

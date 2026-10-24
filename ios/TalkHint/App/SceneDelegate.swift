@@ -11,6 +11,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
         self.window = window
+        #if TALKHINT_NATIVE_VALIDATION
+        // Tests construct the controllers they need; no saved login or push routing.
+        window.rootViewController = UIViewController()
+        window.makeKeyAndVisible()
+        return
+        #else
         let loggedIn = SessionStore.shared.isLoggedIn
         print("[SceneDelegate] preparing \(loggedIn ? "main tabs" : "login")")
         showRoot(loggedIn: loggedIn)
@@ -20,6 +26,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         if let response = connectionOptions.notificationResponse {
             let payload = response.notification.request.content.userInfo
+            if payload["type"] as? String == "incoming_secretary_request" {
+                Task { @MainActor in SecretaryNotificationRouter.openIncoming() }
+            }
             if payload["type"] as? String == "secretary_result",
                let taskID = payload["taskId"] as? String,
                !taskID.isEmpty {
@@ -32,11 +41,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             PushManager.shared.registerCurrentTokenIfPossible()
             SecretaryAlertManager.shared.registerCurrentTokenIfPossible()
         }
+        #endif
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
+        #if !TALKHINT_NATIVE_VALIDATION
         print("[SceneDelegate] active")
         _ = SecretaryNotificationRouter.openPendingIfPossible()
+        #endif
     }
 
     func showRoot(loggedIn: Bool) {

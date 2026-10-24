@@ -393,13 +393,13 @@ describe("/api/twilio/hold browser bridge (regression)", () => {
     expect(holdRes.text).not.toContain("<Client>");
   });
 
-  it("silently records an arbitrary inbound caller to a diagnostic user", async () => {
+  it.each(["browser", "ios"])("keeps %s incoming voice connected but denies unverified recording", async clientType => {
     h.recording.diagnosticUsers.add(OWNER);
     seedPendingCall({
       userId: OWNER,
       fromNumber: "+15559998888",
       status: "accepted",
-      clientType: "browser",
+      clientType,
     });
 
     const holdRes = await request(app).post(
@@ -407,9 +407,11 @@ describe("/api/twilio/hold browser bridge (regression)", () => {
     );
 
     expect(holdRes.status).toBe(200);
-    expect(holdRes.text).toContain('record="record-from-answer-dual"');
+    expect(holdRes.text).not.toContain('record="record-from-answer-dual"');
+    expect(holdRes.text).not.toContain('record="record-from-start"');
+    expect(holdRes.text).toContain("<Dial");
     expect(holdRes.text).not.toContain("This call may be recorded");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
+    expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 
   it("does not record an inbound caller when the owner's diagnostic flag is off", async () => {
@@ -469,7 +471,7 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(setCallOwner).not.toHaveBeenCalled();
   });
 
-  it("silently records an approved diagnostic user's outbound call to any destination", async () => {
+  it("denies recording with only a diagnostic flag while preserving outbound dialing", async () => {
     h.recording.diagnosticUsers.add(OWNER);
 
     const res = await request(app)
@@ -482,9 +484,10 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(res.text).toContain('record="record-from-answer-dual"');
+    expect(res.text).not.toContain('record="record-from-answer-dual"');
+    expect(res.text).toContain("<Dial");
     expect(res.text).not.toContain("/twilio/recording-notice");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
+    expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 
   it("does not let the legacy global toggle enable recording", async () => {
@@ -505,7 +508,7 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 
-  it("does not restore the notice when a diagnostic user calls a different number", async () => {
+  it("does not grant recording consent when a diagnostic user calls another number", async () => {
     h.recording.diagnosticUsers.add(OWNER);
 
     const res = await request(app)
@@ -518,12 +521,12 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
       });
 
     expect(res.status).toBe(200);
-    expect(res.text).toContain('record="record-from-answer-dual"');
+    expect(res.text).not.toContain('record="record-from-answer-dual"');
     expect(res.text).not.toContain("/twilio/recording-notice");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
+    expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 
-  it("keeps the admin capability as the only recording authority", async () => {
+  it("does not treat admin capability plus an environment flag as participant consent", async () => {
     process.env.BENCHMARK_CALL_RECORDING = "1";
     h.recording.diagnosticUsers.add(OWNER);
 
@@ -538,7 +541,8 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
 
     expect(res.status).toBe(200);
     expect(res.text).not.toContain("/twilio/recording-notice");
-    expect(stampRecordingPolicy).toHaveBeenCalledWith(CALL_SID);
+    expect(res.text).not.toContain('record="record-from-answer-dual"');
+    expect(stampRecordingPolicy).not.toHaveBeenCalled();
   });
 
   it("does not record or announce ordinary calls", async () => {

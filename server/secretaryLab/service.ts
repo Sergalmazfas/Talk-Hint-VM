@@ -2,7 +2,8 @@ import { EventEmitter } from "node:events";
 import { randomBytes, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import type { SecretaryCallContext, SecretaryStreamDependencies } from "../secretary/agent";
-import { LAB_REALTIME_MODEL, LAB_REALTIME_VOICE, type LabRealtimeCallbacks, type LabRealtimeConnection } from "./openAIRealtime";
+import { type LabRealtimeCallbacks, type LabRealtimeConnection } from "./openAIRealtime";
+import { SECRETARY_AUDIO_MODEL as LAB_REALTIME_MODEL,SECRETARY_AUDIO_VOICE as LAB_REALTIME_VOICE } from "../secretary/voice";
 
 export interface LabTurn {
   id: string;
@@ -35,7 +36,7 @@ export interface LabReport {
 }
 export interface LabDependencies {
   startEngine(socket: WebSocket, dependencies: SecretaryStreamDependencies): void;
-  context(owner: string, provider: "elevenlabs" | "cartesia"): Promise<Omit<SecretaryCallContext, "instruction">>;
+  context(owner: string, provider: "elevenlabs" | "cartesia" | "openai"): Promise<Omit<SecretaryCallContext, "instruction">>;
   translate(text: string): Promise<{ translation?: string; unavailableReason?: string }>;
   now?: () => number;
   onEnd?(report: LabReport): void;
@@ -187,7 +188,7 @@ export class SecretaryLab {
         instruction: input.instruction.trim(), voiceProvider: input.voiceProvider, turns: [], events: [],
         model: input.voiceProvider === "openai" ? LAB_REALTIME_MODEL : process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime",
         voice: input.voiceProvider === "openai" ? LAB_REALTIME_VOICE : `Owner-linked ${input.voiceProvider} voice`,
-        transport: input.voiceProvider === "openai" ? "webrtc" : "simulated_twilio", modelVerified: false,
+        transport: "simulated_twilio", modelVerified: false,
         metrics: { guestTurns: 0, secretaryTurns: 0 } },
     };
     this.sessions.set(id, s);
@@ -195,9 +196,12 @@ export class SecretaryLab {
       if (input.voiceProvider === "openai") {
         if (!this.deps.openAI || !await this.deps.openAI.isAvailable()) throw new Error("Exact OpenAI model unavailable");
       } else s.context = { ...await this.deps.context(owner, input.voiceProvider), instruction: s.report.instruction };
+      if(input.voiceProvider==="openai")s.context={
+        ...await this.deps.context(owner,"openai"),voiceProvider:"openai",cloneVoiceId:"",instruction:s.report.instruction,
+      };
     } catch {
       this.sessions.delete(id);
-      fail(409, input.voiceProvider === "openai" ? "Exact gpt-realtime-2.1 model is unavailable in this Dev environment; no fallback"
+      fail(409, input.voiceProvider === "openai" ? "Exact GPT-Live 1 / gpt-6.1-sol is unavailable in this Dev environment; no fallback"
         : "The selected owner voice or OpenAI service is unavailable; configure it in Voice Lab");
     }
     if (s.report.status === "ended") fail(409, "Lab session was cancelled");
@@ -216,7 +220,7 @@ export class SecretaryLab {
     clearTimeout(s.timer);
     s.report.status = "running";
     s.send({ type: "state", state: "connecting", atMs: this.now() - s.started });
-    if (s.report.voiceProvider === "openai") {
+    if (s.report.voiceProvider === "openai" && s.report.transport==="webrtc") {
       try {
         s.realtime = this.deps.openAI!.create(s.owner, s.report.instruction, {
           ready: (model, voice) => {
@@ -274,7 +278,10 @@ export class SecretaryLab {
         onDiagnostic: event => {
           if (s.report.status === "ended") return;
           this.event(s, event);
-          if (event === "realtime_ready") { s.inputReady = true; s.send?.({ type: "ready" }); }
+          if (event === "realtime_ready") {
+            s.inputReady = true;s.report.modelVerified=s.report.voiceProvider==="openai";
+            s.send?.({ type: "ready",model:s.report.model,voice:s.report.voice,transport:s.report.transport,modelVerified:s.report.modelVerified });
+          }
           const state = event === "tts_received" ? "speaking"
             : event === "guest_speech_started" || event === "realtime_ready" ? "listening" : "thinking";
           s.send?.({ type: "state", state, atMs: this.now() - s.started });

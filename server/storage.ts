@@ -11,7 +11,8 @@ import {
   type AiratomaDelivery,
   type DialogueLibrary, type DialogueEntry,
   users, phoneNumbers, userPrompts, promptTemplates, calls, availableNumbers, sessions, contactMemory, knowledgeCards, airatomaDeliveries, dialogueLibraries,
-  tutorSessions, tutorCallMemories, voiceLabClones, voiceLabRuns, secretaryTasks
+  tutorSessions, tutorCallMemories, voiceLabClones, voiceLabRuns, secretaryTasks,
+  secretaryCalendarGrants, secretaryCalendarAttempts
 } from "@shared/schema";
 import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, or, sql, gt, lte, desc, asc, getTableColumns } from "drizzle-orm";
@@ -169,6 +170,8 @@ const APP_TABLES: Record<string, any> = {
   tutor_call_memories: tutorCallMemories,
   voice_lab_clones: voiceLabClones,
   voice_lab_runs: voiceLabRuns,
+  secretary_calendar_grants: secretaryCalendarGrants,
+  secretary_calendar_attempts: secretaryCalendarAttempts,
 };
 
 // Compare the columns the Drizzle schema declares against what actually exists

@@ -1,0 +1,32 @@
+import type { Express } from "express";
+import { requireBenchmarkAdmin } from "../benchmark/adminGate";
+import { adminActionOrigin } from "../adminWeb";
+import { dbReady, pool } from "../db";
+import { ModelError, requestSchema } from "./domain";
+import { PgModelRepository, type ModelRepository } from "./repository";
+
+const repository = new PgModelRepository(async () => {
+  await dbReady;
+  if (!pool) throw new Error("Database unavailable");
+  return pool;
+});
+
+export function registerProjectModel(app: Express, repo: ModelRepository = repository) {
+  // Defense in depth: safe even when mounted without the outer /api/admin gate.
+  app.all("/api/admin/project-model", requireBenchmarkAdmin, adminActionOrigin, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const owner = String(req.user!.id);
+    try {
+      if (req.method === "GET") return res.json(await repo.read(owner));
+      if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+      const parsed = requestSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Некорректное изменение модели", details: parsed.error.flatten() });
+      return res.json(await repo.update(owner, parsed.data.revision, parsed.data.command));
+    } catch (error) {
+      if (error instanceof ModelError) return res.status(error.status).json({ error: error.message });
+      // Never echo SQL / connection strings / raw submitted content.
+      console.error("[ProjectModel] storage operation failed");
+      return res.status(503).json({ error: "Не удалось сохранить или прочитать модель. Данные не подтверждены; повторите после восстановления базы." });
+    }
+  });
+}

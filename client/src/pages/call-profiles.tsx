@@ -51,9 +51,8 @@ interface CallProfile {
 
 interface CallProfilesResponse {
   profiles: CallProfile[];
-  recommendedWorkNumber: { id: string; phoneNumber: string; available: boolean; existingBindingMove?: boolean };
-  incomingAiEnabled: false;
-  calendarConnected: false;
+  onboarding?: { choices: Array<"frames" | "work" | "both">; subscribed: boolean; availableCount: number };
+  recommendedWorkNumber?: { id: string; phoneNumber: string; available: boolean; existingBindingMove?: boolean } | null;
 }
 
 interface KnowledgeCard {
@@ -71,7 +70,7 @@ interface CardDraft {
 }
 
 const scopeTitles: Record<Scope, string> = {
-  personal: "Личное",
+  personal: "Фреймы",
   work: "Работа",
   shared: "Общее",
 };
@@ -89,11 +88,16 @@ export default function CallProfiles() {
   const [, setLocation] = useLocation();
   const { user, token, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
+  const previewMode = typeof window !== "undefined" && import.meta.env.DEV && new URLSearchParams(window.location.search).get("preview") === "1";
   const [profiles, setProfiles] = useState<CallProfile[]>([]);
-  const [recommended, setRecommended] = useState<CallProfilesResponse["recommendedWorkNumber"] | null>(null);
+  const [onboarding, setOnboarding] = useState<CallProfilesResponse["onboarding"]>({ choices: ["frames", "work", "both"], subscribed: false, availableCount: 0 });
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
-  const [scope, setScope] = useState<Scope>("personal");
+  const [scope, setScope] = useState<Scope>(() => {
+    if (typeof window === "undefined") return "personal";
+    const requested = new URLSearchParams(window.location.search).get("profile");
+    return requested === "work" ? "work" : "personal";
+  });
   const [cards, setCards] = useState<KnowledgeCard[]>([]);
   const [cardsLoading, setCardsLoading] = useState(true);
   const [cardsError, setCardsError] = useState("");
@@ -105,8 +109,9 @@ export default function CallProfiles() {
   const currentToken = useRef(token);
   currentScope.current = scope;
   currentToken.current = token;
-  const [selectedNumberId, setSelectedNumberId] = useState("");
   const [attaching, setAttaching] = useState(false);
+  const [selectedChoice, setSelectedChoice] = useState<"frames" | "work" | "both">("both");
+  const [previewScenario, setPreviewScenario] = useState<"ready" | "empty" | "retry">("ready");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<KnowledgeCard | null>(null);
   const [draft, setDraft] = useState<CardDraft>({ cardType: "project", title: "", body: "" });
@@ -114,10 +119,21 @@ export default function CallProfiles() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!authLoading && !user) setLocation("/");
-  }, [authLoading, user, setLocation]);
+    if (!previewMode && !authLoading && !user) setLocation("/");
+  }, [previewMode, authLoading, user, setLocation]);
 
   const loadProfiles = useCallback(async () => {
+    if (previewMode) {
+      setProfileError("");
+      setProfileLoading(false);
+      const fixtureProfiles: CallProfile[] = [
+        { id: "personal", label: "Фреймы", numbers: [], secretaryOutboundReady: false },
+        { id: "work", label: "Работа", numbers: [], secretaryOutboundReady: false },
+      ];
+      setProfiles(fixtureProfiles);
+      setOnboarding({ choices: ["frames", "work", "both"], subscribed: true, availableCount: previewScenario === "empty" ? 0 : 6 });
+      return;
+    }
     if (!token) return;
     setProfileError("");
     setProfileLoading(true);
@@ -128,16 +144,23 @@ export default function CallProfiles() {
       if (!response.ok) throw new Error(await readError(response, "Не удалось загрузить профили."));
       const data = (await response.json()) as CallProfilesResponse;
       setProfiles(Array.isArray(data.profiles) ? data.profiles : []);
-      setRecommended(data.recommendedWorkNumber || null);
-      setSelectedNumberId(data.recommendedWorkNumber?.available ? data.recommendedWorkNumber.id : "");
+      setOnboarding(data.onboarding || { choices: ["frames", "work", "both"], subscribed: false, availableCount: 0 });
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "Ошибка сети. Проверьте соединение и повторите.");
     } finally {
       setProfileLoading(false);
     }
-  }, [token]);
+  }, [previewMode, previewScenario, token]);
 
   const loadCards = useCallback(async (requestedScope: Scope, authToken = token) => {
+    if (previewMode) {
+      setCardsError("");
+      setCardsLoading(false);
+      setCardsScope(requestedScope);
+      setCardsToken("synthetic-preview");
+      setCards([]);
+      return;
+    }
     cardsAbortController.current?.abort();
     const requestId = ++cardsRequestId.current;
     if (!authToken) {
@@ -182,13 +205,22 @@ export default function CallProfiles() {
         if (cardsAbortController.current === controller) cardsAbortController.current = null;
       }
     }
-  }, [token]);
+  }, [previewMode, token]);
 
   useEffect(() => {
-    if (token && user) void loadProfiles();
-  }, [token, user, loadProfiles]);
+    if (previewMode) void loadProfiles();
+    else if (token && user) void loadProfiles();
+  }, [token, user, loadProfiles, previewMode]);
 
   useEffect(() => {
+    if (previewMode) {
+      setCards([]);
+      setCardsError("");
+      setCardsLoading(false);
+      setCardsScope(scope);
+      setCardsToken("synthetic-preview");
+      return;
+    }
     if (token && user) {
       void loadCards(scope, token);
     } else {
@@ -206,32 +238,64 @@ export default function CallProfiles() {
       cardsRequestId.current += 1;
       cardsAbortController.current = null;
     };
-  }, [token, user, scope, loadCards]);
+  }, [token, user, scope, loadCards, previewMode]);
 
-  async function attachWorkNumber() {
-    if (!selectedNumberId) return;
-    const selected = recommended?.id === selectedNumberId
-      ? recommended.phoneNumber
-      : selectedNumberId;
-    const moveNotice = recommended?.existingBindingMove
-      ? "\n\nCDL-линия перейдёт из вашего прежнего CDL-аккаунта в этот аккаунт: новые входящие будут приходить сюда. История прежнего аккаунта останется в нём."
-      : "";
-    const confirmed = window.confirm(`Сделать номер ${selected} рабочим?${moveNotice}\n\nЛичный номер не изменится. Ранее предложенный номер вернётся в пул, без отказа от него у оператора. Покупки не будет.`);
-    if (!confirmed) return;
+  async function connectChoice(choice: "frames" | "work" | "both") {
+    if (previewMode) {
+      if (previewScenario === "retry") {
+        setProfileError("Синтетическая ошибка соединения. Никакие данные не изменены; попробуйте ещё раз.");
+        return;
+      }
+      setProfiles((previous) => previous.map((profile) => {
+        if ((choice === "frames" && profile.id !== "personal") || (choice === "work" && profile.id !== "work")) return profile;
+        if (profile.numbers.length) return profile;
+        const syntheticNumber: ProfileNumber = profile.id === "personal"
+          ? { id: "preview-personal", phoneNumber: "+1 202 555 0146", name: "Личная линия · пример", type: "personal" }
+          : { id: "preview-work", phoneNumber: "+1 202 555 0182", name: "Рабочая линия · пример", type: "work" };
+        return { ...profile, numbers: [syntheticNumber] };
+      }));
+      if (choice === "work") {
+        setScope("work");
+        setLocation("/settings/call-profiles?preview=1&profile=work");
+      } else if (choice === "frames") {
+        setScope("personal");
+        setLocation("/settings/call-profiles?preview=1&profile=personal");
+      } else {
+        setScope("personal");
+        setLocation("/settings/call-profiles?preview=1&profile=both");
+      }
+      return;
+    }
+    if (!token) return;
     setAttaching(true);
+    setProfileError("");
     try {
-      const response = await fetch("/api/call-profiles/work-number", {
+      const response = await fetch("/api/call-profiles/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ numberId: selectedNumberId }),
+        body: JSON.stringify({ choice }),
       });
-      if (!response.ok) throw new Error(await readError(response, "Не удалось подключить номер."));
-      toast({ title: "Рабочий номер подключён", description: `${selected} теперь относится к рабочему профилю.` });
+      if (!response.ok) throw new Error(await readError(response, "Не удалось настроить профили."));
+      const result = await response.json() as { phoneNumbers?: ProfileNumber[]; reused?: boolean };
       await loadProfiles();
+      toast({ title: result.reused ? "Настройка уже выполнена" : "Профили настроены", description: "Существующие номера сохранены, новые назначения готовы." });
+      if (choice === "work") {
+        setScope("work");
+        setLocation("/settings/call-profiles?profile=work");
+      } else if (choice === "frames") {
+        setScope("personal");
+        setLocation("/settings/call-profiles?profile=personal");
+      } else {
+        setScope("personal");
+        setLocation("/settings/call-profiles?profile=both");
+      }
     } catch (error) {
+      // A transport error may arrive after the atomic connect committed. Recover by
+      // reading current state; never automatically repeat the assignment POST.
+      await loadProfiles();
       toast({
-        title: "Не удалось подключить номер",
-        description: error instanceof Error ? error.message : "Ошибка сети. Проверьте соединение и повторите.",
+        title: "Не удалось подтвердить настройку",
+        description: `${error instanceof Error ? error.message : "Ошибка сети."} Состояние профилей обновлено; проверьте его перед повторной попыткой.`,
         variant: "destructive",
       });
     } finally {
@@ -254,6 +318,18 @@ export default function CallProfiles() {
   async function saveCard(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!draft.title.trim() || !draft.body.trim()) return;
+    if (previewMode) {
+      const localCard: KnowledgeCard = {
+        id: editingCard?.id || `synthetic-card-${Date.now()}`,
+        cardType: draft.cardType,
+        title: draft.title.trim(),
+        body: draft.body.trim(),
+        profileScope: scope,
+      };
+      setCards((previous) => editingCard ? previous.map((card) => card.id === editingCard.id ? localCard : card) : [localCard, ...previous]);
+      setEditorOpen(false);
+      return;
+    }
     const operationScope = scope;
     const operationToken = token;
     setSavingCard(true);
@@ -284,6 +360,10 @@ export default function CallProfiles() {
 
   async function deleteCard(card: KnowledgeCard) {
     if (!window.confirm(`Удалить карточку «${card.title}»? Это действие нельзя отменить.`)) return;
+    if (previewMode) {
+      setCards((previous) => previous.filter((item) => item.id !== card.id));
+      return;
+    }
     const operationScope = scope;
     const operationToken = token;
     setDeletingId(card.id);
@@ -312,9 +392,15 @@ export default function CallProfiles() {
   const personal = profileFor("personal");
   const work = profileFor("work");
   const workHasNumber = Boolean(work?.numbers.length);
-  const cardsViewLoading = cardsLoading || cardsScope !== scope || cardsToken !== token;
+  const personalHasNumber = Boolean(personal?.numbers.length);
+  const missingLineCount = selectedChoice === "frames"
+    ? Number(!personalHasNumber)
+    : selectedChoice === "work"
+      ? Number(!workHasNumber)
+      : Number(!personalHasNumber) + Number(!workHasNumber);
+  const cardsViewLoading = !previewMode && (cardsLoading || cardsScope !== scope || cardsToken !== token);
 
-  if (authLoading || (!user && !profileError)) {
+  if (!previewMode && (authLoading || (!user && !profileError))) {
     return <div className="min-h-[100dvh] flex items-center justify-center bg-gray-900"><Loader2 className="h-7 w-7 animate-spin text-cyan-400" /></div>;
   }
 
@@ -333,19 +419,38 @@ export default function CallProfiles() {
       </header>
 
       <main className="mx-auto max-w-5xl space-y-7 px-4 py-6 sm:py-9">
-        <section className="max-w-3xl">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Личное отдельно. Работа отдельно.</h2>
-          <p className="mt-2 text-sm leading-6 text-gray-300 sm:text-base">
-            Настройте, какой номер и какие знания относятся к каждому контексту. Это первый этап настройки номера и контекста, а не полноценная система записи на встречи.
-          </p>
+        <section className="grid gap-5 border-b border-gray-700 pb-7 md:grid-cols-[1.2fr_0.8fr] md:items-end">
+          <div className="max-w-3xl">
+            <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-800 bg-cyan-950/50 px-3 py-1 text-xs font-medium text-cyan-200"><ShieldCheck className="h-3.5 w-3.5" />Один Secretary · ваш контекст</p>
+            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Кому звонят — определяет, что он знает.</h2>
+            <p className="mt-3 text-sm leading-6 text-gray-300 sm:text-base">Выберите назначение ваших линий. Существующие номера сохраняются; TalkHint разделит личные фреймы и рабочие сведения, не создавая вторую бизнес-анкету.</p>
+          </div>
+          <Button variant="outline" onClick={() => setLocation("/incoming-secretary")} className="w-fit border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">
+            Настройки входящего Secretary
+          </Button>
         </section>
+
+        {previewMode && (
+          <section className="rounded-2xl border border-amber-700/70 bg-amber-950/30 p-4 sm:p-5" aria-label="Синтетический предпросмотр">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><p className="text-xs font-semibold uppercase tracking-[0.17em] text-amber-300">Dev preview · только локально</p><p className="mt-1 text-sm leading-5 text-amber-100">Синтетические линии и карточки. Здесь нет запросов, назначений, сохранения или действий с аккаунтом.</p></div>
+              <div className="flex flex-wrap gap-2">
+                {(["ready", "empty", "retry"] as const).map((scenario) => (
+                  <Button key={scenario} size="sm" variant="outline" onClick={() => { setPreviewScenario(scenario); setProfileError(""); }} className={`border-amber-700 ${previewScenario === scenario ? "bg-amber-900/70 text-amber-50" : "text-amber-200"}`}>
+                    {scenario === "ready" ? "Есть линии" : scenario === "empty" ? "Пустой пул" : "Ошибка / повтор"}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
 
         <section aria-label="Профили">
           {profileLoading ? (
             <div className="grid gap-4 md:grid-cols-2">
               {[0, 1].map((item) => <div key={item} className="h-40 animate-pulse rounded-xl border border-gray-700 bg-gray-800/60" />)}
             </div>
-          ) : profileError ? (
+          ) : profileError && !previewMode ? (
             <Card className="border-red-900/70 bg-gray-800/60">
               <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
                 <p className="flex items-center gap-2 text-sm text-red-200"><AlertTriangle className="h-4 w-4 shrink-0" />{profileError}</p>
@@ -353,72 +458,52 @@ export default function CallProfiles() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card className="border-cyan-800/60 bg-gray-800/60">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2 text-lg"><UserRound className="h-5 w-5 text-cyan-400" />Личный профиль</CardTitle>
-                    <Badge variant="outline" className="border-cyan-800 text-cyan-300">Личное</Badge>
-                  </div>
-                  <CardDescription className="text-gray-400">Сохранённый личный номер остаётся без изменений.</CardDescription>
+            <div className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                {[{ id: "personal" as const, icon: UserRound, title: "Личное · фреймы", description: "Для частных звонков и личных целей. Ваши персональные фреймы остаются отдельно." }, { id: "work" as const, icon: BriefcaseBusiness, title: "Работа", description: "Для клиентов и деловых звонков. Сведения Secretary берёт из выбранных рабочих карточек." }].map(({ id, icon: Icon, title, description }) => {
+                  const profile = id === "personal" ? personal : work;
+                  const isPersonal = id === "personal";
+                  return <Card key={id} className={`${isPersonal ? "border-cyan-800/60" : "border-teal-800/60"} bg-gray-800/60`}>
+                    <CardHeader className="pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <CardTitle className="flex items-center gap-2 text-lg"><Icon className={`h-5 w-5 ${isPersonal ? "text-cyan-300" : "text-teal-300"}`} />{title}</CardTitle>
+                        <Badge variant="outline" className={isPersonal ? "border-cyan-800 text-cyan-200" : "border-teal-800 text-teal-200"}>{profile?.numbers.length ? "Назначено" : "Ожидает настройки"}</Badge>
+                      </div>
+                      <CardDescription className="text-gray-400">{description}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {profile?.numbers.length ? profile.numbers.map((number) => <div key={number.id} className="rounded-lg border border-gray-700 bg-gray-900/60 p-3"><p className="font-mono text-lg text-cyan-100">{number.phoneNumber}</p><p className="mt-1 text-sm text-gray-400">{number.name}</p></div>) : <p className="rounded-lg border border-dashed border-gray-700 px-3 py-4 text-sm text-gray-400">Линия появится здесь после настройки.</p>}
+                    </CardContent>
+                  </Card>;
+                })}
+              </div>
+              <Card className="overflow-hidden border-cyan-800/60 bg-gray-800/70">
+                <CardHeader className="border-b border-gray-700 bg-gray-900/40">
+                  <p className="text-xs uppercase tracking-[0.16em] text-cyan-300">Выберите назначение</p>
+                  <CardTitle className="text-xl">Одна настройка. Три возможных пути.</CardTitle>
+                  <CardDescription className="text-gray-400">Доступно линий в вашем пуле: {onboarding?.availableCount ?? 0}. Выбор сохраняет уже назначенные номера и добавляет только недостающие назначения.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {personal?.numbers.length ? personal.numbers.map((number) => (
-                    <div key={number.id} className="rounded-lg border border-gray-700 bg-gray-900/60 p-3">
-                      <p className="font-mono text-lg text-cyan-300">{number.phoneNumber}</p>
-                      <p className="mt-1 text-sm text-gray-400">{number.name}</p>
-                    </div>
-                  )) : <p className="rounded-lg border border-dashed border-gray-700 px-3 py-4 text-sm text-gray-400">Личный номер пока не указан.</p>}
-                </CardContent>
-              </Card>
-
-              <Card className="border-purple-800/60 bg-gray-800/60">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2 text-lg"><BriefcaseBusiness className="h-5 w-5 text-purple-300" />Рабочий профиль</CardTitle>
-                    <Badge variant="outline" className="border-purple-800 text-purple-200">{workHasNumber ? "Номер подключён" : "Не настроен"}</Badge>
+                <CardContent className="space-y-4 p-4 sm:p-6">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {([
+                      { id: "frames" as const, title: "Только фреймы", detail: "Личные звонки и ваши карточки для подсказок.", icon: UserRound },
+                      { id: "work" as const, title: "Только работа", detail: "Переход прямо к рабочим карточкам.", icon: BriefcaseBusiness },
+                      { id: "both" as const, title: "Оба номера", detail: "Два независимых потока: фреймы и работа.", icon: Check },
+                    ]).map(({ id, title, detail, icon: Icon }) => <button key={id} type="button" onClick={() => setSelectedChoice(id)} aria-pressed={selectedChoice === id} className={`rounded-xl border p-4 text-left transition-colors ${selectedChoice === id ? "border-cyan-400 bg-cyan-950/40 ring-1 ring-cyan-400/30" : "border-gray-700 bg-gray-900/50 hover:border-gray-500"}`}>
+                      <span className="flex items-center justify-between"><Icon className={`h-5 w-5 ${selectedChoice === id ? "text-cyan-300" : "text-gray-500"}`} />{selectedChoice === id && <Check className="h-4 w-4 text-cyan-200" />}</span>
+                      <span className="mt-4 block font-semibold text-white">{title}</span><span className="mt-1 block text-sm leading-5 text-gray-400">{detail}</span>
+                    </button>)}
                   </div>
-                  <CardDescription className="text-gray-400">Подключается только уже принадлежащий вам номер из пула.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {work?.numbers.map((number) => (
-                    <div key={number.id} className="rounded-lg border border-purple-900/70 bg-gray-900/60 p-3">
-                      <p className="font-mono text-lg text-purple-200">{number.phoneNumber}</p>
-                      <p className="mt-1 text-sm text-gray-400">{number.name}</p>
-                    </div>
-                  ))}
-                  {!workHasNumber && (
-                    <>
-                      {recommended?.available ? (
-                        <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${selectedNumberId === recommended.id ? "border-cyan-500 bg-cyan-950/30" : "border-gray-700 bg-gray-900/50 hover:border-gray-500"}`}>
-                          <input
-                            type="radio"
-                            name="work-number"
-                            value={recommended.id}
-                            checked={selectedNumberId === recommended.id}
-                            onChange={() => setSelectedNumberId(recommended.id)}
-                            className="mt-1 accent-cyan-400"
-                          />
-                          <span>
-                            <span className="block font-mono text-lg text-white">{recommended.phoneNumber}</span>
-                            <span className="mt-1 block text-xs text-gray-400">Выбранная вами линия CDL · без покупки</span>
-                          </span>
-                        </label>
-                      ) : (
-                        <p className="rounded-lg border border-dashed border-gray-700 px-3 py-4 text-sm text-gray-400">
-                          Сейчас нет доступного номера для рабочего профиля.
-                        </p>
-                      )}
-                      <p className="text-xs leading-5 text-gray-500">Выбор применяется только после подтверждения. Личный номер сохраняется. Если CDL закреплён за вашим прежним аккаунтом, новые входящие перейдут в этот аккаунт; старая история не переносится и не удаляется. Во время активного звонка назначение блокируется.</p>
-                      <Button onClick={attachWorkNumber} disabled={!recommended?.available || !selectedNumberId || attaching} className="w-full bg-purple-700 hover:bg-purple-600">
-                        {attaching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-                        Подключить выбранный номер
-                      </Button>
-                    </>
-                  )}
-                  {workHasNumber && (
-                    <p className="flex items-center gap-2 text-xs text-gray-400"><ShieldCheck className="h-4 w-4 text-green-400" />Номер уже подключён к рабочему профилю. Личный номер и активная линия сохранены.</p>
-                  )}
+                  {!onboarding?.subscribed && <p className="rounded-lg border border-amber-800/70 bg-amber-950/30 p-3 text-sm leading-5 text-amber-100">Для этой возможности действует существующее ограничение доступа. Подписка не меняется на этом экране.</p>}
+                  {onboarding?.availableCount === 0 && !workHasNumber && <p className="rounded-lg border border-gray-700 bg-gray-900/60 p-3 text-sm leading-5 text-gray-300">Свободных линий сейчас нет. Выбор не активирует и не покупает номер; существующие номера не изменятся.</p>}
+                  <div className="flex flex-col gap-3 border-t border-gray-700 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="max-w-xl text-xs leading-5 text-gray-500">Настройка не включает приём реальных звонков. В любой момент можно вернуться к карточкам и проверить назначение контекстов.</p>
+                    <Button onClick={() => void connectChoice(selectedChoice)} disabled={attaching || !onboarding?.subscribed || missingLineCount > (onboarding?.availableCount ?? 0)} className="shrink-0 bg-cyan-700 hover:bg-cyan-600">
+                      {attaching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                      {attaching ? "Настраиваем…" : "Продолжить с выбранным путём"}
+                    </Button>
+                  </div>
+                  {profileError && <div role="alert" className="flex flex-col gap-3 rounded-lg border border-red-900/70 bg-red-950/30 p-3 text-sm text-red-200 sm:flex-row sm:items-center sm:justify-between"><span>{profileError}</span><Button variant="outline" size="sm" onClick={() => void loadProfiles()}>Обновить состояние</Button></div>}
                 </CardContent>
               </Card>
             </div>
@@ -498,13 +583,13 @@ export default function CallProfiles() {
         <section aria-label="Доступность функций">
           <Card className="border-amber-800/60 bg-amber-950/20">
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-amber-300" />Что пока недоступно</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-amber-300" />Назначение номера — не активация AI</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-gray-300">
-              <p>• Автоматический Secretary для входящих звонков выключен.</p>
-              <p>• Календарь не подключён.</p>
-              <p>• Исходящий Secretary для рабочего профиля пока не включён.</p>
-              <p className="leading-6 text-gray-400">Карточки сейчас помогают формировать подсказки владельцу и не управляют автономным ИИ на входящих звонках.</p>
+              <p>• Выбор номеров сам по себе не включает AI-приём.</p>
+              <p>• Календарь и бронирование не подключаются этим шагом.</p>
+              <p>• Существующие звонки и режимы сохраняются.</p>
+              <p className="leading-6 text-gray-400">Для входящего Secretary отдельно разрешите нужные Work-карточки в его настройках. Это единственный источник рабочих сведений; общая карточка сама по себе не даёт права сообщать её содержимое клиентам.</p>
             </CardContent>
           </Card>
         </section>

@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 
 type Turn = { id: string; itemId: string; tail: Buffer; frames: Buffer[]; abort: AbortController; generated: number;
+  texts:Array<{text:string;through:number}>;liveMarking?:boolean;
   sent: number; startedAt?: number; ended: boolean; marking: boolean; played: boolean; text: string; saved: boolean };
 /** Bounded 20ms Twilio playback, cancellable independently of model generation. */
 export class SecretaryNativePlayback {
@@ -14,13 +15,14 @@ export class SecretaryNativePlayback {
     truncate: (item: string, milliseconds: number) => void;
     playedText: (text: string) => void; audio: (payload: string) => void;
     fail: (reason: string) => void;
+    continuous?:boolean;
   }) {}
   audio(id: string, itemId: string, mulaw: Buffer) {
     if (this.closed) return;
     if (this.current?.id !== id) {
       this.interrupt();
       this.current = { id, itemId, tail: Buffer.alloc(0), frames: [], abort: new AbortController(),
-        sent: 0, generated: 0, ended: false, marking: false, played: false, text: "", saved: false };
+        sent: 0, generated: 0, ended: false, marking: false, played: false, text: "", saved: false,texts:[] };
     }
     const t = this.current!;
     if (t.ended || t.abort.signal.aborted) return;
@@ -43,7 +45,24 @@ export class SecretaryNativePlayback {
   transcript(id: string, text: string) {
     const t = this.current;
     if (!t || t.id !== id || this.closed) return;
+    if(this.io.continuous){
+      if(t.texts.length>=32)return this.io.fail("Secretary Live transcript queue exceeded its safety limit");
+      t.texts.push({text,through:t.generated});this.markLive(t);return;
+    }
     t.text = text; this.save(t);
+  }
+  private markLive(t:Turn){
+    const pending=t.texts[0];
+    if(!this.io.continuous||t.liveMarking||!pending||t.sent<pending.through||t.abort.signal.aborted||this.closed)return;
+    t.liveMarking=true;t.texts.shift();
+    const name=`secretary-live-${++this.sequence}`;
+    const ack=this.io.waitMark(name,t.abort.signal);
+    this.send({event:"mark",streamSid:this.io.streamSid(),mark:{name}});
+    void ack.then(()=>{
+      if(this.current===t&&!t.abort.signal.aborted&&!this.closed)this.io.playedText(pending.text);
+    }).catch(()=>{/* interruption does not report unplayed text */}).finally(()=>{
+      t.liveMarking=false;this.markLive(t);
+    });
   }
   interrupt() {
     const t = this.current;
@@ -66,6 +85,7 @@ export class SecretaryNativePlayback {
         if (this.io.ws.bufferedAmount > 512 * 1024) throw new Error("Secretary Twilio audio buffer exceeded its safety limit");
         if (!this.send({ event: "media", streamSid: this.io.streamSid(), media: { payload } })) return;
         t.startedAt ??= Date.now(); t.sent += frame.length; this.io.audio(payload);
+        this.markLive(t);
         await new Promise<void>((resolve, reject) => {
           const abort = () => { clearTimeout(timer); t.abort.signal.removeEventListener("abort", abort); reject(new Error("interrupted")); };
           const timer = setTimeout(() => { t.abort.signal.removeEventListener("abort", abort); resolve(); }, 20);

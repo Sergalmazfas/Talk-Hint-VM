@@ -23,7 +23,7 @@ function providerFor(environment: string): apn.Provider | null {
   });
 }
 
-export async function notifySecretaryResult(userId: string, taskId: string): Promise<void> {
+export async function notifySecretaryResult(userId: string, taskId: string, incoming = false): Promise<void> {
   const tokens = await db.select().from(deviceTokens).where(and(
     eq(deviceTokens.userId, userId),
     eq(deviceTokens.platform, "ios_alert"),
@@ -44,9 +44,10 @@ export async function notifySecretaryResult(userId: string, taskId: string): Pro
     notification.expiry = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
     notification.alert = {
       title: "TalkHint Secretary",
-      body: "Your call report is ready. Open TalkHint to read it.",
+      body: incoming ? "An incoming request needs your review. No appointment is confirmed." : "Your call report is ready. Open TalkHint to read it.",
     };
-    notification.payload = { type: "secretary_result", taskId };
+    notification.payload = incoming ? { type: "incoming_secretary_request", requestId: taskId } : { type: "secretary_result", taskId };
+    if (incoming) notification.collapseId = `incoming-${taskId}`;
     try {
       const result = await provider.send(notification, token.token);
       if (result.failed.length) {
@@ -64,9 +65,10 @@ export async function notifySecretaryResult(userId: string, taskId: string): Pro
   }
   const webSent = await sendPushToUser(userId, {
     title: "TalkHint Secretary",
-    body: "Your call report is ready. Open TalkHint to read it.",
+    body: incoming ? "An incoming request needs your review. No appointment is confirmed." : "Your call report is ready. Open TalkHint to read it.",
     tag: `secretary-${taskId}`,
-    data: { type: "secretary_result", taskId, url: `/app?secretaryTask=${encodeURIComponent(taskId)}` },
+    data: incoming ? { type: "incoming_secretary_request", requestId: taskId, url: "/incoming-secretary" } :
+      { type: "secretary_result", taskId, url: `/app?secretaryTask=${encodeURIComponent(taskId)}` },
   });
   // The report is already persisted and remains visible in the app. A missing
   // standard APNs setup is surfaced to the worker as a retryable failure rather

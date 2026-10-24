@@ -16,9 +16,11 @@ final class KnowledgeCardsViewController: UITableViewController {
     private var loadError: String?
     private var loadGeneration = 0
     private let profileScope: CallProfileScope
+    private let api: APIClient
 
-    init(profileScope: CallProfileScope = .personal) {
+    init(profileScope: CallProfileScope = .personal, api: APIClient = .shared) {
         self.profileScope = profileScope
+        self.api = api
         super.init(style: .insetGrouped)
         title = String(format: NSLocalizedString("profiles.cards_title", comment: ""), profileScope.localizedName)
     }
@@ -43,23 +45,26 @@ final class KnowledgeCardsViewController: UITableViewController {
     }
 
     @objc private func reload() {
+        Task { @MainActor in await loadCards() }
+    }
+
+    /// Shared by appearance, pull-to-refresh and isolated native tests.
+    @MainActor func loadCards() async {
         loadGeneration += 1
         let generation = loadGeneration
-        Task { @MainActor in
-            do {
-                let result = try await APIClient.shared.knowledgeCards(profileScope: profileScope)
-                guard generation == loadGeneration else { return }
-                cards = result
-                loadError = nil
-            } catch {
-                guard generation == loadGeneration else { return }
-                cards = []
-                loadError = error.localizedDescription
-            }
-            loaded = true
-            tableView.refreshControl?.endRefreshing()
-            tableView.reloadData()
+        do {
+            let result = try await api.knowledgeCards(profileScope: profileScope)
+            guard generation == loadGeneration else { return }
+            cards = result
+            loadError = nil
+        } catch {
+            guard generation == loadGeneration else { return }
+            cards = []
+            loadError = error.localizedDescription
         }
+        loaded = true
+        tableView.refreshControl?.endRefreshing()
+        tableView.reloadData()
     }
 
     private func cards(for type: String) -> [APIClient.KnowledgeCardItem] {
@@ -123,14 +128,14 @@ final class KnowledgeCardsViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         let group = cards(for: groups[indexPath.section].type)
         guard !group.isEmpty else { return }
-        let editor = KnowledgeCardEditorViewController(card: group[indexPath.row], profileScope: profileScope) { [weak self] in
+        let editor = KnowledgeCardEditorViewController(card: group[indexPath.row], profileScope: profileScope, api: api) { [weak self] in
             self?.reload()
         }
         navigationController?.pushViewController(editor, animated: true)
     }
 
     @objc private func addTapped() {
-        let editor = KnowledgeCardEditorViewController(card: nil, profileScope: profileScope) { [weak self] in
+        let editor = KnowledgeCardEditorViewController(card: nil, profileScope: profileScope, api: api) { [weak self] in
             self?.reload()
         }
         navigationController?.pushViewController(editor, animated: true)
@@ -156,19 +161,28 @@ final class KnowledgeCardsViewController: UITableViewController {
     }
 
     private func performDelete(_ card: APIClient.KnowledgeCardItem) {
-        Task { @MainActor in
-            do {
-                try await APIClient.shared.deleteCard(id: card.id)
-                cards.removeAll { $0.id == card.id }
-                tableView.reloadData()
-            } catch {
-                let alert = UIAlertController(
-                    title: NSLocalizedString("common.delete_failed", comment: ""),
-                    message: error.localizedDescription,
-                    preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
-                present(alert, animated: true)
-            }
+        Task { @MainActor in await deleteCard(card) }
+    }
+
+    @MainActor func deleteCard(_ card: APIClient.KnowledgeCardItem) async {
+        // Any GET already in flight predates this mutation and must not
+        // resurrect a successfully deleted card.
+        loadGeneration += 1
+        do {
+            try await api.deleteCard(id: card.id)
+            // Also invalidate reads started while DELETE was in flight.
+            loadGeneration += 1
+            cards.removeAll { $0.id == card.id }
+            tableView.refreshControl?.endRefreshing()
+            tableView.reloadData()
+        } catch {
+            tableView.refreshControl?.endRefreshing()
+            let alert = UIAlertController(
+                title: NSLocalizedString("common.delete_failed", comment: ""),
+                message: error.localizedDescription,
+                preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+            present(alert, animated: true)
         }
     }
 }
@@ -182,6 +196,8 @@ final class KnowledgeCardEditorViewController: UIViewController {
     private let onSave: () -> Void
     private let profileScope: CallProfileScope
     private var isSaving = false
+    private let templateBody: String?
+    private let api: APIClient
 
     private let typeControl = UISegmentedControl(items: [
         NSLocalizedString("card_editor.type.project", comment: ""),
@@ -191,8 +207,10 @@ final class KnowledgeCardEditorViewController: UIViewController {
     private let bodyView = UITextView()
     private let sortField = UITextField()
 
-    init(card: APIClient.KnowledgeCardItem?, profileScope: CallProfileScope = .personal, onSave: @escaping () -> Void) {
+    init(card: APIClient.KnowledgeCardItem?, profileScope: CallProfileScope = .personal, templateBody: String? = nil, api: APIClient = .shared, onSave: @escaping () -> Void) {
         self.card = card
+        self.api = api
+        self.templateBody = templateBody
         self.profileScope = card?.profileScope ?? profileScope
         self.onSave = onSave
         super.init(nibName: nil, bundle: nil)
@@ -209,12 +227,12 @@ final class KnowledgeCardEditorViewController: UIViewController {
             barButtonSystemItem: .save, target: self, action: #selector(save))
         navigationItem.rightBarButtonItem?.accessibilityIdentifier = "button-card-save"
 
-        typeControl.selectedSegmentIndex = (card?.cardType == "company") ? 1 : 0
+        typeControl.selectedSegmentIndex = (card?.cardType == "company" || templateBody != nil) ? 1 : 0
         typeControl.translatesAutoresizingMaskIntoConstraints = false
         typeControl.accessibilityIdentifier = "segment-card-type"
 
         let titleLabel = makeLabel(NSLocalizedString("card_editor.field.title", comment: ""))
-        titleField.text = card?.title
+        titleField.text = card?.title ?? (templateBody == nil ? nil : NSLocalizedString("incoming.template", comment: ""))
         titleField.placeholder = NSLocalizedString("card_editor.field.title.placeholder", comment: "")
         titleField.borderStyle = .roundedRect
         titleField.backgroundColor = .secondarySystemGroupedBackground
@@ -222,7 +240,7 @@ final class KnowledgeCardEditorViewController: UIViewController {
         titleField.accessibilityIdentifier = "input-card-title"
 
         let bodyLabel = makeLabel(NSLocalizedString("card_editor.field.details", comment: ""))
-        bodyView.text = card?.body
+        bodyView.text = card?.body ?? templateBody
         bodyView.font = .preferredFont(forTextStyle: .body)
         bodyView.backgroundColor = .secondarySystemGroupedBackground
         bodyView.layer.cornerRadius = 10
@@ -289,10 +307,10 @@ final class KnowledgeCardEditorViewController: UIViewController {
         Task { @MainActor in
             do {
                 if let card = card {
-                    _ = try await APIClient.shared.updateCard(
+                    _ = try await api.updateCard(
                         id: card.id, cardType: cardType, title: title, body: body, sortOrder: sortOrder, profileScope: profileScope)
                 } else {
-                    _ = try await APIClient.shared.createCard(
+                    _ = try await api.createCard(
                         cardType: cardType, title: title, body: body, sortOrder: sortOrder, profileScope: profileScope)
                 }
                 onSave()

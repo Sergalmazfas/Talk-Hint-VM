@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
 interface User {
   id: string;
@@ -31,26 +31,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (urlToken) {
       localStorage.setItem("token", urlToken);
       setToken(urlToken);
-      window.history.replaceState({}, "", window.location.pathname);
+      urlParams.delete("token");
+      const remainingQuery = urlParams.toString();
+      const cleanUrl = `${window.location.pathname}${remainingQuery ? `?${remainingQuery}` : ""}${window.location.hash}`;
+      window.history.replaceState({}, "", cleanUrl);
     }
     
     const currentToken = urlToken || token;
-    if (currentToken) {
-      fetchUserWithToken(currentToken);
-    } else {
-      setIsLoading(false);
-    }
+    fetchUser(currentToken);
   }, []);
 
-  async function fetchUserWithToken(authToken: string) {
+  async function fetchUser(authToken: string | null) {
     try {
       const res = await fetch("/api/auth/me", {
-        headers: { Authorization: `Bearer ${authToken}` },
+        credentials: "include",
+        ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
       });
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
-      } else {
+      } else if (authToken) {
         localStorage.removeItem("token");
         setToken(null);
       }
@@ -64,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(email: string, password: string): Promise<User> {
     const res = await fetch("/api/auth/login", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
@@ -83,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function register(email: string, password: string, language = "ru"): Promise<User> {
     const res = await fetch("/api/auth/register", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, language }),
     });
@@ -103,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       await fetch("/api/auth/logout", {
         method: "POST",
+        credentials: "include",
         headers: { Authorization: `Bearer ${token}` },
       });
     }
@@ -124,4 +127,8 @@ export function useAuth() {
     throw new Error("useAuth must be used within AuthProvider");
   }
   return context;
+}
+
+export function useOptionalAuth() {
+  return useContext(AuthContext);
 }

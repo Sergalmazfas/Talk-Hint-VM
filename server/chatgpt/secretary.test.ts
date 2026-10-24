@@ -33,7 +33,7 @@ vi.mock("../auth", () => ({ authMiddleware: (_req: any, res: any) => res.sendSta
 const input = {
   phoneNumber: "+12025550123", instruction: "Ask for opening hours",
   clientRequestId: "56fa4264-8b0a-4692-bcb2-77b03c145631",
-  voiceProvider: "elevenlabs" as const, translationLanguage: "ru" as const,
+  voiceProvider: "openai" as const, translationLanguage: "ru" as const,
 };
 const row = {
   id: "task1", userId: "alice", status: "starting", ...input,
@@ -55,7 +55,7 @@ beforeEach(() => {
 import { afterEach } from "vitest";
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe("Secretary adapter uses durable native launch helpers", () => {
-  it.each(["elevenlabs", "openai"] as const)("executes OAuth/refresh -> exact owner approval -> one %s mock launch -> task result", async voiceProvider => {
+  it.each(["openai"] as const)("executes OAuth/refresh -> exact owner approval -> one %s mock launch -> task result", async voiceProvider => {
     const selectedInput = { ...input, voiceProvider };
     const app = express();
     app.use(express.json());
@@ -224,8 +224,8 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     const backend = secretaryBackend(dial);
     f.query.mockResolvedValueOnce([]);
     await expect(backend.start("alice", input)).rejects.toMatchObject({ status: 409 });
-    f.ready.mockImplementationOnce(() => { throw new Error("Clone not ready"); });
-    await expect(backend.start("alice", input)).rejects.toThrow("Clone not ready");
+    f.modelAvailable.mockRejectedValueOnce(new Error("Model not ready"));
+    await expect(backend.start("alice", input)).rejects.toThrow("Model not ready");
     vi.stubEnv("OPENAI_API_KEY", "");
     await expect(backend.start("alice", input)).rejects.toMatchObject({ status: 503 });
     expect(dial).not.toHaveBeenCalled();

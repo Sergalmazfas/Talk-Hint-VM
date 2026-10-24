@@ -1,8 +1,19 @@
 import XCTest
+import Foundation
 import UIKit
 @testable import TalkHint
 
 final class CallProfilesTests: XCTestCase {
+    func testNativeValidationUsesAnIsolatedBackend() throws {
+        #if TALKHINT_NATIVE_VALIDATION
+        XCTAssertEqual(AppConfig.baseURL.host, "talkhint-native-tests.invalid")
+        XCTAssertEqual(AppConfig.webSocketBaseURL.host, "talkhint-native-tests.invalid")
+        #else
+        // The native validation script rejects a skipped isolation test.
+        throw XCTSkip("Run TalkHintValidation / NativeValidation for isolated native validation")
+        #endif
+    }
+
     func testCardProfileIsAQueryAndNotAnEncodedPath() throws {
         for scope in CallProfileScope.allCases {
             let url = try APIClient.requestURL("/api/cards", queryItems: [

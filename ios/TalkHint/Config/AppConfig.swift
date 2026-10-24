@@ -3,7 +3,12 @@ import Foundation
 enum AppConfig {
     /// Base URL of the TalkHint backend (the published Reserved VM app).
     /// No trailing slash. Change this to your server before building.
+    #if TALKHINT_NATIVE_VALIDATION
+    // Reserved .invalid domain: hosted XCTest must never reach the live backend.
+    static let baseURL = URL(string: "https://talkhint-native-tests.invalid")!
+    #else
     static let baseURL = URL(string: "https://talkhint.app")!
+    #endif
 
     /// WebSocket base URL derived from `baseURL` (https -> wss, http -> ws).
     /// Used by the in-call screen to subscribe to the `/ui` transcript/hint feed.

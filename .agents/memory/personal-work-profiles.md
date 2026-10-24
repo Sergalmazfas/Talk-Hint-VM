@@ -18,6 +18,47 @@ A promised booking requires a durable calendar acknowledgement, not merely a
 transcript or generated reply. Number setup is not permission to enable
 autonomous incoming answering or forwarding.
 
+Number onboarding must offer two optional purposes, in the user's words:
+«один для фреймов, другой только рабочий». The user may select only the
+frames number, only Work, or both. Do not assume that both numbers are required.
+
+**Why:** The user explicitly specified all three onboarding choices and the
+corresponding independent flows, then confirmed the complete scheme with
+«Да именно так».
+
+**How to apply:** Work-only goes directly to the Work card-based setup without
+requiring another number first. Frames-only follows that number's flow. When
+both are selected, each number follows its corresponding flow. This is the
+general user onboarding requirement, not a special entitlement for the creator.
+Do not silently reinterpret the user's term «фреймы» as a different app mode.
+
+«Ты видишь только карточки, которые заполняются. Одно заполнение решает,
+кто он, откуда и зачем. Ничего более. Мы знакомы же только карточкой».
+Secretary is universal because the filled card is its sole source of knowledge
+about the represented person or business, not because of separate industry
+profiles, questionnaires or service catalogs.
+
+**Why:** The user repeated and narrowed the requirement after the agent
+incorrectly proposed parallel business-profile settings and a separate catalog.
+
+**How to apply:** One card entry supplies identity, purpose and whatever business
+facts the owner actually entered. Do not require the same information again in
+another questionnaire, catalog or business-settings form. Industry, services,
+hours, location and conditions must not be inferred or supplied by global
+industry defaults. If absent from the card, they are unknown. Personal/Work
+remain access boundaries, not additional sources of business knowledge. Cards
+remain business data and cannot bypass account authorization or action safety.
+
+The owner selected a new dedicated Google Calendar named “TalkHint — Work”,
+with business timezone America/New_York, rather than writing appointments to
+the primary calendar.
+
+**Why:** This was the owner's explicit calendar and timezone choice.
+
+**How to apply:** Keep client appointments separate from personal events.
+Do not treat connector authorization or calendar creation as activation of
+phone answering, voice-agent booking tools or a launched business.
+
 The user confirmed their existing CDL line is theirs and selected it as Work,
 rejecting the alternative trial line. Keep that alternative in the pool; do not
 cancel the provider number.

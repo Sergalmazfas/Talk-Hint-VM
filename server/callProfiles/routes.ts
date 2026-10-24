@@ -1,70 +1,56 @@
-import type { Express, RequestHandler } from "express";
-import { numberProfile, PROFILE_KEYS, verifyNumberRouting, WORK_NUMBER_CANDIDATE, WORK_NUMBER_OWNER, UNUSED_WORK_NUMBER } from "./policy";
-
+import type { Express,RequestHandler } from "express";
+import { z } from "zod";
+import { numberProfile,PROFILE_KEYS } from "./policy";
+import { NumberSetupError,type Choice,type Purpose } from "./assign";
 interface Dependencies {
-  numbers(owner: string): Promise<Array<{ id: string; userId: string; twilioNumber: string; name: string; type: string; createdAt?: Date }>>;
-  pool(): Promise<Array<{ id: string; twilioNumber: string; isAssigned: boolean }>>;
-  inspect(number: string): Promise<Parameters<typeof verifyNumberRouting>[0]>;
-  canAdoptExisting?(): Promise<boolean>;
-  assign(numberId: string, owner: string): Promise<{ id: string; twilioNumber: string; name: string; type: string }>;
+  numbers(owner:string):Promise<Array<{id:string;userId:string;twilioNumber:string;name:string;type:string}>>;
+  pool():Promise<Array<{id:string;twilioNumber:string;isAssigned:boolean}>>;
+  user(owner:string):Promise<{plan?:string|null}|undefined>;
+  connect(owner:string,choice:Choice,selected?:Partial<Record<Purpose,string>>,name?:string):Promise<unknown>;
 }
-
-/** Owner-authenticated setup only. Never dials, buys, transfers or reconfigures a number. */
-export function registerCallProfileRoutes(app: Express, auth: RequestHandler, deps: Dependencies) {
-  app.get("/api/call-profiles", auth, async (req, res) => {
+const input=z.object({choice:z.enum(["frames","work","both"])}).strict();
+export function registerCallProfileRoutes(app:Express,auth:RequestHandler,deps:Dependencies) {
+  app.get("/api/call-profiles",auth,async(req,res)=>{
     try {
-      const owner = req.user!.id;
-      const [numbers, pool] = await Promise.all([deps.numbers(owner), deps.pool()]);
-      const candidate = pool.find(n => n.id === WORK_NUMBER_CANDIDATE.id && n.twilioNumber === WORK_NUMBER_CANDIDATE.phoneNumber);
-      const mayAdopt = owner === WORK_NUMBER_OWNER && !!candidate?.isAssigned &&
-        !!deps.canAdoptExisting && await deps.canAdoptExisting();
+      const owner=req.user!.id;
+      const [numbers,pool,user]=await Promise.all([deps.numbers(owner),deps.pool(),deps.user(owner)]);
+      const free=pool.filter(n=>!n.isAssigned);
       res.json({
-        profiles: PROFILE_KEYS.map(id => ({
-          id, label: id === "personal" ? "Личное" : "Работа",
-          numbers: numbers.filter(n => numberProfile(n.type) === id)
-            .map(n => ({ id: n.id, phoneNumber: n.twilioNumber, name: n.name, type: n.type })),
-          secretaryOutboundReady: id === "personal" && numbers.some(n => numberProfile(n.type) === "personal"),
-        })),
-        recommendedWorkNumber: { ...WORK_NUMBER_CANDIDATE, available: owner === WORK_NUMBER_OWNER && !!candidate && (!candidate.isAssigned || mayAdopt),
-          existingBindingMove: mayAdopt && !numbers.some(n => n.twilioNumber === WORK_NUMBER_CANDIDATE.phoneNumber) },
-        incomingAiEnabled: false, calendarConnected: false,
+        profiles:PROFILE_KEYS.map(id=>({id,label:id==="personal"?"Фреймы":"Работа",
+          numbers:numbers.filter(n=>n.userId===owner&&numberProfile(n.type)===id)
+            .map(n=>({id:n.id,phoneNumber:n.twilioNumber,name:n.name,type:n.type})),
+          secretaryOutboundReady:numbers.some(n=>n.userId===owner&&numberProfile(n.type)===id)})),
+        recommendedWorkNumber:free[0]?{id:free[0].id,phoneNumber:free[0].twilioNumber,available:true}:null,
+        onboarding:{choices:["frames","work","both"],subscribed:!!user?.plan&&!["free","none"].includes(user.plan),availableCount:free.length},
+        incomingAiEnabled:false,calendarConnected:false,
       });
-    } catch { res.status(503).json({ error: "Не удалось загрузить профили звонков." }); }
+    }catch{res.status(503).json({error:"Не удалось загрузить профили звонков."});}
   });
-  app.post("/api/call-profiles/work-number", auth, async (req, res) => {
-    try {
-      if (req.user!.id !== WORK_NUMBER_OWNER)
-        return res.status(403).json({ error: "Подключение этого номера разрешено только владельцу согласованного плана." });
-      // Existing same-origin app and native Bearer clients; reject foreign browser writes.
-      if (req.headers.origin) {
-        const origin = new URL(req.headers.origin);
-        if (origin.host !== req.get("host") ||
-          (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)))
-          return res.status(403).json({ error: "Cross-origin request denied" });
-      }
-      if (!req.is("application/json") || !req.body || Object.keys(req.body).some(k => k !== "numberId") ||
-        req.body.numberId !== WORK_NUMBER_CANDIDATE.id)
-        return res.status(400).json({ error: "Выберите предложенный свободный рабочий номер." });
-      const owner = req.user!.id;
-      const numbers = await deps.numbers(owner);
-      const existing = numbers.find(n => n.type === "work" && n.twilioNumber !== UNUSED_WORK_NUMBER);
-      if (existing) {
-        if (existing.twilioNumber !== WORK_NUMBER_CANDIDATE.phoneNumber)
-          return res.status(409).json({ error: "Рабочий номер уже назначен. Переназначение не выполнялось." });
-        if (!numbers.some(n => n.twilioNumber === UNUSED_WORK_NUMBER))
-          return res.json({ phoneNumber: { id: existing.id, phoneNumber: existing.twilioNumber, name: existing.name, type: existing.type }, reused: true });
-      }
-      // The provider is read before DB assignment. A disconnected/foreign route is a blocker, not an invitation to change it.
-      const inspected = await deps.inspect(WORK_NUMBER_CANDIDATE.phoneNumber);
-      if (!verifyNumberRouting(inspected))
-        return res.status(409).json({ error: "Номер не прошёл проверку голосового маршрута. Ничего не перенастроено." });
-      const assigned = await deps.assign(WORK_NUMBER_CANDIDATE.id, owner);
-      res.json({ phoneNumber: { id: assigned.id, phoneNumber: assigned.twilioNumber, name: assigned.name, type: assigned.type }, reused: false });
-    } catch (error: any) {
-      const conflict = error?.status === 409 || /not available|already|lock/i.test(error?.message ?? "");
-      res.status(conflict ? 409 : 503).json({ error: conflict ?
-        "Номер уже занят или назначение выполняется. Обновите список; чужой номер не переназначен." :
-        "Не удалось проверить или подключить номер. Новый звонок не запускался." });
-    }
+  const write:RequestHandler=(req,res,next)=>{
+    if(!req.is("application/json"))return res.sendStatus(415);
+    if(req.get("origin")){try{
+      const origin=new URL(req.get("origin")!);
+      if(origin.host!==req.get("host")||!["http:","https:"].includes(origin.protocol))return res.sendStatus(403);
+    }catch{return res.sendStatus(403);}}
+    next();
+  };
+  const fail=(res:any,e:any)=>{
+    const messages:Record<string,string>={subscription_required:"Для назначения номера нужна подписка TalkHint.",
+      pool_unavailable:"Недостаточно свободных номеров. Назначение не выполнено; обновите список и повторите позже.",
+      purpose_already_connected:"Номер этого назначения уже подключён. Он не изменён.",
+      number_route_not_ready:"Номер пока не готов к работе с TalkHint. Назначение не выполнено."};
+    if(e instanceof z.ZodError)return res.status(400).json({error:"Выберите только фреймы, только работу или оба номера."});
+    return res.status(e instanceof NumberSetupError?e.status:503).json({error:messages[e?.code]||"Назначение не подтверждено. Обновите список номеров перед повтором.",code:e instanceof NumberSetupError?e.code:"assignment_unavailable"});
+  };
+  app.post("/api/call-profiles/connect",auth,write,async(req,res)=>{
+    try {const data=input.parse(req.body);res.json(await deps.connect(req.user!.id,data.choice));}
+    catch(e){fail(res,e);}
+  });
+  // Older native clients keep working, but there is no creator-specific adoption.
+  app.post("/api/call-profiles/work-number",auth,write,async(req,res)=>{
+    try {const data=z.object({numberId:z.string().min(1).max(100)}).strict().parse(req.body);
+      const result:any=await deps.connect(req.user!.id,"work",{work:data.numberId});
+      res.json({...result,phoneNumber:result.phoneNumbers?.find((n:any)=>n.type==="work")});}
+    catch(e){fail(res,e);}
   });
 }

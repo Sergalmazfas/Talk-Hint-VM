@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import { createServer } from "http";
 import request from "supertest";
@@ -31,7 +31,7 @@ const h = vi.hoisted(() => {
       rows: ALL_COLUMNS.map((c) => ({ column_name: c })),
     }),
   };
-  return { pool };
+  return { pool, role: "owner" as "owner" | "regular" | "guest" };
 });
 
 vi.mock("../db", () => ({
@@ -46,8 +46,10 @@ vi.mock("../db", () => ({
 const { storage } = await import("../storage");
 
 vi.mock("../auth", () => ({
-  authMiddleware: (req: any, _res: any, next: any) => {
-    req.user = { id: "u1", email: "u1@example.com", language: "en", plan: "free" };
+  authMiddleware: (req: any, res: any, next: any) => {
+    const owner = h.role === "owner" || req.get("authorization") === "Bearer valid-session-token";
+    if (!owner && h.role === "guest") return res.status(401).json({ error: "Unauthorized" });
+    req.user = { id: "u1", email: owner ? "u1@example.com" : "regular@example.test", language: "en", plan: "free" };
     next();
   },
   registerUser: vi.fn(),
@@ -114,8 +116,11 @@ async function makeApp() {
 let app: express.Express;
 
 beforeEach(async () => {
+  h.role = "owner";
+  vi.stubEnv("BENCHMARK_ADMIN_EMAILS", "u1@example.com");
   app = await makeApp();
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("GET /api/health", () => {
   it("includes the contactMemory.{writes, drift} shape", async () => {
@@ -158,7 +163,11 @@ describe("GET /api/health", () => {
       expect(res.body.alertChannels.sms).toEqual({
         configured: false,
         ready: false,
-        missing: [],
+        missing: [
+          "sender_readiness_unverified",
+          "recipient_sms_consent_unverified",
+          "suppression_check_unavailable",
+        ],
       });
       expect(res.body.alertChannels.email).toEqual({
         configured: false,
@@ -269,12 +278,9 @@ describe("GET /api/health", () => {
 // ---------------------------------------------------------------------------
 // Production access gate for the save-health endpoints. The gate is secure by
 // default in production: access is DENIED unless the requester proves they
-// belong, via either a valid shared on-call token (HEALTH_STATUS_TOKEN, sent as
-// ?token=, an x-health-token header, or a Bearer header) or a valid
-// authenticated app session (the same Bearer session token the /app UI uses).
-// Outside production both endpoints stay open (frictionless dev). When denied,
-// the JSON endpoint returns 401 with no internals, and the HTML page returns a
-// token prompt rather than the dashboard.
+// belong to the existing owner allowlist. Shared on-call tokens and ordinary
+// app accounts no longer bypass the web-admin boundary, including in Dev.
+// The legacy HTML address migrates only authenticated owners to /admin/health.
 // ---------------------------------------------------------------------------
 describe("save-health access gate", () => {
   function withEnv(
@@ -292,19 +298,19 @@ describe("save-health access gate", () => {
   }
 
   beforeEach(() => {
-    // Default: no valid session unless a test opts in.
+    h.role = "guest";
     vi.mocked(getSessionUserId).mockResolvedValue(undefined);
   });
 
-  it("stays open outside production even when a token is configured", async () => {
+  it("denies guests outside production even when a shared token is configured", async () => {
     await withEnv(
       { NODE_ENV: "test", HEALTH_STATUS_TOKEN: "s3cret" },
       async () => {
         const api = await request(app).get("/api/health");
-        expect(api.status).toBe(200);
+        expect(api.status).toBe(401);
         const page = await request(app).get("/health");
-        expect(page.status).toBe(200);
-        expect(page.text).toContain("Database Save Health");
+        expect(page.status).toBe(401);
+        expect(page.text).toContain("Continue with Google");
       },
     );
   });
@@ -319,7 +325,7 @@ describe("save-health access gate", () => {
 
         const page = await request(app).get("/health");
         expect(page.status).toBe(401);
-        expect(page.text).toContain("On-call token required");
+        expect(page.text).toContain("Continue with Google");
         expect(page.text).not.toContain("Per-table status");
       },
     );
@@ -348,23 +354,22 @@ describe("save-health access gate", () => {
     );
   });
 
-  it("allows /api/health with the token via query, x-health-token, or Bearer", async () => {
+  it("does not accept a shared token via query, x-health-token, or Bearer as owner identity", async () => {
     await withEnv(
       { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
       async () => {
         const viaQuery = await request(app).get("/api/health?token=s3cret");
-        expect(viaQuery.status).toBe(200);
-        expect(viaQuery.body.status).toBe("ok");
+        expect(viaQuery.status).toBe(401);
 
         const viaHeader = await request(app)
           .get("/api/health")
           .set("x-health-token", "s3cret");
-        expect(viaHeader.status).toBe(200);
+        expect(viaHeader.status).toBe(401);
 
         const viaBearer = await request(app)
           .get("/api/health")
           .set("Authorization", "Bearer s3cret");
-        expect(viaBearer.status).toBe(200);
+        expect(viaBearer.status).toBe(401);
       },
     );
   });
@@ -383,7 +388,7 @@ describe("save-health access gate", () => {
     );
   });
 
-  it("allows access in production via a valid authenticated app session", async () => {
+  it("allows the existing owner and migrates the old HTML address", async () => {
     await withEnv(
       { NODE_ENV: "production", HEALTH_STATUS_TOKEN: undefined },
       async () => {
@@ -397,33 +402,42 @@ describe("save-health access gate", () => {
         const page = await request(app)
           .get("/health")
           .set("Authorization", "Bearer valid-session-token");
-        expect(page.status).toBe(200);
-        expect(page.text).toContain("Per-table status");
+        expect(page.status).toBe(307);
+        expect(page.headers.location).toBe("/admin/health");
+        const movedPage = await request(app).get("/admin/health").set("Authorization", "Bearer valid-session-token");
+        expect(movedPage.status).toBe(200);
+        expect(movedPage.text).toContain("Per-table status");
       },
     );
   });
 
-  it("serves a token prompt (no internals) for /health when locked", async () => {
+  it("serves the Google entry (no internals) for /health when locked", async () => {
     await withEnv(
       { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
       async () => {
         const res = await request(app).get("/health");
         expect(res.status).toBe(401);
-        expect(res.text).toContain("On-call token required");
+        expect(res.text).toContain("Continue with Google");
         // The real dashboard markup must not be served when locked.
         expect(res.text).not.toContain("Per-table status");
       },
     );
   });
 
-  it("serves the dashboard for /health with a valid token", async () => {
+  it("does not serve the dashboard for /health with only a shared token", async () => {
     await withEnv(
       { NODE_ENV: "production", HEALTH_STATUS_TOKEN: "s3cret" },
       async () => {
         const res = await request(app).get("/health?token=s3cret");
-        expect(res.status).toBe(200);
-        expect(res.text).toContain("Per-table status");
+        expect(res.status).toBe(401);
+        expect(res.text).not.toContain("Per-table status");
       },
     );
+  });
+  it("denies an authenticated ordinary user at both diagnostic addresses", async () => {
+    h.role = "regular";
+    expect((await request(app).get("/api/health")).status).toBe(403);
+    expect((await request(app).get("/health").set("Authorization", "Bearer ordinary")).status).toBe(403);
+    expect((await request(app).get("/admin/health").set("Authorization", "Bearer ordinary")).status).toBe(403);
   });
 });

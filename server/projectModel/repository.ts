@@ -1,0 +1,51 @@
+import type { Pool } from "pg";
+import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
+import { applyCommand, ModelError } from "./domain";
+import { initialModel } from "./seed";
+
+export interface ModelRepository {
+  read(owner: string): Promise<ProjectModelState>;
+  update(owner: string, revision: number, command: ModelCommand): Promise<ProjectModelState>;
+}
+/** Additive table, owner-keyed; durable history and state commit atomically. */
+export class PgModelRepository implements ModelRepository {
+  private ready?: Promise<void>;
+  constructor(private getPool: () => Promise<Pool>) {}
+  private async database() {
+    const pool = await this.getPool();
+    if (!this.ready) {
+      this.ready = pool.query(`CREATE TABLE IF NOT EXISTS talkhint_project_models (
+        owner_key text PRIMARY KEY, revision integer NOT NULL,
+        state jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
+      )`).then(() => {}).catch(e => { this.ready = undefined; throw e; });
+    }
+    await this.ready;
+    return pool;
+  }
+  private async ensure(pool: Pool, owner: string) {
+    await pool.query("INSERT INTO talkhint_project_models(owner_key, revision, state) VALUES($1,0,$2::jsonb) ON CONFLICT(owner_key) DO NOTHING",
+      [owner, JSON.stringify(initialModel())]);
+  }
+  async read(owner: string) {
+    const pool = await this.database();
+    await this.ensure(pool, owner);
+    const r = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
+    return r.rows[0].state as ProjectModelState;
+  }
+  async update(owner: string, revision: number, command: ModelCommand) {
+    const pool = await this.database();
+    await this.ensure(pool, owner);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const r = await client.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
+      if (r.rows[0].revision !== revision) throw new ModelError(409, "Модель изменена в другой вкладке. Обновите данные и сравните правки.");
+      const next = applyCommand(r.rows[0].state, command, owner);
+      await client.query("UPDATE talkhint_project_models SET state=$2::jsonb,revision=$3,updated_at=now() WHERE owner_key=$1",
+        [owner, JSON.stringify(next), next.revision]);
+      await client.query("COMMIT");
+      return next;
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+}

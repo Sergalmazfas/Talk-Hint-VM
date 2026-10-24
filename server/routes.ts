@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
+import { registerIncomingRoutes } from "./incomingSecretary/routes";
+import { tryIncomingSecretary, stopIncomingCard } from "./incomingSecretary/runtime";
 import { defaultCallingNumber, validCardScope } from "./callProfiles/policy";
 import { inspectExistingVoiceNumber } from "./twilioService";
 import { createServer, type Server } from "http";
@@ -22,6 +24,7 @@ import { getStripePublishableKey } from "./stripeClient";
 import { searchAvailableNumbers, purchasePhoneNumber, configureVoiceWebhook, configureAllPoolWebhooks, configureWebhookByPhone } from "./twilioService";
 import { saveSubscription, sendIncomingCallPush, getVapidPublicKey } from "./pushService";
 import { startTrainingSession, processTrainingTurn, resetTrainingSession, generateTTS } from "./training";
+import { recordingPermitted, sendSmsSafely } from "./communications/safety";
 import { deriveOtherPartyPhone, formatStaticCards } from "./contactMemory";
 import { pendingCalls, users, phoneNumbers, deviceTokens, DIALOGUE_ENTRY_TYPES } from "@shared/schema";
 import type { DialogueEntry, DialogueEntryType } from "@shared/schema";
@@ -34,10 +37,13 @@ import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
+import { registerAdminWebBoundary } from "./adminWeb";
+import { registerProjectModel } from "./projectModel/routes";
 import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices, resolveTranslatorPlayback } from "./translation/twilioBridge";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
 import { registerSecretaryRoutes } from "./secretary/routes";
+import { registerMobileSecretary } from "./mobileSecretary/routes";
 import { registerLegacyTestCallRoute } from "./secretary/legacyRoute";
 import { registerChatGPTIntegration } from "./chatgpt/routes";
 import { mcpReleaseConfiguration } from "./chatgpt/releaseConfig";
@@ -166,6 +172,7 @@ function timingSafeEqualStr(a: string, b: string): boolean {
 }
 
 async function healthAccessAllowed(req: express.Request): Promise<boolean> {
+  if (isBenchmarkAdmin((req.user as any)?.email)) return true;
   // Frictionless outside production.
   if (process.env.NODE_ENV !== "production") return true;
 
@@ -285,6 +292,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  registerAdminWebBoundary(app);
+  registerProjectModel(app);
+  registerMobileSecretary(app);
   setupWebSocket(httpServer);
   registerChatGPTIntegration(app, mcpReleaseConfiguration(
     process.env, process.env.NODE_ENV === "production", () => process.env.SESSION_SECRET ?? "",
@@ -403,9 +413,11 @@ export async function registerRoutes(
   // In production, use cwd-relative path; in dev, use __dirname-relative
   const talkhintUiPath = process.env.NODE_ENV === "production"
     ? path.join(process.cwd(), "dist/talkhint/ui")
-    : path.join(__dirnameResolved, "../dist/talkhint/ui");
+    : path.join(__dirnameResolved, "../talkhint/ui");
   console.log("[TalkHint] Serving UI from:", talkhintUiPath);
-  app.use("/app", express.static(talkhintUiPath));
+  app.use("/admin/app", express.static(talkhintUiPath, {
+    index: "index.html", setHeaders: res => res.setHeader("Cache-Control", "no-store"),
+  }));
 
   app.get("/api/expo-url", (_req, res) => {
     let url = "";
@@ -1145,7 +1157,9 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         // diagnostic-flagged owner are recorded via native Twilio recording.
         // Fail-closed helper — any error means "don't record"; a recording
         // failure can never stop or degrade the call.
-        const diagRecording = !copilotCall && await isDiagnosticRecordingUser(pendingCall.userId);
+        const diagRecording = !copilotCall &&
+          recordingPermitted(isIosConferenceClientType(pendingCall.clientType) ? "incoming_conference" : "incoming_browser") &&
+          await isDiagnosticRecordingUser(pendingCall.userId);
         if (diagRecording) {
           void stampRecordingPolicy(callSid);
         }
@@ -1448,6 +1462,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     // Try phoneNumbers table first (user-assigned), then available_numbers (line pool)
     let ownerUserId: string | null = null;
     let ownerPhoneNumberId: string | null = null;
+    let ownerPhoneNumberType: string | null = null;
     let lineId: number | null = null;
     let lineName: string | null = null;
     
@@ -1458,6 +1473,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         if (phoneNumber) {
           ownerUserId = phoneNumber.userId;
           ownerPhoneNumberId = phoneNumber.id;
+          ownerPhoneNumberType = phoneNumber.type;
           console.log("[TwiML Voice] INCOMING: Found owner userId:", ownerUserId);
         } else {
           // Second try: available_numbers pool (line-based)
@@ -1529,6 +1545,8 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         twimlResponse.hangup();
       }
     } else if (ownerUserId) {
+      // Opt-in AI Work handling must return BEFORE legacy push/SMS/hold logic.
+      if (await tryIncomingSecretary(req, res, ownerUserId, ownerPhoneNumberId, ownerPhoneNumberType, callSid)) return;
       // INCOMING CALL: Send push notification and HOLD the call
       console.log("[TwiML Voice] INCOMING CALL from", fromNumber, "to", toNumber);
       
@@ -1581,15 +1599,14 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
         try {
           const [user] = await db.select().from(users).where(eq(users.id, ownerUserId));
           if (user?.forwardingPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-            const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+            const recipient = user.forwardingPhone;
             const protocol = req.get("x-forwarded-proto") || "https";
             const appUrl = `${protocol}://${host}/app`;
-            await twilioClient.messages.create({
+            await sendSmsSafely("incoming_call_notification", () => twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN).messages.create({
               body: `📞 Incoming call from ${fromNumber}. Answer in app: ${appUrl}`,
               from: toNumber, // Use the Twilio number that received the call
-              to: user.forwardingPhone
-            });
-            console.log(`[TwiML Voice] SMS sent to ${user.forwardingPhone}`);
+              to: recipient
+            }));
           } else {
             console.log("[TwiML Voice] No forwarding phone for SMS notification");
           }
@@ -1728,14 +1745,13 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
        // (Task #173). Fail-closed: any error means "don't record"; recording
        // never alters call routing, streaming, or hints in any way.
       let diagnosticTestRecording = false;
-      if (fromNumber && fromNumber.startsWith("client:user-")) {
+      if (fromNumber && fromNumber.startsWith("client:user-") && recordingPermitted("outgoing_browser")) {
         diagnosticTestRecording = await isDiagnosticRecordingUser(
           fromNumber.replace("client:user-", ""),
         );
       }
-      // Recording is controlled only by the per-user admin capability. The
-      // legacy global env toggle is intentionally ignored so no other user or
-      // line can turn recording on.
+      // Capability is necessary, never consent. The independent safety gate
+      // above denies unverified participant consent, including for admins.
       const shouldRecord = !copilotMode && diagnosticTestRecording;
       if (shouldRecord) {
         // The admin-enabled diagnostic profile records silently regardless of
@@ -1791,7 +1807,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
           await storage.updateCall(call.id, { metadata });
           console.log(`[Recording] Stored recording metadata for ${callSid}`);
           // Every diagnostic user's call is a test: auto-send to the benchmark.
-          if (call.userId && await isDiagnosticRecordingUser(call.userId)) {
+          if (call.userId && recordingPermitted("recording_callback") && await isDiagnosticRecordingUser(call.userId)) {
             scheduleAutoBenchmark(callSid);
           }
         }
@@ -2064,6 +2080,17 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     if (authHeader?.startsWith("Bearer ")) {
       await deleteSession(authHeader.substring(7));
     }
+    // Web access now uses the existing Passport session as well as the app
+    // token. Signing out must close both; native clients keep the same reply.
+    if (typeof req.logout === "function") {
+      return req.logout(() => {
+        if (req.session) return req.session.destroy(() => {
+          res.clearCookie("connect.sid");
+          res.json({ success: true });
+        });
+        res.json({ success: true });
+      });
+    }
     res.json({ success: true });
   });
 
@@ -2276,23 +2303,17 @@ USER'S NATIVE LANGUAGE: ${langName}`;
     }
   });
 
+  registerIncomingRoutes(app, authMiddleware);
   registerCallProfileRoutes(app, authMiddleware, {
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),
-    inspect: number => inspectExistingVoiceNumber(number),
-    canAdoptExisting: async () => {
-      const { pool, dbReady } = await import("./db");
-      await dbReady;
-      if (!pool) return false;
-      const { canAdoptCdl } = await import("./callProfiles/activateCdl");
-      return canAdoptCdl(pool);
-    },
-    assign: async (_numberId, owner) => {
+    user: owner => storage.getUser(owner),
+    connect: async (owner, choice, selected, name) => {
       const { pool, dbReady } = await import("./db");
       await dbReady;
       if (!pool) throw new Error("Database unavailable");
-      const { activateCdl } = await import("./callProfiles/activateCdl");
-      return activateCdl(pool, owner);
+      const { assignProfiles } = await import("./callProfiles/assign");
+      return assignProfiles(pool, owner, choice, inspectExistingVoiceNumber, selected, name);
     },
   });
 
@@ -2381,6 +2402,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       if (!updated) {
         return res.status(404).json({ error: "Card not found" });
       }
+      stopIncomingCard(user.id,id);
       console.log(`[Cards] User ${user.id} updated card ${id}`);
       res.json({ success: true, card: updated });
     } catch (error: any) {
@@ -2394,6 +2416,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
       const user = (req as any).user;
       const { id } = req.params;
       const deleted = await storage.deleteKnowledgeCardById(user.id, id);
+      if(deleted)stopIncomingCard(user.id,id);
       if (!deleted) {
         return res.status(404).json({ error: "Card not found" });
       }
@@ -2957,21 +2980,20 @@ USER'S NATIVE LANGUAGE: ${langName}`;
         return res.status(400).json({ error: "Number ID and name required" });
       }
       
-      const existingNumbers = await storage.getUserPhoneNumbers(req.user!.id);
-      const user = await storage.getUser(req.user!.id);
-      
-      // SIMPLIFIED: Only subscribers can have phone numbers
-      const hasSubscription = user?.plan && user.plan !== "free" && user.plan !== "none";
-      if (!hasSubscription) {
-        return res.status(400).json({ error: "Please subscribe to get a phone number." });
+      const purpose=type??"personal";
+      if(!["personal","work"].includes(purpose)||typeof numberId!=="string"||typeof name!=="string"||name.length>120)
+        return res.status(400).json({error:"Invalid number purpose or name"});
+      if(req.get("origin")){
+        try{if(new URL(req.get("origin")!).host!==req.get("host"))return res.sendStatus(403);}
+        catch{return res.sendStatus(403);}
       }
-      // Basic plan: 1 number only
-      if (existingNumbers.length >= 1) {
-        return res.status(400).json({ error: "Basic plan allows only 1 number." });
-      }
-      
-      const phoneNumber = await storage.assignNumber(numberId, req.user!.id, name, type || "personal");
-      res.json({ phoneNumber });
+      const {pool,dbReady}=await import("./db");await dbReady;
+      if(!pool)throw new Error("Database unavailable");
+      const {assignProfiles}=await import("./callProfiles/assign");
+      const result=await assignProfiles(pool,req.user!.id,purpose==="work"?"work":"frames",
+        inspectExistingVoiceNumber,{[purpose]:numberId},name);
+      const phoneNumber=result.phoneNumbers.find(n=>n.type===purpose);
+      res.json({phoneNumber:{...phoneNumber,twilioNumber:phoneNumber?.phoneNumber},reused:result.reused});
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -2979,7 +3001,13 @@ USER'S NATIVE LANGUAGE: ${langName}`;
 
   app.put("/api/numbers/:id", authMiddleware, async (req, res) => {
     try {
+      const owned=await storage.getPhoneNumber(req.params.id);
+      if(!owned||owned.userId!==req.user!.id)return res.status(404).json({error:"Number not found"});
       const { name, activePromptId } = req.body;
+      if(activePromptId){
+        const prompts=await storage.getUserPrompts(req.user!.id);
+        if(!prompts.some(p=>p.id===activePromptId))return res.status(404).json({error:"Prompt not found"});
+      }
       const updated = await storage.updatePhoneNumber(req.params.id, { name, activePromptId });
       if (!updated) {
         return res.status(404).json({ error: "Number not found" });
