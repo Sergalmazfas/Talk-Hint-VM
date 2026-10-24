@@ -324,13 +324,12 @@ export function callApprovalWidgetHtml(): string {
       transcript.appendChild(item); const entry = { item, text, translation }; turns.set(key, entry); return entry;
     }
     function addTurn(event) { const entry = ensureTurn(event.turnId, event.role); if (!entry || typeof event.text !== "string") return; entry.text.textContent = event.text; }
-    function addSubtitle(event) { const entry = ensureTurn(event.turnId, ""); if (!entry || typeof event.translation !== "string") return; const language = event.language === "ru" ? "Перевод · русский: " : event.language === "es" ? "Traducción · español: " : ""; entry.translation.textContent = language + event.translation; entry.translation.hidden = false; }
     function addSnapshot(task) {
       if (!task || typeof task !== "object") return;
       const status = valueText(task.status) || "обновляется";
       const summary = summaryText(task); $("resultCopy").textContent = "Статус: " + status + (summary ? " · " + summary : "") + ".";
       const list = Array.isArray(task.transcriptTurns) ? task.transcriptTurns : [];
-      list.forEach(turn => { if (turn && typeof turn === "object") { addTurn({ turnId: turn.turnId || turn.id, role: turn.role, text: turn.text }); if (typeof turn.translation === "string") addSubtitle({ turnId: turn.turnId || turn.id, translation: turn.translation, language: turn.language }); } });
+      list.forEach(turn => { if (turn && typeof turn === "object") { addTurn({ turnId: turn.turnId || turn.id, role: turn.role, text: turn.text }); } });
     }
     function clearScheduledAudio() {
       scheduledSources.forEach(source => { try { source.stop(); } catch (_) {} });
@@ -377,8 +376,6 @@ export function callApprovalWidgetHtml(): string {
         else setMonitorState(connectedAudioMessage());
       }
       else if (event.type === "turn") addTurn(event);
-      else if (event.type === "subtitle") addSubtitle(event);
-      else if (event.type === "subtitle_unavailable") setMonitorState("Перевод этой реплики недоступен; исходный текст не изменён.");
       else if (event.type === "audio") playAudio(event.payload, event.role);
       else if (event.type === "status") { setMonitorState("Статус TalkHint: " + valueText(event.status)); if (terminalStatus(event.status)) markTerminal(event.status); }
       else if (event.type === "ended") {

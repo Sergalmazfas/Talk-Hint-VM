@@ -78,7 +78,8 @@ final class SecretaryTranscriptRenderingTests: XCTestCase {
         let stack = try feed(controller)
         XCTAssertEqual(stack.arrangedSubviews.count, 2)
         assertAttachedWidthConstraints(stack, count: 2)
-        XCTAssertTrue(texts(controller).contains("Привет"))
+        XCTAssertTrue(texts(controller).contains("Hello"))
+        XCTAssertFalse(texts(controller).contains("Привет"), "Secretary must show original speech, not legacy translations")
     }
 
     func testLegacyTranscriptSnapshotRestoresWithoutDuplicates() throws {

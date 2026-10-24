@@ -1,18 +1,27 @@
 import WebSocket from "ws";
 import { LiveAudio,liveConfig } from "../incomingSecretary/liveAudio";
 import type { SecretaryRealtimeSession,SecretaryRealtimeEvent } from "./agent";
+import { secretaryEndTool } from "./callEnding";
+import { SecretaryLiveEndTool } from "./liveEndTool";
 
 export function outgoingLiveConfig(instructions:string){
-  return liveConfig(instructions,{
+  const config = liveConfig(instructions + "\nClosing policy: only use prepare_call_end after a confirmed summary/next step or explicit decline. Never end for hold, transfer, silence or the task goal alone. After a successful tool result, say exactly its farewell and listen.",{
     instructions:instructions+"\n"+
       "Speak naturally and briefly. Follow the other party's EN/RU/ES. Use the trusted standard secretary introduction, never an invented identity.\n"+
       "Interruption policy: Yield immediately when the other party speaks; understand their corrections. Noise, music and background chatter are not requests.\n"+
       "On hold or transfer: acknowledge once, wait silently, keep listening and resume when the person returns. Do not end a call merely for silence or hold music.\n"+
-      "Delegation policy: Backend tools: reason about the owner's authorized assignment and facts already provided; no external tools or calendar are connected.\n"+
+      "Delegation policy: Backend tools: reason about the owner's authorized assignment and facts already provided. The only tool is prepare_call_end; no external business tools or calendar are connected.\n"+
+      "Closing policy: summarize the actual outcome/next step and let the other party confirm or correct it. After confirmation or an explicit decline, delegate with <|SpawnThinking|> to call prepare_call_end, then speak exactly its farewell. Do not end on hold, transfer, silence, or merely reaching the task goal. If the person continues, listen and respond; the previous end request is cancelled and a fresh closing decision is required.\n"+
       "Generate <|SpawnThinking|> when the assignment requires careful reasoning or checking the supplied facts; do not generate it for simple greetings or brief clarifications. Never invent verified facts, availability or actions.",
     opening:"Begin the authorized telephone conversation now using the trusted secretary introduction and actual task above. Then listen.",
     tools:[],
   });
+  return {
+    ...config,
+    delegation: { ...config.delegation, responses: {
+      ...config.delegation.responses, tools: [{ ...secretaryEndTool, strict: false }],
+    } },
+  };
 }
 /** Native full-duplex Live; no Realtime cancel/truncate or cloned TTS. */
 export class OpenAISecretaryLiveSession implements SecretaryRealtimeSession{
@@ -22,6 +31,10 @@ export class OpenAISecretaryLiveSession implements SecretaryRealtimeSession{
   private listeners:Array<(e:SecretaryRealtimeEvent)=>void>=[];
   private transcripts=new Map<string,{text:string;end:number;stream:string;timer?:ReturnType<typeof setTimeout>}>();
   private seen=new Set<string>();
+  private endTool = new SecretaryLiveEndTool(
+    event => this.ai?.send(event),
+    request => this.emit({ type: "end_requested", request }),
+  );
   constructor(private instructions:string,private factory=(url:string)=>new WebSocket(url,{
     headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`},
   })){}
@@ -72,7 +85,10 @@ export class OpenAISecretaryLiveSession implements SecretaryRealtimeSession{
   }
   private event(e:any){
     if(this.closed)return;
-    if(e.type==="session.input_transcript.delta")this.text(e,"guest");
+    if(e.type==="session.input_transcript.delta"){
+      if(typeof e.delta==="string" && e.delta.trim()) this.emit({type:"guest_activity"});
+      this.text(e,"guest");
+    }
     if(e.type==="session.output_transcript.delta")this.text(e,"secretary");
     if(e.type==="session.output_audio.delta"){
       if(typeof e.delta!=="string"||e.delta.length>128000||e.delta.length%4||!/^[A-Za-z0-9+/]*={0,2}$/.test(e.delta)){
@@ -86,6 +102,10 @@ export class OpenAISecretaryLiveSession implements SecretaryRealtimeSession{
     }
     if(e.type==="response.event"&&["response.failed","response.incomplete"].includes(e.event?.type))
       this.fail("GPT-Live reasoning failed; no fallback");
+    if(e.type==="response.event"){
+      try { this.endTool.event(e.event); }
+      catch { this.fail("GPT-Live closing tool failed"); }
+    }
     if(["transport_error","transport_closed","session.closed"].includes(e.type)){
       this.flush("guest");this.emit({type:"closed"});this.close();
     }

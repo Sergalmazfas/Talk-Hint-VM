@@ -4,6 +4,7 @@ import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
 import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { randomUUID } from "node:crypto";
+import { hangupSecretaryCall } from "./secretary/dialer";
 import { TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, MODE_PROMPTS, getModePrompt, getFullPrompt, LIVE_ANTI_LOOP_RULES, LIVE_GROUNDING_RULES, GOAL_PRIORITY_RULES, STRATEGY_MEMORY_RULES, buildLiveSystemPrompt, buildLiveUserPrompt, buildAskRefinePrompt } from "@shared/prompts";
 import { FastLayerManager, FastPhraseResult, FAST_THRESHOLD_MS, FAST_COOLDOWN_MS } from "./fastLayer";
 import { getOrCreateEngine, removeEngine, GoalEngine } from "./goalEngine";
@@ -55,16 +56,12 @@ import { handleSecretaryTwilioStream } from "./secretary/agent";
 import { secretaryVoiceProvider } from "./secretary/voice";
 import {
   appendSecretaryTurn,
-  beginSecretarySubtitleTranslation,
-  endSecretarySubtitleTranslation,
   getSecretaryTaskById,
   getSecretaryTaskForCall,
   markSecretaryStreamEnded,
   markSecretaryStreamFailed,
-  persistSecretaryTurnTranslation,
   toSecretaryTaskReport,
 } from "./secretary/tasks";
-import { MAX_SUBTITLE_JOBS_PER_CALL, translateTextSubtitle } from "./translation/textSubtitle";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
 import { verifySecretaryStream } from "./secretary/streamAuth";
@@ -841,7 +838,6 @@ class GPTRealtimeHandler {
 }
 
 export function setupWebSocket(server: Server) {
-  const secretarySubtitleTurnCounts = new Map<string, number>();
   const wss = new WebSocketServer({ noServer: true });
   const labWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
 
@@ -1036,60 +1032,19 @@ export function setupWebSocket(server: Server) {
         },
         onTurn: async (taskId, role, text, callSid) => {
           const turnId = randomUUID();
-          beginSecretarySubtitleTranslation(taskId);
-          let turn: Awaited<ReturnType<typeof appendSecretaryTurn>>;
-          try {
-            turn = await appendSecretaryTurn(taskId, role, text, callSid, turnId);
-          } catch (error) {
-            endSecretarySubtitleTranslation(taskId);
-            throw error;
-          }
-          if (!turn) {
-            endSecretarySubtitleTranslation(taskId);
-            return;
-          }
+          const turn = await appendSecretaryTurn(taskId, role, text, callSid, turnId);
+          if (!turn) return;
           publishSecretaryFeedEvent(taskId, { type: "turn", turnId, role, text });
-          const scheduled = secretarySubtitleTurnCounts.get(taskId) ?? 0;
-          if (scheduled >= MAX_SUBTITLE_JOBS_PER_CALL) {
-            publishSecretaryFeedEvent(taskId, {
-              type: "subtitle_unavailable",
-              turnId,
-              role,
-              language: turn.translationLanguage,
-              reason: "turn_limit",
-            });
-            endSecretarySubtitleTranslation(taskId);
-            return;
-          }
-          secretarySubtitleTurnCounts.set(taskId, scheduled + 1);
-          void translateTextSubtitle(turn.text, turn.translationLanguage)
-            .then(async (result) => {
-              if (result.translation) {
-                const saved = await persistSecretaryTurnTranslation(
-                  taskId, callSid, turnId, result.translation, turn.translationLanguage,
-                );
-                if (saved) return;
-              }
-              publishSecretaryFeedEvent(taskId, {
-                type: "subtitle_unavailable",
-                turnId,
-                role,
-                language: turn.translationLanguage,
-                reason: result.unavailableReason ?? "provider_error",
-              });
-            })
-            .catch(() => publishSecretaryFeedEvent(taskId, {
-              type: "subtitle_unavailable",
-              turnId,
-              role,
-              language: turn.translationLanguage,
-              reason: "provider_error",
-            }))
-            .finally(() => endSecretarySubtitleTranslation(taskId));
         },
         onAudio: (taskId, role, payload) => publishSecretaryFeedEvent(taskId, { type: "audio", role, payload }),
+        onEndCall: async (taskId, callSid) => {
+          const task = await getSecretaryTaskForCall(taskId, callSid);
+          if (!task || !["connected", "ringing", "starting"].includes(task.status)) {
+            throw new Error("Secretary end request no longer matches an active authorized call");
+          }
+          await hangupSecretaryCall(callSid);
+        },
         onStreamEnd: async (taskId, reason, callSid) => {
-          secretarySubtitleTurnCounts.delete(taskId);
           if (callSid) {
             const task = reason
               ? await markSecretaryStreamFailed(taskId, callSid, reason)

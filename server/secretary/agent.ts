@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { SecretaryCallEnding, type SecretaryEndRequest } from "./callEnding";
 import {
   isSafeEnglishTranslation,
   synthesizeCartesiaCloneSpeech,
@@ -47,6 +48,7 @@ export interface SecretaryStreamDependencies {
   ): Promise<void>;
   onStreamEnd(taskId: string, reason?: string, callSid?: string): Promise<void>;
   onAudio?(taskId: string, role: "secretary" | "guest", payload: string): void;
+  onEndCall?(taskId: string, callSid: string): Promise<void>;
   /** Optional lab telemetry only; never changes the native call policy. */
   onDiagnostic?(event: "realtime_ready" | "guest_speech_started" | "response_text_ready" |
     "tts_requested" | "tts_received" | "playback_cleared"): void;
@@ -54,7 +56,9 @@ export interface SecretaryStreamDependencies {
 
 export type SecretaryRealtimeEvent =
   | { type: "ready" }
+  | { type: "end_requested"; request: SecretaryEndRequest }
   | { type: "speech_started" }
+  | { type: "guest_activity" }
   | { type: "guest_transcript"; text: string }
   | { type: "response_text"; responseId: string; text: string }
   | { type: "audio"; responseId: string; itemId: string; mulaw: Buffer }
@@ -102,7 +106,7 @@ export function configureSecretaryAgentForTests(services: {
 export function buildSecretaryInstructions(instruction: string, ownerName?: ConfirmedSecretaryOwnerName): string {
   return [
     "You are an automated telephone secretary speaking on behalf of the person who authorized this specific call.",
-    "Use English by default, or Russian when appropriate for the conversation. Use the trusted introduction policy below.",
+    "Follow the other party's language: Russian, English or Spanish. The owner's task language does not force the call language. If the preference is ambiguous, ask briefly. Use the trusted introduction policy below.",
     "Do not assign yourself a personal name or claim a human identity.",
     "Your purpose is to listen patiently, explain the caller's stated issue, ask relevant clarifying questions, and accurately report the other party's answer back to the person who authorized the call.",
     "This is a soft goal, not a rigid script. Let the representative explain. Ask a concise follow-up only when it helps understand what happened, what will happen next, a promised callback day/time, a reference number, or what the caller should do. Do not pressure the representative or repeat a question after a clear answer.",
@@ -453,10 +457,17 @@ export function handleSecretaryTwilioStream(
   const earlyAudio: Buffer[] = [];
   let earlyAudioBytes = 0;
   let turnQueue = Promise.resolve();
+  const ending = new SecretaryCallEnding(async () => {
+    if (finalized || !context || !callSid || !deps.onEndCall) return;
+    // The provider operation is scoped to the already authorized task/SID.
+    await deps.onEndCall(taskId, callSid);
+    await finish();
+  }, () => { void finish("Secretary could not confirm telephone disconnection"); });
 
   const queueTurn = (role: "secretary" | "guest", text: string) => {
     const clean = text.trim().slice(0, MAX_OUTPUT_TEXT_CHARS);
     if (!clean || !taskId) return;
+    if (role === "secretary") ending.played(clean);
     turnQueue = turnQueue.then(() => deps.onTurn(taskId, role, clean, callSid)).catch((error: unknown) => {
       // Log only the database error code, never the spoken text or SQL params.
       const code = (error as { code?: unknown })?.code;
@@ -491,6 +502,7 @@ export function handleSecretaryTwilioStream(
   const finish = async (reason?: string) => {
     if (finalized) return;
     finalized = true;
+    ending.close();
     nativePlayback?.close();
     clearTimeout(callTimer);
     currentSpeech?.abort();
@@ -674,10 +686,16 @@ export function handleSecretaryTwilioStream(
         realtime?.startIntroduction();
         for (const frame of earlyAudio.splice(0)) realtime?.sendAudio(realtime.inputFormat === "mulaw8k" ? frame : mulaw8kToPcm24k(frame));
       } else if (event.type === "speech_started") {
+        ending.cancel();
         deps.onDiagnostic?.("guest_speech_started");
         interruptPlayback();
       } else if (event.type === "guest_transcript") {
+        ending.cancel();
         queueTurn("guest", event.text);
+      } else if (event.type === "guest_activity") {
+        ending.cancel();
+      } else if (event.type === "end_requested") {
+        if (deps.onEndCall) ending.request(event.request);
       } else if (event.type === "audio") {
         nativePlayback?.audio(event.responseId, event.itemId, event.mulaw);
       } else if (event.type === "audio_done") {

@@ -84,6 +84,49 @@ class FakeRealtimeSession implements SecretaryRealtimeSession {
 
 const originalApiKey = process.env.OPENAI_API_KEY;
 
+it.each(["none", "guest_activity", "speech_started"] as const)(
+  "ends only the authorized SID after acknowledged farewell; interruption=%s", async interruption => {
+    vi.useFakeTimers();
+    try {
+      process.env.OPENAI_API_KEY = "fixture-not-a-key";
+      const realtime = new FakeRealtimeSession(false), ws = new FakeTwilioSocket();
+      configureSecretaryAgentForTests({ realtimeFactory: () => realtime });
+      const onEndCall = vi.fn(async () => {}), onStreamEnd = vi.fn(async () => {});
+      handleSecretaryTwilioStream(ws as any, {
+        lookup: async () => ({ instruction: "Ask for an update", ownerId: "synthetic-owner",
+          voiceProvider: "openai", cloneVoiceId: "" }),
+        onTurn: vi.fn(async () => {}), onEndCall, onStreamEnd,
+      });
+      await ws.emit("message", { event: "start", start: {
+        callSid: "CA-synthetic", streamSid: "MZ-synthetic",
+        customParameters: { taskId: "task-synthetic", streamAuth: "synthetic-proof" },
+      } });
+      await vi.advanceTimersByTimeAsync(0);
+      realtime.emit({ type: "end_requested", request: { reason: "completed", farewell: "Thank you, goodbye." } });
+      realtime.emit({ type: "audio", responseId: "farewell", itemId: "spoken-1", mulaw: Buffer.alloc(320, 255) });
+      realtime.emit({ type: "assistant_transcript", responseId: "farewell", text: "Thank you, goodbye." });
+      realtime.emit({ type: "audio_done", responseId: "farewell" });
+      await vi.advanceTimersByTimeAsync(40);
+      const mark = ws.sent.find(event => event.event === "mark");
+      expect(mark).toBeDefined();
+      expect(onEndCall).not.toHaveBeenCalled();
+      await ws.emit("message", { event: "mark", mark: mark.mark });
+      await vi.advanceTimersByTimeAsync(0);
+      if (interruption !== "none") realtime.emit({ type: interruption });
+      await vi.advanceTimersByTimeAsync(2499);
+      expect(onEndCall).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      if (interruption === "none") {
+        expect(onEndCall).toHaveBeenCalledExactlyOnceWith("task-synthetic", "CA-synthetic");
+        expect(onStreamEnd).toHaveBeenCalledExactlyOnceWith("task-synthetic", undefined, "CA-synthetic");
+      } else {
+        expect(onEndCall).not.toHaveBeenCalled();
+        expect(onStreamEnd).not.toHaveBeenCalled();
+        await ws.emit("message", { event: "stop" });
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
 afterEach(() => {
   configureSecretaryAgentForTests(undefined);
   if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
