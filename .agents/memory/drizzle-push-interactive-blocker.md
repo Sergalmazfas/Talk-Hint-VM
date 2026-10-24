@@ -16,3 +16,18 @@ description: Why drizzle-kit push can hang/block in this repo and the safe worka
 - **Why:** there are live DB objects not mirrored in the Drizzle schema, so push
   treats them as candidates for rename. Adding additive objects by hand sidesteps
   the prompt without touching the unrelated tables.
+
+## Publish diffs and environment-specific storage
+
+Production-only runtime tables can also appear as “removed” when the publishing
+diff compares them with Dev, where the feature intentionally uses a different
+table. Never approve either renaming an unrelated table or “create new” when its
+description also deletes the production table.
+
+**Why:** Mobile Secretary separates Dev and production state; publishing offered
+to replace its production state with unrelated project-model storage.
+
+**How to apply:** Compare both database catalogs and runtime consumers first.
+Preserve required production-only tables and add new tables separately; verify
+the complete resulting migration has no unintended drops or renames before
+resuming publication.
