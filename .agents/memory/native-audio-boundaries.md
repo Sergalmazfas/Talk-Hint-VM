@@ -62,6 +62,8 @@ iPhone credentials or production account are broken.
 tests passed. Xcode simulator runtime rights can reside in the main Mach-O
 `__TEXT,__entitlements` section even when codesign reports an empty dictionary;
 checking only the signature can falsely reject a correctly configured host.
+Mac validation confirmed that simulator-local ad-hoc signing with those runtime
+rights supports real Keychain write/read/delete without changing iPhone signing.
 
 **How to apply:** Keep signing repairs local to simulator validation, inspect
 the built main executable's runtime rights separately from signature integrity,
