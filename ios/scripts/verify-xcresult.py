@@ -5,6 +5,29 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "SecretaryPersonalityTests": (
+        "testPersistedSetupDecodesPinnedKatyaAndExplicitCards",
+        "testLegacyDraftDoesNotAcquireANumberOrNewRequestID",
+        "testNumberAndBackendSurviveAmbiguousRequestRecovery",
+        "testCatalogUsesServerIdentityAndPagination",
+        "testMissingAuthenticationNeverReachesPersonalityTransport",
+        "testOutgoingReadRejectsWrongProtocolProviderOrNumber",
+        "testPersonalityAPIUsesExactPathsQueriesBearerAndExplicitSaveBody",
+        "testSaveHTTPFailuresAndCrossProfileCardsAreExplicit",
+        "testLostResponseRetryUsesSameRequestLineOriginAndProvider",
+    ),
+    "SecretaryPersonalityUITests": (
+        "testSettingsKatyaCharacterExplicitCardsSaveAndReopen",
+        "testPersonalWorkLineSheetAndPermissionsStaySeparate",
+        "testSaveServerErrorKeepsDraftAndAllowsRetryWithoutLocalCommit",
+        "testGPTAndRetellSelectionOnlyChangesFutureDrafts",
+        "testSavingNewSetupCannotRewriteAmbiguousRequestAndBackendMismatchNeverSends",
+        "testHomeRestoresAmbiguousRequestAfterLostResponseWithoutAnotherCall",
+        "testHomeBackendChangeShowsErrorWithoutSendingOrUnlockingDraft",
+        "testPendingSecretaryDraftIsIsolatedAcrossOwnerAccounts",
+        "testPendingDraftStorageSeparatesDevelopmentAndProductionOrigins",
+        "testHomePreconfirmSummaryIncludesExactTaskAndRetellRuntime",
+    ),
     "SecretaryMonitorAudioTests": (
         "testTranscriptConnectionDoesNotClaimAudioIsPlaying",
         "testAudioRequiresPacketsThenPlaybackEvidence",
@@ -51,6 +74,10 @@ REQUIRED_TESTS = {
         "testLegacyTranscriptSnapshotRestoresWithoutDuplicates",
         "testLiveUpdateAfterRecoveryReusesTheExistingCard",
         "testEmptyTurnsDoNotCreateCards",
+        "testUnavailableTwilioSourceDoesNotOfferRecreationOrDisableEnd",
+        "testSourceTrackReceiptIsNotPresentedAsAudibleProof",
+        "testLegacyServerWithoutMonitoringCapabilityKeepsExistingFeedBehavior",
+        "testReappearingFeedDiscoversSourceThatStartedWhileMonitorWasHidden",
     ),
     "CallAudioDeviceRouterTests": (
         "testOrdinaryCallsUseOnlyStandardDeviceAndWaitForCallKit",
@@ -98,7 +125,7 @@ def verify(bundle):
         for method in methods:
             if not any(suite in p and method + "()" in p for p in passed):
                 raise ValueError(f"Missing successful {suite}/{method}()")
-    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards/Secretary/audio/recovery/secure-storage tests passed")
+    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards/Secretary/personality-UI/audio/recovery/secure-storage tests passed")
 
 
 if __name__ == "__main__":

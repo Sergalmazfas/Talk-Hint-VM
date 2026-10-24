@@ -17,6 +17,7 @@ export interface LabEvent {
 }
 
 export interface LabReport {
+  cost?: import("@shared/secretaryLabCost").LabRunCost;
   id: string;
   status: LabStatus;
   createdAt: string;

@@ -14,6 +14,7 @@ export interface LabRealtimeCallbacks {
   clear(responseId?: string): void;
   event(type: string): void;
   end(reason: string): void;
+  usage?(responseId: string, usage?: unknown): void;
 }
 export interface LabRealtimeConnection {
   connect(sdp: string): Promise<string>;
@@ -131,6 +132,9 @@ export class OpenAILabRealtime implements LabRealtimeConnection {
     if (!this.closed && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(event));
   }
   private handle(event: any) {
+    if (["response.created", "response.done"].includes(event.type) && typeof event.response?.id === "string") {
+      this.callbacks.usage?.(event.response.id, event.type === "response.done" ? event.response.usage : undefined);
+    }
     if (event.type === "session.created" || event.type === "session.updated") {
       const session = event.session;
       if (session?.model !== LAB_REALTIME_MODEL || session?.audio?.output?.voice !== LAB_REALTIME_VOICE) {

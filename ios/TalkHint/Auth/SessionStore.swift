@@ -18,12 +18,14 @@ enum VoiceProviderPreference: String, Codable {
 /// Independent of the cloned-voice setting used by Translator and Copilot.
 enum SecretaryVoiceProviderPreference: String, Codable, CaseIterable {
     case openai
+    case retell
     case elevenlabs
     case cartesia
 
     var displayName: String {
         switch self {
         case .openai: return "OpenAI"
+        case .retell: return "Retell + TalkHint Engine"
         case .elevenlabs: return "ElevenLabs"
         case .cartesia: return "Cartesia"
         }
@@ -37,7 +39,7 @@ final class SessionStore {
     static let shared = SessionStore()
 
     private let tokenKey = "talkhint.session.token"
-    private let pendingSecretaryCallKey = "talkhint.secretary.pending.call"
+    private let legacyPendingSecretaryCallKey = "talkhint.secretary.pending.call"
     private let userIdKey = "talkhint.user.id"
     private let emailKey = "talkhint.user.email"
     private let activeNumberIdKey = "talkhint.active.number.id"
@@ -52,7 +54,7 @@ final class SessionStore {
     private let translatorVoiceKey = "talkhint.translator.voice"
     private let translatorPlaybackKey = "talkhint.translator.playback"
     private let voiceProviderKey = "talkhint.voice.provider"
-    private let secretaryVoiceProviderKey = "talkhint.secretary.voice.provider"
+    private let secretaryVoiceProviderKey = "talkhint.secretary.voice.provider.v2"
 
     /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
     /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
@@ -80,6 +82,12 @@ final class SessionStore {
         var requestAttempted: Bool
         // Optional for backward-compatible Keychain decoding.
         var confirmationRejected: Bool? = nil
+        var secretaryNumberId: String? = nil
+        var secretaryBackendOrigin: String? = nil
+        // Added for owner/environment isolation. Optional for legacy Keychain
+        // decoding; unscoped legacy storage is discarded rather than replayed.
+        var ownerId: String? = nil
+        var environmentOrigin: String? = nil
 
         var needsPreparation: Bool {
             // Never discard an ambiguous attempt merely because its token
@@ -112,18 +120,46 @@ final class SessionStore {
 
     var pendingSecretaryCall: SecretaryCallDraft? {
         guard let stored = Keychain.get(pendingSecretaryCallKey),
-              let data = Data(base64Encoded: stored) else { return nil }
-        return try? JSONDecoder().decode(SecretaryCallDraft.self, from: data)
+              let data = Data(base64Encoded: stored),
+              let draft = try? JSONDecoder().decode(SecretaryCallDraft.self, from: data) else {
+            // Legacy global drafts have no trustworthy owner/environment scope.
+            // Discard rather than risk replaying a task into another account.
+            Keychain.delete(legacyPendingSecretaryCallKey)
+            return nil
+        }
+        guard draft.ownerId == userId,
+              draft.environmentOrigin == AppConfig.baseURL.absoluteString else {
+            Keychain.delete(pendingSecretaryCallKey)
+            return nil
+        }
+        return draft
     }
 
     @discardableResult
     func savePendingSecretaryCall(_ draft: SecretaryCallDraft) -> Bool {
-        guard let data = try? JSONEncoder().encode(draft) else { return false }
+        guard draft.ownerId == userId,
+              draft.environmentOrigin == AppConfig.baseURL.absoluteString,
+              let data = try? JSONEncoder().encode(draft) else { return false }
         return Keychain.set(data.base64EncodedString(), for: pendingSecretaryCallKey)
     }
 
     func clearPendingSecretaryCall() {
         Keychain.delete(pendingSecretaryCallKey)
+        Keychain.delete(legacyPendingSecretaryCallKey)
+    }
+
+    private var pendingSecretaryCallKey: String {
+        Self.pendingSecretaryCallStorageKey(
+            ownerId: userId,
+            backendOrigin: AppConfig.baseURL.absoluteString)
+    }
+
+    static func pendingSecretaryCallStorageKey(ownerId: String?, backendOrigin: String) -> String {
+        let owner = ownerId ?? "signed-out"
+        let origin = backendOrigin
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+        return "talkhint.secretary.pending.call.\(owner).\(origin)"
     }
 
     /// The phone number the user has chosen as their active line. The backend has
@@ -224,12 +260,29 @@ final class SessionStore {
 
     /// No migration from the shared clone preference: new Secretary calls default
     /// to OpenAI, while Codable preserves providers on already persisted drafts.
+    /// Owner + backend scoped: a Dev selection must never leak into a production build.
+    private var secretaryNumberKey: String {
+        "talkhint.secretary.number.\(userId ?? "signed-out").\(AppConfig.baseURL.absoluteString)"
+    }
+    var secretaryOutgoingNumberId: String? {
+        get { UserDefaults.standard.string(forKey: secretaryNumberKey) }
+        set {
+            if let newValue { UserDefaults.standard.set(newValue, forKey: secretaryNumberKey) }
+            else { UserDefaults.standard.removeObject(forKey: secretaryNumberKey) }
+        }
+    }
     var secretaryVoiceProvider: SecretaryVoiceProviderPreference {
         get {
-            // New Secretary calls use GPT-Live only. Keep legacy enum decoding for history.
-            return .openai
+            // Versioned preference intentionally migrates the former GPT-only default.
+            if let raw = UserDefaults.standard.string(forKey: secretaryVoiceProviderKey),
+               let value = SecretaryVoiceProviderPreference(rawValue: raw),
+               value == .openai || value == .retell { return value }
+            return .retell
         }
-        set { UserDefaults.standard.set(SecretaryVoiceProviderPreference.openai.rawValue, forKey: secretaryVoiceProviderKey) }
+        set {
+            guard newValue == .openai || newValue == .retell else { return }
+            UserDefaults.standard.set(newValue.rawValue, forKey: secretaryVoiceProviderKey)
+        }
     }
 
     /// How incoming calls are handled, persisted to the backend via
@@ -279,6 +332,7 @@ final class SessionStore {
 
     func clear() {
         Keychain.delete(tokenKey)
+        clearPendingSecretaryCall()
         UserDefaults.standard.removeObject(forKey: userIdKey)
         UserDefaults.standard.removeObject(forKey: emailKey)
         UserDefaults.standard.removeObject(forKey: activeNumberIdKey)
@@ -294,6 +348,5 @@ final class SessionStore {
         UserDefaults.standard.removeObject(forKey: translatorPlaybackKey)
         UserDefaults.standard.removeObject(forKey: voiceProviderKey)
         UserDefaults.standard.removeObject(forKey: secretaryVoiceProviderKey)
-        clearPendingSecretaryCall()
     }
 }

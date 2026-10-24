@@ -457,6 +457,16 @@ describe("Secretary owner-scoped routes", () => {
     expect(allowed.status).toBe(200);
     expect(hangupSecretaryCall).toHaveBeenCalledWith("CA0123456789abcdef0123456789abcdef");
   });
+  it("returns the existing completed task on repeated End without another provider action", async () => {
+    mocks.getSecretaryTaskById.mockResolvedValue({ ...task, mode: "live", status: "completed" });
+    const server = app();
+    for (let i = 0; i < 2; i++) {
+      const result = await request(server).post("/api/secretary/tasks/task-1/hangup").set("x-test-user-id", "owner-a");
+      expect(result.status).toBe(200);
+      expect(result.body.task.status).toBe("completed");
+    }
+    expect(hangupSecretaryCall).not.toHaveBeenCalled();
+  });
 
   it("does not hand a live task to the retry queue", async () => {
     mocks.retrySecretaryTask.mockResolvedValue(undefined);

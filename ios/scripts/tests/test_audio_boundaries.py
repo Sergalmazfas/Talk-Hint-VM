@@ -37,12 +37,27 @@ class AudioBoundaryTests(unittest.TestCase):
         for signature in ["override func viewDidAppear(", "@objc private func retryConnection()",
                           "@objc private func appDidBecomeActive()"]:
             starting = body(self.monitor, signature)
-            self.assertLess(starting.index("guard configureAudioPlayback() else { return }"),
-                            starting.index("connectStream()"))
+            self.assertIn("connectStream()", starting)
+            self.assertNotIn("guard configureAudioPlayback() else { return }", starting)
         configuring = body(self.monitor, "private func configureAudioPlayback()")
         self.assertIn("-> Bool", configuring)
         self.assertIn("setConnectionFailure", configuring)
         self.assertIn("return false", configuring)
+
+    def test_absent_source_never_blocks_read_only_feed_or_later_playback(self):
+        appearing = body(self.monitor, "override func viewDidAppear(")
+        connecting = body(self.monitor, "private func connectStream()")
+        monitoring = body(self.monitor, "func applyMonitoring(")
+        unavailable = body(self.monitor, "private func showSourceUnavailable()")
+        self.assertIn("connectStream()", appearing)
+        self.assertNotIn("canResubscribeFeed", appearing + connecting)
+        self.assertLess(connecting.index("onFeedSubscriptionRequested?()"),
+                        connecting.index("SessionStore.shared.token"))
+        self.assertIn("if sourceConnected == true, wasConnected != true", monitoring)
+        self.assertIn("configureAudioPlayback()", monitoring)
+        self.assertIn("showSourceUnavailable()", monitoring)
+        self.assertNotIn("stream?.disconnect()", unavailable)
+        self.assertNotIn("connectionTimeout?.cancel()", unavailable)
 
     def test_stale_monitor_cleanup_cannot_stop_new_player_or_callkit_session(self):
         stopping = body(self.monitor, "private func stopPlayback()")

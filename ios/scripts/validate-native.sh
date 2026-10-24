@@ -71,7 +71,8 @@ codesign --display --entitlements :- "$APP" \
   > "$OUT/codesign-entitlements.plist" 2> "$OUT/codesign-display.log"
 xcrun segedit "$APP/TalkHint" -extract __TEXT __entitlements "$OUT/simulator-entitlements.plist"
 python3 scripts/verify-native-entitlements.py "$OUT/simulator-entitlements.plist"
-# No filters: run the entire TalkHintTests target, not just CallProfilesTests.
+# No filters: run the entire TalkHintTests target, including the fixture-only
+# SecretaryPersonalityTests and hosted SecretaryPersonalityUITests.
 xcodebuild "${COMMON[@]}" test-without-building -parallel-testing-enabled NO \
   -testLanguage en -testRegion US \
   -resultBundlePath "$OUT/TalkHintTests.xcresult" 2>&1 | tee "$OUT/tests.log"

@@ -15,6 +15,15 @@ import {
 import { createLabRtcController, LabRtcController, OPENAI_LAB_MODEL, OPENAI_LAB_VOICE } from "@/lib/secretary-lab-rtc";
 import { AlertCircle, ArrowDownToLine, AudioLines, Check, CircleStop, Headphones, LoaderCircle, Mic, MicOff, Radio, RefreshCw, ShieldAlert, Volume2, Wifi } from "lucide-react";
 import "@/lib/secretary-lab.css";
+import RetellBench from "@/components/secretary-lab/RetellBench";
+import RunCost from "@/components/secretary-lab/RunCost";
+import ElevenEngineBench from "@/components/secretary-lab/ElevenEngineBench";
+import EngineFixtures from "@/components/secretary-lab/EngineFixtures";
+import { useStandReadiness } from "@/components/secretary-lab/stand-readiness";
+import "@/components/secretary-lab/stand-readiness.css";
+import { secretaryStand, secretaryStandPath, chooseSecretaryStand, type SecretaryStand } from "@/lib/secretary-lab-modes";
+
+import SavedComparisons from "@/components/secretary-lab/SavedComparisons";
 
 type LiveState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "ended";
 type WireMessage = Record<string, any>;
@@ -61,6 +70,9 @@ export default function SecretaryLab() {
   const [loadError, setLoadError] = useState("");
   const [denied, setDenied] = useState(false);
   const [instruction, setInstruction] = useState("Поговори с собеседником на английском как дружелюбный и собранный секретарь. Помогай уточнять цель звонка и спокойно реагируй на возражения.");
+  const [stand, setStand] = useState<SecretaryStand>(() => secretaryStand(window.location.search));
+  const [retellBusy, setRetellBusy] = useState(false);
+  const [uncertainStop, setUncertainStop] = useState(false);
   const [provider, setProvider] = useState<VoiceProvider>("openai");
   const [paidConsent, setPaidConsent] = useState(false);
   const [pending, setPending] = useState(false);
@@ -101,6 +113,29 @@ export default function SecretaryLab() {
   const holdUiTimerRef = useRef<number | null>(null);
   const closingRef = useRef(false);
   const currentReportRef = useRef<LabReport | null>(null);
+  // closingRef also stays true after a confirmed end to reject old media events.
+  // It is not evidence of an active session and must not prevent choosing another stand.
+  const standBusy = pending || !!active || retellBusy || uncertainStop || startLockRef.current;
+  const readiness = useStandReadiness(token);
+
+  useEffect(() => {
+    const syncStand = () => {
+      if (standBusy) {
+        window.history.replaceState(null, "", `/admin${secretaryStandPath(stand)}`);
+        return;
+      }
+      setStand(chooseSecretaryStand(stand, secretaryStand(window.location.search), standBusy));
+    };
+    window.addEventListener("popstate", syncStand);
+    return () => window.removeEventListener("popstate", syncStand);
+  }, [setLocation, stand, standBusy]);
+
+  const selectStand = (next: SecretaryStand) => {
+    const selected = chooseSecretaryStand(stand, next, standBusy);
+    if (selected === stand) return;
+    setStand(selected);
+    setLocation(secretaryStandPath(selected));
+  };
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -175,10 +210,12 @@ export default function SecretaryLab() {
           method: "DELETE", body: JSON.stringify({ reason: userInitiated ? "user_stop" : clientReason }),
         });
         setReport(result.report); setActive(null); setRating("");
+        setUncertainStop(false);
         currentReportRef.current = result.report;
         setSnapshot((old) => old ? { ...old, sessions: [result.report, ...old.sessions.filter((item) => item.id !== result.report.id)] } : old);
       } catch (cause) {
         const e = cause as Error;
+        setUncertainStop(true);
         setError(`Не удалось подтвердить остановку на сервере: ${e.message}`);
       }
     }
@@ -269,7 +306,7 @@ export default function SecretaryLab() {
 
   const beginSession = async () => {
     const selectedProviderReady = !!snapshot?.providers[provider]?.ready;
-    if (startLockRef.current || !token || !snapshot || !instruction.trim() || !paidConsent || !selectedProviderReady) return;
+    if (startLockRef.current || uncertainStop || !token || !snapshot || !instruction.trim() || !paidConsent || !selectedProviderReady) return;
     startLockRef.current = true;
     const attemptId = ++attemptIdRef.current;
     const attemptIsCurrent = () => mountedRef.current && attemptIdRef.current === attemptId;
@@ -277,6 +314,7 @@ export default function SecretaryLab() {
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
     let createdId: string | null = null;
+    let createAttempted = false;
     let ws: WebSocket | null = null;
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext) throw new Error("Этот браузер не поддерживает доступ к микрофону или AudioContext.");
@@ -297,6 +335,7 @@ export default function SecretaryLab() {
       }
       streamRef.current = stream;
       audioClockStartRef.current = context.currentTime;
+      createAttempted = true;
       const created = await labRequest<{ id: string; ticket: string; socketPath: string; report: LabReport }>(`${LAB_API}/sessions`, token, {
         method: "POST",
         body: JSON.stringify({ instruction: instruction.trim(), voiceProvider: provider, consent: true }),
@@ -309,6 +348,7 @@ export default function SecretaryLab() {
         return;
       }
       currentReportRef.current = created.report;
+      setUncertainStop(false);
       firstAudioScheduledRef.current = false;
       lastGuestTurnContextTimeRef.current = null;
       playbackCursorRef.current = 0;
@@ -457,6 +497,7 @@ export default function SecretaryLab() {
           updateReport((old) => ({ ...old, events: [...old.events, message.event] }));
         } else if (message.type === "ended" && message.report) {
           closingRef.current = true;
+          setUncertainStop(false);
           setReport(message.report); setActive(null); setLiveState("ended"); setSocketConnected(false);
           setPlayingHold(false); micPausedRef.current = false; setMicPaused(false);
           currentReportRef.current = message.report;
@@ -488,7 +529,14 @@ export default function SecretaryLab() {
       if (createdId && token) {
         try {
           await labRequest(`${LAB_API}/sessions/${encodeURIComponent(createdId)}`, token, { method: "DELETE" });
-        } catch { /* report the original setup failure; session cleanup is best effort */ }
+        } catch {
+          setUncertainStop(true);
+          setError((old) => `${old} Остановка созданной сессии не подтверждена; смена стенда заблокирована.`);
+        }
+      }
+      if (!createdId && createAttempted && ![400, 401, 402, 403, 422, 429].includes((cause as { status?: number }).status ?? 0)) {
+        setUncertainStop(true);
+        setError((old) => `${old} Ответ создания сессии не подтверждён; смена стенда заблокирована до проверки состояния.`);
       }
       if (attemptIsCurrent()) {
         setActive(null); currentReportRef.current = null; setLiveState("idle"); setSocketConnected(false);
@@ -615,8 +663,8 @@ export default function SecretaryLab() {
 
   return <div className="lab-shell">
     <header className="lab-header">
-      <Link href="/diagnostics" className="lab-brand"><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
-      <nav className="lab-nav"><Link href="/diagnostics">Диагностика</Link><Link href="/voice-lab">Voice Lab</Link><Link href="/incoming-secretary">Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
+      <Link href="/diagnostics" className="lab-brand" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}><span className="brand-glyph"><AudioLines size={18} /></span><span>TALKHINT <b>LAB / 02</b></span></Link>
+      <nav className="lab-nav"><Link href="/diagnostics" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}>Диагностика</Link><Link href="/voice-lab" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}>Voice Lab</Link><Link href="/incoming-secretary" onClick={(event) => { if (standBusy) { event.preventDefault(); setNotice("Сначала подтвердите остановку голосовой сессии."); } }}>Входящий Secretary</Link><span className="admin-chip">ADMIN</span></nav>
     </header>
     <main className="lab-main">
       <section className="lab-intro">
@@ -627,10 +675,33 @@ export default function SecretaryLab() {
         <div className="intro-stamp"><span>NO PSTN</span><i /><small>PRIVATE<br />SESSION</small></div>
       </section>
 
+      <section className="lab-readiness" aria-label="Готовность голосовых стендов">
+        <div className="readiness-heading"><span>ПРОВЕРКА КОНФИГУРАЦИИ</span><small>Только GET-запросы · сессии не создаются</small></div>
+        <div className="readiness-items">
+          <div><b>GPT</b><span className={snapshot?.providers.openai?.ready ? "ready" : "not-ready"}>{loading ? "Проверяется" : snapshot?.providers.openai?.ready ? "Настроен" : "Не готов"}</span><small>{snapshot?.providers.openai?.reason || snapshot?.providers.openai?.model || "Нет подтверждения конфигурации"}</small></div>
+          <div><b>Retell</b><span className={readiness.retell?.ready ? "ready" : "not-ready"}>{readiness.retellError ? "Ошибка проверки" : !readiness.retell ? "Проверяется" : readiness.retell.ready ? "Настроен" : "Не готов"}</span><small>{readiness.retellError || [readiness.retell?.stage, readiness.retell?.reason || (readiness.retell?.ready ? `${readiness.retell.model || "Модель подтверждена"} · голос ${readiness.retell.voice || "—"}` : "Ответ API Retell")].filter(Boolean).join(" · ")}</small></div>
+          <div><b>Retell + Engine</b><span className={readiness.engine?.ready ? "ready" : "not-ready"}>{readiness.engineError ? "Ошибка проверки" : !readiness.engine ? "Проверяется" : readiness.engine.ready ? "Настроен" : "Не готов"}</span><small>{readiness.engineError || [readiness.engine?.stage || readiness.engine?.engine?.stage, readiness.engine?.reason || (readiness.engine?.ready ? `${readiness.engine.engine?.provider || "OpenAI via TalkHint"} · ${readiness.engine.engine?.model || "модель подтверждена"}` : "Ответ API engine")].filter(Boolean).join(" · ")}</small></div>
+          <div><b>ElevenLabs + Engine</b><span className={readiness.elevenEngine?.ready ? "ready" : "not-ready"}>{readiness.elevenEngineError ? "Ошибка проверки" : !readiness.elevenEngine ? "Проверяется" : readiness.elevenEngine.ready ? "Настроен" : "Не готов"}</span><small>{readiness.elevenEngineError || (readiness.elevenEngine ? `${readiness.elevenEngine.model} · ${readiness.elevenEngine.ttsModel} · ${readiness.elevenEngine.asr}` : "Проверяется сервером")}</small></div>
+        </div>
+        <p>«Настроен» отражает ответ readiness API, а не подключение браузерной сессии. Реальное подключение отображается только в отчёте активного прогона.</p>
+      </section>
+
+      <nav className="lab-stand-nav" aria-label="Выбор голосового стенда">
+        <span>ВЫБРАТЬ СТЕНД</span>
+        <button type="button" className={stand === "gpt" ? "selected" : ""} aria-pressed={stand === "gpt"} disabled={standBusy} onClick={() => selectStand("gpt")}><AudioLines size={15} /> GPT <small>текущий</small></button>
+        <button type="button" className={stand === "retell" ? "selected" : ""} aria-pressed={stand === "retell"} disabled={standBusy} onClick={() => selectStand("retell")}><Radio size={15} /> Retell <small>live web</small></button>
+        <button type="button" className={stand === "retell-engine" ? "selected" : ""} aria-pressed={stand === "retell-engine"} disabled={standBusy} onClick={() => selectStand("retell-engine")}><AudioLines size={15} /> Retell + Engine <small>TalkHint LLM</small></button>
+        <button type="button" className={stand === "eleven-engine" ? "selected" : ""} aria-pressed={stand === "eleven-engine"} disabled={standBusy} onClick={() => selectStand("eleven-engine")}><AudioLines size={15} /> ElevenLabs + Engine <small>TalkHint LLM</small></button>
+        {standBusy && <small className="stand-lock">{uncertainStop ? "Состояние сессии не подтверждено · смена стенда заблокирована" : "Стенд заблокирован во время сессии"}{uncertainStop && currentReportRef.current && <button type="button" onClick={() => void stopServer(false, "client_error")}>Повторить остановку</button>}</small>}
+      </nav>
+
       {loadError && <div className="lab-alert" role="alert"><AlertCircle size={18} /><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void reload()}><RefreshCw size={14} /> Повторить</Button></div>}
       {error && <div className="lab-alert" role="alert"><AlertCircle size={18} /><span>{error}</span><button onClick={() => setError("")} aria-label="Закрыть">×</button></div>}
       {notice && <div className="lab-notice"><span>{notice}</span><button onClick={() => setNotice("")}>Понятно</button></div>}
 
+      {(stand === "retell-engine" || stand === "eleven-engine") && <EngineFixtures />}
+      {stand === "eleven-engine" ? <ElevenEngineBench key={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
+      stand !== "gpt" ? <RetellBench key={stand} mode={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
       <div className="lab-layout">
         <div className="lab-primary">
           <Card className="control-card">
@@ -661,7 +732,7 @@ export default function SecretaryLab() {
                 <label className={`consent-row ${!providerReady ? "muted" : ""}`}><input type="checkbox" checked={paidConsent} onChange={(event) => setPaidConsent(event.target.checked)} disabled={!!active || pending || !providerReady} /><span>Я понимаю, что разговор может использовать платные услуги AI и генерации голоса.</span></label>
               </div>
               <div className="start-row">
-                {!active ? <Button className="start-button" onClick={() => void beginSession()} disabled={pending || !providerReady || !paidConsent || !instruction.trim() || !!loadError}>
+                {!active ? <Button className="start-button" onClick={() => void beginSession()} disabled={pending || uncertainStop || !providerReady || !paidConsent || !instruction.trim() || !!loadError}>
                   {pending ? <><LoaderCircle className="spin" size={17} /> Подключение…</> : <><Radio size={17} /> Начать разговор</>}
                 </Button> : <Button className="stop-button" onClick={() => void stopServer(true)}><CircleStop size={17} /> Остановить</Button>}
                 {active && <span className="runtime"><i /> {elapsedLabel} / 05:00</span>}
@@ -733,6 +804,7 @@ export default function SecretaryLab() {
                    <span className={`history-dot ${item.status}`} /><span className="history-detail"><b>{item.voiceProvider === "elevenlabs" ? "ElevenLabs" : item.voiceProvider === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"} · {item.metrics.guestTurns + item.metrics.secretaryTurns} реплик</b><small>{formatLabTime(item.createdAt)} · {item.instruction}</small></span><span className="history-arrow">→</span>
                 </button>)}</div>}
                {visibleReport && <div className="report-actions">
+                 <RunCost cost={visibleReport.cost} />
                  <div className="report-title"><b>Отчёт выбран · {visibleReport.model ?? visibleReport.voiceProvider}</b><span>{visibleReport.voice ?? "голос не указан"} · {visibleReport.transport ?? "транспорт не указан"} · {labEndReasonLabel(visibleReport.reason)}</span></div>
                  <div className="report-instruction"><b>Инструкция сессии</b><p>{visibleReport.instruction}</p></div>
                 <Button variant="outline" size="sm" onClick={() => downloadReport({ ...visibleReport, rating: rating || undefined })}><ArrowDownToLine size={14} /> JSON</Button>
@@ -743,6 +815,8 @@ export default function SecretaryLab() {
           </Card>
         </aside>
       </div>
+      }
+      <SavedComparisons key={token || "signed-out"} token={token || ""} />
       <footer className="lab-footer"><span>SECRETARY LAB · PRIVATE SANDBOX</span><span>REAL AUDIO · NO RECORDING · NO TELEPHONE</span></footer>
     </main>
   </div>;

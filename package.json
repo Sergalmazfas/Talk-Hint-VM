@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@deepgram/sdk": "^4.11.3",
+    "@elevenlabs/client": "^1.30.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@parse/node-apn": "^8.1.0",
@@ -88,6 +89,7 @@
     "react-hook-form": "^7.66.0",
     "react-resizable-panels": "^2.1.9",
     "recharts": "^2.15.4",
+    "retell-client-js-sdk": "^3.0.3",
     "sonner": "^2.0.7",
     "stripe": "^20.0.0",
     "supertest": "^7.2.2",

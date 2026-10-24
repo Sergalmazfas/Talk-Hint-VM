@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
 import { registerIncomingRoutes } from "./incomingSecretary/routes";
+import { registerPersonalityRoutes } from "./secretary/personalities/routes";
 import { tryIncomingSecretary, stopIncomingCard } from "./incomingSecretary/runtime";
 import { defaultCallingNumber, validCardScope } from "./callProfiles/policy";
 import { inspectExistingVoiceNumber } from "./twilioService";
@@ -53,6 +54,7 @@ import { dialSecretaryTask, secretaryCallbackOrigin } from "./secretary/dialer";
 import { notifySecretaryResult } from "./secretary/notifications";
 import { bindSecretaryCall, finishSecretaryAttempt, getSecretaryTaskById, getSecretaryTaskForCall } from "./secretary/tasks";
 import { signSecretaryStream } from "./secretary/streamAuth";
+import { registerRetellPhone, endRetellPhone } from "./secretary/retellPhone";
 import { publishSecretaryFeedEvent } from "./secretary/feed";
 import {
   isDiagnosticRecordingUser,
@@ -325,6 +327,14 @@ export async function registerRoutes(
     const taskId = String(req.query.taskId ?? "");
     const callSid = String(req.body.CallSid ?? "");
     try {
+      // Dev's general Twilio validator may be disabled. This real telephone
+      // pilot still requires a provider signature before binding or registering.
+      if ((await getSecretaryTaskById(taskId))?.voiceProvider === "retell" &&
+        (!TWILIO_AUTH_TOKEN || !twilio.validateRequest(TWILIO_AUTH_TOKEN,
+          req.get("X-Twilio-Signature") ?? "",
+          new URL(req.originalUrl, secretaryCallbackOrigin()).toString(), req.body))) {
+        return res.status(403).send("Invalid Retell telephone callback signature");
+      }
       const bound = await bindSecretaryCall(taskId, callSid);
       if (!bound) return res.status(403).send("Secretary task is not assigned to this call");
       // Twilio may request TwiML just before the originating worker has
@@ -337,6 +347,18 @@ export async function registerRoutes(
       if (!task) return res.status(403).send("Secretary task is not assigned to this call");
       const origin = secretaryCallbackOrigin();
       const twiml = new twilio.twiml.VoiceResponse();
+      if (task.voiceProvider === "retell") {
+        const sip = await registerRetellPhone(task.id, callSid, origin);
+        const monitor = twiml.start().stream({
+          url: new URL("/secretary-retell-monitor", origin).toString().replace(/^https:/, "wss:"),
+          track: "both_tracks",
+        });
+        monitor.parameter({ name: "taskId", value: task.id });
+        monitor.parameter({ name: "streamAuth", value: signSecretaryStream(task.id, callSid) });
+        twiml.dial({ timeLimit: 300, timeout: 30 }).sip(sip);
+        twiml.hangup();
+        return res.type("text/xml").send(twiml.toString());
+      }
       const stream = twiml.connect().stream({
         url: new URL("/secretary-stream", origin).toString().replace(/^https:/, "wss:"),
       });
@@ -353,8 +375,17 @@ export async function registerRoutes(
     const callSid = String(req.body.CallSid ?? "");
     const status = String(req.body.CallStatus ?? "");
     try {
+      if ((await getSecretaryTaskById(taskId))?.voiceProvider === "retell" &&
+        (!TWILIO_AUTH_TOKEN || !twilio.validateRequest(TWILIO_AUTH_TOKEN,
+          req.get("X-Twilio-Signature") ?? "",
+          new URL(req.originalUrl, secretaryCallbackOrigin()).toString(), req.body))) {
+        return res.status(403).send("Invalid Retell telephone callback signature");
+      }
       const bound = await bindSecretaryCall(taskId, callSid);
       if (!bound) return res.status(403).send("Secretary task is not assigned to this call");
+      if (["completed", "no-answer", "busy", "failed", "canceled"].includes(status)) {
+        await endRetellPhone(taskId);
+      }
       const task = await finishSecretaryAttempt(taskId, callSid, status);
       if (task) publishSecretaryFeedEvent(taskId, { type: "status", status: task.status });
       if (task && ["completed", "no-answer", "busy", "failed", "canceled"].includes(status)) {
@@ -403,6 +434,35 @@ export async function registerRoutes(
   const { registerSecretaryLabRoutes } = await import("./secretaryLab/routes");
   const { secretaryLab, secretaryLabReadiness } = await import("./secretaryLab/runtime");
   registerSecretaryLabRoutes(app, secretaryLab, secretaryLabReadiness);
+  await import("./secretaryLab/retellRoutes").then(({ registerRetellLabRoutes }) => registerRetellLabRoutes(app));
+  const { retellEngineLab } = await import("./secretaryLab/retellEngine");
+  const { registerRetellLabRoutes } = await import("./secretaryLab/retellRoutes");
+  registerRetellLabRoutes(app, retellEngineLab, "/api/admin/secretary-lab/retell-engine");
+  if (process.env.NODE_ENV === "development") {
+    const { registerComparisonRoutes } = await import("./secretaryLab/comparisonRoutes");
+    const { PgComparisonRepository } = await import("./secretaryLab/comparisonStore");
+    const { retellSecretaryLab } = await import("./secretaryLab/retell");
+    const { dbReady, pool } = await import("./db");
+    await dbReady;
+    // No in-memory fallback: a missing DB/schema must produce an honest 503.
+    const store = new PgComparisonRepository({
+      query: (...args: any[]) => {
+        if (!pool) return Promise.reject(new Error("Comparison database unavailable"));
+        return (pool.query as any)(...args);
+      },
+    });
+    const { registerElevenEngineRoutes } = await import("./secretaryLab/elevenRoutes");
+    const elevenLab = registerElevenEngineRoutes(app, store);
+    registerComparisonRoutes(app, store, owner => [
+      ...secretaryLab.reports(owner).map(report => ({ mode: "gpt" as const, report })),
+      ...retellSecretaryLab.reports(owner).map(report => ({ mode: "retell" as const, report })),
+      ...retellEngineLab.reports(owner).map(report => ({ mode: "retell-engine" as const, report })),
+      ...elevenLab.history(owner).map(report => ({ mode: "eleven-engine" as const, report })),
+    ]);
+    const purge = () => store.purge().catch(() => console.error("[SecretaryLab] Comparison expiry cleanup failed"));
+    void purge();
+    setInterval(() => { void purge(); }, 3_600_000).unref();
+  }
   await import("./copilotSpeech").then(({ registerCopilotSpeechRoute }) => registerCopilotSpeechRoute(app));
 
   // Translator Realtime Spike — dev-only test stand (404 in production).
@@ -2304,6 +2364,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   });
 
   registerIncomingRoutes(app, authMiddleware);
+  registerPersonalityRoutes(app);
   registerCallProfileRoutes(app, authMiddleware, {
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),

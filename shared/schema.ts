@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniqueIndex, foreignKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -124,11 +124,56 @@ export type Call = typeof calls.$inferSelect;
 // finalize it as unknown rather than risk placing a duplicate call.
 // `finalizing` is held active while the last media-stream turns are persisted;
 // Scheduled tasks have bounded attempts; attemptHistory records their dial leases.
+export const secretaryPersonalities = pgTable("secretary_personalities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  searchName: text("search_name").notNull(),
+  description: text("description").notNull(),
+  status: text("status").notNull().default("available"),
+  currentVersion: integer("current_version").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, t => ({
+  pageIdx: index("secretary_personalities_page_idx").on(t.status, t.searchName, t.id),
+  searchIdx: index("secretary_personalities_search_idx").on(t.searchName.asc().op("text_pattern_ops")),
+  slugSearchIdx: index("secretary_personalities_slug_search_idx").on(t.slug.asc().op("text_pattern_ops")),
+}));
+export const secretaryPersonalityVersions = pgTable("secretary_personality_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  personalityId: varchar("personality_id").notNull().references(() => secretaryPersonalities.id),
+  version: integer("version").notNull(),
+  content: jsonb("content").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, t => ({ versionUnique: uniqueIndex("secretary_personality_versions_personality_id_version_key").on(t.personalityId, t.version) }));
+export const secretaryPersonalityAssignments = pgTable("secretary_personality_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  numberId: varchar("number_id").notNull().references(() => phoneNumbers.id),
+  personalityId: varchar("personality_id").notNull(),
+  version: integer("version").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, t => ({
+  numberUnique: uniqueIndex("secretary_personality_assignments_user_id_number_id_key").on(t.userId, t.numberId),
+  versionFk: foreignKey({ columns: [t.personalityId, t.version], foreignColumns: [
+    secretaryPersonalityVersions.personalityId, secretaryPersonalityVersions.version,
+  ] }),
+}));
+
+export const secretaryOutgoingSettings = pgTable("secretary_outgoing_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  numberId: varchar("number_id").notNull().references(() => phoneNumbers.id),
+  cardIds: jsonb("card_ids").notNull().default(sql`'[]'::jsonb`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, t => ({ numberUnique: uniqueIndex("secretary_outgoing_settings_user_id_number_id_key").on(t.userId, t.numberId) }));
+
 export const secretaryTasks = pgTable("secretary_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   phoneNumber: text("phone_number").notNull(),
   instruction: text("instruction").notNull(),
+  outgoingContext: jsonb("outgoing_context"),
   clientRequestId: text("client_request_id"),
   voiceProvider: text("voice_provider").notNull().default("elevenlabs"),
   mode: text("mode").notNull().default("queued"),
@@ -641,3 +686,16 @@ export const talkhintProjectModels = pgTable("talkhint_project_models", {
   state: jsonb("state").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Explicitly consented Dev voice-bench snapshots, separate from call history.
+export const secretaryLabComparisons = pgTable("secretary_lab_comparisons", {
+  id: varchar("id").primaryKey(),
+  ownerId: varchar("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  instruction: text("instruction").notNull(),
+  evaluation: jsonb("evaluation").notNull(),
+  runs: jsonb("runs").notNull(),
+  consentAt: timestamp("consent_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, t => ({ expiresIdx: index("secretary_lab_comparisons_expires_idx").on(t.expiresAt) }));

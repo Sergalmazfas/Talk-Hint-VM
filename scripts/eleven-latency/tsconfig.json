@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "../probe-eleven-latency.ts",
+    "./*.ts",
+    "../../server/secretaryLab/elevenLatencyProbe.test.ts"
+  ],
+  "exclude": [],
+  "compilerOptions": {
+    "target": "ES2022",
+    "incremental": false
+  }
+}

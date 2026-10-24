@@ -9,12 +9,14 @@ import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
 import { secretaryVoiceProvider, requireSecretaryAudioModel, SECRETARY_AUDIO_MODEL,SECRETARY_AUDIO_VOICE } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
 import { defaultCallingNumber } from "../callProfiles/policy";
+import { validateOutgoingSnapshot } from "./personalities/outgoing";
 
 export interface SecretaryDialJob {
   id: string;
   userId: string;
   phoneNumber: string;
   voiceProvider: string;
+  outgoingContext?: unknown;
 }
 
 // Twilio needs a public HTTPS callback. Never derive this from a client Host
@@ -42,6 +44,8 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
     const voiceProvider = secretaryVoiceProvider(job.voiceProvider);
     if (voiceProvider === "openai") await requireSecretaryAudioModel();
+    else if (voiceProvider === "retell")
+      await (await import("./retellPhone")).requireRetellPhone(secretaryCallbackOrigin());
     else {
       const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(job.userId) : getClone(job.userId));
       requireReadyTranslatorClone(voiceProvider, clone,
@@ -49,7 +53,8 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     }
     if (!process.env.OPENAI_API_KEY) throw new Error("Secretary conversation model is not configured");
     const ownedNumbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(100);
-    const number = defaultCallingNumber(ownedNumbers);
+    const context = job.outgoingContext ? await validateOutgoingSnapshot(job.userId, job.outgoingContext) : undefined;
+    const number = context ? ownedNumbers.find(n => n.id === context.numberId) : defaultCallingNumber(ownedNumbers);
     if (!number) throw new Error("Assign a TalkHint phone number before starting a Secretary call");
     fromNumber = number.twilioNumber;
     origin = secretaryCallbackOrigin();
@@ -93,5 +98,17 @@ export async function hangupSecretaryCall(callSid: string): Promise<void> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
-  await twilio(accountSid, authToken).calls(callSid).update({ status: "completed" });
+  const call = twilio(accountSid, authToken).calls(callSid);
+  try {
+    await call.update({ status: "completed" });
+  } catch (error) {
+    // A callback/peer hangup can win the race. Provider failure or 404 alone
+    // cannot prove completion; verify the same SID before accepting a retry.
+    try {
+      const current = await call.fetch();
+      if (current.sid === callSid &&
+          ["completed", "busy", "no-answer", "failed", "canceled"].includes(current.status)) return;
+    } catch { /* Preserve uncertain outcome and allow an explicit retry. */ }
+    throw error;
+  }
 }

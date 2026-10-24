@@ -48,7 +48,10 @@ final class SettingsViewController: UITableViewController {
     private var profilesLoaded = false
     private var profilesLoadFailed = false
 
-    init() {
+    private let api: APIClient
+
+    init(api: APIClient = .shared) {
+        self.api = api
         super.init(style: .insetGrouped)
     }
 
@@ -68,7 +71,7 @@ final class SettingsViewController: UITableViewController {
 
     private func loadFeatureSettings() {
         Task { @MainActor in
-            if let settings = try? await APIClient.shared.callFeatureSettings() {
+            if let settings = try? await api.callFeatureSettings() {
                 liveHintsEnabled = settings.liveHintsEnabled
                 translationEnabled = settings.translationEnabled
                 tableView.reloadSections(IndexSet(integer: Section.features.rawValue), with: .none)
@@ -79,14 +82,14 @@ final class SettingsViewController: UITableViewController {
     private func loadMyNumber() {
         Task { @MainActor in
             do {
-                let profiles = try await APIClient.shared.callProfiles()
+                let profiles = try await api.callProfiles()
                 myNumber = profiles.profile(.personal)?.numbers.first?.phoneNumber
                 workNumber = profiles.profile(.work)?.numbers.first?.phoneNumber
                 profilesLoaded = true
                 profilesLoadFailed = false
             } catch {
                 profilesLoadFailed = true
-                if let numbers = try? await APIClient.shared.numbers() {
+                if let numbers = try? await api.numbers() {
                     myNumber = numbers.first?.number
                 }
             }
@@ -105,7 +108,7 @@ final class SettingsViewController: UITableViewController {
         case .language: return SessionStore.availableLanguages.count
         case .features: return FeatureRow.allCases.count
         case .translator: return TranslatorRow.allCases.count
-        case .secretary: return 1
+        case .secretary: return 2
         case .phone: return 3
         case .account: return 1
         }
@@ -131,7 +134,7 @@ final class SettingsViewController: UITableViewController {
         case .translator:
             return NSLocalizedString("settings.footer.voice_provider", comment: "")
         case .secretary:
-            return NSLocalizedString("settings.secretary.footer", comment: "")
+            return NSLocalizedString("secretary.personality.provider_note", comment: "")
         case .phone, .account:
             return nil
         }
@@ -200,12 +203,23 @@ final class SettingsViewController: UITableViewController {
 
         case .secretary:
             let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+            if indexPath.row == 1 {
+                cell.textLabel?.text = NSLocalizedString("secretary.personality.title", comment: "")
+                cell.detailTextLabel?.text = NSLocalizedString("secretary.personality.entry", comment: "")
+                cell.textLabel?.numberOfLines = 0
+                cell.detailTextLabel?.numberOfLines = 0
+                cell.accessoryType = .disclosureIndicator
+                cell.accessibilityIdentifier = "cell-secretary-personality"
+                return cell
+            }
             let provider = SessionStore.shared.secretaryVoiceProvider
             cell.textLabel?.text = provider == .openai
                 ? NSLocalizedString("settings.secretary.openai", comment: "")
                 : provider.displayName
             cell.textLabel?.numberOfLines = 0
-            cell.detailTextLabel?.text = NSLocalizedString(
+            cell.detailTextLabel?.text = provider == .retell
+                ? "Merritt · TalkHint Engine: gpt-6.1-sol · medium"
+                : NSLocalizedString(
                 provider == .openai ? "settings.secretary.openai.detail" : "settings.secretary.clone.detail",
                 comment: "")
             cell.detailTextLabel?.numberOfLines = 0
@@ -262,7 +276,11 @@ final class SettingsViewController: UITableViewController {
         case .translator:
             break // handled by the segmented control
         case .secretary:
-            selectSecretaryProvider(at: indexPath)
+            if indexPath.row == 1 {
+                navigationController?.pushViewController(SecretaryPersonalityViewController(api: api), animated: true)
+            } else {
+                selectSecretaryProvider(at: indexPath)
+            }
         case .phone:
             if indexPath.row == 0 {
                 navigationController?.pushViewController(NumbersViewController(), animated: true)
@@ -285,13 +303,12 @@ final class SettingsViewController: UITableViewController {
         let sheet = UIAlertController(
             title: NSLocalizedString("settings.secretary.choose", comment: ""),
             message: nil, preferredStyle: .actionSheet)
-        for provider in [SecretaryVoiceProviderPreference.openai] {
+        for provider in [SecretaryVoiceProviderPreference.retell, .openai] {
             let title = provider == .openai
                 ? NSLocalizedString("settings.secretary.openai", comment: "")
                 : provider.displayName
             sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
-                SessionStore.shared.secretaryVoiceProvider = provider
-                self?.tableView.reloadSections(IndexSet(integer: Section.secretary.rawValue), with: .none)
+                self?.applySecretaryProvider(provider)
             })
         }
         sheet.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
@@ -300,6 +317,21 @@ final class SettingsViewController: UITableViewController {
             popover.sourceRect = tableView.rectForRow(at: indexPath)
         }
         present(sheet, animated: true)
+    }
+
+    // Shared by the action-sheet handler and hosted UIKit tests.
+    func applySecretaryProvider(_ provider: SecretaryVoiceProviderPreference) {
+        SessionStore.shared.secretaryVoiceProvider = provider
+        if provider == .openai {
+            SessionStore.shared.secretaryOutgoingNumberId = nil
+            if var draft = SessionStore.shared.pendingSecretaryCall, !draft.requestAttempted {
+                draft.voiceProvider = .openai
+                draft.secretaryNumberId = nil
+                draft.secretaryBackendOrigin = nil
+                _ = SessionStore.shared.savePendingSecretaryCall(draft)
+            }
+        }
+        tableView.reloadSections(IndexSet(integer: Section.secretary.rawValue), with: .none)
     }
 
     private func featureCell(title: String, isOn: Bool, identifier: String, action: Selector) -> UITableViewCell {
@@ -344,7 +376,7 @@ final class SettingsViewController: UITableViewController {
         apply()
         Task { @MainActor in
             do {
-                let saved = try await APIClient.shared.setCallFeatureSettings(liveHintsEnabled: liveHints, translationEnabled: translation)
+                let saved = try await api.setCallFeatureSettings(liveHintsEnabled: liveHints, translationEnabled: translation)
                 liveHintsEnabled = saved.liveHintsEnabled
                 translationEnabled = saved.translationEnabled
                 sender.setOn(liveHints ?? translation ?? sender.isOn, animated: false)

@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { upgradeElevenAudio } from "./secretaryLab/elevenAudioUpgrade";
 import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
@@ -65,6 +66,8 @@ import {
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
 import { verifySecretaryStream } from "./secretary/streamAuth";
+import { handleRetellPhoneMonitor, retellPhoneMonitoring } from "./secretary/retellMonitor";
+import { retellPhoneRegistry } from "./secretary/retellPhone";
 import { signSecretaryConfirmation } from "./secretary/confirmation";
 import {
   buildSecretaryFeedSnapshot,
@@ -840,10 +843,37 @@ class GPTRealtimeHandler {
 export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ noServer: true });
   const labWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
+  const retellEngineWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const elevenEngineWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   server.on("upgrade", (request, socket, head) => {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
+    if (pathname.startsWith("/eleven-engine-audio/")) {
+      void upgradeElevenAudio(request, socket, head, {
+        server: elevenEngineWss, environment: process.env.NODE_ENV,
+        runtime: async () => (await import("./secretaryLab/elevenRoutes")).elevenEngineLab,
+      });
+      return;
+    }
+    if (pathname.startsWith("/retell-engine-stream/")) {
+      if (process.env.NODE_ENV !== "development" || parsedUrl.search) { socket.destroy(); return; }
+      void import("./secretaryLab/retellEngine").then(({ retellEngineRegistry }) => {
+        if (socket.destroyed || !retellEngineRegistry.permits(pathname)) { socket.destroy(); return; }
+        retellEngineWss.handleUpgrade(request, socket, head, ws => retellEngineRegistry.attach(ws, pathname));
+      }).catch(() => socket.destroy());
+      return;
+    }
+    if (pathname.startsWith("/retell-phone-engine/")) {
+      if (parsedUrl.search || !retellPhoneRegistry.permits(pathname)) { socket.destroy(); return; }
+      retellEngineWss.handleUpgrade(request, socket, head, ws => retellPhoneRegistry.attach(ws, pathname));
+      return;
+    }
+    if (pathname === "/secretary-retell-monitor") {
+      if (parsedUrl.search) { socket.destroy(); return; }
+      retellEngineWss.handleUpgrade(request, socket, head, ws => handleRetellPhoneMonitor(ws));
+      return;
+    }
 
     if (pathname === "/secretary-lab-stream") {
       // Load before upgrading so the browser's first auth frame cannot race
@@ -983,7 +1013,8 @@ export function setupWebSocket(server: Server) {
             if (!sendSecretaryFeedSnapshot(
               secretaryTaskId,
               ws,
-              buildSecretaryFeedSnapshot(toSecretaryTaskReport(task)),
+              { ...buildSecretaryFeedSnapshot(toSecretaryTaskReport(task)),
+                ...(task.voiceProvider === "retell" ? { monitoring: retellPhoneMonitoring(task.id) } : {}) },
             )) {
               if (ws.readyState === WebSocket.OPEN) ws.close(1011, "Secretary feed snapshot could not be sent");
               return;
@@ -1021,6 +1052,7 @@ export function setupWebSocket(server: Server) {
           const task = await getSecretaryTaskForCall(taskId, callSid);
           if (!task) return null;
           const voiceProvider = secretaryVoiceProvider(task.voiceProvider);
+          if (voiceProvider === "retell") throw new Error("Retell uses the isolated SIP bridge, not GPT audio");
           const ownerName = confirmedSecretaryOwnerName(task.userId);
           if (voiceProvider === "openai") return { instruction: task.instruction, ownerId: task.userId, ownerName, voiceProvider, cloneVoiceId: "" };
           const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(task.userId) : getClone(task.userId));
