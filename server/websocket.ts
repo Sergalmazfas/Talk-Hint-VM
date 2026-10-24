@@ -840,10 +840,19 @@ class GPTRealtimeHandler {
 export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ noServer: true });
   const labWss = new WebSocketServer({ noServer: true, maxPayload: 8192 });
+  const retellEngineWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   server.on("upgrade", (request, socket, head) => {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
+    if (pathname.startsWith("/retell-engine-stream/")) {
+      if (process.env.NODE_ENV !== "development" || parsedUrl.search) { socket.destroy(); return; }
+      void import("./secretaryLab/retellEngine").then(({ retellEngineRegistry }) => {
+        if (socket.destroyed || !retellEngineRegistry.permits(pathname)) { socket.destroy(); return; }
+        retellEngineWss.handleUpgrade(request, socket, head, ws => retellEngineRegistry.attach(ws, pathname));
+      }).catch(() => socket.destroy());
+      return;
+    }
 
     if (pathname === "/secretary-lab-stream") {
       // Load before upgrading so the browser's first auth frame cannot race

@@ -3,6 +3,8 @@ import type WebSocket from "ws";
 import { buildSecretaryInstructions } from "../secretary/agent";
 import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import { RetellApi, RetellApiError, RETELL_LAB_AGENT, RETELL_LAB_MODEL, RETELL_LAB_VOICE } from "./retellApi";
+import { secretaryTestContextPrompt } from "./testContext";
+import type { SecretaryConversationEngine } from "../secretary/conversationEngine";
 
 export interface RetellReport {
   id: string; callId: string; status: "connecting" | "live" | "ended" | "stop_failed" | "failed";
@@ -13,6 +15,8 @@ export interface RetellReport {
   events: Array<{ type: string; atMs: number; detail?: string }>;
   observations: Array<{ atMs: number; outcome: "stopped" | "continued" | "unknown"; note?: string }>;
   metrics: { guestTurns: number; secretaryTurns: number };
+  mode?: string;
+  engine?: SecretaryConversationEngine["report"];
 }
 interface Session {
   owner: string; requestId: string; inputHash: string; report: RetellReport; call?: any;
@@ -26,7 +30,14 @@ const fail = (status: number, text: string): never => { throw Object.assign(new 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 const terminal = (s: Session) => s.report.status === "ended" || s.report.status === "failed";
 export function retellSecretaryInstructions(owner: string, instruction: string) {
-  return buildSecretaryInstructions(instruction, confirmedSecretaryOwnerName(owner));
+  return buildSecretaryInstructions(instruction, confirmedSecretaryOwnerName(owner)) + secretaryTestContextPrompt();
+}
+export interface RetellLabProfile {
+  agentName: string; mode: string;
+  check(): Promise<object>;
+  reserve(owner: string, instruction: string, id: string): { ticket: string; engine: SecretaryConversationEngine["report"]; promptHash?: string };
+  registered(id: string, callId: string): void;
+  ended(id: string): void;
 }
 /** Dev-only web sessions. No dialer, phone endpoints, persistent call history, or tools. */
 export class RetellSecretaryLab {
@@ -34,7 +45,7 @@ export class RetellSecretaryLab {
   private attempts = new Map<string, number[]>();
   private setup?: ReturnType<RetellApi["ensureAgent"]>;
   constructor(private api = new RetellApi(), private now = Date.now,
-    private isDev = () => process.env.NODE_ENV === "development") {}
+    private isDev = () => process.env.NODE_ENV === "development", private profile?: RetellLabProfile) {}
   private dev() { if (!this.isDev()) fail(404, "Retell bench is Dev-only"); }
   private get(owner: string, id: string) {
     this.dev(); this.prune();
@@ -55,6 +66,7 @@ export class RetellSecretaryLab {
     s.socket?.close(); s.socket = undefined;
     // Admission credentials never appear in report/history; destroy after end.
     s.call = undefined;
+    this.profile?.ended(s.report.id);
   }
   private prune() {
     for (const [id, s] of Array.from(this.sessions)) {
@@ -71,10 +83,11 @@ export class RetellSecretaryLab {
       limits: { durationSeconds: 300, historyMinutes: 60 },
       history: Array.from(this.sessions.values()).filter(s => s.owner === owner).map(s => structuredClone(s.report)).reverse() };
     try {
-      const matches = (await this.api.listAgents()).filter(a => a.agent_name === RETELL_LAB_AGENT);
+      const extra = await this.profile?.check();
+      const matches = (await this.api.listAgents()).filter(a => a.agent_name === (this.profile?.agentName ?? RETELL_LAB_AGENT));
       if (matches.length > 1) fail(409, "Retell: дублирующиеся стенды");
       const agent = matches.length ? await this.api.inspectAgent(matches[0].agent_id) : undefined;
-      return { ...base, ready: true, keyStatus: "authenticated",
+      return { ...base, ...extra, mode: this.profile?.mode ?? "retell", ready: true, keyStatus: "authenticated",
         agentId: agent?.id, reason: agent ? undefined : "Отдельный Dev-агент будет создан при первом запуске. Права Call ещё не испытаны." };
     } catch (e) {
       return { ...base, ready: false, keyStatus: "unavailable", reason: (e as Error).message };
@@ -90,6 +103,7 @@ export class RetellSecretaryLab {
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.clientRequestId)) {
       fail(400, "Нужны поручение 8–4000 символов, согласие на платный тест и UUID запроса. Телефонные параметры запрещены.");
     }
+    if (this.profile) await this.profile.check();
     const instruction = input.instruction.trim(), inputHash = digest(instruction);
     const old = Array.from(this.sessions.values()).find(s => s.owner === owner && s.requestId === input.clientRequestId);
     if (old) {
@@ -104,17 +118,21 @@ export class RetellSecretaryLab {
     const times = this.attempts.get(owner) ?? [];
     if (times.length >= 6 || this.sessions.size >= 200) fail(429, "Не более 6 тестов в час; либо стенд заполнен");
     const id = randomUUID(), instructions = retellSecretaryInstructions(owner, instruction);
+    // No yield between owner exclusion above and reserving the session.
     const s: Session = { owner, requestId: input.clientRequestId, inputHash, lastSeen: this.now(),
       monitoring: false, polling: false, monitorAttempts: 0,
       report: { id, callId: "", status: "connecting", instruction, model: RETELL_LAB_MODEL,
         voice: RETELL_LAB_VOICE, promptHash: digest(instructions), createdAt: new Date(this.now()).toISOString(),
         monitorStatus: "waiting", turns: [], events: [], observations: [],
         metrics: { guestTurns: 0, secretaryTurns: 0 } } };
+    const engine = this.profile?.reserve(owner, instruction, id);
+    if (engine) { s.report.mode = this.profile!.mode; s.report.engine = engine.engine; }
+    if (engine?.promptHash) s.report.promptHash = engine.promptHash;
     this.sessions.set(id, s); this.attempts.set(owner, [...times, this.now()]);
-    s.creation = this.admit(s, instructions);
+    s.creation = this.admit(s, instructions, engine?.ticket);
     try { return await s.creation; } finally { s.creation = undefined; }
   }
-  private async admit(s: Session, instructions: string) {
+  private async admit(s: Session, instructions: string, ticket?: string) {
     let submitting = false;
     try {
       this.setup ??= this.api.ensureAgent().catch(e => { this.setup = undefined; throw e; });
@@ -124,7 +142,7 @@ export class RetellSecretaryLab {
       submitting = true;
       const call = await this.api.request("/v3/create-web-call", {
         agent_id: agent.id, agent_version: agent.version,
-        retell_llm_dynamic_variables: { talkhint_instructions: instructions },
+        retell_llm_dynamic_variables: { talkhint_instructions: instructions, ...(ticket ? { talkhint_engine_ticket: ticket } : {}) },
         metadata: { talkhint_lab_session: s.report.id, purpose: "secretary_dev_comparison" },
       });
       // Keep call id even on a malformed credential response, so it can be stopped safely.
@@ -132,17 +150,20 @@ export class RetellSecretaryLab {
       if (typeof call.call_id !== "string" || typeof call.access_token !== "string" ||
           call.transport !== "gateway" || !Array.isArray(call.ice_servers) ||
           typeof call.expires_at !== "number") throw new RetellApiError(503, "Retell: неподдерживаемые реквизиты web-сессии");
-      s.call = call;
+      this.profile?.registered(s.report.id, call.call_id);
+      // Do not expose dynamic variables/callback capability if provider echoes them.
+      s.call = Object.fromEntries(["call_id", "access_token", "transport", "ice_servers", "expires_at"].map(k => [k, call[k]]));
       this.event(s, "web_session_registered");
       s.timer = setTimeout(() => { void this.stop(s.owner, s.report.id, "duration_limit").catch(() => {}); }, 300_000);
       s.timer.unref?.();
-      return { id: s.report.id, call, report: structuredClone(s.report) };
+      return { id: s.report.id, call: s.call, report: structuredClone(s.report) };
     } catch (e) {
       const uncertain = submitting && (!(e instanceof RetellApiError) || e.status >= 500);
       s.uncertain = uncertain;
       s.report.status = "failed"; s.report.endedAt = new Date(this.now()).toISOString();
       s.report.reason = uncertain ? "create_result_unknown" : "create_rejected";
       this.event(s, s.report.reason);
+      this.profile?.ended(s.report.id);
       if (uncertain && s.report.callId) {
         s.report.status = "stop_failed";
         void this.stop(s.owner, s.report.id, "setup_failed").catch(() => {});
@@ -269,6 +290,7 @@ export class RetellSecretaryLab {
     for (const s of Array.from(this.sessions.values())) {
       clearTimeout(s.timer); clearInterval(s.poll); clearTimeout(s.reconnect);
       s.report.status = "ended"; s.socket?.close();
+      this.profile?.ended(s.report.id);
     }
   }
   sweep() { this.prune(); }

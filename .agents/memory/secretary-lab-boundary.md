@@ -44,3 +44,15 @@ The owner subsequently completed a live browser comparison and strongly preferre
 **Why:** This is direct user-observed browser evidence, superseding the earlier absence of any live Retell trial. It is not proof of telephone quality, measured interruption latency, or integration with the common execution Engine.
 
 **How to apply:** Prioritize evaluating Retell with TalkHint's task/control backend, without silently replacing the telephone default. Treat the GPT stand's audio path as a separate diagnostic question rather than concluding its language model is inferior.
+
+The owner authorized a third “Retell + Engine” comparison ONLY inside the existing Dev browser bench, using Custom LLM, Merritt and comparable conversation settings. All context/actions are test-only; no production notifications/calendar/telephony or publishing.
+
+**Why:** Sharing a prompt with a Retell-managed model was not enough to compare our own controlled execution logic. This approval does not switch the telephone default or authorize business actions.
+
+**How to apply:** Keep the original two modes available. Distinguish the new text adapter from the existing audio Engine; enforce a sandbox allowlist rather than exposing real tools. Treat interruption as cancellation of obsolete speech/generation, not rollback of an already committed action, and deduplicate action replays across response IDs/reconnects.
+
+Retell's Custom LLM WebSocket does not send authentication headers. Do not assume the webhook signature mechanism protects that separate protocol.
+
+**Why:** The provider's setup guide explicitly requires endpoint admission protection; authenticating ordinary webhooks does not authenticate model sockets.
+
+**How to apply:** Require a short-lived per-session capability plus the registered web-call identity, reject production callbacks, and never expose capabilities in browser admissions, report exports or URL logs.

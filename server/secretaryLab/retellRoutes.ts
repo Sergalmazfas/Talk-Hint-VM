@@ -2,8 +2,8 @@ import express, { type Express } from "express";
 import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import { retellSecretaryLab, type RetellSecretaryLab } from "./retell";
 
-export function registerRetellLabRoutes(app: Express, lab: RetellSecretaryLab = retellSecretaryLab) {
-  const base = "/api/admin/secretary-lab/retell";
+export function registerRetellLabRoutes(app: Express, lab: RetellSecretaryLab = retellSecretaryLab,
+  base = "/api/admin/secretary-lab/retell") {
   app.use(base, requireBenchmarkAdmin, express.json({ limit: "16kb" }), (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (process.env.NODE_ENV !== "development") { res.sendStatus(404); return; }

@@ -6,6 +6,7 @@ import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
 import { translateTextSubtitle } from "../translation/textSubtitle";
 import { OpenAILabRealtime } from "./openAIRealtime";
 import { requireSecretaryAudioModel,SECRETARY_AUDIO_MODEL as LAB_REALTIME_MODEL,SECRETARY_AUDIO_VOICE as LAB_REALTIME_VOICE } from "../secretary/voice";
+import { secretaryTestContextPrompt } from "./testContext";
 
 let modelCheck: Promise<{ ready: boolean; reason?: string }> | undefined;
 let modelCheckedAt = 0;
@@ -20,7 +21,13 @@ function availability() {
 
 /** Does not import the telephone dialer, tasks worker or call storage. */
 export const secretaryLab = new SecretaryLab({
-  startEngine: handleSecretaryTwilioStream,
+  startEngine: (socket, dependencies) => handleSecretaryTwilioStream(socket, {
+    ...dependencies,
+    lookup: async (...args) => {
+      const context = await dependencies.lookup(...args);
+      return context ? { ...context, instruction: context.instruction + secretaryTestContextPrompt() } : null;
+    },
+  }),
   context: async (ownerId, voiceProvider) => {
     if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI unavailable");
     if(voiceProvider==="openai")return{ownerId,ownerName:confirmedSecretaryOwnerName(ownerId),voiceProvider,cloneVoiceId:""};

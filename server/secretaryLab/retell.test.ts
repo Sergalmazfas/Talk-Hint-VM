@@ -8,6 +8,7 @@ import { RetellApi, RetellApiError, RETELL_LAB_AGENT, RETELL_LAB_MODEL, RETELL_L
 import { registerRetellLabRoutes } from "./retellRoutes";
 import { buildSecretaryInstructions } from "../secretary/agent";
 import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
+import { secretaryTestContextPrompt } from "./testContext";
 
 vi.mock("../auth", () => ({
   authMiddleware: (req: any, res: any, next: () => void) => {
@@ -51,7 +52,7 @@ describe("Retell web Secretary bench — never PSTN", () => {
   it("shares the actual Secretary's core policy and trusted owner identity, not a template agent", async () => {
     const draft = input();
     expect(retellSecretaryInstructions("alice", draft.instruction)).toBe(
-      buildSecretaryInstructions(draft.instruction, confirmedSecretaryOwnerName("alice")));
+      buildSecretaryInstructions(draft.instruction, confirmedSecretaryOwnerName("alice")) + secretaryTestContextPrompt());
     const result = await lab.create("alice", draft);
     const payload = calls.find(x => x.path === "/v3/create-web-call")!.body;
     expect(payload.retell_llm_dynamic_variables.talkhint_instructions).toContain(draft.instruction);
