@@ -103,6 +103,10 @@ class XCTestEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing successful CallAudioDeviceRouterTests"):
             self.run_evidence(omit_suite="CallAudioDeviceRouterTests")
 
+    def test_missing_secretary_voice_policy_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful SecretaryVoicePreferenceTests"):
+            self.run_evidence(omit_suite="SecretaryVoicePreferenceTests")
+
     def test_failed_action_fails(self):
         with self.assertRaisesRegex(ValueError, "did not succeed"):
             self.run_evidence(status="failed")

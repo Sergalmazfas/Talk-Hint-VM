@@ -15,11 +15,18 @@ final class SecretaryVoicePreferenceTests: XCTestCase {
         defaults.removeObject(forKey: keys[0])
         SessionStore.shared.voiceProvider = .cartesia
         XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .openai)
-        SessionStore.shared.secretaryVoiceProvider = .elevenlabs
-        XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .elevenlabs)
-        XCTAssertEqual(SessionStore.shared.voiceProvider, .cartesia)
-        defaults.set("invalid", forKey: keys[0])
-        XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .openai)
+        // New Secretary calls are GPT-Live only; clone choices must not leak
+        // from Translator/Copilot or become available through this preference.
+        for provider in SecretaryVoiceProviderPreference.allCases {
+            SessionStore.shared.secretaryVoiceProvider = provider
+            XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .openai)
+            XCTAssertEqual(defaults.string(forKey: keys[0]), "openai")
+            XCTAssertEqual(SessionStore.shared.voiceProvider, .cartesia)
+        }
+        for stored in ["elevenlabs", "cartesia", "invalid"] {
+            defaults.set(stored, forKey: keys[0])
+            XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .openai)
+        }
     }
 
     func testOldPersistedDraftStillDecodesItsExplicitProvider() throws {
