@@ -67,7 +67,7 @@ class SourceMembershipTests(unittest.TestCase):
 
 
 class XCTestEvidenceTests(unittest.TestCase):
-    def run_evidence(self, status="succeeded", test_status="Success", omit=False, omit_cards=False):
+    def run_evidence(self, status="succeeded", test_status="Success", omit=False, omit_cards=False, omit_suite=None):
         root = {"actions": {"_values": [{"actionResult": {
             "status": {"_value": status}, "testsRef": {"id": {"_value": "tests"}}
         }}]}}
@@ -75,7 +75,7 @@ class XCTestEvidenceTests(unittest.TestCase):
             {"identifier": {"_value": method + "()"}, "testStatus": {"_value": test_status}}
             for method in methods[(1 if omit and suite == "CallProfilesTests" else 0):]
         ]}} for suite, methods in results.REQUIRED_TESTS.items()
-            if not (omit_cards and suite == "KnowledgeCardsTests")]
+            if not (omit_cards and suite == "KnowledgeCardsTests") and suite != omit_suite]
         with patch.object(results, "read_result", side_effect=[root, tests]):
             with contextlib.redirect_stdout(io.StringIO()):
                 results.verify("fixture.xcresult")
@@ -94,6 +94,14 @@ class XCTestEvidenceTests(unittest.TestCase):
     def test_missing_cards_suite_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing successful KnowledgeCardsTests"):
             self.run_evidence(omit_cards=True)
+
+    def test_missing_secretary_rendering_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful SecretaryTranscriptRenderingTests"):
+            self.run_evidence(omit_suite="SecretaryTranscriptRenderingTests")
+
+    def test_missing_audio_routing_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful CallAudioDeviceRouterTests"):
+            self.run_evidence(omit_suite="CallAudioDeviceRouterTests")
 
     def test_failed_action_fails(self):
         with self.assertRaisesRegex(ValueError, "did not succeed"):

@@ -23,6 +23,19 @@ REQUIRED_TESTS = {
         "testDeleteFailurePreservesRowAndOffersRetry",
         "testNativeNavigationCreateEditDeleteAndReopenKeepsScope",
     ),
+    "SecretaryTranscriptRenderingTests": (
+        "testFirstLiveSecretaryAndGuestTurnsHaveAttachedConstraints",
+        "testRecoveredSnapshotAndReplayDoNotCrashOrDuplicateTurns",
+        "testLegacyTranscriptSnapshotRestoresWithoutDuplicates",
+        "testLiveUpdateAfterRecoveryReusesTheExistingCard",
+        "testEmptyTurnsDoNotCreateCards",
+    ),
+    "CallAudioDeviceRouterTests": (
+        "testOrdinaryCallsUseOnlyStandardDeviceAndWaitForCallKit",
+        "testCopilotKeepsItsCustomDeviceAndPrivatePreparation",
+        "testNeverSwapsDuringActiveOrDisconnectingCalls",
+        "testNextOrdinaryCallDoesNotInheritCopilotDevice",
+    ),
 }
 
 
@@ -63,7 +76,7 @@ def verify(bundle):
         for method in methods:
             if not any(suite in p and method + "()" in p for p in passed):
                 raise ValueError(f"Missing successful {suite}/{method}()")
-    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards tests passed")
+    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards/Secretary/audio tests passed")
 
 
 if __name__ == "__main__":

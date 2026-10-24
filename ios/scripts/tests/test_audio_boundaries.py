@@ -58,6 +58,21 @@ class AudioBoundaryTests(unittest.TestCase):
         self.assertIn("audioRouter.setEnabled(true)", body(self.calls, "didActivate audioSession:"))
         self.assertIn("audioRouter.setEnabled(false)", body(self.calls, "didDeactivate audioSession:"))
 
+    def test_transcript_width_is_activated_only_after_feed_insertion(self):
+        rendering = body(self.monitor, "private func appendTurn(")
+        insertion = rendering.index("feed.addArrangedSubview(row)")
+        width = rendering.index("bubble.widthAnchor.constraint(lessThanOrEqualTo: feed.widthAnchor")
+        self.assertLess(insertion, width)
+        self.assertIn(".isActive = true", rendering[width:])
+
+    def test_incoming_call_completions_hop_to_main_actor_before_mutation(self):
+        incoming = body(self.calls, "func reportIncomingCall(")
+        placeholder = body(self.calls, "func reportAndImmediatelyEnd(")
+        for completion in [incoming, placeholder]:
+            callback = completion.split("provider.reportNewIncomingCall", 1)[1]
+            self.assertIn("Task { @MainActor in", callback)
+            self.assertLess(callback.index("Task { @MainActor in"), callback.index("self?."))
+
 
 if __name__ == "__main__":
     unittest.main()

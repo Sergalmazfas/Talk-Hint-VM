@@ -114,6 +114,7 @@ final class SecretaryLiveCallViewController: UIViewController {
 
         feed.axis = .vertical
         feed.spacing = 10
+        feed.accessibilityIdentifier = "feed-secretary-live-transcript"
         feed.translatesAutoresizingMaskIntoConstraints = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.alwaysBounceVertical = true
@@ -324,7 +325,9 @@ final class SecretaryLiveCallViewController: UIViewController {
         }
     }
 
-    private func renderSnapshot(_ snapshot: [String: Any]) {
+    // Shared rendering entry points are internal so UIKit regression tests can
+    // replay real feed data without starting audio, transport or a phone call.
+    func renderSnapshot(_ snapshot: [String: Any]) {
         var terminalStatus: String?
         defer {
             if let terminalStatus { finishLiveCall(status: terminalStatus) }
@@ -383,7 +386,7 @@ final class SecretaryLiveCallViewController: UIViewController {
             .replacingOccurrences(of: "%@", with: name)
     }
 
-    private func upsertTurn(id: String?, role: String, text: String, translation: String?) {
+    func upsertTurn(id: String?, role: String, text: String, translation: String?) {
         if let id, let existing = turnCardsByID[id] {
             existing.update(text: text)
             if let translation, !translation.isEmpty { existing.updateTranslation(translation) }
@@ -441,6 +444,7 @@ final class SecretaryLiveCallViewController: UIViewController {
         labels.translatesAutoresizingMaskIntoConstraints = false
 
         let bubble = UIView()
+        bubble.accessibilityIdentifier = "card-secretary-turn-\(isGuest ? "guest" : (isSecretary ? "secretary" : "transcript"))"
         bubble.backgroundColor = isSecretary ? .secondarySystemBackground :
             (isGuest ? Theme.green : .tertiarySystemBackground)
         bubble.layer.cornerRadius = 16
@@ -451,12 +455,15 @@ final class SecretaryLiveCallViewController: UIViewController {
             labels.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -10),
             labels.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 12),
             labels.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -12),
-            bubble.widthAnchor.constraint(lessThanOrEqualTo: feed.widthAnchor, multiplier: 0.88),
         ])
         let row = UIStackView(arrangedSubviews: isGuest ? [UIView(), bubble] : [bubble, UIView()])
         row.axis = .horizontal
         row.alignment = .top
         feed.addArrangedSubview(row)
+        // A cross-view constraint may only be activated after both views have
+        // a common ancestor. Activating this before insertion crashes on the
+        // first live turn and on replaying any non-empty snapshot.
+        bubble.widthAnchor.constraint(lessThanOrEqualTo: feed.widthAnchor, multiplier: 0.88).isActive = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let bottom = CGPoint(x: 0, y: max(0, self.scrollView.contentSize.height - self.scrollView.bounds.height))

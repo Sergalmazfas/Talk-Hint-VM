@@ -30,3 +30,14 @@ call. Audio-start failure must not be overwritten by a networking
 the autonomous server call, guard lifecycle callbacks, and preserve explicit
 audio errors. Verify hardware behavior on iPhone; source checks and mocked
 tests do not establish working microphone or speaker audio.
+
+Require executed native transcript-rendering and audio-routing suites, not
+merely a successful application build, when validating Secretary changes.
+
+**Why:** Device-symbolicated failures occurred while rendering both first live
+turns and recovered snapshots despite a successful build and passing server
+tests. The server-side call could continue after the native UI terminated.
+
+**How to apply:** Keep live/recovery UIKit coverage mandatory in native result
+validation. Check the exact revision installed on the phone before attributing
+new symptoms to changes that may not yet be in that binary.

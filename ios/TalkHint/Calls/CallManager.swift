@@ -128,10 +128,12 @@ final class CallManager: NSObject {
         update.supportsUngrouping = false
 
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
-            if error != nil {
-                self?.sessions[uuid] = nil
+            Task { @MainActor in
+                if error != nil {
+                    self?.sessions[uuid] = nil
+                }
+                completion()
             }
-            completion()
         }
     }
 
@@ -142,8 +144,10 @@ final class CallManager: NSObject {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: "TalkHint")
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] _ in
-            self?.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
-            completion()
+            Task { @MainActor in
+                self?.provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+                completion()
+            }
         }
     }
 
