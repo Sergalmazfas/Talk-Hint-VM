@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { upgradeElevenAudio } from "./secretaryLab/elevenAudioUpgrade";
 import type { Server } from "http";
 import { log } from "./index";
 import { isFarewellUtterance } from "./farewellFilter";
@@ -847,12 +848,10 @@ export function setupWebSocket(server: Server) {
     const parsedUrl = new URL(request.url || "", `http://${request.headers.host}`);
     const pathname = parsedUrl.pathname;
     if (pathname.startsWith("/eleven-engine-audio/")) {
-      if (process.env.NODE_ENV !== "development" || parsedUrl.search) { socket.destroy(); return; }
-      const ticket = /^\/eleven-engine-audio\/([a-f0-9]{64})$/.exec(pathname)?.[1];
-      void import("./secretaryLab/elevenRoutes").then(({ elevenEngineLab }) => {
-        if (!ticket || socket.destroyed || !elevenEngineLab?.permitsAudio(ticket)) { socket.destroy(); return; }
-        elevenEngineWss.handleUpgrade(request, socket, head, ws => elevenEngineLab.attachAudio(ws, ticket));
-      }).catch(() => socket.destroy());
+      void upgradeElevenAudio(request, socket, head, {
+        server: elevenEngineWss, environment: process.env.NODE_ENV,
+        runtime: async () => (await import("./secretaryLab/elevenRoutes")).elevenEngineLab,
+      });
       return;
     }
     if (pathname.startsWith("/retell-engine-stream/")) {

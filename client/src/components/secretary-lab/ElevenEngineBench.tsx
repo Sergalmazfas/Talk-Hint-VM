@@ -97,11 +97,12 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
     };
   }, [refreshReadiness, token]);
 
-  const sendTelemetry = useCallback((type: "playback_started" | "playback_stopped" | "error") => {
+  const sendTelemetry = useCallback((type: "playback_started" | "playback_stopped" | "error", detail?: string) => {
     const id = admittedIdRef.current;
     if (!id || !token) return;
     void labRequest(`${API}/sessions/${encodeURIComponent(id)}/telemetry`, token, {
-      method: "POST", body: JSON.stringify({ type, atMs: elapsedClientMs(startedAtRef.current, performance.now()) }),
+      method: "POST", body: JSON.stringify({ type, atMs: elapsedClientMs(startedAtRef.current, performance.now()),
+        ...(detail ? { detail: detail.slice(0, 500) } : {}) }),
     }).catch(() => undefined);
   }, [token]);
 
@@ -289,11 +290,14 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
         },
         onError: (message) => {
           if (!current()) return;
-          sendTelemetry("error");
+          sendTelemetry("error", message);
           setError(`ElevenLabs SDK: ${message}`);
         },
         onDisconnect: (details) => {
-          if (current() && details.reason === "error") sendTelemetry("error");
+          if (current() && details.reason === "error") {
+            sendTelemetry("error", "SDK connection closed unexpectedly");
+            setError("ElevenLabs: аудиосоединение неожиданно закрыто. Причина и этап подключения сохраняются в отчёте.");
+          }
         },
       });
       if (!current()) {
@@ -313,10 +317,11 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
       preflight?.getTracks().forEach((track) => track.stop());
       if (!mountedRef.current) return;
       setError(errText(cause));
-      sendTelemetry("error");
+      sendTelemetry("error", errText(cause));
       if (createdId) {
         try {
           const result = await labRequest<{ report: EngineReport }>(`${API}/sessions/${encodeURIComponent(createdId)}`, token, { method: "DELETE", body: JSON.stringify({}) });
+          if (result.report.reason) setError(`Не удалось запустить ElevenLabs: ${result.report.reason}`);
           acceptReport(result.report);
           if (ended(result.report)) {
             admittedIdRef.current = null; requestIdRef.current = null; setState("idle"); markBusy(false);

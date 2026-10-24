@@ -86,3 +86,9 @@ An existing Instant Voice Clone can be ready for TTS and accessible via Voices A
 **Why:** Actual agent creation rejected the owner's saved IVC while the catalog voice accepted exactly the same Custom LLM configuration. This was provider eligibility, not an invalid key or a missing clone.
 
 **How to apply:** Preserve that clone, show the provider restriction, and never bypass it by silently selecting a managed LLM/catalog voice or making a new clone. Ordinary TTS plus another speech transport would be a separately approved architecture.
+
+Official ElevenLabs JS SDK appends `source` and `version` to a supplied signed URL, including a same-origin proxy URL. A blanket rejection of WebSocket query parameters breaks startup before ElevenLabs is contacted.
+
+**Why:** Agent configuration and text probes passed, but real browser startup failed because the upgrade gate rejected the installed SDK's own URL.
+
+**How to apply:** Allow only validated SDK metadata while preserving capability, Dev-only and one-session admission checks. Verify the installed SDK through the actual HTTP upgrade/proxy to provider conversation metadata; agent creation alone is not a speech-connection test.

@@ -215,9 +215,10 @@ export class ElevenEngineLab {
   }
   async telemetry(owner: string, id: string, raw: unknown) {
     const s = this.owned(owner, id);
-    const p = z.object({ type: z.enum(["playback_started", "playback_stopped", "error"]), atMs: z.number().min(0).max(900_000) }).strict().safeParse(raw);
+    const p = z.object({ type: z.enum(["playback_started", "playback_stopped", "error"]), atMs: z.number().min(0).max(900_000),
+      detail: z.string().max(500).optional() }).strict().safeParse(raw);
     if (!p.success) fail(400, "Некорректная метка");
-    if (s.report.events.length < 295) this.event(s, `client_${p.data.type}`, `clientElapsedMs=${Math.round(p.data.atMs)}; not acoustic measurement`);
+    if (s.report.events.length < 295) this.event(s, `client_${p.data.type}`, `clientElapsedMs=${Math.round(p.data.atMs)}; not acoustic measurement${p.data.detail ? "; " + p.data.detail : ""}`);
     await this.persist(s); return { ok: true };
   }
   permitsAudio(ticket: string) {
@@ -227,9 +228,13 @@ export class ElevenEngineLab {
     const s = this.audioTickets.get(ticket);
     if (!s || !this.permitsAudio(ticket) || s.connected || !s.signedUrl) { browser.close(1008, "Dev admission denied"); return; }
     s.connected = true; s.browser = browser;
+    this.event(s, "browser_audio_socket_connected");
     const upstream = this.api.socket(s.signedUrl); s.upstream = upstream;
     const queue: string[] = [];
-    upstream.on("open", () => { for (const raw of queue) upstream.send(raw); queue.length = 0; });
+    upstream.on("open", () => {
+      this.event(s, "provider_audio_socket_connected");
+      for (const raw of queue) upstream.send(raw); queue.length = 0;
+    });
     browser.on("message", (raw, binary) => {
       if (s.closed) return;
       let f: any; try { if (binary) throw Error(); f = JSON.parse(raw.toString()); } catch { browser.close(1008, "Invalid message"); return; }
@@ -275,8 +280,20 @@ export class ElevenEngineLab {
         browser.send(raw.toString().replaceAll(s.capability, "[capability removed]").replaceAll(s.signedUrl!, "[signed URL removed]"));
       else void this.stop(s.owner, s.id).catch(() => undefined);
     });
-    const end = () => { if (!s.closed) void this.stop(s.owner, s.id).catch(() => undefined); };
-    upstream.on("error", end); upstream.on("close", end); browser.on("error", end); browser.on("close", end);
+    const end = (source: "provider" | "browser", code?: number, reason?: string) => {
+      if (s.closed) return;
+      const safe = comparisonText((reason ?? "").replaceAll(s.signedUrl!, "[URL]")
+        .replace(/(?:https?|wss?):\/\/\S+/g, "[URL]"), 200);
+      this.event(s, `${source}_audio_socket_closed`, `code=${code ?? "error"}${safe ? "; " + safe : ""}`);
+      if (source === "provider" || (code !== 1000 && code !== 1005)) {
+        s.report.reason = `${source === "provider" ? "ElevenLabs" : "Браузер"}: аудиосоединение закрыто${code ? ` (код ${code})` : ""}${safe ? ": " + safe : ""}`;
+      }
+      void this.stop(s.owner, s.id).catch(() => undefined);
+    };
+    upstream.on("error", e => end("provider", undefined, e.message));
+    upstream.on("close", (code, reason) => end("provider", code, reason?.toString()));
+    browser.on("error", e => end("browser", undefined, e.message));
+    browser.on("close", (code, reason) => end("browser", code, reason?.toString()));
   }
   async completion(capability: string, req: Request, res: Response) {
     this.checkDev();

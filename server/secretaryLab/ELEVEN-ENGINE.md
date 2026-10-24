@@ -94,5 +94,22 @@ Official references checked 2026-10-24:
 - https://elevenlabs.io/docs/agents-platform/customization/conversation-flow
 - https://elevenlabs.io/docs/eleven-agents/api-reference/agents/create.md
 
+### Startup transport verification
+
+The installed SDK adds `source=js_sdk&version=...` to its supplied signed URL.
+The audio upgrade gate allows these bounded, nonduplicate metadata fields while
+rejecting unknown query keys, malformed capabilities and production admission.
+The proxy negotiates the provider's `convai` WebSocket subprotocol.
+Reports distinguish browser socket, provider socket, provider conversation
+metadata and errors/close codes, without retaining URLs or capability secrets.
+
+`NODE_ENV=development npx tsx scripts/probe-eleven-engine.ts --audio-connect`
+uses the installed SDK WebSocket implementation, our actual upgrade gate/audio
+proxy and a private ElevenLabs Sarah session. On 2026-10-24 it successfully
+received real provider metadata with PCM 16 kHz input/output. It opens no
+microphone, plays no audio and places no phone call. SDK/proxy transport tests
+also run against a local provider fixture. This proves connection startup, not
+audible quality, recognition, pronunciation or physical barge-in latency.
+
 No production, telephone, notification, working calendar, native Xcode or default
 Secretary voice changes. No publishing.

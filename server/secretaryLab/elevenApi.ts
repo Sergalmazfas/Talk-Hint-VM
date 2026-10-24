@@ -97,5 +97,5 @@ export class ElevenLabApi {
     try { await this.request(`/v1/convai/agents/${encodeURIComponent(id)}`, undefined, "DELETE"); }
     catch (e) { if (!(e instanceof ElevenLabError && e.status === 404)) throw e; }
   }
-  socket(url: string) { return new WebSocket(url, { maxPayload: 256 * 1024, handshakeTimeout: 12_000 }); }
+  socket(url: string) { return new WebSocket(url, ["convai"], { maxPayload: 256 * 1024, handshakeTimeout: 12_000 }); }
 }
