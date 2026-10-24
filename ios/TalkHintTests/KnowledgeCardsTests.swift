@@ -422,7 +422,7 @@ final class KnowledgeCardsTests: XCTestCase {
 
     private func descendant(_ view: UIView, id: String) -> UIView? {
         if view.accessibilityIdentifier == id { return view }
-        return view.subviews.lazy.compactMap { descendant($0, id: id) }.first
+        return view.subviews.lazy.compactMap { self.descendant($0, id: id) }.first
     }
 
     func testNativeNavigationCreateEditDeleteAndReopenKeepsScope() async throws {
