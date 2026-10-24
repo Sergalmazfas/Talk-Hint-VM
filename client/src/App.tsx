@@ -13,6 +13,7 @@ import Dashboard from "@/pages/dashboard";
 import IncomingSecretary from "@/pages/incoming-secretary";
 import NotFound from "@/pages/not-found";
 import Onboarding from "@/pages/onboarding";
+import ProjectModel from "@/pages/project-model";
 import SecretaryLab from "@/pages/secretary-lab";
 import VoiceLab from "@/pages/voice-lab";
 
@@ -93,6 +94,7 @@ function AdminRoutes() {
         <Route path="/incoming-secretary" component={IncomingSecretary} />
         <Route path="/incoming-secretary-preview" component={IncomingSecretary} />
         <Route path="/diagnostics" component={AdminDiagnostics} />
+        <Route path="/project-model" component={ProjectModel} />
         <Route path="/voice-lab" component={VoiceLab} />
         <Route path="/secretary-lab" component={SecretaryLab} />
         <Route component={NotFound} />

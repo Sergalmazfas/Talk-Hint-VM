@@ -425,3 +425,17 @@ mtime_ms = 1792782059318
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f09fb805-3521-460a-9a2f-b7b29e73bd17/2557e9e7-b378-45b1-a29d-4a0ece19566c"
 storage_version_token = "1792782089758172"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "wiAqio9DdV5lL6-QOCC17"
+uri = "file://docs/project-model.md"
+type = "text"
+title = "Модель проекта TalkHint — реализация и проверки"
+description = "Границы первого этапа, сохранение и версии, права доступа, источники и лицензии, выполненные проверки и ограничения."
+logical_id = "e13c43ee-7648-4539-a849-d5a0d782b018"
+content_hash = "sha256:fa025bb711648227136852acb4f31cdd2b5e5ee045e52e3ca4e80c5df1fb55c9"
+size = 11693
+mtime_ms = 1792802039124
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e13c43ee-7648-4539-a849-d5a0d782b018/6411493a-0002-4e53-8f3c-f21e1f2b3542"
+storage_version_token = "1792802078553778"
+content_type = "text/markdown"

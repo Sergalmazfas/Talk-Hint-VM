@@ -174,6 +174,15 @@ export default function Dashboard() {
                 >
                   Secretary Lab
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLocation("/project-model")}
+                  className="border-teal-600 text-teal-300 hover:text-teal-200"
+                  data-testid="button-project-model"
+                >
+                  Модель проекта
+                </Button>
               </>
             )}
             <span className="text-gray-400 text-sm hidden sm:inline">{user?.email}</span>
@@ -209,6 +218,7 @@ export default function Dashboard() {
             <Button variant="outline" size="sm" onClick={() => setLocation("/settings/call-profiles")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Call profiles</Button>
             <Button variant="outline" size="sm" onClick={() => setLocation("/voice-lab")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Voice Lab</Button>
             <Button variant="outline" size="sm" onClick={() => setLocation("/secretary-lab")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Secretary Lab</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/project-model")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Модель проекта</Button>
             <Button variant="outline" size="sm" onClick={() => setLocation("/incoming-secretary")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Incoming dev</Button>
             <a href="/admin/translator-spike" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Translator stand</a>
             <a href="/admin/health" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Health</a>

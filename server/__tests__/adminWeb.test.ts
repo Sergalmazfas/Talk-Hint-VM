@@ -69,7 +69,7 @@ describe("entire existing web workspace is owner-only", () => {
   });
   const current = ["/admin", "/admin/app/", "/admin/app/script.js", "/admin/dashboard",
     "/admin/diagnostics", "/admin/voice-lab", "/admin/secretary-lab", "/admin/health",
-    "/admin/incoming-secretary", "/admin/settings/call-profiles", "/admin/tutor/preview"];
+    "/admin/incoming-secretary", "/admin/settings/call-profiles", "/admin/tutor/preview", "/admin/project-model"];
   it.each(current)("denies guest and ordinary Google account at %s", async path => {
     expect((await request(app()).get(path)).status).toBe(401);
     expect((await request(app()).get(path).set("x-test-oauth", "regular")).status).toBe(403);

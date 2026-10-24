@@ -38,6 +38,7 @@ import { eq, and } from "drizzle-orm";
 import { registerTutorRoutes } from "./tutorRoutes";
 import { isBenchmarkAdmin } from "./benchmark/adminGate";
 import { registerAdminWebBoundary } from "./adminWeb";
+import { registerProjectModel } from "./projectModel/routes";
 import { configureTranslatorDialer, registerTranslatorCall, getTranslatorCall, resolveTranslatorVoices, resolveTranslatorPlayback } from "./translation/twilioBridge";
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone, resolveTranslatorCloneProvider } from "./translation/cloneSpeech";
@@ -292,6 +293,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   registerAdminWebBoundary(app);
+  registerProjectModel(app);
   registerMobileSecretary(app);
   setupWebSocket(httpServer);
   registerChatGPTIntegration(app, mcpReleaseConfiguration(
