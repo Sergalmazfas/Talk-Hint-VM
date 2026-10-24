@@ -23,12 +23,13 @@ export const secretaryTestTools = [
   }, ["startsAt", "note"]),
 ];
 /** The voice provider receives text; our OpenAI account does all model generation. No Retell LLM. */
-export async function* streamSecretaryResponse(request: EngineRequest): AsyncGenerator<EngineChunk> {
+export async function* streamSecretaryResponse(request: EngineRequest,
+  options: { reasoning?: "medium" | "low" } = {}): AsyncGenerator<EngineChunk> {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 25_000 });
   const stream = await client.responses.create({
     model: SECRETARY_REASONING_MODEL, instructions: request.instructions,
     input: request.input, tools: secretaryTestTools,
-    parallel_tool_calls: false, reasoning: { effort: "medium" }, max_output_tokens: 1600,
+    parallel_tool_calls: false, reasoning: { effort: options.reasoning ?? "medium" }, max_output_tokens: 1600,
     stream: true, store: false,
   }, { signal: request.signal });
   let complete = false;

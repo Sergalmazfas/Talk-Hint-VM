@@ -3,6 +3,24 @@ name: Secretary Lab boundary
 description: Why the admin conversation bench reuses the Secretary and what it does not prove.
 ---
 
+ElevenLabs latency profiles must remain local to its Dev adapter; keep other working benches unchanged, preserve the original profile and compare the same model before combining changes.
+
+**Why:** The owner explicitly requires preserving the other working benches. Lower reasoning in a named ElevenLabs experiment is not permission to change the global Secretary default.
+
+**How to apply:** Record profile snapshots and distinguish first-text/audio-frame measurements from physical audibility. Do not promote Eager based on text-only tests.
+
+Eleven Agents rejects Flash v2.5 with English as the primary language; the same configuration is accepted with Russian primary. Multilingual speech and switching must still be tested, not inferred from admission.
+
+**Why:** Actual agent creation returned “English Agents must use turbo or flash v2.” A Russian-primary configuration was accepted. This is an extra comparison variable, not an equivalent TTS-only switch.
+
+**How to apply:** Disclose the primary language in profile snapshots, preserve baseline, never silently substitute Flash v2 or Realtime for Custom LLM.
+
+The installed Eleven browser SDK separates raw control messages from audio output listeners.
+
+**Why:** A synthetic probe received audio but incorrectly timed out waiting for agent-response events on the audio listener. Independently, valid multi-second PCM frames exceeded the old 256KiB upstream cap.
+
+**How to apply:** Subscribe to control events as well as audio in probes, answer ping, and inspect saved provider close reasons before labeling a timeout as silence or slow Engine. Keep bounded payload limits appropriate for base64 PCM.
+
 The Secretary bench belongs alongside the existing model/admin benches. Preserve the existing real-agent/owner-voice baseline. An explicitly named direct OpenAI comparison is a separate selectable Dev experiment, never a silent replacement of that baseline or the telephone runtime.
 
 **Why:** The owner wants to hear and understand the actual Secretary before changing conversation behavior or providers after an unexplained short call.

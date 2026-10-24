@@ -7,6 +7,8 @@ import { formatLabTime, labRequest } from "@/lib/secretary-lab";
 import { elevenEngineApi } from "@/lib/secretary-lab-modes";
 import { elapsedClientMs, elevenProxySocketUrl, isElevenReportEnded } from "./eleven-engine-helpers";
 import type { ElevenEngineReadiness } from "./stand-readiness";
+import { elevenProfiles, type ElevenProfileId, type ElevenTiming } from "../../../../shared/elevenLabProfiles";
+import ElevenPerformance from "./ElevenPerformance";
 import EngineFixtures from "./EngineFixtures";
 import "./eleven-engine.css";
 
@@ -14,6 +16,7 @@ type Turn = { id?: string; role?: string; text?: string; atMs?: number; [key: st
 type EngineReport = {
   id: string; savedComparisonId?: string; voiceChoice?: "clone" | "catalog";
   status: string; model?: string; voice?: string; ttsModel?: string; instruction?: string;
+  profileId?: string; configuration?: unknown; timings?: ElevenTiming[];
   createdAt?: string; endedAt?: string; turns?: Turn[]; events?: Array<Record<string, unknown>>;
   observations?: Array<Record<string, unknown>>; metrics?: Record<string, unknown>;
   engine?: { provider?: string; model?: string; testOnly?: boolean; context?: Record<string, unknown>;
@@ -34,6 +37,8 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
   const [loadError, setLoadError] = useState("");
   const [state, setState] = useState<BenchState>("idle");
   const [voice, setVoice] = useState<"clone" | "catalog">("catalog");
+  const [profileId, setProfileId] = useState<ElevenProfileId>("baseline");
+  const [scenarioLanguage, setScenarioLanguage] = useState<"ru" | "en" | "es">("ru");
   const [consent, setConsent] = useState(false);
   const [report, setReport] = useState<EngineReport | null>(null);
   const [selected, setSelected] = useState<EngineReport | null>(null);
@@ -100,11 +105,12 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
     };
   }, [refreshReadiness, token]);
 
-  const sendTelemetry = useCallback((type: "playback_started" | "playback_stopped" | "error", detail?: string) => {
+  const sendTelemetry = useCallback((type: "playback_started" | "playback_stopped" | "error", detail?: string, eventId?: number) => {
     const id = admittedIdRef.current;
     if (!id || !token) return;
     void labRequest(`${API}/sessions/${encodeURIComponent(id)}/telemetry`, token, {
       method: "POST", body: JSON.stringify({ type, atMs: elapsedClientMs(startedAtRef.current, performance.now()),
+        ...(Number.isInteger(eventId) ? { eventId } : {}),
         ...(detail ? { detail: detail.slice(0, 500) } : {}) }),
     }).catch(() => undefined);
   }, [token]);
@@ -224,7 +230,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
       createAttempted = true;
       const created = await labRequest<{ id: string; websocketPath: string; report: EngineReport; savedComparisonId?: string; voiceChoice?: "clone" | "catalog"; ttsModel?: string }>(`${API}/sessions`, token, {
         method: "POST",
-        body: JSON.stringify({ instruction: instruction.trim(), voice, consent: true, clientRequestId: requestIdRef.current }),
+        body: JSON.stringify({ instruction: instruction.trim(), voice, consent: true, profileId, clientRequestId: requestIdRef.current }),
       });
       createdId = created.id;
       admittedIdRef.current = created.id;
@@ -264,10 +270,12 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
           if (!speaking && lastPlaybackRef.current) sendTelemetry("playback_stopped");
           lastPlaybackRef.current = speaking;
         },
-        onAudioAlignmentPlayback: () => {
+        onAudioAlignmentPlayback: (alignment) => {
           if (current() && !lastPlaybackRef.current) {
             lastPlaybackRef.current = true;
-            sendTelemetry("playback_started");
+            const info = alignment as { event_id?: unknown; eventId?: unknown };
+            const eventId = typeof info?.event_id === "number" ? info.event_id : info?.eventId;
+            sendTelemetry("playback_started", undefined, typeof eventId === "number" && Number.isInteger(eventId) ? eventId : undefined);
           }
         },
         onInterruption: (interruption) => {
@@ -369,9 +377,38 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
     } catch (cause) { setError(errText(cause)); }
     finally { setSavingEvaluation(false); }
   };
+  const downloadReport = () => {
+    if (!current) return;
+    const file = new Blob([JSON.stringify(current, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(file);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `eleven-report-${current.id}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
   const current = report ?? selected;
   const history = config?.history ?? [];
   const voiceStatus = voice === "clone" ? config?.voices.clone : config?.voices.catalog;
+  const scenarios = {
+    ru: [
+      "Проверьте отдельно: попросите записать вас на вторник после обеда. Сделайте паузу, затем назовите обращение и номер телефона.",
+      "Продиктуйте номер по цифрам, попросите повторить его и исправьте одну цифру. Затем перебейте ответ секретаря и внесите короткую коррекцию.",
+      "Сценарий TEST save/replay: попросите сохранить тестовую запись, дождитесь подтверждения, затем попросите повторить её. Убедитесь, что повтор не создаёт дубликат.",
+    ],
+    en: [
+      "Test separately: ask for an appointment Tuesday afternoon. Pause, then give a form of address and a phone number.",
+      "Speak the number digit by digit, ask for it back, then correct one digit. Interrupt the reply and make one short correction.",
+      "TEST save/replay: ask to save a test appointment, wait for confirmation, then ask to replay it. Check that replay does not create a duplicate.",
+    ],
+    es: [
+      "Prueba por separado: pide una cita para el martes por la tarde. Haz una pausa y después indica el tratamiento y un número de teléfono.",
+      "Dicta el número cifra por cifra, pide que lo repita y corrige una cifra. Interrumpe la respuesta y haz una corrección breve.",
+      "Prueba TEST guardar/reproducir: pide guardar una cita de prueba, espera la confirmación y luego pide reproducirla. Comprueba que no se cree un duplicado.",
+    ],
+  } as const;
 
   return <section className="eleven-bench" aria-label="ElevenLabs plus TalkHint Engine test bench">
     <header className="eleven-heading">
@@ -397,6 +434,21 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
               <em>{readiness?.ready ? "READY" : "NOT READY"}</em>
             </label>)}
           </div>
+          <div className="eleven-profile-wrap">
+            <div className="eleven-profile-head">
+              <div><b>Профиль эксперимента ElevenLabs</b><small>Влияет только на эту ElevenLabs-пробу. Выбор фиксируется в серверном отчёте; другие стенды не затрагиваются.</small></div>
+              {profileId === "optimized" && <span className="eleven-profile-badge">Эксперимент</span>}
+              {profileId === "eager" && <span className="eleven-profile-badge">Не подтверждён</span>}
+            </div>
+            <select aria-label="Профиль latency-эксперимента" value={profileId} disabled={isBusy} onChange={(event) => setProfileId(event.target.value as ElevenProfileId)}>
+              {Object.entries(elevenProfiles).map(([id, profile]) => <option key={id} value={id}>{profile.label}{id === "eager" ? " · отдельный, не проверен" : id === "optimized" ? " · эксперимент" : ""}</option>)}
+            </select>
+            <div className="eleven-profile-details">
+              TTS: {elevenProfiles[profileId].ttsModel} · основной язык провайдера: {elevenProfiles[profileId].initialLanguage} · turn eagerness: {elevenProfiles[profileId].turnEagerness} · reasoning: {elevenProfiles[profileId].reasoning} · brief: {elevenProfiles[profileId].brief ? "да" : "нет"} · checkpoint: {elevenProfiles[profileId].checkpoint}
+            </div>
+            {elevenProfiles[profileId].initialLanguage === "ru" && <p className="eleven-experiment-note">ElevenLabs отклоняет Flash v2.5 при основном языке EN. Здесь основной язык провайдера RU, голос по-прежнему Sarah. Engine следует языку собеседника; это не полностью изолированная замена TTS. Английский, русский, испанский и переключения требуют отдельной проверки.</p>}
+            {profileId === "optimized" && <p className="eleven-experiment-note">Экспериментальная комбинация, не рекомендованный или подтверждённый пресет.</p>}
+          </div>
           <div className="eleven-facts">
             <div><small>REASONING MODEL</small><b>{config?.model || "—"}</b></div>
             <div><small>TTS</small><b>{config?.ttsModel || "—"}</b></div>
@@ -412,13 +464,25 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
               <Button className="eleven-stop" onClick={() => void stopSession(state === "permission" || state === "admitting" || state === "starting")}><CircleStop size={15} /> {state === "permission" || state === "admitting" ? "Отменить создание" : state === "starting" ? "Отменить / остановить" : state === "uncertain" ? "Повторить остановку" : "Остановить сессию"}</Button>}
           </div>
           <p className="eleven-safety"><ShieldCheck size={15} /> Путь WebSocket — одноразовый серверный прокси с cancellation/control, не provider signed URL. Секреты провайдера браузеру не передаются.</p>
-          <p className="eleven-caveat">Тайминги отражают состояние воспроизведения, сообщённое SDK. Они не измеряют физическую акустическую задержку и не доказывают, что звук был слышен.</p>
+          <p className="eleven-caveat">Playback в браузерном SDK не равен акустической слышимости. Серверные и браузерные часы разделены; их значения не вычитаются друг из друга.</p>
+          <div className="eleven-profile-wrap">
+            <div className="eleven-panel-title"><span>ИЗОЛИРОВАННЫЙ СЦЕНАРИЙ</span><b>Одна инструкция, разные прогоны</b></div>
+            <div className="eleven-scenario-languages" aria-label="Язык инструкций сценария">
+              {(["ru", "en", "es"] as const).map((language) => <button key={language} type="button" aria-pressed={scenarioLanguage === language} onClick={() => setScenarioLanguage(language)}>{language.toUpperCase()}</button>)}
+            </div>
+            <div className="eleven-scenario-copy">{scenarios[scenarioLanguage].map((line) => <p key={line}>{line}</p>)}</div>
+            <p className="eleven-experiment-note">Используйте одну и ту же fixture и одинаковые инструкции отдельно для каждого профиля. Не объединяйте прогоны; вручную отмечайте перебивания и проверяйте TEST save/replay на отсутствие дублей. Эти инструкции не создают и не имитируют результаты.</p>
+          </div>
         </article>
         <article className="eleven-panel">
           <div className="eleven-panel-title"><span>03 / ОТЧЁТ И ОЦЕНКА</span><b>Отдельный человеческий сигнал</b></div>
           {current ? <>
             <div className="eleven-report-id"><span>SESSION ID <b>{current.id}</b></span><span>SAVED COMPARISON ID <b>{current.savedComparisonId || savedId || "Не сообщён"}</b></span><a href="#saved-comparisons">Открыть архив сравнений ↓</a></div>
             <div className="eleven-report-facts"><span>Статус <b>{current.status}</b></span><span>Голос <b>{current.voice || current.voiceChoice || "Не сообщён"}</b></span><span>Модель <b>{current.engine?.model || current.model || "Не сообщена"}</b></span><span>Test-only <b>{current.engine?.testOnly === undefined ? "Не сообщено" : current.engine.testOnly ? "Да" : "Нет"}</b></span></div>
+             <ElevenPerformance profileId={current.profileId} configuration={current.configuration} timings={current.timings} />
+             <div className="eleven-report-actions">
+               <Button type="button" variant="outline" onClick={downloadReport}>Скачать JSON</Button>
+             </div>
             <label className="eleven-label" htmlFor="eleven-audibility">Слышимость · 1–5</label>
             <div className="eleven-evaluation">
               <label>Слышимость<select id="eleven-audibility" value={audibility} disabled={savingEvaluation || isBusy} onChange={(event) => setAudibility(event.target.value)}><option value="">Не оценено</option>{[1,2,3,4,5].map((n) => <option key={n}>{n}</option>)}</select></label>

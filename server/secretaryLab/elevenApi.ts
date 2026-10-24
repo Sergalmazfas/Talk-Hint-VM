@@ -1,5 +1,7 @@
 import WebSocket from "ws";
 import { SECRETARY_REASONING_MODEL } from "../secretary/voice";
+import { elevenProfiles, type ElevenProfileId } from "../../shared/elevenLabProfiles";
+import { comparisonText } from "./comparisonSnapshot";
 
 export const ELEVEN_TTS_MODEL = "eleven_multilingual_v2";
 export const ELEVEN_CATALOG = { voiceId: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", gender: "female", accent: "american" };
@@ -26,7 +28,10 @@ export class ElevenLabApi {
       const detail = await r.json().catch(() => null) as any;
       if (detail?.detail?.status === "custom_llm_not_allowed_in_with_agent_with_ivc_voice")
         throw new ElevenLabError(409, "ElevenLabs запрещает Custom LLM с Instant Voice Clone; сохранённый голос не заменён");
-      throw new ElevenLabError(r.status === 404 ? 404 : 503, `ElevenLabs HTTP ${r.status}: доступ/настройки не подтверждены; подмены нет`);
+      const reason = typeof detail?.detail?.message === "string" ? comparisonText(detail.detail.message, 250) :
+        Array.isArray(detail?.detail) ? comparisonText(detail.detail.map((d: any) => d.msg).join("; "), 250) : "";
+      throw new ElevenLabError(r.status === 404 ? 404 : 503,
+        `ElevenLabs HTTP ${r.status}: ${reason || "доступ/настройки не подтверждены"}; подмены нет`);
     }
     return r.status === 204 ? {} : r.json();
   }
@@ -35,14 +40,15 @@ export class ElevenLabApi {
     if (v.voice_id !== id) throw new ElevenLabError(503, "ElevenLabs: voice ID не подтверждён");
     return v;
   }
-  configuration(name: string, voiceId: string, capability: string) {
+  configuration(name: string, voiceId: string, capability: string, profile: ElevenProfileId = "baseline") {
+    const settings = elevenProfiles[profile];
     return {
       name,
       conversation_config: {
         asr: { provider: "scribe_realtime", quality: "high", user_input_audio_format: "pcm_16000" },
-        tts: { voice_id: voiceId, model_id: ELEVEN_TTS_MODEL, agent_output_audio_format: "pcm_16000",
+        tts: { voice_id: voiceId, model_id: settings.ttsModel, agent_output_audio_format: "pcm_16000",
           stability: 0.5, similarity_boost: 0.8, speed: 1 },
-        agent: { first_message: "", language: "en", disable_first_message_interruptions: false,
+        agent: { first_message: "", language: settings.initialLanguage, disable_first_message_interruptions: false,
           prompt: { llm: "custom-llm", prompt: "Audio transport only. All business replies, permissions and tools are controlled by TalkHint.",
             // ElevenLabs treats this as an OpenAI base URL and appends
             // /chat/completions itself (verified with an actual provider request).
@@ -50,7 +56,7 @@ export class ElevenLabApi {
               model_id: SECRETARY_REASONING_MODEL, api_type: "chat_completions" },
             tools: [], tool_ids: [], knowledge_base: [], rag: { enabled: false },
             backup_llm_config: { preference: "disabled" } } },
-        turn: { turn_timeout: 15, silence_end_call_timeout: -1, turn_eagerness: "normal", speculative_turn: false,
+        turn: { turn_timeout: 15, silence_end_call_timeout: -1, turn_eagerness: settings.turnEagerness, speculative_turn: false,
           spelling_patience: "auto", soft_timeout_config: { timeout_seconds: -1 } },
         conversation: { max_duration_seconds: 300, client_events: [
           "conversation_initiation_metadata", "audio", "interruption", "user_transcript", "agent_response",
@@ -63,13 +69,14 @@ export class ElevenLabApi {
       },
     };
   }
-  async create(voiceId: string, capability: string, id: string) {
-    const config = this.configuration(`TalkHint ElevenLabs Engine DEV ${id}`, voiceId, capability);
+  async create(voiceId: string, capability: string, id: string, profile: ElevenProfileId = "baseline") {
+    const config = this.configuration(`TalkHint ElevenLabs Engine DEV ${id}`, voiceId, capability, profile);
     const r = await this.request("/v1/convai/agents/create", config);
     if (typeof r.agent_id !== "string") throw new ElevenLabError(503, "Создание Dev-аудиоагента не подтверждено");
     return r.agent_id as string;
   }
-  async inspect(id: string, voiceId: string, capability: string) {
+  async inspect(id: string, voiceId: string, capability: string, profile: ElevenProfileId = "baseline") {
+    const settings = elevenProfiles[profile];
     const a = await this.request(`/v1/convai/agents/${encodeURIComponent(id)}`);
     const c = a.conversation_config, p = c?.agent?.prompt;
     if (!a.name?.startsWith("TalkHint ElevenLabs Engine DEV ") || p?.llm !== "custom-llm" ||
@@ -77,7 +84,8 @@ export class ElevenLabApi {
         p.custom_llm?.model_id !== SECRETARY_REASONING_MODEL ||
         p.backup_llm_config?.preference !== "disabled" || p.tools?.length || p.tool_ids?.length ||
         p.knowledge_base?.length || p.rag?.enabled ||
-        c?.tts?.voice_id !== voiceId || c.tts.model_id !== ELEVEN_TTS_MODEL ||
+        c?.tts?.voice_id !== voiceId || c.tts.model_id !== settings.ttsModel || c.agent?.language !== settings.initialLanguage ||
+        c.turn?.turn_eagerness !== settings.turnEagerness ||
         c.asr?.provider !== "scribe_realtime" || c.turn?.speculative_turn !== false ||
         !c.conversation?.client_events?.includes("interruption") || c.conversation.max_duration_seconds !== 300 ||
         a.platform_settings?.auth?.enable_auth !== true || a.platform_settings?.privacy?.record_voice !== false ||
@@ -99,5 +107,8 @@ export class ElevenLabApi {
     try { await this.request(`/v1/convai/agents/${encodeURIComponent(id)}`, undefined, "DELETE"); }
     catch (e) { if (!(e instanceof ElevenLabError && e.status === 404)) throw e; }
   }
-  socket(url: string) { return new WebSocket(url, ["convai"], { maxPayload: 256 * 1024, handshakeTimeout: 12_000 }); }
+  // Agents may send an entire multi-second PCM phrase in one frame. At 16kHz
+  // a base64 7-second phrase already exceeds 256KiB; that old limit terminated
+  // healthy replies. Still bounded (roughly 24s PCM plus JSON), never unlimited.
+  socket(url: string) { return new WebSocket(url, ["convai"], { maxPayload: 1024 * 1024, handshakeTimeout: 12_000 }); }
 }

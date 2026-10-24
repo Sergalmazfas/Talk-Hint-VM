@@ -10,10 +10,15 @@ import { ElevenLabApi, ElevenLabError, ELEVEN_CATALOG, ELEVEN_TTS_MODEL, elevenD
 import type { ComparisonRepository } from "./comparisonStore";
 import { comparisonSnapshot, comparisonText } from "./comparisonSnapshot";
 import type { RetellReport } from "./retell";
+import { elevenProfiles, type ElevenProfileId, type ElevenTiming } from "../../shared/elevenLabProfiles";
 
 const startInput = z.object({ instruction: z.string().trim().min(8).max(4000),
-  voice: z.enum(["clone", "catalog"]), consent: z.literal(true), clientRequestId: z.string().uuid() }).strict();
+  voice: z.enum(["clone", "catalog"]), consent: z.literal(true), clientRequestId: z.string().uuid(),
+  profileId: z.enum(["baseline", "flash", "eager", "low", "brief", "optimized"]).default("baseline") }).strict();
+const briefInstructions = "\nFor this ElevenLabs experiment only: give one or two short conversational sentences, then one question if needed. " +
+  "Keep names, numbers and addresses accurate. Never omit a required confirmation or claim uncommitted work.";
 type Report = RetellReport & { savedComparisonId: string; voiceChoice: "clone" | "catalog"; ttsModel: string;
+  profileId: ElevenProfileId; configuration: Record<string, unknown>; timings: ElevenTiming[]; timingNotes: string[];
   evaluation: { audibility: number | null; naturalness: number | null; note: string; device: string } };
 type Entry = {
   owner: string; id: string; fingerprint: string; capability: string; audioTicket: string;
@@ -22,7 +27,8 @@ type Entry = {
   browser?: WebSocket; upstream?: WebSocket; persistChain: Promise<unknown>; stopPromise?: Promise<any>;
   timer?: NodeJS.Timeout; heartbeat?: NodeJS.Timeout; lastSeen: number; connected: boolean;
   completed: Map<string, string>; sequence: number; activeHttp?: Response;
-  archiveCreated: boolean;
+  archiveCreated: boolean; checkpointedActions?: string; activeTiming?: ElevenTiming;
+  latestTranscript?: { text: string; atMs: number }; activeUserText?: string;
 };
 function fail(status: number, message: string): never { throw new ElevenLabError(status, message); }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -52,7 +58,7 @@ export class ElevenEngineLab {
   async readiness(owner: string) {
     this.checkDev();
     const base = { mode: "eleven-engine", model: SECRETARY_REASONING_MODEL, ttsModel: ELEVEN_TTS_MODEL,
-      asr: "scribe_realtime", context: SECRETARY_TEST_CONTEXT, history: this.history(owner),
+      asr: "scribe_realtime", profiles: elevenProfiles, context: SECRETARY_TEST_CONTEXT, history: this.history(owner),
       settings: { languages: ["en", "ru", "es"], initialLanguage: "en", turnEagerness: "normal", turnTimeout: 15,
         maxDurationSeconds: 300, providerAudioRetention: false, archiveRetentionDays: 30 },
     };
@@ -92,18 +98,23 @@ export class ElevenEngineLab {
   private persist(s: Entry) {
     const snapshot = comparisonSnapshot("eleven-engine", s.report);
     snapshot.ttsModel = s.report.ttsModel; snapshot.voiceChoice = s.report.voiceChoice;
+    snapshot.profileId = s.report.profileId; snapshot.configuration = structuredClone(s.report.configuration);
+    snapshot.timings = structuredClone(s.report.timings);
+    snapshot.timingNotes = [...s.report.timingNotes];
     snapshot.evaluation = { ...s.report.evaluation, note: comparisonText(s.report.evaluation.note), device: comparisonText(s.report.evaluation.device, 200) };
-    const content = { title: `ElevenLabs + Engine · ${s.report.voiceChoice} · TEST`, instruction: comparisonText(s.report.instruction),
+    const actionsSignature = JSON.stringify(s.engine.report.actions);
+    const content = { title: `ElevenLabs + Engine · ${s.report.profileId} · TEST`, instruction: comparisonText(s.report.instruction),
       evaluation: { score: null, note: "" }, runs: [snapshot] };
     const write = s.persistChain.then(() => this.store.checkpoint!(s.owner, s.id, content));
     s.persistChain = write.catch(() => undefined);
-    return write.then(record => { s.archiveCreated = true; return record; });
+    return write.then(record => { s.archiveCreated = true; s.checkpointedActions = actionsSignature; return record; });
   }
   async create(owner: string, raw: unknown) {
     this.checkDev();
     const parsed = startInput.safeParse(raw); if (!parsed.success) fail(400, "Проверьте поручение, голос, согласие и request ID");
     const input = parsed.data;
-    const fingerprint = hash(input.instruction + "\n" + input.voice);
+    const profile = elevenProfiles[input.profileId];
+    const fingerprint = hash(input.instruction + "\n" + input.voice + "\n" + input.profileId);
     const old = this.sessions.get(input.clientRequestId);
     if (old) {
       if (old.owner !== owner) fail(404, "Сессия не найдена");
@@ -123,14 +134,38 @@ export class ElevenEngineLab {
     // checkpoint/ACK the ledger BEFORE any follow-up model can claim success.
     const service = this;
     s.engine = new SecretaryConversationEngine(owner, input.instruction, async function* (request) {
-      await service.persist(s);
-      if (!request.signal.aborted) yield* service.stream(request);
+      const timing = s.controller?.signal === request.signal ? s.activeTiming : undefined;
+      const unchanged = s.archiveCreated && s.checkpointedActions === JSON.stringify(s.engine.report.actions);
+      if (profile.checkpoint === "actions_changed" && unchanged) {
+        if (timing) timing.checkpointSkipped++;
+      } else {
+        const before = performance.now();
+        await service.persist(s);
+        if (timing) timing.checkpointsMs.push(Math.round(performance.now() - before));
+      }
+      if (!request.signal.aborted) {
+        const scoped = profile.brief ? { ...request, instructions: request.instructions + briefInstructions } : request;
+        // Injected streams remain testable; only this adapter supplies nondefault
+        // reasoning. Other callers retain the unchanged medium default.
+        yield* (service.stream === streamSecretaryResponse
+          ? streamSecretaryResponse(scoped, { reasoning: profile.reasoning })
+          : service.stream(scoped));
+      }
     });
     s.report = { id, callId: "", mode: "eleven-engine", status: "connecting", instruction: input.instruction,
-      model: SECRETARY_REASONING_MODEL, voice: "", promptHash: hash(s.engine.instructions),
+      model: SECRETARY_REASONING_MODEL, voice: "", promptHash: hash(s.engine.instructions + (profile.brief ? briefInstructions : "")),
       createdAt: new Date().toISOString(), monitorStatus: "waiting", turns: [], events: [], observations: [],
       metrics: { guestTurns: 0, secretaryTurns: 0 }, engine: s.engine.report, savedComparisonId: id,
-      ttsModel: ELEVEN_TTS_MODEL, voiceChoice: input.voice,
+      ttsModel: profile.ttsModel, voiceChoice: input.voice, profileId: input.profileId,
+      configuration: { ...profile, model: SECRETARY_REASONING_MODEL, voice: ELEVEN_CATALOG.name,
+        asr: "scribe_realtime", speculativeTurn: false, maxOutputTokens: 1600, transport: "Agents Custom LLM",
+        region: "provider default; no regional routing measurement", optimizedStatus: "experimental; not a listening-quality claim" },
+      timings: [], timingNotes: [
+        "Server timestamps are milliseconds since session creation. Browser playbackClientMs has a separate clock; do not subtract clocks.",
+        "Physical speech end and provider end-of-turn decision timestamps are unavailable in this protocol; null is not zero.",
+        "Transcript receipt is not the time speech recognition completed. Audio-to-request association is sequential/best-effort, not a provider turn-ID guarantee.",
+        "Playback is SDK telemetry, not proof of physically audible sound. Network hops and provider region are not isolated by these measurements.",
+      ],
       evaluation: { audibility: null, naturalness: null, note: "", device: "" } };
     this.sessions.set(id, s); this.attempts.set(owner, [...recent, Date.now()]);
     s.created = (async () => {
@@ -143,9 +178,10 @@ export class ElevenEngineLab {
         await this.persist(s);
         if (s.closed) fail(409, "Запуск отменён");
         this.capabilities.set(s.capability, s);
-        s.agentId = await this.api.create(choice.voiceId, s.capability, id);
+        s.report.configuration.voice = s.report.voice;
+        s.agentId = await this.api.create(choice.voiceId, s.capability, id, input.profileId);
         if (s.closed) { await this.api.remove(s.agentId); s.agentId = undefined; fail(409, "Запуск отменён"); }
-        await this.api.inspect(s.agentId, choice.voiceId, s.capability);
+        await this.api.inspect(s.agentId, choice.voiceId, s.capability, input.profileId);
         s.signedUrl = await this.api.signedUrl(s.agentId);
         if (s.closed) { await this.api.remove(s.agentId); s.agentId = undefined; fail(409, "Запуск отменён"); }
         this.audioTickets.set(s.audioTicket, s); this.event(s, "custom_llm_configured");
@@ -216,9 +252,18 @@ export class ElevenEngineLab {
   async telemetry(owner: string, id: string, raw: unknown) {
     const s = this.owned(owner, id);
     const p = z.object({ type: z.enum(["playback_started", "playback_stopped", "error"]), atMs: z.number().min(0).max(900_000),
-      detail: z.string().max(500).optional() }).strict().safeParse(raw);
+      detail: z.string().max(500).optional(), eventId: z.number().int().nonnegative().optional() }).strict().safeParse(raw);
     if (!p.success) fail(400, "Некорректная метка");
     if (s.report.events.length < 295) this.event(s, `client_${p.data.type}`, `clientElapsedMs=${Math.round(p.data.atMs)}; not acoustic measurement${p.data.detail ? "; " + p.data.detail : ""}`);
+    if (p.data.type === "playback_started") {
+      const timing = p.data.eventId === undefined ? s.activeTiming :
+        s.report.timings.find(t => t.providerAudioEventId === p.data.eventId);
+      if (timing && !timing.cancelled && timing.firstAudioMs !== null && timing.playbackClientMs === null) {
+        timing.playbackClientMs = p.data.atMs;
+        timing.playbackTelemetryReceivedMs = Date.now() - Date.parse(s.report.createdAt);
+        timing.correlation += p.data.eventId === undefined ? "; SDK playback sequential/best-effort" : "; SDK playback event-ID";
+      }
+    }
     await this.persist(s); return { ok: true };
   }
   permitsAudio(ticket: string) {
@@ -262,19 +307,32 @@ export class ElevenEngineLab {
           this.event(s, "audio_connected");
         }
         if (f.type === "interruption") {
+          if (s.activeTiming) s.activeTiming.cancelled = true;
           s.epoch++; s.controller?.abort(); s.activeHttp?.end(); s.activeHttp = undefined;
           this.event(s, "provider_interruption_cancelled_generation");
         }
         const role = f.type === "user_transcript" ? "guest" : f.type === "agent_response" ? "secretary" : undefined;
         const text = role === "guest" ? f.user_transcription_event?.user_transcript : f.agent_response_event?.agent_response;
         if (role && typeof text === "string") {
+          if (role === "guest") {
+            s.latestTranscript = { text, atMs: Date.now() - Date.parse(s.report.createdAt) };
+            if (s.activeTiming && s.activeUserText === text && s.activeTiming.transcriptReceivedMs === null) {
+              s.activeTiming.transcriptReceivedMs = s.latestTranscript.atMs; s.latestTranscript = undefined;
+            }
+          }
           if (s.report.turns.length < 300) s.report.turns.push({ id: `${role}:${++s.sequence}`, role, text: text.slice(0, 4000), atMs: Date.now() - Date.parse(s.report.createdAt) });
           if (role === "guest") s.report.metrics.guestTurns++; else s.report.metrics.secretaryTurns++;
           this.event(s, role === "guest" ? "provider_final_user_transcript" : "provider_agent_response");
           void this.persist(s).catch(() => void this.stop(s.owner, s.id).catch(() => undefined));
         }
-        if (f.type === "audio" && s.report.events.at(-1)?.type !== "provider_audio_frame")
-          this.event(s, "provider_audio_frame");
+        if (f.type === "audio") {
+          const timing = s.activeTiming;
+          if (timing && !timing.cancelled && timing.firstTextMs !== null && timing.firstAudioMs === null) {
+            timing.firstAudioMs = Date.now() - Date.parse(s.report.createdAt);
+            timing.providerAudioEventId = Number.isSafeInteger(f.audio_event?.event_id) ? f.audio_event.event_id : null;
+          }
+          if (s.report.events.at(-1)?.type !== "provider_audio_frame") this.event(s, "provider_audio_frame");
+        }
       } catch { browser.close(1008, "Invalid provider frame"); return; }
       if (browser.readyState === 1 && browser.bufferedAmount < 512 * 1024)
         browser.send(raw.toString().replaceAll(s.capability, "[capability removed]").replaceAll(s.signedUrl!, "[signed URL removed]"));
@@ -309,7 +367,18 @@ export class ElevenEngineLab {
       turns.push({ role: m.role === "user" ? "user" : "agent", content: m.content });
     }
     if (!turns.length) turns.push({ role: "user", content: "Begin the authorized TEST conversation." });
+    if (s.activeHttp && s.activeTiming) s.activeTiming.cancelled = true;
     s.epoch++; s.controller?.abort(); s.activeHttp?.end();
+    const timing: ElevenTiming = { id: `response-${s.epoch}`, requestReceivedMs: Date.now() - Date.parse(s.report.createdAt),
+      speechEndMs: null, endOfTurnMs: null, transcriptReceivedMs: null, firstTextMs: null, firstAudioMs: null,
+      providerAudioEventId: null, playbackClientMs: null, playbackTelemetryReceivedMs: null,
+      checkpointsMs: [], checkpointSkipped: 0, cancelled: false, correlation: "sequential_provider_stream/best-effort" };
+    s.activeUserText = turns.filter(t => t.role === "user").at(-1)?.content;
+    if (s.latestTranscript?.text === s.activeUserText) {
+      timing.transcriptReceivedMs = s.latestTranscript!.atMs; s.latestTranscript = undefined;
+    }
+    s.activeTiming = timing; s.report.timings.push(timing);
+    if (s.report.timings.length > 150) s.report.timings.shift();
     const epoch = s.epoch, c = new AbortController(); s.controller = c; s.activeHttp = res;
     const current = () => !s.closed && s.epoch === epoch && !c.signal.aborted && !res.destroyed;
     const key = hash(JSON.stringify(turns));
@@ -317,6 +386,7 @@ export class ElevenEngineLab {
     res.flushHeaders();
     const send = (text: string, finish = false) => {
       if (!current()) return;
+      if (text.trim() && timing.firstTextMs === null) timing.firstTextMs = Date.now() - Date.parse(s.report.createdAt);
       res.write(`data: ${JSON.stringify({ id: `chatcmpl-${s.id}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000),
         model: SECRETARY_REASONING_MODEL, choices: [{ index: 0, delta: finish ? {} : { content: text }, finish_reason: finish ? "stop" : null }] })}\n\n`);
     };
@@ -330,7 +400,7 @@ export class ElevenEngineLab {
       else {
         await s.engine.respond(turns, c.signal, text => {
           if (!current()) return;
-          if (first) { this.event(s, "engine_first_text"); first = false; }
+          if (first && text.trim()) { this.event(s, "engine_first_text"); first = false; }
           output += text; send(text);
         });
         if (current()) { s.completed.set(key, output); if (s.completed.size > 100) s.completed.delete(s.completed.keys().next().value!); }

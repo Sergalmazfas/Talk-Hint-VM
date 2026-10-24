@@ -73,6 +73,60 @@ beforeEach(() => vi.stubEnv("REPLIT_DEV_DOMAIN", "unit.replit.dev"));
 afterEach(() => { labs.splice(0).forEach(l => l.dispose()); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("ElevenLabs + unchanged TalkHint Engine", () => {
+  it("forwards the first useful SSE text before the model finishes, without collecting a sentence", async () => {
+    const chunks: string[] = [];
+    const f = fixture(async function* () {
+      yield { type: "text", text: "Hello," };
+      expect(chunks.some(s => s.includes("Hello,"))).toBe(true);
+      expect(chunks.some(s => s.includes("[DONE]"))).toBe(false);
+      yield { type: "text", text: " test." }; yield completed;
+    });
+    await f.lab.create("owner", f.body);
+    const res: any = { destroyed: false, status: () => res, set: () => res, flushHeaders: () => {},
+      on: () => res, write: (s: string) => { chunks.push(s); }, end: () => {} };
+    await f.lab.completion(f.api.capability, { body: wireInput } as any, res);
+    expect(chunks.at(-1)).toContain("[DONE]");
+  });
+  it("defaults old clients to baseline and rejects a changed profile under the same request ID", async () => {
+    const f = fixture();
+    const created = await f.lab.create("owner", f.body);
+    expect(created.report.profileId).toBe("baseline");
+    await expect(f.lab.create("owner", { ...f.body, profileId: "flash" })).rejects.toMatchObject({ status: 409 });
+    await expect(f.lab.create("owner", { ...f.body, clientRequestId: randomUUID(), profileId: "unknown" })).rejects.toMatchObject({ status: 400 });
+  });
+  it("persists configuration/timing and keeps clocks and unknown speech-end separate", async () => {
+    const f = fixture();
+    const created = await f.lab.create("owner", { ...f.body, profileId: "optimized" });
+    await request(f.app).post(`/completion/${f.api.capability}`).send(wireInput).expect(200);
+    const run = (await f.lab.report("owner", created.id)).report;
+    expect(run.profileId).toBe("optimized");
+    expect(run.configuration).toMatchObject({ reasoning: "medium", brief: false, ttsModel: "eleven_flash_v2_5", checkpoint: "actions_changed" });
+    expect(run.timings).toHaveLength(1);
+    expect(run.timings![0]).toMatchObject({ speechEndMs: null, endOfTurnMs: null,
+      firstAudioMs: null, playbackClientMs: null, checkpointSkipped: 1 });
+    expect(run.timings![0].firstTextMs).toBeTypeOf("number");
+    await f.lab.stop("owner", created.id);
+    expect((await f.lab.report("owner", created.id)).report.timings).toEqual(run.timings);
+  });
+  it("optimized mode still checkpoints a committed TEST action BEFORE claiming it saved", async () => {
+    let rounds = 0;
+    const f = fixture(async function* () {
+      if (++rounds === 1) yield { type: "complete", output: [{ type: "function_call", call_id: "1", name: "save_test_message", arguments: '{"sender":"Alex TEST","message":"Ocean TEST 14:00"}' }],
+        tools: [{ call_id: "1", name: "save_test_message", arguments: '{"sender":"Alex TEST","message":"Ocean TEST 14:00"}' }] };
+      else {
+        const saved = f.rows.get(f.body.clientRequestId);
+        expect((saved!.runs[0].engine as any).actions).toHaveLength(1);
+        yield { type: "text", text: "TEST result saved." }; yield completed;
+      }
+    });
+    await f.lab.create("owner", { ...f.body, profileId: "optimized" });
+    await request(f.app).post(`/completion/${f.api.capability}`).send(wireInput).expect(200);
+    await request(f.app).post(`/completion/${f.api.capability}`).send(wireInput).expect(200);
+    const run = (await f.lab.report("owner", f.body.clientRequestId)).report;
+    expect((run.engine as any).actions).toHaveLength(1);
+    expect((run.engine as any).actions[0].result).toMatchObject({ delivered: false, calendarWritten: false });
+    expect(run.timings![0].checkpointsMs).toHaveLength(1);
+  });
   it("routes the actual provider base-URL suffix to our streaming Engine, not a doubled endpoint", async () => {
     const f = fixture();
     registerElevenEngineRoutes(f.app, f.store, f.lab);
