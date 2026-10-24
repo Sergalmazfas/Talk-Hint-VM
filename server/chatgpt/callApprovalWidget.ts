@@ -125,7 +125,7 @@ export function callApprovalWidgetHtml(): string {
       const expires = Date.parse(valueText(card.expiresAt));
       if (!Number.isFinite(expires) || expires > Date.now()) return false;
       decisionLocked = true; approveButton.disabled = true; denyButton.disabled = true;
-      setStatus("Подтверждение истекло. Попросите подготовить новую карточку того же поручения. Звонок не запущен.", "error");
+      setStatus("Подтверждение истекло. Сначала проверьте существующую задачу, затем попросите новую карточку того же поручения с тем же clientRequestId. Эта карточка не запускает новый звонок.", "error");
       return true;
     }
     function sendNotification(method, params) { if (!standardAvailable) return false; try { window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"); return true; } catch (_) { return false; } }
@@ -150,7 +150,14 @@ export function callApprovalWidgetHtml(): string {
     function assertToolSuccess(response) {
       const envelope = plainRecord(response) || {}, metadata = plainRecord(envelope.toolResponseMetadata);
       const candidates = [envelope, plainRecord(envelope.result), plainRecord(metadata && metadata.mcp_tool_result), plainRecord(metadata && metadata.call_tool_result)];
-      if (candidates.some(candidate => candidate && (candidate.isError || candidate.error))) throw new Error("tool error");
+      const failed = candidates.find(candidate => candidate && (candidate.isError || candidate.error));
+      if (failed) {
+        const error = new Error("tool error");
+        error.approvalRejected = !!(failed.structuredContent &&
+          failed.structuredContent.code === "CALL_APPROVAL_REJECTED" &&
+          failed.structuredContent.requestNotStarted === true);
+        throw error;
+      }
       return response || {};
     }
     async function callToolEnvelope(name, args) {
@@ -269,8 +276,16 @@ export function callApprovalWidgetHtml(): string {
         const result = await callTool("confirm_call_from_card", { confirmation: card.confirmation, approvalToken: card.approvalToken, decision });
         if (sequence !== cardSequence) return;
         if (decision === "deny" || result.status === "denied") showDenied(cardSequence); else showStarted(result, cardSequence);
-      } catch (_) {
+      } catch (error) {
         if (sequence !== cardSequence) return;
+        if (error && error.approvalRejected) {
+          setStatus("Подтверждение отклонено. Этот запрос не запускал звонок. Можно заново подготовить и подтвердить поручение.", "error");
+          compatNode.textContent = "Попросите ChatGPT сначала проверить существующую задачу, затем подготовить новую карточку с тем же clientRequestId: " +
+            valueText(card.call && card.call.clientRequestId) +
+            ". При необходимости обновите подключение. Уже созданную задачу повторно не запускать.";
+          compatNode.hidden = false;
+          return;
+        }
         setStatus("Не удалось достоверно получить результат. Не нажимайте подтверждение повторно и не набирайте номер: проверьте статус в задачах TalkHint.", "error");
         compatNode.textContent = "Запрос мог быть принят, даже если ответ не дошёл. Повторный запуск не выполняется."; compatNode.hidden = false;
       } finally { if (sequence === cardSequence) { approveButton.removeAttribute("aria-busy"); denyButton.removeAttribute("aria-busy"); } }

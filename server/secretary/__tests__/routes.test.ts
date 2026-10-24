@@ -175,7 +175,51 @@ describe("Secretary owner-scoped routes", () => {
         confirmationToken: signSecretaryConfirmation("owner-a", "Ask about the returned deposit."),
       });
     expect(response.status).toBe(403);
+    expect(response.body.code).toBe("SECRETARY_CONFIRMATION_REQUIRED");
     expect(mocks.createSecretaryTask).not.toHaveBeenCalled();
+  });
+
+  it("reconfirms after expiry, double-submits once, then recovers the same task even with an expired token", async () => {
+    const dial = vi.fn().mockResolvedValue({
+      sid: "CA0123456789abcdef0123456789abcdef", callId: "call-test",
+    });
+    const server = express();
+    server.use(express.json());
+    registerSecretaryRoutes(server as any, { dial, notify: vi.fn() });
+    let saved: any;
+    mocks.getLiveSecretaryTaskByClientRequest.mockImplementation(async (owner) =>
+      owner === "owner-a" ? saved : undefined);
+    mocks.createLiveSecretaryTask.mockImplementation(async () => {
+      if (saved) return { task: saved, created: false };
+      saved = { ...task, voiceProvider: "openai", mode: "live", status: "starting", attempts: 1 };
+      return { task: saved, created: true };
+    });
+    const realNow = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(realNow - 16 * 60_000);
+    const expired = signSecretaryConfirmation("owner-a", task.instruction);
+    clock.mockRestore();
+    const body = {
+      live: true, phoneNumber: task.phoneNumber, instruction: task.instruction,
+      clientRequestId: task.clientRequestId, voiceProvider: "openai",
+    };
+    const post = (confirmationToken: string, owner = "owner-a") =>
+      request(server).post("/api/secretary/tasks").set("x-test-user-id", owner)
+        .send({ ...body, confirmationToken });
+    const rejected = await post(expired);
+    expect(rejected.status).toBe(403);
+    expect(rejected.body.code).toBe("SECRETARY_CONFIRMATION_REQUIRED");
+    expect(dial).not.toHaveBeenCalled();
+    expect(mocks.createLiveSecretaryTask).not.toHaveBeenCalled();
+
+    const fresh = signSecretaryConfirmation("owner-a", task.instruction);
+    const responses = await Promise.all([post(fresh), post(fresh)]);
+    expect(responses.every(r => [200, 201].includes(r.status))).toBe(true);
+    expect(dial).toHaveBeenCalledTimes(1);
+    expect(new Set(responses.map(r => r.body.task.id)).size).toBe(1);
+    expect((await post(expired)).status).toBe(200);
+    expect(dial).toHaveBeenCalledTimes(1);
+    expect((await post(fresh, "owner-b")).status).toBe(403);
+    expect(dial).toHaveBeenCalledTimes(1);
   });
 
   it("creates and dials a live task exactly once immediately", async () => {

@@ -78,6 +78,31 @@ final class SessionStore {
         var voiceProvider: SecretaryVoiceProviderPreference
         var phoneNumber: String?
         var requestAttempted: Bool
+        // Optional for backward-compatible Keychain decoding.
+        var confirmationRejected: Bool? = nil
+
+        var needsPreparation: Bool {
+            // Never discard an ambiguous attempt merely because its token
+            // expired: the same request ID must first recover the server task.
+            confirmationRejected == true || (!requestAttempted && !hasFreshConfirmation)
+        }
+
+        var hasFreshConfirmation: Bool {
+            // UI freshness only, NOT authorization. The server still verifies
+            // the signature, owner and exact instruction before any dial.
+            let parts = confirmationToken.split(separator: ".", omittingEmptySubsequences: false)
+            guard parts.count == 2 else { return false }
+            var payload = String(parts[0]).replacingOccurrences(of: "-", with: "+")
+                .replacingOccurrences(of: "_", with: "/")
+            payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+            guard let data = Data(base64Encoded: payload),
+                  let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let issuedAt = body["issuedAt"] as? Double,
+                  body["instruction"] as? String == instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+            else { return false }
+            let age = Date().timeIntervalSince1970 * 1000 - issuedAt
+            return age >= 0 && age <= 15 * 60_000
+        }
     }
 
     var token: String? { Keychain.get(tokenKey) }

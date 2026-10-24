@@ -84,7 +84,10 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
       }
     }
     if (!verifySecretaryConfirmation(req.body?.confirmationToken, userId, req.body?.instruction)) {
-      return res.status(403).json({ error: "Confirm this Secretary assignment in Prepare before starting the call." });
+      return res.status(403).json({
+        code: "SECRETARY_CONFIRMATION_REQUIRED",
+        error: "Confirm this Secretary assignment in Prepare before starting the call.",
+      });
     }
     try {
       const [number] = await db.select({ id: phoneNumbers.id }).from(phoneNumbers)

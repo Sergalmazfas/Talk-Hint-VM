@@ -95,6 +95,25 @@ function harness(options: { fetchResponse?: (url: string, init: any) => Promise<
   return { node, messages, fetchCalls, receive, initialize, card, show, click, requests, flush, timers, runTimers, window, dispatch };
 }
 describe("inline card bridge with simulated ChatGPT host", () => {
+  it("distinguishes a pre-start rejection and accepts a newly prepared card, never retrying by itself", async () => {
+    const h = harness();
+    h.initialize(); h.show(); h.click("approve");
+    h.receive({ id: h.requests()[0].id, result: {
+      isError: true, structuredContent: { code: "CALL_APPROVAL_REJECTED", requestNotStarted: true },
+    } });
+    await h.flush();
+    expect(h.node("status").textContent).toContain("Подтверждение отклонено");
+    h.click("approve");
+    expect(h.requests()).toHaveLength(1);
+    const fresh = JSON.parse(JSON.stringify(h.card));
+    fresh._meta["talkhint/cardApproval"].confirmation = "fresh-confirmation";
+    fresh._meta["talkhint/cardApproval"].approvalToken = "fresh-capability";
+    h.show(fresh);
+    expect(h.node("approve").disabled).toBe(false);
+    expect(h.requests()).toHaveLength(1);
+    h.click("approve"); h.click("approve");
+    expect(h.requests()).toHaveLength(2);
+  });
   it("persists only a versioned task locator and restores it via a fresh owner-authorized read", async () => {
     const saved: any[] = [];
     const first = harness({ openai: { setWidgetState: (state: any) => saved.push(state) } });

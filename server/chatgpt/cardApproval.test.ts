@@ -182,6 +182,35 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     expect((await tool("start_call", { confirmation: cap.confirmation }, token)).isError).toBe(true);
     expect(backend.start).not.toHaveBeenCalled();
   });
+  it("allows a new card with the same request key after a pre-start 403, without bypassing owner review", async () => {
+    const { token } = await connect();
+    const first = (await prepare(token))._meta["talkhint/cardApproval"];
+    const other = (await prepare(token, { instruction: "A different goal" }))._meta["talkhint/cardApproval"];
+    const rejected = await tool("confirm_call_from_card", {
+      confirmation: first.confirmation, approvalToken: other.approvalToken, decision: "approve",
+    }, token);
+    expect(rejected.structuredContent).toMatchObject({
+      code: "CALL_APPROVAL_REJECTED", requestNotStarted: true,
+    });
+    expect(backend.start).not.toHaveBeenCalled();
+    const fresh = (await prepare(token))._meta["talkhint/cardApproval"];
+    expect(fresh.call.clientRequestId).toBe(input.clientRequestId);
+    expect(backend.start).not.toHaveBeenCalled();
+    const approved = await tool("confirm_call_from_card", {
+      confirmation: fresh.confirmation, approvalToken: fresh.approvalToken, decision: "approve",
+    }, token);
+    expect(approved.structuredContent.task_id).toBe("mock-task-1");
+    expect(backend.start).toHaveBeenCalledExactlyOnceWith("alice", input);
+  });
+  it("does not advertise safe re-preparation after a 403 from the call backend itself", async () => {
+    const { token } = await connect();
+    const { call, ...cap } = (await prepare(token))._meta["talkhint/cardApproval"];
+    backend.start.mockRejectedValueOnce(Object.assign(new Error("Backend refused"), { status: 403 }));
+    const result = await tool("confirm_call_from_card", { ...cap, decision: "approve" }, token);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(backend.start).toHaveBeenCalledTimes(1);
+  });
   it("rejects missing OAuth, wrong owner/grant, read-only scope and revoked grants", async () => {
     const alice = await connect();
     const cap = (await prepare(alice.token))._meta["talkhint/cardApproval"];

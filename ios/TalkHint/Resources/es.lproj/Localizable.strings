@@ -286,6 +286,7 @@
 "secretary.prepare.confirmed" = "Tarea confirmada. Revisa el número y la tarea antes de pulsar «Iniciar llamada».";
 "secretary.prepare.confirmation.missing" = "No pude verificar la tarea confirmada. Confírmala de nuevo.";
 "secretary.prepare.token_missing" = "El servidor no devolvió la confirmación segura requerida. Vuelve a preparar la tarea antes de llamar.";
+"secretary.prepare.confirmation_required" = "Confirma de nuevo la tarea en Prepare. TalkHint rechazó este inicio antes de marcar. Se conserva el ID de solicitud para evitar una llamada duplicada.";
 "secretary.prepare.retry.title" = "Confirmación no disponible";
 "secretary.prepare.retry" = "Reintentar preparación";
 "secretary.prepare.no_connection.confirm" = "No hay conexión con el servidor. Confirma la tarea otra vez cuando se restablezca.";

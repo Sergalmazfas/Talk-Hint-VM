@@ -495,8 +495,9 @@ final class HomeViewController: UIViewController {
 
     private func renderGoalState() {
         if secretaryMode {
-            goalBadge.isHidden = confirmedSecretaryTask == nil
-            prepareButton.isHidden = true
+            let ready = confirmedSecretaryTask.map { !$0.needsPreparation } ?? false
+            goalBadge.isHidden = !ready
+            prepareButton.isHidden = ready
             return
         }
         let hasGoal = !SessionStore.shared.callGoal
@@ -721,15 +722,18 @@ final class HomeViewController: UIViewController {
                 showSecretaryError(NSLocalizedString("secretary.live.safe_retry_required", comment: ""))
                 return
             }
-            let prepare = PrepareViewController(mode: .secretary)
+            let rejected = confirmedSecretaryTask?.confirmationRejected == true ? confirmedSecretaryTask : nil
+            let prepare = PrepareViewController(mode: .secretary, initialMessage: rejected?.instruction)
             prepare.onSecretaryTaskConfirmed = { [weak self] instruction, token in
                 guard let self else { return }
                 let draft = SessionStore.SecretaryCallDraft(
                     instruction: instruction,
                     confirmationToken: token,
-                    clientRequestId: UUID(),
+                    // Re-confirmation after an explicit rejection must retain
+                    // the request key, including across restart/lost responses.
+                    clientRequestId: rejected?.clientRequestId ?? UUID(),
                     voiceProvider: SessionStore.shared.secretaryVoiceProvider,
-                    phoneNumber: nil,
+                    phoneNumber: rejected?.phoneNumber,
                     requestAttempted: false)
                 guard SessionStore.shared.savePendingSecretaryCall(draft) else {
                     self.showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
@@ -843,6 +847,9 @@ final class HomeViewController: UIViewController {
 
     private func renderCallButtonIdle() {
         callButton.isEnabled = true
+        if secretaryMode, confirmedSecretaryTask?.needsPreparation == true {
+            callButton.isEnabled = false
+        }
         callButton.configuration?.showsActivityIndicator = false
         callButton.configuration?.image = UIImage(systemName: "phone.fill")
         let titleKey = secretaryMode && confirmedSecretaryTask?.requestAttempted == true
@@ -872,6 +879,12 @@ final class HomeViewController: UIViewController {
     private func startSecretaryCall() {
         guard var confirmed = confirmedSecretaryTask else {
             showSecretaryError(NSLocalizedString("secretary.task.not_ready.message", comment: ""))
+            return
+        }
+        guard !confirmed.needsPreparation else {
+            renderGoalState()
+            renderCallButtonIdle()
+            showSecretaryError(NSLocalizedString("secretary.prepare.confirmation.missing", comment: ""))
             return
         }
         // Before the first request, use the current Settings selection. Once
@@ -942,6 +955,21 @@ final class HomeViewController: UIViewController {
                         }
                         return
                     }
+                    if case APIError.secretaryConfirmationRequired = error {
+                        var rejected = confirmed
+                        rejected.requestAttempted = false
+                        rejected.confirmationRejected = true
+                        guard SessionStore.shared.savePendingSecretaryCall(rejected) else {
+                            self.renderCallButtonIdle()
+                            self.showSecretaryError(NSLocalizedString("secretary.live.assignment_save_failed", comment: ""))
+                            return
+                        }
+                        self.confirmedSecretaryTask = rejected
+                        self.renderGoalState()
+                        self.renderCallButtonIdle()
+                        self.showSecretaryError(NSLocalizedString("secretary.prepare.confirmation_required", comment: ""))
+                        return
+                    }
                     if case APIError.secretaryCooldown(let seconds) = error {
                         // This explicit response occurs before a new task is
                         // created. Keep ambiguous network errors idempotent.
@@ -953,6 +981,7 @@ final class HomeViewController: UIViewController {
                             return
                         }
                         self.confirmedSecretaryTask = waiting
+                        self.renderGoalState()
                         self.renderCallButtonIdle()
                         self.showSecretaryError(String(
                             format: NSLocalizedString("secretary.live.cooldown", comment: ""), seconds))

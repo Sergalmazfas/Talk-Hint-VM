@@ -286,6 +286,7 @@
 "secretary.prepare.confirmed" = "Task confirmed. Review the number and task before choosing Start call.";
 "secretary.prepare.confirmation.missing" = "I couldn’t verify the confirmed task. Please confirm it again.";
 "secretary.prepare.token_missing" = "The server did not return the required secure confirmation. Start preparation again before placing the call.";
+"secretary.prepare.confirmation_required" = "Confirm this assignment again in Prepare. TalkHint rejected this start request before dialing. The request ID is preserved to prevent a duplicate call.";
 "secretary.prepare.retry.title" = "Confirmation unavailable";
 "secretary.prepare.retry" = "Retry preparation";
 "secretary.prepare.no_connection.confirm" = "No connection to the server. Confirm the task again once the connection is restored.";

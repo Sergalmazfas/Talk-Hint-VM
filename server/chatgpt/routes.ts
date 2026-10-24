@@ -544,6 +544,7 @@ export function registerChatGPTIntegration(
         error: { code: -32602, message: "Unknown tool" } });
       if (!(mcpTools as readonly string[]).includes(name) && !cardRequest && !monitorRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         result: { isError: true, content: [{ type: "text", text: "Tool is unavailable in this plugin." }] } });
+      let callStartAttempted = false;
       try {
         let value: any;
         let meta: object | undefined;
@@ -566,6 +567,7 @@ export function registerChatGPTIntegration(
           const decision = await cardApproval.decide(claims, args.confirmation, args.approvalToken, args.decision);
           if (!decision.approved) value = { status: "denied", note: "No call was started." };
           else {
+            callStartAttempted = true;
             const started = await backend.start(claims.sub, CALL.parse(decision.call));
             value = { ...started, task_id: started.task.id, asynchronous: true,
               fallbackUrl: `${base}/api/chatgpt/secretary/tasks/${encodeURIComponent(started.task.id)}`,
@@ -607,6 +609,13 @@ export function registerChatGPTIntegration(
         result = { isError: true, content: [{ type: "text", text: error instanceof z.ZodError ? "Invalid arguments" :
           error?.status && error.status < 500 ? error.message :
             "Operation unavailable; check the existing task before trying again." }],
+          ...(cardRequest && !callStartAttempted && [401, 403].includes(error?.status) ? {
+            structuredContent: {
+              code: "CALL_APPROVAL_REJECTED",
+              requestNotStarted: true,
+              note: "This confirmation request did not invoke the call backend. Check for an existing task first. Renew authorization if needed, then prepare the same assignment with the SAME clientRequestId and explicitly confirm the new card. Do not redial an existing task.",
+            },
+          } : {}),
           ...(authenticate ? { _meta: { "mcp/www_authenticate": [authenticate] } } : {}) };
       }
     } else return res.json({ jsonrpc: "2.0", id: rpc.id, error: { code: -32601, message: "Method not found" } });
