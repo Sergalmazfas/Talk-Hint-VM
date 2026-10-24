@@ -230,6 +230,12 @@ export default function ProjectModel() {
     { id: "TH-MARKET", label: "Рынок и отличие" },
     { id: "TH-ECONOMICS", label: "Доходы и расходы" },
   ] as const;
+  const startingSegment = talkhintElements.find((element) => element.id === "TH-SEGMENT");
+  const primaryCompetitors = elements.filter((element) =>
+    element.details.benchmarkType === "competitor" &&
+    element.details.competitorPriority === "primary-starting-segment" &&
+    element.details.prioritySegmentId === "TH-SEGMENT",
+  );
   const isFocusedTasks = section === "Задания Replit";
   const isFocusedHistory = section === "История решений";
 
@@ -308,6 +314,26 @@ export default function ProjectModel() {
                   </button>;
                 })}
               </div>}
+
+              {section === "Обзор" && startingSegment && <section className="pm-starting-segment" aria-label="Стартовый сегмент">
+                <div className="pm-starting-segment-copy">
+                  <p className="pm-kicker">PILOT / STARTING SEGMENT</p>
+                  <h2>{startingSegment.title}</h2>
+                  <p>{startingSegment.description || "Описание сегмента не заполнено в модели."}</p>
+                  <div className="pm-starting-segment-meta">
+                    <span><strong>Решение владельца:</strong> {startingSegment.details.decisionDate || "дата не указана в модели"}</span>
+                    <span>Подтверждение выбора сегмента — не доказательство прибыльности или результата пилота.</span>
+                  </div>
+                </div>
+                <div className="pm-starting-segment-actions">
+                  <a className="pm-btn small" href="/admin/project-model?view=benchmark&filter=primary">Основные конкуренты</a>
+                  <a className="pm-btn small" href="/admin/project-model?view=benchmark&suite=pilot">Пилотные сценарии</a>
+                  {primaryCompetitors.map((competitor) => <a className="pm-segment-company" key={competitor.id}
+                    href={`/admin/project-model?view=benchmark&element=${encodeURIComponent(competitor.id)}`}>
+                    Профиль: {competitor.title} <span>{competitor.id}</span>
+                  </a>)}
+                </div>
+              </section>}
 
               {section === "Рынок и конкуренты" && benchmarkView && state && <Benchmark state={state} openElement={openElement} />}
 

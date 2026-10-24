@@ -80,13 +80,20 @@ export function applyApprovedMaterial(initial: ProjectModelState, owner: string)
 }
 
 export async function persistApprovedMaterial(pool: Pool, owner: string) {
+  return persistModelUpdate(pool, owner, state => applyApprovedMaterial(state, owner));
+}
+
+/** Reuse the same locked JSONB transaction for narrow, explicitly approved updates. */
+export async function persistModelUpdate(pool: Pool, owner: string, transform: (state: ProjectModelState) => ProjectModelState, existingOnly = false) {
   const client = await pool.connect();
   let next: ProjectModelState;
   try {
     await client.query("BEGIN");
-    await client.query("INSERT INTO talkhint_project_models(owner_key,revision,state) VALUES($1,0,$2::jsonb) ON CONFLICT(owner_key) DO NOTHING", [owner, JSON.stringify(initialModel())]);
+    if (!existingOnly)
+      await client.query("INSERT INTO talkhint_project_models(owner_key,revision,state) VALUES($1,0,$2::jsonb) ON CONFLICT(owner_key) DO NOTHING", [owner, JSON.stringify(initialModel())]);
     const row = await client.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
-    next = applyApprovedMaterial(row.rows[0].state, owner);
+    if (!row.rows.length) throw new Error("Existing model required; no new namespace created");
+    next = transform(row.rows[0].state);
     if (next !== row.rows[0].state)
       await client.query("UPDATE talkhint_project_models SET state=$2::jsonb,revision=$3,updated_at=now() WHERE owner_key=$1", [owner, JSON.stringify(next), next.revision]);
     await client.query("COMMIT");

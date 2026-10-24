@@ -22,14 +22,22 @@ secretary is one role, not the whole target product. The owner retains approval
 and control; detailed authority belongs in later procedures, not implied autonomy.
 This is agreed target positioning, not evidence that these functions exist.
 
-The US is the target market, starting research in Miami-Dade, Broward and Palm
-Beach. No winning segment has been selected. Massage is an example; cleaning is
-the next research candidate alongside beauty and other small service trades.
-The stationary salon remains a separate illustrative client model.
+The US is the target market, starting in Miami-Dade, Broward and Palm Beach.
+The owner's confirmed decision dated 2026-10-23 selects independent licensed
+massage therapists with their own small private practice and no administrator
+for the first pilot. This is a segment to test, not proof of profitability,
+low competition or willingness to pay. The stationary salon remains a separate
+illustrative client model, not the parameters of this pilot.
 
-**Why:** The owner explicitly updated the startup layer and requested competitor
-benchmarking. Earlier selection of a stationary salon must not be treated as the
-current winning market segment.
+MassageBook and ClinicSense are the pilot's primary competitors. All earlier
+competitors, research, sources and history must remain in the general benchmark;
+changing segment priority is not permission to delete or replace that work.
+Less setup and less owner management time are hypotheses, not proven advantages.
+MBLEx is a potential audience channel, not a confirmed database of buyers.
+
+**Why:** The owner explicitly narrowed the pilot and repeated “те конкурентов не
+убирай ничего, потому что мы по ним делаем бенчмаркетинг”. Earlier broader
+segment exploration and the fictional salon must not override this decision.
 
 **How to apply:** Do not propagate the illustrative salon's resources, prices,
 capacity or assumptions into real customers' cards or the general phone agent.

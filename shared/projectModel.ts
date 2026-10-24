@@ -24,8 +24,15 @@ export const detailFields = {
   features: "Функции", aiVoiceChat: "AI / голос / чат", callsBooking: "Звонки и запись", marketing: "Маркетинг",
   billing: "Счета и оплаты", analytics: "Аналитика и учёт", pricing: "Тарифы / доплаты", comparison: "Сравнение с TalkHint",
   recheckedAt: "Дата повторного чтения", provenance: "Происхождение", researchDate: "Дата исходной проверки",
+  competitorPriority: "Приоритет конкурента", prioritySegmentId: "Сегмент приоритета",
+  decisionDate: "Дата решения владельца", benchmarkSuite: "Набор сценариев",
 } as const;
-export const benchmarkSubjects = { talkhint: "TalkHint", jobber: "Jobber", "housecall-pro": "Housecall Pro", zenmaid: "ZenMaid" } as const;
+export const benchmarkSubjects = { talkhint: "TalkHint", jobber: "Jobber", "housecall-pro": "Housecall Pro", zenmaid: "ZenMaid", massagebook: "MassageBook", clinicsense: "ClinicSense" } as const;
+export const pilotBenchmarkSteps = {
+  setup: "Настройка практики", inquiry: "Обработка обращения", "approval-booking": "Согласование и запись",
+  "reminder-reschedule": "Напоминание / перенос", payment: "Оплата", rebooking: "Повторная запись",
+  voice: "Голосовое поручение", "owner-report": "Отчёт владельцу",
+} as const;
 export const benchmarkSteps = {
   incoming: "Входящий звонок", intake: "Выяснение запроса", quote: "Расчёт",
   approval: "Одобрение владельцем", booking: "Запись", execution: "Статус выполнения",

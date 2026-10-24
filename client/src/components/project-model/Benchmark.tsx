@@ -4,6 +4,7 @@ import {
   benchmarkSteps,
   benchmarkSubjects,
   detailFields,
+  pilotBenchmarkSteps,
   type ModelElement,
   type ProjectModelState,
 } from "@shared/projectModel";
@@ -13,32 +14,25 @@ type Props = {
   openElement: (element: ModelElement) => void;
 };
 
-const competitorIds = [
-  { id: "COMP-JOBBER", subject: "jobber" },
-  { id: "COMP-HOUSECALL-PRO", subject: "housecall-pro" },
-  { id: "COMP-ZENMAID", subject: "zenmaid" },
-] as const;
-
+const knownSubjects: Record<string, string> = {
+  "COMP-JOBBER": "jobber",
+  "COMP-HOUSECALL-PRO": "housecall-pro",
+  "COMP-ZENMAID": "zenmaid",
+  "COMP-MASSAGEBOOK": "massagebook",
+  "COMP-CLINICSENSE": "clinicsense",
+};
 const profileFields = [
   "buyer", "segment", "solution", "procedure", "features", "aiVoiceChat",
   "callsBooking", "marketing", "billing", "analytics", "pricing", "comparison",
+  "competitorPriority", "prioritySegmentId", "decisionDate",
   "sourceDate", "researchDate", "recheckedAt", "provenance", "unknown",
 ] as const;
-
 const proofLabels: Record<string, string> = {
-  confirmed: "Подтверждено",
-  hypothesis: "Гипотеза",
-  unestablished: "Не установлено",
-  "not-established": "Не установлено",
-  not_established: "Не установлено",
-  unknown: "Не установлено",
-  practical_test: "Нужен практический тест",
-  needs_practical_test: "Нужен практический тест",
-  "needs-practical-test": "Нужен практический тест",
-  practical_test_needed: "Нужен практический тест",
-  "Подтверждено": "Подтверждено",
-  "Гипотеза": "Гипотеза",
-  "Не установлено": "Не установлено",
+  confirmed: "Подтверждено", hypothesis: "Гипотеза", unestablished: "Не установлено",
+  "not-established": "Не установлено", not_established: "Не установлено", unknown: "Не установлено",
+  practical_test: "Нужен практический тест", needs_practical_test: "Нужен практический тест",
+  "needs-practical-test": "Нужен практический тест", practical_test_needed: "Нужен практический тест",
+  "Подтверждено": "Подтверждено", "Гипотеза": "Гипотеза", "Не установлено": "Не установлено",
   "Нужен практический тест": "Нужен практический тест",
 };
 
@@ -52,18 +46,13 @@ function usableUrl(raw: string): string | null {
 }
 
 function SourceLinks({ element, state, compact = false }: { element: ModelElement; state: ProjectModelState; compact?: boolean }) {
-  const sourceUrls = (element.details.source ?? "")
-    .split(/[\n,;]/)
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const sourceUrls = (element.details.source ?? "").split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
   const documents = state.documents.filter((document) => document.elementIds.includes(element.id));
   if (!sourceUrls.length && !documents.length) return compact ? null : <p className="pm-benchmark-muted">Источники и связанные документы не указаны.</p>;
-
   return <div className="pm-benchmark-sources">
     {sourceUrls.map((raw, index) => {
       const href = usableUrl(raw);
-      return href
-        ? <a key={`${href}-${index}`} href={href} target="_blank" rel="noreferrer">{raw}<ExternalLink size={12} /></a>
+      return href ? <a key={`${href}-${index}`} href={href} target="_blank" rel="noreferrer">{raw}<ExternalLink size={12} /></a>
         : <span className="pm-benchmark-source-text" key={`${raw}-${index}`}>{raw}</span>;
     })}
     {documents.map((document) => <div className="pm-benchmark-document" key={document.id}>
@@ -80,15 +69,20 @@ function Value({ value }: { value?: string }) {
   return <p>{value?.trim() || <span className="pm-benchmark-muted">Не указано</span>}</p>;
 }
 
+function queryHref(updates: Record<string, string | null>) {
+  const params = new URLSearchParams(window.location.search);
+  params.set("view", "benchmark");
+  Object.entries(updates).forEach(([key, value]) => value === null ? params.delete(key) : params.set(key, value));
+  return `${window.location.pathname}?${params.toString()}`;
+}
+
 export default function Benchmark({ state, openElement }: Props) {
   const elements = state.elements;
-  const competitors = competitorIds.map(({ id, subject }) => ({
-    id,
-    subject,
-    element: elements.find((element) => element.id === id),
-  }));
-  const selectedId = new URLSearchParams(window.location.search).get("element");
-  const selected = competitors.find((item) => item.id === selectedId);
+  const competitors = useMemo(
+    () => elements.filter((element) => element.details.benchmarkType === "competitor")
+      .sort((a, b) => Number(b.details.competitorPriority === "primary-starting-segment") - Number(a.details.competitorPriority === "primary-starting-segment")),
+    [elements],
+  );
   const assessments = useMemo(
     () => elements.filter((element) => element.details.benchmarkType === "assessment"),
     [elements],
@@ -96,22 +90,56 @@ export default function Benchmark({ state, openElement }: Props) {
   const marketNotes = elements.filter((element) =>
     element.details.benchmarkType === "market-note" && element.section === "Рынок и конкуренты",
   );
-  const relatedIds = new Set([
-    ...competitors.map(({ id }) => id),
-    ...assessments.map(({ id }) => id),
-    ...marketNotes.map(({ id }) => id),
-  ]);
+  const params = new URLSearchParams(window.location.search);
+  const selectedId = params.get("element");
+  const selected = competitors.find((element) => element.id === selectedId);
+  const primaryOnly = params.get("filter") === "primary";
+  const suite = params.get("suite") === "pilot" ? "pilot" : "general";
+  const pilotMethod = elements.find(element => element.id === "REQ-PILOT-COMPARE");
+  const visibleCompetitors = primaryOnly
+    ? competitors.filter((element) => element.details.competitorPriority === "primary-starting-segment" && element.details.prioritySegmentId === "TH-SEGMENT")
+    : competitors;
+  const relatedIds = new Set([...competitors.map(({ id }) => id), ...assessments.map(({ id }) => id), ...marketNotes.map(({ id }) => id)]);
   const relatedRelations = state.relations.filter((relation) => relatedIds.has(relation.from) || relatedIds.has(relation.to));
-  // Requirements are neighbors, not assessment records themselves.
-  relatedRelations.forEach(relation => { relatedIds.add(relation.from); relatedIds.add(relation.to); });
+  relatedRelations.forEach((relation) => { relatedIds.add(relation.from); relatedIds.add(relation.to); });
   const relatedTasks = state.taskDrafts.filter((draft) => draft.elementIds.some((id) => relatedIds.has(id)));
-  const subjectEntries = Object.entries(benchmarkSubjects) as [keyof typeof benchmarkSubjects, string][];
-  const stepEntries = Object.entries(benchmarkSteps) as [keyof typeof benchmarkSteps, string][];
+  const suiteSteps = suite === "pilot" ? pilotBenchmarkSteps : benchmarkSteps;
+  const steps = Object.entries(suiteSteps) as [string, string][];
+  const suiteAssessments = assessments.filter((element) =>
+    suite === "pilot" ? element.details.benchmarkSuite === "pilot" : element.details.benchmarkSuite !== "pilot",
+  );
+  const subjects = useMemo(() => {
+    const entries = new Map<string, string>();
+    competitors.forEach((element) => {
+      const subject = element.details.benchmarkSubject || knownSubjects[element.id] || element.id;
+      entries.set(subject, (benchmarkSubjects as Record<string, string>)[subject] || element.title || subject);
+    });
+    suiteAssessments.forEach((element) => {
+      const subject = element.details.benchmarkSubject;
+      if (subject && subject !== "talkhint" && !entries.has(subject)) {
+        entries.set(subject, (benchmarkSubjects as Record<string, string>)[subject] || subject);
+      }
+    });
+    return Array.from(entries.entries());
+  }, [competitors, suiteAssessments]);
+  const columns = [["talkhint", benchmarkSubjects.talkhint] as [string, string], ...subjects.filter(([key]) => {
+    const matchingCompetitors = competitors.filter((element) =>
+      (element.details.benchmarkSubject || knownSubjects[element.id] || element.id) === key,
+    );
+    return !primaryOnly || matchingCompetitors.some((element) =>
+      element.details.competitorPriority === "primary-starting-segment" && element.details.prioritySegmentId === "TH-SEGMENT",
+    );
+  })];
 
   function assessmentFor(subject: string, step: string) {
-    return assessments.find((element) =>
+    return suiteAssessments.find((element) =>
       element.details.benchmarkSubject === subject && element.details.benchmarkStep === step,
     );
+  }
+  function profileFieldsFor(element: ModelElement) {
+    return <dl className="pm-benchmark-profile-fields">{profileFields.map((key) => <div key={key}>
+      <dt>{detailFields[key]}</dt><dd><Value value={element.details[key]} /></dd>
+    </div>)}</dl>;
   }
 
   return <section className="pm-benchmark" aria-label="Конкурентный бенчмаркинг">
@@ -124,43 +152,61 @@ export default function Benchmark({ state, openElement }: Props) {
       <span className="pm-benchmark-caution"><Beaker size={14} /> Практические тесты не проводились</span>
     </div>
 
-    {selected && selected.element && <section className="pm-benchmark-profile-focus" aria-label={`Профиль ${selected.element.title}`}>
-      <div className="pm-benchmark-profile-top">
-        <div><span className="pm-benchmark-id">{selected.id}</span><h3>{selected.element.title}</h3></div>
-        <button className="pm-btn small" type="button" onClick={() => openElement(selected.element!)}><PencilLine size={13} /> Редактировать запись</button>
+    <div className="pm-benchmark-controls">
+      <div className="pm-benchmark-control-group" aria-label="Фильтр конкурентов">
+        <a className={`pm-btn small ${!primaryOnly ? "primary" : ""}`} href={queryHref({ filter: null })}>Все конкуренты</a>
+        <a className={`pm-btn small ${primaryOnly ? "primary" : ""}`} href={queryHref({ filter: "primary" })}>Основные конкуренты сегмента</a>
       </div>
-      <p className="pm-benchmark-description">{selected.element.description || "Описание не заполнено."}</p>
-      <dl className="pm-benchmark-profile-fields">{profileFields.map((key) => <div key={key}>
-        <dt>{detailFields[key]}</dt><dd><Value value={selected.element!.details[key]} /></dd>
-      </div>)}</dl>
-      <div className="pm-benchmark-profile-source"><h4>Источники и материалы</h4><SourceLinks element={selected.element} state={state} /></div>
+      <div className="pm-benchmark-control-group" aria-label="Набор сценариев">
+        <a className={`pm-btn small ${suite === "general" ? "primary" : ""}`} href={queryHref({ suite: null })}>Общие сценарии</a>
+        <a className={`pm-btn small ${suite === "pilot" ? "primary" : ""}`} href={queryHref({ suite: "pilot" })}>Пилотный сценарий</a>
+      </div>
+    </div>
+
+    {suite === "pilot" && pilotMethod && <section className="pm-benchmark-note" aria-label="Методика замеров пилота">
+      <div><strong>Методика пилота</strong><p>{pilotMethod.description}</p>
+        <p>{pilotMethod.details.unknown}</p>
+        <p>{pilotMethod.details.practicalTest}</p></div>
+    </section>}
+
+    {selected && <section className="pm-benchmark-profile-focus" aria-label={`Профиль ${selected.title}`}>
+      <div className="pm-benchmark-profile-top">
+        <div><span className="pm-benchmark-id">{selected.id}</span><h3>{selected.title}</h3>
+          {selected.details.competitorPriority === "primary-starting-segment" && selected.details.prioritySegmentId === "TH-SEGMENT" &&
+            <span className="pm-benchmark-primary-badge">Основной конкурент стартового сегмента</span>}
+        </div>
+        <button className="pm-btn small" type="button" onClick={() => openElement(selected)}><PencilLine size={13} /> Редактировать запись</button>
+      </div>
+      <p className="pm-benchmark-description">{selected.description || "Описание не заполнено."}</p>
+      {profileFieldsFor(selected)}
+      <div className="pm-benchmark-profile-source"><h4>Источники и материалы</h4><SourceLinks element={selected} state={state} /></div>
     </section>}
 
     <div className="pm-benchmark-card-grid">
-      {competitors.map(({ id, subject, element }) => <article className="pm-benchmark-card" key={id}>
+      {visibleCompetitors.map((element, index) => <article className="pm-benchmark-card" key={element.id}>
         <div className="pm-benchmark-card-head">
-          <div><span className="pm-benchmark-id">{id}</span><h3>{element?.title ?? benchmarkSubjects[subject]}</h3></div>
-          <span className="pm-benchmark-card-index">{String(competitors.findIndex((item) => item.id === id) + 1).padStart(2, "0")}</span>
+          <div><span className="pm-benchmark-id">{element.id}</span><h3>{element.title}</h3>
+            {element.details.competitorPriority === "primary-starting-segment" && element.details.prioritySegmentId === "TH-SEGMENT" &&
+              <span className="pm-benchmark-primary-badge">Основной конкурент стартового сегмента</span>}
+          </div>
+          <span className="pm-benchmark-card-index">{String(index + 1).padStart(2, "0")}</span>
         </div>
-        {element ? <>
-          <p>{element.description || "Описание не заполнено."}</p>
-          <div className="pm-benchmark-card-meta">
-            <span>{element.details.buyer || "Покупатель не указан"}</span>
-            {element.details.recheckedAt && <span>Повторно прочитано: {element.details.recheckedAt}</span>}
-          </div>
-          <div className="pm-footer-actions">
-            <a className="pm-btn small" href={`/admin/project-model?view=benchmark&element=${encodeURIComponent(id)}`}>Открыть профиль <ArrowUpRight size={12} /></a>
-          </div>
-          <details className="pm-benchmark-card-details">
-            <summary>Показать профиль и источники</summary>
-            <dl className="pm-benchmark-profile-fields">{profileFields.map((key) => <div key={key}>
-              <dt>{detailFields[key]}</dt><dd><Value value={element.details[key]} /></dd>
-            </div>)}</dl>
-            <div className="pm-benchmark-profile-source"><h4>Источники и материалы</h4><SourceLinks element={element} state={state} /></div>
-            <button className="pm-btn small" type="button" onClick={() => openElement(element)}><PencilLine size={12} /> Редактировать запись</button>
-          </details>
-        </> : <div className="pm-benchmark-card-empty">Запись с этим постоянным ID пока отсутствует в полученном состоянии.</div>}
+        <p>{element.description || "Описание не заполнено."}</p>
+        <div className="pm-benchmark-card-meta">
+          <span>{element.details.buyer || "Покупатель не указан"}</span>
+          {element.details.recheckedAt && <span>Повторно прочитано: {element.details.recheckedAt}</span>}
+        </div>
+        <div className="pm-footer-actions">
+          <a className="pm-btn small" href={queryHref({ element: element.id })}>Открыть профиль <ArrowUpRight size={12} /></a>
+        </div>
+        <details className="pm-benchmark-card-details">
+          <summary>Показать профиль и источники</summary>
+          {profileFieldsFor(element)}
+          <div className="pm-benchmark-profile-source"><h4>Источники и материалы</h4><SourceLinks element={element} state={state} /></div>
+          <button className="pm-btn small" type="button" onClick={() => openElement(element)}><PencilLine size={12} /> Редактировать запись</button>
+        </details>
       </article>)}
+      {!visibleCompetitors.length && <div className="pm-empty pm-benchmark-empty"><strong>Нет сохранённых конкурентов для этого фильтра</strong>Фильтр опирается только на записи модели с приоритетом и сегментом TH-SEGMENT.</div>}
     </div>
 
     <section className="pm-benchmark-method">
@@ -171,16 +217,16 @@ export default function Benchmark({ state, openElement }: Props) {
 
     <div className="pm-benchmark-table-wrap">
       <table className="pm-benchmark-table">
-        <thead><tr><th scope="col">Сценарий</th>{subjectEntries.map(([key, label]) => <th scope="col" key={key}>{label}</th>)}</tr></thead>
-        <tbody>{stepEntries.map(([stepKey, stepLabel]) => <tr key={stepKey}>
+        <thead><tr><th scope="col">Сценарий</th>{columns.map(([key, label]) => <th scope="col" key={key}>{label}</th>)}</tr></thead>
+        <tbody>{steps.map(([stepKey, stepLabel]) => <tr key={stepKey}>
           <th scope="row">{stepLabel}</th>
-          {subjectEntries.map(([subjectKey]) => {
+          {columns.map(([subjectKey, subjectLabel]) => {
             const element = assessmentFor(subjectKey, stepKey);
             const status = element?.details.proofStatus;
             const statusText = status ? proofLabels[status] ?? status : "Не установлено";
-            return <td key={subjectKey} data-subject={benchmarkSubjects[subjectKey]}>
+            return <td key={subjectKey} data-subject={subjectLabel}>
               {element ? <div className="pm-benchmark-cell">
-                <button type="button" className="pm-benchmark-cell-open" onClick={() => openElement(element)} aria-label={`Открыть оценку: ${stepLabel}, ${benchmarkSubjects[subjectKey]}`}>
+                <button type="button" className="pm-benchmark-cell-open" onClick={() => openElement(element)} aria-label={`Открыть оценку: ${stepLabel}, ${subjectLabel}`}>
                   <span className={`pm-benchmark-proof ${statusText === "Подтверждено" ? "is-confirmed" : statusText === "Гипотеза" ? "is-hypothesis" : ""}`}>{statusText}</span>
                   <span className="pm-benchmark-cell-description">{element.description || "Описание не заполнено."}</span>
                   {element.details.solution && <span><b>Решение / видение:</b> {element.details.solution}</span>}

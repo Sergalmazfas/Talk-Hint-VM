@@ -338,3 +338,36 @@
   .pm-benchmark-table th:first-child { width: 140px; min-width: 140px; }
   .pm-benchmark-table td { min-width: 170px; }
 }
+
+/* Persisted pilot segment and dynamic benchmark controls */
+.pm-starting-segment {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr);
+  gap: 22px;
+  align-items: center;
+  margin: 17px 0 22px;
+  padding: 20px 21px;
+  border: 1px solid #bfd9d4;
+  border-left: 4px solid var(--pm-teal);
+  border-radius: 10px;
+  background: linear-gradient(112deg, #e7f3ef, #f7fbf9 72%);
+}
+.pm-starting-segment h2 { margin: 0; color: var(--pm-ink); font: 800 20px/1.2 Manrope,sans-serif; letter-spacing: -.035em; }
+.pm-starting-segment-copy > p:not(.pm-kicker) { max-width: 720px; margin: 9px 0 0; color: #526e78; font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+.pm-starting-segment-meta { display: grid; gap: 5px; margin-top: 13px; color: #617a80; font-size: 11px; line-height: 1.5; }
+.pm-starting-segment-meta strong { color: var(--pm-teal-dark); }
+.pm-starting-segment-actions { display: grid; justify-items: start; gap: 7px; }
+.pm-segment-company { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; color: var(--pm-teal-dark); font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.pm-segment-company span { color: var(--pm-faint); font: 10px "DM Mono",monospace; text-decoration: none; }
+.pm-benchmark-controls { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pm-benchmark-control-group { display: flex; gap: 7px; flex-wrap: wrap; }
+.pm-benchmark-control-group a { text-decoration: none; }
+.pm-benchmark-primary-badge { display: inline-flex; margin-top: 7px; padding: 5px 8px; border-radius: 5px; background: #dff2ed; color: #146e66; font-size: 10px; font-weight: 700; line-height: 1.3; }
+.pm-benchmark-empty { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .pm-starting-segment { grid-template-columns: 1fr; padding: 16px; }
+  .pm-starting-segment-actions { grid-template-columns: 1fr; }
+  .pm-benchmark-controls { align-items: flex-start; flex-direction: column; }
+  .pm-benchmark-control-group { width: 100%; }
+  .pm-benchmark-control-group .pm-btn { flex: 1; text-align: center; }
+}
