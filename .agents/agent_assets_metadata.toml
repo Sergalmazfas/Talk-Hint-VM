@@ -453,3 +453,17 @@ mtime_ms = 1792862294227
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/956ca383-c646-4e9c-92f0-2fdef433fe9e/c9d3be20-4291-4f88-b505-f7643d1aed3b"
 storage_version_token = "1792862316117426"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "xNWhN4IJXV9JABsbPaO1P"
+uri = "file://generated-artifacts/eleven-report-32c36660.json"
+type = "unspecified"
+title = "JSON последнего разговора ElevenLabs"
+description = "Сохранённый Dev TEST-отчёт: разговор 24 октября, 15:44 по Нью-Йорку, профиль «Исходный», транскрипция, настройки, задержки и TEST-действия. Содержит продиктованные в разговоре контактные данные."
+logical_id = "086566c2-af4f-4fbd-86c0-ac4abb3760cd"
+content_hash = "sha256:57f5bca9248ccf131530e0b120a7b0e7e3e20359399bb88072ca7dae2ed86b72"
+size = 59427
+mtime_ms = 1792871712668
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/086566c2-af4f-4fbd-86c0-ac4abb3760cd/791f135b-8bcd-4a20-9ee9-c012b5e18653"
+storage_version_token = "1792871729319050"
+content_type = "application/octet-stream"

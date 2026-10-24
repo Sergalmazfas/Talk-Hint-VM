@@ -101,6 +101,8 @@ For the ElevenLabs catalog comparison, the owner specified a female American-acc
 
 The owner subsequently confirmed that ElevenLabs + Engine works with a normal, clearly audible voice, but reported substantially longer waits and a less lively conversation than Retell + Engine.
 
+The owner later confirmed improved ElevenLabs response speed, but still rated the conversation 3.5/5 and preferred Retell for conversational responsiveness. The saved conversation they described used the baseline profile, not the Flash optimized profile.
+
 **Why:** This is live user confirmation of audibility after startup fixes, not a measured recognition, interruption or latency comparison.
 
 **How to apply:** Treat basic live audibility as user-confirmed; investigate response timing by stage and keep Retell as the user's responsiveness reference. Do not silently downgrade the common Engine to improve a voice-provider comparison.
