@@ -4,6 +4,7 @@ import {
   benchmarkSteps,
   benchmarkSubjects,
   detailFields,
+  differenceBenchmarkSteps,
   pilotBenchmarkSteps,
   type ModelElement,
   type ProjectModelState,
@@ -24,6 +25,7 @@ const knownSubjects: Record<string, string> = {
 const profileFields = [
   "buyer", "segment", "solution", "procedure", "features", "aiVoiceChat",
   "callsBooking", "marketing", "billing", "analytics", "pricing", "comparison",
+  "contentEditing", "paidAdvertising", "attribution", "metrics", "convenience", "netIncome", "measurement",
   "competitorPriority", "prioritySegmentId", "decisionDate",
   "sourceDate", "researchDate", "recheckedAt", "provenance", "unknown",
 ] as const;
@@ -94,7 +96,7 @@ export default function Benchmark({ state, openElement }: Props) {
   const selectedId = params.get("element");
   const selected = competitors.find((element) => element.id === selectedId);
   const primaryOnly = params.get("filter") === "primary";
-  const suite = params.get("suite") === "pilot" ? "pilot" : "general";
+  const suite = params.get("suite") === "pilot" ? "pilot" : params.get("suite") === "difference" ? "difference" : "general";
   const pilotMethod = elements.find(element => element.id === "REQ-PILOT-COMPARE");
   const visibleCompetitors = primaryOnly
     ? competitors.filter((element) => element.details.competitorPriority === "primary-starting-segment" && element.details.prioritySegmentId === "TH-SEGMENT")
@@ -103,11 +105,15 @@ export default function Benchmark({ state, openElement }: Props) {
   const relatedRelations = state.relations.filter((relation) => relatedIds.has(relation.from) || relatedIds.has(relation.to));
   relatedRelations.forEach((relation) => { relatedIds.add(relation.from); relatedIds.add(relation.to); });
   const relatedTasks = state.taskDrafts.filter((draft) => draft.elementIds.some((id) => relatedIds.has(id)));
-  const suiteSteps = suite === "pilot" ? pilotBenchmarkSteps : benchmarkSteps;
+  const suiteSteps = suite === "pilot" ? pilotBenchmarkSteps : suite === "difference" ? differenceBenchmarkSteps : benchmarkSteps;
   const steps = Object.entries(suiteSteps) as [string, string][];
   const suiteAssessments = assessments.filter((element) =>
-    suite === "pilot" ? element.details.benchmarkSuite === "pilot" : element.details.benchmarkSuite !== "pilot",
+    suite === "pilot" ? element.details.benchmarkSuite === "pilot"
+      : suite === "difference" ? element.details.benchmarkSuite === "difference"
+        : !element.details.benchmarkSuite || element.details.benchmarkSuite === "general",
   );
+  const priceEvidence = elements.filter((element) => element.details.benchmarkType === "pricing-evidence" ||
+    ["PRICE-MB-LAUNCH", "PRICE-MB-PRACTICE", "PRICE-MB-CLINIC", "PRICE-CS-LITE", "PRICE-CS-STANDARD", "PRICE-CS-PREMIUM"].includes(element.id));
   const subjects = useMemo(() => {
     const entries = new Map<string, string>();
     competitors.forEach((element) => {
@@ -160,6 +166,7 @@ export default function Benchmark({ state, openElement }: Props) {
       <div className="pm-benchmark-control-group" aria-label="Набор сценариев">
         <a className={`pm-btn small ${suite === "general" ? "primary" : ""}`} href={queryHref({ suite: null })}>Общие сценарии</a>
         <a className={`pm-btn small ${suite === "pilot" ? "primary" : ""}`} href={queryHref({ suite: "pilot" })}>Пилотный сценарий</a>
+        <a className={`pm-btn small ${suite === "difference" ? "primary" : ""}`} href={queryHref({ suite: "difference" })}>Отличие и две оси</a>
       </div>
     </div>
 
@@ -167,6 +174,10 @@ export default function Benchmark({ state, openElement }: Props) {
       <div><strong>Методика пилота</strong><p>{pilotMethod.description}</p>
         <p>{pilotMethod.details.unknown}</p>
         <p>{pilotMethod.details.practicalTest}</p></div>
+    </section>}
+    {suite === "difference" && <section className="pm-benchmark-note pm-difference-method" aria-label="Ограничения сравнения отличий">
+      <div><strong>Качественная матрица гипотез</strong><p>Пустые оценки не означают отсутствия функции. Удобство и влияние на доход после расходов не измерены; у TalkHint показан только желаемый замысел, не результат.</p></div>
+      <a className="pm-btn small" href="/admin/project-model?view=difference">Вернуться к карте двух осей</a>
     </section>}
 
     {selected && <section className="pm-benchmark-profile-focus" aria-label={`Профиль ${selected.title}`}>
@@ -208,6 +219,15 @@ export default function Benchmark({ state, openElement }: Props) {
       </article>)}
       {!visibleCompetitors.length && <div className="pm-empty pm-benchmark-empty"><strong>Нет сохранённых конкурентов для этого фильтра</strong>Фильтр опирается только на записи модели с приоритетом и сегментом TH-SEGMENT.</div>}
     </div>
+
+    {priceEvidence.length > 0 && <section className="pm-benchmark-related pm-pricing-evidence">
+      <div className="pm-section-list-head"><div><h3>Сохранённые наблюдения цен</h3><span className="pm-help">Исторические значения и повторная проверка остаются раздельными в исходных записях.</span></div></div>
+      <div className="pm-pricing-grid">{priceEvidence.map((item) => <article className="pm-pricing-card" key={item.id}>
+        <div><span className="pm-benchmark-id">{item.id}</span><h4>{item.title}</h4><p>{item.description || item.details.evidence || "Описание наблюдения не заполнено."}</p></div>
+        <div className="pm-pricing-values">{item.details.pricing && <div><b>Цена / тариф</b><span>{item.details.pricing}</span></div>}{item.details.limitations && <div><b>Ограничения</b><span>{item.details.limitations}</span></div>}{item.details.evidence && <div><b>Основание</b><span>{item.details.evidence}</span></div>}</div>
+        <button type="button" className="pm-btn small" onClick={() => openElement(item)}><PencilLine size={12} /> Открыть запись</button>
+      </article>)}</div>
+    </section>}
 
     <section className="pm-benchmark-method">
       <div><span className="pm-benchmark-overline">МЕТОДИКА</span><h3>Сравниваем сценарии, а не обещания</h3></div>

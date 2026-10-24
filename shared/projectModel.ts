@@ -26,12 +26,32 @@ export const detailFields = {
   recheckedAt: "Дата повторного чтения", provenance: "Происхождение", researchDate: "Дата исходной проверки",
   competitorPriority: "Приоритет конкурента", prioritySegmentId: "Сегмент приоритета",
   decisionDate: "Дата решения владельца", benchmarkSuite: "Набор сценариев",
+  convenience: "Удобство управления практикой", netIncome: "Влияние на доход после расходов",
+  measurement: "Необходимые измерения", positionIntent: "Желаемая позиция, не результат",
+  tamFormula: "TAM — формула", samFormula: "SAM — формула", somFormula: "SOM — формула",
+  monetaryScenario: "Денежный сценарий / допущения", contentEditing: "Монтаж исходного видео",
+  paidAdvertising: "Платная реклама", attribution: "Атрибуция и окупаемость",
 } as const;
+export const projectPackageBlocks = [
+  { id: "TH-PRODUCT", title: "Продукт" }, { id: "TH-CLIENT", title: "Клиент" },
+  { id: "TH-PROBLEM", title: "Проблема" }, { id: "TH-PILOT-VALUE", title: "Решение и ценность" },
+  { id: "TH-MARKET", title: "Рынок и сегменты", view: "segment" },
+  { id: "TH-PILOT-COMPETITORS", title: "Конкуренты", view: "benchmark" },
+  { id: "TH-DIFFERENTIATION", title: "Отличие", view: "difference" },
+  { id: "TH-ACQUISITION", title: "Привлечение и продажи" }, { id: "TH-ECONOMICS", title: "Экономика", view: "market" },
+  { id: "TH-TEAM", title: "Команда и этапы запуска" },
+] as const;
 export const benchmarkSubjects = { talkhint: "TalkHint", jobber: "Jobber", "housecall-pro": "Housecall Pro", zenmaid: "ZenMaid", massagebook: "MassageBook", clinicsense: "ClinicSense" } as const;
 export const pilotBenchmarkSteps = {
   setup: "Настройка практики", inquiry: "Обработка обращения", "approval-booking": "Согласование и запись",
   "reminder-reschedule": "Напоминание / перенос", payment: "Оплата", rebooking: "Повторная запись",
   voice: "Голосовое поручение", "owner-report": "Отчёт владельцу",
+} as const;
+export const differenceBenchmarkSteps = {
+  marketing: "Маркетинг и возвраты уже есть", editing: "Монтаж исходного видео",
+  ads: "Ведение платной Meta-рекламы", attribution: "Расходы → оплаченные записи / повторы",
+  conversation: "Единое разговорное управление", convenience: "Удобство управления",
+  netIncome: "Доход после расходов",
 } as const;
 export const benchmarkSteps = {
   incoming: "Входящий звонок", intake: "Выяснение запроса", quote: "Расчёт",

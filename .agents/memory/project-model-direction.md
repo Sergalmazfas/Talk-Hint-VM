@@ -32,7 +32,11 @@ illustrative client model, not the parameters of this pilot.
 MassageBook and ClinicSense are the pilot's primary competitors. All earlier
 competitors, research, sources and history must remain in the general benchmark;
 changing segment priority is not permission to delete or replace that work.
-Less setup and less owner management time are hypotheses, not proven advantages.
+The owner explicitly corrected the goal: “Мы не делаем меньше участия владельца,
+мы делаем удобный инструмент. Это разные вещи”. Reducing owner participation is
+not the target. The two agreed evaluation axes are convenience of managing the
+practice and impact on income after expenses. Both remain unmeasured, not proven
+advantages; the owner stays involved and approves actions.
 MBLEx is a potential audience channel, not a confirmed database of buyers.
 
 **Why:** The owner explicitly narrowed the pilot and repeated “те конкурентов не
@@ -43,3 +47,19 @@ segment exploration and the fictional salon must not override this decision.
 capacity or assumptions into real customers' cards or the general phone agent.
 The salon's $20 per session is revenue before expenses, not profit; conditional
 price/capacity examples are not actual utilization or market research.
+
+The proposed differentiation combines conversational practice management and
+advertising/content Crew. The owner supplies original video; the hypothesis is
+editing that video, not generating new scenes. Publication and advertising/budget
+need separate approvals. End-to-end Meta advertising, attribution and increased
+income are a target hypothesis, not working capabilities or guaranteed sales.
+Competitors already have marketing, rebooking, documents and payments. Not
+finding their full conversational editing/advertising chain in reviewed materials
+does not prove that chain or AI is absent.
+
+**Why:** These are explicit owner corrections and boundaries for the assembled
+project package.
+
+**How to apply:** Preserve earlier formulations in history, not as current goals.
+Keep unmeasured coordinates/ratings/income unknown, and compare documented
+capabilities with documented capabilities, not the TalkHint vision as finished.

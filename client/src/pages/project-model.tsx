@@ -14,9 +14,12 @@ import { useAuth } from "@/lib/auth";
 import { modelRequest } from "@/lib/project-model-api";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import Benchmark from "@/components/project-model/Benchmark";
+import PackageViews from "@/components/project-model/PackageViews";
 import "./project-model.css";
 
 type Tab = "overview" | "links" | "documents";
+const projectViews = ["overview", "segment", "market", "difference", "benchmark"] as const;
+const projectTabs: Tab[] = ["overview", "links", "documents"];
 const sections = modelSections;
 const emptyElement = (section: ElementInput["section"] = "Обзор"): ElementInput => ({
   title: "", section, scope: "talkhint", kind: "context", description: "",
@@ -37,10 +40,17 @@ export default function ProjectModel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState("");
+  const initialParams = new URLSearchParams(window.location.search);
+  const requestedView = initialParams.get("view");
+  const initialView = projectViews.includes(requestedView as typeof projectViews[number]) ? requestedView as typeof projectViews[number] : "overview";
+  const requestedSection = initialParams.get("section");
+  const initialSection = sections.find((item) => item === requestedSection) ?? (initialView === "benchmark" ? "Рынок и конкуренты" : "Обзор");
+  const requestedTab = initialParams.get("tab");
+  const initialTab = projectTabs.includes(requestedTab as Tab) ? requestedTab as Tab : "overview";
   const [section, setSection] = useState<ElementInput["section"]>(() =>
-    new URLSearchParams(window.location.search).get("view") === "benchmark" ? "Рынок и конкуренты" : "Обзор",
+    initialSection,
   );
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [editor, setEditor] = useState<{ id?: string; value: ElementInput } | null>(null);
   const [relationDraft, setRelationDraft] = useState<{ id?: string; from: string; to: string; label: string }>({ from: "", to: "", label: "" });
   const [documentDraft, setDocumentDraft] = useState({ title: "", text: "", url: "", elementIds: [] as string[], id: undefined as string | undefined });
@@ -50,7 +60,8 @@ export default function ProjectModel() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [proposalEditorOpen, setProposalEditorOpen] = useState(false);
   const [deepLinkError, setDeepLinkError] = useState("");
-  const benchmarkView = useMemo(() => new URLSearchParams(window.location.search).get("view") === "benchmark", []);
+  const benchmarkView = initialView === "benchmark";
+  const currentView = initialView;
   const deepLinkId = useMemo(() => benchmarkView ? "" : new URLSearchParams(window.location.search).get("element")?.trim() ?? "", [benchmarkView]);
   const deepLinkHandled = useRef("");
 
@@ -80,6 +91,7 @@ export default function ProjectModel() {
     setDeepLinkError("");
     setSection(target.section);
     setTab("overview");
+    setUrlState({ section: target.section, tab: "overview" });
     setEditor({
       id: target.id,
       value: {
@@ -130,6 +142,16 @@ export default function ProjectModel() {
       implementationStatus: element.implementationStatus, details: { ...element.details },
     } : emptyElement(section) });
   }
+  function clearElementQuery() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("element")) return;
+    params.delete("element");
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+  }
+  function closeElementEditor() {
+    setEditor(null);
+    clearElementQuery();
+  }
   async function saveElement(value: ElementInput, id?: string) {
     if (id) {
       const current = elements.find((el) => el.id === id);
@@ -138,11 +160,11 @@ export default function ProjectModel() {
           targetId: id, source: "Ручная правка администратора", rationale: "",
           relatedIds: [], change: value, proposalId: undefined,
         });
-        setEditor(null);
+        closeElementEditor();
         return;
       }
     }
-    if (await submit({ type: "saveElement", ...(id ? { id } : {}), element: value })) setEditor(null);
+    if (await submit({ type: "saveElement", ...(id ? { id } : {}), element: value })) closeElementEditor();
   }
 
   const [proposalForm, setProposalForm] = useState<{
@@ -222,14 +244,16 @@ export default function ProjectModel() {
     }
   }
 
-  const overviewCards = [
-    { id: "TH-CLIENT", label: "Клиент" },
-    { id: "TH-PROBLEM", label: "Проблема" },
-    { id: "TH-PRODUCT", label: "Продукт" },
-    { id: "TH-SEGMENT", label: "Первый сегмент" },
-    { id: "TH-MARKET", label: "Рынок и отличие" },
-    { id: "TH-ECONOMICS", label: "Доходы и расходы" },
-  ] as const;
+  const setUrlState = (updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(updates).forEach(([key, value]) => value === null ? params.delete(key) : params.set(key, value));
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+  };
+  const changeSection = (value: ElementInput["section"]) => {
+    setSection(value); setTab("overview");
+    setUrlState({ view: "overview", section: value, tab: "overview", element: null, suite: null, filter: null });
+  };
+  const changeTab = (value: Tab) => { setTab(value); setUrlState({ tab: value }); };
   const startingSegment = talkhintElements.find((element) => element.id === "TH-SEGMENT");
   const primaryCompetitors = elements.filter((element) =>
     element.details.benchmarkType === "competitor" &&
@@ -258,7 +282,7 @@ export default function ProjectModel() {
           <nav className="pm-nav">
             {sections.map((item, index) => (
               <div className="pm-nav-group" key={item}>
-                <button type="button" onClick={() => { setSection(item); setTab("overview"); }} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}>
+                <button type="button" onClick={() => changeSection(item)} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}>
                   <span className="pm-nav-index">{String(index + 1).padStart(2, "0")}</span>{item}
                 </button>
                 {item === "Рынок и конкуренты" && <a className={`pm-nav-subitem ${benchmarkView && section === item ? "active" : ""}`} href="/admin/project-model?view=benchmark" aria-current={benchmarkView && section === item ? "page" : undefined}>Конкурентный бенчмаркинг</a>}
@@ -286,14 +310,22 @@ export default function ProjectModel() {
             </div>
           </div>
 
+          <nav className="pm-package-nav" aria-label="Пакет проекта">
+            <a className={currentView === "overview" ? "active" : ""} href="/admin/project-model?view=overview">Обзор пакета</a>
+            <a className={currentView === "segment" ? "active" : ""} href="/admin/project-model?view=segment">Сегмент</a>
+            <a className={currentView === "market" ? "active" : ""} href="/admin/project-model?view=market">Рынок и экономика</a>
+            <a className={currentView === "difference" ? "active" : ""} href="/admin/project-model?view=difference">Отличие и проверка</a>
+            <a className={benchmarkView ? "active" : ""} href="/admin/project-model?view=benchmark&suite=pilot&filter=primary">Основные конкуренты</a>
+          </nav>
+
           {conflict && <div role="alert" className="pm-alert"><AlertCircle size={16} />{conflict} <button className="pm-btn small" type="button" onClick={() => setConflict("")}>Понятно</button></div>}
           {error && <div role="alert" className="pm-alert pm-error"><AlertCircle size={16} /><span>{error}</span><button className="pm-btn small" type="button" onClick={() => void load()}>Повторить</button></div>}
           {deepLinkError && <div role="alert" className="pm-alert pm-error"><AlertCircle size={16} /><span>{deepLinkError}</span><button className="pm-btn small" type="button" onClick={() => setDeepLinkError("")}>Закрыть</button></div>}
 
           <div className="pm-tabs" role="tablist" aria-label="Представление модели">
-            <button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>Обзор <span className="pm-count">{talkhintElements.length}</span></button>
-            <button type="button" role="tab" aria-selected={tab === "links"} className={tab === "links" ? "active" : ""} onClick={() => setTab("links")}>Связи <span className="pm-count">{state?.relations.length ?? 0}</span></button>
-            <button type="button" role="tab" aria-selected={tab === "documents"} className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы <span className="pm-count">{state?.documents.length ?? 0}</span></button>
+            <button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => changeTab("overview")}>Обзор <span className="pm-count">{talkhintElements.length}</span></button>
+            <button type="button" role="tab" aria-selected={tab === "links"} className={tab === "links" ? "active" : ""} onClick={() => changeTab("links")}>Связи <span className="pm-count">{state?.relations.length ?? 0}</span></button>
+            <button type="button" role="tab" aria-selected={tab === "documents"} className={tab === "documents" ? "active" : ""} onClick={() => changeTab("documents")}>Документы <span className="pm-count">{state?.documents.length ?? 0}</span></button>
           </div>
 
           {loading && !state ? <div className="pm-overview-grid" aria-label="Загрузка модели"><div className="pm-skeleton" /><div className="pm-skeleton" /><div className="pm-skeleton" /><div className="pm-skeleton" /></div> : null}
@@ -301,21 +333,8 @@ export default function ProjectModel() {
 
           {state && tab === "overview" && !isFocusedTasks && !isFocusedHistory && (
             <>
-              {section === "Обзор" && <div className="pm-overview-grid">
-                {overviewCards.map((card, index) => {
-                  const element = talkhintElements.find((item) => item.id === card.id);
-                  return <button key={card.label} type="button" className="pm-overview-card" onClick={() => {
-                    if (element) openElement(element);
-                    else setDeepLinkError(`Обзорный узел ${card.id} отсутствует в модели. Проверьте seed-данные; созданием нового узла его ID не подменяется.`);
-                  }}>
-                    <span className="pm-card-top"><span className="pm-card-label">{card.label}</span><span className="pm-card-index">{card.id}</span></span>
-                    <span className={`pm-card-value ${element ? "" : "pm-card-empty"}`}>{element?.title ?? "Узел не найден"}</span>
-                    <span className="pm-card-foot"><span>{element ? element.description || "Открыть подробности" : `Ожидаемый ID: ${card.id}`}</span>{element && <span className={`pm-pill ${element.contentStatus}`}>{statusLabel(element.contentStatus)}</span>}</span>
-                  </button>;
-                })}
-              </div>}
-
-              {section === "Обзор" && startingSegment && <section className="pm-starting-segment" aria-label="Стартовый сегмент">
+              {section === "Обзор" && <PackageViews state={state} view={currentView} openElement={openElement} />}
+              {section === "Обзор" && currentView === "overview" && startingSegment && <section className="pm-starting-segment" aria-label="Стартовый сегмент">
                 <div className="pm-starting-segment-copy">
                   <p className="pm-kicker">PILOT / STARTING SEGMENT</p>
                   <h2>{startingSegment.title}</h2>
@@ -337,7 +356,7 @@ export default function ProjectModel() {
 
               {section === "Рынок и конкуренты" && benchmarkView && state && <Benchmark state={state} openElement={openElement} />}
 
-              {section === "Обзор" && <section className="pm-gap-summary" aria-label="Сводка пробелов модели">
+              {section === "Обзор" && currentView === "overview" && <section className="pm-gap-summary" aria-label="Сводка пробелов модели">
                 <div className="pm-section-list-head"><h2>Что ещё требует внимания</h2><span className="pm-help">Актуально по текущей версии</span></div>
                 <div className="pm-gap-metrics">
                   <div><b>{questionElements.length}</b><span>открытых вопросов / неизвестных</span></div>
@@ -348,7 +367,7 @@ export default function ProjectModel() {
                 {incompleteActions.length > 0 && <div className="pm-gap-detail">Не заполнено у: {incompleteActions.slice(0, 4).map(({ element, missing }) => `${element.title} (${missing.map((key) => detailFields[key]).join(", ")})`).join(" · ")}</div>}
               </section>}
 
-              {!isFocusedTasks && !isFocusedHistory && !(section === "Рынок и конкуренты" && benchmarkView) && <section className="pm-section-list">
+              {!isFocusedTasks && !isFocusedHistory && !(section === "Рынок и конкуренты" && benchmarkView) && !(section === "Обзор" && ["segment", "market", "difference"].includes(currentView)) && <section className="pm-section-list">
                 <div className="pm-section-list-head">
                   <h2>{section}</h2>
                   <button className="pm-btn small" type="button" onClick={() => openElement()}><Plus size={12} /> Добавить элемент</button>
@@ -511,10 +530,10 @@ export default function ProjectModel() {
       {editor && <ElementEditor
         initial={editor.value} id={editor.id} version={elements.find((element) => element.id === editor.id)?.version} busy={saving} mode="element"
         needsReview={elements.find((element) => element.id === editor.id)?.needsReview ?? false}
-        onClose={() => setEditor(null)}
+        onClose={closeElementEditor}
         onSave={(value) => void saveElement(value, editor.id)}
         onReview={async (reason) => {
-          if (editor.id && await submit({ type: "reviewElement", id: editor.id, reason })) setEditor(null);
+          if (editor.id && await submit({ type: "reviewElement", id: editor.id, reason })) closeElementEditor();
         }}
       />}
       {proposalEditorOpen && <ElementEditor
