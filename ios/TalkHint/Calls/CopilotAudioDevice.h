@@ -2,8 +2,8 @@
 //  CopilotAudioDevice.h
 //
 //  Based on Twilio's MIT-licensed ExampleAVAudioEngineDevice sample
-//  (Copyright © 2018-2020 Twilio, Inc.).  Copilot-specific routing is kept
-//  here so the normal CallKit/Twilio audio path does not need a second device.
+//  (Copyright © 2018-2020 Twilio, Inc.). This custom device is selected only
+//  for Copilot; ordinary calls use Twilio's standard audio device.
 //
 //  MIT License
 //  Copyright © 2018-2020 Twilio, Inc.

@@ -62,3 +62,4 @@
 - [Standalone Secretary client](standalone-secretary-client.md) — separate Expo client, not migration; Swift/admin remain the owner's lab; reproduce the Secretary workflow.
 - [Internal project model](project-model-direction.md) — TalkHint planning, not a universal builder; separate client examples, hypotheses, decisions and implementation.
 - [GitHub workflow permissions](github-workflow-permissions.md) — generic PUSH_REJECTED can mask missing OAuth workflow scope; dry-run success does not verify server acceptance.
+- [Native audio boundaries](native-audio-boundaries.md) — ordinary Twilio audio, Copilot private gates and visible Secretary monitoring must not compete for one audio session.

@@ -27,9 +27,21 @@ final class CallManager: NSObject {
 
     private let provider: CXProvider
     private let callController = CXCallController()
-    // Installed before every Twilio connection and never swapped mid-call.
-    // With taps disabled this remains the ordinary Hint/Translator device.
-    private let audioDevice = CopilotAudioDevice()
+    private let standardAudioDevice = DefaultAudioDevice()
+    // Only Copilot needs custom capture, private gates and playback injection.
+    private lazy var audioDevice = CopilotAudioDevice()
+    private lazy var audioRouter = CallAudioDeviceRouter(
+        install: { [weak self] device in
+            guard let self else { return }
+            switch device {
+            case .standard: TwilioVoiceSDK.audioDevice = self.standardAudioDevice
+            case .copilot: TwilioVoiceSDK.audioDevice = self.audioDevice
+            }
+        },
+        enableStandard: { [weak self] in self?.standardAudioDevice.isEnabled = $0 },
+        enableCopilot: { [weak self] in self?.audioDevice.isEnabled = $0 },
+        prepareCopilot: { [weak self] in self?.audioDevice.prepareForNewCall() }
+    )
 
     /// How a call is being assisted. Structural placeholder (task #274): ALL
     /// calls — whether started from the Hint tab or, in a future stage, from
@@ -65,6 +77,11 @@ final class CallManager: NSObject {
     // SDK can deallocate on the main thread while its media thread is stopping.
     private var disconnectingCalls: [UUID: Call] = [:]
 
+    /// A monitor must not activate/deactivate the shared session under CallKit.
+    var hasPhoneAudioSession: Bool {
+        !sessions.isEmpty || !disconnectingCalls.isEmpty
+    }
+
     private override init() {
         let config = CXProviderConfiguration()
         config.supportsVideo = false
@@ -77,7 +94,13 @@ final class CallManager: NSObject {
 
         provider.setDelegate(self, queue: nil)
         // Let CallKit own the audio session lifecycle.
-        TwilioVoiceSDK.audioDevice = audioDevice
+        prepareAudioDevice(for: .hint)
+    }
+
+    private func prepareAudioDevice(for mode: CallMode) {
+        audioRouter.prepare(copilot: mode == .copilot,
+                            hasSessions: !sessions.isEmpty,
+                            hasDisconnectingCalls: !disconnectingCalls.isEmpty)
     }
 
     /// Must be called from the PushKit `didReceiveIncomingPush` handler. iOS 13+
@@ -85,10 +108,10 @@ final class CallManager: NSObject {
     /// PushKit completion handler must run only after `reportNewIncomingCall`.
     func reportIncomingCall(callSid: String, fromNumber: String, completion: @escaping () -> Void) {
         let uuid = UUID()
-        if sessions.isEmpty, disconnectingCalls.isEmpty { audioDevice.prepareForNewCall() }
         // The ringing tab is the explicit incoming-mode selection. Do not
         // turn every incoming call into Copilot.
         let selectedMode: CallMode = Self.selectedIncomingMode()
+        prepareAudioDevice(for: selectedMode)
         sessions[uuid] = CallSession(uuid: uuid, mode: selectedMode, callSid: callSid,
                                       remoteLabel: fromNumber, twilioCall: nil, answered: false,
                                       isOutgoing: false, translatorVoice: .female,
@@ -141,7 +164,7 @@ final class CallManager: NSObject {
     @discardableResult
     func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
-        if sessions.isEmpty, disconnectingCalls.isEmpty { audioDevice.prepareForNewCall() }
+        prepareAudioDevice(for: mode)
         // Snapshot before CallKit/Twilio starts. Later Settings changes apply
         // to the next call, including owner clone speech in Copilot.
         let translatorVoice = SessionStore.shared.translatorVoice
@@ -361,7 +384,7 @@ extension CallManager: CXProviderDelegate {
         answerActions.removeAll()
         // The SDK may still be finishing disconnect. Terminal callbacks release
         // these references even though CallKit has reset its own sessions.
-        audioDevice.isEnabled = false
+        audioRouter.setEnabled(false)
         tearDownInCallScreen()
     }
 
@@ -372,7 +395,7 @@ extension CallManager: CXProviderDelegate {
         }
 
         // CallKit will activate the audio session; keep it disabled until then.
-        audioDevice.isEnabled = false
+        audioRouter.setEnabled(false)
         let uuid = action.callUUID
         let number = session.remoteLabel
 
@@ -421,7 +444,7 @@ extension CallManager: CXProviderDelegate {
         }
 
         // CallKit will activate the audio session; keep it disabled until then.
-        audioDevice.isEnabled = false
+        audioRouter.setEnabled(false)
         answerActions[action.callUUID] = action
 
         guard let callSid = session.callSid else {
@@ -492,11 +515,11 @@ extension CallManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        audioDevice.isEnabled = true
+        audioRouter.setEnabled(true)
     }
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        audioDevice.isEnabled = false
+        audioRouter.setEnabled(false)
     }
 }
 
