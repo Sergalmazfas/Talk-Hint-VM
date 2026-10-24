@@ -63,6 +63,19 @@ struct SecretaryOutgoingSetup: Decodable {
     let reasoning: String
 }
 extension APIClient {
+    /// Catalog and number IDs are opaque UUIDs/unreserved identifiers, not URL
+    /// fragments. Pass them raw to requestURL, which performs URL construction.
+    /// Pre-encoding here makes appendingPathComponent encode "%" a second time.
+    /// Reject path separators/escapes instead of letting an ID change the route.
+    static func secretaryPathID(_ id: String) throws -> String {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard !id.isEmpty, id != ".", id != "..",
+              id.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            throw APIError.decoding
+        }
+        return id
+    }
+
     func secretaryPersonalityContext() async throws -> SecretaryPersonalityContext {
         try JSONDecoder().decode(SecretaryPersonalityContext.self, from: await request(
             "/api/secretary-personalities/context", method: "GET", json: nil, authenticated: true))
@@ -74,19 +87,19 @@ extension APIClient {
             "/api/secretary-personalities", method: "GET", json: nil, authenticated: true, queryItems: query))
     }
     func secretaryPersonalityDetails(id: String) async throws -> SecretaryPersonalityDetails {
-        guard let safe = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { throw APIError.decoding }
+        let safe = try Self.secretaryPathID(id)
         return try JSONDecoder().decode(SecretaryPersonalityDetails.self, from: await request(
             "/api/secretary-personalities/\(safe)", method: "GET", json: nil, authenticated: true))
     }
     func secretaryOutgoingSetup(numberId: String) async throws -> SecretaryOutgoingSetup {
-        guard let safe = numberId.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { throw APIError.decoding }
+        let safe = try Self.secretaryPathID(numberId)
         let result = try JSONDecoder().decode(SecretaryOutgoingSetup.self, from: await request(
             "/api/secretary-personalities/numbers/\(safe)/outgoing", method: "GET", json: nil, authenticated: true))
         guard result.protocolVersion == 1, result.provider == "retell", result.numberId == numberId else { throw APIError.decoding }
         return result
     }
     func saveSecretaryOutgoingSetup(numberId: String, personalityId: String?, version: Int?, cardIds: [String]) async throws -> SecretaryOutgoingSetup {
-        guard let safe = numberId.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { throw APIError.decoding }
+        let safe = try Self.secretaryPathID(numberId)
         let body: [String: Any] = [
             "personalityId": personalityId.map { $0 as Any } ?? NSNull(),
             "version": version.map { $0 as Any } ?? NSNull(), "cardIds": cardIds,

@@ -2,6 +2,31 @@ import XCTest
 @testable import TalkHint
 
 final class SecretaryPersonalityTests: XCTestCase {
+    func testSecretaryIDsKeepHyphensAndUUIDsWithoutDoubleEncoding() throws {
+        for id in ["katya-fixture", "work-line", "personal-line",
+                   "e27af015-6c51-4927-b28e-34b7168a8542", "catalog_v2.~"] {
+            let safe = try APIClient.secretaryPathID(id)
+            XCTAssertEqual(safe, id)
+            for path in ["/api/secretary-personalities/\(safe)",
+                         "/api/secretary-personalities/numbers/\(safe)/outgoing"] {
+                let url = try APIClient.requestURL(path)
+                let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+                XCTAssertEqual(parts.percentEncodedPath, path)
+                XCTAssertEqual(url.path, path)
+                XCTAssertNil(parts.query)
+                XCTAssertNil(parts.fragment)
+            }
+        }
+    }
+
+    func testSecretaryIDsCannotInjectRoutesOrAlreadyEncodedEscapes() {
+        for id in ["", ".", "..", "../work-line", "work/line", "work\\line",
+                   "%2F", "work%2Dline", "%252F", "line?admin=true", "line#fragment",
+                   "line\n", " work-line", "https://example.invalid", "Катя"] {
+            XCTAssertThrowsError(try APIClient.secretaryPathID(id), "Unsafe opaque ID: \(id)")
+        }
+    }
+
     func testPersistedSetupDecodesPinnedKatyaAndExplicitCards() throws {
         let json = #"""
         {"protocolVersion":1,"numberId":"personal-line","scope":"personal","fromNumber":"+19990000001",
@@ -135,6 +160,53 @@ final class SecretaryPersonalityTests: XCTestCase {
             personalityId: nil, version: nil, cardIds: [])
         XCTAssertNil(removed.assignment)
         XCTAssertTrue(removed.cardIds.isEmpty)
+    }
+
+    func testSavedKatyaV2IsReadBackByNewClientWithoutChangingOtherLine() async throws {
+        let fixture = SecretaryPersonalityFixture()
+        let api = client(fixture)
+        let detail = try await api.secretaryPersonalityDetails(id: "katya-fixture")
+        let version = try XCTUnwrap(detail.versions.first { $0.version == 2 })
+        _ = try await api.saveSecretaryOutgoingSetup(numberId: "work-line",
+            personalityId: detail.personality.id, version: version.version, cardIds: ["work-card"])
+
+        // A new API client must read the server fixture, not a local selection.
+        let reopened = client(fixture)
+        let stored = try await reopened.secretaryOutgoingSetup(numberId: "work-line")
+        XCTAssertEqual(stored.assignment?.personalityId, detail.personality.id)
+        XCTAssertEqual(stored.assignment?.version, 2)
+        XCTAssertEqual(stored.assignment?.snapshot.name, "Катя")
+        XCTAssertEqual(stored.assignment?.snapshot.rules, version.rules)
+        XCTAssertEqual(stored.assignment?.snapshot.examples, version.examples)
+        XCTAssertEqual(stored.cardIds, ["work-card"])
+        let personal = try await reopened.secretaryOutgoingSetup(numberId: "personal-line")
+        XCTAssertNil(personal.assignment)
+        XCTAssertTrue(personal.cardIds.isEmpty)
+        let requests = await fixture.recorded()
+        XCTAssertEqual(requests.filter { $0.httpMethod == "PUT" }.count, 1)
+        XCTAssertFalse(requests.contains { $0.url?.path.hasPrefix("/api/secretary/tasks") == true })
+    }
+
+    func testUnsafeIDsFailBeforePersonalityTransport() async throws {
+        let fixture = SecretaryPersonalityFixture()
+        let api = client(fixture)
+        for id in ["../work-line", "work/line", "work%2Dline", "line?x=1", "line#x"] {
+            do {
+                _ = try await api.secretaryPersonalityDetails(id: id)
+                XCTFail("Unsafe personality ID must fail")
+            } catch APIError.decoding {}
+            do {
+                _ = try await api.secretaryOutgoingSetup(numberId: id)
+                XCTFail("Unsafe number ID must fail")
+            } catch APIError.decoding {}
+            do {
+                _ = try await api.saveSecretaryOutgoingSetup(numberId: id,
+                    personalityId: "katya-fixture", version: 2, cardIds: [])
+                XCTFail("Unsafe save path must fail")
+            } catch APIError.decoding {}
+        }
+        let requests = await fixture.recorded()
+        XCTAssertTrue(requests.isEmpty)
     }
 
     func testSaveHTTPFailuresAndCrossProfileCardsAreExplicit() async throws {

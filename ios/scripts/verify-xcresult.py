@@ -6,6 +6,10 @@ import sys
 
 REQUIRED_TESTS = {
     "SecretaryPersonalityTests": (
+        "testSecretaryIDsKeepHyphensAndUUIDsWithoutDoubleEncoding",
+        "testSecretaryIDsCannotInjectRoutesOrAlreadyEncodedEscapes",
+        "testSavedKatyaV2IsReadBackByNewClientWithoutChangingOtherLine",
+        "testUnsafeIDsFailBeforePersonalityTransport",
         "testPersistedSetupDecodesPinnedKatyaAndExplicitCards",
         "testLegacyDraftDoesNotAcquireANumberOrNewRequestID",
         "testNumberAndBackendSurviveAmbiguousRequestRecovery",
