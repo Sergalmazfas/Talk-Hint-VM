@@ -11,6 +11,8 @@ The owner explicitly confirmed: “Только один звонок сразу
 
 The Secretary must conduct the entire conversation autonomously. The owner only sets the assignment and number, then listens and reads the two-party dialogue and native-language subtitles; they do not speak or send live hints to the Secretary. The Hint interface is a reference for assignment entry and design, not a feature to extend for Secretary work.
 
+Live listening on the iPhone is mandatory in the existing owner's Swift/Xcode app, including assignments dictated or typed directly in that app, not only tasks created through ChatGPT. This requirement does not automatically expand the separate Expo client's scope.
+
 **Why:** The owner explicitly corrected a misunderstanding that had led to unrelated live-Hint translation work. The Secretary is the speaker on the call, not the owner.
 
 **How to apply:** Keep Secretary translation and call reporting confined to Secretary flows. Do not route owner audio or Hint suggestions into Secretary, and do not modify Hint merely because its task-entry design was reused.
