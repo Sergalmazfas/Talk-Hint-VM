@@ -37,6 +37,19 @@ export async function personalityDetails(id: string) {
     WHERE personality_id=$1 ORDER BY version DESC LIMIT 100`, [id]);
   return { personality: r.rows[0], versions: versions.rows.map(v => ({ ...v.content, version: v.version })) };
 }
+/** Browser TEST sessions pin an available catalog version, never a phone assignment. */
+export async function availablePersonalityVersion(id: string, version: number, mode: PersonalityMode): Promise<PersonalityBinding> {
+  if (!personalitiesEnabled()) throw problem(404, "Личности стенда доступны только в Dev");
+  const r = await database().query(`SELECT p.id,p.status,p.current_version,v.content FROM secretary_personalities p
+    JOIN secretary_personality_versions v ON v.personality_id=p.id AND v.version=$2
+    WHERE p.id=$1`, [id, version]);
+  const row = r.rows[0];
+  if (!row || row.status !== "available" || row.current_version !== version)
+    throw problem(409, "Личность недоступна или её версия изменилась. Обновите каталог и выберите её снова.");
+  return { personalityId: row.id, version, mode, snapshot: {
+    ...row.content, id: row.id, version, status: row.status,
+  } };
+}
 export async function createPersonality(slug: string, content: PersonalityContent) {
   const c = await database().connect();
   try {

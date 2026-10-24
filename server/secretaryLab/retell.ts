@@ -7,6 +7,9 @@ import { secretaryTestContextPrompt } from "./testContext";
 import type { SecretaryConversationEngine } from "../secretary/conversationEngine";
 import type { LabRunCost, LabTariffSnapshot } from "../../shared/secretaryLabCost";
 import { captureLabTariff, pricedLabReport } from "./cost";
+import type { PersonalityBinding } from "../secretary/personalities/types";
+import type { LabPersonalitySummary } from "../../shared/secretaryLabPersonality";
+import { labPersonalitySummary, parseLabPersonality, resolveLabPersonality } from "./personality";
 
 export interface RetellReport {
   id: string; callId: string; status: "connecting" | "live" | "ended" | "stop_failed" | "failed";
@@ -23,6 +26,7 @@ export interface RetellReport {
   cost?: LabRunCost;
   ttsModel?: string;
   profileId?: string;
+  personality?: LabPersonalitySummary | null;
   audioConnectedAt?: string;
   providerDurationSeconds?: number;
 }
@@ -43,7 +47,7 @@ export function retellSecretaryInstructions(owner: string, instruction: string) 
 export interface RetellLabProfile {
   agentName: string; mode: string;
   check(): Promise<object>;
-  reserve(owner: string, instruction: string, id: string): { ticket: string; engine: SecretaryConversationEngine["report"]; promptHash?: string };
+  reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding): { ticket: string; engine: SecretaryConversationEngine["report"]; promptHash?: string };
   registered(id: string, callId: string): void;
   ended(id: string): void;
 }
@@ -107,22 +111,27 @@ export class RetellSecretaryLab {
   async create(owner: string, input: any) {
     this.dev(); this.prune();
     if (!owner) fail(401, "Authentication required");
-    if (!input || Object.keys(input).some(k => !["instruction", "consent", "clientRequestId"].includes(k)) ||
+    if (!input || Object.keys(input).some(k => !["instruction", "consent", "clientRequestId", ...(this.profile ? ["personality"] : [])].includes(k)) ||
         input.consent !== true || typeof input.instruction !== "string" ||
         input.instruction.trim().length < 8 || input.instruction.length > 4000 ||
         typeof input.clientRequestId !== "string" ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.clientRequestId)) {
       fail(400, "Нужны поручение 8–4000 символов, согласие на платный тест и UUID запроса. Телефонные параметры запрещены.");
     }
+    const selectedPersonality = parseLabPersonality(input.personality);
     if (this.profile) await this.profile.check();
-    const instruction = input.instruction.trim(), inputHash = digest(instruction);
-    const old = Array.from(this.sessions.values()).find(s => s.owner === owner && s.requestId === input.clientRequestId);
-    if (old) {
+    const instruction = input.instruction.trim(), inputHash = digest(instruction +
+      (selectedPersonality ? "\n" + JSON.stringify(selectedPersonality) : ""));
+    const findOld = () => Array.from(this.sessions.values()).find(s => s.owner === owner && s.requestId === input.clientRequestId);
+    const resume = (old: Session) => {
       if (old.inputHash !== inputHash) fail(409, "Этот ID уже связан с другим поручением");
       if (old.creation) return old.creation;
       if (!old.call || terminal(old)) fail(409, "Запрос уже завершён или результат создания не установлен. Повторный вызов не создан.");
       return { id: old.report.id, call: old.call, report: this.priced(old) };
-    }
+    };
+    const old = findOld(); if (old) return resume(old);
+    const personality = await resolveLabPersonality(selectedPersonality);
+    const raced = findOld(); if (raced) return resume(raced);
     if (Array.from(this.sessions.values()).some(s => s.owner === owner && (!terminal(s) || s.uncertain))) {
       fail(409, "Сессия Retell уже активна или её остановка не подтверждена");
     }
@@ -136,8 +145,9 @@ export class RetellSecretaryLab {
         voice: RETELL_LAB_VOICE, promptHash: digest(instructions), createdAt: new Date(this.now()).toISOString(),
         tariffSnapshot: captureLabTariff(), monitorStatus: "waiting", turns: [], events: [], observations: [],
         metrics: { guestTurns: 0, secretaryTurns: 0 } } };
-    const engine = this.profile?.reserve(owner, instruction, id);
-    if (engine) { s.report.mode = this.profile!.mode; s.report.engine = engine.engine; }
+    const engine = this.profile?.reserve(owner, instruction, id, personality);
+    if (engine) { s.report.mode = this.profile!.mode; s.report.engine = engine.engine;
+      s.report.personality = labPersonalitySummary(personality); s.report.profileId = "default"; }
     if (engine?.promptHash) s.report.promptHash = engine.promptHash;
     this.sessions.set(id, s); this.attempts.set(owner, [...times, this.now()]);
     s.creation = this.admit(s, instructions, engine?.ticket);

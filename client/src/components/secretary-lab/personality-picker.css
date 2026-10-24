@@ -1,0 +1,37 @@
+.personality-picker{display:grid;gap:13px;margin:18px 0;padding:16px;border:1px solid #d8d8c8;border-radius:12px;background:#f5f4eb;color:#30372f}
+.personality-picker-heading,.personality-selected-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.personality-picker-heading>div,.personality-selected-head>div{display:grid;gap:4px}
+.personality-picker-heading span:first-child,.personality-selected-head small{font-size:9px;letter-spacing:.13em;font-weight:800;color:#737a68}
+.personality-picker-heading strong{font-size:14px}
+.personality-test-tag{border:1px solid #c7d0ae;border-radius:99px;padding:5px 8px;font-size:9px;color:#596448;white-space:nowrap}
+.personality-none,.personality-role label{display:flex;align-items:center;gap:10px;border:1px solid #dedecf;border-radius:9px;padding:10px;background:#fbfaf5;cursor:pointer}
+.personality-none.chosen,.personality-role label.selected{border-color:#83916c;background:#eef0e5}
+.personality-none input,.personality-role input{accent-color:#66754f}
+.personality-none>span,.personality-role label>span{display:grid;gap:3px;flex:1}
+.personality-none b,.personality-role b{font-size:12px}
+.personality-none small,.personality-role small{font-size:10px;color:#73776b}
+.personality-none i{font-size:8px;font-style:normal;letter-spacing:.1em;color:#77815e}
+.personality-catalog{display:grid;grid-template-columns:minmax(0,1fr) minmax(160px,.7fr);gap:8px 12px;align-items:end}
+.personality-select-label{grid-column:1/-1;font-size:10px;font-weight:700;color:#555d4e}
+.personality-select-wrap,.personality-search{height:36px;display:flex;align-items:center;gap:8px;border:1px solid #d4d6c6;border-radius:7px;padding:0 9px;background:#fffef8;color:#707663}
+.personality-select-wrap select{appearance:none;min-width:0;flex:1;border:0;outline:0;background:transparent;color:#30372f;font:inherit;font-size:11px}
+.personality-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#30372f;font:inherit;font-size:11px}
+.personality-loading,.personality-error{grid-column:1/-1;margin:0;font-size:10px;color:#747a6c}
+.personality-error{display:flex;align-items:center;gap:5px;color:#a34f3f}
+.personality-more,.personality-inspect{border:0;background:transparent;color:#65734f;text-decoration:underline;text-underline-offset:3px;font:inherit;font-size:10px;cursor:pointer;justify-self:start}
+.personality-selected{display:grid;gap:10px;padding-top:11px;border-top:1px solid #dddfd1}
+.personality-selected-head b{font-size:12px}
+.personality-description{margin:0;color:#596052;font-size:11px;line-height:1.55}
+.personality-details{display:grid;gap:10px;padding:11px;border-radius:8px;background:#eeede3}
+.personality-details>p{margin:0;font-size:11px;line-height:1.5}
+.personality-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.personality-detail-grid>div{min-width:0}
+.personality-detail-grid small{font-size:9px;font-weight:700;color:#6b735f}
+.personality-detail-grid pre{max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:9px;line-height:1.45;color:#41483d}
+.personality-current-version{font-size:9px;color:#757b6c}
+.personality-role{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:0;padding:0;border:0}
+.personality-role legend{grid-column:1/-1;margin-bottom:2px;font-size:10px;color:#565d50}
+.personality-role legend b{color:#697650}
+.personality-role-required{grid-column:1/-1;color:#a34f3f;font-size:10px}
+.personality-picker-foot{margin:0;font-size:9px;line-height:1.45;color:#777c6f}
+@media(max-width:600px){.personality-catalog{grid-template-columns:1fr}.personality-select-label{grid-column:auto}.personality-search{grid-column:auto}.personality-detail-grid{grid-template-columns:1fr}.personality-picker{padding:12px}.personality-picker-heading{align-items:flex-start;flex-direction:column}.personality-role{grid-template-columns:1fr}}

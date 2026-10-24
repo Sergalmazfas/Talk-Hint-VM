@@ -12,12 +12,16 @@ import ElevenPerformance from "./ElevenPerformance";
 import EngineFixtures from "./EngineFixtures";
 import RunCost from "./RunCost";
 import type { LabRunCost } from "../../../../shared/secretaryLabCost";
+import PersonalityPicker, { type PersonalityChoice } from "./PersonalityPicker";
+import { RunSummary } from "./RunSummary";
 import "./eleven-engine.css";
+import "./run-summary.css";
 
 type Turn = { id?: string; role?: string; text?: string; atMs?: number; [key: string]: unknown };
 type EngineReport = {
   cost?: LabRunCost;
   id: string; savedComparisonId?: string; voiceChoice?: "clone" | "catalog";
+  personality?: { id: string; name: string; version: number; mode: "personal" | "work" } | null;
   status: string; model?: string; voice?: string; ttsModel?: string; instruction?: string;
   profileId?: string; configuration?: unknown; timings?: ElevenTiming[];
   createdAt?: string; endedAt?: string; turns?: Turn[]; events?: Array<Record<string, unknown>>;
@@ -32,6 +36,16 @@ type BenchState = "idle" | "permission" | "admitting" | "starting" | "live" | "s
 const API = elevenEngineApi;
 const ended = (report: EngineReport) => isElevenReportEnded(report.status);
 const errText = (cause: unknown) => cause instanceof Error ? cause.message : "Не удалось выполнить запрос.";
+const personalitySummary = (value: unknown) => {
+  if (value === null) return "без личности · legacy";
+  if (value && typeof value === "object") {
+    const item = value as { name?: unknown; version?: unknown; mode?: unknown };
+    if (typeof item.name === "string" && typeof item.version === "number" && (item.mode === "personal" || item.mode === "work")) {
+      return `${item.name} v${item.version} · TEST ${item.mode}`;
+    }
+  }
+  return "persona неизвестна";
+};
 
 export default function ElevenEngineBench({ token, instruction, onInstructionChange, onActiveChange }: {
   token: string; instruction: string; onInstructionChange: (value: string) => void; onActiveChange: (active: boolean) => void;
@@ -41,6 +55,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
   const [state, setState] = useState<BenchState>("idle");
   const [voice, setVoice] = useState<"clone" | "catalog">("catalog");
   const [profileId, setProfileId] = useState<ElevenProfileId>("baseline");
+  const [personality, setPersonality] = useState<PersonalityChoice | null>(null);
   const [scenarioLanguage, setScenarioLanguage] = useState<"ru" | "en" | "es">("ru");
   const [consent, setConsent] = useState(false);
   const [report, setReport] = useState<EngineReport | null>(null);
@@ -62,6 +77,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
   const lockRef = useRef(false);
   const stoppingRef = useRef(false);
   const requestIdRef = useRef<string | null>(null);
+  const admissionPersonalityRef = useRef<PersonalityChoice | null | undefined>(undefined);
   const admittedIdRef = useRef<string | null>(null);
   const startedAtRef = useRef(0);
   const lastPlaybackRef = useRef(false);
@@ -128,6 +144,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
       stoppingRef.current = false;
       admittedIdRef.current = null;
       requestIdRef.current = null;
+      admissionPersonalityRef.current = undefined;
       setState("idle");
       markBusy(false);
     }
@@ -190,6 +207,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
         sessionRef.current = null;
         admittedIdRef.current = null;
         requestIdRef.current = null;
+        admissionPersonalityRef.current = undefined;
         setState("idle");
         markBusy(false);
         setNotice("Сервер подтвердил остановку. Проверка поведения завершена.");
@@ -207,8 +225,10 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
   }, [acceptReport, markBusy, state, token]);
 
   const start = async (retry = false) => {
+    if (!retry) admissionPersonalityRef.current = personality ? { ...personality } : null;
+    const selectedPersonality = admissionPersonalityRef.current;
     const voiceReady = voice === "clone" ? config?.voices.clone.ready : config?.voices.catalog.ready;
-    if (!config?.ready || !voiceReady || !token || instruction.trim().length < 8 || !consent || lockRef.current || (isBusy && !retry)) return;
+    if (!config?.ready || !voiceReady || !token || instruction.trim().length < 8 || !consent || lockRef.current || (isBusy && !retry) || (selectedPersonality && !selectedPersonality.mode)) return;
     lockRef.current = true;
     const epoch = ++epochRef.current;
     const current = () => mountedRef.current && epochRef.current === epoch;
@@ -233,7 +253,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
       createAttempted = true;
       const created = await labRequest<{ id: string; websocketPath: string; report: EngineReport; savedComparisonId?: string; voiceChoice?: "clone" | "catalog"; ttsModel?: string }>(`${API}/sessions`, token, {
         method: "POST",
-        body: JSON.stringify({ instruction: instruction.trim(), voice, consent: true, profileId, clientRequestId: requestIdRef.current }),
+        body: JSON.stringify({ instruction: instruction.trim(), voice, consent: true, profileId, clientRequestId: requestIdRef.current, personality: selectedPersonality }),
       });
       createdId = created.id;
       admittedIdRef.current = created.id;
@@ -339,16 +359,22 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
           acceptReport(result.report);
           if (ended(result.report)) {
             admittedIdRef.current = null; requestIdRef.current = null; setState("idle"); markBusy(false);
+            admissionPersonalityRef.current = undefined;
           } else { setState("uncertain"); markBusy(true); }
         } catch {
           setState("uncertain"); markBusy(true);
           setError((old) => `${old} Серверную остановку не удалось подтвердить; новый запуск заблокирован.`);
         }
+      } else if (createAttempted && [400, 401, 402, 403, 409, 422, 429].includes((cause as { status?: number }).status ?? 0)) {
+        requestIdRef.current = null;
+        admissionPersonalityRef.current = undefined;
+        setState("idle"); markBusy(false);
       } else if (createAttempted) {
         setState("uncertain"); markBusy(true);
         setError((old) => `${old} Ответ создания не подтверждён. Повтор доступен только с тем же clientRequestId.`);
       } else {
         setState("idle"); markBusy(false);
+        admissionPersonalityRef.current = undefined;
       }
     } finally {
       preflight?.getTracks().forEach((track) => track.stop());
@@ -395,6 +421,9 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
   const current = report ?? selected;
   const history = config?.history ?? [];
   const voiceStatus = voice === "clone" ? config?.voices.clone : config?.voices.catalog;
+  const personalityReady = !personality || !!personality.mode;
+  const actualProfileId = current?.profileId as ElevenProfileId | undefined;
+  const actualProfile = actualProfileId ? elevenProfiles[actualProfileId] : undefined;
   const scenarios = {
     ru: [
       "Проверьте отдельно: попросите записать вас на вторник после обеда. Сделайте паузу, затем назовите обращение и номер телефона.",
@@ -427,6 +456,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
           <label className="eleven-label" htmlFor="eleven-instruction">Общая инструкция секретарю</label>
           <Textarea id="eleven-instruction" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} disabled={isBusy} maxLength={1600} className="eleven-instruction" />
           <div className="eleven-meta-line"><span>Общая инструкция для всех стендов · 1 600 символов</span><span>{instruction.length}/1600</span></div>
+          <PersonalityPicker token={token} value={personality} onChange={setPersonality} disabled={isBusy} />
           <div className="eleven-voice-choice">
             {([
               ["catalog", "Sarah", "Каталожный голос · женский, американский английский", config?.voices.catalog],
@@ -462,7 +492,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
           </div>
           <label className="eleven-consent"><input type="checkbox" checked={consent} disabled={isBusy} onChange={(event) => setConsent(event.target.checked)} /><span>Я выбираю ElevenLabs для этой пробы и явно соглашаюсь на хранение текстового отчёта, инструкции, оценки и Engine-трассы в общем репозитории сравнений на 30 дней. Аудио и секреты не отправляются на сохранение.</span></label>
           <div className="eleven-actions">
-            {state === "idle" ? <Button className="eleven-start" disabled={!config?.ready || !voiceStatus?.ready || !consent || instruction.trim().length < 8} onClick={() => void start()}><Mic size={15} /> Начать пробу</Button> :
+            {state === "idle" ? <Button className="eleven-start" disabled={!config?.ready || !voiceStatus?.ready || !consent || instruction.trim().length < 8 || !personalityReady} onClick={() => void start()}><Mic size={15} /> Начать пробу</Button> :
               state === "uncertain" && !admittedIdRef.current ? <Button variant="outline" onClick={() => void start(true)}><RefreshCw size={14} /> Повторить тот же запрос</Button> :
               <Button className="eleven-stop" onClick={() => void stopSession(state === "permission" || state === "admitting" || state === "starting")}><CircleStop size={15} /> {state === "permission" || state === "admitting" ? "Отменить создание" : state === "starting" ? "Отменить / остановить" : state === "uncertain" ? "Повторить остановку" : "Остановить сессию"}</Button>}
           </div>
@@ -481,7 +511,8 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
           <div className="eleven-panel-title"><span>03 / ОТЧЁТ И ОЦЕНКА</span><b>Отдельный человеческий сигнал</b></div>
           {current ? <>
             <div className="eleven-report-id"><span>SESSION ID <b>{current.id}</b></span><span>SAVED COMPARISON ID <b>{current.savedComparisonId || savedId || "Не сообщён"}</b></span><a href="#saved-comparisons">Открыть архив сравнений ↓</a></div>
-            <div className="eleven-report-facts"><span>Статус <b>{current.status}</b></span><span>Голос <b>{current.voice || current.voiceChoice || "Не сообщён"}</b></span><span>Модель <b>{current.engine?.model || current.model || "Не сообщена"}</b></span><span>Test-only <b>{current.engine?.testOnly === undefined ? "Не сообщено" : current.engine.testOnly ? "Да" : "Нет"}</b></span></div>
+            <div className="eleven-report-facts"><span>Статус <b>{current.status}</b></span><span>Модель <b>{current.engine?.model || current.model || "Не сообщена"}</b></span><span>Test-only <b>{current.engine?.testOnly === undefined ? "Не сообщено" : current.engine.testOnly ? "Да" : "Нет"}</b></span></div>
+            <RunSummary voiceBundle={[current.voice || current.voiceChoice || "ElevenLabs", current.ttsModel || "TTS не записан"].filter(Boolean).join(" · ")} profile={actualProfile?.label || current.profileId || "Не записан"} personality={current.personality} />
              <ElevenPerformance profileId={current.profileId} configuration={current.configuration} timings={current.timings} />
              <RunCost cost={current.cost} />
              <div className="eleven-report-actions">
@@ -506,7 +537,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
         <p>История показывает отчёты; читать отчёт не значит подключать звук или микрофон.</p>
         {config?.context && <details className="eleven-readiness-context"><summary>Общий Engine context / settings</summary><pre>{JSON.stringify({ context: config.context, settings: config.settings }, null, 2)}</pre></details>}
         {config ? <div className="eleven-history-list">{history.length ? history.map((item) => <button key={item.id} disabled={isBusy || refreshingReport} className={current?.id === item.id ? "current" : ""} onClick={() => { setSelected(item as EngineReport); setReport(null); reportRef.current = null; setSessionId(item.id); setSavedId(String(item.savedComparisonId || "")); void readReport(item.id); }}>
-          <span className="eleven-history-dot" /><span><b>{String(item.voice || item.voiceChoice || "ElevenLabs")} · {item.status}</b><small>{item.createdAt ? formatLabTime(item.createdAt) : "Дата не сообщена"} · {item.id}</small></span><span>→</span>
+          <span className="eleven-history-dot" /><span><b>{String(item.voice || item.voiceChoice || "ElevenLabs")} · {item.status}</b><small>{item.createdAt ? formatLabTime(item.createdAt) : "Дата не сообщена"} · {item.id} · {personalitySummary(item.personality)}</small></span><span>→</span>
         </button>) : <div className="eleven-empty">Сессий пока нет.</div>}</div> : <div className="eleven-skeleton"><i /><i /><i /></div>}
         {current && <Button className="eleven-readback" variant="outline" disabled={refreshingReport || isBusy} onClick={() => void readReport(sessionId || current.id)}>{refreshingReport ? <><LoaderCircle size={14} /> Читаем…</> : <><RefreshCw size={14} /> Прочитать с сервера</>}</Button>}
         <a href="#saved-comparisons">Архив сохранённых сравнений</a>

@@ -59,6 +59,11 @@ export function comparisonSnapshot(mode: ComparisonMode, report: LabReport | Ret
     } : {}),
   };
   const engine = retell?.engine;
+  if (retell?.profileId !== undefined) snapshot.profileId = comparisonText(retell.profileId, 100);
+  if (retell?.personality !== undefined) snapshot.personality = retell.personality === null ? null : {
+    id: comparisonText(retell.personality.id, 100), name: comparisonText(retell.personality.name, 120),
+    version: retell.personality.version, mode: retell.personality.mode,
+  };
   if (engine) {
     snapshot.engine = {
       provider: comparisonText(engine.provider, 160), model: comparisonText(engine.model, 160),

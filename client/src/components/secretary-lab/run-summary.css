@@ -1,0 +1,4 @@
+.run-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px;margin:10px 0;padding:11px;border:1px solid #d8d8c8;border-radius:8px;background:#f5f4eb;color:#30372f}
+.run-summary>span{display:grid;gap:4px;min-width:0}
+.run-summary small{font-size:8px;letter-spacing:.1em;font-weight:800;color:#737a68}
+.run-summary b{font-size:10px;line-height:1.45;overflow-wrap:anywhere}

@@ -3,8 +3,11 @@ import { AlertCircle, Check, Download, RefreshCw, Save, ShieldCheck, Trash2 } fr
 import { Button } from "@/components/ui/button";
 import { labRequest, formatLabTime } from "@/lib/secretary-lab";
 import "./saved-comparisons.css";
+import "./run-summary.css";
+import { RunSummary } from "./RunSummary";
 import RunCost from "./RunCost";
 import type { LabRunCost } from "../../../../shared/secretaryLabCost";
+import { elevenProfiles, type ElevenProfileId } from "../../../../shared/elevenLabProfiles";
 
 type Mode = "gpt" | "retell" | "retell-engine" | "eleven-engine";
 type Evaluation = { score: number | null; note: string };
@@ -20,6 +23,9 @@ type Summary = {
   runs: RunIdentity[];
 };
 type SavedRun = RunIdentity & {
+  personality?: { id: string; name: string; version: number; mode: "personal" | "work" } | null;
+  profileId?: string;
+  ttsModel?: string;
   cost?: LabRunCost;
   verification?: string;
   instruction: string;
@@ -55,8 +61,15 @@ function ReportView({ record }: { record: SavedComparison }) {
     {record.runs.map((run) => <article className="saved-report" key={`${run.mode}:${run.id}`}>
       <header className="saved-report-head">
         <div><span className="saved-kicker">{modeLabel[run.mode] || run.mode} · {run.status}</span><h3>{run.runtime || "Runtime не сообщён"}</h3></div>
-        <div className="saved-run-facts"><span><small>ФАКТИЧЕСКАЯ МОДЕЛЬ</small><b>{run.model || "Не сообщена"}</b></span><span><small>ФАКТИЧЕСКИЙ ГОЛОС</small><b>{run.voice || "Не сообщён"}</b></span></div>
+        <div className="saved-run-facts">
+          <span><small>ФАКТИЧЕСКАЯ МОДЕЛЬ</small><b>{run.model || "Не сообщена"}</b></span>
+        </div>
       </header>
+      {(run.mode === "retell-engine" || run.mode === "eleven-engine") && <RunSummary
+        voiceBundle={[run.voice || "Не сообщён", run.ttsModel].filter(Boolean).join(" · ")}
+        profile={run.mode === "eleven-engine" ? (run.profileId ? elevenProfiles[run.profileId as ElevenProfileId]?.label : undefined) || run.profileId || "Не записан" : "Retell default"}
+        personality={run.personality}
+      />}
       <div className="saved-report-meta"><span>Создан {humanDate(run.createdAt)}</span><span>{run.endedAt ? `Завершён ${humanDate(run.endedAt)}` : "Время завершения не сообщено"}</span><span>ID · {run.id}</span></div>
       <p className="saved-muted">Источник проверки: {run.verification || "Не указан"}. Проверенная конфигурация не доказывает слышимость голоса или качество телефонного звонка.</p>
       <RunCost cost={run.cost} />

@@ -12,10 +12,13 @@ import { comparisonSnapshot, comparisonText } from "./comparisonSnapshot";
 import type { RetellReport } from "./retell";
 import { elevenProfiles, type ElevenProfileId, type ElevenTiming } from "../../shared/elevenLabProfiles";
 import { captureLabTariff, pricedLabReport } from "./cost";
+import { labPersonalitySelection } from "../../shared/secretaryLabPersonality";
+import { labPersonalitySummary, resolveLabPersonality } from "./personality";
 
 const startInput = z.object({ instruction: z.string().trim().min(8).max(4000),
   voice: z.enum(["clone", "catalog"]), consent: z.literal(true), clientRequestId: z.string().uuid(),
-  profileId: z.enum(["baseline", "flash", "eager", "low", "brief", "optimized"]).default("baseline") }).strict();
+  profileId: z.enum(["baseline", "flash", "eager", "low", "brief", "optimized"]).default("baseline"),
+  personality: labPersonalitySelection.nullable().optional() }).strict();
 const briefInstructions = "\nFor this ElevenLabs experiment only: give one or two short conversational sentences, then one question if needed. " +
   "Keep names, numbers and addresses accurate. Never omit a required confirmation or claim uncommitted work.";
 type Report = RetellReport & { savedComparisonId: string; voiceChoice: "clone" | "catalog"; ttsModel: string;
@@ -115,14 +118,20 @@ export class ElevenEngineLab {
     const parsed = startInput.safeParse(raw); if (!parsed.success) fail(400, "Проверьте поручение, голос, согласие и request ID");
     const input = parsed.data;
     const profile = elevenProfiles[input.profileId];
-    const fingerprint = hash(input.instruction + "\n" + input.voice + "\n" + input.profileId);
-    const old = this.sessions.get(input.clientRequestId);
-    if (old) {
+    const fingerprint = hash(input.instruction + "\n" + input.voice + "\n" + input.profileId +
+      (input.personality ? "\n" + JSON.stringify(input.personality) : ""));
+    const resume = (old: Entry) => {
       if (old.owner !== owner) fail(404, "Сессия не найдена");
       if (old.fingerprint !== fingerprint) fail(409, "Request ID уже относится к другому поручению или голосу");
       if (old.closed) return { id: old.id, report: pricedLabReport("eleven-engine", old.report) };
       return old.created;
-    }
+    };
+    const old = this.sessions.get(input.clientRequestId);
+    if (old) return resume(old);
+    const personality = await resolveLabPersonality(input.personality);
+    // Catalog resolution yields: re-enter through the existing retry path if a concurrent start won.
+    const raced = this.sessions.get(input.clientRequestId);
+    if (raced) return resume(raced);
     if (Array.from(this.sessions.values()).some(s => s.owner === owner && (!s.closed || s.report.status === "stop_failed")))
       fail(409, "Сначала подтвердите остановку предыдущей сессии");
     const recent = (this.attempts.get(owner) ?? []).filter(t => Date.now() - t < 3600_000);
@@ -152,8 +161,9 @@ export class ElevenEngineLab {
           ? streamSecretaryResponse(scoped, { reasoning: profile.reasoning })
           : service.stream(scoped));
       }
-    });
+    }, false, personality);
     s.report = { id, callId: "", mode: "eleven-engine", status: "connecting", instruction: input.instruction,
+      personality: labPersonalitySummary(personality),
       model: SECRETARY_REASONING_MODEL, voice: "", promptHash: hash(s.engine.instructions + (profile.brief ? briefInstructions : "")),
       createdAt: new Date().toISOString(), tariffSnapshot: captureLabTariff(), monitorStatus: "waiting", turns: [], events: [], observations: [],
       metrics: { guestTurns: 0, secretaryTurns: 0 }, engine: s.engine.report, savedComparisonId: id,

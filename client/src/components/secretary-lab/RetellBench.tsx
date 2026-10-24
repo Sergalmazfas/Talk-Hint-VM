@@ -8,7 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatLabTime, labRequest } from "@/lib/secretary-lab";
 import { savedRetellAdmission, retellEnded, retellError as friendlyError } from "@/lib/secretary-lab-retell";
 import { retellStandApi } from "@/lib/secretary-lab-modes";
+import PersonalityPicker, { type PersonalityChoice } from "./PersonalityPicker";
+import { RunSummary } from "./RunSummary";
 import "./retell-engine.css";
+import "./run-summary.css";
 
 type BenchMode = "retell" | "retell-engine";
 
@@ -17,6 +20,7 @@ type RetellEvent = { type: string; atMs: number; detail?: string };
 type RetellObservation = { atMs: number; outcome: "stopped" | "continued" | "unknown"; note?: string };
 export type RetellReport = {
   cost?: LabRunCost;
+  personality?: { id: string; name: string; version: number; mode: "personal" | "work" } | null;
   id: string;
   callId: string;
   status: "connecting" | "live" | "ended" | "stop_failed" | "failed";
@@ -96,11 +100,13 @@ export default function RetellBench({
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [uncertainCreate, setUncertainCreate] = useState(false);
+  const [personality, setPersonality] = useState<PersonalityChoice | null>(null);
   const [observationNote, setObservationNote] = useState("");
   const clientRef = useRef<RetellClient | null>(null);
   const sessionRef = useRef<any>(null);
   const reportRef = useRef<RetellReport | null>(null);
   const requestIdRef = useRef<string | null>(null);
+  const admissionPersonalityRef = useRef<PersonalityChoice | null | undefined>(undefined);
   const mountedRef = useRef(false);
   const stoppingRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
@@ -163,6 +169,7 @@ export default function RetellBench({
           sessionRef.current = null;
           stoppingRef.current = false;
           requestIdRef.current = null;
+          admissionPersonalityRef.current = undefined;
           markBusy(false);
           return;
         }
@@ -203,6 +210,7 @@ export default function RetellBench({
         sessionRef.current = null;
         stoppingRef.current = false;
         requestIdRef.current = null;
+        admissionPersonalityRef.current = undefined;
         markBusy(false);
         return;
       }
@@ -220,8 +228,11 @@ export default function RetellBench({
   }, [acceptReport, api, markBusy, token]);
 
   const start = async (recover = false) => {
+    if (isEngine && !recover) admissionPersonalityRef.current = personality ? { ...personality } : null;
+    const selectedPersonality = isEngine ? admissionPersonalityRef.current : null;
     if (!config?.ready || !token || instruction.trim().length < 8 || !consent || startLockRef.current ||
-        (reportRef.current && !retellEnded(reportRef.current.status)) || (uncertainCreate && !recover)) return;
+        (reportRef.current && !retellEnded(reportRef.current.status)) || (uncertainCreate && !recover) ||
+        (selectedPersonality && !selectedPersonality.mode)) return;
     startLockRef.current = true;
     markBusy(true);
     setPending(true);
@@ -240,7 +251,7 @@ export default function RetellBench({
       createAttempted = true;
       const created = await labRequest<{ id: string; call: { call_id: string; access_token: string; [key: string]: unknown }; report: RetellReport }>(`${api}/sessions`, token, {
         method: "POST",
-        body: JSON.stringify({ instruction: instruction.trim(), consent: true, clientRequestId: requestIdRef.current }),
+        body: JSON.stringify({ instruction: instruction.trim(), consent: true, clientRequestId: requestIdRef.current, ...(isEngine ? { personality: selectedPersonality } : {}) }),
       });
       createdId = created.id;
       if (!mountedRef.current) {
@@ -288,13 +299,15 @@ export default function RetellBench({
             if (mountedRef.current) acceptReport(result.report);
             if (result.report.status === "ended") {
               requestIdRef.current = null;
+              admissionPersonalityRef.current = undefined;
               markBusy(false);
             }
           } catch {
             if (mountedRef.current) setError((old) => `${old} Остановка созданной сессии не подтверждена; повторите остановку.`);
           }
-        } else if (createAttempted && [400, 401, 402, 403, 422, 429].includes((cause as { status?: number }).status ?? 0)) {
+        } else if (createAttempted && [400, 401, 402, 403, 409, 422, 429].includes((cause as { status?: number }).status ?? 0)) {
           requestIdRef.current = null;
+          admissionPersonalityRef.current = undefined;
           markBusy(false);
         } else if (createAttempted) {
           // Ambiguous create responses must not trigger another paid attempt in this mount.
@@ -328,6 +341,7 @@ export default function RetellBench({
 
   const current = report ?? selected;
   const busy = pending || (!!report && !["ended", "failed"].includes(report.status));
+  const personalityReady = !personality || !!personality.mode;
 
   const engineConnected = current?.engine?.connected;
   const reportConnected = current?.monitorStatus === "connected";
@@ -347,15 +361,19 @@ export default function RetellBench({
           <label className="field-label" htmlFor="retell-instruction">Общая инструкция секретарю</label>
            <Textarea id="retell-instruction" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} disabled={busy || uncertainCreate} maxLength={1600} className="instruction-input" />
           <div className="field-foot"><span>Совпадает с GPT-стендом · до 1 600 символов</span><span>{instruction.length}/1600</span></div>
+           {isEngine && <PersonalityPicker token={token} value={personality} onChange={setPersonality} disabled={busy || pending || uncertainCreate} />}
            <div className="retell-config">
              <div><span>МОДЕЛЬ В КОНФИГУРАЦИИ</span><b>{isEngine ? config?.engine?.model || "Не сообщена API" : config?.model || "—"}</b></div>
              <div><span>ГОЛОС RETELL · КОНФИГУРАЦИЯ</span><b>{config?.voice || "—"}</b></div>
              <div><span>МОДЕЛЬ ИЗ ОТЧЁТА</span><b>{current?.engine?.model || current?.model || "Нет отчёта"}</b></div>
              <div><span>ГОЛОС ИЗ ОТЧЁТА</span><b>{current?.voice || "Нет отчёта"}</b></div>
+              <div><span>VOICE BUNDLE · ФАКТИЧЕСКИЙ ГОЛОС</span><b>{current ? current.voice || "Не записан в отчёте" : config?.voice || "Не сообщён API"}</b></div>
+              <div><span>VOICE PERFORMANCE PROFILE</span><b>Retell default · профиль из конфигурации провайдера</b></div>
              <div><span>READINESS · КОНФИГУРАЦИЯ</span><b>{config ? config.ready ? "Готов к запуску" : config.reason || "Не готов" : "Проверяется сервером"}</b></div>
              <div><span>СОСТОЯНИЕ КЛЮЧА RETELL</span><b>{config?.keyStatus || "Проверяется сервером"}</b></div>
              <div><span>ЛИМИТЫ ПРОГОНА</span><b>{config?.limits.durationSeconds ?? "—"} сек. · история {config?.limits.historyMinutes ?? "—"} мин.</b></div>
              {isEngine && <div><span>ПОДКЛЮЧЕНИЕ В ОТЧЁТЕ</span><b>{engineConnected === undefined ? current?.monitorStatus || "Не измерено" : engineConnected ? "Engine connected" : "Engine disconnected"}</b></div>}
+              {isEngine && current && <RunSummary voiceBundle={current.voice || "Не записан"} profile="Retell default" personality={current.personality} />}
            </div>
            {isEngine && config?.engine && <div className="engine-config" aria-label="TalkHint Engine configuration">
              <div className="engine-config-title"><b>{config.engine.provider || "OpenAI via TalkHint"}</b><span>{config.engine.testOnly ? "TEST ONLY" : "SCOPE NOT REPORTED"}</span></div>
@@ -368,7 +386,7 @@ export default function RetellBench({
           {config && !config.ready && <p className="retell-reason">{config.reason || "Стенд пока не настроен на сервере."}</p>}
            <label className={`consent-row ${!config?.ready ? "muted" : ""}`}><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} disabled={busy || !config?.ready} /><span>{isEngine ? "Понимаю, что тест может повлечь отдельные расходы Retell и OpenAI через TalkHint." : "Я согласен на возможные платные расходы Retell для этого теста."}</span></label>
           <div className="retell-action-row">
-            {!busy ? <Button className="start-button" disabled={!config?.ready || !consent || instruction.trim().length < 8 || pending || uncertainCreate} onClick={() => void start()}>
+             {!busy ? <Button className="start-button" disabled={!config?.ready || !consent || instruction.trim().length < 8 || pending || uncertainCreate || !personalityReady} onClick={() => void start()}>
               {pending ? <><LoaderCircle className="spin" size={16} /> Проверка микрофона…</> : <><Radio size={16} /> Начать тест</>}
             </Button> : <Button className="stop-button" onClick={() => void endSession()}><CircleStop size={16} /> {report?.status === "stop_failed" ? "Повторить остановку" : "Остановить тест"}</Button>}
             {busy && <Button variant="outline" onClick={() => {
@@ -425,7 +443,7 @@ export default function RetellBench({
          <p className="retell-history-caption">Это временная история: до {config?.limits.historyMinutes ?? 60} минут или перезапуска сервера, не архив сравнения. Retell настроен на basic_attributes_only, без сохранения записи и транскрипта у провайдера. <a href="#saved-comparisons">Для длительного хранения выберите прогоны в сохранённых сравнениях</a>.</p>
         {(config?.history || []).length === 0 ? <div className="history-empty">Сохранённых прогонов пока нет.<small>Завершённые и текущие отчёты появятся здесь.</small></div> :
           <div className="history-list">{config!.history.map((item) => <button key={item.id} disabled={busy} className={`history-item ${current?.id === item.id ? "current" : ""}`} onClick={() => { setSelected(item); setReport(null); reportRef.current = null; }}>
-            <span className={`history-dot ${item.status === "live" || item.status === "connecting" ? "running" : ""}`} /><span className="history-detail"><b>{item.model} · {item.voice}</b><small>{formatLabTime(item.createdAt)} · {item.status}</small></span><span className="history-arrow">→</span>
+             <span className={`history-dot ${item.status === "live" || item.status === "connecting" ? "running" : ""}`} /><span className="history-detail"><b>{item.model} · {item.voice}</b><small>{formatLabTime(item.createdAt)} · {item.status} · {item.personality === null ? "без личности · legacy" : item.personality ? `${item.personality.name} v${item.personality.version} · TEST ${item.personality.mode}` : "persona неизвестна"}</small></span><span className="history-arrow">→</span>
           </button>)}</div>}
          {current && <div className="retell-report-actions"><div><b>Отчёт · {current.status}</b><small>{current.reason || `Prompt ${current.promptHash}`}</small>{isEngine && <small>Engine actions: {current.engine?.actions ? current.engine.actions.length : "not reported"} · events: {current.engine?.events ? current.engine.events.length : "not reported"}</small>}</div><Button variant="outline" size="sm" onClick={() => exportReport(current)}><Download size={14} /> JSON</Button></div>}
         <div className="retell-history-foot"><span><Check size={13} /> API credential не включается в отчёт</span><span>{current?.endedAt ? `Завершён ${formatLabTime(current.endedAt)}` : "Без публикации и PSTN"}</span></div>
