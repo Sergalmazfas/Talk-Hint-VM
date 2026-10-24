@@ -15,6 +15,7 @@ import {
 import { createLabRtcController, LabRtcController, OPENAI_LAB_MODEL, OPENAI_LAB_VOICE } from "@/lib/secretary-lab-rtc";
 import { AlertCircle, ArrowDownToLine, AudioLines, Check, CircleStop, Headphones, LoaderCircle, Mic, MicOff, Radio, RefreshCw, ShieldAlert, Volume2, Wifi } from "lucide-react";
 import "@/lib/secretary-lab.css";
+import RetellBench from "@/components/secretary-lab/RetellBench";
 
 type LiveState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "ended";
 type WireMessage = Record<string, any>;
@@ -61,6 +62,8 @@ export default function SecretaryLab() {
   const [loadError, setLoadError] = useState("");
   const [denied, setDenied] = useState(false);
   const [instruction, setInstruction] = useState("Поговори с собеседником на английском как дружелюбный и собранный секретарь. Помогай уточнять цель звонка и спокойно реагируй на возражения.");
+  const [stand, setStand] = useState<"gpt" | "retell">(() => new URLSearchParams(window.location.search).get("stand") === "retell" ? "retell" : "gpt");
+  const [retellBusy, setRetellBusy] = useState(false);
   const [provider, setProvider] = useState<VoiceProvider>("openai");
   const [paidConsent, setPaidConsent] = useState(false);
   const [pending, setPending] = useState(false);
@@ -101,6 +104,25 @@ export default function SecretaryLab() {
   const holdUiTimerRef = useRef<number | null>(null);
   const closingRef = useRef(false);
   const currentReportRef = useRef<LabReport | null>(null);
+  const standBusy = pending || !!active || retellBusy;
+
+  useEffect(() => {
+    const syncStand = () => {
+      if (standBusy) {
+        setLocation(`/secretary-lab?stand=${stand}`);
+        return;
+      }
+      setStand(new URLSearchParams(window.location.search).get("stand") === "retell" ? "retell" : "gpt");
+    };
+    window.addEventListener("popstate", syncStand);
+    return () => window.removeEventListener("popstate", syncStand);
+  }, [setLocation, stand, standBusy]);
+
+  const selectStand = (next: "gpt" | "retell") => {
+    if (standBusy || next === stand) return;
+    setStand(next);
+    setLocation(`/secretary-lab?stand=${next}`);
+  };
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -627,10 +649,18 @@ export default function SecretaryLab() {
         <div className="intro-stamp"><span>NO PSTN</span><i /><small>PRIVATE<br />SESSION</small></div>
       </section>
 
+      <nav className="lab-stand-nav" aria-label="Выбор голосового стенда">
+        <span>ВЫБРАТЬ СТЕНД</span>
+        <button type="button" className={stand === "gpt" ? "selected" : ""} aria-pressed={stand === "gpt"} disabled={standBusy} onClick={() => selectStand("gpt")}><AudioLines size={15} /> GPT <small>текущий</small></button>
+        <button type="button" className={stand === "retell" ? "selected" : ""} aria-pressed={stand === "retell"} disabled={standBusy} onClick={() => selectStand("retell")}><Radio size={15} /> Retell <small>live web</small></button>
+        {standBusy && <small className="stand-lock">Стенд заблокирован во время сессии</small>}
+      </nav>
+
       {loadError && <div className="lab-alert" role="alert"><AlertCircle size={18} /><span>{loadError}</span><Button variant="outline" size="sm" onClick={() => void reload()}><RefreshCw size={14} /> Повторить</Button></div>}
       {error && <div className="lab-alert" role="alert"><AlertCircle size={18} /><span>{error}</span><button onClick={() => setError("")} aria-label="Закрыть">×</button></div>}
       {notice && <div className="lab-notice"><span>{notice}</span><button onClick={() => setNotice("")}>Понятно</button></div>}
 
+      {stand === "retell" ? <RetellBench token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
       <div className="lab-layout">
         <div className="lab-primary">
           <Card className="control-card">
@@ -743,6 +773,7 @@ export default function SecretaryLab() {
           </Card>
         </aside>
       </div>
+      }
       <footer className="lab-footer"><span>SECRETARY LAB · PRIVATE SANDBOX</span><span>REAL AUDIO · NO RECORDING · NO TELEPHONE</span></footer>
     </main>
   </div>;

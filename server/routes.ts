@@ -403,6 +403,7 @@ export async function registerRoutes(
   const { registerSecretaryLabRoutes } = await import("./secretaryLab/routes");
   const { secretaryLab, secretaryLabReadiness } = await import("./secretaryLab/runtime");
   registerSecretaryLabRoutes(app, secretaryLab, secretaryLabReadiness);
+  await import("./secretaryLab/retellRoutes").then(({ registerRetellLabRoutes }) => registerRetellLabRoutes(app));
   await import("./copilotSpeech").then(({ registerCopilotSpeechRoute }) => registerCopilotSpeechRoute(app));
 
   // Translator Realtime Spike — dev-only test stand (404 in production).

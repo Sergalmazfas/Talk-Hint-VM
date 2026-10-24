@@ -107,7 +107,7 @@ final class SecretaryTranscriptRenderingTests: XCTestCase {
         XCTAssertEqual(stack.arrangedSubviews.count, 1)
         XCTAssertTrue(texts(controller).contains("Hello there"))
         XCTAssertFalse(texts(controller).contains("Hel"))
-        XCTAssertTrue(texts(controller).contains("Здравствуйте"))
+        XCTAssertFalse(texts(controller).contains("Здравствуйте"), "Live updates must not restore legacy translations in Secretary")
         assertAttachedWidthConstraints(stack, count: 1)
     }
 

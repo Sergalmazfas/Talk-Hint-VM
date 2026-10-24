@@ -26,3 +26,15 @@ For the Dev comparison the owner stated: “Приоритет — умный, �
 **Why:** The user explicitly prioritizes conversation quality over reducing model/voice cost.
 
 **How to apply:** Do not silently replace the requested model with a cheaper model or judge readiness by a first greeting. Preserve the same task across named comparisons and test corrections, free interruption, waiting and resumption.
+
+The owner approved a Retell API comparison in the browser, with one Secretary policy and the same task as the existing GPT stand, especially testing interruption.
+
+**Why:** The request is to compare voice runtimes, not to replace the working telephone Secretary or create another independently maintained persona.
+
+**How to apply:** Keep Retell an explicitly selected Dev-only experiment; share the trusted core instructions, identify actual model/voice/ASR differences, and do not call this an isolated LLM comparison. Do not switch native or telephone calls implicitly. Provider setup/configuration checks are not proof of audible conversation or successful interruption.
+
+Do not treat a Retell API migration error as evidence that the secret needs rotation.
+
+**Why:** A legacy list operation was rejected while the same credential successfully accessed supported voice and agent operations. New browser transport credentials also cannot safely be guessed as an older transport's token.
+
+**How to apply:** Check the provider's current migration notice and explicit response transport first; distinguish authentication, permission, payment and protocol errors. Verify paid conversation separately from configuration access.
