@@ -105,7 +105,7 @@ final class SettingsViewController: UITableViewController {
         case .language: return SessionStore.availableLanguages.count
         case .features: return FeatureRow.allCases.count
         case .translator: return TranslatorRow.allCases.count
-        case .secretary: return 1
+        case .secretary: return 2
         case .phone: return 3
         case .account: return 1
         }
@@ -131,7 +131,7 @@ final class SettingsViewController: UITableViewController {
         case .translator:
             return NSLocalizedString("settings.footer.voice_provider", comment: "")
         case .secretary:
-            return NSLocalizedString("settings.secretary.footer", comment: "")
+            return NSLocalizedString("secretary.personality.provider_note", comment: "")
         case .phone, .account:
             return nil
         }
@@ -200,6 +200,15 @@ final class SettingsViewController: UITableViewController {
 
         case .secretary:
             let cell = UITableViewCell(style: .subtitle, reuseIdentifier: nil)
+            if indexPath.row == 1 {
+                cell.textLabel?.text = NSLocalizedString("secretary.personality.title", comment: "")
+                cell.detailTextLabel?.text = NSLocalizedString("secretary.personality.entry", comment: "")
+                cell.textLabel?.numberOfLines = 0
+                cell.detailTextLabel?.numberOfLines = 0
+                cell.accessoryType = .disclosureIndicator
+                cell.accessibilityIdentifier = "cell-secretary-personality"
+                return cell
+            }
             let provider = SessionStore.shared.secretaryVoiceProvider
             cell.textLabel?.text = provider == .openai
                 ? NSLocalizedString("settings.secretary.openai", comment: "")
@@ -264,7 +273,11 @@ final class SettingsViewController: UITableViewController {
         case .translator:
             break // handled by the segmented control
         case .secretary:
-            selectSecretaryProvider(at: indexPath)
+            if indexPath.row == 1 {
+                navigationController?.pushViewController(SecretaryPersonalityViewController(), animated: true)
+            } else {
+                selectSecretaryProvider(at: indexPath)
+            }
         case .phone:
             if indexPath.row == 0 {
                 navigationController?.pushViewController(NumbersViewController(), animated: true)
@@ -293,6 +306,15 @@ final class SettingsViewController: UITableViewController {
                 : provider.displayName
             sheet.addAction(UIAlertAction(title: title, style: .default) { [weak self] _ in
                 SessionStore.shared.secretaryVoiceProvider = provider
+                if provider == .openai {
+                    SessionStore.shared.secretaryOutgoingNumberId = nil
+                    if var draft = SessionStore.shared.pendingSecretaryCall, !draft.requestAttempted {
+                        draft.voiceProvider = .openai
+                        draft.secretaryNumberId = nil
+                        draft.secretaryBackendOrigin = nil
+                        _ = SessionStore.shared.savePendingSecretaryCall(draft)
+                    }
+                }
                 self?.tableView.reloadSections(IndexSet(integer: Section.secretary.rawValue), with: .none)
             })
         }

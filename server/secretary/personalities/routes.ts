@@ -8,6 +8,7 @@ import { confirmedSecretaryOwnerName } from "../ownerIdentity";
 import { streamSecretaryResponse } from "../conversationEngine";
 import { applyPersonality } from "./types";
 import * as store from "./store";
+import { outgoingSettings, saveOutgoingSetup } from "./outgoing";
 
 const content = z.object({
   name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(400),
@@ -57,6 +58,15 @@ export function registerPersonalityRoutes(app: Express) {
       input.includeRetired === "true" && await admin(req)));
   }));
   app.get(root + "/numbers/:numberId", wrap(async (req, res) => res.json(await assignment(owner(req), String(req.params.numberId)))));
+  app.get(root + "/numbers/:numberId/outgoing", wrap(async (req, res) =>
+    res.json(await outgoingSettings(owner(req), String(req.params.numberId)))));
+  app.put(root + "/numbers/:numberId/outgoing", wrap(async (req, res) => {
+    const input = z.object({
+      cardIds: z.array(z.string().min(1).max(100)).max(8),
+      personalityId: z.string().min(1).max(100).nullable(), version: z.number().int().positive().nullable(),
+    }).strict().refine(v => (v.personalityId === null) === (v.version === null)).parse(req.body);
+    res.json(await saveOutgoingSetup(owner(req), String(req.params.numberId), input));
+  }));
   app.put(root + "/numbers/:numberId", wrap(async (req, res) => {
     const input = z.object({ personalityId: z.string().min(1).max(100).nullable(), version: z.number().int().positive().nullable() })
       .strict().refine(v => (v.personalityId === null) === (v.version === null)).parse(req.body);

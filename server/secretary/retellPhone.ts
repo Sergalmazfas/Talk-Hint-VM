@@ -9,6 +9,7 @@ import { getSecretaryTaskForCall } from "./tasks";
 import { publishSecretaryFeedEvent } from "./feed";
 import { createHash } from "node:crypto";
 import { resolveOutgoingPersonality } from "./personalities/store";
+import { validateOutgoingSnapshot } from "./personalities/outgoing";
 
 export const RETELL_PHONE_AGENT = "TalkHint Secretary — Telephone + Engine";
 export const retellPhoneApi = new RetellApi();
@@ -140,8 +141,11 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
       sql`${calls.metadata}->'retellPhone' IS NULL`)).returning({ id: calls.id });
     if (!reserved.length) throw new Error("Retell registration already attempted; automatic retry prohibited");
     const history = await storage.getCallByCallSid(callSid);
-    const personality = await resolveOutgoingPersonality(task.userId, history?.fromNumber ?? "");
-    const entry = retellPhoneRegistry.reserve(task.userId, task.instruction, taskId, personality);
+    const context = task.outgoingContext ? await validateOutgoingSnapshot(task.userId, task.outgoingContext) : undefined;
+    if (context && context.fromNumber !== history?.fromNumber) throw new Error("Outgoing line context mismatch");
+    const personality = context ? context.personality ?? undefined :
+      await resolveOutgoingPersonality(task.userId, history?.fromNumber ?? "");
+    const entry = retellPhoneRegistry.reserve(task.userId, task.instruction, taskId, personality, context?.cards);
     try {
       const call = await retellPhoneApi.request("/v2/register-phone-call", {
         agent_id: agentId, agent_version: verified!.version, direction: "outbound",

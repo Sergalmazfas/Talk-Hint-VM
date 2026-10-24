@@ -5,6 +5,7 @@ import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
 import { SecretaryConversationEngine, type EngineStream, type SpokenTurn } from "../secretary/conversationEngine";
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
 import type { PersonalityBinding } from "../secretary/personalities/types";
+import type { OutgoingContext } from "../secretary/personalities/outgoing";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -64,9 +65,9 @@ export class RetellEngineRegistry {
     onTranscript?: (id: string, turns: SpokenTurn[]) => Promise<void>;
     onFailure?: (id: string) => void;
   } = {}) {}
-  reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding) {
+  reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     const ticket = randomBytes(32).toString("hex");
-    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality),
+    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts),
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false, expiresAt: Date.now() + 300_000 };
     this.entries.set(id, entry); this.tickets.set(ticket, entry);
     if (this.options.phone) {

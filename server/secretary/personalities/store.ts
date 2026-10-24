@@ -1,4 +1,5 @@
 import { pool } from "../../db";
+import type { PoolClient } from "pg";
 import type { PersonalityBinding, PersonalityContent, PersonalityMode } from "./types";
 
 export const problem = (status: number, message: string) => Object.assign(new Error(message), { status });
@@ -90,11 +91,19 @@ export async function assignPersonality(owner: string, number: string, id: strin
   const c = await database().connect();
   try {
     await c.query("BEGIN");
+    await assignPersonalityInTransaction(c, owner, number, id, version);
+    await c.query("COMMIT");
+  } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
+}
+export async function assignPersonalityInTransaction(c: PoolClient, owner: string, number: string, id: string | null, version: number | null) {
     const n = await c.query("SELECT id FROM phone_numbers WHERE id=$1 AND user_id=$2 FOR SHARE", [number, owner]);
     if (!n.rows[0]) throw problem(404, "Номер не найден");
     if (id === null) {
       await c.query("DELETE FROM secretary_personality_assignments WHERE user_id=$1 AND number_id=$2", [owner, number]);
     } else {
+      const existing = await c.query(`SELECT 1 FROM secretary_personality_assignments
+        WHERE user_id=$1 AND number_id=$2 AND personality_id=$3 AND version=$4`, [owner, number, id, version]);
+      if (existing.rows.length) return; // Keep a pinned/retired assignment while changing other settings.
       const p = await c.query("SELECT status,current_version FROM secretary_personalities WHERE id=$1 FOR SHARE", [id]);
       if (!p.rows[0] || p.rows[0].status !== "available") throw problem(409, "Личность недоступна для новых назначений");
       if (p.rows[0].current_version !== version) throw problem(409, "Выберите актуальную версию личности");
@@ -102,8 +111,6 @@ export async function assignPersonality(owner: string, number: string, id: strin
         VALUES($1,$2,$3,$4) ON CONFLICT(user_id,number_id) DO UPDATE SET
         personality_id=excluded.personality_id,version=excluded.version,updated_at=now()`, [owner, number, id, version]);
     }
-    await c.query("COMMIT");
-  } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
 }
 export async function resolveNumberPersonality(owner: string, number: string) {
   if (!personalitiesEnabled()) return undefined;

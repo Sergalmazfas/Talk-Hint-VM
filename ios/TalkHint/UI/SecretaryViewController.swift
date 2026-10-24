@@ -697,7 +697,9 @@ private final class SecretaryTaskReviewViewController: UIViewController {
             do {
                 _ = try await APIClient.shared.createSecretaryTask(
                     phoneNumber: number, instruction: instruction, confirmationToken: confirmationToken,
-                    voiceProvider: SessionStore.shared.secretaryVoiceProvider)
+                    voiceProvider: SessionStore.shared.secretaryVoiceProvider,
+                    secretaryNumberId: SessionStore.shared.secretaryOutgoingNumberId,
+                    secretaryBackendOrigin: SessionStore.shared.secretaryOutgoingNumberId == nil ? nil : AppConfig.baseURL.absoluteString)
                 await MainActor.run {
                     self.activity.stopAnimating()
                     self.navigationController?.popToRootViewController(animated: true)

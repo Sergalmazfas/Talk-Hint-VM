@@ -31,3 +31,12 @@ CREATE TABLE IF NOT EXISTS secretary_personality_assignments (
   UNIQUE(user_id,number_id),
   FOREIGN KEY(personality_id,version) REFERENCES secretary_personality_versions(personality_id,version)
 );
+CREATE TABLE IF NOT EXISTS secretary_outgoing_settings (
+  id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id varchar NOT NULL REFERENCES users(id),
+  number_id varchar NOT NULL REFERENCES phone_numbers(id),
+  card_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  updated_at timestamp NOT NULL DEFAULT now(),
+  UNIQUE(user_id,number_id)
+);
+ALTER TABLE secretary_tasks ADD COLUMN IF NOT EXISTS outgoing_context jsonb;

@@ -26,6 +26,7 @@ import {
 } from "./tasks";
 import { hangupSecretaryCall, secretaryCallbackOrigin } from "./dialer";
 import { publishSecretaryFeedEvent } from "./feed";
+import { prepareOutgoingContext, assertOutgoingRetryLine } from "./personalities/outgoing";
 
 function ownerId(req: Request): string | undefined {
   return (req as any).user?.id as string | undefined;
@@ -77,7 +78,10 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
           req.body?.phoneNumber,
           req.body?.instruction,
         );
-        if (existing) return res.status(200).json({ task: toSecretaryTaskReport(existing) });
+        if (existing) {
+          assertOutgoingRetryLine(existing.outgoingContext, req.body?.secretaryNumberId);
+          return res.status(200).json({ task: toSecretaryTaskReport(existing) });
+        }
       } catch (error) {
         sendError(res, error, "Could not recover the Secretary task.");
         return;
@@ -94,6 +98,7 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
         .where(eq(phoneNumbers.userId, userId)).limit(1);
       if (!number) throw Object.assign(new Error("Assign a TalkHint phone number before starting Secretary."), { status: 409 });
       const provider = secretaryVoiceProvider(req.body?.voiceProvider);
+      const outgoingContext = await prepareOutgoingContext(userId, req.body?.secretaryNumberId, provider);
       if (provider === "openai") await requireSecretaryAudioModel();
       else if (provider === "retell")
         await (await import("./retellPhone")).requireRetellPhone(secretaryCallbackOrigin());
@@ -118,6 +123,7 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
           voiceProvider: provider,
           clientRequestId: req.body?.clientRequestId,
           translationLanguage,
+          outgoingContext,
         });
         let task = result.task;
         if (!result.created) return res.status(200).json({ task: toSecretaryTaskReport(task) });
@@ -153,6 +159,7 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
       const task = await createSecretaryTask(userId, {
         phoneNumber: req.body?.phoneNumber,
         instruction: req.body?.instruction,
+        outgoingContext,
         voiceProvider: provider,
       });
       res.status(201).json({ task: toSecretaryTaskReport(task) });

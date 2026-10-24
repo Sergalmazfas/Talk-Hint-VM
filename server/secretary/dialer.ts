@@ -9,12 +9,14 @@ import { requireReadyTranslatorClone } from "../translation/cloneSpeech";
 import { secretaryVoiceProvider, requireSecretaryAudioModel, SECRETARY_AUDIO_MODEL,SECRETARY_AUDIO_VOICE } from "./voice";
 import { SecretaryPreDialError } from "./dialErrors";
 import { defaultCallingNumber } from "../callProfiles/policy";
+import { validateOutgoingSnapshot } from "./personalities/outgoing";
 
 export interface SecretaryDialJob {
   id: string;
   userId: string;
   phoneNumber: string;
   voiceProvider: string;
+  outgoingContext?: unknown;
 }
 
 // Twilio needs a public HTTPS callback. Never derive this from a client Host
@@ -51,7 +53,8 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     }
     if (!process.env.OPENAI_API_KEY) throw new Error("Secretary conversation model is not configured");
     const ownedNumbers = await db.select().from(phoneNumbers).where(eq(phoneNumbers.userId, job.userId)).limit(100);
-    const number = defaultCallingNumber(ownedNumbers);
+    const context = job.outgoingContext ? await validateOutgoingSnapshot(job.userId, job.outgoingContext) : undefined;
+    const number = context ? ownedNumbers.find(n => n.id === context.numberId) : defaultCallingNumber(ownedNumbers);
     if (!number) throw new Error("Assign a TalkHint phone number before starting a Secretary call");
     fromNumber = number.twilioNumber;
     origin = secretaryCallbackOrigin();

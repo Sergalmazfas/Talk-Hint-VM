@@ -160,11 +160,20 @@ export const secretaryPersonalityAssignments = pgTable("secretary_personality_as
   ] }),
 }));
 
+export const secretaryOutgoingSettings = pgTable("secretary_outgoing_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  numberId: varchar("number_id").notNull().references(() => phoneNumbers.id),
+  cardIds: jsonb("card_ids").notNull().default(sql`'[]'::jsonb`),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, t => ({ numberUnique: uniqueIndex("secretary_outgoing_settings_user_id_number_id_key").on(t.userId, t.numberId) }));
+
 export const secretaryTasks = pgTable("secretary_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   phoneNumber: text("phone_number").notNull(),
   instruction: text("instruction").notNull(),
+  outgoingContext: jsonb("outgoing_context"),
   clientRequestId: text("client_request_id"),
   voiceProvider: text("voice_provider").notNull().default("elevenlabs"),
   mode: text("mode").notNull().default("queued"),

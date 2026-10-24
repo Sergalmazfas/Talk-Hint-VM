@@ -362,7 +362,7 @@ async function setTaskReport(
 
 export async function createSecretaryTask(
   userId: string,
-  data: { phoneNumber: unknown; instruction: unknown; voiceProvider?: unknown },
+  data: { phoneNumber: unknown; instruction: unknown; voiceProvider?: unknown; outgoingContext?: unknown },
 ): Promise<SecretaryTask> {
   isDatabaseReady();
   const phoneNumber = validateSecretaryPhoneNumber(data.phoneNumber);
@@ -377,6 +377,7 @@ export async function createSecretaryTask(
     phoneNumber,
     instruction,
     voiceProvider,
+    outgoingContext: data.outgoingContext ?? null,
     mode: "queued",
   }).returning();
   if (!task) throw new Error("Secretary task could not be saved.");
@@ -392,6 +393,7 @@ export async function createLiveSecretaryTask(
     voiceProvider?: unknown;
     clientRequestId: unknown;
     translationLanguage?: unknown;
+    outgoingContext?: unknown;
   },
 ): Promise<{ task: SecretaryTask; created: boolean }> {
   isDatabaseReady();
@@ -442,6 +444,7 @@ export async function createLiveSecretaryTask(
     const [task] = await tx.insert(secretaryTasks).values({
       userId, phoneNumber, instruction, voiceProvider, mode: "live", status: "starting",
       clientRequestId, translationLanguage,
+      outgoingContext: data.outgoingContext ?? null,
       attempts: 1, attemptHistory: [now.toISOString()], dialStartedAt: now,
     }).returning();
     if (!task) throw new Error("Secretary task could not be saved.");

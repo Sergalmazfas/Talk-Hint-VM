@@ -890,7 +890,17 @@ final class HomeViewController: UIViewController {
         // Before the first request, use the current Settings selection. Once
         // attempted, keep the provider fixed to preserve request idempotency.
         if !confirmed.requestAttempted {
+            if let saved = SessionStore.shared.pendingSecretaryCall,
+               saved.clientRequestId == confirmed.clientRequestId, !saved.requestAttempted {
+                confirmed = saved
+            }
             confirmed.voiceProvider = SessionStore.shared.secretaryVoiceProvider
+            if confirmed.secretaryNumberId == nil {
+                confirmed.secretaryNumberId = SessionStore.shared.secretaryOutgoingNumberId
+            }
+            if confirmed.secretaryNumberId != nil && confirmed.secretaryBackendOrigin == nil {
+                confirmed.secretaryBackendOrigin = AppConfig.baseURL.absoluteString
+            }
         }
         let cleaned: String
         if confirmed.requestAttempted, let requestedPhone = confirmed.phoneNumber {
@@ -928,7 +938,9 @@ final class HomeViewController: UIViewController {
                     confirmationToken: confirmed.confirmationToken,
                     voiceProvider: confirmed.voiceProvider,
                     live: true,
-                    clientRequestId: confirmed.clientRequestId)
+                    clientRequestId: confirmed.clientRequestId,
+                    secretaryNumberId: confirmed.secretaryNumberId,
+                    secretaryBackendOrigin: confirmed.secretaryBackendOrigin)
                 await MainActor.run {
                     self.isCreatingSecretaryTask = false
                     guard task.mode?.lowercased() == "live" else {

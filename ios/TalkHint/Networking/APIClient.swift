@@ -883,13 +883,17 @@ final class APIClient {
     func createSecretaryTask(phoneNumber: String, instruction: String, confirmationToken: String,
                              voiceProvider: SecretaryVoiceProviderPreference, live: Bool = false,
                              clientRequestId: UUID? = nil,
-                             translationLanguage: String? = nil) async throws -> SecretaryTask {
+                             translationLanguage: String? = nil,
+                             secretaryNumberId: String? = nil,
+                             secretaryBackendOrigin: String? = nil) async throws -> SecretaryTask {
+        if let origin = secretaryBackendOrigin, origin != AppConfig.baseURL.absoluteString { throw SecretaryBackendMismatch() }
         var body: [String: Any] = [
             "phoneNumber": phoneNumber,
             "instruction": instruction,
             "confirmationToken": confirmationToken,
             "voiceProvider": voiceProvider.rawValue,
         ]
+        if let secretaryNumberId { body["secretaryNumberId"] = secretaryNumberId }
         if live {
             guard let clientRequestId else { throw APIError.decoding }
             body["live"] = true
@@ -1031,7 +1035,7 @@ final class APIClient {
         return url
     }
 
-    private func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool,
+    func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool,
                          queryItems: [URLQueryItem] = []) async throws -> Data {
         var req = URLRequest(url: try Self.requestURL(path, queryItems: queryItems))
         req.httpMethod = method

@@ -82,6 +82,8 @@ final class SessionStore {
         var requestAttempted: Bool
         // Optional for backward-compatible Keychain decoding.
         var confirmationRejected: Bool? = nil
+        var secretaryNumberId: String? = nil
+        var secretaryBackendOrigin: String? = nil
 
         var needsPreparation: Bool {
             // Never discard an ambiguous attempt merely because its token
@@ -226,6 +228,17 @@ final class SessionStore {
 
     /// No migration from the shared clone preference: new Secretary calls default
     /// to OpenAI, while Codable preserves providers on already persisted drafts.
+    /// Owner + backend scoped: a Dev selection must never leak into a production build.
+    private var secretaryNumberKey: String {
+        "talkhint.secretary.number.\(userId ?? "signed-out").\(AppConfig.baseURL.absoluteString)"
+    }
+    var secretaryOutgoingNumberId: String? {
+        get { UserDefaults.standard.string(forKey: secretaryNumberKey) }
+        set {
+            if let newValue { UserDefaults.standard.set(newValue, forKey: secretaryNumberKey) }
+            else { UserDefaults.standard.removeObject(forKey: secretaryNumberKey) }
+        }
+    }
     var secretaryVoiceProvider: SecretaryVoiceProviderPreference {
         get {
             // Versioned preference intentionally migrates the former GPT-only default.
