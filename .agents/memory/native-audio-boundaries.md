@@ -41,3 +41,16 @@ tests. The server-side call could continue after the native UI terminated.
 **How to apply:** Keep live/recovery UIKit coverage mandatory in native result
 validation. Check the exact revision installed on the phone before attributing
 new symptoms to changes that may not yet be in that binary.
+
+Keep UI recovery fixtures independent of OS credential storage and live socket
+timing, but require real Keychain integration evidence separately.
+
+**Why:** A reserved `.invalid` backend protects production; it is not a suspended
+test transport. DNS failures still produce asynchronous recovery events, and a
+simulator test host's secure-storage availability must not be silently assumed.
+UI fixtures alone cannot prove real authentication or device audio.
+
+**How to apply:** Inject credentials and controlled sockets for UI transition
+tests. Separately require actual Keychain write/read/delete checks with synthetic,
+uniquely scoped keys; report unavailable storage as a failing integration check,
+never a skip, memory fallback, or reason to weaken normal authentication.

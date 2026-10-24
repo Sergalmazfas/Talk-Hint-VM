@@ -14,6 +14,34 @@ import XCTest
 /// Must be run on a Mac with Xcode / iOS simulator — these sources cannot be
 /// compiled on Linux. `xcodebuild test -scheme TalkHint -destination 'platform=iOS Simulator,name=iPhone 15'`.
 final class InCallCaptionTests: XCTestCase {
+    // UI recovery tests must not depend on unsigned-simulator Keychain access or
+    // DNS failure timing. Production defaults still use Keychain + URLSession.
+    private var sessionToken: String?
+    private var openedURLs: [URL] = []
+    private var sockets: [CaptionSocket] = []
+
+    private final class CaptionSocket: CallHintSocket {
+        var response: URLResponse?
+        var resumeCount = 0
+        var cancelCount = 0
+        private var receiver: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
+
+        func resume() { resumeCount += 1 }
+        func cancel() { cancelCount += 1 }
+        func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
+            receiver = completionHandler
+        }
+        func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping (Error?) -> Void) {
+            completionHandler(nil)
+        }
+        func fail(status: Int) {
+            response = HTTPURLResponse(url: URL(string: "https://caption-fixture.invalid/ui")!,
+                                       statusCode: status, httpVersion: nil, headerFields: nil)
+            let callback = receiver
+            receiver = nil
+            callback?(.failure(URLError(.badServerResponse)))
+        }
+    }
 
     /// Interim updates reuse one card, the final freezes it (full opacity), and
     /// the next utterance starts a brand-new card.
@@ -78,7 +106,7 @@ final class InCallCaptionTests: XCTestCase {
         // Finalizing the guest leaves the owner card still live; a new guest line
         // opens a third card while the owner card stays the same instance.
         vc.callHintStream(stream, didReceive:
-            .guestTranscript(text: "guest final", translation: nil, confidence: nil, isFinal: true))
+            .guestTranscript(text: "guest final caption", translation: nil, confidence: nil, isFinal: true))
         vc.callHintStream(stream, didReceive:
             .guestTranscript(text: "guest three", translation: nil, confidence: nil, isFinal: false))
         XCTAssertEqual(feedCards(vc).count, 3)
@@ -354,7 +382,7 @@ final class InCallCaptionTests: XCTestCase {
                        "spinner must not animate in the connected state")
         XCTAssertTrue(retryButton(vc).isHidden,
                       "retry button must stay hidden while connected")
-        XCTAssertEqual(statusText(vc), "Live assistant connected")
+        XCTAssertTrue(statusIsHidden(vc), "the connected state hides the status line")
 
         // First retry: spinner spins, status names attempt 1 of 5, retry hidden.
         vc.callHintStream(stream, didDisconnectWillRetryAttempt: 1, of: 5)
@@ -396,7 +424,7 @@ final class InCallCaptionTests: XCTestCase {
                        "spinner must be stopped again after reconnecting")
         XCTAssertTrue(retryButton(vc).isHidden,
                       "retry button must hide again after a successful reconnect")
-        XCTAssertEqual(statusText(vc), "Live assistant connected")
+        XCTAssertTrue(statusIsHidden(vc), "a recovered connection hides the stale error line")
     }
 
     /// Drives the controller into the terminal "gave up" state and then taps the
@@ -405,12 +433,10 @@ final class InCallCaptionTests: XCTestCase {
     /// regression in `retryTapped` (e.g. dropping the `stream.retry()` call, or
     /// not re-hiding the button) would strand users on the terminal screen with
     /// no way back, undetected by the delegate-driven lifecycle test above.
-    func testManualReconnectButtonReArmsStreamAfterTerminalFailure() {
-        // A signed-in user: the live socket can authenticate, so a manual retry
-        // genuinely re-opens the stream. (The signed-out case is covered by
-        // `testNoTokenReconnectSurfacesSignInState`.)
-        SessionStore.shared.save(token: "test-token", userId: "u1", email: "u1@example.com")
-        defer { SessionStore.shared.clear() }
+    func testManualReconnectButtonReArmsStreamAfterTerminalFailure() throws {
+        // A signed-in fixture: the real retry path must create and resume a
+        // new controlled socket, not merely change UI state.
+        sessionToken = "caption-fixture-token"
 
         let vc = makeLoadedViewController()
         // Drive the controller's *own* stream — the same instance the Reconnect
@@ -442,6 +468,51 @@ final class InCallCaptionTests: XCTestCase {
         // reconnects the live assistant instead of only changing the label.
         XCTAssertTrue(stream.isActive,
                       "manual retry must re-open the live stream, not just relabel the status")
+        XCTAssertEqual(sockets.count, 2, "retry must create a new connection")
+        XCTAssertEqual(sockets.last?.resumeCount, 1, "retry must resume the new socket")
+        XCTAssertEqual(sockets.first?.cancelCount, 1, "the prior socket must be closed")
+        let retryURL = try XCTUnwrap(openedURLs.last)
+        XCTAssertEqual(retryURL.path, "/ui")
+        XCTAssertEqual(URLComponents(url: retryURL, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "token" })?.value, sessionToken)
+    }
+
+    func testLateSocketFailureCannotTearDownManualRetry() throws {
+        sessionToken = "caption-fixture-token"
+        let vc = makeLoadedViewController()
+        let stream = vc.hintStream
+        let previous = try XCTUnwrap(sockets.first)
+        stream.disconnect()
+        vc.callHintStreamDidFailTerminally(stream)
+        retryButton(vc).sendActions(for: .touchUpInside)
+        let recovered = try XCTUnwrap(sockets.last)
+        XCTAssertFalse(previous === recovered)
+
+        // URLSession can deliver cancellation/failure after a newer socket
+        // exists. The real stream must reject this obsolete connection callback.
+        previous.fail(status: 401)
+        pumpMainQueue()
+        XCTAssertTrue(stream.isActive)
+        XCTAssertEqual(sockets.count, 2, "a late callback must not open another connection")
+        XCTAssertEqual(recovered.cancelCount, 0, "an old failure must not cancel the new socket")
+        XCTAssertTrue(retryButton(vc).isHidden)
+        XCTAssertTrue(statusIsHidden(vc))
+    }
+
+    func testTransportAuthRejectionRequiresSignInWithoutAutomaticRetry() throws {
+        sessionToken = "expired-caption-fixture-token"
+        let vc = makeLoadedViewController()
+        pumpMainQueue()
+        let socket = try XCTUnwrap(sockets.first)
+        socket.fail(status: 401)
+        pumpMainQueue()
+
+        XCTAssertFalse(vc.hintStream.isActive)
+        XCTAssertEqual(sockets.count, 1, "authentication rejection must not open another socket")
+        XCTAssertEqual(socket.cancelCount, 1)
+        XCTAssertEqual(retryButton(vc).title(for: .normal), "Sign in")
+        XCTAssertFalse(retryButton(vc).isHidden)
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating)
     }
 
     /// The silent-failure case the manual-reconnect test above cannot cover: when
@@ -604,9 +675,9 @@ final class InCallCaptionTests: XCTestCase {
             return XCTFail("tapping sign-in must present the login screen")
         }
 
-        // Simulate a successful login exactly as `LoginViewController` does: persist
-        // the new session first, then fire its `onLoggedIn` completion.
-        SessionStore.shared.save(token: "test-token", userId: "u1", email: "u1@example.com")
+        // Make the authenticated session available before firing the real login
+        // completion. Secure storage itself has a separate mandatory native test.
+        sessionToken = "caption-fixture-token"
         login.onLoggedIn?()
 
         // `onLoggedIn` dismisses the login screen and, on the dismiss completion,
@@ -616,16 +687,16 @@ final class InCallCaptionTests: XCTestCase {
 
         XCTAssertTrue(stream.isActive,
                       "a successful sign-in must re-arm the live stream")
+        XCTAssertEqual(sockets.count, 1, "sign-in must open exactly one authenticated connection")
+        XCTAssertEqual(sockets.last?.resumeCount, 1)
         XCTAssertNil(vc.presentedViewController,
                      "the login screen must be dismissed after a successful sign-in")
         XCTAssertEqual(retryButton(vc).title(for: .normal), "Reconnect",
                        "the retry button must return to its plain reconnect role")
         XCTAssertTrue(retryButton(vc).isHidden,
                       "the retry button must hide once recovery is underway")
-        let status = statusText(vc) ?? ""
-        XCTAssertTrue(status == "Reconnecting to live assistant…"
-                        || status == "Live assistant connected",
-                      "status must reflect reconnecting/connected after sign-in, got: \(status)")
+        XCTAssertTrue(statusIsHidden(vc), "the connected stream hides its status line")
+        XCTAssertFalse(reconnectSpinner(vc).isAnimating)
     }
 
     /// The cancel branch of the same recovery flow: if the user opens the login
@@ -891,11 +962,26 @@ final class InCallCaptionTests: XCTestCase {
     }
 
     private func makeLoadedViewControllerWithSize(_ size: CGSize) -> InCallViewController {
-        let vc = InCallViewController(callerName: "Tester")
+        let stream = CallHintStream(tokenProvider: { [weak self] in self?.sessionToken },
+                                    socketFactory: { [weak self] url in
+            let socket = CaptionSocket()
+            self?.openedURLs.append(url)
+            self?.sockets.append(socket)
+            return socket
+        })
+        let vc = InCallViewController(callerName: "Tester", hintStream: stream)
         vc.loadViewIfNeeded()
         vc.view.frame = CGRect(origin: .zero, size: size)
         vc.view.layoutIfNeeded()
         return vc
+    }
+
+    private func statusIsHidden(_ vc: UIViewController) -> Bool {
+        guard let label = view(withIdentifier: "text-incall-status", in: vc.view) as? UILabel else {
+            XCTFail("in-call status label missing")
+            return false
+        }
+        return label.isHidden
     }
 
     /// The transcript feed's cards, in display order. The feed lives inside the
