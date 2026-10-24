@@ -53,6 +53,7 @@ import { dialSecretaryTask, secretaryCallbackOrigin } from "./secretary/dialer";
 import { notifySecretaryResult } from "./secretary/notifications";
 import { bindSecretaryCall, finishSecretaryAttempt, getSecretaryTaskById, getSecretaryTaskForCall } from "./secretary/tasks";
 import { signSecretaryStream } from "./secretary/streamAuth";
+import { registerRetellPhone, endRetellPhone } from "./secretary/retellPhone";
 import { publishSecretaryFeedEvent } from "./secretary/feed";
 import {
   isDiagnosticRecordingUser,
@@ -325,6 +326,14 @@ export async function registerRoutes(
     const taskId = String(req.query.taskId ?? "");
     const callSid = String(req.body.CallSid ?? "");
     try {
+      // Dev's general Twilio validator may be disabled. This real telephone
+      // pilot still requires a provider signature before binding or registering.
+      if ((await getSecretaryTaskById(taskId))?.voiceProvider === "retell" &&
+        (!TWILIO_AUTH_TOKEN || !twilio.validateRequest(TWILIO_AUTH_TOKEN,
+          req.get("X-Twilio-Signature") ?? "",
+          new URL(req.originalUrl, secretaryCallbackOrigin()).toString(), req.body))) {
+        return res.status(403).send("Invalid Retell telephone callback signature");
+      }
       const bound = await bindSecretaryCall(taskId, callSid);
       if (!bound) return res.status(403).send("Secretary task is not assigned to this call");
       // Twilio may request TwiML just before the originating worker has
@@ -337,6 +346,18 @@ export async function registerRoutes(
       if (!task) return res.status(403).send("Secretary task is not assigned to this call");
       const origin = secretaryCallbackOrigin();
       const twiml = new twilio.twiml.VoiceResponse();
+      if (task.voiceProvider === "retell") {
+        const sip = await registerRetellPhone(task.id, callSid, origin);
+        const monitor = twiml.start().stream({
+          url: new URL("/secretary-retell-monitor", origin).toString().replace(/^https:/, "wss:"),
+          track: "both_tracks",
+        });
+        monitor.parameter({ name: "taskId", value: task.id });
+        monitor.parameter({ name: "streamAuth", value: signSecretaryStream(task.id, callSid) });
+        twiml.dial({ timeLimit: 300, timeout: 30 }).sip(sip);
+        twiml.hangup();
+        return res.type("text/xml").send(twiml.toString());
+      }
       const stream = twiml.connect().stream({
         url: new URL("/secretary-stream", origin).toString().replace(/^https:/, "wss:"),
       });
@@ -353,8 +374,17 @@ export async function registerRoutes(
     const callSid = String(req.body.CallSid ?? "");
     const status = String(req.body.CallStatus ?? "");
     try {
+      if ((await getSecretaryTaskById(taskId))?.voiceProvider === "retell" &&
+        (!TWILIO_AUTH_TOKEN || !twilio.validateRequest(TWILIO_AUTH_TOKEN,
+          req.get("X-Twilio-Signature") ?? "",
+          new URL(req.originalUrl, secretaryCallbackOrigin()).toString(), req.body))) {
+        return res.status(403).send("Invalid Retell telephone callback signature");
+      }
       const bound = await bindSecretaryCall(taskId, callSid);
       if (!bound) return res.status(403).send("Secretary task is not assigned to this call");
+      if (["completed", "no-answer", "busy", "failed", "canceled"].includes(status)) {
+        await endRetellPhone(taskId);
+      }
       const task = await finishSecretaryAttempt(taskId, callSid, status);
       if (task) publishSecretaryFeedEvent(taskId, { type: "status", status: task.status });
       if (task && ["completed", "no-answer", "busy", "failed", "canceled"].includes(status)) {

@@ -205,7 +205,9 @@ final class SettingsViewController: UITableViewController {
                 ? NSLocalizedString("settings.secretary.openai", comment: "")
                 : provider.displayName
             cell.textLabel?.numberOfLines = 0
-            cell.detailTextLabel?.text = NSLocalizedString(
+            cell.detailTextLabel?.text = provider == .retell
+                ? "Merritt · TalkHint Engine: gpt-6.1-sol · medium"
+                : NSLocalizedString(
                 provider == .openai ? "settings.secretary.openai.detail" : "settings.secretary.clone.detail",
                 comment: "")
             cell.detailTextLabel?.numberOfLines = 0
@@ -285,7 +287,7 @@ final class SettingsViewController: UITableViewController {
         let sheet = UIAlertController(
             title: NSLocalizedString("settings.secretary.choose", comment: ""),
             message: nil, preferredStyle: .actionSheet)
-        for provider in [SecretaryVoiceProviderPreference.openai] {
+        for provider in [SecretaryVoiceProviderPreference.retell, .openai] {
             let title = provider == .openai
                 ? NSLocalizedString("settings.secretary.openai", comment: "")
                 : provider.displayName

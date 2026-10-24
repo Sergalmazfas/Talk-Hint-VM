@@ -26,11 +26,11 @@ export const secretaryTestTools = [
 ];
 /** The voice provider receives text; our OpenAI account does all model generation. No Retell LLM. */
 export async function* streamSecretaryResponse(request: EngineRequest,
-  options: { reasoning?: "medium" | "low" } = {}): AsyncGenerator<EngineChunk> {
+  options: { reasoning?: "medium" | "low"; tools?: typeof secretaryTestTools } = {}): AsyncGenerator<EngineChunk> {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 25_000 });
   const stream = await client.responses.create({
     model: SECRETARY_REASONING_MODEL, instructions: request.instructions,
-    input: request.input, tools: secretaryTestTools,
+    input: request.input, tools: options.tools ?? secretaryTestTools,
     parallel_tool_calls: false, reasoning: { effort: options.reasoning ?? "medium" }, max_output_tokens: 1600,
     stream: true, store: false,
   }, { signal: request.signal });
@@ -57,14 +57,26 @@ export async function* streamSecretaryResponse(request: EngineRequest,
 export type TestAction = { id: string; name: string; args: Record<string, string>; result: any; status: "test_saved" | "pending_owner_approval" };
 export class SecretaryConversationEngine {
   readonly report = {
-    provider: "OpenAI via TalkHint", model: SECRETARY_REASONING_MODEL, testOnly: true as const,
+    provider: "OpenAI via TalkHint", model: SECRETARY_REASONING_MODEL, testOnly: true,
     context: SECRETARY_TEST_CONTEXT, actions: [] as TestAction[],
     events: [] as Array<{ type: string; at: string }>, connected: false,
     usage: { requests: 0, measuredRequests: 0, input: 0, cachedInput: 0, output: 0 } as LabTokenUsage,
   };
   readonly instructions: string;
   private ledger = new Map<string, any>();
-  constructor(owner: string, assignment: string, private stream: EngineStream = streamSecretaryResponse) {
+  constructor(owner: string, assignment: string, private stream: EngineStream = streamSecretaryResponse,
+    private telephone = false) {
+    if (telephone) {
+      this.report.testOnly = false;
+      this.instructions = buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner)) +
+        "\nThis is the owner's authorized telephone call, not a test or a fictional business. " +
+        "Use only the confirmed assignment and facts supplied by the other party. No calendar, email, SMS or other business actions are connected. " +
+        "Never claim to have sent, booked, saved a business action or verified outside facts. The conversation itself is retained by TalkHint. " +
+        "Speak briefly and naturally in the other party's language (EN/RU/ES). Yield to interruptions and incorporate corrections. " +
+        "Do not hang up for silence, hold music or transfer. Summarize the actual outcome and next step; do not invent agreement. " +
+        "Current time: " + new Date().toISOString();
+      return;
+    }
     this.instructions = buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner)) + secretaryTestContextPrompt() +
       "\nTalkHint Engine controls all tool permissions. Tools are TEST ONLY. Say short natural sentences, no markdown. " +
       "Never claim you saved, booked or delivered something before a successful tool result. Booking proposals always require owner approval. " +
@@ -77,6 +89,7 @@ export class SecretaryConversationEngine {
     if (this.report.events.length > 200) this.report.events.shift();
   }
   execute(name: string, raw: string, signal: AbortSignal) {
+    if (this.telephone) throw new Error("Business and TEST tools are not enabled in telephone conversations");
     if (signal.aborted) throw new Error("Stale response cannot execute");
     if (!SECRETARY_TEST_CONTEXT.permissions.includes(name)) throw new Error("Tool is not permitted");
     const a = JSON.parse(raw);
@@ -106,7 +119,8 @@ export class SecretaryConversationEngine {
   }
   async respond(turns: SpokenTurn[], signal: AbortSignal, emit: (text: string) => void, reminder = false) {
     const input: any[] = turns.map(t => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content }));
-    input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
+    if (!this.telephone)
+      input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
     if (reminder) input.push({ role: "developer", content: "Briefly check if the caller is still there; do not invent a request or end for silence." });
     for (let round = 0; round < 4 && !signal.aborted; round++) {
       let completion: Extract<EngineChunk, { type: "complete" }> | undefined;

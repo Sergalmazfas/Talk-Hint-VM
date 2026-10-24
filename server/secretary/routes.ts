@@ -24,7 +24,7 @@ import {
   validateSecretaryTranslationLanguage,
   type SecretaryWorkerDependencies,
 } from "./tasks";
-import { hangupSecretaryCall } from "./dialer";
+import { hangupSecretaryCall, secretaryCallbackOrigin } from "./dialer";
 import { publishSecretaryFeedEvent } from "./feed";
 
 function ownerId(req: Request): string | undefined {
@@ -95,6 +95,8 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
       if (!number) throw Object.assign(new Error("Assign a TalkHint phone number before starting Secretary."), { status: 409 });
       const provider = secretaryVoiceProvider(req.body?.voiceProvider);
       if (provider === "openai") await requireSecretaryAudioModel();
+      else if (provider === "retell")
+        await (await import("./retellPhone")).requireRetellPhone(secretaryCallbackOrigin());
       else {
         const clone = await (provider === "cartesia" ? getCartesiaClone(userId) : getClone(userId));
         try {

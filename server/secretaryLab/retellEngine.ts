@@ -54,14 +54,29 @@ type Entry = {
 /** Per-session high-entropy capability, not an owner bearer token or permanent Retell key.
  * Retell's Custom LLM socket has no signature/auth header. Never log these URL paths. */
 export class RetellEngineRegistry {
+  private pendingWrites = new Map<string, Promise<void>>();
+  async flush(id: string) { await this.pendingWrites.get(id); }
   private entries = new Map<string, Entry>();
   private tickets = new Map<string, Entry>();
-  constructor(private stream?: EngineStream) {}
+  constructor(private stream?: EngineStream, private options: {
+    phone?: boolean;
+    onTranscript?: (id: string, turns: SpokenTurn[]) => Promise<void>;
+    onFailure?: (id: string) => void;
+  } = {}) {}
   reserve(owner: string, instruction: string, id: string) {
     const ticket = randomBytes(32).toString("hex");
-    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream),
+    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone),
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false, expiresAt: Date.now() + 300_000 };
     this.entries.set(id, entry); this.tickets.set(ticket, entry);
+    if (this.options.phone) {
+      const expiry = setTimeout(() => {
+        if (!entry.closed) {
+          this.options.onFailure?.(id);
+          this.ended(id);
+        }
+      }, 300_000);
+      expiry.unref();
+    }
     return { ticket, engine: entry.engine.report, promptHash: createHash("sha256").update(entry.engine.instructions).digest("hex") };
   }
   registered(id: string, callId: string) { const entry = this.entries.get(id); if (entry) entry.callId = callId; }
@@ -69,9 +84,12 @@ export class RetellEngineRegistry {
     const entry = this.entries.get(id); if (!entry) return;
     entry.closed = true; entry.abort?.abort(); entry.engine.report.connected = false;
     entry.socket?.close(1000, "Test ended"); this.entries.delete(id); this.tickets.delete(entry.ticket);
+    this.pendingWrites.delete(id);
   }
   private entry(path: string) {
-    const match = /^\/retell-engine-stream\/([a-f0-9]{64})\/([A-Za-z0-9_-]{1,120})$/.exec(path);
+    const match = (this.options.phone
+      ? /^\/retell-phone-engine\/([a-f0-9]{64})\/([A-Za-z0-9_-]{1,120})$/
+      : /^\/retell-engine-stream\/([a-f0-9]{64})\/([A-Za-z0-9_-]{1,120})$/).exec(path);
     if (!match) return undefined;
     const entry = this.tickets.get(match[1]);
     if (!entry || entry.closed || Date.now() > entry.expiresAt || (entry.callId && entry.callId !== match[2])) return undefined;
@@ -96,6 +114,21 @@ export class RetellEngineRegistry {
     wait();
   }
   private bind(ws: WebSocket, entry: Entry) {
+    let persisted = Promise.resolve();
+    const transcript = (frame: any) => {
+      if (!this.options.onTranscript || !Array.isArray(frame.transcript)) return;
+      if (frame.transcript.length > 300 ||
+        frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
+          typeof t.content !== "string" || t.content.length > 4000)) {
+        ws.close(1008, "Invalid transcript"); return;
+      }
+      const turns = frame.transcript.map((t: any) => ({ role: t.role, content: t.content }));
+      persisted = persisted.then(() => this.options.onTranscript!(entry.id, turns)).catch(() => {
+        ws.close(1011, "Transcript persistence failed");
+        this.options.onFailure?.(entry.id);
+      });
+      this.pendingWrites.set(entry.id, persisted);
+    };
     const previous = entry.socket;
     entry.abort?.abort(); entry.epoch++;
     entry.pending = undefined;
@@ -151,14 +184,18 @@ export class RetellEngineRegistry {
         return;
       }
       if (frame.interaction_type === "call_details") {
-        if (frame.call?.call_id !== entry.callId || frame.call?.call_type !== "web_call") { ws.close(1008, "Only registered web calls"); return; }
+        if (frame.call?.call_id !== entry.callId ||
+          frame.call?.call_type !== (this.options.phone ? "phone_call" : "web_call")) { ws.close(1008, "Registered call identity required"); return; }
         if (!entry.introduced) {
           entry.introduced = true;
-          reply(0, [{ role: "user", content: "Begin the authorized TEST conversation using the trusted standard secretary introduction. Then listen." }]);
+          reply(0, [{ role: "user", content: this.options.phone
+            ? "Begin the authorized telephone conversation using the trusted standard secretary introduction and actual assignment. Then listen."
+            : "Begin the authorized TEST conversation using the trusted standard secretary introduction. Then listen." }]);
         } else send({ response_type: "response", response_id: 0, content: "", content_complete: true });
         return;
       }
       if (frame.interaction_type === "update_only") {
+        transcript(frame);
         if (frame.turntaking === "user_turn") abort();
         return;
       }
@@ -169,11 +206,18 @@ export class RetellEngineRegistry {
         ws.close(1008, "Invalid response request"); return;
       }
       reply(frame.response_id, frame.transcript.map((t: any) => ({ role: t.role, content: t.content })), frame.interaction_type === "reminder_required");
+      transcript(frame);
     });
     const close = () => {
       if (entry.socket !== ws) return;
       abort(); entry.socket = undefined; entry.engine.report.connected = false;
       entry.engine.record("custom_llm_disconnected");
+      if (this.options.phone && !entry.closed) {
+        const grace = setTimeout(() => {
+          if (!entry.closed && !entry.socket) this.options.onFailure?.(entry.id);
+        }, 8000);
+        grace.unref();
+      }
     };
     ws.on("close", close); ws.on("error", close);
   }

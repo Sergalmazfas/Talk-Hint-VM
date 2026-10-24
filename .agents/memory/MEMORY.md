@@ -45,7 +45,7 @@
 - [Voice Lab rollout approval](voice-lab-rollout.md) — owner approved opt-in Cartesia/ElevenLabs live comparison; ElevenLabs default, Copilot remains tap-only.
 - [Secretary live-call intent](secretary-live-call-intent.md) — one manual call; owner only monitors, Secretary speaks autonomously; Hint is design reference, not a feature target.
 - [Secretary Lab boundary](secretary-lab-boundary.md) — central admin bench uses the actual agent/voice; simulated transport never proves PSTN or iPhone reliability.
-- [Secretary voice policy](secretary-voice-policy.md) — direct OpenAI is the owner-requested default; preserve explicit clone choices and keep Translator/Copilot separate.
+- [Secretary voice policy](secretary-voice-policy.md) — Retell + Engine approved for the native phone pilot/default; GPT selectable; preserve old attempts and separate Translator/Copilot.
 - [ChatGPT Secretary boundaries](chatgpt-secretary-boundaries.md) — official ChatGPT only; no replacement chat, no SMS, incoming AI handoff requires separate approval.
 - [OpenAI plugin review](openai-plugin-review.md) — retain OAuth despite upstream portable-schema conflict; local package checks are not portal acceptance.
 - [Personal GPT Actions](chatgpt-actions-constraints.md) — confidential OAuth distinct from MCP; Plus new-GPT restrictions and mobile use require current official checks.

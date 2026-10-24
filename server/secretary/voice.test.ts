@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { secretaryVoiceProvider,selectedSecretaryVoiceProvider } from "./voice";
 describe("Secretary-only voice defaults and pre-dial availability", () => {
-  it("allows only GPT-Live for new assignments while decoding historical providers unchanged",()=>{
+  it("accepts native Retell selection and preserves legacy integrations and historical decoding",()=>{
     expect(selectedSecretaryVoiceProvider(undefined)).toBe("openai");
+    expect(selectedSecretaryVoiceProvider("retell")).toBe("retell");
     expect(selectedSecretaryVoiceProvider("openai")).toBe("openai");
     for(const legacy of ["elevenlabs","cartesia"]){
-      expect(()=>selectedSecretaryVoiceProvider(legacy)).toThrow(/GPT-Live 1 only/);
+      expect(()=>selectedSecretaryVoiceProvider(legacy)).toThrow(/Retell \+ Engine or GPT-Live 1 only/);
       expect(secretaryVoiceProvider(legacy)).toBe(legacy);
     }
   });

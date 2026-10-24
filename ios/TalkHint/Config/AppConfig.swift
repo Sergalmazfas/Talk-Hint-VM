@@ -7,7 +7,21 @@ enum AppConfig {
     // Reserved .invalid domain: hosted XCTest must never reach the live backend.
     static let baseURL = URL(string: "https://talkhint-native-tests.invalid")!
     #else
-    static let baseURL = URL(string: "https://talkhint.app")!
+    static let baseURL: URL = {
+        #if DEBUG
+        // Xcode Scheme > Run > Arguments > Environment Variables.
+        // Release builds cannot be redirected by a launch environment.
+        if let raw = ProcessInfo.processInfo.environment["TALKHINT_API_BASE_URL"], !raw.isEmpty {
+            guard let url = URL(string: raw), url.scheme == "https", url.host != nil,
+                  url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+                  url.path.isEmpty || url.path == "/" else {
+                preconditionFailure("TALKHINT_API_BASE_URL must be an HTTPS origin")
+            }
+            return url
+        }
+        #endif
+        return URL(string: "https://talkhint.app")!
+    }()
     #endif
 
     /// WebSocket base URL derived from `baseURL` (https -> wss, http -> ws).

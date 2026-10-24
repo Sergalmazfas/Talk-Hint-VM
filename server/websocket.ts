@@ -66,6 +66,8 @@ import {
 import { getClone, getCartesiaClone } from "./voiceLab/store";
 import { requireReadyTranslatorClone } from "./translation/cloneSpeech";
 import { verifySecretaryStream } from "./secretary/streamAuth";
+import { handleRetellPhoneMonitor } from "./secretary/retellMonitor";
+import { retellPhoneRegistry } from "./secretary/retellPhone";
 import { signSecretaryConfirmation } from "./secretary/confirmation";
 import {
   buildSecretaryFeedSnapshot,
@@ -862,6 +864,16 @@ export function setupWebSocket(server: Server) {
       }).catch(() => socket.destroy());
       return;
     }
+    if (pathname.startsWith("/retell-phone-engine/")) {
+      if (parsedUrl.search || !retellPhoneRegistry.permits(pathname)) { socket.destroy(); return; }
+      retellEngineWss.handleUpgrade(request, socket, head, ws => retellPhoneRegistry.attach(ws, pathname));
+      return;
+    }
+    if (pathname === "/secretary-retell-monitor") {
+      if (parsedUrl.search) { socket.destroy(); return; }
+      retellEngineWss.handleUpgrade(request, socket, head, ws => handleRetellPhoneMonitor(ws));
+      return;
+    }
 
     if (pathname === "/secretary-lab-stream") {
       // Load before upgrading so the browser's first auth frame cannot race
@@ -1039,6 +1051,7 @@ export function setupWebSocket(server: Server) {
           const task = await getSecretaryTaskForCall(taskId, callSid);
           if (!task) return null;
           const voiceProvider = secretaryVoiceProvider(task.voiceProvider);
+          if (voiceProvider === "retell") throw new Error("Retell uses the isolated SIP bridge, not GPT audio");
           const ownerName = confirmedSecretaryOwnerName(task.userId);
           if (voiceProvider === "openai") return { instruction: task.instruction, ownerId: task.userId, ownerName, voiceProvider, cloneVoiceId: "" };
           const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(task.userId) : getClone(task.userId));

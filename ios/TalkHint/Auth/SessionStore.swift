@@ -18,12 +18,14 @@ enum VoiceProviderPreference: String, Codable {
 /// Independent of the cloned-voice setting used by Translator and Copilot.
 enum SecretaryVoiceProviderPreference: String, Codable, CaseIterable {
     case openai
+    case retell
     case elevenlabs
     case cartesia
 
     var displayName: String {
         switch self {
         case .openai: return "OpenAI"
+        case .retell: return "Retell + TalkHint Engine"
         case .elevenlabs: return "ElevenLabs"
         case .cartesia: return "Cartesia"
         }
@@ -52,7 +54,7 @@ final class SessionStore {
     private let translatorVoiceKey = "talkhint.translator.voice"
     private let translatorPlaybackKey = "talkhint.translator.playback"
     private let voiceProviderKey = "talkhint.voice.provider"
-    private let secretaryVoiceProviderKey = "talkhint.secretary.voice.provider"
+    private let secretaryVoiceProviderKey = "talkhint.secretary.voice.provider.v2"
 
     /// Built-in assistant modes mirrored from the backend (`BUILTIN_MODES` in
     /// server/websocket.ts). Selecting one sends `set_mode` over the /ui socket.
@@ -226,10 +228,16 @@ final class SessionStore {
     /// to OpenAI, while Codable preserves providers on already persisted drafts.
     var secretaryVoiceProvider: SecretaryVoiceProviderPreference {
         get {
-            // New Secretary calls use GPT-Live only. Keep legacy enum decoding for history.
-            return .openai
+            // Versioned preference intentionally migrates the former GPT-only default.
+            if let raw = UserDefaults.standard.string(forKey: secretaryVoiceProviderKey),
+               let value = SecretaryVoiceProviderPreference(rawValue: raw),
+               value == .openai || value == .retell { return value }
+            return .retell
         }
-        set { UserDefaults.standard.set(SecretaryVoiceProviderPreference.openai.rawValue, forKey: secretaryVoiceProviderKey) }
+        set {
+            guard newValue == .openai || newValue == .retell else { return }
+            UserDefaults.standard.set(newValue.rawValue, forKey: secretaryVoiceProviderKey)
+        }
     }
 
     /// How incoming calls are handled, persisted to the backend via

@@ -1,13 +1,13 @@
 ---
 name: Secretary voice choice policy
-description: Owner-approved default and boundaries for direct OpenAI Secretary audio.
+description: Owner-approved Retell + Engine native default, GPT fallback choice, and safe rollout boundaries.
 ---
 
-After personally testing GPT-Live 1 with Marin in the incoming microphone bench, the owner said it worked magnificently and requested only this combination throughout Secretary, including iOS and ChatGPT. This supersedes the earlier Realtime-2.1/default-with-clone-options choice. It is a confirmed microphone experience, not a PSTN benchmark.
+After personally rating Retell + TalkHint Engine highly in the browser bench, the owner explicitly approved adding it to telephone Secretary and the existing Swift/Xcode admin app, making it the native default while retaining a GPT choice. This supersedes the former GPT-Live-only Secretary policy. Browser approval is not proof of PSTN/iPhone operation.
 
-**Why:** The user explicitly chose this combination after the Dev comparison. Their priority is an intelligent, natural-speaking Secretary, not cost reduction.
+**Why:** The user said Retell had passed their bench, authorized telephone testing, and requested its existing settings and priority in the native Secretary.
 
-**How to apply:** New Secretary calls use GPT-Live 1 with built-in Marin and the tested Sol reasoning backend, with no silent fallback or new clone-provider choices. Keep historical provider decoding and existing task data; reject obsolete new-call choices instead of silently changing their approved parameters. Translator/Copilot remain independent.
+**How to apply:** Retell + Engine is the new native Secretary default; explicit GPT remains selectable. Do not silently reroute old approved attempts, historical providers, omitted-provider integrations, or incoming-number routing. Hint, Translator and Copilot remain independent. Retell must use the real confirmed assignment, not browser TEST fixtures. No real call or publication is authorized merely by permission to implement the connection.
 
 Older native clients may explicitly send cloned-voice choices. Require a fresh preparation under the current Secretary choice rather than silently rerouting a signed old request. Native Settings must clearly identify the Secretary model separately from Translator/Copilot.
 

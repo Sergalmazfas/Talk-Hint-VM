@@ -42,6 +42,8 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     if (!accountSid || !authToken) throw new Error("Twilio calling is not configured");
     const voiceProvider = secretaryVoiceProvider(job.voiceProvider);
     if (voiceProvider === "openai") await requireSecretaryAudioModel();
+    else if (voiceProvider === "retell")
+      await (await import("./retellPhone")).requireRetellPhone(secretaryCallbackOrigin());
     else {
       const clone = await (voiceProvider === "cartesia" ? getCartesiaClone(job.userId) : getClone(job.userId));
       requireReadyTranslatorClone(voiceProvider, clone,
