@@ -81,6 +81,12 @@ For the ElevenLabs catalog comparison, the owner specified a female American-acc
 
 **How to apply:** Keep clone/catalog choices explicit and verify live multilingual speech rather than inferring it from the voice's English label.
 
+The owner subsequently confirmed that ElevenLabs + Engine works with a normal, clearly audible voice, but reported substantially longer waits and a less lively conversation than Retell + Engine.
+
+**Why:** This is live user confirmation of audibility after startup fixes, not a measured recognition, interruption or latency comparison.
+
+**How to apply:** Treat basic live audibility as user-confirmed; investigate response timing by stage and keep Retell as the user's responsiveness reference. Do not silently downgrade the common Engine to improve a voice-provider comparison.
+
 ElevenLabs Custom LLM configuration needs an OpenAI base URL: the provider itself appends `/chat/completions`. A successful audio metadata handshake does not prove that the provider can reach our Engine or produce speech.
 
 **Why:** Supplying the full endpoint produced a doubled callback path and `Brain returned no response`; a metadata-only probe missed it while the owner's conversation stayed silent.
