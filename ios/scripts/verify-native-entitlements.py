@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Check the signed simulator host before running real Keychain XCTest."""
+"""Check simulator runtime Mach-O entitlements before real Keychain XCTest."""
 from pathlib import Path
 import plistlib
 import sys
 
 
 def verify(path):
-    entitlements = plistlib.loads(Path(path).read_bytes())
+    raw = Path(path).read_bytes()
+    # XML sections may include trailing NUL alignment bytes. Do not trim a
+    # binary plist trailer or relax any entitlement checks.
+    if raw.lstrip().startswith(b"<?xml"):
+        raw = raw.rstrip(b"\x00")
+    entitlements = plistlib.loads(raw)
     expected = "talkhint-native-validation.app.talkhint"
     if entitlements.get("application-identifier") != expected:
         raise ValueError("Simulator application-identifier is absent or outside the local validation namespace")
@@ -24,7 +29,7 @@ def verify(path):
     ]
     if forbidden:
         raise ValueError(f"External-service entitlements are forbidden in native validation: {forbidden}")
-    print("Simulator signing evidence: isolated Keychain entitlements present; real OS storage still requires XCTest")
+    print("Simulator runtime evidence: isolated Keychain entitlements present; real OS storage still requires XCTest")
 
 
 if __name__ == "__main__":

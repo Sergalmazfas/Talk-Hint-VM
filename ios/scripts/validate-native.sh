@@ -63,12 +63,13 @@ COMMON=(-project TalkHint.xcodeproj -scheme TalkHintValidation -configuration Na
   "CODE_SIGN_ENTITLEMENTS=$ROOT/ios/scripts/native-validation.entitlements")
 # Compiles every app/test source: duplicate type declarations are compiler errors.
 xcodebuild "${COMMON[@]}" build-for-testing 2>&1 | tee "$OUT/build.log"
-# Inspect the actual signed host, not just the input plist. Fail before the
-# expensive test run if Xcode omitted/replaced its isolated Keychain rights.
+# Check signature integrity separately from simulator runtime entitlements.
+# Xcode embeds the latter in the main Mach-O; codesign can report an empty dict.
 APP="$OUT/DerivedData/Build/Products/NativeValidation-iphonesimulator/TalkHint.app"
 codesign --verify "$APP" 2>&1 | tee "$OUT/codesign-verify.log"
 codesign --display --entitlements :- "$APP" \
-  > "$OUT/simulator-entitlements.plist" 2> "$OUT/codesign-display.log"
+  > "$OUT/codesign-entitlements.plist" 2> "$OUT/codesign-display.log"
+xcrun segedit "$APP/TalkHint" -extract __TEXT __entitlements "$OUT/simulator-entitlements.plist"
 python3 scripts/verify-native-entitlements.py "$OUT/simulator-entitlements.plist"
 # No filters: run the entire TalkHintTests target, not just CallProfilesTests.
 xcodebuild "${COMMON[@]}" test-without-building -parallel-testing-enabled NO \
