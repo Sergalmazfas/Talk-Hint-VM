@@ -38,3 +38,9 @@ Do not treat a Retell API migration error as evidence that the secret needs rota
 **Why:** A legacy list operation was rejected while the same credential successfully accessed supported voice and agent operations. New browser transport credentials also cannot safely be guessed as an older transport's token.
 
 **How to apply:** Check the provider's current migration notice and explicit response transport first; distinguish authentication, permission, payment and protocol errors. Verify paid conversation separately from configuration access.
+
+The owner subsequently completed a live browser comparison and strongly preferred Retell's audibility/headphone experience. They also confirmed an interruption worked in that trial, while repeatedly reporting poor GPT-stand audio.
+
+**Why:** This is direct user-observed browser evidence, superseding the earlier absence of any live Retell trial. It is not proof of telephone quality, measured interruption latency, or integration with the common execution Engine.
+
+**How to apply:** Prioritize evaluating Retell with TalkHint's task/control backend, without silently replacing the telephone default. Treat the GPT stand's audio path as a separate diagnostic question rather than concluding its language model is inferior.
