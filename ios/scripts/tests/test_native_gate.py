@@ -107,6 +107,14 @@ class XCTestEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing successful SecretaryVoicePreferenceTests"):
             self.run_evidence(omit_suite="SecretaryVoicePreferenceTests")
 
+    def test_missing_caption_recovery_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful InCallCaptionTests"):
+            self.run_evidence(omit_suite="InCallCaptionTests")
+
+    def test_missing_real_keychain_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing successful NativeSessionStorageTests"):
+            self.run_evidence(omit_suite="NativeSessionStorageTests")
+
     def test_failed_action_fails(self):
         with self.assertRaisesRegex(ValueError, "did not succeed"):
             self.run_evidence(status="failed")

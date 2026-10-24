@@ -5,6 +5,17 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "NativeSessionStorageTests": (
+        "testRealKeychainCanStoreReadAndDeleteSessionToken",
+    ),
+    "InCallCaptionTests": (
+        "testGuestAndOwnerLiveCardsAreIndependent",
+        "testReconnectIndicatorAcrossFullRetryCycle",
+        "testManualReconnectButtonReArmsStreamAfterTerminalFailure",
+        "testSignInSuccessReArmsStreamAndRestoresReconnect",
+        "testLateSocketFailureCannotTearDownManualRetry",
+        "testTransportAuthRejectionRequiresSignInWithoutAutomaticRetry",
+    ),
     "SecretaryVoicePreferenceTests": (
         "testDefaultDoesNotInheritTranslatorProvider",
         "testOldPersistedDraftStillDecodesItsExplicitProvider",
@@ -80,7 +91,7 @@ def verify(bundle):
         for method in methods:
             if not any(suite in p and method + "()" in p for p in passed):
                 raise ValueError(f"Missing successful {suite}/{method}()")
-    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards/Secretary/audio tests passed")
+    print(f"Native XCTest evidence: {len(passed)} passed tests, required URL/isolation/cards/Secretary/audio/recovery/secure-storage tests passed")
 
 
 if __name__ == "__main__":

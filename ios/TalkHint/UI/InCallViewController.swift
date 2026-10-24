@@ -8,7 +8,7 @@ import AVFoundation
 final class InCallViewController: UIViewController {
 
     private let callerName: String
-    private let stream = CallHintStream()
+    private let stream: CallHintStream
 
     /// Test seam: the live hint stream that the "Reconnect" button drives via
     /// `retryTapped`, exposed so the manual-reconnect path can be observed
@@ -55,8 +55,9 @@ final class InCallViewController: UIViewController {
     // reconnect would duplicate the "GOAL" card in the conversation history.
     private var lastGoalShownInFeed: String?
 
-    init(callerName: String) {
+    init(callerName: String, hintStream: CallHintStream = CallHintStream()) {
         self.callerName = callerName
+        self.stream = hintStream
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }

@@ -88,8 +88,16 @@ protocol CallHintStreamDelegate: AnyObject {
 final class CallHintStream: NSObject {
     weak var delegate: CallHintStreamDelegate?
 
-    private var task: URLSessionWebSocketTask?
-    private var session: URLSession?
+    private var task: CallHintSocket?
+    private let tokenProvider: () -> String?
+    private let socketFactory: (URL) -> CallHintSocket
+
+    init(tokenProvider: @escaping () -> String? = { SessionStore.shared.token },
+         socketFactory: @escaping (URL) -> CallHintSocket = { URLSessionCallHintSocket(url: $0) }) {
+        self.tokenProvider = tokenProvider
+        self.socketFactory = socketFactory
+        super.init()
+    }
     /// Whether the stream currently considers itself live — `true` from `connect()`
     /// (and through auto-reconnect attempts) until `disconnect()` or a terminal
     /// give-up. The setter stays private; the getter is exposed so tests can
@@ -117,10 +125,9 @@ final class CallHintStream: NSObject {
     /// Tears the connection down cleanly. Safe to call multiple times.
     func disconnect() {
         isActive = false
-        task?.cancel(with: .goingAway, reason: nil)
+        let previous = task
         task = nil
-        session?.invalidateAndCancel()
-        session = nil
+        previous?.cancel()
     }
 
     /// Sends a free-form question to the assistant. The reply arrives as an
@@ -291,7 +298,7 @@ final class CallHintStream: NSObject {
         // "sign in" state instead of silently leaving `isActive == true` (which
         // would strand the manual "Reconnect" path on a frozen "Reconnecting…"
         // label with no recovery).
-        guard let token = SessionStore.shared.token, !token.isEmpty else {
+        guard let token = tokenProvider(), !token.isEmpty else {
             isActive = false
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -307,23 +314,26 @@ final class CallHintStream: NSObject {
         components.queryItems = [URLQueryItem(name: "token", value: token)]
         guard let url = components.url else { return }
 
-        let session = URLSession(configuration: .default)
-        self.session = session
-        let task = session.webSocketTask(with: url)
+        let task = socketFactory(url)
         self.task = task
         task.resume()
         receiveNext()
         applyPersistedSelections()
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self, self.isActive else { return }
+        DispatchQueue.main.async { [weak self, weak task] in
+            guard let self = self, let task = task,
+                  self.isActive, self.task === task else { return }
             self.delegate?.callHintStreamDidConnect(self)
         }
     }
 
     private func receiveNext() {
-        task?.receive { [weak self] result in
-            guard let self = self else { return }
+        guard let current = task else { return }
+        current.receive { [weak self, weak current] result in
+            // A cancelled connection can finish after a manual retry. Its
+            // callback must not tear down or overwrite the newer connection.
+            guard let self = self, let current = current,
+                  self.task === current else { return }
             switch result {
             case .failure:
                 self.handleDisconnect()
@@ -356,9 +366,9 @@ final class CallHintStream: NSObject {
         let statusCode = (task?.response as? HTTPURLResponse)?.statusCode
 
         // Connection dropped mid-call: tear the socket down before reacting.
+        let previous = task
         task = nil
-        session?.invalidateAndCancel()
-        session = nil
+        previous?.cancel()
 
         switch CallHintStream.disconnectAction(handshakeStatusCode: statusCode,
                                                priorAttempts: reconnectAttempts) {
