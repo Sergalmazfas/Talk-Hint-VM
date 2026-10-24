@@ -418,7 +418,7 @@ export default function RetellBench({
       </div>
        <aside className="retell-panel retell-history">
          <div className="retell-panel-title"><span>{isEngine ? "05" : "04"} / ОТЧЁТЫ</span><strong>История на сервере</strong><button className="icon-button" onClick={() => void loadConfig()} aria-label="Обновить историю"><RefreshCw size={14} /></button></div>
-        <p className="retell-history-caption">Временное хранение: до {config?.limits.historyMinutes ?? 60} минут или до перезапуска сервера. Retell настроен на basic_attributes_only, без сохранения записи и транскрипта у провайдера.</p>
+         <p className="retell-history-caption">Это временная история: до {config?.limits.historyMinutes ?? 60} минут или перезапуска сервера, не архив сравнения. Retell настроен на basic_attributes_only, без сохранения записи и транскрипта у провайдера. <a href="#saved-comparisons">Для длительного хранения выберите прогоны в сохранённых сравнениях</a>.</p>
         {(config?.history || []).length === 0 ? <div className="history-empty">Сохранённых прогонов пока нет.<small>Завершённые и текущие отчёты появятся здесь.</small></div> :
           <div className="history-list">{config!.history.map((item) => <button key={item.id} disabled={busy} className={`history-item ${current?.id === item.id ? "current" : ""}`} onClick={() => { setSelected(item); setReport(null); reportRef.current = null; }}>
             <span className={`history-dot ${item.status === "live" || item.status === "connecting" ? "running" : ""}`} /><span className="history-detail"><b>{item.model} · {item.voice}</b><small>{formatLabTime(item.createdAt)} · {item.status}</small></span><span className="history-arrow">→</span>

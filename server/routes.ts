@@ -407,6 +407,28 @@ export async function registerRoutes(
   const { retellEngineLab } = await import("./secretaryLab/retellEngine");
   const { registerRetellLabRoutes } = await import("./secretaryLab/retellRoutes");
   registerRetellLabRoutes(app, retellEngineLab, "/api/admin/secretary-lab/retell-engine");
+  if (process.env.NODE_ENV === "development") {
+    const { registerComparisonRoutes } = await import("./secretaryLab/comparisonRoutes");
+    const { PgComparisonRepository } = await import("./secretaryLab/comparisonStore");
+    const { retellSecretaryLab } = await import("./secretaryLab/retell");
+    const { dbReady, pool } = await import("./db");
+    await dbReady;
+    // No in-memory fallback: a missing DB/schema must produce an honest 503.
+    const store = new PgComparisonRepository({
+      query: (...args: any[]) => {
+        if (!pool) return Promise.reject(new Error("Comparison database unavailable"));
+        return (pool.query as any)(...args);
+      },
+    });
+    registerComparisonRoutes(app, store, owner => [
+      ...secretaryLab.reports(owner).map(report => ({ mode: "gpt" as const, report })),
+      ...retellSecretaryLab.reports(owner).map(report => ({ mode: "retell" as const, report })),
+      ...retellEngineLab.reports(owner).map(report => ({ mode: "retell-engine" as const, report })),
+    ]);
+    const purge = () => store.purge().catch(() => console.error("[SecretaryLab] Comparison expiry cleanup failed"));
+    void purge();
+    setInterval(() => { void purge(); }, 3_600_000).unref();
+  }
   await import("./copilotSpeech").then(({ registerCopilotSpeechRoute }) => registerCopilotSpeechRoute(app));
 
   // Translator Realtime Spike — dev-only test stand (404 in production).

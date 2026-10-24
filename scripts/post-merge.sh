@@ -18,4 +18,7 @@ npm install --no-audit --no-fund
 echo "[post-merge] Preparing per-owner calendar storage (development only)..."
 npx --no-install tsx scripts/ensure-owner-calendar-schema.ts
 
+echo "[post-merge] Preparing Dev-only Secretary comparison storage..."
+npx --no-install tsx scripts/ensure-secretary-comparisons-schema.ts
+
 echo "[post-merge] Done."

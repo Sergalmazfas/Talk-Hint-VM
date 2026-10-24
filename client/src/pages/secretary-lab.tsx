@@ -20,6 +20,8 @@ import { useStandReadiness } from "@/components/secretary-lab/stand-readiness";
 import "@/components/secretary-lab/stand-readiness.css";
 import { secretaryStand, secretaryStandPath, chooseSecretaryStand, type SecretaryStand } from "@/lib/secretary-lab-modes";
 
+import SavedComparisons from "@/components/secretary-lab/SavedComparisons";
+
 type LiveState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "ended";
 type WireMessage = Record<string, any>;
 
@@ -806,6 +808,7 @@ export default function SecretaryLab() {
         </aside>
       </div>
       }
+      <SavedComparisons key={token || "signed-out"} token={token || ""} />
       <footer className="lab-footer"><span>SECRETARY LAB · PRIVATE SANDBOX</span><span>REAL AUDIO · NO RECORDING · NO TELEPHONE</span></footer>
     </main>
   </div>;

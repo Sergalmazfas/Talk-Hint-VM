@@ -51,6 +51,12 @@ The owner authorized a third “Retell + Engine” comparison ONLY inside the ex
 
 **How to apply:** Keep the original two modes available. Distinguish the new text adapter from the existing audio Engine; enforce a sandbox allowlist rather than exposing real tools. Treat interruption as cancellation of obsolete speech/generation, not rollback of an already committed action, and deduplicate action replays across response IDs/reconnects.
 
+Treat consent to paid voice processing and consent to retaining comparison transcripts as separate decisions. Archiving must remain an explicit selection, not an automatic extension of temporary Lab history.
+
+**Why:** The owner requested an explicitly agreed comparison store, not permanent retention of every microphone test. Even fictional scenarios can contain user-spoken private details.
+
+**How to apply:** Explain the retention period and administrator visibility before each save. Preserve the boundary between offline test-action snapshots and real calendar/notification execution; reopening a saved comparison must never resume audio or replay actions.
+
 Retell's Custom LLM WebSocket does not send authentication headers. Do not assume the webhook signature mechanism protects that separate protocol.
 
 **Why:** The provider's setup guide explicitly requires endpoint admission protection; authenticating ordinary webhooks does not authenticate model sockets.

@@ -175,6 +175,11 @@ export class RetellSecretaryLab {
     const s = this.get(owner, id); s.lastSeen = this.now();
     return { report: structuredClone(s.report) };
   }
+  reports(owner: string) {
+    this.dev(); this.prune();
+    return Array.from(this.sessions.values()).filter(s => s.owner === owner)
+      .map(s => structuredClone(s.report)).reverse();
+  }
   async connected(owner: string, id: string) {
     const s = this.get(owner, id); s.lastSeen = this.now();
     if (terminal(s) || !s.report.callId || !s.call) fail(409, "Сессия уже завершена или не создана");

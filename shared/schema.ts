@@ -641,3 +641,16 @@ export const talkhintProjectModels = pgTable("talkhint_project_models", {
   state: jsonb("state").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Explicitly consented Dev voice-bench snapshots, separate from call history.
+export const secretaryLabComparisons = pgTable("secretary_lab_comparisons", {
+  id: varchar("id").primaryKey(),
+  ownerId: varchar("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  instruction: text("instruction").notNull(),
+  evaluation: jsonb("evaluation").notNull(),
+  runs: jsonb("runs").notNull(),
+  consentAt: timestamp("consent_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+}, t => ({ expiresIdx: index("secretary_lab_comparisons_expires_idx").on(t.expiresAt) }));
