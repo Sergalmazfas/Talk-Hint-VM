@@ -3,6 +3,8 @@ import { AlertCircle, Check, Download, RefreshCw, Save, ShieldCheck, Trash2 } fr
 import { Button } from "@/components/ui/button";
 import { labRequest, formatLabTime } from "@/lib/secretary-lab";
 import "./saved-comparisons.css";
+import RunCost from "./RunCost";
+import type { LabRunCost } from "../../../../shared/secretaryLabCost";
 
 type Mode = "gpt" | "retell" | "retell-engine" | "eleven-engine";
 type Evaluation = { score: number | null; note: string };
@@ -18,6 +20,7 @@ type Summary = {
   runs: RunIdentity[];
 };
 type SavedRun = RunIdentity & {
+  cost?: LabRunCost;
   verification?: string;
   instruction: string;
   status: string;
@@ -56,6 +59,7 @@ function ReportView({ record }: { record: SavedComparison }) {
       </header>
       <div className="saved-report-meta"><span>Создан {humanDate(run.createdAt)}</span><span>{run.endedAt ? `Завершён ${humanDate(run.endedAt)}` : "Время завершения не сообщено"}</span><span>ID · {run.id}</span></div>
       <p className="saved-muted">Источник проверки: {run.verification || "Не указан"}. Проверенная конфигурация не доказывает слышимость голоса или качество телефонного звонка.</p>
+      <RunCost cost={run.cost} />
       <details className="saved-data-block" open>
         <summary>Инструкция</summary><p className="saved-instruction">{run.instruction || "Инструкция отсутствует в отчёте."}</p>
       </details>

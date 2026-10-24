@@ -1,0 +1,9 @@
+.lab-run-cost { border: 1px solid #d6e5e1; background: #f8fbfa; border-radius: 12px; padding: 16px; margin: 16px 0; color: #253e37; overflow-wrap: anywhere; }
+.lab-run-cost h4 { font-size: 15px; font-weight: 650; margin: 0 0 8px; }
+.lab-run-cost p { font-size: 12px; line-height: 1.5; margin: 6px 0; }
+.lab-cost-lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; margin: 12px 0; }
+.lab-cost-line { background: white; border: 1px solid #e1eae7; border-radius: 8px; padding: 10px; font-size: 12px; }
+.lab-cost-line b, .lab-cost-line span, .lab-cost-line small { display: block; margin-bottom: 4px; }
+.lab-run-cost summary { cursor: pointer; font-size: 12px; }
+.lab-cost-sources { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.lab-cost-sources a { display: inline-block; padding: 8px 12px; border: 1px solid #b7d7cd; border-radius: 8px; color: #176b57; font-size: 12px; text-decoration: none; }

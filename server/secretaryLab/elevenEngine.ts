@@ -11,6 +11,7 @@ import type { ComparisonRepository } from "./comparisonStore";
 import { comparisonSnapshot, comparisonText } from "./comparisonSnapshot";
 import type { RetellReport } from "./retell";
 import { elevenProfiles, type ElevenProfileId, type ElevenTiming } from "../../shared/elevenLabProfiles";
+import { captureLabTariff, pricedLabReport } from "./cost";
 
 const startInput = z.object({ instruction: z.string().trim().min(8).max(4000),
   voice: z.enum(["clone", "catalog"]), consent: z.literal(true), clientRequestId: z.string().uuid(),
@@ -119,7 +120,7 @@ export class ElevenEngineLab {
     if (old) {
       if (old.owner !== owner) fail(404, "Сессия не найдена");
       if (old.fingerprint !== fingerprint) fail(409, "Request ID уже относится к другому поручению или голосу");
-      if (old.closed) return { id: old.id, report: structuredClone(old.report) };
+      if (old.closed) return { id: old.id, report: pricedLabReport("eleven-engine", old.report) };
       return old.created;
     }
     if (Array.from(this.sessions.values()).some(s => s.owner === owner && (!s.closed || s.report.status === "stop_failed")))
@@ -154,7 +155,7 @@ export class ElevenEngineLab {
     });
     s.report = { id, callId: "", mode: "eleven-engine", status: "connecting", instruction: input.instruction,
       model: SECRETARY_REASONING_MODEL, voice: "", promptHash: hash(s.engine.instructions + (profile.brief ? briefInstructions : "")),
-      createdAt: new Date().toISOString(), monitorStatus: "waiting", turns: [], events: [], observations: [],
+      createdAt: new Date().toISOString(), tariffSnapshot: captureLabTariff(), monitorStatus: "waiting", turns: [], events: [], observations: [],
       metrics: { guestTurns: 0, secretaryTurns: 0 }, engine: s.engine.report, savedComparisonId: id,
       ttsModel: profile.ttsModel, voiceChoice: input.voice, profileId: input.profileId,
       configuration: { ...profile, model: SECRETARY_REASONING_MODEL, voice: ELEVEN_CATALOG.name,
@@ -190,9 +191,10 @@ export class ElevenEngineLab {
           if (Date.now() - s.lastSeen > 25_000) void this.stop(owner, id).catch(() => undefined);
         }, 5000); s.heartbeat.unref();
         await this.persist(s);
-        return { id, websocketPath: `/eleven-engine-audio/${s.audioTicket}`, report: structuredClone(s.report) };
+        return { id, websocketPath: `/eleven-engine-audio/${s.audioTicket}`, report: pricedLabReport("eleven-engine", s.report) };
       } catch (e) {
-        this.close(s); s.report.status = "failed"; s.report.reason = e instanceof ElevenLabError ? e.message : "Сохранение/подключение не подтверждено";
+        this.close(s); s.report.status = "failed"; s.report.endedAt ??= new Date().toISOString();
+        s.report.reason = e instanceof ElevenLabError ? e.message : "Сохранение/подключение не подтверждено";
         if (s.agentId) {
           try { await this.api.remove(s.agentId); s.agentId = undefined; }
           catch { s.report.status = "stop_failed"; s.report.reason = "Удаление изолированного Dev-аудиоагента не подтверждено; повторите Stop"; }
@@ -223,7 +225,7 @@ export class ElevenEngineLab {
         if (s.agentId) { await this.api.remove(s.agentId); s.agentId = undefined; }
         s.report.status = "ended"; s.report.endedAt ??= new Date().toISOString(); this.event(s, "stopped");
         await this.persist(s);
-        return { report: structuredClone(s.report) };
+        return { report: pricedLabReport("eleven-engine", s.report) };
       } catch {
         s.report.status = "stop_failed"; s.report.reason = "Остановка или сохранение не подтверждены; повторите Stop";
         await this.persist(s).catch(() => undefined);
@@ -303,6 +305,7 @@ export class ElevenEngineLab {
         const f = JSON.parse(raw.toString());
         if (f.type === "conversation_initiation_metadata") {
           s.report.callId = f.conversation_initiation_metadata_event?.conversation_id ?? "";
+          s.report.audioConnectedAt ??= new Date().toISOString();
           s.report.status = "live"; s.report.monitorStatus = "connected"; s.engine.report.connected = true;
           this.event(s, "audio_connected");
         }

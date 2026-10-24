@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import RunCost from "./RunCost";
+import type { LabRunCost } from "../../../../shared/secretaryLabCost";
 import { RetellClient } from "retell-client-js-sdk";
 import { AlertCircle, AudioLines, Check, CircleStop, Download, LoaderCircle, Mic, Radio, RefreshCw, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +16,7 @@ type RetellTurn = { id: string; role: "guest" | "secretary"; text: string; atMs:
 type RetellEvent = { type: string; atMs: number; detail?: string };
 type RetellObservation = { atMs: number; outcome: "stopped" | "continued" | "unknown"; note?: string };
 export type RetellReport = {
+  cost?: LabRunCost;
   id: string;
   callId: string;
   status: "connecting" | "live" | "ended" | "stop_failed" | "failed";
@@ -389,6 +392,7 @@ export default function RetellBench({
           <div className="retell-meta"><span>Монитор: {current?.monitorStatus || "waiting"}</span><span>Собеседник {current?.metrics.guestTurns ?? 0} · секретарь {current?.metrics.secretaryTurns ?? 0}</span></div>
         </article>
 
+        {current && <RunCost cost={current.cost} />}
         {isEngine && current?.engine && <article className="retell-panel engine-report">
           <div className="retell-panel-title"><span>03 / ENGINE TRACE</span><strong>Действия и события отчёта</strong></div>
           <div className="engine-report-meta"><span>Provider</span><b>{current.engine.provider || "Не сообщён"}</b><span>Model</span><b>{current.engine.model || "Не сообщена"}</b><span>Test-only</span><b>{current.engine.testOnly === undefined ? "Не сообщено" : current.engine.testOnly ? "Да" : "Нет"}</b><span>Connected</span><b>{current.engine.connected === undefined ? "Не сообщено" : current.engine.connected ? "Да" : "Нет"}</b></div>

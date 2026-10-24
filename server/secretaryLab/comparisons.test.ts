@@ -7,6 +7,7 @@ import { registerComparisonRoutes, type ComparisonReports } from "./comparisonRo
 import { comparisonSnapshot, comparisonText } from "./comparisonSnapshot";
 import { PgComparisonRepository, type ComparisonRepository } from "./comparisonStore";
 import type { RetellReport } from "./retell";
+import { captureLabTariff } from "./cost";
 
 vi.mock("../auth", () => ({
   authMiddleware: (req: any, res: any, next: () => void) => {
@@ -61,6 +62,26 @@ describe("explicit Dev-only Secretary comparisons", () => {
   const saveBody = (s: RetellReport) => ({
     title: "Проверка перебивания", consent: true, sources: [{ mode: "retell-engine", id: s.id }],
     evaluation: { score: 4, note: "Слышно хорошо; телефон не проверялся" },
+  });
+  it("persists the price snapshot through provider loss, restart and evaluation edits without repricing", async () => {
+    source.tariffSnapshot = captureLabTariff();
+    source.tariffSnapshot.rates.retellInfraMinute = 0.123;
+    source.voice = "retell-Merritt"; source.model = "gpt-6.1-sol";
+    source.createdAt = "2026-10-24T12:00:00.000Z"; source.endedAt = "2026-10-24T12:01:10.000Z";
+    source.audioConnectedAt = "2026-10-24T12:00:10.000Z";
+    source.engine!.model = "gpt-6.1-sol";
+    source.engine!.usage = { requests: 1, measuredRequests: 1, input: 1000, cachedInput: 100, output: 100 };
+    const saved = await auth(request(app).post(base)).send(saveBody(source)).expect(201);
+    const cost = saved.body.runs[0].cost;
+    expect(cost.estimatedTotalUsd).toBeCloseTo(0.14081);
+    source.tariffSnapshot.rates.retellInfraMinute = 99;
+    source.engine!.usage.input = 999999;
+    const restarted = express(); registerComparisonRoutes(restarted, store, () => []);
+    const edited = await auth(request(restarted).patch(`${base}/${saved.body.id}`))
+      .send({ evaluation: { score: 5, note: "Price must stay frozen" } }).expect(200);
+    expect(edited.body.runs[0].cost).toEqual(cost);
+    const read = await auth(request(restarted).get(`${base}/${saved.body.id}`)).expect(200);
+    expect(read.body.runs[0].cost).toEqual(cost);
   });
   it("saves an immutable server snapshot, reads after transient reports disappear, edits and physically deletes", async () => {
     const saved = await auth(request(app).post(base)).send(saveBody(source)).expect(201);

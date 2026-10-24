@@ -16,6 +16,7 @@ import { createLabRtcController, LabRtcController, OPENAI_LAB_MODEL, OPENAI_LAB_
 import { AlertCircle, ArrowDownToLine, AudioLines, Check, CircleStop, Headphones, LoaderCircle, Mic, MicOff, Radio, RefreshCw, ShieldAlert, Volume2, Wifi } from "lucide-react";
 import "@/lib/secretary-lab.css";
 import RetellBench from "@/components/secretary-lab/RetellBench";
+import RunCost from "@/components/secretary-lab/RunCost";
 import ElevenEngineBench from "@/components/secretary-lab/ElevenEngineBench";
 import EngineFixtures from "@/components/secretary-lab/EngineFixtures";
 import { useStandReadiness } from "@/components/secretary-lab/stand-readiness";
@@ -803,6 +804,7 @@ export default function SecretaryLab() {
                    <span className={`history-dot ${item.status}`} /><span className="history-detail"><b>{item.voiceProvider === "elevenlabs" ? "ElevenLabs" : item.voiceProvider === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"} · {item.metrics.guestTurns + item.metrics.secretaryTurns} реплик</b><small>{formatLabTime(item.createdAt)} · {item.instruction}</small></span><span className="history-arrow">→</span>
                 </button>)}</div>}
                {visibleReport && <div className="report-actions">
+                 <RunCost cost={visibleReport.cost} />
                  <div className="report-title"><b>Отчёт выбран · {visibleReport.model ?? visibleReport.voiceProvider}</b><span>{visibleReport.voice ?? "голос не указан"} · {visibleReport.transport ?? "транспорт не указан"} · {labEndReasonLabel(visibleReport.reason)}</span></div>
                  <div className="report-instruction"><b>Инструкция сессии</b><p>{visibleReport.instruction}</p></div>
                 <Button variant="outline" size="sm" onClick={() => downloadReport({ ...visibleReport, rating: rating || undefined })}><ArrowDownToLine size={14} /> JSON</Button>

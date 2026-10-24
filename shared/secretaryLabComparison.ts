@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { LabRunCost } from "./secretaryLabCost";
 
 export const comparisonMode = z.enum(["gpt", "retell", "retell-engine", "eleven-engine"]);
 export const comparisonEvaluation = z.object({
@@ -28,6 +29,7 @@ export interface ComparisonRun {
   endedAt?: string;
   /** Configuration verification is not evidence of audible speech or PSTN quality. */
   verification: string;
+  cost?: LabRunCost;
   [key: string]: unknown;
 }
 export interface SavedComparison {

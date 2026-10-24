@@ -4,10 +4,12 @@ import { buildSecretaryInstructions } from "./agent";
 import { confirmedSecretaryOwnerName } from "./ownerIdentity";
 import { SECRETARY_REASONING_MODEL } from "./voice";
 import { SECRETARY_TEST_CONTEXT, secretaryTestContextPrompt } from "../secretaryLab/testContext";
+import type { LabTokenUsage } from "../../shared/secretaryLabCost";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
-  { type: "complete"; output: any[]; tools: Array<{ call_id: string; name: string; arguments: string }> };
+  { type: "complete"; output: any[]; tools: Array<{ call_id: string; name: string; arguments: string }> } |
+  { type: "usage"; input: number; cachedInput: number; output: number };
 export interface EngineRequest { instructions: string; input: any[]; signal: AbortSignal }
 export type EngineStream = (request: EngineRequest) => AsyncIterable<EngineChunk>;
 const schema = (name: string, description: string, properties: object, required: string[]) => ({
@@ -34,6 +36,11 @@ export async function* streamSecretaryResponse(request: EngineRequest,
   }, { signal: request.signal });
   let complete = false;
   for await (const event of stream) {
+    if (["response.completed", "response.incomplete", "response.failed"].includes(event.type) && "response" in event) {
+      const usage = event.response.usage;
+      if (usage) yield { type: "usage", input: usage.input_tokens,
+        cachedInput: usage.input_tokens_details?.cached_tokens ?? 0, output: usage.output_tokens };
+    }
     if (request.signal.aborted) return;
     if (event.type === "response.output_text.delta") yield { type: "text", text: event.delta };
     if (event.type === "response.failed" || event.type === "response.incomplete" || event.type === "error") {
@@ -53,6 +60,7 @@ export class SecretaryConversationEngine {
     provider: "OpenAI via TalkHint", model: SECRETARY_REASONING_MODEL, testOnly: true as const,
     context: SECRETARY_TEST_CONTEXT, actions: [] as TestAction[],
     events: [] as Array<{ type: string; at: string }>, connected: false,
+    usage: { requests: 0, measuredRequests: 0, input: 0, cachedInput: 0, output: 0 } as LabTokenUsage,
   };
   readonly instructions: string;
   private ledger = new Map<string, any>();
@@ -102,7 +110,20 @@ export class SecretaryConversationEngine {
     if (reminder) input.push({ role: "developer", content: "Briefly check if the caller is still there; do not invent a request or end for silence." });
     for (let round = 0; round < 4 && !signal.aborted; round++) {
       let completion: Extract<EngineChunk, { type: "complete" }> | undefined;
+      this.report.usage.requests++;
+      let measured = false;
       for await (const chunk of this.stream({ instructions: this.instructions, input, signal })) {
+        if (chunk.type === "usage") {
+          if (!measured && [chunk.input, chunk.cachedInput, chunk.output].every(n => Number.isSafeInteger(n) && n >= 0) &&
+              chunk.cachedInput <= chunk.input) {
+            measured = true;
+            this.report.usage.measuredRequests++;
+            this.report.usage.input += chunk.input;
+            this.report.usage.cachedInput += chunk.cachedInput;
+            this.report.usage.output += chunk.output;
+          }
+          continue;
+        }
         if (signal.aborted) return;
         if (chunk.type === "text") emit(chunk.text);
         else completion = chunk;

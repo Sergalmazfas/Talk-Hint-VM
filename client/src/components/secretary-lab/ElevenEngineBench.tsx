@@ -10,10 +10,13 @@ import type { ElevenEngineReadiness } from "./stand-readiness";
 import { elevenProfiles, type ElevenProfileId, type ElevenTiming } from "../../../../shared/elevenLabProfiles";
 import ElevenPerformance from "./ElevenPerformance";
 import EngineFixtures from "./EngineFixtures";
+import RunCost from "./RunCost";
+import type { LabRunCost } from "../../../../shared/secretaryLabCost";
 import "./eleven-engine.css";
 
 type Turn = { id?: string; role?: string; text?: string; atMs?: number; [key: string]: unknown };
 type EngineReport = {
+  cost?: LabRunCost;
   id: string; savedComparisonId?: string; voiceChoice?: "clone" | "catalog";
   status: string; model?: string; voice?: string; ttsModel?: string; instruction?: string;
   profileId?: string; configuration?: unknown; timings?: ElevenTiming[];
@@ -480,6 +483,7 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
             <div className="eleven-report-id"><span>SESSION ID <b>{current.id}</b></span><span>SAVED COMPARISON ID <b>{current.savedComparisonId || savedId || "Не сообщён"}</b></span><a href="#saved-comparisons">Открыть архив сравнений ↓</a></div>
             <div className="eleven-report-facts"><span>Статус <b>{current.status}</b></span><span>Голос <b>{current.voice || current.voiceChoice || "Не сообщён"}</b></span><span>Модель <b>{current.engine?.model || current.model || "Не сообщена"}</b></span><span>Test-only <b>{current.engine?.testOnly === undefined ? "Не сообщено" : current.engine.testOnly ? "Да" : "Нет"}</b></span></div>
              <ElevenPerformance profileId={current.profileId} configuration={current.configuration} timings={current.timings} />
+             <RunCost cost={current.cost} />
              <div className="eleven-report-actions">
                <Button type="button" variant="outline" onClick={downloadReport}>Скачать JSON</Button>
              </div>

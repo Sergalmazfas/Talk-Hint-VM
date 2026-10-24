@@ -4,6 +4,9 @@ import WebSocket from "ws";
 import type { SecretaryCallContext, SecretaryStreamDependencies } from "../secretary/agent";
 import { type LabRealtimeCallbacks, type LabRealtimeConnection } from "./openAIRealtime";
 import { SECRETARY_AUDIO_MODEL as LAB_REALTIME_MODEL,SECRETARY_AUDIO_VOICE as LAB_REALTIME_VOICE } from "../secretary/voice";
+import type { LabRunCost, LabTariffSnapshot } from "../../shared/secretaryLabCost";
+import { captureLabTariff, pricedLabReport } from "./cost";
+import { RealtimeUsageMeter } from "./realtimeUsage";
 
 export interface LabTurn {
   id: string;
@@ -14,6 +17,10 @@ export interface LabTurn {
   interrupted?: boolean;
 }
 export interface LabReport {
+  tariffSnapshot?: LabTariffSnapshot;
+  cost?: LabRunCost;
+  realtimeUsage?: import("../../shared/secretaryLabCost").LabRealtimeUsage;
+  audioConnectedAt?: string;
   id: string;
   status: "awaiting_connection" | "running" | "ended";
   createdAt: string;
@@ -128,7 +135,7 @@ export class SecretaryLab {
   reports(owner: string): LabReport[] {
     this.prune();
     return Array.from(this.sessions.values()).filter(s => s.owner === owner)
-      .map(s => structuredClone(s.report)).reverse().slice(0, 20);
+      .map(s => pricedLabReport("gpt", s.report)).reverse().slice(0, 20);
   }
   private event(s: Session, type: string, detail?: string) {
     const event = { type, atMs: this.now() - s.started, ...(detail ? { detail } : {}) };
@@ -184,7 +191,7 @@ export class SecretaryLab {
       started: now, pendingMarks: new Set(), inputReady: false, firstAudioForTurn: true,
       inputWindow: now, inputBytes: 0,
       context: null,
-      report: { id, status: "awaiting_connection", createdAt: new Date(now).toISOString(),
+      report: { id, status: "awaiting_connection", createdAt: new Date(now).toISOString(), tariffSnapshot: captureLabTariff(),
         instruction: input.instruction.trim(), voiceProvider: input.voiceProvider, turns: [], events: [],
         model: input.voiceProvider === "openai" ? LAB_REALTIME_MODEL : process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime",
         voice: input.voiceProvider === "openai" ? LAB_REALTIME_VOICE : `Owner-linked ${input.voiceProvider} voice`,
@@ -209,7 +216,7 @@ export class SecretaryLab {
     this.event(s, "session_created");
     s.timer = setTimeout(() => this.end(s, "connection_timeout"), 30_000);
     s.timer.unref?.();
-    return { id, ticket: s.ticket, socketPath: "/secretary-lab-stream", report: structuredClone(s.report) };
+    return { id, ticket: s.ticket, socketPath: "/secretary-lab-stream", report: pricedLabReport("gpt", s.report) };
   }
   connect(ticket: string, send: Sender, close: () => void): string {
     this.prune();
@@ -222,13 +229,17 @@ export class SecretaryLab {
     s.send({ type: "state", state: "connecting", atMs: this.now() - s.started });
     if (s.report.voiceProvider === "openai" && s.report.transport==="webrtc") {
       try {
+        const meter = new RealtimeUsageMeter();
+        s.report.realtimeUsage = meter.totals;
         s.realtime = this.deps.openAI!.create(s.owner, s.report.instruction, {
           ready: (model, voice) => {
             if (s.report.status === "ended") return;
             s.report.model = model; s.report.voice = voice; s.report.modelVerified = true;
+            s.report.audioConnectedAt ??= new Date(this.now()).toISOString();
             s.send?.({ type: "ready", model, voice, transport: "webrtc" });
           },
           turn: (role, text, interrupted) => this.addTurn(s, role, text, interrupted),
+          usage: (id, usage) => meter.record(id, usage),
           clear: responseId => s.send?.({ type: "clear", responseId }),
           state: state => s.send?.({ type: "state", state, atMs: this.now() - s.started }),
           event: type => {
@@ -342,7 +353,7 @@ export class SecretaryLab {
   async stop(owner: string, id: string, reason = "user_stop"): Promise<LabReport> {
     const s = this.sessions.get(id);
     if (!s || s.owner !== owner) fail(404, "Lab session not found");
-    if (s.report.status === "ended") return structuredClone(s.report);
+    if (s.report.status === "ended") return pricedLabReport("gpt", s.report);
     if (s.stopPromise) return s.stopPromise;
     s.stopReason = reason;
     s.stopPromise = new Promise(resolve => { s.resolveStop = resolve; });
@@ -367,11 +378,11 @@ export class SecretaryLab {
     s.report.endedAt = new Date(this.now()).toISOString();
     this.event(s, "session_ended", reason);
     s.peer?.close();
-    s.send?.({ type: "ended", report: structuredClone(s.report) });
+    s.send?.({ type: "ended", report: pricedLabReport("gpt", s.report) });
     s.send = undefined;
     if (s.context) s.context.cloneVoiceId = "";
     void s.realtime?.stop();
-    try { this.deps.onEnd?.(structuredClone(s.report)); } catch { /* Reporting cannot keep audio running. */ }
-    s.resolveStop?.(structuredClone(s.report));
+    try { this.deps.onEnd?.(pricedLabReport("gpt", s.report)); } catch { /* Reporting cannot keep audio running. */ }
+    s.resolveStop?.(pricedLabReport("gpt", s.report));
   }
 }

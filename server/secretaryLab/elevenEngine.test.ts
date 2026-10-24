@@ -73,6 +73,33 @@ beforeEach(() => vi.stubEnv("REPLIT_DEV_DOMAIN", "unit.replit.dev"));
 afterEach(() => { labs.splice(0).forEach(l => l.dispose()); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("ElevenLabs + unchanged TalkHint Engine", () => {
+  it("checkpoints actual profile, voice, duration, usage and tariff into the common archive without repricing on reopen", async () => {
+    const f = fixture(async function* () {
+      yield { type: "text", text: "Measured TEST response" };
+      yield { type: "usage", input: 1000, cachedInput: 100, output: 50 };
+      yield completed;
+    });
+    const created = await f.lab.create("owner", { ...f.body, profileId: "optimized" });
+    const ticket = created.websocketPath!.split("/").at(-1)!;
+    const browser = new Wire(); f.lab.attachAudio(browser as any, ticket);
+    f.api.wire.emit("message", Buffer.from(JSON.stringify({ type: "conversation_initiation_metadata",
+      conversation_initiation_metadata_event: { conversation_id: "fictional-call" } })));
+    await request(f.app).post(`/completion/${f.api.capability}`).send(wireInput).expect(200);
+    await f.lab.stop("owner", created.id);
+    const saved = await f.store.get(created.id);
+    const cost = saved!.runs[0].cost!;
+    expect(cost).toMatchObject({ profileId: "optimized", voice: ELEVEN_CATALOG.voiceId,
+      ttsModel: "eleven_flash_v2_5", tokenUsage: { requests: 1, measuredRequests: 1, input: 1000, cachedInput: 100, output: 50 } });
+    expect(cost.durationSeconds).toBeTypeOf("number");
+    expect(cost.tariff.sources).toHaveLength(3);
+    expect(cost.confirmedChargeUsd).toBeNull();
+    const reopened = new ElevenEngineLab(f.store, f.api, undefined, undefined, () => true);
+    labs.push(reopened);
+    const read = await reopened.report("owner", created.id);
+    expect(read.report.cost).toEqual(cost);
+    expect(JSON.stringify(read)).not.toContain(f.api.capability);
+    expect(f.rows.size).toBe(1); // Same common archive; not a second results repository.
+  });
   it("forwards the first useful SSE text before the model finishes, without collecting a sentence", async () => {
     const chunks: string[] = [];
     const f = fixture(async function* () {

@@ -1,6 +1,7 @@
 import type { ComparisonMode, ComparisonRun } from "../../shared/secretaryLabComparison";
 import type { LabReport } from "./service";
 import type { RetellReport } from "./retell";
+import { calculateLabCost } from "./cost";
 
 /** Free text may echo provider errors or user-pasted credentials. No URLs are
  * needed for an offline comparison; exclude ALL URLs, not just known hosts.
@@ -35,6 +36,7 @@ export function comparisonSnapshot(mode: ComparisonMode, report: LabReport | Ret
     endedAt: report.endedAt,
     verification: gpt ? (gpt.modelVerified ? "model_verified_by_runtime" : "configuration_only") :
       "agent_configuration_verified_at_admission; audibility_not_measured",
+    cost: calculateLabCost(mode, report),
     reason: comparisonText(report.reason, 300),
     turns: report.turns.slice(0, 300).map(t => ({
       id: comparisonText(t.id, 100), role: t.role, text: comparisonText(t.text), atMs: time(t.atMs),

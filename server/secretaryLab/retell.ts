@@ -5,6 +5,8 @@ import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import { RetellApi, RetellApiError, RETELL_LAB_AGENT, RETELL_LAB_MODEL, RETELL_LAB_VOICE } from "./retellApi";
 import { secretaryTestContextPrompt } from "./testContext";
 import type { SecretaryConversationEngine } from "../secretary/conversationEngine";
+import type { LabRunCost, LabTariffSnapshot } from "../../shared/secretaryLabCost";
+import { captureLabTariff, pricedLabReport } from "./cost";
 
 export interface RetellReport {
   id: string; callId: string; status: "connecting" | "live" | "ended" | "stop_failed" | "failed";
@@ -17,6 +19,12 @@ export interface RetellReport {
   metrics: { guestTurns: number; secretaryTurns: number };
   mode?: string;
   engine?: SecretaryConversationEngine["report"];
+  tariffSnapshot?: LabTariffSnapshot;
+  cost?: LabRunCost;
+  ttsModel?: string;
+  profileId?: string;
+  audioConnectedAt?: string;
+  providerDurationSeconds?: number;
 }
 interface Session {
   owner: string; requestId: string; inputHash: string; report: RetellReport; call?: any;
@@ -57,6 +65,9 @@ export class RetellSecretaryLab {
     s.report.events.push({ type, atMs: this.now() - Date.parse(s.report.createdAt), ...(detail ? { detail } : {}) });
     if (s.report.events.length > 300) s.report.events.shift();
   }
+  private priced(s: Session) {
+    return pricedLabReport(this.profile ? "retell-engine" : "retell", s.report);
+  }
   private finish(s: Session, reason: string) {
     if (terminal(s)) return;
     clearTimeout(s.timer); clearInterval(s.poll); clearTimeout(s.reconnect);
@@ -81,7 +92,7 @@ export class RetellSecretaryLab {
     this.dev(); this.prune();
     const base = { model: RETELL_LAB_MODEL, voice: RETELL_LAB_VOICE,
       limits: { durationSeconds: 300, historyMinutes: 60 },
-      history: Array.from(this.sessions.values()).filter(s => s.owner === owner).map(s => structuredClone(s.report)).reverse() };
+      history: Array.from(this.sessions.values()).filter(s => s.owner === owner).map(s => this.priced(s)).reverse() };
     try {
       const extra = await this.profile?.check();
       const matches = (await this.api.listAgents()).filter(a => a.agent_name === (this.profile?.agentName ?? RETELL_LAB_AGENT));
@@ -110,7 +121,7 @@ export class RetellSecretaryLab {
       if (old.inputHash !== inputHash) fail(409, "Этот ID уже связан с другим поручением");
       if (old.creation) return old.creation;
       if (!old.call || terminal(old)) fail(409, "Запрос уже завершён или результат создания не установлен. Повторный вызов не создан.");
-      return { id: old.report.id, call: old.call, report: structuredClone(old.report) };
+      return { id: old.report.id, call: old.call, report: this.priced(old) };
     }
     if (Array.from(this.sessions.values()).some(s => s.owner === owner && (!terminal(s) || s.uncertain))) {
       fail(409, "Сессия Retell уже активна или её остановка не подтверждена");
@@ -123,7 +134,7 @@ export class RetellSecretaryLab {
       monitoring: false, polling: false, monitorAttempts: 0,
       report: { id, callId: "", status: "connecting", instruction, model: RETELL_LAB_MODEL,
         voice: RETELL_LAB_VOICE, promptHash: digest(instructions), createdAt: new Date(this.now()).toISOString(),
-        monitorStatus: "waiting", turns: [], events: [], observations: [],
+        tariffSnapshot: captureLabTariff(), monitorStatus: "waiting", turns: [], events: [], observations: [],
         metrics: { guestTurns: 0, secretaryTurns: 0 } } };
     const engine = this.profile?.reserve(owner, instruction, id);
     if (engine) { s.report.mode = this.profile!.mode; s.report.engine = engine.engine; }
@@ -156,7 +167,7 @@ export class RetellSecretaryLab {
       this.event(s, "web_session_registered");
       s.timer = setTimeout(() => { void this.stop(s.owner, s.report.id, "duration_limit").catch(() => {}); }, 300_000);
       s.timer.unref?.();
-      return { id: s.report.id, call: s.call, report: structuredClone(s.report) };
+      return { id: s.report.id, call: s.call, report: this.priced(s) };
     } catch (e) {
       const uncertain = submitting && (!(e instanceof RetellApiError) || e.status >= 500);
       s.uncertain = uncertain;
@@ -173,12 +184,12 @@ export class RetellSecretaryLab {
   }
   report(owner: string, id: string) {
     const s = this.get(owner, id); s.lastSeen = this.now();
-    return { report: structuredClone(s.report) };
+    return { report: this.priced(s) };
   }
   reports(owner: string) {
     this.dev(); this.prune();
     return Array.from(this.sessions.values()).filter(s => s.owner === owner)
-      .map(s => structuredClone(s.report)).reverse();
+      .map(s => this.priced(s)).reverse();
   }
   async connected(owner: string, id: string) {
     const s = this.get(owner, id); s.lastSeen = this.now();
@@ -201,10 +212,16 @@ export class RetellSecretaryLab {
       if (call.call_type !== "web_call" || call.call_id !== s.report.callId) {
         this.event(s, "provider_identity_mismatch"); return;
       }
+      if (Number.isFinite(call.duration_ms) && call.duration_ms >= 0 &&
+          ["ended", "error", "not_connected"].includes(call.call_status)) {
+        s.report.providerDurationSeconds = call.duration_ms / 1000;
+      }
       if (call.call_status === "ended" || call.call_status === "error" || call.call_status === "not_connected") {
         this.finish(s, String(call.disconnection_reason ?? call.call_status)); return;
       }
       if (call.call_status === "ongoing") {
+        s.report.audioConnectedAt ??= new Date(this.now()).toISOString();
+        if (!s.report.events.some(e => e.type === "provider_call_connected")) this.event(s, "provider_call_connected");
         s.report.status = "live";
         if (!s.socket && !s.reconnect && !s.monitorDenied && s.monitorAttempts < 8) this.monitor(s);
       }
@@ -272,7 +289,7 @@ export class RetellSecretaryLab {
   }
   async stop(owner: string, id: string, reason = "user_stop") {
     const s = this.get(owner, id);
-    if (terminal(s) && !s.uncertain) return structuredClone(s.report);
+    if (terminal(s) && !s.uncertain) return this.priced(s);
     if (s.stop) return s.stop;
     if (!s.report.callId) fail(409, "Retell не подтвердил ID созданной сессии. Новый вызов заблокирован, чтобы исключить дубликат.");
     s.stop = (async () => {
@@ -282,7 +299,7 @@ export class RetellSecretaryLab {
         // finish also works after an uncertain admission.
         if (s.report.status === "failed") s.report.status = "stop_failed";
         this.finish(s, reason);
-        return structuredClone(s.report);
+        return this.priced(s);
       } catch (e) {
         s.report.status = "stop_failed"; s.report.reason = "stop_not_confirmed";
         this.event(s, "stop_failed", (e as Error).message); throw e;
