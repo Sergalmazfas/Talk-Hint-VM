@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useOptionalAuth } from "@/lib/auth";
 import { IncomingSecretaryDevBench } from "@/components/incoming-secretary-dev-bench";
 import { WorkCalendarSettings } from "@/components/work-calendar-settings";
+import { SecretaryPersonalities } from "@/components/secretary-personalities";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -274,6 +275,7 @@ export default function IncomingSecretary() {
             <h1 className="text-lg font-semibold sm:text-xl">Входящий Secretary</h1>
           </div>
           <Link href="/settings/call-profiles" className="hidden text-sm text-[#b6cbc5] underline-offset-4 hover:text-white hover:underline sm:inline">Профили звонков</Link>
+          <a href="#personalities" className="ml-auto shrink-0 text-xs text-[#b6cbc5] underline-offset-4 hover:text-white hover:underline sm:text-sm">Характеры</a>
         </div>
       </header>
 
@@ -356,6 +358,8 @@ export default function IncomingSecretary() {
             </section>
 
             {selectedNumberId && <WorkCalendarSettings key={selectedNumberId} numberId={selectedNumberId} token={token} offlinePreview={isOfflineDemoRoute} />}
+
+            <SecretaryPersonalities token={token} offlinePreview={isOfflineDemoRoute} />
 
             {isPreviewAllowed && (
               <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">

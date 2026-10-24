@@ -8,6 +8,7 @@ import { streamSecretaryResponse, type SpokenTurn } from "./conversationEngine";
 import { getSecretaryTaskForCall } from "./tasks";
 import { publishSecretaryFeedEvent } from "./feed";
 import { createHash } from "node:crypto";
+import { resolveOutgoingPersonality } from "./personalities/store";
 
 export const RETELL_PHONE_AGENT = "TalkHint Secretary — Telephone + Engine";
 export const retellPhoneApi = new RetellApi();
@@ -138,7 +139,9 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
     }).where(and(eq(calls.callSid, callSid), eq(calls.userId, task.userId),
       sql`${calls.metadata}->'retellPhone' IS NULL`)).returning({ id: calls.id });
     if (!reserved.length) throw new Error("Retell registration already attempted; automatic retry prohibited");
-    const entry = retellPhoneRegistry.reserve(task.userId, task.instruction, taskId);
+    const history = await storage.getCallByCallSid(callSid);
+    const personality = await resolveOutgoingPersonality(task.userId, history?.fromNumber ?? "");
+    const entry = retellPhoneRegistry.reserve(task.userId, task.instruction, taskId, personality);
     try {
       const call = await retellPhoneApi.request("/v2/register-phone-call", {
         agent_id: agentId, agent_version: verified!.version, direction: "outbound",
@@ -151,7 +154,8 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
       await db.update(calls).set({
         metadata: sql`coalesce(${calls.metadata}, '{}'::jsonb) || ${JSON.stringify({
           retellPhone: { state: "registered", taskId, callId: call.call_id, agentId,
-            model: "gpt-6.1-sol", voice: "retell-Merritt" },
+            model: "gpt-6.1-sol", voice: "retell-Merritt",
+            personality: personality ? { id: personality.personalityId, version: personality.version, mode: personality.mode } : null },
         })}::jsonb`,
       }).where(and(eq(calls.callSid, callSid), eq(calls.userId, task.userId)));
       retellPhoneRegistry.registered(taskId, call.call_id);

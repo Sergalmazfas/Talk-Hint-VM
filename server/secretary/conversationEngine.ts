@@ -5,6 +5,7 @@ import { confirmedSecretaryOwnerName } from "./ownerIdentity";
 import { SECRETARY_REASONING_MODEL } from "./voice";
 import { SECRETARY_TEST_CONTEXT, secretaryTestContextPrompt } from "../secretaryLab/testContext";
 import type { LabTokenUsage } from "../../shared/secretaryLabCost";
+import { applyPersonality, type PersonalityBinding } from "./personalities/types";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -65,16 +66,16 @@ export class SecretaryConversationEngine {
   readonly instructions: string;
   private ledger = new Map<string, any>();
   constructor(owner: string, assignment: string, private stream: EngineStream = streamSecretaryResponse,
-    private telephone = false) {
+    private telephone = false, personality?: PersonalityBinding) {
     if (telephone) {
       this.report.testOnly = false;
-      this.instructions = buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner)) +
+      this.instructions = applyPersonality(buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner)) +
         "\nThis is the owner's authorized telephone call, not a test or a fictional business. " +
         "Use only the confirmed assignment and facts supplied by the other party. No calendar, email, SMS or other business actions are connected. " +
         "Never claim to have sent, booked, saved a business action or verified outside facts. The conversation itself is retained by TalkHint. " +
         "Speak briefly and naturally in the other party's language (EN/RU/ES). Yield to interruptions and incorporate corrections. " +
         "Do not hang up for silence, hold music or transfer. Summarize the actual outcome and next step; do not invent agreement. " +
-        "Current time: " + new Date().toISOString();
+        "Current time: " + new Date().toISOString(), personality);
       return;
     }
     this.instructions = buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner)) + secretaryTestContextPrompt() +

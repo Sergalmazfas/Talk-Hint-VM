@@ -12,6 +12,8 @@ import { IncomingAudio } from "./audio";
 import { incomingRevocations } from "./revocation";
 import { handleIncomingLivePhone } from "./livePhone";
 import { LIVE_MODEL,LIVE_VOICE,LIVE_BACKEND } from "./liveAudio";
+import { resolveNumberPersonality } from "../secretary/personalities/store";
+import { applyPersonality } from "../secretary/personalities/types";
 
 export const incomingStore = new IncomingStore();
 export const runtimeEnabled = () => process.env.INCOMING_SECRETARY_RUNTIME_ENABLED === "true";
@@ -91,7 +93,8 @@ export function handleIncomingSocket(ws:WebSocket) {
       const cards=allowedCards(await storage.listKnowledgeCards(owned.userId),owned.userId,settings.cardIds);
       const latest=await incomingStore.settings(owned.userId,number);
       if(JSON.stringify(latest)!==JSON.stringify(settings))throw new Error("Permissions changed");
-      return {session,instructions:buildInstructions(settings,cards),cleanup};
+      const personality = await resolveNumberPersonality(owned.userId, number);
+      return {session,instructions:applyPersonality(buildInstructions(settings,cards), personality),cleanup};
     }catch(error){cleanup();await session.end("setup or permissions failed");throw error;}
   });
 }
