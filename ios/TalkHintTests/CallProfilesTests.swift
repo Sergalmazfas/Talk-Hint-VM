@@ -53,7 +53,7 @@ final class CallProfilesTests: XCTestCase {
         let result = try JSONDecoder().decode(CallProfilesSnapshot.self, from: Data(fixture.utf8))
         XCTAssertEqual(result.profile(.personal)?.numbers.first?.phoneNumber, "+15550000001")
         XCTAssertEqual(result.profile(.work)?.numbers.count, 0)
-        XCTAssertEqual(result.recommendedWorkNumber.existingBindingMove, true)
+        XCTAssertEqual(try XCTUnwrap(result.recommendedWorkNumber).existingBindingMove, true)
         XCTAssertFalse(result.incomingAiEnabled)
         XCTAssertFalse(result.calendarConnected)
         XCTAssertEqual(result.profile(.work)?.secretaryOutboundReady, false)
@@ -62,7 +62,7 @@ final class CallProfilesTests: XCTestCase {
     func testDecodesOlderOptionalMoveFlagButRejectsUnknownScope() throws {
         let old = fixture.replacingOccurrences(of: ",\"existingBindingMove\":true", with: "")
         let result = try JSONDecoder().decode(CallProfilesSnapshot.self, from: Data(old.utf8))
-        XCTAssertNil(result.recommendedWorkNumber.existingBindingMove)
+        XCTAssertNil(try XCTUnwrap(result.recommendedWorkNumber).existingBindingMove)
         let invalid = fixture.replacingOccurrences(of: "\"id\":\"work\"", with: "\"id\":\"unknown\"")
         XCTAssertThrowsError(try JSONDecoder().decode(CallProfilesSnapshot.self, from: Data(invalid.utf8)))
     }
