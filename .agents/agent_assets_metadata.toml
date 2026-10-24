@@ -444,14 +444,14 @@ content_type = "text/markdown"
 id = "CO8O1fZRy67Mrwt901n-W"
 uri = "file://docs/evidence/elevenlabs-engine-preflight-2026-10-24.md"
 type = "text"
-title = "ElevenLabs + Engine: проверка и сценарии"
-description = "Фактическое подключение, найденный клон, официальные источники, блокер общего хранилища и одинаковые сценарии для двух голосов. Это не отчёт о готовом стенде."
+title = "ElevenLabs — историческая проверка перед подключением"
+description = "Полный ранний документ от 24.10.2026. Описывает прежний блокер хранилища и кандидата Roger, а не текущую конфигурацию."
 logical_id = "956ca383-c646-4e9c-92f0-2fdef433fe9e"
 content_hash = "sha256:d7e822d8480d6acd727938f3190e89b9ff8ad65c4ff944d4377edc961ba115a4"
 size = 12779
 mtime_ms = 1792862294227
-storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/956ca383-c646-4e9c-92f0-2fdef433fe9e/c9d3be20-4291-4f88-b505-f7643d1aed3b"
-storage_version_token = "1792862316117426"
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/956ca383-c646-4e9c-92f0-2fdef433fe9e/7723a0ab-e823-4d23-8357-b7faf1f3b705"
+storage_version_token = "1792873290860445"
 content_type = "text/markdown"
 
 [[outputs]]
@@ -495,3 +495,87 @@ mtime_ms = 1792872862703
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/48b1b9be-4ddb-4382-87be-68f7f1ba7f37/72df7a70-4381-4ece-bed6-f01fe511ad84"
 storage_version_token = "1792872930997936"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "8Z-xxxIy4QFtA7NX5pzW6"
+uri = "file://docs/eleven-latency.md"
+type = "text"
+title = "ElevenLabs + Engine — эксперименты с задержкой"
+description = "Полный исходный документ от 24.10.2026: baseline, Flash, профили, замеры, безопасность и ограничения. Составлен до последних живых тестов."
+logical_id = "b42c36a7-a417-48b8-bbc7-342784ff8c7d"
+content_hash = "sha256:2a0b8d932d45897cf6b9344fd3512abfbb85907a7d7ed25df72727b1af1bb2b2"
+size = 8330
+mtime_ms = 1792869358382
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b42c36a7-a417-48b8-bbc7-342784ff8c7d/5c99432e-08f6-4ba3-8eb5-29aaacf6d891"
+storage_version_token = "1792873286984720"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "PGLXQhhsIiD2Mba0hgWAe"
+uri = "file://server/secretaryLab/ELEVEN-ENGINE.md"
+type = "text"
+title = "ElevenLabs + Engine — подключение и проверки"
+description = "Полный технический документ: архитектура Custom LLM, Sarah, хранилище, исправления запуска и границы проверок."
+logical_id = "4eef0323-7f94-4dd3-a84c-f0db2c858af3"
+content_hash = "sha256:71a3264356d723b3f6b639fc4c0517ffd1f4bb88bf3d10da6e8f4fc5757e675f"
+size = 7973
+mtime_ms = 1792866050619
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4eef0323-7f94-4dd3-a84c-f0db2c858af3/cbc0e74f-5063-4b47-acf8-8899672e42d2"
+storage_version_token = "1792873287655648"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "VpXcPHqgmUGCJn5tkzUZ9"
+uri = "file://server/secretaryLab/RETELL-ENGINE.md"
+type = "text"
+title = "Retell + Engine — Custom LLM"
+description = "Полный документ от 24.10.2026. Раннее описание временной истории историческое: сохранённые сравнения теперь используют общее хранилище."
+logical_id = "211e4073-a6b5-4f0b-b26d-f8c329a833aa"
+content_hash = "sha256:68112dc2d609ad71d8110900928fdd8fbe2aaf05aac82171fae0ec8e3a3fe12f"
+size = 4747
+mtime_ms = 1792861393803
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/211e4073-a6b5-4f0b-b26d-f8c329a833aa/7bb53fce-3976-4e62-81b3-0bb205a15a20"
+storage_version_token = "1792873288339107"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "nPuwNr2bknVvpatpstW48"
+uri = "file://server/secretaryLab/RETELL.md"
+type = "text"
+title = "GPT / Retell — сравнение связок"
+description = "Полный документ от 24.10.2026: самостоятельный Retell, API, безопасность и сценарии. Не является измеренным рейтингом моделей."
+logical_id = "79c6868f-62a9-403a-86da-3c6c3690b30f"
+content_hash = "sha256:0280cb7be4a322bebe1b4236467688cd1396f50efcfbb81a4663b068c327b87f"
+size = 4979
+mtime_ms = 1792856685952
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/79c6868f-62a9-403a-86da-3c6c3690b30f/7cd8e647-0af1-43e3-912f-ed3e231ed6e6"
+storage_version_token = "1792873288986071"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "SJCBwZ9qTQ8zAzXhp8wHR"
+uri = "file://scripts/eleven-latency/README.md"
+type = "text"
+title = "ElevenLabs — воспроизводимое сравнение"
+description = "Полный документ от 24.10.2026: парные прогоны, бюджеты, статистика и ограничения. Готовность инструмента не означает выполнения платной серии."
+logical_id = "ed91443d-e008-43ee-9b25-b3f182ddabca"
+content_hash = "sha256:b7a038b5359385de562b6ce92f2f710f6171e67c3ba4b0e6b54d5f3c31cc1d4f"
+size = 5819
+mtime_ms = 1792871544675
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ed91443d-e008-43ee-9b25-b3f182ddabca/c7249d17-0222-4422-9774-82e4e96a5c24"
+storage_version_token = "1792873289666060"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "lfJVVZn21mpAgy25LWlSA"
+uri = "file://server/secretaryLab/COSTS.md"
+type = "text"
+title = "Secretary Lab — аудит стоимости"
+description = "Полный документ от 24.10.2026: ставки, учёт токенов, тарифные снимки и отличие оценки от списания."
+logical_id = "1b012579-a82a-4093-aae6-184a883f48b0"
+content_hash = "sha256:911cad3d440fb22fcad3f09f739c7a10df0784e3ff531fcd8622ef7ec2bf7141"
+size = 3505
+mtime_ms = 1792872177923
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1b012579-a82a-4093-aae6-184a883f48b0/c43d2148-1154-4a45-9239-62a2a102711d"
+storage_version_token = "1792873290196222"
+content_type = "text/markdown"
