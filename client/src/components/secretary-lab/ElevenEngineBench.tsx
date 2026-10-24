@@ -70,6 +70,9 @@ export default function ElevenEngineBench({ token, instruction, onInstructionCha
     setSelected(null);
     setSessionId(next.id);
     setSavedId(String(next.savedComparisonId || ""));
+    if (ended(next) && typeof next.reason === "string" && next.reason) {
+      setError(next.reason);
+    }
   }, []);
   const refreshReadiness = useCallback(async () => {
     setLoadError("");

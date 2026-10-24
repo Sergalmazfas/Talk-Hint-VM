@@ -44,7 +44,9 @@ export class ElevenLabApi {
           stability: 0.5, similarity_boost: 0.8, speed: 1 },
         agent: { first_message: "", language: "en", disable_first_message_interruptions: false,
           prompt: { llm: "custom-llm", prompt: "Audio transport only. All business replies, permissions and tools are controlled by TalkHint.",
-            custom_llm: { url: `${elevenDevBase()}/eleven-engine-llm/${capability}/v1/chat/completions`,
+            // ElevenLabs treats this as an OpenAI base URL and appends
+            // /chat/completions itself (verified with an actual provider request).
+            custom_llm: { url: `${elevenDevBase()}/eleven-engine-llm/${capability}/v1`,
               model_id: SECRETARY_REASONING_MODEL, api_type: "chat_completions" },
             tools: [], tool_ids: [], knowledge_base: [], rag: { enabled: false },
             backup_llm_config: { preference: "disabled" } } },

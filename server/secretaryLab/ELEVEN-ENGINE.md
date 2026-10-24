@@ -111,5 +111,21 @@ microphone, plays no audio and places no phone call. SDK/proxy transport tests
 also run against a local provider fixture. This proves connection startup, not
 audible quality, recognition, pronunciation or physical barge-in latency.
 
+### Real provider callback / speech round-trip
+
+ElevenLabs appends `/chat/completions` to the configured Custom LLM URL.
+Supply our capability-scoped OpenAI **base URL**, ending in `/v1`, not the full
+endpoint. The full endpoint produced a doubled path, no Engine request, and
+provider close code 1002 (`Brain returned no response`), despite metadata success.
+The regression test resolves that suffix through the real route registration.
+
+`--audio-roundtrip` additionally checks a real ElevenLabs request through the
+public Dev domain to our Engine, streamed text and received synthesized PCM
+audio via the installed SDK. It temporarily listens on port 5000; stop only the
+Dev workflow before this one-off probe and restart it afterwards. On 2026-10-24
+this reproduced the doubled path, then passed with the corrected base URL.
+It uses synthetic text input and no microphone/playback; it does not establish
+browser microphone capture, physical audibility, STT or interruption quality.
+
 No production, telephone, notification, working calendar, native Xcode or default
 Secretary voice changes. No publishing.

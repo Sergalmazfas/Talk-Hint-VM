@@ -81,6 +81,12 @@ For the ElevenLabs catalog comparison, the owner specified a female American-acc
 
 **How to apply:** Keep clone/catalog choices explicit and verify live multilingual speech rather than inferring it from the voice's English label.
 
+ElevenLabs Custom LLM configuration needs an OpenAI base URL: the provider itself appends `/chat/completions`. A successful audio metadata handshake does not prove that the provider can reach our Engine or produce speech.
+
+**Why:** Supplying the full endpoint produced a doubled callback path and `Brain returned no response`; a metadata-only probe missed it while the owner's conversation stayed silent.
+
+**How to apply:** Verify the actual provider-initiated HTTP callback through the public Dev domain and receipt of synthesized audio, separately from microphone capture, audible playback and recognition. Do not declare the stand functional from agent creation or connection metadata alone.
+
 An existing Instant Voice Clone can be ready for TTS and accessible via Voices API but still be prohibited with ElevenLabs Agents Custom LLM.
 
 **Why:** Actual agent creation rejected the owner's saved IVC while the catalog voice accepted exactly the same Custom LLM configuration. This was provider eligibility, not an invalid key or a missing clone.

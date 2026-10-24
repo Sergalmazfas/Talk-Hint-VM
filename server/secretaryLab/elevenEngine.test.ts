@@ -73,6 +73,24 @@ beforeEach(() => vi.stubEnv("REPLIT_DEV_DOMAIN", "unit.replit.dev"));
 afterEach(() => { labs.splice(0).forEach(l => l.dispose()); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("ElevenLabs + unchanged TalkHint Engine", () => {
+  it("routes the actual provider base-URL suffix to our streaming Engine, not a doubled endpoint", async () => {
+    const f = fixture();
+    registerElevenEngineRoutes(f.app, f.store, f.lab);
+    await f.lab.create("owner", f.body);
+    const config = f.api.configuration("TEST", ELEVEN_CATALOG.voiceId, f.api.capability);
+    const base = config.conversation_config.agent.prompt.custom_llm.url;
+    expect(base).toBe(`https://unit.replit.dev/eleven-engine-llm/${f.api.capability}/v1`);
+    // Actual ElevenLabs wire behavior: it appends /chat/completions.
+    const path = new URL(`${base}/chat/completions`).pathname;
+    const response = await request(f.app).post(path).send(wireInput).expect(200);
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.text).toContain("Hello test");
+    expect(response.text).toContain("[DONE]");
+    const report = (await f.lab.report("owner", f.body.clientRequestId)).report;
+    expect(report.events.some(e => e.type === "engine_request_received")).toBe(true);
+    await f.lab.stop("owner", f.body.clientRequestId);
+    await request(f.app).post(path).send(wireInput).expect(404);
+  });
   it("uses explicit female American catalog voice and marks IVC clone unavailable without fallback", async () => {
     const f = fixture(); f.api.cloneCategory = "cloned";
     const ready = await f.lab.readiness("owner");
