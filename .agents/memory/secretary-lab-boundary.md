@@ -51,6 +51,12 @@ The owner authorized a third “Retell + Engine” comparison ONLY inside the ex
 
 **How to apply:** Keep the original two modes available. Distinguish the new text adapter from the existing audio Engine; enforce a sandbox allowlist rather than exposing real tools. Treat interruption as cancellation of obsolete speech/generation, not rollback of an already committed action, and deduplicate action replays across response IDs/reconnects.
 
+The owner positively confirmed live voice quality and interruption handling specifically with Retell + TalkHint Engine, while repeated clarification remained a recognition concern.
+
+**Why:** Their good listening experience did not mean that every utterance was understood correctly, nor did it validate the standalone Retell mode or production telephony.
+
+**How to apply:** Preserve the tested separation of voice transport and our Engine. Evaluate recognition accuracy independently from pleasant voice/playback and do not treat this confirmation as production-rollout approval.
+
 Treat consent to paid voice processing and consent to retaining comparison transcripts as separate decisions. Archiving must remain an explicit selection, not an automatic extension of temporary Lab history.
 
 **Why:** The owner requested an explicitly agreed comparison store, not permanent retention of every microphone test. Even fictional scenarios can contain user-spoken private details.
