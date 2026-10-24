@@ -1,12 +1,13 @@
 #!/bin/bash
-# No signing, device installation, publishing, credentials, or live backend.
+# Simulator-only ad-hoc signing. No certificates, Apple accounts, device
+# installation, publishing, or live backend.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [[ "$(uname -s)" != Darwin ]]; then
   echo "ERROR: Native iOS validation requires a macOS runner with Xcode; no native build was run." >&2
   exit 2
 fi
-for tool in xcodegen xcodebuild xcrun python3; do
+for tool in xcodegen xcodebuild xcrun python3 codesign plutil; do
   command -v "$tool" >/dev/null || { echo "ERROR: Missing $tool" >&2; exit 2; }
 done
 mkdir -p "$ROOT/generated-artifacts"
@@ -54,10 +55,21 @@ SIM="$(xcrun simctl create "TalkHint-native-validation" "$DEVICE" "$RUNTIME")"
 xcrun simctl boot "$SIM"
 xcrun simctl bootstatus "$SIM" -b
 COMMON=(-project TalkHint.xcodeproj -scheme TalkHintValidation -configuration NativeValidation
+  -sdk iphonesimulator
   -destination "platform=iOS Simulator,id=$SIM" -destination-timeout 120
-  -derivedDataPath "$OUT/DerivedData" CODE_SIGNING_ALLOWED=NO)
+  -derivedDataPath "$OUT/DerivedData"
+  CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual
+  DEVELOPMENT_TEAM= PROVISIONING_PROFILE= PROVISIONING_PROFILE_SPECIFIER=
+  "CODE_SIGN_ENTITLEMENTS=$ROOT/ios/scripts/native-validation.entitlements")
 # Compiles every app/test source: duplicate type declarations are compiler errors.
 xcodebuild "${COMMON[@]}" build-for-testing 2>&1 | tee "$OUT/build.log"
+# Inspect the actual signed host, not just the input plist. Fail before the
+# expensive test run if Xcode omitted/replaced its isolated Keychain rights.
+APP="$OUT/DerivedData/Build/Products/NativeValidation-iphonesimulator/TalkHint.app"
+codesign --verify "$APP" 2>&1 | tee "$OUT/codesign-verify.log"
+codesign --display --entitlements :- "$APP" \
+  > "$OUT/simulator-entitlements.plist" 2> "$OUT/codesign-display.log"
+python3 scripts/verify-native-entitlements.py "$OUT/simulator-entitlements.plist"
 # No filters: run the entire TalkHintTests target, not just CallProfilesTests.
 xcodebuild "${COMMON[@]}" test-without-building -parallel-testing-enabled NO \
   -testLanguage en -testRegion US \

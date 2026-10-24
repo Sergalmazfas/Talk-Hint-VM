@@ -3,6 +3,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import plistlib
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -19,6 +21,70 @@ def load(name):
 
 sources = load("verify-project-sources")
 results = load("verify-xcresult")
+entitlements = load("verify-native-entitlements")
+
+
+class SimulatorSigningTests(unittest.TestCase):
+    def test_runner_uses_only_local_simulator_signing(self):
+        script = (Path(__file__).resolve().parents[1] / "validate-native.sh").read_text()
+        common = "COMMON=(" + script.split("COMMON=(", 1)[1].split("\n# Compiles", 1)[0]
+        fixture = 'ROOT="/tmp/Native Validation"; OUT="/tmp/Test Output"; SIM="fixture-simulator"\n'
+        output = subprocess.check_output([
+            "bash", "-c", fixture + common + '\nprintf "%s\\0" "${COMMON[@]}"'
+        ])
+        args = output.decode().split("\0")[:-1]
+        for expected in ("iphonesimulator", "platform=iOS Simulator,id=fixture-simulator",
+                         "CODE_SIGNING_ALLOWED=YES", "CODE_SIGN_IDENTITY=-",
+                         "CODE_SIGN_STYLE=Manual", "DEVELOPMENT_TEAM=",
+                         "PROVISIONING_PROFILE=", "PROVISIONING_PROFILE_SPECIFIER=",
+                         "CODE_SIGN_ENTITLEMENTS=/tmp/Native Validation/ios/scripts/native-validation.entitlements"):
+            self.assertIn(expected, args)
+        self.assertNotIn("-allowProvisioningUpdates", script)
+        self.assertNotIn("-allowProvisioningDeviceRegistration", script)
+        self.assertLess(script.index("verify-native-entitlements.py"), script.index("test-without-building"))
+
+    def setUp(self):
+        group = "talkhint-native-validation.app.talkhint"
+        self.data = {
+            "application-identifier": group,
+            "keychain-access-groups": [group],
+            "get-task-allow": True,
+        }
+
+    def verify(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "signed.plist"
+            path.write_bytes(plistlib.dumps(self.data))
+            with contextlib.redirect_stdout(io.StringIO()):
+                entitlements.verify(path)
+
+    def test_isolated_simulator_signature_is_accepted(self):
+        self.verify()
+
+    def test_unsigned_host_is_rejected(self):
+        self.data = {}
+        with self.assertRaisesRegex(ValueError, "application-identifier"):
+            self.verify()
+
+    def test_production_keychain_group_is_rejected(self):
+        self.data["keychain-access-groups"] = ["production.app.talkhint"]
+        with self.assertRaisesRegex(ValueError, "keychain-access-groups"):
+            self.verify()
+
+    def test_unexpanded_build_variables_are_rejected(self):
+        self.data["application-identifier"] = "talkhint-native-validation.$(PRODUCT_BUNDLE_IDENTIFIER)"
+        with self.assertRaisesRegex(ValueError, "application-identifier"):
+            self.verify()
+
+    def test_missing_debugging_permission_is_rejected(self):
+        self.data["get-task-allow"] = False
+        with self.assertRaisesRegex(ValueError, "debugging"):
+            self.verify()
+
+    def test_push_entitlement_is_rejected(self):
+        self.data["aps-environment"] = "development"
+        with self.assertRaisesRegex(ValueError, "External-service"):
+            self.verify()
 
 
 class SourceMembershipTests(unittest.TestCase):

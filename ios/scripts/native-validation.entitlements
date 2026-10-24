@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Local simulator namespace, not an Apple team or a production group. -->
+    <key>application-identifier</key>
+    <string>talkhint-native-validation.$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>talkhint-native-validation.$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    </array>
+    <key>get-task-allow</key>
+    <true/>
+</dict>
+</plist>

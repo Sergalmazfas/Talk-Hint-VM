@@ -54,3 +54,13 @@ UI fixtures alone cannot prove real authentication or device audio.
 tests. Separately require actual Keychain write/read/delete checks with synthetic,
 uniquely scoped keys; report unavailable storage as a failing integration check,
 never a skip, memory fallback, or reason to weaken normal authentication.
+
+A simulator `errSecMissingEntitlement` does not establish that the user's
+iPhone credentials or production account are broken.
+
+**Why:** The Mac validation host lacked embedded Keychain entitlements while
+all other native tests passed. Its ad-hoc signature alone was insufficient.
+
+**How to apply:** Keep signing repairs local to simulator validation, inspect
+the built host's actual entitlements before testing, and leave phone signing,
+APNs rights, account settings and production authentication unchanged.
