@@ -619,3 +619,25 @@ export const voiceLabRuns = pgTable("voice_lab_runs", {
 }, (t) => ({
   userCreatedIdx: index("voice_lab_runs_user_created_idx").on(t.userId, t.createdAt),
 }));
+
+// Both names must exist in the Dev schema used by Publish. Runtime selection
+// still isolates Dev from production; an absent production-only table otherwise
+// looks like a deletion/rename when Publish compares the two databases.
+const mobileSecretaryStateColumns = () => ({
+  id: text("id").primaryKey(),
+  owner: text("owner").notNull(),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").notNull(),
+  expires: timestamp("expires", { withTimezone: true }).notNull(),
+});
+
+export const mobileSecretaryState = pgTable("mobile_secretary_state", mobileSecretaryStateColumns());
+export const mobileSecretaryDev = pgTable("mobile_secretary_dev", mobileSecretaryStateColumns());
+
+// Independent owner-admin model storage, never a rename of mobile state.
+export const talkhintProjectModels = pgTable("talkhint_project_models", {
+  ownerKey: text("owner_key").primaryKey(),
+  revision: integer("revision").notNull(),
+  state: jsonb("state").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

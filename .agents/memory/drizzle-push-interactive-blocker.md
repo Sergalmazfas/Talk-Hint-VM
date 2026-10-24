@@ -31,3 +31,10 @@ to replace its production state with unrelated project-model storage.
 Preserve required production-only tables and add new tables separately; verify
 the complete resulting migration has no unintended drops or renames before
 resuming publication.
+
+Represent both environment-specific table names in the schema source of truth
+and materialize the production counterpart as an empty table in Dev. Do not copy
+production sessions or capabilities into Dev, and keep runtime routing separate.
+**Why:** Publish compares actual database schemas, not just TypeScript
+declarations; an empty structural counterpart preserves production storage
+without mixing environments or adding a production migration runner.
