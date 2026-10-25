@@ -5,6 +5,19 @@ description: How prod schema and Twilio signature trust are handled for the depl
 
 # Production rollout strategy
 
+## iPhone telephone checks after publication
+
+For the owner's real-call checks, connect the Xcode/Swift app to the verified
+production server, not the browser Dev URL. Do not give Claude another Dev
+connection task as the normal post-publish telephone setup.
+
+**Why:** the user corrected this repeatedly after a production-only phone flow
+and a Dev-only personality catalog produced confusing client errors.
+
+**How to apply:** verify the effective backend on the iPhone, match server and
+native releases, and explicitly distinguish an unpublished server feature from
+a client connection problem. A successful build alone is not a phone test.
+
 **Deployment is Reserved VM with Replit-managed PostgreSQL** (`.replit` deploymentTarget=vm, `PROD_DATABASE_URL` unset). So the production DB is a SEPARATE managed PG, and its schema is applied by the **Publish flow** (Replit diffs dev→prod on publish), NOT by any script.
 
 - **Do NOT run/extend `scripts/prod-migrate.ts`** to migrate prod. It is the external-Neon/Autoscale path (`server/db.ts` prefers `PROD_DATABASE_URL` when set). It is unused for the Reserved VM path, and the database skill forbids custom prod-migration scripts / direct DDL / startup self-heal for managed PG.

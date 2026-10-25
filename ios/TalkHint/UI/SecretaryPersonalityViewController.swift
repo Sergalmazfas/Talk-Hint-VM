@@ -153,7 +153,7 @@ final class SecretaryPersonalityViewController: UITableViewController {
         cell.textLabel?.numberOfLines = 0; cell.detailTextLabel?.numberOfLines = 0
         switch indexPath.section {
         case 0:
-            cell.textLabel?.text = NSLocalizedString("secretary.summary.retell", comment: "")
+            cell.textLabel?.text = SecretaryVoiceProviderPreference.retell.displayName
             cell.detailTextLabel?.text = setup.map {
                 "Merritt · \($0.engine) · \($0.reasoning)\n\(AppConfig.baseURL.absoluteString)"
             } ?? (busy ? text("loading") : text("setup_unavailable"))
@@ -164,7 +164,7 @@ final class SecretaryPersonalityViewController: UITableViewController {
             cell.accessoryType = .disclosureIndicator; cell.accessibilityIdentifier = "secretary-personality-number"
         case 2:
             cell.textLabel?.text = character?.name ?? text("none")
-            cell.detailTextLabel?.text = character.map { "\($0.description)\n\(text("version")) \($0.version)" }
+            cell.detailTextLabel?.text = character?.description
             cell.accessoryType = .disclosureIndicator; cell.accessibilityIdentifier = "secretary-personality-character"
         case 3:
             cell.textLabel?.text = character?.rules ?? text("legacy")
