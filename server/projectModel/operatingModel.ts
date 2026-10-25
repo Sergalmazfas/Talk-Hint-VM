@@ -9,6 +9,9 @@ const id = z.string().trim().min(1).max(120);
 const text = z.string().max(12000);
 const ref = id.nullable();
 const node = z.object({
+  managerId: ref.optional(), level: z.enum(["strategy", "direction", "operation"]).optional(),
+  detailState: z.enum(["outlined", "described"]).optional(),
+  workNature: z.enum(["deterministic", "probabilistic", "mixed", "unspecified"]).optional(), marketEffect: text.optional(),
   id, code: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(500),
   kind: z.enum(workKinds), parentId: ref, status: z.enum(["agreed", "proposal"]),
   description: text, purpose: text, clientId: ref, roleId: ref, executorId: ref, recipientId: ref, acceptorId: ref, nextId: ref,
@@ -26,6 +29,8 @@ const node = z.object({
 export const saveOperatingModelSchema = z.object({
   type: z.literal("saveOperatingModel"), baseVersion: z.number().int().nonnegative(),
   data: z.object({
+    companyStructureVersion: z.literal(1).optional(),
+    customerPath: z.array(z.object({ id, name: text, processId: id, b2bProcessId: id.optional(), b2c: text, b2b: text, condition: text }).strict()).max(100).optional(),
     nodes: z.array(node).max(5000),
     links: z.array(z.object({ id, from: id, to: id, kind: z.enum(workLinks), reason: text }).strict()).max(20000),
     stageReports: z.array(z.object({ pass: z.union([z.literal(1), z.literal(2), z.literal(3)]), described: text, boundary: text, dependencies: text, gaps: text, next: text }).strict()).max(100),
@@ -45,7 +50,7 @@ export function saveOperatingModel(old: ProjectModelState, command: SaveOperatin
     ...(old.competitorDirectory?.records.map(n => n.id) ?? []), ...strategyEntries(old).map(n => n.key),
     ...(old.analystPreparation ? ["analyst-preparation"] : [])]);
   for (const n of c.data.nodes) {
-    for (const r of [n.parentId, n.clientId, n.roleId, n.executorId, n.recipientId, n.acceptorId, n.nextId, ...n.resourceIds, ...n.inputs.map(i => i.sourceId)])
+    for (const r of [n.managerId, n.parentId, n.clientId, n.roleId, n.executorId, n.recipientId, n.acceptorId, n.nextId, ...n.resourceIds, ...n.inputs.map(i => i.sourceId)])
       if (r && !map.has(r)) throw new ModelError(400, "Связь с отсутствующим объектом в этой гипотезе.");
     for (const r of n.referenceIds) if (!map.has(r) && !external.has(r)) throw new ModelError(400, "Ссылка на материал недоступна в этой гипотезе.");
     if (n.roleId && map.get(n.roleId)?.kind !== "role") throw new ModelError(400, "Ответственность назначается должности.");
@@ -54,7 +59,29 @@ export function saveOperatingModel(old: ProjectModelState, command: SaveOperatin
     const seen = new Set([n.id]); let parent = n.parentId;
     while (parent) {
       if (seen.has(parent)) throw new ModelError(400, "Цикл иерархии запрещён.");
-      seen.add(parent); parent = map.get(parent)!.parentId;
+      const ancestor = map.get(parent);
+      if (!ancestor) throw new ModelError(400, "Связь с отсутствующим родителем в этой гипотезе.");
+      seen.add(parent); parent = ancestor.parentId;
+    }
+    if (n.managerId && (n.kind !== "role" ||
+      !(map.get(n.managerId)!.kind === "role" || (n.managerId === "owner" && map.get(n.managerId)!.kind === "client"))))
+      throw new ModelError(400, "Руководитель задаётся должности и должен быть ролью или владельцем.");
+    const managers = new Set([n.id]); let manager = n.managerId;
+    while (manager) {
+      if (managers.has(manager)) throw new ModelError(400, "Цикл подчинения запрещён.");
+      const superior = map.get(manager);
+      if (!superior) throw new ModelError(400, "Связь с отсутствующим руководителем в этой гипотезе.");
+      managers.add(manager); manager = superior.managerId;
+    }
+    if (c.data.companyStructureVersion && n.kind === "role" && !n.managerId)
+      throw new ModelError(400, "У каждой должности должен быть один непосредственный руководитель.");
+    if (n.workNature && !["action", "process"].includes(n.kind)) throw new ModelError(400, "Характер выполнения относится к процессу или действию, не отделу.");
+  }
+  if (c.data.customerPath) {
+    if (new Set(c.data.customerPath.map(s => s.id)).size !== c.data.customerPath.length) throw new ModelError(400, "Повтор этапа пути клиента.");
+    for (const stage of c.data.customerPath) {
+      if (map.get(stage.processId)?.kind !== "process" || (stage.b2bProcessId && map.get(stage.b2bProcessId)?.kind !== "process"))
+        throw new ModelError(400, "Этап пути должен ссылаться на существующий процесс.");
     }
   }
   for (const l of c.data.links) if (!map.has(l.from) || !map.has(l.to)) throw new ModelError(400, "Конец связи отсутствует.");

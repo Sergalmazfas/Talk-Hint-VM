@@ -1,8 +1,14 @@
 /** Planning only. No executor, scheduler or external integration is enabled. */
 export const workKinds = ["context", "need", "capability", "process", "action", "result", "client", "role", "department", "crew", "resource", "report"] as const;
-export const workLinks = ["requires", "produces", "handoff", "depends_on", "accountable_to", "acceptance", "return", "escalation"] as const;
+export const workLinks = ["requires", "produces", "handoff", "depends_on", "accountable_to", "acceptance", "return", "escalation", "feedback", "finance_event"] as const;
 export type WorkKind = typeof workKinds[number];
 export interface WorkNode {
+  /** Containment is not line management. Manager is a single immediate superior. */
+  managerId?: string | null;
+  level?: "strategy" | "direction" | "operation";
+  detailState?: "outlined" | "described";
+  workNature?: "deterministic" | "probabilistic" | "mixed" | "unspecified";
+  marketEffect?: string;
   id: string; code: string; name: string; kind: WorkKind; parentId: string | null;
   status: "agreed" | "proposal"; description: string; purpose: string;
   clientId: string | null; roleId: string | null; executorId: string | null;
@@ -17,6 +23,8 @@ export interface WorkNode {
 }
 export interface WorkLink { id: string; from: string; to: string; kind: typeof workLinks[number]; reason: string }
 export interface OperatingData {
+  companyStructureVersion?: 1;
+  customerPath?: { id: string; name: string; processId: string; b2bProcessId?: string; b2c: string; b2b: string; condition: string }[];
   nodes: WorkNode[]; links: WorkLink[];
   stageReports: { pass: 1 | 2 | 3; described: string; boundary: string; dependencies: string; gaps: string; next: string }[];
 }
@@ -31,7 +39,37 @@ export const kindLabels: Record<WorkKind, string> = {
 export const linkLabels: Record<typeof workLinks[number], string> = {
   requires: "Требует", produces: "Производит", handoff: "Передача результата", depends_on: "Зависимость",
   accountable_to: "Подотчётность", acceptance: "Приёмка", return: "Возврат", escalation: "Эскалация",
+  feedback: "Основание для пересмотра", finance_event: "Финансовое событие",
 };
+export function companyCoverage(data: OperatingData) {
+  const byId = new Map(data.nodes.map(n => [n.id, n]));
+  const stages = data.customerPath ?? [];
+  const issues: string[] = [];
+  if (data.companyStructureVersion) {
+    if (data.nodes.filter(n => n.level === "direction").length !== 10) issues.push("Не представлены все десять направлений");
+    for (const n of data.nodes.filter(n => n.kind === "role")) {
+      if (!n.managerId) issues.push(`Нет непосредственного руководителя: ${n.code}`);
+    }
+    for (const stage of stages) {
+      if (!byId.has(stage.processId)) issues.push(`Нет процесса этапа: ${stage.name}`);
+      if (!stage.b2c || !stage.b2b) issues.push(`Не описаны B2C/B2B: ${stage.name}`);
+    }
+    if (stages.length !== 9) issues.push("Путь клиента должен включать девять крупных этапов");
+    for (let i = 1; i < stages.length; i++) {
+      const previous = stages[i].id === "leave" ? stages.find(s => s.id === "help") : stages[i - 1];
+      if (previous && !data.links.some(l => l.kind === "handoff" && l.from === previous.processId && l.to === stages[i].processId))
+        issues.push(`Нет передачи: ${previous.name} → ${stages[i].name}`);
+    }
+    for (const s of stages) {
+      if (s.b2bProcessId && !byId.has(s.b2bProcessId)) issues.push(`Нет отдельного B2B-процесса: ${s.name}`);
+    }
+    for (const n of data.nodes.filter(n => n.level === "direction")) {
+      if (!n.clientId || !n.roleId || !n.inputs.length || !n.purpose) issues.push(`Неполная карточка направления: ${n.code}`);
+      if (!data.links.some(l => l.from === n.id && l.kind === "produces")) issues.push(`Нет выхода направления: ${n.code}`);
+    }
+  }
+  return issues;
+}
 export function workGaps(data: OperatingData) {
   return data.nodes.flatMap(n => {
     const issues: string[] = [];

@@ -268,6 +268,22 @@ its scope, dependencies, gaps and next step. Derive departments from work, prese
 the existing hypotheses, shared owner storage and analyst passport, and label
 unapproved structure as proposals.
 
+The next agreed priority is the upper picture before detailing B2C.1.1:
+strategy → ten tactical directions → major operational processes. Line management
+is a separate scheme from client-path transfers. Each position has one immediate
+manager; receiving another department's report does not establish another boss.
+Sergey owns decisions; the AI CEO is a proposed role with no presumed autonomous
+authority. Finance receives events throughout the path, including pre-purchase
+costs and post-purchase refunds. Repeat use and churn are alternative outcomes.
+
+**Why:** Sergey explicitly requested the whole upper structure before one-action
+detail and prohibited invented missions, permissions and automatic strategy.
+
+**How to apply:** Preserve the mission and existing work identities, move audience
+research separately from acquisition, and distinguish described work from outlined
+placeholders. Classify execution uncertainty at process/action level, not department
+level; completed work does not establish market effect.
+
 ## CrewAI checkpoint boundary
 
 Never silently create a new research run when a requested checkpoint is missing.

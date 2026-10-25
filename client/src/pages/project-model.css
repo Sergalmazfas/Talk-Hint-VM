@@ -3,6 +3,7 @@
 @import "../components/project-model/project-strategy.css";
 @import "../components/project-model/competitive-analyst.css";
 @import "../components/project-model/OperatingModelView.css";
+@import "../components/project-model/CompanyStructureViews.css";
 
 .pm-page {
   --pm-ink: #172d3b;

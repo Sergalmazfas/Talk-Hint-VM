@@ -16,6 +16,7 @@ import { emptyStrategyNode } from "../../shared/projectStrategy";
 import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
 import { defaultAnalystPreparation } from "../../shared/competitiveAnalystTemplate";
 import { defaultOperatingModel } from "../../shared/operatingModelTemplate";
+import { buildCompanyStructure } from "../../shared/companyStructure";
 
 describe("strategy persistence and HTTP boundaries", () => {
   let rows: Map<string, ProjectModelState>, app: express.Express, pool: Pool;
@@ -26,7 +27,7 @@ describe("strategy persistence and HTTP boundaries", () => {
     r.alternatives = [{ id: "new-country", title: "Новая", model: initialModel() }]; return r;
   };
   function mount() {
-    const a = express(); a.use(express.json()); registerProjectModel(a, new PgModelRepository(async () => pool)); return a;
+    const a = express(); a.use(express.json({ limit: "10mb" })); registerProjectModel(a, new PgModelRepository(async () => pool)); return a;
   }
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "development");
@@ -54,6 +55,33 @@ describe("strategy persistence and HTTP boundaries", () => {
     return request(app).post(url).set("x-test-user", owner).set("Host", "127.0.0.1")
       .set("Origin", "http://127.0.0.1").send({ revision: revision ?? rows.get(owner)!.revision, command });
   }
+  it("persists company hierarchy, managers and journey in the existing row across API recreation", async () => {
+    const before = copy(rows.get("owner")!), other = copy(rows.get("second")!);
+    const legacy = defaultOperatingModel();
+    expect((await post({ type: "saveOperatingModel", baseVersion: 0, data: legacy })).status).toBe(200);
+    const data = buildCompanyStructure(legacy);
+    const command = { type: "saveOperatingModel" as const, baseVersion: 1, data };
+    const saved = await post(command);
+    expect(saved.status).toBe(200);
+    expect(saved.body.operatingModel.revisions[0].data).toEqual(legacy);
+    expect(saved.body.operatingModel.revisions[1].data.customerPath).toEqual(data.customerPath);
+    app = mount();
+    const reread = await request(app).get(path).set("x-test-user", "owner");
+    expect(reread.body.operatingModel).toEqual(saved.body.operatingModel);
+    expect((await post({ ...command, baseVersion: 2 })).body).toEqual(reread.body);
+    expect((await post(command)).status).toBe(409);
+    const invalid = copy(data); invalid.nodes.find(n => n.id === "ai-ceo")!.managerId = "foreign-owner";
+    expect((await post({ ...command, baseVersion: 2, data: invalid })).status).toBe(400);
+    expect(rows.get("second")).toEqual(other);
+    expect((await request(app).get(path).set("x-test-user", "second")).body.operatingModel).toBeUndefined();
+    expect(rows.get("owner")!.elements).toEqual(before.elements);
+    expect((await post({ ...command, baseVersion: 2 }, "owner", undefined, "/api/admin/project-model?hypothesis=original")).status).toBe(409);
+    const state = copy(rows.get("owner"));
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await post({ ...command, baseVersion: 2 })).status).toBe(404);
+    expect((await request(app).get(path).set("x-test-user", "owner")).status).toBe(404);
+    expect(rows.get("owner")).toEqual(state);
+  });
   it("round-trips organisation with history, no-op retries and owner / Dev isolation", async () => {
     const before = copy(rows.get("owner")!), second = copy(rows.get("second")!);
     const data = defaultOperatingModel();

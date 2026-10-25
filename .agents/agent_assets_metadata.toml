@@ -649,3 +649,17 @@ mtime_ms = 1792915642806
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f082abfd-0323-4501-9684-4bcd32ea19cf/e031d616-d1c2-47bf-a451-c287df04a42e"
 storage_version_token = "1792915652832882"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "-JvQ1GDumU59mW70OdW8b"
+uri = "file://docs/talkhint-company-structure.md"
+type = "text"
+title = "TalkHint — верхняя структура компании"
+description = "Десять направлений, 33 крупных процесса, перенос прежних объектов, клиентский путь, пробелы и порядок дальнейшей проработки."
+logical_id = "eeb63a6f-f025-4177-bdc7-40cfcc277c86"
+content_hash = "sha256:be03e514194e8c7c3ce8f5d9440fc14cad47376bfac90bf991ff7e1ea1a77c34"
+size = 16817
+mtime_ms = 1792917287650
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/eeb63a6f-f025-4177-bdc7-40cfcc277c86/e04fefff-a681-439d-8bb8-41af7d0ecf4a"
+storage_version_token = "1792917333917838"
+content_type = "text/markdown"

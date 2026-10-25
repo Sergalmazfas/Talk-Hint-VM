@@ -7,11 +7,14 @@ import {
 import type { ModelCommand, ProjectModelState } from "@shared/projectModel";
 import { strategyEntries } from "@shared/projectStrategy";
 import operatingGuide from "../../../../docs/talkhint-operating-model.md?raw";
+import CompanyStructureViews from "./CompanyStructureViews";
+import companyStructureGuide from "../../../../docs/talkhint-company-structure.md?raw";
 
 type Props = { state: ProjectModelState; submit?: (command: ModelCommand) => Promise<boolean>; saving?: boolean };
-type ViewKey = "overview" | "actions" | "process" | "client" | "crew" | "objects" | "tools" | "gaps" | "history" | "coverage" | "docs";
+type ViewKey = "overview" | "company" | "management" | "journey" | "actions" | "process" | "client" | "crew" | "objects" | "tools" | "gaps" | "history" | "coverage" | "docs";
 const views: { id: ViewKey; label: string; kinds?: WorkKind[] }[] = [
-  { id: "overview", label: "Обзор" }, { id: "actions", label: "Действия", kinds: ["action"] },
+  { id: "overview", label: "Обзор" }, { id: "company", label: "Компания" }, { id: "management", label: "Подчинение" }, { id: "journey", label: "Путь клиента" },
+  { id: "actions", label: "Действия", kinds: ["action"] },
   { id: "process", label: "Процессы", kinds: ["process", "capability", "need", "context"] },
   { id: "client", label: "Клиенты", kinds: ["client", "result", "report"] },
   { id: "crew", label: "Crew и роли", kinds: ["role", "department", "crew"] },
@@ -113,6 +116,8 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
   }, [draft.nodes]);
   const patchNode = (id: string, patch: Partial<WorkNode>) =>
     setDraft((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === id ? { ...node, ...patch } : node) }));
+  const patchCustomerPath = (id: string, patch: Partial<NonNullable<OperatingData["customerPath"]>[number]>) =>
+    setDraft((current) => ({ ...current, customerPath: (current.customerPath ?? []).map((stage) => stage.id === id ? { ...stage, ...patch } : stage) }));
   const patchSchedule = (key: keyof WorkNode["schedule"], value: string | number[]) => {
     if (!selected) return;
     patchNode(selected.id, { schedule: { ...selected.schedule, [key]: value } });
@@ -134,6 +139,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
       nodes: current.nodes.filter((item) => item.id !== node.id).map((item) => ({
         ...item,
         parentId: item.parentId === node.id ? null : item.parentId,
+        managerId: item.managerId === node.id ? null : item.managerId,
         clientId: item.clientId === node.id ? null : item.clientId,
         roleId: item.roleId === node.id ? null : item.roleId,
         executorId: item.executorId === node.id ? null : item.executorId,
@@ -145,6 +151,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
         referenceIds: item.referenceIds.filter((id) => id !== node.id),
       })),
       links: current.links.filter((link) => link.from !== node.id && link.to !== node.id),
+      customerPath: current.customerPath?.map((stage) => stage.processId === node.id ? { ...stage, processId: "" } : stage),
     }));
     setSelectedId(null);
   };
@@ -170,7 +177,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
         visited.add(parent);
         parent = parents.get(parent) ?? null;
       }
-      const references = [node.parentId, node.clientId, node.roleId, node.executorId, node.recipientId, node.acceptorId, node.nextId, ...node.resourceIds, ...node.inputs.map((input) => input.sourceId)];
+      const references = [node.parentId, node.managerId ?? null, node.clientId, node.roleId, node.executorId, node.recipientId, node.acceptorId, node.nextId, ...node.resourceIds, ...node.inputs.map((input) => input.sourceId)];
       if (references.some((id) => id !== null && !ids.has(id))) return `В узле «${node.name}» осталась ссылка на отсутствующий ID.`;
       if (node.referenceIds.some((reference) => reference && !availableReferenceIds.has(reference))) return `В основаниях узла «${node.name}» есть неизвестный ID. Выберите существующий элемент, документ, стратегию или подготовку аналитика.`;
       if (node.schedule.days.some((day) => !Number.isInteger(day) || day < 1 || day > 7)) return `В расписании узла «${node.name}» есть день вне диапазона 1–7. Исправьте его перед сохранением.`;
@@ -196,7 +203,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
   const relatedUsage = selected ? draft.nodes.filter((node) =>
     node.clientId === selected.id || node.roleId === selected.id || node.executorId === selected.id ||
     node.recipientId === selected.id || node.acceptorId === selected.id || node.resourceIds.includes(selected.id) ||
-    node.parentId === selected.id || node.nextId === selected.id) : [];
+    node.parentId === selected.id || node.managerId === selected.id || node.nextId === selected.id) : [];
   const referenceLinks = draft.links.filter((link) => link.from === selected?.id || link.to === selected?.id);
   const selectNode = (id: string) => {
     setSelectedId(id);
@@ -303,7 +310,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     </header>
     <div className="om-toolbar"><div className="om-view-tabs" role="tablist" aria-label="Представления модели">{views.map((view) =>
       <button type="button" role="tab" aria-selected={activeView === view.id} className={activeView === view.id ? "active" : ""} key={view.id} onClick={() => setActiveView(view.id)}>{view.label}{view.id === "gaps" && <i>{gaps.length}</i>}</button>)}</div>
-      <div className="om-toolbar-actions"><label className="om-search"><span>Поиск</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, код…" /></label>
+      <div className="om-toolbar-actions">{!["company", "management", "journey"].includes(activeView) && <div className="om-toolbar-expand"><button type="button" onClick={() => setExpanded(new Set(draft.nodes.map((node) => node.id)))}>Раскрыть всё</button><button type="button" onClick={() => setExpanded(new Set())}>Свернуть всё</button></div>}{!["company", "management", "journey"].includes(activeView) && <label className="om-search"><span>Поиск</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, код…" /></label>}
         <details className="om-add-menu"><summary>Добавить узел <span>+</span></summary><div>{workKinds.map((kind) => <button key={kind} type="button" onClick={() => addNode(kind)}>{kindLabels[kind]}</button>)}</div></details>
       </div>
     </div>
@@ -312,7 +319,9 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     {revision && <div className="om-revision"><span><b>Последняя сохранённая</b> v{revision.version}</span><span>{dateLabel(revision.at)} · {revision.actor}</span><span className="om-proposal-tag">Черновик не означает согласование</span></div>}
     {!revision && <div className="om-revision"><span><b>Шаблон не сохранён</b> · показан чистый черновик</span><span>Сохранение создаст первую ревизию</span></div>}
 
-    {activeView === "history" ? <section className="om-history"><div className="om-section-title"><div><p className="pm-kicker">IMMUTABLE SNAPSHOTS</p><h3>История ревизий</h3></div><span>{state.operatingModel?.revisions.length ?? 0} версий</span></div>
+    {["company", "management", "journey"].includes(activeView) ? <CompanyStructureViews
+      view={activeView as "company" | "management" | "journey"} data={draft} selectedId={selectedId} onOpen={openNode} onPatchPath={patchCustomerPath}
+    /> : activeView === "history" ? <section className="om-history"><div className="om-section-title"><div><p className="pm-kicker">IMMUTABLE SNAPSHOTS</p><h3>История ревизий</h3></div><span>{state.operatingModel?.revisions.length ?? 0} версий</span></div>
       {state.operatingModel?.revisions.length ? [...state.operatingModel.revisions].reverse().map((item) => <details key={item.version}><summary><b>v{item.version}</b><span>{dateLabel(item.at)} · {item.actor}</span><i>{item.data.nodes.length} узлов · {item.data.links.length} связей</i></summary><div className="om-history-content">
         <p>Согласовано: {item.data.nodes.filter((node) => node.status === "agreed").length} · Предложено: {item.data.nodes.filter((node) => node.status === "proposal").length}</p>
         <pre>{JSON.stringify(item.data, null, 2)}</pre></div></details>) : <div className="om-empty"><strong>Сохранённых ревизий пока нет</strong>Текущая модель остаётся локальным черновиком до принятия команды сохранения.</div>}
@@ -364,6 +373,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
               <section><h4>Основания и сохранение</h4><p>Используйте существующие ID стратегии, документов и элементов как ссылки, не как дублирующий каталог. Каждое сохранение создаёт снимок модели поверх текущей ревизии. Уведомление о принятой команде не заменяет подтверждения новой сохранённой ревизии.</p></section>
             </div>
             <div className="om-doc-guard">Граница: проектирование только в выбранной гипотезе Dev. Никаких агентов, внешних действий, рассылок, платных API, реального подключения или запуска расписаний.</div>
+            <details className="om-company-guide"><summary>Пояснение к трёхуровневой структуре и пути клиента</summary><a href={`data:text/markdown;charset=utf-8,${encodeURIComponent(companyStructureGuide)}`} download="talkhint-company-structure.md">Скачать talkhint-company-structure.md</a><pre>{companyStructureGuide}</pre></details>
           </article>
           <div className="om-crossrefs"><h4>Связанные рабочие представления</h4><a href={`/admin/project-model?hypothesis=${encodeURIComponent(selectedHypothesis(state) ?? "new-country")}&view=overview#competitive-analyst`}>Подготовка аналитика конкурентов <span>Открыть существующий паспорт →</span></a><a href={`/admin/project-model?hypothesis=${encodeURIComponent(selectedHypothesis(state) ?? "new-country")}&view=overview#project-strategy-focus`}>Стратегия новой страны <span>Открыть существующую стратегию →</span></a></div>
         </section>}
@@ -374,7 +384,12 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
             <Field label="Название" value={selected.name} onChange={(value) => patchNode(selected.id, { name: value })} />
             <label className="om-field"><span>Тип</span><select value={selected.kind} onChange={(event) => patchNode(selected.id, { kind: event.target.value as WorkKind, resourceState: event.target.value === "resource" ? selected.resourceState ?? "required" : null })}>{workKinds.map((kind) => <option key={kind} value={kind}>{kindLabels[kind]}</option>)}</select></label>
             <label className="om-field"><span>Статус</span><select value={selected.status} onChange={(event) => patchNode(selected.id, { status: event.target.value as WorkNode["status"] })}><option value="proposal">Предложение</option><option value="agreed">Согласовано</option></select><small>Статус отражает только запись модели.</small></label>
-            <label className="om-field"><span>Родительский узел</span><select value={selected.parentId ?? ""} onChange={(event) => patchNode(selected.id, { parentId: event.target.value || null })}><option value="">Без родителя</option>{draft.nodes.filter((node) => node.id !== selected.id).map((node) => <option key={node.id} value={node.id}>{node.code} · {node.name}</option>)}</select></label>
+            <label className="om-field"><span>Родительский узел · состав</span><select value={selected.parentId ?? ""} onChange={(event) => patchNode(selected.id, { parentId: event.target.value || null })}><option value="">Без родителя</option>{draft.nodes.filter((node) => node.id !== selected.id).map((node) => <option key={node.id} value={node.id}>{node.code} · {node.name}</option>)}</select><small>Определяет вложенность, но не подчинение.</small></label>
+            {selected.kind === "role" && <label className="om-field"><span>Непосредственный руководитель</span><select value={selected.managerId ?? ""} onChange={(event) => patchNode(selected.id, { managerId: event.target.value || null })}><option value="">Не назначен</option>{draft.nodes.filter((node) => node.id !== selected.id && (node.kind === "role" || node.id === "owner")).map((node) => <option key={node.id} value={node.id}>{node.id === "owner" ? "Владелец · " : ""}{node.code} · {node.name}</option>)}</select><small>Для должностей; отдельная линия через managerId. Не редактирует доступы.</small></label>}
+            <label className="om-field"><span>Уровень планирования</span><select value={selected.level ?? ""} onChange={(event) => patchNode(selected.id, { level: (event.target.value || undefined) as WorkNode["level"] })}><option value="">Не задан</option><option value="strategy">Стратегия</option><option value="direction">Направление</option><option value="operation">Операция</option></select></label>
+            <label className="om-field"><span>Зрелость описания</span><select value={selected.detailState ?? "outlined"} onChange={(event) => patchNode(selected.id, { detailState: event.target.value as WorkNode["detailState"] })}><option value="outlined">Набросок</option><option value="described">Описано</option></select><small>«Набросок» означает, что содержание ещё не проработано.</small></label>
+            {(selected.kind === "process" || selected.kind === "action") && <label className="om-field"><span>Природа работы</span><select value={selected.workNature ?? "unspecified"} onChange={(event) => patchNode(selected.id, { workNature: event.target.value as WorkNode["workNature"] })}><option value="unspecified">Не определена</option><option value="deterministic">Детерминированная</option><option value="probabilistic">Вероятностная</option><option value="mixed">Смешанная</option></select><small>Поле относится только к процессам и действиям.</small></label>}
+            <Field label="Эффект на рынке" value={selected.marketEffect ?? ""} onChange={(value) => patchNode(selected.id, { marketEffect: value })} multiline />
             <Field label="Назначение" value={selected.purpose} onChange={(value) => patchNode(selected.id, { purpose: value })} />
             <Field label="Описание" multiline value={selected.description} onChange={(value) => patchNode(selected.id, { description: value })} />
           </div></section>
@@ -438,7 +453,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
             <button type="button" onClick={addLink} disabled={!newLink.from || !newLink.to || newLink.from === newLink.to}>Добавить</button>
           </div>
             {referenceLinks.length ? <div className="om-links-list">{referenceLinks.map((link) => { const other = nodeMap.get(link.from === selected.id ? link.to : link.from); return <div key={link.id}><span>{link.from === selected.id ? "Отсюда" : "Сюда"} · {linkLabels[link.kind]}</span><button type="button" onClick={() => other && openNode(other.id)}>{other?.code} · {other?.name}</button><small>{link.reason}</small><button type="button" aria-label="Удалить связь" onClick={() => setDraft((current) => ({ ...current, links: current.links.filter((item) => item.id !== link.id) }))}>×</button></div>; })}</div> : <p className="om-muted">Явных связей для этого узла пока нет.</p>}
-            {relatedUsage.length > 0 && <div className="om-usage"><b>Использование этого узла · обратный список</b>{relatedUsage.map((node) => <button type="button" key={node.id} onClick={() => openNode(node.id)}><code>{node.code}</code>{node.name}<small>{node.roleId === selected.id ? "Ответственная должность" : node.executorId === selected.id ? "Crew / исполнитель" : node.clientId === selected.id ? "Клиент результата" : node.resourceIds.includes(selected.id) ? "Использует ресурс" : node.parentId === selected.id ? "Дочерний узел" : node.nextId === selected.id ? "Следующий шаг" : "Связано в модели"}</small></button>)}</div>}
+            {relatedUsage.length > 0 && <div className="om-usage"><b>Использование этого узла · обратный список</b>{relatedUsage.map((node) => <button type="button" key={node.id} onClick={() => openNode(node.id)}><code>{node.code}</code>{node.name}<small>{node.roleId === selected.id ? "Ответственная должность" : node.executorId === selected.id ? "Crew / исполнитель" : node.clientId === selected.id ? "Клиент результата" : node.resourceIds.includes(selected.id) ? "Использует ресурс" : node.managerId === selected.id ? "Непосредственный подчинённый" : node.parentId === selected.id ? "Дочерний узел" : node.nextId === selected.id ? "Следующий шаг" : "Связано в модели"}</small></button>)}</div>}
           </section>
         </form> : <div className="om-empty om-no-selection"><span className="om-empty-index">01</span><strong>Выберите узел рабочей карты</strong><p>Код, имя, клиент, роль, Crew, ресурсы, расписание и критерии результата остаются отдельными редактируемыми полями.</p><button type="button" onClick={() => addNode("process")}>Создать первый процесс</button></div>)}
       </main>
