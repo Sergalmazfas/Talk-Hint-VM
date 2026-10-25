@@ -3,9 +3,17 @@ const terminal = new Set(["completed", "failed", "canceled", "cancelled"]);
 /** Saved data only. Never generates a replacement summary, translates speech,
  * calls providers or starts/retries work. Keep original order and full text. */
 export function finalCallResult(task: Record<string, any>) {
+  const pendingNotes: Record<string, string> = {
+    queued: "Поручение сохранено и ожидает запуска.",
+    starting: "Подготавливается звонок. Ответ оператора ещё не подтверждён.",
+    ringing: "Идёт вызов. Собеседник ещё не ответил.",
+    connected: "Разговор продолжается. Итог появится после завершения.",
+    finalizing: "Разговор завершён. Сохраняем транскрипцию и готовим итог.",
+  };
   if (!terminal.has(task.status)) return {
     task_id: task.id, status: task.status, ready: false,
-    note: "Звонок ещё не завершён. Нажмите «Получить итог звонка» позже. Повторный звонок не запускается.",
+    note: (pendingNotes[task.status] || "Итог поручения пока не готов.") +
+      " Нажмите «Получить итог звонка» позже. Повторный звонок не запускается.",
   };
   const turns = (Array.isArray(task.transcriptTurns) ? task.transcriptTurns : []).map((t: any, index: number) => ({
     id: typeof t.id === "string" ? t.id : String(index),

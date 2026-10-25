@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { runInNewContext } from "node:vm";
 import { callApprovalWidgetHtml } from "./callApprovalWidget";
 
-function harness(options: { state?: object; host?: boolean; respond?: (name: string, args: any) => any } = {}) {
+function harness(options: { state?: object; host?: boolean; respond?: (name: string, args: any) => any; noApproval?: boolean; persistThrows?: boolean } = {}) {
   const nodes = new Map<string, any>(), listeners = new Map<string, Function>();
   const calls: any[] = [], states: any[] = [], sent: any[] = [];
   function node(id: string) {
@@ -16,8 +16,8 @@ function harness(options: { state?: object; host?: boolean; respond?: (name: str
       outgoing: { fromNumber: "+12025550999", personality: { name: "Катя", version: 2 } } } };
   const parent = { postMessage(value: any) { sent.push(value); } };
   const host = options.host === false ? undefined : {
-    toolOutput: output, toolResponseMetadata: meta, widgetState: options.state,
-    setWidgetState(state: any) { states.push(state); },
+    toolOutput: output, toolResponseMetadata: options.noApproval ? undefined : meta, widgetState: options.state,
+    setWidgetState(state: any) { if (options.persistThrows) throw new Error("Host state unavailable"); states.push(state); },
     async callTool(name: string, args: any) { calls.push({ name, args }); return options.respond?.(name, args) ??
       { structuredContent: { task_id: "task-alice", task: { id: "task-alice" } } }; },
   };
@@ -51,7 +51,8 @@ describe("ChatGPT single confirmation and saved final report widget", () => {
       confirmation: "secret-confirmation", approvalToken: "secret-approval", decision: "approve" } }]);
     expect(h.node("getResult").hidden).toBe(false);
     expect(h.node("preview").hidden).toBe(true);
-    expect(h.states).toEqual([{ taskId: "task-alice", clientRequestId: h.output.call.clientRequestId }]);
+    expect(h.states.at(-1)).toEqual({ taskId: "task-alice", clientRequestId: h.output.call.clientRequestId });
+    expect(h.states[0]).toEqual({ taskId: null, clientRequestId: h.output.call.clientRequestId });
     expect(JSON.stringify(h.states)).not.toContain("secret-");
   });
   it("denial makes no result reader or outbound start", async () => {
@@ -111,5 +112,52 @@ describe("ChatGPT single confirmation and saved final report widget", () => {
     const h = harness({ host: false });
     expect(h.node("approve").disabled).toBe(true);
     expect(h.calls).toHaveLength(0);
+  });
+  it("recovers an old preview without approval secrets using only the original request locator", async () => {
+    const h = harness({ noApproval: true, respond: () => ({ structuredContent: {
+      ready: false, status: "not_found", note: "Поручение не найдено в текущем аккаунте.",
+    } }) });
+    await h.click("getResult");
+    expect(h.calls).toEqual([{ name: "get_call_result", args: { clientRequestId: h.output.call.clientRequestId } }]);
+    expect(h.node("status").textContent).toContain("не найдено");
+    expect(h.node("preview").hidden).toBe(true);
+  });
+  it("optional persistence failure does not hide an existing result; accepts text-only host responses", async () => {
+    const h = harness({ state: { taskId: "task-alice" }, persistThrows: true, respond: () => ({
+      content: [{ type: "text", text: JSON.stringify({ task_id: "task-alice", ready: true,
+        status: "completed", summary: "Согласовали встречу.", transcript: "Собеседник: Да." }) }],
+    }) });
+    await h.click("getResult");
+    expect(h.node("summary").textContent).toBe("Согласовали встречу.");
+    expect(h.node("report").hidden).toBe(false);
+  });
+  it("shows actual RPC code and reason instead of blaming ChatGPT; retries only reads", async () => {
+    const h = harness({ host: false });
+    h.listeners.get("message")!({ source: h.parent, data: { jsonrpc: "2.0", id: "talkhint-initialize", result: {} } });
+    h.listeners.get("message")!({ source: h.parent, data: { jsonrpc: "2.0", method: "ui/notifications/tool-result",
+      params: { structuredContent: { task_id: "task-alice", ready: false } } } });
+    const reading = h.click("getResult");
+    const rpc = h.sent.at(-1);
+    expect(rpc.params.name).toBe("get_call_result");
+    h.listeners.get("message")!({ source: h.parent, data: { jsonrpc: "2.0", id: rpc.id,
+      error: { code: -32602, message: "Tool not available to this widget" } } });
+    await reading;
+    expect(h.node("status").textContent).toContain("-32602");
+    expect(h.node("status").textContent).toContain("Tool not available");
+    expect(h.node("getResult").disabled).toBe(false);
+    expect(h.calls).toHaveLength(0);
+  });
+  it("uses compatibility transport only for a failed read, never resends approval", async () => {
+    const h = harness({ state: { taskId: "task-alice" }, respond: () => ({ structuredContent: {
+      task_id: "task-alice", ready: true, status: "completed", summary: "Готово.", transcript: "Да.",
+    } }) });
+    h.listeners.get("message")!({ source: h.parent, data: { jsonrpc: "2.0", id: "talkhint-initialize", result: {} } });
+    const reading = h.click("getResult");
+    const rpc = h.sent.at(-1);
+    h.listeners.get("message")!({ source: h.parent, data: { jsonrpc: "2.0", id: rpc.id,
+      error: { code: -32601, message: "tools/call unsupported" } } });
+    await reading;
+    expect(h.calls).toEqual([{ name: "get_call_result", args: { id: "task-alice" } }]);
+    expect(h.node("summary").textContent).toBe("Готово.");
   });
 });

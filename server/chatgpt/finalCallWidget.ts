@@ -29,8 +29,18 @@ let card = null, taskId = null, requestId = null, locked = false, busy = false, 
 const pending = new Map();
 function status(s) { $("status").textContent = s; }
 function persist() {
-  if (window.openai && typeof window.openai.setWidgetState === "function")
-    window.openai.setWidgetState({taskId, clientRequestId: requestId});
+  try {
+    if (window.openai && typeof window.openai.setWidgetState === "function")
+      window.openai.setWidgetState({taskId, clientRequestId: requestId});
+  } catch (_) { /* Optional host persistence must not prevent a server read. */ }
+}
+function rpcError(error) {
+  const code = Number.isFinite(error && error.code) ? " (" + error.code + ")" : "";
+  const message = text(error && error.message).replace(/Bearer\\s+\\S+/gi, "[скрыто]")
+    .replace(/https?:\\/\\/\\S+/gi, "[адрес скрыт]").slice(0, 300);
+  const failure = new Error("Не выполнен запрос карточки" + code + (message ? ": " + message : "."));
+  failure.bridgeFailure = true;
+  return failure;
 }
 function showResultAction() {
   $("preview").hidden = true; $("getResult").hidden = !taskId && !requestId;
@@ -38,6 +48,8 @@ function showResultAction() {
 function renderReport(result) {
   const id = locator(result.task_id || result.id);
   if (id && taskId && id !== taskId) throw new Error("Получен результат другого поручения");
+  if (result.clientRequestId && requestId && result.clientRequestId !== requestId)
+    throw new Error("Получен результат другого запроса");
   if (id) taskId = id;
   persist(); showResultAction();
   if (!result.ready) { $("report").hidden = true; status(result.note || "Звонок ещё не завершён. Получите итог позже."); return; }
@@ -71,6 +83,12 @@ function receive(output, meta) {
   const wrapped = record(meta && (meta.mcp_tool_result || meta.call_tool_result));
   const metadata = record(wrapped && wrapped._meta) || record(meta && meta._meta) || meta;
   const approval = record(metadata && metadata["talkhint/cardApproval"]);
+  if (!approval && record(value.call) && !taskId && !locked) {
+    // Historical previews are locators only, never permission to approve a call.
+    requestId = locator(value.call.clientRequestId);
+    if (requestId) { locked = true; persist(); showResultAction(); status("Восстановлена ссылка на поручение. Проверьте его статус; новый звонок не запускается."); }
+    return;
+  }
   if (!approval || !record(value.call) || locked) return;
   card = {confirmation: approval.confirmation, approvalToken: approval.approvalToken,
     expiresAt: value.expiresAt, call: value.call};
@@ -87,24 +105,33 @@ function receive(output, meta) {
   status(expired ? "Срок подтверждения истёк. Звонок не начат." : "Проверьте адресата, номер и задание. Звонок ещё не начат.");
 }
 function hasBridge() { return bridge || !!(window.openai && typeof window.openai.callTool === "function"); }
+function toolValue(response) {
+  const value = record(response && response.result) || record(response) || {};
+  if (value.isError) throw new Error((value.content || []).map(v => text(v.text)).join(" ") || "TalkHint не разрешил запрос. Проверьте подключение и разрешения.");
+  if (record(value.structuredContent)) return value.structuredContent;
+  // Some host adapters preserve the MCP text content but omit structuredContent.
+  for (const item of Array.isArray(value.content) ? value.content : []) {
+    try { const parsed = JSON.parse(text(item.text)); if (record(parsed)) return parsed; } catch (_) {}
+  }
+  return value;
+}
 async function callTool(name, args) {
   let result;
   if (bridge) result = await new Promise((resolve, reject) => {
     const id = "talkhint-" + (++sequence);
-    const timer = window.setTimeout(() => {pending.delete(id); reject(new Error("Ответ не получен. Не создавайте повторный звонок."));}, 20000);
+    const timer = window.setTimeout(() => {pending.delete(id); reject(rpcError({message:"Ответ не получен за 20 секунд. Не создавайте повторный звонок."}));}, 20000);
     pending.set(id, {resolve, reject, timer});
     window.parent.postMessage({jsonrpc:"2.0",id,method:"tools/call",params:{name,arguments:args}}, "*");
   });
   else if (window.openai && typeof window.openai.callTool === "function") result = await window.openai.callTool(name, args);
-  else throw new Error("Этот клиент не предоставил защищённый интерфейс TalkHint.");
-  const value = record(result && result.result) || record(result) || {};
-  if (value.isError) throw new Error((value.content || []).map(v => text(v.text)).join(" ") || "Не удалось прочитать результат. Проверьте подключение и разрешения.");
-  return record(value.structuredContent) || value;
+  else throw new Error("Этот клиент не предоставил защищённый интерфейс TalkHint. Звонок не запускался этой кнопкой.");
+  return toolValue(result);
 }
 async function decide(decision) {
   if (locked || busy || !card || !hasBridge()) return;
   if (!Number.isFinite(Date.parse(card.expiresAt)) || Date.parse(card.expiresAt) <= Date.now()) {status("Срок подтверждения истёк. Звонок не начат."); return;}
   locked = true; busy = true; $("approve").disabled = $("deny").disabled = true;
+  persist();
   status(decision === "approve" ? "Отправляем одно подтверждение…" : "Отменяем поручение…");
   try {
     const value = await callTool("confirm_call_from_card", {confirmation:card.confirmation,approvalToken:card.approvalToken,decision});
@@ -118,15 +145,26 @@ async function decide(decision) {
 async function getResult() {
   if (busy || (!taskId && !requestId)) return;
   busy = true; $("getResult").disabled = true;
+  status("Проверяем сохранённое поручение. Новый звонок не запускается…");
   try {
-    renderReport(await callTool("get_call_result", taskId ? {id:taskId} : {clientRequestId:requestId}));
-  } catch (error) {status(error.message);}
+    const args = taskId ? {id:taskId} : {clientRequestId:requestId};
+    let value;
+    try { value = await callTool("get_call_result", args); }
+    catch (error) {
+      // Only a read may use the alternate host transport. Never repeat approval.
+      if (!error.bridgeFailure || !window.openai || typeof window.openai.callTool !== "function") throw error;
+      const response = await window.openai.callTool("get_call_result", args);
+      value = toolValue(response);
+    }
+    if (!record(value) || typeof value.ready !== "boolean") throw new Error("TalkHint не вернул статус поручения. Повторите только получение итога.");
+    renderReport(value);
+  } catch (error) {status(error.message + " Повторите только получение итога; новое подтверждение звонка не отправляется.");}
   finally {busy = false; $("getResult").disabled = false;}
 }
 window.addEventListener("message", event => {
   if (event.source !== window.parent || !record(event.data) || event.data.jsonrpc !== "2.0") return;
   const m = event.data, entry = pending.get(m.id);
-  if (entry) {pending.delete(m.id); window.clearTimeout(entry.timer); m.error ? entry.reject(new Error("Ошибка интерфейса ChatGPT")) : entry.resolve(m.result); return;}
+  if (entry) {pending.delete(m.id); window.clearTimeout(entry.timer); m.error ? entry.reject(rpcError(m.error)) : entry.resolve(m.result); return;}
   if (m.id === "talkhint-initialize" && !m.error) {
     bridge = true;
     window.parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}}, "*");

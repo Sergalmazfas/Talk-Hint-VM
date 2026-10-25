@@ -18,3 +18,16 @@ prepare/dial and without persisting OAuth or approval capabilities.
 the widget or tool metadata. Clear private output and invalidate pending work on
 background/revocation. Do not promise invisible-account-change notification or
 real iPhone retention from local mocks; official-host verification is separate.
+
+Do not attribute a JSON-RPC bridge error to ChatGPT itself or infer that a call
+was created. Preserve the bounded error code/reason and distinguish a missing
+owner-scoped task from an active call or pending report. Never replay approval
+through an alternate transport; fallback transport is safe only for reads.
+
+**Why:** A failed iPhone card displayed a generic host-error label while no
+task was found for its original request. HTTP 200 MCP logs alone could not
+establish whether confirmation or retrieval had succeeded.
+
+**How to apply:** Persist only locators before an ambiguous approval response,
+recover under current authorization, and log safe tool outcomes without
+credentials, hidden approval capabilities or transcript contents.

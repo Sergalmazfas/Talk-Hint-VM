@@ -101,4 +101,27 @@ describe("saved final result; no ChatGPT live transport", () => {
     expect((await f.rpc("get_call_result", { id: "task-alice", clientRequestId: "56fa4264-8b0a-4692-bcb2-77b03c145631" })).body.result.isError).toBe(true);
     expect(f.backend.task).not.toHaveBeenCalled();
   });
+  it("uses owner-scoped exact request lookup even when a task is outside recent history", async () => {
+    const f = await fixture();
+    f.backend.tasks.mockResolvedValue([]);
+    f.backend.taskByClientRequest = vi.fn().mockResolvedValue({ id: "task-alice" });
+    const result = await f.rpc("get_call_result", { clientRequestId: "56fa4264-8b0a-4692-bcb2-77b03c145631" });
+    expect(result.body.result.structuredContent.ready).toBe(true);
+    expect(f.backend.taskByClientRequest).toHaveBeenCalledWith("alice", "56fa4264-8b0a-4692-bcb2-77b03c145631");
+    expect(f.backend.tasks).not.toHaveBeenCalled();
+    expect(f.backend.start).not.toHaveBeenCalled();
+  });
+  it("missing task is an explicit read-only status, not a claim that a call happened", async () => {
+    const f = await fixture();
+    f.backend.taskByClientRequest = vi.fn().mockResolvedValue(undefined);
+    const result = await f.rpc("get_call_result", { clientRequestId: "56fa4264-8b0a-4692-bcb2-77b03c145631" });
+    expect(result.body.result.isError).toBe(false);
+    expect(result.body.result.structuredContent).toMatchObject({ status: "not_found", ready: false });
+    expect(f.backend.task).not.toHaveBeenCalled();
+    expect(f.backend.start).not.toHaveBeenCalled();
+  });
+  it("distinguishes ringing from report preparation without revealing live speech", () => {
+    expect(finalCallResult({ id: "a", status: "ringing" }).note).toContain("ещё не ответил");
+    expect(finalCallResult({ id: "a", status: "finalizing" }).note).toContain("Сохраняем транскрипцию");
+  });
 });

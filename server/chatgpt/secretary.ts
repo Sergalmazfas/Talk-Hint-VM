@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { phoneNumbers, pendingCalls } from "@shared/schema";
+import { phoneNumbers, pendingCalls, secretaryTasks } from "@shared/schema";
 import { db } from "../db";
 import { storage } from "../storage";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
@@ -55,6 +55,12 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
         const { id, clientRequestId, status, outcome, summary, phoneNumber, createdAt, updatedAt } = toSecretaryTaskReport(task);
         return { id, clientRequestId, status, outcome, summary, phoneNumber, createdAt, updatedAt };
       });
+    },
+    async taskByClientRequest(userId: string, clientRequestId: string) {
+      const [task] = await db.select({ id: secretaryTasks.id }).from(secretaryTasks).where(and(
+        eq(secretaryTasks.userId, userId), eq(secretaryTasks.clientRequestId, clientRequestId),
+      )).limit(1);
+      return task;
     },
     async task(userId: string, id: string, transcript: boolean) {
       const task = await getSecretaryTaskById(id);
@@ -116,4 +122,5 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
     },
   };
 }
-export type SecretaryBackend = ReturnType<typeof secretaryBackend>;
+export type SecretaryBackend = Omit<ReturnType<typeof secretaryBackend>, "taskByClientRequest"> &
+  Partial<Pick<ReturnType<typeof secretaryBackend>, "taskByClientRequest">>;

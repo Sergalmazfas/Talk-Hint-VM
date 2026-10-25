@@ -472,9 +472,12 @@ export function registerChatGPTIntegration(
         need(claims, "calls:transcript");
         let id = args.id;
         if (!id) {
-          const saved = (await backend.tasks(claims.sub)).filter(t => t.clientRequestId === args.clientRequestId);
-          if (saved.length !== 1) return fail(404, "Поручение пока не найдено. Повторный звонок не запускался.");
-          id = saved[0].id;
+          const saved = backend.taskByClientRequest
+            ? await backend.taskByClientRequest(claims.sub, args.clientRequestId)
+            : (await backend.tasks(claims.sub)).find(t => t.clientRequestId === args.clientRequestId);
+          if (!saved) return { clientRequestId: args.clientRequestId, status: "not_found", ready: false,
+            note: "В текущем подключённом аккаунте поручение не найдено. Подтверждение могло не дойти до сервера. Наличие звонка не подтверждено; новый звонок не запускался. Проверьте подключённый аккаунт и повторите только получение итога." };
+          id = saved.id;
         }
         return finalCallResult(await backend.task(claims.sub, id, true));
       }
@@ -610,7 +613,12 @@ export function registerChatGPTIntegration(
           JSON.stringify(value);
         result = { content: [{ type: "text", text }], structuredContent: value,
           isError: false, ...(meta ? { _meta: meta } : {}) };
+        console.info(`[TalkHint MCP tool] name=${name} result=ok status=${
+          ["queued", "starting", "ringing", "connected", "finalizing", "completed", "failed", "canceled", "cancelled", "not_found"].includes(value?.status)
+            ? value.status : "returned"}`);
       } catch (error: any) {
+        const errorStatus = error instanceof z.ZodError ? 400 : Number(error?.status) || 503;
+        console.info(`[TalkHint MCP tool] name=${name} result=error status=${errorStatus}`);
         if (error?.status === 401) res.set("WWW-Authenticate", challenge);
         const authenticate = error?.status === 401 ? challenge :
           error?.requiredScopes ? scopeChallenge(error.requiredScopes) :
@@ -619,6 +627,11 @@ export function registerChatGPTIntegration(
         result = { isError: true, content: [{ type: "text", text: error instanceof z.ZodError ? "Invalid arguments" :
           error?.status && error.status < 500 ? error.message :
             "Operation unavailable; check the existing task before trying again." }],
+          ...((name as string) === "get_call_result" ? { structuredContent: {
+            code: errorStatus === 401 ? "AUTH_REQUIRED" : errorStatus === 403 ? "ACCESS_DENIED" :
+              errorStatus === 404 ? "TASK_NOT_FOUND" : errorStatus === 400 ? "INVALID_LOCATOR" : "RESULT_UNAVAILABLE",
+            retryReadOnly: true,
+          } } : {}),
           ...(cardRequest && !callStartAttempted && [401, 403].includes(error?.status) ? {
             structuredContent: {
               code: "CALL_APPROVAL_REJECTED",
