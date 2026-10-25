@@ -10,6 +10,7 @@ import { strategyCommandSchemas, strategyCommandTypes } from "./strategySchema";
 import { applyStrategyCommand, collectStrategyImpacts, captureStrategyMap } from "./strategyDomain";
 import { latestImpactOutcome, type StrategyCommand } from "../../shared/projectStrategy";
 import { ModelError } from "./modelError";
+ import { saveAnalystPreparationSchema, saveAnalystPreparation } from "./analystPreparation";
 export { ModelError } from "./modelError";
 
 const str = (max = 12000) => z.string().max(max);
@@ -24,6 +25,7 @@ export const elementSchema = z.object({
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
+   saveAnalystPreparationSchema,
   ...strategyCommandSchemas,
   addCompetitorReviewSchema,
   saveCompetitorSupportSchema,
@@ -49,6 +51,7 @@ const newId = (prefix: string) => `${prefix}-${randomUUID()}`;
 /** Pure transaction: errors leave the caller's old snapshot untouched. */
 export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: string, collect = true): ProjectModelState {
   const c = commandSchema.parse(raw) as ModelCommand;
+   if (c.type === "saveAnalystPreparation") return saveAnalystPreparation(old, c, actor);
   if (strategyCommandTypes.has(c.type as StrategyCommand["type"])) {
     const next = applyStrategyCommand(old, c as StrategyCommand, actor);
     return collect ? collectStrategyImpacts(old, next, actor) : next;

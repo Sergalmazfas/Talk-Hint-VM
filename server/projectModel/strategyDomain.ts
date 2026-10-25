@@ -158,13 +158,16 @@ export function collectStrategyImpacts(old: ProjectModelState, next: ProjectMode
   const strategy = next.strategy;
   const before = new Map(strategyEntries(old).map(e => [e.key, e]));
   let after = new Map(strategyEntries(next).map(e => [e.key, e]));
-  const links = strategyLinks(next).filter(l => l.kind === "depends_on");
+  // Removed inputs lose their generated edges in the new state; added inputs have
+  // no old entry. Both identities and causal graphs are needed for a true delta.
+  const links = Array.from(new Map([...strategyLinks(old), ...strategyLinks(next)]
+    .filter(l => l.kind === "depends_on").map(l => [`${l.from}\0${l.to}`, l])).values());
   const reverse = new Map<string, typeof links>();
   for (const l of links) { const list = reverse.get(l.to) ?? []; list.push(l); reverse.set(l.to, list); }
-  const changed = Array.from(before.entries()).filter(([key, prior]) =>
-    strategyFingerprint(prior.value) !== strategyFingerprint(after.get(key)?.value ?? null));
+  const changed = Array.from(new Set([...Array.from(before.keys()), ...Array.from(after.keys())])).filter(key =>
+    strategyFingerprint(before.get(key)?.value ?? null) !== strategyFingerprint(after.get(key)?.value ?? null));
   const mapSources = new Set<string>();
-  for (const [source] of changed) {
+  for (const source of changed) {
     if (source === "map:current") continue;
     const visited = new Set([source]), queue = [source];
     for (let index = 0; index < queue.length; index++)
@@ -191,10 +194,11 @@ export function collectStrategyImpacts(old: ProjectModelState, next: ProjectMode
     recalculated = true;
     after = new Map(strategyEntries(next).map(e => [e.key, e]));
   }
-  for (const [source, prior] of Array.from(before.entries())) {
+  for (const source of changed) {
+    const prior = before.get(source);
     const current = after.get(source);
-    if (strategyFingerprint(prior.value) === strategyFingerprint(current?.value ?? null)) continue;
-    const eventId = createHash("sha256").update(`${old.revision}:${source}:${strategyFingerprint(prior.value)}:${strategyFingerprint(current?.value ?? null)}`).digest("hex");
+    if (strategyFingerprint(prior?.value ?? null) === strategyFingerprint(current?.value ?? null)) continue;
+    const eventId = createHash("sha256").update(`${old.revision}:${source}:${strategyFingerprint(prior?.value ?? null)}:${strategyFingerprint(current?.value ?? null)}`).digest("hex");
     const seen = new Set([source]), queue = [{ key: source, path: [source], reasons: [] as string[] }];
     for (let index = 0; index < queue.length; index++) {
       const item = queue[index];
@@ -205,10 +209,10 @@ export function collectStrategyImpacts(old: ProjectModelState, next: ProjectMode
         queue.push({ key: link.from, path, reasons });
         if (strategy.impacts.some(i => i.eventId === eventId && i.target === link.from)) continue;
         if (strategy.impacts.length >= 3000) fail("Достигнут лимит событий влияния; история сохранена", 413);
-        const entry = current ?? prior;
+        const entry = (current ?? prior)!;
         const recomputed = link.from === "map:current" && recalculated && mapSources.has(source);
         strategy.impacts.push({
-          id: id("IMPACT"), eventId, source, target: link.from, before: structuredClone(prior.value),
+          id: id("IMPACT"), eventId, source, target: link.from, before: structuredClone(prior?.value ?? null),
           after: structuredClone(current?.value ?? null), sourceUrls: [...entry.sourceUrls], sourceNote: entry.sourceNote,
           sourceCheckedAt: entry.checkedAt, at: new Date().toISOString(), path, reason: reasons.join(" → "),
           effect: recomputed ? "recomputed" : "review", targetFingerprint: strategyFingerprint(after.get(link.from)!.value), actor, reviews: [],

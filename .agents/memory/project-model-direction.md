@@ -245,3 +245,16 @@ AI-аналитик конкурентного бенчмаркинга. Сна�
 **How to apply:** Do not invent human hires or create the remaining AI roles.
 CrewAI executes processes; the existing TalkHint model remains the data source,
 and Sergey makes strategic decisions.
+
+## CrewAI checkpoint boundary
+
+Never silently create a new research run when a requested checkpoint is missing.
+Keep facts, history and authoritative checkpoints in the existing owner-scoped
+TalkHint model; do not adopt CrewAI's default SQLite as a competing card store.
+
+**Why:** CrewAI Flows documentation permits a missing restore ID to fall back to
+new state. That could repeat paid collection or writes while appearing to resume.
+
+**How to apply:** A future worker must verify owner, hypothesis, run identity,
+approved inputs and persisted version before continuation; reject unknown IDs
+and use atomic revision checks and stable operation identities for writes.

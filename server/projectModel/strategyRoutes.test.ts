@@ -14,6 +14,7 @@ import { PgModelRepository } from "./repository";
 import { initialModel } from "./seed";
 import { emptyStrategyNode } from "../../shared/projectStrategy";
 import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
+import { defaultAnalystPreparation } from "../../shared/competitiveAnalystTemplate";
 
 describe("strategy persistence and HTTP boundaries", () => {
   let rows: Map<string, ProjectModelState>, app: express.Express, pool: Pool;
@@ -95,6 +96,30 @@ describe("strategy persistence and HTTP boundaries", () => {
     vi.stubEnv("NODE_ENV", "production");
     expect((await request(app).get(path).set("x-test-user", "owner")).status).toBe(404);
     expect((await post(cmd)).status).toBe(404);
+    expect(JSON.stringify(Array.from(rows.entries()))).toBe(before);
+  });
+  it("saves analyst preparation in the SAME owner row and reads it after API/repository recreation without running anything", async () => {
+    const other = copy(rows.get("second")), original = copy(rows.get("owner"));
+    const data = defaultAnalystPreparation(rows.get("owner")!.alternatives![0].model);
+    const command = { type: "saveAnalystPreparation" as const, baseVersion: 0, preparation: data };
+    const saved = await post(command);
+    expect(saved.status).toBe(200);
+    expect(saved.body.analystPreparation.revisions[0]).toMatchObject({ status: "awaiting_approval", version: 1, actor: "owner" });
+    app = mount();
+    const loaded = await request(app).get(path).set("x-test-user", "owner");
+    expect(loaded.body.analystPreparation).toEqual(saved.body.analystPreparation);
+    expect((await post({ ...command, baseVersion: 1 })).body).toEqual(loaded.body);
+    expect((await post(command)).status).toBe(409);
+    expect((await post(command, "owner", undefined, "/api/admin/project-model?hypothesis=original")).status).toBe(409);
+    expect(rows.get("second")).toEqual(other);
+    expect(rows.get("owner")!.elements).toEqual(original!.elements);
+    expect(rows.get("owner")!.alternatives![0].model.competitorDirectory).toEqual(original!.alternatives![0].model.competitorDirectory);
+    expect((await request(app).get(path).set("x-test-user", "second")).body.analystPreparation).toBeUndefined();
+    const before = JSON.stringify(Array.from(rows.entries()));
+    expect((await request(app).post(path).set("x-test-user", "owner").set("Origin", "https://evil.example")
+      .send({ revision: loaded.body.revision, command })).status).toBe(403);
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await post({ ...command, baseVersion: 1 })).status).toBe(404);
     expect(JSON.stringify(Array.from(rows.entries()))).toBe(before);
   });
 });

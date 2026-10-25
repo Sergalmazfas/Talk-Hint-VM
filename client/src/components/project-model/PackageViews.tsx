@@ -11,6 +11,7 @@ import {
 import { strategyEntries, strategyHref, strategyLinks } from "@shared/projectStrategy";
 import CompetitorDirectory from "@/components/project-model/CompetitorDirectory";
 import ProjectStrategyWorkspace, { ProjectStrategySummary } from "@/components/project-model/ProjectStrategyWorkspace";
+import CompetitiveAnalystPreparation from "@/components/project-model/CompetitiveAnalystPreparation";
 
 type Props = {
   state: ProjectModelState;
@@ -218,7 +219,9 @@ export default function PackageViews({ state, view, openElement, submit, saving 
 
   if (view === "overview") return <section className="pm-package-overview" aria-label="Краткий пакет проекта">
     <div className="pm-package-intro">
-      <div><p className="pm-kicker">OWNER RESEARCH / PROJECT BRIEF</p><h2>Десять блоков, одна рабочая версия</h2><p>Краткие ответы берутся из текущих узлов модели. Раскройте блок для основания, даты и источников.</p></div>
+      <div><p className="pm-kicker">OWNER RESEARCH / PROJECT BRIEF</p><h2>Десять блоков, одна рабочая версия</h2><p>Краткие ответы берутся из текущих узлов модели. Раскройте блок для основания, даты и источников.</p>
+        {state.hypothesisContext?.selectedId === "new-country" && <a className="pm-btn small" href="#competitive-analyst">Открыть подготовку AI-аналитика</a>}
+      </div>
       <span className="pm-package-count">{packageElements.filter(({ element }) => !!element?.description.trim()).length}<small>/ 10 заполнено</small></span>
     </div>
     <div className="pm-package-blocks">{packageElements.map(({ block, element }, index) => {
@@ -278,6 +281,7 @@ export default function PackageViews({ state, view, openElement, submit, saving 
       </details>;
     })}</div>
     {state.hypothesisContext?.selectedId === "new-country" && submit && <ProjectStrategyWorkspace state={state} submit={submit} saving={saving} openElement={openElement} />}
+    {state.hypothesisContext?.selectedId === "new-country" && <CompetitiveAnalystPreparation state={state} submit={submit} saving={saving} />}
   </section>;
 
   if (!["segment", "market", "difference"].includes(view)) return null;

@@ -4,7 +4,7 @@ import { applyCommand, requestSchema } from "./domain";
 import { initialModel } from "./seed";
 import { projectPackageBlocks, type ProjectModelState, type ModelCommand } from "../../shared/projectModel";
 import { emptyStrategyNode, emptyStrategyDecision, defaultStrategyMap, strategyEntries, strategyLinks, strategyGaps } from "../../shared/projectStrategy";
-import { emptyCompetitorResearch, researchRows, featureStatusLabel, positioningFor, quarterDirectory } from "../../shared/competitorResearch";
+import { emptyCompetitorResearch, researchRows, researchFeatures, featureStatusLabel, positioningFor, quarterDirectory } from "../../shared/competitorResearch";
 import { initialAIPhoneSnapshot } from "./competitorInitial";
 import { newReview } from "../../shared/competitorAssessments";
 import { applyHypothesisCommand } from "./hypotheses";
@@ -238,4 +238,49 @@ describe("connected strategy model", () => {
     }, "owner")).toThrow(/исходная модель/);
     expect(JSON.stringify(original)).toBe(before);
   });
+  for (const change of ["add_feature", "remove_feature", "add_competitor"] as const)
+    it(`actually recalculates scenario_v2 for ${change}, preserving archive geometry`, () => {
+      let s = competitor(strategyFixture());
+      const record = s.competitorDirectory!.records[0];
+      const baseline = structuredClone(record.revisions[0].snapshot);
+      // Use a feature not present in the six legacy compatibility scenarios.
+      baseline.research!.features = Object.fromEntries(Object.keys(researchFeatures).map(k => [k, {
+        status: "not_supported", note: "ЯВНО ТЕСТОВОЕ отсутствие", sourceUrls: ["https://example.test"],
+        checkedAt: "2026-10-25", contexts: ["personal", "business"],
+      }]));
+      baseline.research!.autonomy = { mode: "confirmed_tasks", evidence: {
+        status: "live_verified", note: "Синтетическая проверка", sourceUrls: ["https://example.test"], checkedAt: "2026-10-25",
+      } };
+      if (change === "add_feature") delete baseline.research!.features.chat;
+      s = run(s, { type: "saveCompetitor", id: record.id, baseVersion: 1, reason: "Синтетическая база", snapshot: baseline });
+      s = run(s, { type: "saveStrategyMap", baseVersion: 0, map: defaultStrategyMap() });
+      const previousMaps = structuredClone(s.strategy!.mapVersions);
+      const now = new Date(), quarter = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+      s = run(s, { type: "captureCompetitorQuarter", quarter, reason: "ТЕСТ", direction: "Фикстура" });
+      const archived = structuredClone(s.competitorDirectory!.quarters);
+      const snapshot = structuredClone(baseline);
+      if (change === "add_feature") snapshot.research!.features.chat = {
+        status: "live_verified", note: "ЯВНО ТЕСТОВЫЙ новый факт", sourceUrls: ["https://example.test"],
+        checkedAt: "2026-10-25", contexts: ["personal", "business"],
+      };
+      if (change === "remove_feature") delete snapshot.research!.features.chat;
+      if (change === "add_competitor") {
+        snapshot.name = "ЯВНО ТЕСТОВЫЙ второй продукт"; snapshot.website = "https://second.example.test"; snapshot.appStore = "https://apps.apple.com/us/app/id9999999999";
+      }
+      s = run(s, { type: "saveCompetitor", ...(change === "add_competitor" ? {} : { id: record.id }),
+        baseVersion: change === "add_competitor" ? 0 : 2, reason: "Тест структурного изменения", snapshot });
+      const current = s.strategy!.mapVersions.at(-1)!;
+      expect(s.strategy!.mapVersions.slice(0, -1)).toEqual(previousMaps);
+      expect(s.competitorDirectory!.quarters).toEqual(archived);
+      expect(current.version).toBe(previousMaps.at(-1)!.version + 1);
+      expect(s.decisions.at(-1)?.strategyChange?.command).toBe("recalculateStrategyMap");
+      expect(s.strategy!.impacts.some(i => i.target === "map:current" && i.effect === "recomputed")).toBe(true);
+      if (change === "add_competitor") expect(current.calculations).toHaveLength(previousMaps.at(-1)!.calculations!.length + 1);
+      else {
+        const point = current.calculations!.find(p => p.ref === `competitor:${record.id}`)!;
+        expect(point.x).toBe(change === "add_feature" ? 2 : null);
+        const event = s.strategy!.impacts.find(i => i.source === `fact:${record.id}:feature:chat`)!;
+        expect(change === "add_feature" ? event.before : event.after).toBeNull();
+      }
+    });
 });

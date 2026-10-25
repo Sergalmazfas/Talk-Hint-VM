@@ -101,6 +101,8 @@ export interface ProjectModelState {
   competitorDirectory?: CompetitorDirectory;
   /** Dev-only connected planning; existing records and audit history stay intact. */
   strategy?: import("./projectStrategy").ProjectStrategy;
+   /** Stage A role preparation; not authorization to execute an agent. */
+   analystPreparation?: import("./competitiveAnalyst").AnalystPreparation;
   /** Response metadata only; viewing an alternative never selects a primary. */
   hypothesisContext?: {
     selectedId: string;
@@ -109,6 +111,7 @@ export interface ProjectModelState {
   };
 }
 export type ModelCommand =
+   | import("./competitiveAnalyst").AnalystPreparationCommand
   | import("./projectStrategy").StrategyCommand
   | import("./competitorAssessments").AddCompetitorReviewCommand
   | import("./competitorAssessments").SaveCompetitorSupportCommand

@@ -621,3 +621,17 @@ mtime_ms = 1792896570299
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d8c00af8-8190-486b-bd19-c5b3a76a9a1c/119fb75e-a3c2-4e2e-a236-1b70adf8926b"
 storage_version_token = "1792897064439979"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "d8O9e-3XzlyjYZ6EQG7AA"
+uri = "file://docs/competitive-analyst-preparation.md"
+type = "text"
+title = "AI-аналитик — паспорт и пакет согласования"
+description = "25 октября 2026: источники, инструменты и цены, процедура, лимиты, предложенный пилот и результаты проверок. Рабочий запуск ещё не разрешён."
+logical_id = "fb6bbb57-326d-4aa8-9db6-87ec1d3a544d"
+content_hash = "sha256:4006b435713b14f825ae15b3b7083cd40cb6aec580a5c76f055ffe7128d58047"
+size = 19761
+mtime_ms = 1792912136918
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fb6bbb57-326d-4aa8-9db6-87ec1d3a544d/2cb11094-d015-4bc1-8835-761bb2c6754e"
+storage_version_token = "1792912149405335"
+content_type = "text/markdown"
