@@ -1,5 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
 @import "../components/project-model/competitor-assessments.css";
+@import "../components/project-model/project-strategy.css";
 
 .pm-page {
   --pm-ink: #172d3b;

@@ -216,3 +216,32 @@ project package.
 **How to apply:** Preserve earlier formulations in history, not as current goals.
 Keep unmeasured coordinates/ratings/income unknown, and compare documented
 capabilities with documented capabilities, not the TalkHint vision as finished.
+
+## Evidence and strategic review
+
+Navigation is not a causal dependency. A changed competitor fact may require a
+related conclusion to be reviewed, but must never automatically replace the
+mission, differentiation, budget, people or plan. Public claims, private
+observations, external estimates and accepted decisions stay distinct.
+
+**Why:** The owner explicitly wants to understand why a decision follows from
+data, while retaining control of strategic choices; a competitor's new feature
+is not itself an instruction to copy it or start an action.
+
+**How to apply:** Propagate review only through explained dependencies, preserve
+the old meaning and review rationale, and keep quarterly data and map methods
+historical. Deterministic recalculation is not an accepted strategy decision.
+Do not label a map as recalculated unless a fresh calculation actually exists;
+archive captures must stay frozen while a newer calculation is shown as current.
+
+## AI staff direction
+
+«Вся будущая команда — AI-сотрудники и Сергей». Начинать с одной должности:
+AI-аналитик конкурентного бенчмаркинга. Сначала паспорт, источники, инструменты
+и процедура для согласования; только после согласования — ограниченный пилот.
+
+**Why:** The owner explicitly set this staffing direction and approval sequence.
+
+**How to apply:** Do not invent human hires or create the remaining AI roles.
+CrewAI executes processes; the existing TalkHint model remains the data source,
+and Sergey makes strategic decisions.

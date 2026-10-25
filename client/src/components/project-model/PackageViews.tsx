@@ -8,7 +8,9 @@ import {
   type ModelElement,
   type ProjectModelState,
 } from "@shared/projectModel";
+import { strategyEntries, strategyHref, strategyLinks } from "@shared/projectStrategy";
 import CompetitorDirectory from "@/components/project-model/CompetitorDirectory";
+import ProjectStrategyWorkspace, { ProjectStrategySummary } from "@/components/project-model/ProjectStrategyWorkspace";
 
 type Props = {
   state: ProjectModelState;
@@ -147,8 +149,31 @@ function EvidenceLinks({ element, state, openElement }: { element: ModelElement;
   const sources = (element.details.source ?? "").split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
   const documents = state.documents.filter((document) => document.elementIds.includes(element.id));
   const relations = state.relations.filter((relation) => relation.from === element.id || relation.to === element.id);
-  if (!sources.length && !documents.length && !relations.length) return null;
+  const key = `element:${element.id}`;
+  const strategyEnabled = state.hypothesisContext?.selectedId === "new-country";
+  const entries = new Map((strategyEnabled ? strategyEntries(state) : []).map((entry) => [entry.key, entry]));
+  const strategyRelations = strategyEnabled ? strategyLinks(state).filter((link) => link.from === key || link.to === key) : [];
+  const basedOn = strategyRelations.filter((link) => link.kind === "depends_on" && link.from === key);
+  const affectedBy = strategyRelations.filter((link) => link.kind === "depends_on" && link.to === key);
+  const related = strategyRelations.filter((link) => link.kind === "navigation");
+  if (!sources.length && !documents.length && !relations.length && !strategyRelations.length) return null;
   return <div className="pm-node-evidence">
+    {strategyRelations.length > 0 && <div className="pm-node-strategy-edges">
+      {([
+        { label: "Основано на", links: basedOn },
+        { label: "Влияет на", links: affectedBy },
+        { label: "Связано с", links: related },
+      ]).map((group) => group.links.length > 0 && <div key={group.label}><b>{group.label}</b>{group.links.map((link) => {
+        const ref = link.from === key ? link.to : link.from;
+        const entry = entries.get(ref);
+        const linkedElement = ref.startsWith("element:") ? state.elements.find((item) => `element:${item.id}` === ref) : undefined;
+        return <span className="pm-node-strategy-edge" key={link.id}>
+          {linkedElement ? <button type="button" onClick={() => openElement(linkedElement)}>{linkedElement.title}</button>
+            : <a href={strategyHref(ref)}>{entry?.title ?? ref}</a>}
+          <small>{link.reason}{entry?.kind ? ` · ${entry.kind}` : ""}</small>
+        </span>;
+      })}</div>)}
+    </div>}
     {sources.map((source, index) => {
       const href = safeUrl(source, hypothesisId);
       return href ? <a key={`${source}-${index}`} href={href} target="_blank" rel="noreferrer">Источник: {source}</a>
@@ -200,6 +225,7 @@ export default function PackageViews({ state, view, openElement, submit, saving 
       const documents = element ? state.documents.filter((document) => document.elementIds.includes(element.id)) : [];
       const description = element ? parseDescription(element.description) : null;
       const showCompetitorDirectory = block.id === "TH-PILOT-COMPETITORS" && state.hypothesisContext?.selectedId === "new-country";
+      const showStrategySummary = block.id === "TH-PRODUCT" && state.hypothesisContext?.selectedId === "new-country";
       const blockView = "view" in block ? block.view : undefined;
       const route = blockView === "benchmark" ? projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)
         : blockView ? projectRoute(`view=${blockView}`, hypothesisId)
@@ -243,12 +269,15 @@ export default function PackageViews({ state, view, openElement, submit, saving 
                 {document.text && <details><summary>Фрагмент документа</summary><p>{document.text}</p></details>}
               </div>;
             })}
+            <EvidenceLinks element={element} state={state} openElement={openElement} />
             <a className="pm-btn small pm-package-route" href={route}>{blockView ? "Открыть рабочее представление" : "Открыть карточку узла"}</a>
             <button className="pm-btn small" type="button" onClick={() => openElement(element)}>Открыть и редактировать узел</button>
           </> : <a className="pm-btn small" href={route}>Проверить узел</a>}
+          {showStrategySummary && <ProjectStrategySummary state={state} openElement={openElement} />}
         </div>
       </details>;
     })}</div>
+    {state.hypothesisContext?.selectedId === "new-country" && submit && <ProjectStrategyWorkspace state={state} submit={submit} saving={saving} openElement={openElement} />}
   </section>;
 
   if (!["segment", "market", "difference"].includes(view)) return null;
@@ -298,5 +327,6 @@ export default function PackageViews({ state, view, openElement, submit, saving 
     {view === "segment" && <a className="pm-btn small" href={projectRoute("view=market", hypothesisId)}>Перейти к рынку и формулам</a>}
     {view === "market" && <a className="pm-btn small" href={projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)}>Основные конкуренты стартового сегмента</a>}
     {view === "difference" && <div className="pm-validation-note"><strong>Проверка гипотезы — результаты не внесены</strong><span>Интервью владельцев · удобство управления · чистая прибыль после расходов · практические тесты. До появления записанных результатов преимуществ нет.</span></div>}
+    {state.hypothesisContext?.selectedId === "new-country" && submit && <ProjectStrategyWorkspace state={state} submit={submit} saving={saving} openElement={openElement} />}
   </section>;
 }

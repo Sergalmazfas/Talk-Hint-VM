@@ -57,6 +57,8 @@ export interface QuarterlyCompetitorSnapshot {
   methodologyVersion: 1 | 2;
   competitorVersions: { id: string; version: number }[];
   talkhint: CompetitorDirectory["talkhint"];
+  /** New captures only. Old quarterly snapshots remain byte-for-byte intact. */
+  strategyMap?: import("./projectStrategy").StrategyMapVersion;
 }
 export interface CaptureCompetitorQuarterCommand {
   type: "captureCompetitorQuarter";

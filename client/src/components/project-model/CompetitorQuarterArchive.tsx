@@ -7,6 +7,8 @@ import {
 } from "@shared/competitorResearch";
 import { competitorSnapshotDiff, type CompetitorDirectory } from "@shared/projectCompetitors";
 import type { ModelCommand } from "@shared/projectModel";
+import { strategyHref } from "@shared/projectStrategy";
+import StrategyPositionMap from "@/components/project-model/StrategyPositionMap";
 
 type Props = {
   directory: CompetitorDirectory;
@@ -105,9 +107,29 @@ export default function CompetitorQuarterArchive({ directory, submit, saving }: 
         </select></label>
       </div>
       {quarters.map((item) => <article className="pm-cr-quarter-card" key={item.id}>
-        <div><strong>{item.quarter}</strong><span>{dateLabel(item.capturedAt)} · {item.competitorVersions.length} карточек · методика v{item.methodologyVersion}</span></div>
+        <div><strong>{item.quarter}</strong><span>{dateLabel(item.capturedAt)} · {item.competitorVersions.length} карточек · методика исследования v{item.methodologyVersion}</span></div>
         <p><b>Причина:</b> {item.reason}</p>
         <p><b>Ручной вывод направления:</b> {item.direction}</p>
+        {item.strategyMap && <details className="pm-cr-quarter-method">
+          <summary>Снимок отдельной методики карты · {item.strategyMap.data.title} · версия {item.strategyMap.version}</summary>
+          <p>Метод: {item.strategyMap.data.mode === "expert" ? "Экспертная оценка" : "scenario_v2"} · {dateLabel(item.strategyMap.at)} · {item.strategyMap.actor}. Это точная методика на момент снимка; она не заменяет и не сравнивается напрямую с полем «методика исследования v{item.methodologyVersion}».</p>
+          <div className="pm-cr-quarter-axes">{(["x", "y"] as const).map((axis) => <section key={axis}>
+            <strong>{axis.toUpperCase()} · {item.strategyMap!.data[axis].name}</strong>
+            <span>{item.strategyMap!.data[axis].definition}</span>
+            <small>{item.strategyMap!.data[axis].direction} · шкала {item.strategyMap!.data[axis].scaleMin}–{item.strategyMap!.data[axis].scaleMax}</small>
+            <p>{item.strategyMap!.data[axis].criteria}</p>
+            <small>Основания: {item.strategyMap!.data[axis].basisRefs.length ? item.strategyMap!.data[axis].basisRefs.map((ref) => <a key={ref} href={strategyHref(ref)}>{ref}</a>) : "не указаны"}</small>
+          </section>)}</div>
+          {item.strategyMap.data.points.length ? <div className="pm-cr-quarter-point-wrap"><table><thead><tr><th>Запись</th><th>X</th><th>Y</th><th>Обоснование и основания</th></tr></thead><tbody>{item.strategyMap.data.points.map((point) => <tr key={point.ref}><th><a href={strategyHref(point.ref)}>{point.ref}</a></th><td>{point.x ?? "Не определено"}</td><td>{point.y ?? "Не определено"}</td><td>{point.rationale || "Обоснование не указано"}{point.basisRefs.length > 0 && <small>Основания: {point.basisRefs.map((ref) => <a key={ref} href={strategyHref(ref)}>{ref}</a>)}</small>}</td></tr>)}</tbody></table></div>
+            : <p>В сохранённой методике нет явных точек.</p>}
+          <section className="pm-cr-quarter-frozen"><strong>Замороженные расчёты метода на момент снимка</strong><span>Дата расчёта: {item.strategyMap.calculatedAt || "не записана"}. Исторические v2 значения не пересчитываются из текущих карточек.</span>
+            <StrategyPositionMap version={item.strategyMap} historical />
+            {item.strategyMap.calculations?.length ? <div className="pm-cr-quarter-point-wrap"><table><thead><tr><th>Запись</th><th>X</th><th>Y</th><th>Диапазон</th><th>Объяснение</th></tr></thead><tbody>{item.strategyMap.calculations.map((result, index) => <tr key={`${result.ref}-${index}`}><th><a href={strategyHref(result.ref)}>{result.name}</a></th><td>{result.x ?? "Не определено"}</td><td>{result.y ?? "Не определено"}</td><td>{result.lower}–{result.upper}</td><td>{result.reason || "Не указано"}</td></tr>)}</tbody></table></div>
+              : <p>Замороженные расчёты для этой версии не сохранены.</p>}
+            {item.strategyMap.basisVersions?.length ? <small>Зафиксированные версии оснований: {item.strategyMap.basisVersions.map((basis) => <a key={basis.ref} href={strategyHref(basis.ref)}>{basis.ref} · v{basis.version ?? "не указана"}</a>)}</small> : <small>Версии оснований не сохранены.</small>}
+          </section>
+        </details>}
+        {!item.strategyMap && <p className="pm-cr-quarter-legacy-note">В этом старом снимке сохранена только методика исследования v{item.methodologyVersion}; снимка стратегической карты нет.</p>}
       </article>)}
       {before && after && before.id !== after.id ? <div className="pm-cr-quarter-changes">
         <div className="pm-cr-section-head"><span>ARCHIVE DIFF</span><h4>Изменения сохранённых сведений</h4></div>

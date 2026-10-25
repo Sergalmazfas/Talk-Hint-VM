@@ -6,6 +6,11 @@ import type { ModelCommand, ProjectModelState, ModelElement, ModelDecision } fro
 import { competitorScenarios, normalizeCompetitorSnapshot } from "../../shared/projectCompetitors";
 import { saveCompetitorSchema, captureCompetitorQuarterSchema, saveTalkHintResearchSchema } from "./competitorSchema";
 import { addCompetitorReviewSchema, saveCompetitorSupportSchema } from "./assessmentSchema";
+import { strategyCommandSchemas, strategyCommandTypes } from "./strategySchema";
+import { applyStrategyCommand, collectStrategyImpacts, captureStrategyMap } from "./strategyDomain";
+import { latestImpactOutcome, type StrategyCommand } from "../../shared/projectStrategy";
+import { ModelError } from "./modelError";
+export { ModelError } from "./modelError";
 
 const str = (max = 12000) => z.string().max(max);
 const nonempty = (max = 2000) => z.string().trim().min(1).max(max);
@@ -19,6 +24,7 @@ export const elementSchema = z.object({
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
+  ...strategyCommandSchemas,
   addCompetitorReviewSchema,
   saveCompetitorSupportSchema,
   saveCompetitorSchema,
@@ -37,15 +43,16 @@ const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("prepareTask"), title: nonempty(240), elementIds: ids.min(1), acceptance: nonempty(20000) }).strict(),
 ]);
 export const requestSchema = z.object({ revision: z.number().int().nonnegative(), command: commandSchema }).strict();
-export class ModelError extends Error {
-  constructor(public status: number, message: string) { super(message); }
-}
 function fail(message: string, status = 400): never { throw new ModelError(status, message); }
 const newId = (prefix: string) => `${prefix}-${randomUUID()}`;
 
 /** Pure transaction: errors leave the caller's old snapshot untouched. */
-export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: string): ProjectModelState {
+export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: string, collect = true): ProjectModelState {
   const c = commandSchema.parse(raw) as ModelCommand;
+  if (strategyCommandTypes.has(c.type as StrategyCommand["type"])) {
+    const next = applyStrategyCommand(old, c as StrategyCommand, actor);
+    return collect ? collectStrategyImpacts(old, next, actor) : next;
+  }
   const s = structuredClone(old);
   const now = new Date().toISOString();
   const element = (id: string) => s.elements.find(e => e.id === id) ?? fail("Элемент не найден", 404);
@@ -55,6 +62,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     s.decisions.push({ id: newId("DEC"), at: now, actor, action, reason, elementIds, ...structuredClone(snapshots) });
   }
   function impact(target: string, related: string[] = []) {
+    if (s.strategy) return; // Explicit causal dependencies replace broad adjacency in the new model.
     const affected = new Set(related);
     s.relations.forEach(r => { if (r.from === target) affected.add(r.to); if (r.to === target) affected.add(r.from); });
     affected.delete(target);
@@ -72,7 +80,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       // history replacement through the general-purpose card editor.
       const next = applyCommand(old, { type: "saveCompetitor", id: c.id, baseVersion: c.baseVersion,
         reason: c.type === "addCompetitorReview" ? `Личная проверка: ${c.review.category}` : "Публичные сведения о поддержке",
-        snapshot }, actor);
+        snapshot }, actor, false);
       const nextSnapshot = next.competitorDirectory!.records.find(row => row.id === c.id)!.revisions.at(-1)!.snapshot;
       if (c.type === "addCompetitorReview") {
         if (Object.values(snapshot.assessments ?? {}).flat().some(review => review.id === c.requestId))
@@ -82,7 +90,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
         reviews.push({ ...structuredClone(c.review), id: c.requestId, savedAt: now, recordedBy: actor });
       } else nextSnapshot.supportResearch = structuredClone(c.support);
       if (JSON.stringify(next).length > 5_000_000) fail("Модель превысила допустимый размер", 413);
-      return next;
+      return collect ? collectStrategyImpacts(old, next, actor) : next;
     }
     case "captureCompetitorQuarter": {
       const directory = s.competitorDirectory;
@@ -95,6 +103,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       (directory.quarters ??= []).push({
         id: `QUARTER-${randomUUID()}`, quarter: c.quarter, capturedAt: new Date().toISOString(),
         reason: c.reason, direction: c.direction, methodologyVersion: 2,
+        ...(s.strategy?.mapVersions.at(-1) ? { strategyMap: captureStrategyMap(s, s.strategy.mapVersions.at(-1)!) } : {}),
         competitorVersions: directory.records.flatMap(record => {
           const revision = record.revisions.at(-1);
           return revision ? [{ id: record.id, version: revision.version }] : [];
@@ -218,13 +227,13 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       const link = { id: oldLink?.id ?? newId("LINK"), from: c.from, to: c.to, label: c.label };
       if (oldLink) s.relations[s.relations.indexOf(oldLink)] = link; else s.relations.push(link);
       const affected = Array.from(new Set([c.from, c.to, ...(oldLink ? [oldLink.from, oldLink.to] : [])]));
-      checkIds(affected).forEach(e => { e.needsReview = true; });
+      if (!s.strategy) checkIds(affected).forEach(e => { e.needsReview = true; });
       log("Сохранена связь", c.label, affected, { relationBefore: oldLink, relationAfter: link }); break;
     }
     case "removeRelation": {
       const link = s.relations.find(r => r.id === c.id) ?? fail("Связь не найдена", 404);
       s.relations = s.relations.filter(r => r.id !== c.id);
-      checkIds([link.from, link.to]).forEach(e => { e.needsReview = true; });
+      if (!s.strategy) checkIds([link.from, link.to]).forEach(e => { e.needsReview = true; });
       log("Удалена связь", link.label, [link.from, link.to], { relationBefore: link }); break;
     }
     case "saveDocument": {
@@ -234,10 +243,13 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       const doc = { id: existing?.id ?? newId("DOC"), title: c.title, text: c.text, url: c.url, elementIds: Array.from(new Set(c.elementIds)), updatedAt: now };
       if (existing) s.documents[s.documents.indexOf(existing)] = doc; else s.documents.push(doc);
       const affected = Array.from(new Set([...linked.map(e => e.id), ...(existing?.elementIds ?? [])]));
-      checkIds(affected).forEach(e => { e.needsReview = true; });
+      if (!s.strategy) checkIds(affected).forEach(e => { e.needsReview = true; });
       log("Сохранён документ", c.title, affected, { documentBefore: existing, documentAfter: doc }); break;
     }
     case "reviewElement": {
+      if (s.strategy?.impacts.some(i => i.target === `element:${c.id}` && i.effect !== "recomputed" &&
+        ["pending", "deferred"].includes(latestImpactOutcome(i))))
+        fail("Сначала рассмотрите связанные события на панели влияния", 409);
       element(c.id).needsReview = false;
       log("Связанный элемент пересмотрен", c.reason, [c.id]); break;
     }
@@ -256,5 +268,5 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
   }
   s.revision++;
   if (JSON.stringify(s).length > 5_000_000) fail("Модель превысила допустимый размер; требуется архивирование", 413);
-  return s;
+  return collect ? collectStrategyImpacts(old, s, actor) : s;
 }

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { projectPackageBlocks, type ModelCommand, type ModelElement, type ProjectModelState } from "../../shared/projectModel";
 import { applyCommand, ModelError } from "./domain";
+import { strategyCommandTypes } from "./strategySchema";
+import type { StrategyCommand } from "../../shared/projectStrategy";
 
 export const originalHypothesisTitle = "TalkHint — AI-управляющий малого бизнеса с командой ролей";
 export const newCountryHypothesisTitle = "TalkHint — помощник для жизни и малого бизнеса в новой стране";
@@ -23,6 +25,8 @@ export function readHypothesis(root: ProjectModelState, id = "original"): Projec
 
 export function applyHypothesisCommand(root: ProjectModelState, id: string,
   command: ModelCommand, actor: string): ProjectModelState {
+  if (strategyCommandTypes.has(command.type as StrategyCommand["type"]) && id !== "new-country")
+    throw new ModelError(409, "Связная модель доступна только в новой гипотезе; исходная модель не изменена.");
   if (["saveCompetitor", "captureCompetitorQuarter", "saveTalkHintResearch", "addCompetitorReview", "saveCompetitorSupport"].includes(command.type) && id !== "new-country")
     throw new ModelError(409, "Новый справочник доступен только в отдельной гипотезе new-country; прежние исследования не изменены.");
   if (id === "original") return applyCommand(root, command, actor);
@@ -30,7 +34,10 @@ export function applyHypothesisCommand(root: ProjectModelState, id: string,
   if (index < 0) throw new ModelError(404, "Гипотеза не найдена.");
   const next = structuredClone(root);
   const alternative = next.alternatives![index];
-  alternative.model = applyCommand(alternative.model, command, actor);
+  const selected = alternative.model;
+  const updated = applyCommand(selected, command, actor);
+  if (updated === selected) return root;
+  alternative.model = updated;
   next.revision++;
   if (JSON.stringify(next).length > 5_000_000)
     throw new ModelError(413, "Модель превысила допустимый размер.");

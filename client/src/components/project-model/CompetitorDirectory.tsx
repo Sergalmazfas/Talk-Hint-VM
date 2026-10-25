@@ -10,6 +10,7 @@ import {
 import type { ModelCommand } from "@shared/projectModel";
 import { emptyCompetitorResearch, researchFor } from "@shared/competitorResearch";
 import { dossierFor } from "@shared/competitorDossier";
+import { strategyHref } from "@shared/projectStrategy";
 import { CompetitorResearchEditor, ResearchEvidenceEditor } from "@/components/project-model/CompetitorResearchProfile";
 import CompetitorResearchWorkbench from "@/components/project-model/CompetitorResearchWorkbench";
 import CompetitorAssessments, { AssessmentLinks } from "./CompetitorAssessments";
@@ -351,6 +352,7 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
           <p>Снимок версии {selectedRevision.version}. Данные внутреннего исследования, не описание телефонного агента TalkHint.</p></div>
         <div className="pm-cd-heading-actions">
           <a className="pm-btn small" href={routeFor(view, hypothesisId)}>Все карточки</a>
+          <a className="pm-btn small" href={strategyHref(`competitor:${selectedId}`)}>Стратегические связи</a>
           {submit && <button type="button" className="pm-btn primary" disabled={!!draft || saving} onClick={() => startEdit(selectedId)}>Обновить данные вручную</button>}
         </div>
       </div>

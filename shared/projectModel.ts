@@ -86,6 +86,7 @@ export interface ModelDecision {
   documentBefore?: ModelDocument; documentAfter?: ModelDocument;
   relationBefore?: ModelRelation; relationAfter?: ModelRelation;
   proposalBefore?: ModelProposal; proposalAfter?: ModelProposal;
+  strategyChange?: { command: string; before: unknown; after: unknown };
 }
 export interface ModelTaskDraft {
   id: string; title: string; elementIds: string[]; acceptance: string; text: string; createdAt: string;
@@ -98,6 +99,8 @@ export interface ProjectModelState {
   alternatives?: { id: string; title: string; model: ProjectModelState }[];
   primaryHypothesisId?: string | null;
   competitorDirectory?: CompetitorDirectory;
+  /** Dev-only connected planning; existing records and audit history stay intact. */
+  strategy?: import("./projectStrategy").ProjectStrategy;
   /** Response metadata only; viewing an alternative never selects a primary. */
   hypothesisContext?: {
     selectedId: string;
@@ -106,6 +109,7 @@ export interface ProjectModelState {
   };
 }
 export type ModelCommand =
+  | import("./projectStrategy").StrategyCommand
   | import("./competitorAssessments").AddCompetitorReviewCommand
   | import("./competitorAssessments").SaveCompetitorSupportCommand
   | SaveCompetitorCommand
