@@ -5,6 +5,8 @@
 // id, short-lived realtime token). No STT/LLM/TTS/teaching logic lives here.
 // ---------------------------------------------------------------------------
 
+import { externalTutorConnectionEnabled, TUTOR_DISCONNECTED_MESSAGE } from "./tutorConnectionPolicy";
+
 const TUTOR_ENGINE_BASE = (process.env.TUTOR_ENGINE_BASE || "https://ai-tutor-engine.replit.app").replace(/\/+$/, "");
 // Preferred secret name is TUTOR_ENGINE_API_KEY; API_KEY is accepted as a
 // fallback because the key was initially saved under that generic name.
@@ -12,12 +14,12 @@ const TUTOR_ENGINE_API_KEY = process.env.TUTOR_ENGINE_API_KEY || process.env.API
 const TUTOR_ID = process.env.TUTOR_ENGINE_TUTOR_ID || "emma_us_01";
 const SCENARIO_ID = process.env.TUTOR_ENGINE_SCENARIO_ID || "english_free_talk";
 
-if (!process.env.TUTOR_ENGINE_API_KEY && process.env.API_KEY) {
+if (externalTutorConnectionEnabled() && !process.env.TUTOR_ENGINE_API_KEY && process.env.API_KEY) {
   console.warn("[TutorEngine] Using API_KEY secret as the engine key — please rename it to TUTOR_ENGINE_API_KEY.");
 }
 
 export function tutorEngineConfigured(): boolean {
-  return !!TUTOR_ENGINE_API_KEY;
+  return externalTutorConnectionEnabled() && !!TUTOR_ENGINE_API_KEY;
 }
 
 // VERIFIED production contract (2026-08-10): the REST namespace is /api/v1 and
@@ -48,7 +50,7 @@ export class TutorEngineError extends Error {
   constructor(
     message: string,
     public status: number | null,
-    public kind: "auth" | "not_json" | "http" | "network" | "not_configured" | "incompatible",
+    public kind: "auth" | "not_json" | "http" | "network" | "not_configured" | "incompatible" | "disabled",
     public body?: string,
   ) {
     super(message);
@@ -60,6 +62,9 @@ export class TutorEngineError extends Error {
 // means "engine not republished yet", which we surface distinctly so the
 // operator knows the fix is on the engine side, not ours.
 async function engineFetch(path: string, init?: { method?: string; body?: unknown }): Promise<any> {
+  if (!externalTutorConnectionEnabled()) {
+    throw new TutorEngineError(TUTOR_DISCONNECTED_MESSAGE, null, "disabled");
+  }
   if (!TUTOR_ENGINE_API_KEY) {
     throw new TutorEngineError("Tutor Engine API key is not configured (TUTOR_ENGINE_API_KEY)", null, "not_configured");
   }

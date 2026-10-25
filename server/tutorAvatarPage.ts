@@ -1173,7 +1173,7 @@ async function connect(simCfg) {
   let status;
   try { status = await api("/api/tutor/status" + (selectedTutorId ? "?tutorId=" + encodeURIComponent(selectedTutorId) : "")); }
   catch (e) { stateLabel.textContent = L.error + ": " + e.message; dispatch("error"); return; }
-  if (!status.configured) { stateLabel.textContent = L.notConfigured; return; }
+  if (!status.configured) { stateLabel.textContent = status.disabled ? status.message : L.notConfigured; return; }
   if (!status.ready) { stateLabel.textContent = L.engineDown; return; }
   if (status.tutor?.name) { tutorName = status.tutor.name; applyTutorName(); }
 

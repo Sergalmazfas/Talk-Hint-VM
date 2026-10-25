@@ -6,6 +6,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import request from "supertest";
+// Historical compatibility behavior remains covered offline while runtime
+// integration is retired. Every engine response below is a fetch fixture.
+vi.mock("../tutorConnectionPolicy", () => ({
+  externalTutorConnectionEnabled: () => true,
+  TUTOR_DISCONNECTED_MESSAGE: "External Tutor Engine disconnected",
+}));
 
 vi.hoisted(() => {
   if (!process.env.TUTOR_ENGINE_API_KEY && !process.env.API_KEY) {

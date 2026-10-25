@@ -39,6 +39,13 @@ import { TUTOR_AVATAR_PAGE_HTML } from "./tutorAvatarPage";
 import { buildTutorPreviewHtml } from "./tutorPreviewPage";
 import { translateTutorText, validateTranslateInput } from "./tutorTranslate";
 import { storage } from "./storage";
+import { externalTutorConnectionEnabled, TUTOR_DISCONNECTED_MESSAGE } from "./tutorConnectionPolicy";
+
+function rejectDisconnectedTutor(res: any): boolean {
+  if (externalTutorConnectionEnabled()) return false;
+  res.status(503).json({ error: "tutor_engine_disabled", message: TUTOR_DISCONNECTED_MESSAGE });
+  return true;
+}
 
 // Users only ever see a safe connection error; full detail goes to the log.
 function safeEngineError(res: any, err: any) {
@@ -102,6 +109,9 @@ export function registerTutorRoutes(app: Express) {
   // Dynamic tutor catalog from the engine (allow-list driven — never
   // hardcode ids). Client-safe: names, previews, asset versions only.
   app.get("/api/tutor/tutors", authMiddleware, async (_req, res) => {
+    if (!externalTutorConnectionEnabled()) {
+      return res.json({ tutors: [], disabled: true, message: TUTOR_DISCONNECTED_MESSAGE });
+    }
     if (!tutorEngineConfigured()) return res.json({ tutors: [] });
     try {
       const list = (await getTutorCatalog())
@@ -115,6 +125,10 @@ export function registerTutorRoutes(app: Express) {
 
   // Client-safe status: capabilities + avatar assets. No API key material.
   app.get("/api/tutor/status", authMiddleware, async (req, res) => {
+    if (!externalTutorConnectionEnabled()) {
+      return res.json({ configured: false, ready: false, callMemoryReady: false,
+        disabled: true, message: TUTOR_DISCONNECTED_MESSAGE });
+    }
     const user = (req as any).user;
     if (!tutorEngineConfigured()) {
       return res.json({ configured: false, ready: false, callMemoryReady: false });
@@ -153,6 +167,7 @@ export function registerTutorRoutes(app: Express) {
 
   // Integration smoke checks (operator-facing).
   app.get("/api/tutor/smoke", authMiddleware, async (req, res) => {
+    if (rejectDisconnectedTutor(res)) return;
     const user = (req as any).user;
     try {
       res.json(await runTutorSmokeChecks(user.id));
@@ -168,6 +183,7 @@ export function registerTutorRoutes(app: Express) {
   // explicit error — TalkHint never silently falls back to free talk, and
   // never auto-retries the non-idempotent POST /sessions.
   app.post("/api/tutor/sessions", authMiddleware, async (req, res) => {
+    if (rejectDisconnectedTutor(res)) return;
     const user = (req as any).user;
     // Optional tutor selection — only the id travels to the engine; it must
     // exist in the live catalog (allow-list driven, never trusted blindly).
@@ -274,6 +290,7 @@ export function registerTutorRoutes(app: Express) {
   // MEMORY_CONFIRMATION state. If the engine can't provide one, the integration
   // is surfaced as incomplete — TalkHint never summarizes the session itself.
   app.post("/api/tutor/sessions/:engineSessionId/end", authMiddleware, async (req, res) => {
+    if (rejectDisconnectedTutor(res)) return;
     const user = (req as any).user;
     const engineSessionId = req.params.engineSessionId;
     try {

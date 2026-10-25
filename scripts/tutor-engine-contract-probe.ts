@@ -3,10 +3,9 @@
 // v1 — tutor-engine 1.0.0, tutor-realtime/1.0; consumer copy:
 // docs/tutor-engine-public-contract-v1.md).
 //
-// ENFORCED pre-publish gate for TalkHint: script/build.ts (the Publish build)
-// runs this probe FIRST and aborts the build on any mismatch. Also registered
-// as the named validation step "tutor-engine-contract" (see replit.md
-// Pre-Publish Checklist). Manual run:
+// RETIRED: the external connection was removed at the owner's request.
+// This historical probe is no longer a Publish gate or workflow. Its entrypoint
+// refuses to run before any network request; see the policy below. Legacy command:
 //   npm run test:tutor-engine-contract
 //
 // Verifies PROTOCOL COMPATIBILITY ONLY against the real Engine:
@@ -49,6 +48,7 @@
 // docs/tutor-engine-consumer-contract.md.
 // ---------------------------------------------------------------------------
 import WebSocket from "ws";
+import { externalTutorConnectionEnabled } from "../server/tutorConnectionPolicy";
 import { buildSessionPayload, getTutorEngineBase, type TutorSimulationParams } from "../server/tutorEngine";
 
 // What THIS probe was written against (the published contract document).
@@ -416,6 +416,11 @@ async function checkSimulationOpening() {
 }
 
 async function main() {
+  if (!externalTutorConnectionEnabled()) {
+    console.error("External Tutor Engine is disconnected. Live probe retired; no network requests made.");
+    process.exitCode = 2;
+    return;
+  }
   if (!API_KEY) {
     console.error("TUTOR_ENGINE_API_KEY is not configured — cannot probe the Engine.");
     process.exit(2);

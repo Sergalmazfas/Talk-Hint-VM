@@ -1,38 +1,12 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile, writeFile, cp } from "fs/promises";
-import { spawnSync } from "child_process";
 import { resolve, join } from "node:path";
 import { createHash } from "node:crypto";
 import { verifyMcpBuild } from "./mcp-build-verification";
 
-// -----------------------------------------------------------------------------
-// MANDATORY pre-publish gate: the LIVE Tutor Engine contract probe runs before
-// every production build (Publish executes `npm run build`, so a probe failure
-// blocks deployment with a non-zero exit). The probe is time-bounded and
-// cleans up its own sessions. Escape hatch (audited, e.g. Engine planned
-// downtime): SKIP_TUTOR_ENGINE_CONTRACT_PROBE=true.
-// -----------------------------------------------------------------------------
-function runTutorEngineContractProbe() {
-  if (process.env.SKIP_TUTOR_ENGINE_CONTRACT_PROBE === "true") {
-    console.warn(
-      "WARNING: Tutor Engine contract probe SKIPPED via SKIP_TUTOR_ENGINE_CONTRACT_PROBE=true — publishing without live contract verification.",
-    );
-    return;
-  }
-  console.log("running Tutor Engine contract probe (pre-publish gate)...");
-  const r = spawnSync("npx", ["tsx", "scripts/tutor-engine-contract-probe.ts"], {
-    stdio: "inherit",
-  });
-  if (r.status !== 0) {
-    console.error(
-      `Tutor Engine contract probe FAILED (exit ${r.status ?? "signal"}) — build aborted to prevent publishing an incompatible client. ` +
-        "Fix the contract mismatch (see report above) or, for audited emergencies only, set SKIP_TUTOR_ENGINE_CONTRACT_PROBE=true.",
-    );
-    process.exit(1);
-  }
-  console.log("Tutor Engine contract probe PASSED.\n");
-}
+// Publishing no longer depends on the retired external Tutor Engine.
+// Local application/MCP bundle checks remain required below.
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -67,10 +41,10 @@ const allowlist = [
 async function buildAll() {
   const prepareOnly = process.argv.includes("--prepare-only");
   // A candidate never replaces dist used by the running phone/UI server.
-  // The NORMAL Publish command keeps its mandatory live Tutor gate.
+  // Neither build mode contacts the retired external Tutor Engine.
   const out = prepareOnly ? "generated-artifacts/talkhint-release-candidate/dist" : "dist";
   if (prepareOnly) console.log("OFFLINE PREPARATION ONLY: no app boot, live Tutor probe or publication.");
-  else runTutorEngineContractProbe();
+  else console.log("External Tutor Engine disconnected; building TalkHint locally.");
 
   await rm(out, { recursive: true, force: true });
 

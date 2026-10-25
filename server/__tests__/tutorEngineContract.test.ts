@@ -23,6 +23,11 @@ vi.hoisted(() => {
     process.env.TUTOR_ENGINE_API_KEY = "offline-contract-test-dummy-key";
   }
 });
+// Exercise the archived adapter against fetch fixtures only, never a live engine.
+vi.mock("../tutorConnectionPolicy", () => ({
+  externalTutorConnectionEnabled: () => true,
+  TUTOR_DISCONNECTED_MESSAGE: "External Tutor Engine disconnected",
+}));
 import { classifyEngineEvent } from "../tutorRealtimeUi";
 import {
   normalizeTutorEntry,

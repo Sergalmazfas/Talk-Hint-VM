@@ -22,7 +22,7 @@
 - [Tutor Engine realtime protocol](tutor-engine-realtime-protocol.md) — verified event catalog; hints are engine-initiated USER-reply suggestions (never TTS); goal fields silently ignored at session create.
 - [Tutor catalog is dynamic](tutor-catalog-dynamic.md) — tutors come from engine GET /tutors at runtime, never hardcode ids; GLB Cache API per tutor_id+asset_version; tn() name substitution.
 - [Goal-driven simulation contract](tutor-simulation-contract.md) — fail-closed create (no practice fallback, echo verified), opening-turn mic gate; v1 not yet deployed at engine base; group_id/version source unconfirmed.
-- [Tutor Engine contract testing](tutor-engine-contract-testing.md) — consumer contract doc + frozen fixtures + live probe; canonical tutor.suggested_reply, no silent alias success; probe must be bounded + status-exact.
+- [Historical Tutor contract lessons](tutor-engine-contract-testing.md) — retired external integration; apply these fail-closed protocol lessons only if its restoration is explicitly approved.
 - [Local prod-boot testing](prod-boot-local-testing.md) — NEVER run dist build locally without DISABLE_AUTO_WEBHOOK_REPOINT=true (it hijacks live Twilio webhooks to dev); ready-wait failure w/o logs = platform, retry.
 - [Publish gating via build script](publish-gating.md) — no publish hook exists; mandatory pre-publish checks must run inside script/build.ts and exit non-zero to block deploy.
 - [Tutor compat handshake](tutor-compat-handshake.md) — fail-closed contract check inside createTutorSession; unverifiable metadata/outage refuses the lesson, never fail-open.
