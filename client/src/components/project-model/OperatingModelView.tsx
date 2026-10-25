@@ -9,15 +9,16 @@ import { strategyEntries } from "@shared/projectStrategy";
 import operatingGuide from "../../../../docs/talkhint-operating-model.md?raw";
 import CompanyStructureViews from "./CompanyStructureViews";
 import companyStructureGuide from "../../../../docs/talkhint-company-structure.md?raw";
+import TeamView from "./TeamView";
 
 type Props = { state: ProjectModelState; submit?: (command: ModelCommand) => Promise<boolean>; saving?: boolean };
-type ViewKey = "overview" | "company" | "management" | "journey" | "actions" | "process" | "client" | "crew" | "objects" | "tools" | "gaps" | "history" | "coverage" | "docs";
+type ViewKey = "overview" | "company" | "management" | "journey" | "actions" | "process" | "client" | "crew" | "team" | "objects" | "tools" | "gaps" | "history" | "coverage" | "docs";
 const views: { id: ViewKey; label: string; kinds?: WorkKind[] }[] = [
   { id: "overview", label: "Обзор" }, { id: "company", label: "Компания" }, { id: "management", label: "Подчинение" }, { id: "journey", label: "Путь клиента" },
   { id: "actions", label: "Действия", kinds: ["action"] },
   { id: "process", label: "Процессы", kinds: ["process", "capability", "need", "context"] },
   { id: "client", label: "Клиенты", kinds: ["client", "result", "report"] },
-  { id: "crew", label: "Crew и роли", kinds: ["role", "department", "crew"] },
+  { id: "crew", label: "Crew и роли", kinds: ["role", "department", "crew"] }, { id: "team", label: "Команда" },
   { id: "objects", label: "Объекты", kinds: ["resource", "report", "result"] },
   { id: "tools", label: "Инструменты", kinds: ["resource"] },
   { id: "gaps", label: "Пробелы" }, { id: "coverage", label: "Покрытие" },
@@ -58,7 +59,9 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
   const revision = state.operatingModel?.revisions.at(-1);
   const [draft, setDraft] = useState<OperatingData>(() => structuredClone(revision?.data ?? defaultOperatingModel()));
   const [baseVersion, setBaseVersion] = useState(revision?.version ?? 0);
-  const [activeView, setActiveView] = useState<ViewKey>("overview");
+  const [activeView, setActiveView] = useState<ViewKey>(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("workView") === "team" ? "team" : "overview",
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -69,6 +72,15 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
   const saveSignal = useRef(0);
   const openedWorkQuery = useRef(false);
   const [signal, setSignal] = useState(0);
+  const switchView = (view: ViewKey) => {
+    setActiveView(view);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (view === "team") params.set("workView", "team");
+      else params.delete("workView");
+      window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
+    }
+  };
 
   useEffect(() => {
     if (!revision || !submittedSnapshot.current) return;
@@ -224,7 +236,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
       return next;
     });
   };
-  const openNode = (id: string) => { selectNode(id); setActiveView("overview"); };
+  const openNode = (id: string) => { selectNode(id); switchView("overview"); };
   useEffect(() => {
     if (openedWorkQuery.current || typeof window === "undefined") return;
     const workId = new URLSearchParams(window.location.search).get("work");
@@ -318,20 +330,20 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     <header className="om-hero">
       <div><p className="pm-kicker">OWNER MODEL / NEW-COUNTRY · PLANNING ONLY</p><h2 id="om-title">Операционная модель компании</h2>
         <p>Компания через конкретную работу и принятые результаты. Это редактор проектируемой структуры — без запуска исполнителей и расписаний.</p></div>
-      <div className="om-hero-count"><span>{String(draft.nodes.length).padStart(2, "0")}</span><small>узлов модели</small><b>{revision ? `Основание v${revision.version}` : "Новая модель"}</b></div>
+      <div className="om-hero-count"><span>{String(activeView === "team" ? revision?.data.nodes.length ?? 0 : draft.nodes.length).padStart(2, "0")}</span><small>{activeView === "team" ? "узлов снимка" : "узлов модели"}</small><b>{revision ? `Основание v${revision.version}` : activeView === "team" ? "Нет сохранённого снимка" : "Новая модель"}</b></div>
     </header>
     <div className="om-toolbar"><div className="om-view-tabs" role="tablist" aria-label="Представления модели">{views.map((view) =>
-      <button type="button" role="tab" aria-selected={activeView === view.id} className={activeView === view.id ? "active" : ""} key={view.id} onClick={() => setActiveView(view.id)}>{view.label}{view.id === "gaps" && <i>{gaps.length}</i>}</button>)}</div>
-      <div className="om-toolbar-actions">{!["company", "management", "journey"].includes(activeView) && <div className="om-toolbar-expand"><button type="button" onClick={() => setExpanded(new Set(draft.nodes.map((node) => node.id)))}>Раскрыть всё</button><button type="button" onClick={() => setExpanded(new Set())}>Свернуть всё</button></div>}{!["company", "management", "journey"].includes(activeView) && <label className="om-search"><span>Поиск</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, код…" /></label>}
-        <details className="om-add-menu"><summary>Добавить узел <span>+</span></summary><div>{workKinds.map((kind) => <button key={kind} type="button" onClick={() => addNode(kind)}>{kindLabels[kind]}</button>)}</div></details>
+      <button type="button" role="tab" aria-selected={activeView === view.id} className={activeView === view.id ? "active" : ""} key={view.id} onClick={() => switchView(view.id)}>{view.label}{view.id === "gaps" && <i>{gaps.length}</i>}</button>)}</div>
+      <div className="om-toolbar-actions">{!["company", "management", "journey", "team"].includes(activeView) && <div className="om-toolbar-expand"><button type="button" onClick={() => setExpanded(new Set(draft.nodes.map((node) => node.id)))}>Раскрыть всё</button><button type="button" onClick={() => setExpanded(new Set())}>Свернуть всё</button></div>}{!["company", "management", "journey", "team"].includes(activeView) && <label className="om-search"><span>Поиск</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название, код…" /></label>}
+        {!["team"].includes(activeView) && <details className="om-add-menu"><summary>Добавить узел <span>+</span></summary><div>{workKinds.map((kind) => <button key={kind} type="button" onClick={() => addNode(kind)}>{kindLabels[kind]}</button>)}</div></details>}
       </div>
     </div>
     {error && <p className="om-alert" role="alert">{error}</p>}{notice && <p className="om-notice" role="status">{notice}</p>}
     {!submit && <p className="om-alert">Режим чтения: команда сохранения не подключена.</p>}
     {revision && <div className="om-revision"><span><b>Последняя сохранённая</b> v{revision.version}</span><span>{dateLabel(revision.at)} · {revision.actor}</span><span className="om-proposal-tag">Черновик не означает согласование</span></div>}
-    {!revision && <div className="om-revision"><span><b>Шаблон не сохранён</b> · показан чистый черновик</span><span>Сохранение создаст первую ревизию</span></div>}
+    {!revision && <div className="om-revision">{activeView === "team" ? <><span><b>Нет сохранённого снимка</b> · шаблон не показывается как команда</span><span>Команда появится после существующей сохранённой ревизии операционной модели</span></> : <><span><b>Шаблон не сохранён</b> · показан чистый черновик</span><span>Сохранение создаст первую ревизию</span></>}</div>}
 
-    {["company", "management", "journey"].includes(activeView) ? <CompanyStructureViews
+    {activeView === "team" ? <TeamView data={revision?.data ?? null} state={state} /> : ["company", "management", "journey"].includes(activeView) ? <CompanyStructureViews
       view={activeView as "company" | "management" | "journey"} data={draft} selectedId={selectedId} onOpen={openNode} onPatchPath={patchCustomerPath}
     /> : activeView === "history" ? <section className="om-history"><div className="om-section-title"><div><p className="pm-kicker">IMMUTABLE SNAPSHOTS</p><h3>История ревизий</h3></div><span>{state.operatingModel?.revisions.length ?? 0} версий</span></div>
       {state.operatingModel?.revisions.length ? [...state.operatingModel.revisions].reverse().map((item) => <details key={item.version}><summary><b>v{item.version}</b><span>{dateLabel(item.at)} · {item.actor}</span><i>{item.data.nodes.length} узлов · {item.data.links.length} связей</i></summary><div className="om-history-content">
@@ -477,7 +489,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
         </form> : <div className="om-empty om-no-selection"><span className="om-empty-index">01</span><strong>Выберите узел рабочей карты</strong><p>Код, имя, клиент, роль, Crew, ресурсы, расписание и критерии результата остаются отдельными редактируемыми полями.</p><button type="button" onClick={() => addNode("process")}>Создать первый процесс</button></div>)}
       </main>
     </div></>}
-    {activeView !== "history" && activeView !== "coverage" && <div className="om-stage-strip"><span>STAGE REPORTS</span>{draft.stageReports.length ? draft.stageReports.map((report) => <button key={report.pass} type="button" onClick={() => setActiveView("gaps")}>Этап {report.pass} · {report.gaps}</button>) : <i>Отчётов этапов нет</i>}</div>}
-    <form className="om-savebar" onSubmit={(event) => void save(event)}><div><b>Только проектирование</b><span>Не создаются исполнители, расписания выполнения или подключённые инструменты.</span></div><span className="om-save-base">Основание v{baseVersion} · {draft.nodes.length} узлов</span><button type="submit" disabled={!submit || saving}>{saving ? "Сохраняем…" : "Сохранить черновик"}</button></form>
+    {activeView !== "history" && activeView !== "coverage" && activeView !== "team" && <div className="om-stage-strip"><span>STAGE REPORTS</span>{draft.stageReports.length ? draft.stageReports.map((report) => <button key={report.pass} type="button" onClick={() => switchView("gaps")}>Этап {report.pass} · {report.gaps}</button>) : <i>Отчётов этапов нет</i>}</div>}
+    {activeView !== "team" && <form className="om-savebar" onSubmit={(event) => void save(event)}><div><b>Только проектирование</b><span>Не создаются исполнители, расписания выполнения или подключённые инструменты.</span></div><span className="om-save-base">Основание v{baseVersion} · {draft.nodes.length} узлов</span><button type="submit" disabled={!submit || saving}>{saving ? "Сохраняем…" : "Сохранить черновик"}</button></form>}
   </section>;
 }

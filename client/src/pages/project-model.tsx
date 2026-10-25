@@ -17,6 +17,8 @@ import Benchmark from "@/components/project-model/Benchmark";
 import CompetitorDirectory from "@/components/project-model/CompetitorDirectory";
 import PackageViews from "@/components/project-model/PackageViews";
 import "./project-model.css";
+import "@xyflow/react/dist/style.css";
+import "@/components/project-model/TeamView.css";
 
 type Tab = "overview" | "links" | "documents";
 const projectViews = ["overview", "segment", "market", "difference", "benchmark"] as const;

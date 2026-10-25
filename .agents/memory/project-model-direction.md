@@ -47,10 +47,14 @@ Product-crew control in ChatGPT is a separate owner-scoped integration from
 Secretary/Katya. A job description or saved/assigned work must never imply an
 autonomous run or newly granted API access. Replit is the technical executor in
 the owner's current Dev session, not a remote background employee.
+All product-team roles are intended for AI; the owner is the only human
+participant. A role and a concrete AI executor are different identities.
 
 **Why:** the owner explicitly wants ChatGPT as the conversational interface for
 building the product crew, with duties derived from actions and result clients;
 it must not be confused with the telephone assistant or fake worker activation.
+The owner explicitly said all executors are presumed AI and a human should only
+be involved for a justified necessity.
 
 **How to apply:** keep the common roadmap/model, reuse role identities, retain
 source/type/evidence on intake, report saved versus launched separately, and
