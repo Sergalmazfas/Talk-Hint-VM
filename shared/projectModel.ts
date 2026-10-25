@@ -61,6 +61,7 @@ export const benchmarkSteps = {
   marketing: "Маркетинг", analytics: "Бизнес-аналитика", coordination: "Согласования и межролевая передача",
 } as const;
 export interface ElementInput {
+  coordination?: import("./productCrew").CrewCoordination;
   title: string;
   section: typeof modelSections[number];
   scope: "talkhint" | "salon_example";
@@ -128,5 +129,6 @@ export type ModelCommand =
   | { type: "saveRelation"; id?: string; from: string; to: string; label: string }
   | { type: "removeRelation"; id: string }
   | { type: "saveDocument"; id?: string; title: string; text: string; url: string; elementIds: string[] }
+  | { type: "createDocument"; id: string; title: string; text: string; url: string; elementIds: string[] }
   | { type: "reviewElement"; id: string; reason: string }
   | { type: "prepareTask"; title: string; elementIds: string[]; acceptance: string };

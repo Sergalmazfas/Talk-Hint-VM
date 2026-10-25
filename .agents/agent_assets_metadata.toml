@@ -705,3 +705,17 @@ mtime_ms = 1792954276202
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9c884a75-fc87-4438-9014-adf9c4955f0a/0e261f22-a2d0-49d1-b985-2cfdd96f998a"
 storage_version_token = "1792954333061559"
 content_type = "text/html"
+
+[[outputs]]
+id = "MUg-nM4vdfSyUENYF0Uca"
+uri = "file://generated-artifacts/crew-roadmap/talkhint-product-crew-connection-v1.html"
+type = "html"
+title = "TalkHint · Управление продуктом — подключение ChatGPT"
+description = "Адрес отдельного MCP-подключения, шаги OAuth без ключей, 12 инструментов управления crew, назначение главного инженера и честный статус возможностей. Dev; без телефонии и публикации."
+logical_id = "f0c46917-409b-4b6f-a672-01ef6b7ad835"
+content_hash = "sha256:ceb85f89c5334ca66826097086526b52e2fe34b172f9da8b56991cb3d9be3cbc"
+size = 12633
+mtime_ms = 1792955639603
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f0c46917-409b-4b6f-a672-01ef6b7ad835/7f86c68a-27be-474e-b57b-a9635eccdb0e"
+storage_version_token = "1792955693850121"
+content_type = "text/html"

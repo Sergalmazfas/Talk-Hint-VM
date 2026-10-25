@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { modelSizeBudget } from "./sizeBudget";
 import { projectPackageBlocks, type ModelCommand, type ModelElement, type ProjectModelState } from "../../shared/projectModel";
 import { applyCommand, ModelError } from "./domain";
 import { strategyCommandTypes } from "./strategySchema";
@@ -43,7 +44,7 @@ export function applyHypothesisCommand(root: ProjectModelState, id: string,
   if (updated === selected) return root;
   alternative.model = updated;
   next.revision++;
-  if (JSON.stringify(next).length > 5_000_000)
+  if (JSON.stringify(next).length > modelSizeBudget(next))
     throw new ModelError(413, "Модель превысила допустимый размер.");
   return next;
 }

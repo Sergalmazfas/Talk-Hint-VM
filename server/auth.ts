@@ -69,7 +69,7 @@ export async function createSession(userId: string): Promise<string> {
 export async function getSessionUserId(token: string): Promise<string | undefined> {
   // Integration revocation/consent markers are not login sessions, even if an
   // attacker knows a marker ID. Only the isolated adapter may resolve them.
-  if (token.startsWith("chatgpt:") || token.startsWith("thcg.") || token.startsWith("thmobile.")) return undefined;
+  if (token.startsWith("chatgpt:") || token.startsWith("thcg.") || token.startsWith("thmobile.") || token.startsWith("productcrew:") || token.startsWith("thpc.")) return undefined;
   const session = await storage.getSession(token);
   return session?.userId;
 }
@@ -79,6 +79,9 @@ export async function deleteSession(token: string): Promise<void> {
 }
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (req.headers.authorization?.startsWith("Bearer thpc.")) {
+    return res.status(401).json({ error: "Product crew credentials are restricted to its MCP adapter" });
+  }
   // A scoped TEST client credential cannot inherit a browser's wider Passport
   // authority when accidentally sent to a legacy calling/assignment endpoint.
   if (req.headers.authorization?.startsWith("Bearer thmobile.")) {

@@ -4,6 +4,7 @@ import { dbReady, isDevDatabase, pool } from "../../db";
 import { landingGearDocumentTitle } from "./landingGearCaseContent";
 import { crewRoadmapTitle } from "./crewRoadmapContent";
 import { crewSetupTitle } from "./crewSetup";
+import { productCrewGuideTitle } from "../../productCrew/setup";
 import { readHypothesis } from "../hypotheses";
 const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 function inline(text: string) {
@@ -36,10 +37,11 @@ async function main() {
   if (rows.length !== 1) throw new Error("Ambiguous owner; no export");
   const roadmap = process.argv.includes("--crew-roadmap");
   const setup = process.argv.includes("--crew-setup");
-  const doc = readHypothesis(rows[0].state, "new-country").documents.find(d => d.title === (setup ? crewSetupTitle : roadmap ? crewRoadmapTitle : landingGearDocumentTitle));
+  const product = process.argv.includes("--product-crew");
+  const doc = readHypothesis(rows[0].state, "new-country").documents.find(d => d.title === (product ? productCrewGuideTitle : setup ? crewSetupTitle : roadmap ? crewRoadmapTitle : landingGearDocumentTitle));
   if (!doc) throw new Error("Saved case document not found");
-  const folder = roadmap || setup ? "generated-artifacts/crew-roadmap" : "generated-artifacts/landing-gear-case";
-  const filename = setup ? "talkhint-crew-roadmap-v2" : roadmap ? "talkhint-crew-roadmap-v1" : "talkhint-landing-gear-v1";
+  const folder = roadmap || setup || product ? "generated-artifacts/crew-roadmap" : "generated-artifacts/landing-gear-case";
+  const filename = product ? "talkhint-product-crew-connection-v1" : setup ? "talkhint-crew-roadmap-v2" : roadmap ? "talkhint-crew-roadmap-v1" : "talkhint-landing-gear-v1";
   await mkdir(folder, { recursive: true });
   await writeFile(`${folder}/${filename}.md`, doc.text);
   await writeFile(`${folder}/${filename}.html`, `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

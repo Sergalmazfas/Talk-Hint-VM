@@ -7,6 +7,7 @@ import { initialModel } from "./seed";
 export interface ModelRepository {
   read(owner: string, hypothesis?: string): Promise<ProjectModelState>;
   update(owner: string, revision: number, command: ModelCommand, hypothesis?: string): Promise<ProjectModelState>;
+  updateMany?(owner: string, revision: number, commands: ModelCommand[], hypothesis?: string): Promise<ProjectModelState>;
 }
 /** Additive table, owner-keyed; durable history and state commit atomically. */
 export class PgModelRepository implements ModelRepository {
@@ -34,6 +35,11 @@ export class PgModelRepository implements ModelRepository {
     return readHypothesis(r.rows[0].state as ProjectModelState, hypothesis);
   }
   async update(owner: string, revision: number, command: ModelCommand, hypothesis = "original") {
+    return this.updateMany(owner, revision, [command], hypothesis);
+  }
+  /** A result document and its work status must commit or roll back together. */
+  async updateMany(owner: string, revision: number, commands: ModelCommand[], hypothesis = "original") {
+    if (!commands.length || commands.length > 3) throw new ModelError(400, "Invalid transaction size");
     const pool = await this.database();
     await this.ensure(pool, owner);
     const client = await pool.connect();
@@ -41,7 +47,7 @@ export class PgModelRepository implements ModelRepository {
       await client.query("BEGIN");
       const r = await client.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
       if (r.rows[0].revision !== revision) throw new ModelError(409, "Модель изменена в другой вкладке. Обновите данные и сравните правки.");
-      const next = applyHypothesisCommand(r.rows[0].state, hypothesis, command, owner);
+      const next = commands.reduce((state, command) => applyHypothesisCommand(state, hypothesis, command, owner), r.rows[0].state as ProjectModelState);
       await client.query("UPDATE talkhint_project_models SET state=$2::jsonb,revision=$3,updated_at=now() WHERE owner_key=$1",
         [owner, JSON.stringify(next), next.revision]);
       await client.query("COMMIT");

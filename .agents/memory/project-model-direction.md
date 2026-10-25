@@ -43,6 +43,32 @@ VM would not address that failure, and deleting history would lose owner work.
 **How to apply:** inspect payload growth and persistence errors first. Measure
 worker/app memory, CPU and concurrency separately before proposing paid capacity.
 
+Product-crew control in ChatGPT is a separate owner-scoped integration from
+Secretary/Katya. A job description or saved/assigned work must never imply an
+autonomous run or newly granted API access. Replit is the technical executor in
+the owner's current Dev session, not a remote background employee.
+
+**Why:** the owner explicitly wants ChatGPT as the conversational interface for
+building the product crew, with duties derived from actions and result clients;
+it must not be confused with the telephone assistant or fake worker activation.
+
+**How to apply:** keep the common roadmap/model, reuse role identities, retain
+source/type/evidence on intake, report saved versus launched separately, and
+confirm the actual external ChatGPT/iPhone connection rather than infer it from
+subscription price.
+
+Independent hypotheses need separate payload accounting from their common owner
+envelope; preserving each hypothesis's guard must not make their combined
+workspace read-only at the same threshold.
+
+**Why:** the crew setup brought the envelope near its limit although the selected
+hypothesis still had capacity; frequent intake and result writes would fail for
+the wrong aggregate reason.
+
+**How to apply:** keep both bounded and tested, preserve rollback/history, and
+plan real archival/version-storage work rather than treating a larger envelope
+as unlimited scalability.
+
 Keep independent product hypotheses, not successive replacements of one model.
 Neither has been chosen as the primary hypothesis. The original is TalkHint as
 an AI manager of a small business with specialist roles; retain all its ten

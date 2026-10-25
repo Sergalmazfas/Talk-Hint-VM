@@ -10,6 +10,8 @@ import { strategyCommandSchemas, strategyCommandTypes } from "./strategySchema";
 import { applyStrategyCommand, collectStrategyImpacts, captureStrategyMap } from "./strategyDomain";
 import { latestImpactOutcome, type StrategyCommand } from "../../shared/projectStrategy";
 import { ModelError } from "./modelError";
+import { modelSizeBudget } from "./sizeBudget";
+import { crewCoordinationSchema } from "../../shared/productCrew";
  import { saveAnalystPreparationSchema, saveAnalystPreparation } from "./analystPreparation";
 import { saveOperatingModelSchema, saveOperatingModel } from "./operatingModel";
 export { ModelError } from "./modelError";
@@ -20,12 +22,14 @@ const id = nonempty(120);
 const ids = z.array(id).max(200);
 const detailShape = Object.fromEntries(Object.keys(detailFields).map(key => [key, str().optional()]));
 export const elementSchema = z.object({
+  coordination: crewCoordinationSchema.optional(),
   title: nonempty(240), section: z.enum(modelSections), scope: z.enum(["talkhint", "salon_example"]), kind: z.enum(elementKinds),
   description: str(20000), contentStatus: z.enum(Object.keys(contentStatuses) as [keyof typeof contentStatuses, ...Array<keyof typeof contentStatuses>]),
   implementationStatus: z.enum(Object.keys(implementationStatuses) as [keyof typeof implementationStatuses, ...Array<keyof typeof implementationStatuses>]),
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("createDocument"), id, title: nonempty(240), text: str(50000), url: str(2000), elementIds: ids }).strict(),
   saveOperatingModelSchema,
    saveAnalystPreparationSchema,
   ...strategyCommandSchemas,
@@ -95,7 +99,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
         if (reviews.length >= 100) fail("Достигнут лимит проверок категории; история сохранена", 413);
         reviews.push({ ...structuredClone(c.review), id: c.requestId, savedAt: now, recordedBy: actor });
       } else nextSnapshot.supportResearch = structuredClone(c.support);
-      if (JSON.stringify(next).length > 5_000_000) fail("Модель превысила допустимый размер", 413);
+      if (JSON.stringify(next).length > modelSizeBudget(next)) fail("Модель превысила допустимый размер", 413);
       return collect ? collectStrategyImpacts(old, next, actor) : next;
     }
     case "captureCompetitorQuarter": {
@@ -242,11 +246,13 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       if (!s.strategy) checkIds([link.from, link.to]).forEach(e => { e.needsReview = true; });
       log("Удалена связь", link.label, [link.from, link.to], { relationBefore: link }); break;
     }
+    case "createDocument":
     case "saveDocument": {
       const linked = checkIds(c.elementIds);
-      const existing = c.id ? s.documents.find(d => d.id === c.id) ?? fail("Документ не найден", 404) : undefined;
+      if (c.type === "createDocument" && s.documents.some(d => d.id === c.id)) fail("Постоянный ID документа уже существует", 409);
+      const existing = c.type === "saveDocument" && c.id ? s.documents.find(d => d.id === c.id) ?? fail("Документ не найден", 404) : undefined;
       if (!existing && s.documents.length >= 500) fail("Достигнут лимит документов");
-      const doc = { id: existing?.id ?? newId("DOC"), title: c.title, text: c.text, url: c.url, elementIds: Array.from(new Set(c.elementIds)), updatedAt: now };
+      const doc = { id: existing?.id ?? (c.type === "createDocument" ? c.id : newId("DOC")), title: c.title, text: c.text, url: c.url, elementIds: Array.from(new Set(c.elementIds)), updatedAt: now };
       if (existing) s.documents[s.documents.indexOf(existing)] = doc; else s.documents.push(doc);
       const affected = Array.from(new Set([...linked.map(e => e.id), ...(existing?.elementIds ?? [])]));
       if (!s.strategy) checkIds(affected).forEach(e => { e.needsReview = true; });
@@ -273,6 +279,6 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     }
   }
   s.revision++;
-  if (JSON.stringify(s).length > 5_000_000) fail("Модель превысила допустимый размер; требуется архивирование", 413);
+  if (JSON.stringify(s).length > modelSizeBudget(s)) fail("Модель превысила допустимый размер; требуется архивирование", 413);
   return collect ? collectStrategyImpacts(old, s, actor) : s;
 }
