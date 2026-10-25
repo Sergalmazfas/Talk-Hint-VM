@@ -27,7 +27,7 @@ describe("isolated Actions test service", () => {
   it("defaults to five read operations with no outbound scope", async () => {
     const { app } = createActionsMockServer(options());
     const result = await request(app).get("/api/chatgpt-actions/openapi.json");
-    expect(Object.keys(result.body.paths)).toHaveLength(5);
+    expect(Object.keys(result.body.paths)).toHaveLength(6);
     expect(JSON.stringify(result.body)).not.toContain("secretary:start");
     expect((await request(app).get("/api/chatgpt-actions/calls")).status).toBe(401);
     expect((await request(app).post("/api/chatgpt-actions/drafts").send({ phoneNumber: MOCK_PHONE })).status).toBe(404);

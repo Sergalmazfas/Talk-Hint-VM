@@ -89,7 +89,7 @@ describe("stage one: actual HTTP OAuth + MCP with fake identities, storage and t
     }
     const list = await rpc("tools/list");
     expect(list.body.result.tools.map((t: any) => t.name).sort()).toEqual([
-      "get_call", "get_profile", "get_task", "list_calls", "list_tasks", "read_call_turns",
+      "get_call", "get_call_result", "get_profile", "get_task", "list_calls", "list_tasks",
     ]);
     expect(list.body.result.tools.every((t: any) => t.annotations.readOnlyHint)).toBe(true);
     const profile = list.body.result.tools.find((t: any) => t.name === "get_profile");

@@ -41,6 +41,10 @@ struct SecretaryPersonalityDetails: Decodable {
     let versions: [SecretaryPersonalityContent]
 }
 struct SecretaryPersonalityContext: Decodable {
+    struct DefaultOutgoing: Decodable {
+        let numberId: String
+        let provider: String
+    }
     struct Number: Decodable {
         let id: String
         let type: String
@@ -48,6 +52,7 @@ struct SecretaryPersonalityContext: Decodable {
         let friendlyName: String?
     }
     let numbers: [Number]
+    var defaultOutgoing: DefaultOutgoing? = nil
 }
 struct SecretaryOutgoingSetup: Decodable {
     struct Card: Decodable { let id: String; let title: String; let description: String }

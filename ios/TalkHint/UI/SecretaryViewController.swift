@@ -726,28 +726,38 @@ final class SecretaryTaskReviewViewController: UIViewController {
             updateConfigurationSummary()
             return
         }
-        guard let numberId = SessionStore.shared.secretaryOutgoingNumberId else {
-            outgoingSetup = nil
-            setupFailed = true
-            updateConfigurationSummary()
-            return
-        }
+        let savedNumberId = SessionStore.shared.secretaryOutgoingNumberId
+        let requestOwner = SessionStore.shared.userId
         setupLoading = true
         startButton.isEnabled = false
         updateConfigurationSummary()
         Task { @MainActor in
             do {
                 let context = try await api.secretaryPersonalityContext()
+                guard SessionStore.shared.userId == requestOwner,
+                      let numberId = savedNumberId ?? context.defaultOutgoing.flatMap({ $0.provider == "retell" ? $0.numberId : nil }) else {
+                    throw SecretaryOutgoingSetupUnavailable()
+                }
                 guard let selectedLine = context.numbers.first(where: { $0.id == numberId }) else {
                     throw SecretaryOutgoingSetupUnavailable()
                 }
                 let result = try await api.secretaryOutgoingSetup(numberId: numberId)
+                guard SessionStore.shared.userId == requestOwner,
+                      SessionStore.shared.secretaryOutgoingNumberId == savedNumberId,
+                      activeDraft == nil else {
+                    throw SecretaryOutgoingSetupUnavailable()
+                }
                 guard result.protocolVersion == 1, result.provider == "retell",
                       result.numberId == numberId, !result.engine.isEmpty,
                       !result.reasoning.isEmpty, result.scope == selectedLine.type else {
                     throw SecretaryOutgoingSetupUnavailable()
                 }
                 outgoingSetup = result
+                // Resolve only the signed-in account's server default; do not
+                // replace an explicit local line or an already-created draft.
+                if savedNumberId == nil {
+                    SessionStore.shared.secretaryOutgoingNumberId = numberId
+                }
                 setupFailed = false
             } catch {
                 outgoingSetup = nil

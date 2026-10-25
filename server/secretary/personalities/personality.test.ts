@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { applyPersonality, type PersonalityBinding } from "./types";
 import { initialKatya } from "./katya";
-import { decodeCursor, numberMode, resolveNumberPersonality, resolveOutgoingPersonality } from "./store";
+import { decodeCursor, numberMode, personalitiesEnabled } from "./store";
 import { SecretaryConversationEngine } from "../conversationEngine";
 import { buildInstructions, defaults, allowedCards } from "../../incomingSecretary/policy";
 const binding: PersonalityBinding = {
@@ -74,11 +74,10 @@ describe("Secretary personality is reusable style, never permissions or facts", 
     expect(engine.instructions.lastIndexOf("SECRETARY PERSONALITY")).toBeGreaterThan(engine.instructions.indexOf("SERVER-AUTHORIZED OUTGOING FACTS"));
     expect(() => engine.execute("save_test_message", "{}", new AbortController().signal)).toThrow();
   });
-  it("never queries or applies Dev assignments in production", async () => {
+  it("makes owned personality settings available in production without enabling browser TEST routes", () => {
     vi.stubEnv("NODE_ENV", "production");
     try {
-      expect(await resolveNumberPersonality("owner", "number")).toBeUndefined();
-      expect(await resolveOutgoingPersonality("owner", "number")).toBeUndefined();
+      expect(personalitiesEnabled()).toBe(true);
     } finally { vi.unstubAllEnvs(); }
   });
   it("rejects malformed cursors and keeps keyset cursors bounded", () => {

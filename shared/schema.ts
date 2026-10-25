@@ -168,6 +168,14 @@ export const secretaryOutgoingSettings = pgTable("secretary_outgoing_settings", 
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, t => ({ numberUnique: uniqueIndex("secretary_outgoing_settings_user_id_number_id_key").on(t.userId, t.numberId) }));
 
+// Account default shared by native and ChatGPT. A personality remains assigned
+// to an owned number, not to a global voice provider.
+export const secretaryOutgoingDefaults = pgTable("secretary_outgoing_defaults", {
+  userId: varchar("user_id").primaryKey().references(() => users.id),
+  numberId: varchar("number_id").notNull().references(() => phoneNumbers.id),
+  provider: text("provider").notNull().default("retell"),
+});
+
 export const secretaryTasks = pgTable("secretary_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

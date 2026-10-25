@@ -29,7 +29,7 @@ export function mcpReleaseConfiguration(
   const outboundEnabled = enabled && !!redirectUri &&
     settings.CHATGPT_SECRETARY_CALL_MODE === "owner-confirmed";
   const allowedScopes: Scope[] = ["calls:read", "calls:transcript", "offline_access"];
-  if (outboundEnabled) allowedScopes.push("secretary:start", "calls:listen");
+  if (outboundEnabled) allowedScopes.push("secretary:start");
   return {
     // Read-only unless the new confirmed-outbound mode is explicitly selected.
     // Development remains opt-in; configuring this object never changes a VM.

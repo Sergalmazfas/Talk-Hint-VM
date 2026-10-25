@@ -27,6 +27,7 @@ import {
 import { hangupSecretaryCall, secretaryCallbackOrigin } from "./dialer";
 import { publishSecretaryFeedEvent } from "./feed";
 import { prepareOutgoingContext, assertOutgoingRetryLine } from "./personalities/outgoing";
+import { outgoingDefault } from "./personalities/defaults";
 
 function ownerId(req: Request): string | undefined {
   return (req as any).user?.id as string | undefined;
@@ -98,7 +99,8 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
         .where(eq(phoneNumbers.userId, userId)).limit(1);
       if (!number) throw Object.assign(new Error("Assign a TalkHint phone number before starting Secretary."), { status: 409 });
       const provider = secretaryVoiceProvider(req.body?.voiceProvider);
-      const outgoingContext = await prepareOutgoingContext(userId, req.body?.secretaryNumberId, provider);
+      const savedDefault = provider === "retell" && !req.body?.secretaryNumberId ? await outgoingDefault(userId) : undefined;
+      const outgoingContext = await prepareOutgoingContext(userId, req.body?.secretaryNumberId ?? savedDefault?.numberId, provider);
       if (provider === "openai") await requireSecretaryAudioModel();
       else if (provider === "retell")
         await (await import("./retellPhone")).requireRetellPhone(secretaryCallbackOrigin());

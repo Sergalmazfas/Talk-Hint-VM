@@ -53,6 +53,7 @@ export function createActionsMockServer(options: Options) {
     secretaryTaskId: null,
     phoneNumber: MOCK_PHONE, summary: "[TEST] Fictional opening-hours result; no call occurred." };
   const backend: SecretaryBackend = {
+    async prepare(owner, input) { own(owner); return input; },
     async history(owner) { own(owner); return [record] as any; },
     async call(owner, id, transcript) {
       own(owner);

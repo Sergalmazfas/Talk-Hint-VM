@@ -10,8 +10,8 @@ describe("installed TalkHint workflow matches outbound capability", () => {
     const skills = packagedSecretarySkills(true);
     expect(Object.keys(skills)).toEqual(["skills/setup/SKILL.md", "skills/secretary/SKILL.md"]);
     const workflow = skills["skills/secretary/SKILL.md"];
-    for (const text of ["prepare_call", "inline confirmation card", "start_call", "get_task", "same confirmation",
-      "task_id", "old failed report", "not a", "three times", "do not", "separate OAuth consent"])
+    for (const text of ["prepare_call", "inline confirmation card", "start_call", "get_call_result", "same confirmation",
+      "task_id", "old failed report", "not a", "get_call_result", "do not", "separate OAuth consent"])
       expect(workflow.toLowerCase()).toContain(text.toLowerCase());
     expect(workflow).not.toContain("approval_url");
     expect(workflow).toContain("Never invoke confirm_call_from_card from the model");

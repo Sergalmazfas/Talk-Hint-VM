@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const f = vi.hoisted(() => ({
   create: vi.fn(), existing: vi.fn(), attach: vi.fn(), preDial: vi.fn(), getTask: vi.fn(), listTasks: vi.fn(),
   history: vi.fn(), getCall: vi.fn(), clone: vi.fn(), ready: vi.fn(), query: vi.fn(), feed: vi.fn(),
-  modelAvailable: vi.fn(),
+  modelAvailable: vi.fn(), prepareCall: vi.fn(), outgoingContext: vi.fn(), retellReady: vi.fn(),
 }));
 vi.mock("../secretary/voice", async importOriginal => ({
   ...await importOriginal<typeof import("../secretary/voice")>(),
@@ -12,6 +12,13 @@ vi.mock("../db", () => ({ db: { select: () => ({
   from: () => ({ where: () => ({ limit: f.query, orderBy: () => ({ limit: f.query }) }) }),
 }) } }));
 vi.mock("../storage", () => ({ storage: { getUserCalls: f.history, getCall: f.getCall } }));
+vi.mock("../secretary/personalities/defaults", () => ({
+  prepareDefaultCall: f.prepareCall,
+  confirmedOutgoingContext: f.outgoingContext,
+  contextHash: () => "a".repeat(64),
+}));
+vi.mock("../secretary/retellPhone", () => ({ requireRetellPhone: f.retellReady }));
+vi.mock("../secretary/dialer", () => ({ secretaryCallbackOrigin: () => "https://fixture.example.test" }));
 vi.mock("../voiceLab/store", () => ({ getClone: f.clone, getCartesiaClone: f.clone }));
 vi.mock("../translation/cloneSpeech", () => ({ requireReadyTranslatorClone: f.ready }));
 vi.mock("../secretary/feed", () => ({ publishSecretaryFeedEvent: f.feed }));
@@ -42,6 +49,9 @@ const row = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  f.prepareCall.mockImplementation(async (_owner, call) => call);
+  f.outgoingContext.mockResolvedValue(undefined);
+  f.retellReady.mockResolvedValue("fixture-agent");
   vi.stubEnv("OPENAI_API_KEY", "fake-test-only");
   vi.stubEnv("ELEVENLABS_API_KEY", "fake-test-only");
   vi.stubEnv("CARTESIA_API_KEY", "fake-test-only");
@@ -55,12 +65,20 @@ beforeEach(() => {
 import { afterEach } from "vitest";
 afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe("Secretary adapter uses durable native launch helpers", () => {
-  it.each(["openai"] as const)("executes OAuth/refresh -> exact owner approval -> one %s mock launch -> task result", async voiceProvider => {
+  it.each(["openai", "retell"] as const)("executes OAuth/refresh -> exact owner approval -> one %s mock launch -> task result", async voiceProvider => {
     const selectedInput = { ...input, voiceProvider };
+    const outgoingContext = voiceProvider === "retell" ? { version: 1, numberId: "fixture-personal",
+      fromNumber: "+12025550999", scope: "personal" as const, cardIds: [], cards: [],
+      personality: { personalityId: "fixture-katya", version: 2, snapshot: { name: "Катя" } } } : undefined;
+    const resolvedInput = outgoingContext ? { ...selectedInput, secretaryNumberId: outgoingContext.numberId,
+      outgoingContextHash: "a".repeat(64), outgoingSummary: { fromNumber: outgoingContext.fromNumber,
+        scope: outgoingContext.scope, personality: { id: "fixture-katya", name: "Катя", version: 2 } } } : selectedInput;
+    f.prepareCall.mockResolvedValue(resolvedInput);
+    f.outgoingContext.mockResolvedValue(outgoingContext);
     const app = express();
     app.use(express.json());
     let won = false;
-    const task = { ...row, ...selectedInput, summary: "" };
+    const task = { ...row, ...resolvedInput, outgoingContext, summary: "" };
     f.create.mockImplementation(async () => {
       const created = !won; won = true;
       return { created, task };
@@ -122,7 +140,13 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     expect(cachedTemplate.body.result.contents[0].uri).toBe("ui://talkhint/call-approval/v2.html");
     expect(cachedTemplate.body.result.contents[0].text).toContain("Подтвердить и позвонить");
     const prepared = await rpc("prepare_call", selectedInput);
-    expect(prepared.body.result.structuredContent.call).toEqual(selectedInput);
+    expect(prepared.body.result.structuredContent.call).toEqual(resolvedInput);
+    if (voiceProvider === "retell") {
+      expect(prepared.body.result.structuredContent.execution).toMatchObject({
+        voice: "retell-Merritt", reasoning: "medium", outgoing: { personality: { name: "Катя", version: 2 } },
+      });
+      expect(dial).not.toHaveBeenCalled();
+    }
     expect(prepared.body.result.structuredContent.execution.provider).toBe(voiceProvider);
     expect(prepared.body.result.structuredContent).not.toHaveProperty("approval_url");
     expect(prepared.body.result.structuredContent.confirmationMethod).toBe("inline_card");
@@ -157,7 +181,7 @@ describe("Secretary adapter uses durable native launch helpers", () => {
     }
     await vi.waitFor(() => expect(f.attach).toHaveBeenCalledTimes(1));
     expect(dial).toHaveBeenCalledTimes(1);
-    expect(f.create).toHaveBeenCalledWith("alice", selectedInput);
+    expect(f.create).toHaveBeenCalledWith("alice", { ...resolvedInput, outgoingContext });
     expect(f.modelAvailable).toHaveBeenCalledTimes(voiceProvider === "openai" ? 1 + repeatedClicks.length + starts.length : 0);
     task.status = "finalizing";
     expect((await rpc("get_task", { id: task.id })).body.result.structuredContent.status).toBe("finalizing");

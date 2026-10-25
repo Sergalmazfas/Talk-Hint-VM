@@ -15,7 +15,7 @@ const contextSchema = z.object({
 }).strict();
 export type OutgoingContext = Omit<z.infer<typeof contextSchema>, "personality"> & { personality: PersonalityBinding | null };
 const ready = () => {
-  if (!personalitiesEnabled() || !pool) throw problem(409, "Связка личности и исходящей линии пока доступна только в Dev");
+  if (!personalitiesEnabled() || !pool) throw problem(409, "Настройки исходящей линии недоступны");
   return pool;
 };
 export function parseOutgoingContext(value: unknown): OutgoingContext {

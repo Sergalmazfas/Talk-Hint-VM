@@ -5,7 +5,9 @@ import type { PersonalityBinding, PersonalityContent, PersonalityMode } from "./
 export const problem = (status: number, message: string) => Object.assign(new Error(message), { status });
 const database = () => { if (!pool) throw problem(503, "Хранилище личностей недоступно"); return pool; };
 const columns = `id,slug,name,description,status,current_version AS "currentVersion"`;
-export const personalitiesEnabled = () => process.env.NODE_ENV === "development";
+// Catalog/owned assignments are product settings, not browser-lab features.
+// Browser TEST routes retain their separate development/admin gates.
+export const personalitiesEnabled = () => process.env.NODE_ENV === "development" || process.env.NODE_ENV === "production";
 export const numberMode = (type: string): PersonalityMode => type === "work" ? "work" : "personal";
 export function decodeCursor(cursor?: string): [string, string] | null {
   if (!cursor) return null;

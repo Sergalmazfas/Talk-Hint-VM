@@ -11,6 +11,8 @@ export type BrowserPage =
       account: string;
       phoneNumber: string;
       instruction: string;
+      voiceProvider?: string;
+      outgoingSummary?: { fromNumber: string; scope: string; personality: { name: string; version: number } | null };
       expiresAt: string;
       approved: boolean;
     }
@@ -186,6 +188,11 @@ export function renderBrowserPage(page: BrowserPage, nonce: string, api: "/api/c
         <div class="list">
           <div class="row"><span class="detail-label">Аккаунт TalkHint</span><div class="detail-value">${escapeHtml(page.account)}</div></div>
           <div class="row"><span class="detail-label">Точный номер телефона</span><div class="detail-value">${escapeHtml(page.phoneNumber)}</div></div>
+          ${page.outgoingSummary ? `<div class="row"><span class="detail-label">Исходящий Secretary</span><div class="detail-value">${escapeHtml([
+            page.outgoingSummary.fromNumber, page.outgoingSummary.personality
+              ? `${page.outgoingSummary.personality.name} v${page.outgoingSummary.personality.version}` : "Без личности",
+            page.voiceProvider === "retell" ? "Retell + TalkHint Engine · Merritt · gpt-6.1-sol · medium" : page.voiceProvider ?? "",
+          ].join(" · "))}</div></div>` : ""}
           <div class="row"><span class="detail-label">Инструкция</span><div class="detail-value">${escapeHtml(page.instruction)}</div></div>
         </div>
         <p class="expiry">Срок действия запроса: ${escapeHtml(page.expiresAt)}</p>

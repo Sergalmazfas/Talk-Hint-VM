@@ -6,10 +6,9 @@ import type { SecretaryBackend } from "./secretary";
 import { registerBrowserIntegration, type BrowserAuth, type AuthorizationRequest } from "./browser";
 import { CallConfirmations } from "./confirmations";
 import { talkHintPluginPackage } from "./plugin";
-import { PUBLIC_TOOLS, publicToolMetadata, cardApprovalToolMetadata, monitorToolMetadata, type PublicTool } from "./toolMetadata";
+import { PUBLIC_TOOLS, publicToolMetadata, cardApprovalToolMetadata, type PublicTool } from "./toolMetadata";
 import { callPresentation } from "./callPresentation";
-import { CallMonitor, MONITOR_SCOPES } from "./monitor";
-import { selectCallTurns } from "./turns";
+import { finalCallResult } from "./finalResult";
 import { CardApproval } from "./cardApproval";
 import { CALL_APPROVAL_RESOURCE, callApprovalWidgetHtml } from "./callApprovalWidget";
 import { callApprovalResource, hostUiSupport, LEGACY_CALL_APPROVAL_RESOURCES, uiResourceLabel } from "./uiResources";
@@ -31,9 +30,17 @@ const CALL = z.object({
   phoneNumber: z.string().regex(/^\+1[2-9]\d{9}$/),
   instruction: z.string().trim().min(1).max(2000),
   clientRequestId: z.string().uuid(),
-  voiceProvider: z.enum(["openai", "elevenlabs", "cartesia"]).default("openai"),
+  voiceProvider: z.enum(["openai", "retell", "elevenlabs", "cartesia"]).default("openai"),
   translationLanguage: z.enum(["ru", "es"]).default("ru"),
+  secretaryNumberId: z.string().min(1).max(100).optional(),
+  outgoingContextHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  outgoingSummary: z.object({
+    fromNumber: z.string().max(30), scope: z.enum(["personal", "work"]),
+    personality: z.object({ id: z.string().max(100), name: z.string().max(120), version: z.number().int().positive() }).strict().nullable(),
+  }).strict().optional(),
 }).strict();
+// Binding fields are server-owned, never model inputs.
+const CALL_INPUT = CALL.omit({ secretaryNumberId: true, outgoingContextHash: true, outgoingSummary: true });
 const CARD_DECISION = z.object({
   confirmation: z.string().max(16000), approvalToken: z.string().max(16000),
   decision: z.enum(["approve", "deny"]),
@@ -45,9 +52,10 @@ const schemas = {
   get_call: z.object({ id: ID, includeTranscript: z.boolean().default(false) }).strict(),
   list_tasks: z.object({}).strict(),
   get_task: z.object({ id: ID, includeTranscript: z.boolean().default(false) }).strict(),
-  read_call_turns: z.object({ id: ID, afterTurnId: ID.optional(), limit: z.number().int().min(1).max(50).default(30) }).strict(),
+  get_call_result: z.object({ id: ID.optional(), clientRequestId: z.string().uuid().optional() }).strict()
+    .refine(v => !!v.id !== !!v.clientRequestId, "Supply one task locator"),
   get_incoming: z.object({}).strict(),
-  prepare_call: CALL.extend({ recipient: z.string().trim().min(1).max(200).optional() }),
+  prepare_call: CALL_INPUT.extend({ recipient: z.string().trim().min(1).max(200).optional() }),
   start_call: z.object({ confirmation: z.string().max(16000) }).strict(),
 };
 type Tool = keyof typeof schemas;
@@ -55,7 +63,7 @@ const permissions: Record<Tool, Scope> = {
   get_profile: "calls:read", list_calls: "calls:read", get_call: "calls:read",
   list_tasks: "calls:read", get_task: "calls:read", get_incoming: "incoming:read",
   prepare_call: "secretary:start", start_call: "secretary:start",
-  read_call_turns: "calls:transcript",
+  get_call_result: "calls:read",
 };
 const uuidPattern = /^[a-f0-9-]{36}$/i;
 const TOKEN_MS = 10 * 60_000;
@@ -65,16 +73,15 @@ const TOOL_INPUTS: Record<Tool, object> = {
   get_profile: {}, list_calls: {}, list_tasks: {}, get_incoming: {},
   get_call: { id: { type: "string" }, includeTranscript: { type: "boolean", default: false } },
   get_task: { id: { type: "string" }, includeTranscript: { type: "boolean", default: false } },
-  read_call_turns: { id: { type: "string" }, afterTurnId: { type: "string" },
-    limit: { type: "integer", minimum: 1, maximum: 50, default: 30 } },
+  get_call_result: { id: { type: "string" }, clientRequestId: { type: "string", format: "uuid" } },
   prepare_call: {
     recipient: { type: "string", minLength: 1, maxLength: 200,
       description: "Recipient name supplied by the owner, never inferred from phone number." },
     phoneNumber: { type: "string", pattern: "^\\+1[2-9]\\d{9}$" },
     instruction: { type: "string", minLength: 1, maxLength: 2000 },
     clientRequestId: { type: "string", format: "uuid" },
-    voiceProvider: { type: "string", enum: ["openai"], default: "openai",
-      description: "GPT-Live 1 with built-in marin voice; reasoning gpt-6.1-sol. No fallback. Legacy providers are retained only for history/compatibility." },
+    voiceProvider: { type: "string", enum: ["openai", "retell"],
+      description: "Use the owner's saved Secretary default. The server resolves and displays the actual provider, outgoing line and personality before approval. Do not select a replacement if unavailable." },
     translationLanguage: { type: "string", enum: ["ru", "es"] },
   },
   start_call: { confirmation: { type: "string" } },
@@ -117,9 +124,6 @@ export function registerChatGPTIntegration(
     () => config.outboundEnabled === true, config.clientId);
   const cardApproval = new CardApproval(credentials, store, confirmations);
   const cardEnabled = !config.actions && availableTools.includes("prepare_call");
-  const monitorEnabled = cardEnabled && MONITOR_SCOPES.every(s => scopesSupported.includes(s));
-  const monitor = new CallMonitor(credentials, store, backend, base, () => config.enabled);
-  if (!config.actions) monitor.register(app);
   const challenge = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", error="invalid_token", error_description="Connect your TalkHint account"` +
     (config.actions ? "" : `, scope="${MCP_BASE_SCOPES.join(" ")}"`);
   const scopeChallenge = (scope: Scope | readonly Scope[]) =>
@@ -284,7 +288,7 @@ export function registerChatGPTIntegration(
     ui: cardEnabled ? { resourceUri: CALL_APPROVAL_RESOURCE, mimeType: "text/html;profile=mcp-app",
       compatibleResourceUris: [...LEGACY_CALL_APPROVAL_RESOURCES],
       requiresMcpAppsHost: true, iphoneVerified: false } : undefined,
-    uiTools: cardEnabled ? ["confirm_call_from_card", ...(monitorEnabled ? ["open_call_monitor"] : [])] : [],
+    uiTools: cardEnabled ? ["confirm_call_from_card"] : [],
     scopes: discoveryScopes,
     // No callback value, account details, signing keys or credentials.
   }));
@@ -448,15 +452,36 @@ export function registerChatGPTIntegration(
     switch (name) {
       case "get_profile": return { id: claims.sub };
       case "list_calls": return { calls: await backend.history(claims.sub) };
-      case "get_call": return backend.call(claims.sub, args.id, args.includeTranscript);
+      case "get_call": {
+        const call = await backend.call(claims.sub, args.id, args.includeTranscript);
+        if (!["completed", "failed", "busy", "no-answer", "canceled"].includes(call.status)) {
+          const { transcript, ...saved } = call;
+          return saved;
+        }
+        return call;
+      }
       case "list_tasks": return { tasks: await backend.tasks(claims.sub) };
-      case "get_task": return backend.task(claims.sub, args.id, args.includeTranscript);
+      case "get_task": {
+        const task = await backend.task(claims.sub, args.id, args.includeTranscript);
+        if (!["completed", "failed", "canceled", "cancelled"].includes(task.status))
+          return { id: task.id, status: task.status, ready: false, note: "Call still in progress; no live transcript in ChatGPT." };
+        return task;
+      }
       case "get_incoming": return backend.incoming(claims.sub);
-      case "read_call_turns":
-        return selectCallTurns(await backend.task(claims.sub, args.id, true), args.afterTurnId, args.limit);
+      case "get_call_result": {
+        need(claims, "calls:transcript");
+        let id = args.id;
+        if (!id) {
+          const saved = (await backend.tasks(claims.sub)).filter(t => t.clientRequestId === args.clientRequestId);
+          if (saved.length !== 1) return fail(404, "Поручение пока не найдено. Повторный звонок не запускался.");
+          id = saved[0].id;
+        }
+        return finalCallResult(await backend.task(claims.sub, id, true));
+      }
       case "prepare_call": {
         const { recipient, ...nativeArgs } = args;
-        const call = CALL.parse(nativeArgs);
+        const requested = CALL_INPUT.parse(nativeArgs);
+        const call = CALL.parse(backend.prepare ? await backend.prepare(claims.sub, requested) : requested);
         if (!uuidPattern.test(call.clientRequestId)) return fail(400, "Invalid request ID");
         const confirmation = credentials.issue({ type: "confirmation", sub: claims.sub, grant: claims.grant,
           scopes: claims.scopes, client: claims.client, exp: Math.min(Date.now() + CONFIRM_MS, claims.exp), call,
@@ -533,34 +558,20 @@ export function registerChatGPTIntegration(
     else if (rpc.method === "tools/list") result = { tools: [...mcpTools.map(name =>
       publicToolMetadata(name, permissions[name], TOOL_INPUTS[name],
         name === "prepare_call" ? ["phoneNumber", "instruction", "clientRequestId"] :
-        name === "start_call" ? ["confirmation"] : ["get_call", "get_task", "read_call_turns"].includes(name) ? ["id"] : [], cardEnabled)),
-      ...(cardEnabled ? [cardApprovalToolMetadata()] : []),
-      ...(monitorEnabled ? [monitorToolMetadata()] : [])] };
+        name === "start_call" ? ["confirmation"] : ["get_call", "get_task"].includes(name) ? ["id"] : [], cardEnabled)),
+      ...(cardEnabled ? [cardApprovalToolMetadata()] : [])] };
     else if (rpc.method === "tools/call") {
       const name = rpc.params?.name as Tool;
       const cardRequest = (name as string) === "confirm_call_from_card" && cardEnabled;
-      const monitorRequest = (name as string) === "open_call_monitor" && monitorEnabled;
-      if (!Object.hasOwn(schemas, name) && !cardRequest && !monitorRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
+      if (!Object.hasOwn(schemas, name) && !cardRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         error: { code: -32602, message: "Unknown tool" } });
-      if (!(mcpTools as readonly string[]).includes(name) && !cardRequest && !monitorRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
+      if (!(mcpTools as readonly string[]).includes(name) && !cardRequest) return res.json({ jsonrpc: "2.0", id: rpc.id,
         result: { isError: true, content: [{ type: "text", text: "Tool is unavailable in this plugin." }] } });
       let callStartAttempted = false;
       try {
         let value: any;
         let meta: object | undefined;
-        if (monitorRequest) {
-          const claims = await claimsFor(req);
-          if (MONITOR_SCOPES.some(s => !claims.scopes.includes(s))) throw Object.assign(
-            new Error("Allow listening and transcript access once to monitor this call"), {
-              status: 403, requiredScopes: Array.from(new Set([...claims.scopes, ...MONITOR_SCOPES])),
-            });
-          if (MONITOR_SCOPES.some(s => !scopesSupported.includes(s))) return fail(403, "Monitor unavailable");
-          const args = z.object({ id: ID }).strict().parse(rpc.params?.arguments ?? {});
-          const ticket = await monitor.issue(claims, args.id);
-          meta = { "talkhint/monitor": ticket };
-          value = { task_id: args.id, expiresAt: ticket.expiresAt,
-            note: "UI-only live audio and text. No call is started or retried. ChatGPT does not hear the player." };
-        } else if (cardRequest) {
+        if (cardRequest) {
           const claims = await claimsFor(req);
           need(claims, "secretary:start");
           const args = CARD_DECISION.parse(rpc.params?.arguments ?? {});
@@ -570,15 +581,14 @@ export function registerChatGPTIntegration(
             callStartAttempted = true;
             const started = await backend.start(claims.sub, CALL.parse(decision.call));
             value = { ...started, task_id: started.task.id, asynchronous: true,
-              fallbackUrl: `${base}/api/chatgpt/secretary/tasks/${encodeURIComponent(started.task.id)}`,
-              note: "Read get_task with this task_id. Never create a new call because the result is delayed." };
+              note: "Нажмите «Получить итог звонка» после завершения. Это чтение существующего поручения, не повторный звонок." };
           }
         } else {
           value = await execute(req, name, rpc.params?.arguments ?? {});
-          if (name === "get_task" && cardEnabled) {
+          if (name === "get_call_result" && cardEnabled) {
             // Only after execute has authenticated the current owner and read this task.
             meta = { "talkhint/task": {
-              fallbackUrl: `${base}/api/chatgpt/secretary/tasks/${encodeURIComponent(value.id)}`,
+              taskId: value.task_id,
             } };
           }
           if (name === "prepare_call") {
@@ -586,7 +596,7 @@ export function registerChatGPTIntegration(
             const { approval_url, approvalEndpoint, note, ...preview } = value;
             const recipient = credentials.read(value.confirmation, "confirmation").recipient;
             const displayCall = { ...preview.call, ...(recipient ? { recipient } : {}) };
-            const execution = callPresentation(displayCall.voiceProvider);
+            const execution = callPresentation(displayCall.voiceProvider, displayCall.outgoingSummary);
             meta = { "talkhint/cardApproval": { ...await cardApproval.issue(value.confirmation), call: displayCall } };
             value = { ...preview, call: displayCall, confirmationMethod: "inline_card",
               execution,

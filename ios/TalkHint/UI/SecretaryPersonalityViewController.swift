@@ -98,7 +98,9 @@ final class SecretaryPersonalityViewController: UITableViewController {
                     self.setup = nil
                     self.tableView.reloadData()
                     self.error(self.text("line_stale"))
-                } else if let number = context.numbers.first(where: { $0.id == saved }) ?? context.numbers.first {
+                } else if let number = context.numbers.first(where: { $0.id == saved })
+                    ?? context.numbers.first(where: { $0.id == context.defaultOutgoing?.numberId })
+                    ?? context.numbers.first {
                     await self.load(number.id)
                 } else {
                     self.busy = false; self.setup = nil; self.tableView.reloadData()

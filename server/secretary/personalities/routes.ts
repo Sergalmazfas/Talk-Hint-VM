@@ -9,6 +9,7 @@ import { streamSecretaryResponse } from "../conversationEngine";
 import { applyPersonality } from "./types";
 import * as store from "./store";
 import { outgoingSettings, saveOutgoingSetup } from "./outgoing";
+import { outgoingDefault } from "./defaults";
 
 const content = z.object({
   name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(400),
@@ -37,7 +38,7 @@ async function assignment(ownerId: string, number: string) {
     incoming: n.type === "work", outgoingRetell: true,
     note: n.type === "work"
       ? "Характер применяется к уже включённому входящему Work Secretary и исходящему Retell. Этот выбор не включает приём звонков."
-      : "Личный входящий Secretary пока не реализован. Выбор применяется к исходящему Retell с этого номера. Выбор номера при наборе не изменяется.",
+      : "Личный входящий Secretary пока не реализован. Выбор применяется к исходящему Retell с этого номера.",
   } };
 }
 export function registerPersonalityRoutes(app: Express) {
@@ -48,7 +49,7 @@ export function registerPersonalityRoutes(app: Express) {
   app.get(root + "/context", wrap(async (req, res) => {
     const numbers = await storage.getUserPhoneNumbers(owner(req));
     res.json({ numbers: numbers.map(n => ({ id: n.id, type: n.type, twilioNumber: n.twilioNumber, friendlyName: n.name })),
-      admin: await admin(req) });
+      admin: await admin(req), defaultOutgoing: await outgoingDefault(owner(req)) ?? null });
   }));
   app.get(root, wrap(async (req, res) => {
     const input = z.object({ q: z.string().max(100).default(""), cursor: z.string().max(1200).optional(),

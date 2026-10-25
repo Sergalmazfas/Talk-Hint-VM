@@ -15,6 +15,8 @@ import { SecretaryPreDialError } from "../secretary/dialErrors";
 import { publishSecretaryFeedEvent } from "../secretary/feed";
 import { fail, type Claims } from "./security";
 import { savedTaskEvents } from "./savedEvents";
+import { prepareDefaultCall, confirmedOutgoingContext, contextHash } from "../secretary/personalities/defaults";
+import { assertOutgoingRetryLine } from "../secretary/personalities/outgoing";
 
 /** Reuses the same durable lease/dialer/streams/reporting as native Secretary. */
 export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
@@ -25,6 +27,9 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
     reused,
   });
   return {
+    async prepare(userId: string, input: NonNullable<Claims["call"]>) {
+      return prepareDefaultCall(userId, input);
+    },
     async history(userId: string) {
       const rows = await storage.getUserCalls(userId);
       const reports = (await listSecretaryTasks(userId)).filter(task => task.userId === userId && task.callId);
@@ -67,18 +72,29 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
     },
     async start(userId: string, input: NonNullable<Claims["call"]>) {
       const old = await getLiveSecretaryTaskByClientRequest(userId, input.clientRequestId, input.phoneNumber, input.instruction);
-      if (old) return started(old, true);
+      if (old) {
+        assertOutgoingRetryLine(old.outgoingContext, input.secretaryNumberId);
+        if (input.outgoingContextHash && contextHash(old.outgoingContext) !== input.outgoingContextHash)
+          return fail(409, "This request ID belongs to a different outgoing setup");
+        return started(old, true);
+      }
       const [number] = await db.select({ id: phoneNumbers.id }).from(phoneNumbers).where(eq(phoneNumbers.userId, userId)).limit(1);
       if (!number) return fail(409, "Assign a TalkHint number first");
       selectedSecretaryVoiceProvider(input.voiceProvider);
+      const outgoingContext = await confirmedOutgoingContext(userId, input);
       if (input.voiceProvider === "openai") await requireSecretaryAudioModel();
+      else if (input.voiceProvider === "retell") {
+        const { requireRetellPhone } = await import("../secretary/retellPhone");
+        const { secretaryCallbackOrigin } = await import("../secretary/dialer");
+        await requireRetellPhone(secretaryCallbackOrigin());
+      }
       else {
         const clone = await (input.voiceProvider === "cartesia" ? getCartesiaClone(userId) : getClone(userId));
         requireReadyTranslatorClone(input.voiceProvider, clone,
           input.voiceProvider === "cartesia" ? process.env.CARTESIA_API_KEY : process.env.ELEVENLABS_API_KEY);
       }
       if (!process.env.OPENAI_API_KEY) return fail(503, "Secretary is not configured");
-      const result = await createLiveSecretaryTask(userId, input);
+      const result = await createLiveSecretaryTask(userId, { ...input, outgoingContext });
       if (result.created) {
         // Return the durable task immediately. Exactly one winning lease may
         // dial. A restart/ambiguous provider response never schedules a retry.

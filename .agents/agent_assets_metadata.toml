@@ -593,3 +593,31 @@ mtime_ms = 1792883171529
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/01ec3dc9-90cb-4c99-b6e3-51bf19cb3fd3/f3654ea0-356b-4be3-a56f-8e7b0964b7f0"
 storage_version_token = "1792883272862553"
 content_type = "text/html"
+
+[[outputs]]
+id = "SF0OSSFhu0ddpN52kbeJ5"
+uri = "file://docs/CLAUDE-PRODUCTION-SECRETARY-CHECK.md"
+type = "text"
+title = "Задание Claude — запуск Secretary на production"
+description = "Готовый текст для копирования: существующая сборка, правильный сервер, личная линия, Катя v2, без автоматического звонка."
+logical_id = "6347dc58-96c7-41e6-985a-f0bc5dcc4752"
+content_hash = "sha256:098991ed7345c6e5cdf298bcac0cd130c5ff03482a6a613b321ab9fa9759a317"
+size = 3798
+mtime_ms = 1792896822534
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6347dc58-96c7-41e6-985a-f0bc5dcc4752/cde17712-b457-41ee-b901-893556f669aa"
+storage_version_token = "1792897063840393"
+content_type = "text/markdown"
+
+[[outputs]]
+id = "VdV5XJcbY83wpsFBTeTDJ"
+uri = "file://docs/CHATGPT-SECRETARY-FINAL-RESULT.md"
+type = "text"
+title = "ChatGPT Secretary — изменения и ограничения"
+description = "Подтверждение → один звонок → резюме и полная транскрипция; обновление плагина и проверенные ограничения автоматической доставки."
+logical_id = "d8c00af8-8190-486b-bd19-c5b3a76a9a1c"
+content_hash = "sha256:0c2086ea515f6f5a4f17c467ec9b2bd317e6847fafa4e483a1b94c25435689b3"
+size = 4634
+mtime_ms = 1792896570299
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d8c00af8-8190-486b-bd19-c5b3a76a9a1c/119fb75e-a3c2-4e2e-a236-1b70adf8926b"
+storage_version_token = "1792897064439979"
+content_type = "text/markdown"

@@ -334,9 +334,9 @@ describe("personal Actions: isolated confidential OAuth and owner-only API", () 
   it("advertises only read tools by default and never truncates large text silently", async () => {
     setup(false);
     const schema = await request(app).get(`${api}/openapi.json`);
-    expect(Object.keys(schema.body.paths)).toHaveLength(5);
+    expect(Object.keys(schema.body.paths)).toHaveLength(6);
     expect((await request(app).post(`${api}/drafts`).send(draft())).status).toBe(404);
-    vi.mocked(backend.call).mockResolvedValueOnce({ id: "owned-call", transcript: "x".repeat(100_001) } as any);
+    vi.mocked(backend.call).mockResolvedValueOnce({ id: "owned-call", status: "completed", transcript: "x".repeat(100_001) } as any);
     const result = await request(app).get(`${api}/calls/owned-call?includeTranscript=true`)
       .auth(await token("calls:read calls:transcript"), { type: "bearer" });
     expect(result.status).toBe(413);
@@ -350,7 +350,7 @@ describe("offline Actions schema and export", () => {
   it("matches all HTTP operations, scopes and consequential writes without external refs/secrets", () => {
     const schema = talkHintActionsSchema(origin, true);
     expect(schema.openapi).toBe("3.1.0");
-    expect(Object.keys(schema.paths)).toHaveLength(7);
+    expect(Object.keys(schema.paths)).toHaveLength(8);
     const ids = new Set<string>();
     for (const [path, methods] of Object.entries(schema.paths)) {
       for (const [method, value] of Object.entries(methods as any)) {
@@ -367,7 +367,7 @@ describe("offline Actions schema and export", () => {
         }));
       }
     }
-    expect(ids.size).toBe(7);
+    expect(ids.size).toBe(8);
     expect(JSON.stringify(schema)).not.toMatch(/\$ref|client_secret|Route Leader|Road Ranger|confirmed/);
     expect(schema.components.securitySchemes.TalkHintOAuth.flows.authorizationCode.authorizationUrl)
       .toBe(`${origin}${api}/oauth/authorize`);
@@ -378,7 +378,7 @@ describe("offline Actions schema and export", () => {
     const text = readFileSync("generated-artifacts/talkhint-actions/draft/talkhint-actions-NOT-FOR-CONNECTION.json", "utf8");
     const schema = JSON.parse(text);
     expect(schema.servers).toEqual([{ url: "https://talkhint-actions.invalid" }]);
-    expect(Object.keys(schema.paths)).toHaveLength(7);
+    expect(Object.keys(schema.paths)).toHaveLength(8);
     expect(text).not.toContain(secret);
     expect(mockDial).not.toHaveBeenCalled();
   });

@@ -247,6 +247,10 @@ app.use(createRequestLoggingMiddleware(log));
       console.log("[Seed] Skipping seed in production (use RUN_SEED=true to force)");
     }
 
+    // Explicit, insert-only owner-approved outgoing release. No generic
+    // production sample-data seed and no external provider side effects.
+    await (await import("./secretary/personalities/defaults")).initializeOwnerSecretaryDefaults();
+
     // After each Publish the deployed app must own the inbound Twilio webhooks.
     // Repoint every pool number at the live production URL on startup so calls
     // always reach this build. Dev startup leaves webhooks alone (they are

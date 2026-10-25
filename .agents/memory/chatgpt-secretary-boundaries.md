@@ -6,6 +6,15 @@ description: User-approved integration scope and safety boundaries for official 
 Use official ChatGPT as a command/result surface for the existing TalkHint
 Secretary, not a replacement chat application or a new iOS interface. Keep
 Secretary, Twilio, the existing database and native call reception intact.
+The owner now wants only assignment review → one approved call → saved summary
+and full transcript in ChatGPT, with no live viewing, listening or monitoring.
+
+**Why:** the user explicitly removed those features from the ChatGPT plugin;
+native iPhone monitoring remains required and is outside this removal.
+
+**How to apply:** expose a single final-result read action for the existing
+task; never start another call to retrieve a result. Do not promise automatic
+chat delivery without verifying host support and an active subscription.
 Exclude SMS. The user approved minimal protected web pages for initial OAuth
 consent, without changes to existing TalkHint or iOS interfaces. Per-call approval
 must now happen inside ChatGPT, without a mandatory website visit.

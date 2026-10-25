@@ -9,6 +9,8 @@ export const LEGACY_CALL_APPROVAL_RESOURCES = [
   "ui://talkhint/call-approval/v1.html",
   "ui://talkhint/call-approval/v2.html",
   "ui://talkhint/call-approval/v3.html",
+  "ui://talkhint/call-approval/v4.html",
+  "ui://talkhint/call-approval/v5.html",
 ] as const;
 
 export function callApprovalResource(uri: unknown) {

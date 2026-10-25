@@ -39,4 +39,9 @@ CREATE TABLE IF NOT EXISTS secretary_outgoing_settings (
   updated_at timestamp NOT NULL DEFAULT now(),
   UNIQUE(user_id,number_id)
 );
+CREATE TABLE IF NOT EXISTS secretary_outgoing_defaults (
+  user_id varchar PRIMARY KEY REFERENCES users(id),
+  number_id varchar NOT NULL REFERENCES phone_numbers(id),
+  provider text NOT NULL DEFAULT 'retell'
+);
 ALTER TABLE secretary_tasks ADD COLUMN IF NOT EXISTS outgoing_context jsonb;

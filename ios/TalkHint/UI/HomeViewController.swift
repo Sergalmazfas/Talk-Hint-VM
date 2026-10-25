@@ -936,6 +936,7 @@ final class HomeViewController: UIViewController {
         callButton.configuration?.showsActivityIndicator = true
         callButton.configuration?.image = nil
         callButton.configuration?.title = NSLocalizedString("home.connecting", comment: "")
+        let requestOwner = SessionStore.shared.userId
         Task {
             do {
                 var summarySetup: SecretaryOutgoingSetup?
@@ -945,11 +946,19 @@ final class HomeViewController: UIViewController {
                 // default. This preflight is only for a new request; retries of
                 // an ambiguous request keep their original id and binding.
                 if isNewRequest, confirmed.voiceProvider == .retell {
+                    let context = try await api.secretaryPersonalityContext()
+                    guard SessionStore.shared.userId == requestOwner else {
+                        throw SecretaryOutgoingSetupUnavailable()
+                    }
+                    if confirmed.secretaryNumberId == nil,
+                       let savedDefault = context.defaultOutgoing, savedDefault.provider == "retell" {
+                        confirmed.secretaryNumberId = savedDefault.numberId
+                        confirmed.secretaryBackendOrigin = AppConfig.baseURL.absoluteString
+                    }
                     guard let numberId = confirmed.secretaryNumberId,
                           confirmed.secretaryBackendOrigin == AppConfig.baseURL.absoluteString else {
                         throw SecretaryOutgoingSetupUnavailable()
                     }
-                    let context = try await api.secretaryPersonalityContext()
                     guard let selectedLine = context.numbers.first(where: { $0.id == numberId }) else {
                         throw SecretaryOutgoingSetupUnavailable()
                     }

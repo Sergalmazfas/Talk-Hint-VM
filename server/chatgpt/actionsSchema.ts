@@ -8,6 +8,7 @@ const reads = [
   ["calls/{id}", "get_call", "Read an owned call's status and saved result. Transcript requires a separate scope."],
   ["tasks", "list_tasks", "List the owner's recent Secretary tasks."],
   ["tasks/{id}", "get_task", "Read an owned task's status and saved result using its task_id."],
+  ["tasks/{id}/result", "get_call_result", "Read the saved final summary and complete transcript; never starts another call."],
 ] as const;
 const record = { type: "object", properties: {
   id: { type: "string" }, status: { type: "string" }, summary: { type: "string" },
@@ -93,7 +94,7 @@ export function registerActionOperations(app: Express, api: string, outbound: bo
     const query = z.object({ includeTranscript: z.enum(["true", "false"]).optional() }).strict().parse(req.query);
     if (!path.includes("{id}") && query.includeTranscript !== undefined) return res.status(400).json({ error: "Unexpected transcript argument" });
     return send(res, await execute(req, name, path.includes("{id}") ?
-      { id: req.params.id, includeTranscript: query.includeTranscript === "true" } : {}));
+      { id: req.params.id, ...(name === "get_call_result" ? {} : { includeTranscript: query.includeTranscript === "true" }) } : {}));
   }));
   if (outbound) {
     app.post(`${api}/drafts`, wrap(async (req, res) => {
