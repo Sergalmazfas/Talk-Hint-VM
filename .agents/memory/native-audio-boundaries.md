@@ -100,3 +100,16 @@ tests need a scene-attached window, fresh-operation evidence and fully dismissed
 presentations. Cancel and drain work before restoring shared test state. Keep
 delayed-response fixtures that ignore cancellation; do not fix these races by
 increasing timeouts or weakening assertions.
+
+Hosted navigation tests must observe actual disappearance before releasing a
+held response and draining the departing screen; issuing push/pop is not proof
+that appearance callbacks have completed.
+
+**Why:** Mac lifecycle tracing reproduced a coalesced push/pop with no
+disappearance/reappearance callbacks. The test's drain helper suspended a still
+visible screen and then incorrectly expected reappearance to resume it.
+
+**How to apply:** Await the departing view leaving its window and navigation
+settling before draining; await actual attachment on return. Do not infer an app
+lifecycle bug from a test that skipped those preconditions or accept one green
+run as proof an intermittent failure is resolved.
