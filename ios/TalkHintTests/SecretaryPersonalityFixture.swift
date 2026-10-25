@@ -1,6 +1,33 @@
 import XCTest
 @testable import TalkHint
 
+/// Delay an already completed fixture response, deliberately ignoring task
+/// cancellation. Proves that lifecycle/epoch checks, not transport luck, stop
+/// stale saves, alerts and catalog callbacks. Never reaches URLSession.
+actor SecretaryPersonalityResponseGate {
+    let fixture: SecretaryPersonalityFixture
+    private var target: (method: String, path: String)?
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(fixture: SecretaryPersonalityFixture) { self.fixture = fixture }
+    func arm(method: String, path: String) { target = (method, path) }
+    func isHolding() -> Bool { continuation != nil }
+    func release() {
+        let pending = continuation
+        continuation = nil
+        target = nil
+        pending?.resume()
+    }
+    func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        let result = try await fixture.send(request)
+        if let target, request.httpMethod == target.method, request.url?.path == target.path {
+            self.target = nil
+            await withCheckedContinuation { continuation = $0 }
+        }
+        return result
+    }
+}
+
 /// In-memory HTTP only. No URLSession fallback, push, phone SDK or real accounts.
 /// Task recovery is separately opt-in and returns a terminal fake task.
 actor SecretaryPersonalityFixture {

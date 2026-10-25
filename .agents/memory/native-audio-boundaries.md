@@ -86,3 +86,17 @@ that audio has become available.
 **How to apply:** screen re-entry may refresh the feed, never create a new call
 or promise to recreate a missing Twilio source. Treat receipt of both tracks,
 local playback callbacks, and human-confirmed audibility as separate evidence.
+
+Treat cancelling a native settings request as cancelling local observation,
+not rolling back an accepted server write.
+
+**Why:** Hosted personality tests could read an old alert as a new save result;
+late completions then changed shared preferences during the next test. A saved
+server result can still exist after navigation cancels its client-side wait.
+
+**How to apply:** Validate lifecycle, owner, origin and request generation before
+local side effects; re-read the same line after interrupted saving. Hosted UIKit
+tests need a scene-attached window, fresh-operation evidence and fully dismissed
+presentations. Cancel and drain work before restoring shared test state. Keep
+delayed-response fixtures that ignore cancellation; do not fix these races by
+increasing timeouts or weakening assertions.
