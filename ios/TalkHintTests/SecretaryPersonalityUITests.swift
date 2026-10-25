@@ -369,11 +369,17 @@ final class SecretaryPersonalityUITests: XCTestCase {
         XCTAssertTrue(SessionStore.shared.savePendingSecretaryCall(pending))
         select(settings, 3, 0)
         try await waitUntil {
-            guard let sheet = self.settings.presentedViewController as? UIAlertController else { return false }
-            return sheet.presentingViewController === self.settings &&
+            guard let sheet = self.settings.presentedViewController as? UIAlertController,
+                  let presenter = sheet.presentingViewController else { return false }
+            // UIKit may delegate a child's presentation to its navigation
+            // controller. Validate the actual relationship, not just the caller.
+            return (presenter === self.settings || presenter === self.nav) &&
+                presenter.presentedViewController === sheet &&
+                presenter.viewIfLoaded?.window === self.window &&
                 sheet.viewIfLoaded?.window === self.window &&
                 !sheet.isBeingPresented && !sheet.isBeingDismissed &&
                 sheet.transitionCoordinator == nil &&
+                presenter.transitionCoordinator == nil &&
                 self.settings.transitionCoordinator == nil
         }
         let sheet = try XCTUnwrap(settings.presentedViewController as? UIAlertController)
