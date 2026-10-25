@@ -19,6 +19,10 @@ final class SecretaryPersonalityUITests: XCTestCase {
     private var previousUserId: String?
     private var previousEmail: String?
     private var scopedTestOwners: [String] = []
+    private var previousKeyWindow: UIWindow?
+    private var animationsWereEnabled = true
+    private var openedControllers: [UIViewController] = []
+    private var responseGates: [SecretaryPersonalityResponseGate] = []
 
     override func setUp() async throws {
         try await super.setUp()
@@ -35,17 +39,48 @@ final class SecretaryPersonalityUITests: XCTestCase {
         api = APIClient(transport: { try await fixture.send($0) }, tokenProvider: { "personality-fixture" })
         settings = SettingsViewController(api: api)
         nav = UINavigationController(rootViewController: settings)
-        window = UIWindow(frame: UIScreen.main.bounds)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive })
+        previousKeyWindow = scene.windows.first { $0.isKeyWindow }
+        animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
         window.rootViewController = nav
         window.makeKeyAndVisible()
         settings.loadViewIfNeeded()
+        try await waitUntil { self.settings.viewIfLoaded?.window === self.window &&
+            self.nav.transitionCoordinator == nil }
     }
 
     override func tearDown() async throws {
-        await dismissAlert()
-        window.isHidden = true
-        window.rootViewController = nil
+        do { try await dismissAlert() } catch { XCTFail("Could not dismiss test presentation: \(error)") }
+        let controllers = openedControllers + (nav?.viewControllers ?? [])
+        for controller in controllers {
+            (controller as? SecretaryPersonalityViewController)?.cancelPendingOperations()
+            (controller as? SecretaryPersonalityPickerViewController)?.cancelPendingOperations()
+        }
+        window?.isHidden = true
+        window?.rootViewController = nil
+        for gate in responseGates { await gate.release() }
+        responseGates = []
+        // Invalidate/drain controller work before restoring global preferences.
+        // Do not let a previous test's late PUT update the next test's session.
+        for controller in controllers {
+            if let screen = controller as? SecretaryPersonalityViewController {
+                await screen.finishPendingOperations()
+            } else if let picker = controller as? SecretaryPersonalityPickerViewController {
+                await picker.finishPendingOperations()
+            }
+        }
+        openedControllers = []
+        window?.isHidden = true
+        window?.rootViewController = nil
         window = nil; nav = nil; settings = nil; api = nil; server = nil
+        previousKeyWindow?.makeKey()
+        previousKeyWindow = nil
+        UIView.setAnimationsEnabled(animationsWereEnabled)
         for ownerId in scopedTestOwners {
             SessionStore.shared.save(token: "native-fixture", userId: ownerId, email: "fixture@example.invalid")
             SessionStore.shared.clearPendingSecretaryCall()
@@ -66,10 +101,22 @@ final class SecretaryPersonalityUITests: XCTestCase {
         try await super.tearDown()
     }
 
-    private func waitUntil(_ condition: () async -> Bool) async throws {
+    private func waitUntil(file: StaticString = #filePath, line: UInt = #line,
+                           fixture: SecretaryPersonalityFixture? = nil,
+                           _ condition: () async -> Bool) async throws {
         let deadline = Date().addingTimeInterval(4)
         while !(await condition()) {
-            guard Date() < deadline else { XCTFail("Timed out waiting for Secretary UI"); throw URLError(.timedOut) }
+            guard Date() < deadline else {
+                let recorded = await (fixture ?? server)?.recorded() ?? []
+                let paths = recorded.map { "\($0.httpMethod ?? "?") \($0.url?.path ?? "?")" }
+                let top = nav?.topViewController
+                XCTFail("Timed out waiting for Secretary UI. top=\(String(describing: top.map { type(of: $0) })) " +
+                    "attached=\(top?.viewIfLoaded?.window != nil) " +
+                    "transition=\(nav?.transitionCoordinator != nil) " +
+                    "presented=\(String(describing: top?.presentedViewController.map { type(of: $0) })) " +
+                    "fixtureRequests=\(paths)", file: file, line: line)
+                throw URLError(.timedOut)
+            }
             try await Task.sleep(nanoseconds: 1_000_000)
         }
     }
@@ -79,41 +126,59 @@ final class SecretaryPersonalityUITests: XCTestCase {
     private func select(_ vc: UITableViewController, _ section: Int, _ row: Int = 0) {
         vc.tableView(vc.tableView, didSelectRowAt: IndexPath(row: row, section: section))
     }
-    private func dismissAlert() async {
-        guard let nav, nav.presentedViewController != nil || nav.topViewController?.presentedViewController != nil else { return }
-        await withCheckedContinuation { continuation in
-            nav.dismiss(animated: false) { continuation.resume() }
+    private func dismissAlert() async throws {
+        guard let nav else { return }
+        while let presented = nav.presentedViewController ?? nav.topViewController?.presentedViewController {
+            let presenter = try XCTUnwrap(presented.presentingViewController)
+            presenter.dismiss(animated: false)
+            try await waitUntil {
+                presented.presentingViewController == nil &&
+                    presenter.presentedViewController == nil && !presented.isBeingDismissed
+            }
         }
     }
     private func open() async throws -> SecretaryPersonalityViewController {
         XCTAssertEqual(cell(settings, 3, 1).accessibilityIdentifier, "cell-secretary-personality")
         select(settings, 3, 1)
-        try await waitUntil { self.nav.topViewController is SecretaryPersonalityViewController }
+        try await waitUntil { self.nav.topViewController is SecretaryPersonalityViewController &&
+            self.nav.transitionCoordinator == nil &&
+            self.nav.topViewController?.viewIfLoaded?.window === self.window }
         let screen = try XCTUnwrap(nav.topViewController as? SecretaryPersonalityViewController)
+        openedControllers.append(screen)
         screen.loadViewIfNeeded()
         try await waitUntil { self.cell(screen, 1).textLabel?.text == "+12025550101" }
         return screen
     }
     private func chooseKatya(_ screen: SecretaryPersonalityViewController) async throws {
         select(screen, 2)
-        try await waitUntil { self.nav.topViewController is SecretaryPersonalityPickerViewController }
+        try await waitUntil { self.nav.topViewController is SecretaryPersonalityPickerViewController &&
+            self.nav.transitionCoordinator == nil &&
+            self.nav.topViewController?.viewIfLoaded?.window === self.window }
         let picker = try XCTUnwrap(nav.topViewController as? SecretaryPersonalityPickerViewController)
+        openedControllers.append(picker)
         picker.loadViewIfNeeded()
         try await waitUntil {
             picker.tableView(picker.tableView, numberOfRowsInSection: 0) >= 2 &&
                 self.cell(picker, 0, 1).textLabel?.text == "Катя"
         }
         select(picker, 0, 1)
-        try await waitUntil { self.nav.topViewController === screen && self.cell(screen, 2).textLabel?.text == "Катя" }
+        try await waitUntil { self.nav.topViewController === screen &&
+            self.nav.transitionCoordinator == nil && screen.viewIfLoaded?.window === self.window &&
+            self.cell(screen, 2).textLabel?.text == "Катя" }
     }
     private func save(_ screen: SecretaryPersonalityViewController, success: Bool = true) async throws {
+        XCTAssertNil(screen.presentedViewController, "Each save must start without a stale alert")
+        let before = await server.recorded().filter { $0.httpMethod == "PUT" }.count
         select(screen, 5)
-        try await waitUntil { screen.presentedViewController is UIAlertController }
+        try await waitUntil {
+            let writes = await self.server.recorded().filter { $0.httpMethod == "PUT" }.count
+            return writes == before + 1 && screen.presentedViewController is UIAlertController
+        }
         let alert = try XCTUnwrap(screen.presentedViewController as? UIAlertController)
         if success {
             XCTAssertEqual(alert.message, NSLocalizedString("secretary.personality.saved", comment: ""))
         } else { XCTAssertTrue(alert.message?.contains("500") == true) }
-        await dismissAlert()
+        try await dismissAlert()
     }
     private func draft(attempted: Bool) -> SessionStore.SecretaryCallDraft {
         var draft = SessionStore.SecretaryCallDraft(instruction: "Fixture only", confirmationToken: "expired.fixture",
@@ -236,7 +301,7 @@ final class SecretaryPersonalityUITests: XCTestCase {
         let sheet = try XCTUnwrap(screen.presentedViewController as? UIAlertController)
         XCTAssertTrue(sheet.actions.contains { $0.title?.contains("+12025550101") == true })
         XCTAssertTrue(sheet.actions.contains { $0.title?.contains("+12025550102") == true })
-        await dismissAlert()
+        try await dismissAlert()
         await screen.load("work-line") // same async handler as the line sheet
         XCTAssertEqual(cell(screen, 1).textLabel?.text, "+12025550102")
         XCTAssertEqual(cell(screen, 4).accessibilityIdentifier, "secretary-personality-card-work-card")
@@ -297,7 +362,7 @@ final class SecretaryPersonalityUITests: XCTestCase {
         try await waitUntil { self.settings.presentedViewController is UIAlertController }
         let sheet = try XCTUnwrap(settings.presentedViewController as? UIAlertController)
         XCTAssertEqual(sheet.actions.filter { $0.style != .cancel }.count, 2)
-        await dismissAlert()
+        try await dismissAlert()
         settings.applySecretaryProvider(.openai)
         XCTAssertNil(SessionStore.shared.secretaryOutgoingNumberId)
         let changed = try XCTUnwrap(SessionStore.shared.pendingSecretaryCall)
@@ -355,6 +420,123 @@ final class SecretaryPersonalityUITests: XCTestCase {
         return view.subviews.lazy.compactMap { self.descendant($0, id: id) }.first
     }
 
+    private func useResponseGate() -> SecretaryPersonalityResponseGate {
+        let gate = SecretaryPersonalityResponseGate(fixture: server)
+        responseGates.append(gate)
+        api = APIClient(transport: { try await gate.send($0) }, tokenProvider: { "personality-fixture" })
+        settings = SettingsViewController(api: api)
+        nav.setViewControllers([settings], animated: false)
+        settings.loadViewIfNeeded()
+        return gate
+    }
+
+    func testLateSavedResponseCannotChangePreferencesAfterLeavingScreen() async throws {
+        let gate = useResponseGate()
+        let pending = draft(attempted: false)
+        XCTAssertTrue(SessionStore.shared.savePendingSecretaryCall(pending))
+        let screen = try await open()
+        await screen.load("work-line")
+        try await chooseKatya(screen)
+        await gate.arm(method: "PUT", path: "/api/secretary-personalities/numbers/work-line/outgoing")
+        select(screen, 5)
+        try await waitUntil { await gate.isHolding() }
+        nav.popToRootViewController(animated: false)
+        try await waitUntil { screen.viewIfLoaded?.window == nil }
+        await gate.release()
+        await screen.finishPendingOperations()
+        XCTAssertNil(SessionStore.shared.secretaryOutgoingNumberId)
+        XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .openai)
+        XCTAssertEqual(SessionStore.shared.pendingSecretaryCall?.clientRequestId, pending.clientRequestId)
+        XCTAssertEqual(SessionStore.shared.pendingSecretaryCall?.secretaryNumberId, pending.secretaryNumberId)
+        XCTAssertNil(screen.presentedViewController)
+        XCTAssertNil(settings.presentedViewController)
+        // PUT completed remotely before the lost/late response. Read it back;
+        // never pretend cancellation rolled it back or issue another PUT.
+        let reopened = try await open()
+        await reopened.load("work-line")
+        XCTAssertEqual(cell(reopened, 2).textLabel?.text, "Катя")
+        let requests = await server.recorded()
+        XCTAssertEqual(requests.filter { $0.httpMethod == "PUT" }.count, 1)
+        XCTAssertFalse(requests.contains { $0.url?.path == "/api/secretary/tasks" })
+    }
+
+    func testLateFailedSaveDoesNotPresentOnDetachedController() async throws {
+        let gate = useResponseGate()
+        let screen = try await open()
+        await server.failNextSave(500)
+        await gate.arm(method: "PUT", path: "/api/secretary-personalities/numbers/personal-line/outgoing")
+        select(screen, 5)
+        try await waitUntil { await gate.isHolding() }
+        nav.popToRootViewController(animated: false)
+        try await waitUntil { screen.viewIfLoaded?.window == nil }
+        await gate.release()
+        await screen.finishPendingOperations()
+        XCTAssertNil(screen.presentedViewController)
+        XCTAssertNil(settings.presentedViewController)
+        XCTAssertNil(SessionStore.shared.secretaryOutgoingNumberId)
+        XCTAssertEqual(SessionStore.shared.secretaryVoiceProvider, .openai)
+    }
+
+    func testReturnAfterInterruptedSaveReadsSameLineWithoutAnotherPUT() async throws {
+        let gate = useResponseGate()
+        let screen = try await open()
+        await screen.load("work-line")
+        try await chooseKatya(screen)
+        await gate.arm(method: "PUT", path: "/api/secretary-personalities/numbers/work-line/outgoing")
+        select(screen, 5)
+        try await waitUntil { await gate.isHolding() }
+        nav.pushViewController(UIViewController(), animated: false)
+        await gate.release()
+        await screen.finishPendingOperations()
+        nav.popViewController(animated: false)
+        try await waitUntil {
+            self.cell(screen, 1).textLabel?.text == "+12025550102" &&
+                self.cell(screen, 2).textLabel?.text == "Катя"
+        }
+        XCTAssertNil(screen.presentedViewController)
+        XCTAssertNil(SessionStore.shared.secretaryOutgoingNumberId)
+        let requests = await server.recorded()
+        XCTAssertEqual(requests.filter { $0.httpMethod == "PUT" }.count, 1)
+        XCTAssertGreaterThanOrEqual(requests.filter {
+            $0.httpMethod == "GET" &&
+                $0.url?.path == "/api/secretary-personalities/numbers/work-line/outgoing"
+        }.count, 2)
+    }
+
+    func testOlderLineResponseCannotReplaceNewerLineSelection() async throws {
+        let gate = useResponseGate()
+        let screen = try await open()
+        await gate.arm(method: "GET", path: "/api/secretary-personalities/numbers/work-line/outgoing")
+        let older = Task { @MainActor in await screen.load("work-line") }
+        try await waitUntil { await gate.isHolding() }
+        await screen.load("personal-line")
+        await gate.release()
+        await older.value
+        XCTAssertEqual(cell(screen, 1).textLabel?.text, "+12025550101")
+        XCTAssertEqual(cell(screen, 4).accessibilityIdentifier, "secretary-personality-card-personal-card")
+        XCTAssertNil(screen.presentedViewController)
+    }
+
+    func testLateCatalogDetailCannotSelectCharacterAfterBack() async throws {
+        let gate = useResponseGate()
+        let screen = try await open()
+        select(screen, 2)
+        try await waitUntil { self.nav.topViewController is SecretaryPersonalityPickerViewController &&
+            self.nav.transitionCoordinator == nil }
+        let picker = try XCTUnwrap(nav.topViewController as? SecretaryPersonalityPickerViewController)
+        openedControllers.append(picker)
+        try await waitUntil { self.cell(picker, 0, 1).textLabel?.text == "Катя" }
+        await gate.arm(method: "GET", path: "/api/secretary-personalities/katya-fixture")
+        select(picker, 0, 1)
+        try await waitUntil { await gate.isHolding() }
+        nav.popViewController(animated: false)
+        await gate.release()
+        await picker.finishPendingOperations()
+        XCTAssertTrue(nav.topViewController === screen)
+        XCTAssertEqual(cell(screen, 2).textLabel?.text, NSLocalizedString("secretary.personality.none", comment: ""))
+        XCTAssertNil(screen.presentedViewController)
+    }
+
     func testHomeRestoresAmbiguousRequestAfterLostResponseWithoutAnotherCall() async throws {
         let fixture = SecretaryPersonalityFixture(recoveryEnabled: true)
         let client = APIClient(transport: { try await fixture.send($0) }, tokenProvider: { "personality-fixture" })
@@ -365,23 +547,23 @@ final class SecretaryPersonalityUITests: XCTestCase {
         let home = HomeViewController(secretary: true, api: client)
         nav.setViewControllers([home], animated: false)
         home.loadViewIfNeeded()
-        try await waitUntil { await fixture.recorded().contains { $0.httpMethod == "GET" } }
+        try await waitUntil(fixture: fixture) { await fixture.recorded().contains { $0.httpMethod == "GET" } }
         let button = try XCTUnwrap(descendant(home.view, id: "button-start-call") as? UIButton)
         XCTAssertTrue(button.isEnabled) // expired token must not unlock Prepare
         XCTAssertEqual(button.configuration?.title, NSLocalizedString("secretary.live.retry_safe", comment: ""))
         button.sendActions(for: .touchUpInside)
-        try await waitUntil { home.presentedViewController is UIAlertController }
+        try await waitUntil(fixture: fixture) { home.presentedViewController is UIAlertController }
         let locked = try XCTUnwrap(SessionStore.shared.pendingSecretaryCall)
         XCTAssertEqual(locked.clientRequestId, pending.clientRequestId)
         XCTAssertEqual(locked.secretaryNumberId, "personal-line")
         XCTAssertEqual(locked.voiceProvider, .retell)
-        await dismissAlert()
+        try await dismissAlert()
         // A new controller restores the persisted draft, then finds the accepted
         // terminal task by request ID in the fake history. No monitoring opens.
         let reopened = HomeViewController(secretary: true, api: client)
         nav.setViewControllers([reopened], animated: false)
         reopened.loadViewIfNeeded()
-        try await waitUntil { SessionStore.shared.pendingSecretaryCall == nil }
+        try await waitUntil(fixture: fixture) { SessionStore.shared.pendingSecretaryCall == nil }
         let requests = await fixture.recorded()
         XCTAssertEqual(requests.filter { $0.httpMethod == "POST" }.count, 1)
         let creates = await fixture.creationCount()
@@ -404,10 +586,10 @@ final class SecretaryPersonalityUITests: XCTestCase {
         let home = HomeViewController(secretary: true, api: client)
         nav.setViewControllers([home], animated: false)
         home.loadViewIfNeeded()
-        try await waitUntil { await fixture.recorded().contains { $0.httpMethod == "GET" } }
+        try await waitUntil(fixture: fixture) { await fixture.recorded().contains { $0.httpMethod == "GET" } }
         let button = try XCTUnwrap(descendant(home.view, id: "button-start-call") as? UIButton)
         button.sendActions(for: .touchUpInside)
-        try await waitUntil { home.presentedViewController is UIAlertController }
+        try await waitUntil(fixture: fixture) { home.presentedViewController is UIAlertController }
         let alert = try XCTUnwrap(home.presentedViewController as? UIAlertController)
         XCTAssertTrue(alert.message?.contains(NSLocalizedString("secretary.personality.origin_changed", comment: "")) == true)
         let requests = await fixture.recorded()

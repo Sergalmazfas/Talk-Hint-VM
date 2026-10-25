@@ -21,6 +21,11 @@ REQUIRED_TESTS = {
         "testLostResponseRetryUsesSameRequestLineOriginAndProvider",
     ),
     "SecretaryPersonalityUITests": (
+        "testLateSavedResponseCannotChangePreferencesAfterLeavingScreen",
+        "testLateFailedSaveDoesNotPresentOnDetachedController",
+        "testReturnAfterInterruptedSaveReadsSameLineWithoutAnotherPUT",
+        "testOlderLineResponseCannotReplaceNewerLineSelection",
+        "testLateCatalogDetailCannotSelectCharacterAfterBack",
         "testSettingsKatyaCharacterExplicitCardsSaveAndReopen",
         "testPersonalWorkLineSheetAndPermissionsStaySeparate",
         "testSaveServerErrorKeepsDraftAndAllowsRetryWithoutLocalCommit",
