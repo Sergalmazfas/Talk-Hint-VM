@@ -25,6 +25,8 @@ export function readHypothesis(root: ProjectModelState, id = "original"): Projec
 
 export function applyHypothesisCommand(root: ProjectModelState, id: string,
   command: ModelCommand, actor: string): ProjectModelState {
+  if (command.type === "saveOperatingModel" && id !== "new-country")
+    throw new ModelError(409, "Модель организации доступна только в новой Dev-гипотезе.");
    if (command.type === "saveAnalystPreparation" && id !== "new-country")
      throw new ModelError(409, "AI-аналитик подготавливается только в новой Dev-гипотезе.");
   if (strategyCommandTypes.has(command.type as StrategyCommand["type"]) && id !== "new-country")

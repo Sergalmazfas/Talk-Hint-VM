@@ -242,9 +242,31 @@ AI-аналитик конкурентного бенчмаркинга. Сна�
 
 **Why:** The owner explicitly set this staffing direction and approval sequence.
 
-**How to apply:** Do not invent human hires or create the remaining AI roles.
+**How to apply:** Do not invent human hires or activate further employees.
 CrewAI executes processes; the existing TalkHint model remains the data source,
 and Sergey makes strategic decisions.
+
+## Organisation through work
+
+The owner subsequently requested the full structure of a large AI company,
+without artificial reductions or role mergers for savings. A separate mini-action
+may have a separate Crew. Designing roles is allowed; connecting and running them
+remains a separate decision. Use the supplied read-only findings from Driver's
+wallet / Road Ranger Operating Model Builder, not transport-domain data, and do
+not claim direct inspection without access.
+
+**Why:** The owner explicitly chose structure first: actions and clients, then
+roles/resources/inputs/outputs/reports, then interdepartmental acceptance and
+accountability. This supersedes the earlier restriction on describing further roles,
+not the approval requirement for execution.
+
+**How to apply:** Keep client, recipient, accountable role, executor and acceptor
+distinct. Keep stable identity independent of a changeable work code. Model transfer,
+dependency, accountability, acceptance, return and escalation separately. Necessary,
+approved and connected resources are different states. Each modelling pass reports
+its scope, dependencies, gaps and next step. Derive departments from work, preserve
+the existing hypotheses, shared owner storage and analyst passport, and label
+unapproved structure as proposals.
 
 ## CrewAI checkpoint boundary
 

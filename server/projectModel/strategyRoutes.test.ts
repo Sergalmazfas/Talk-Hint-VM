@@ -15,6 +15,7 @@ import { initialModel } from "./seed";
 import { emptyStrategyNode } from "../../shared/projectStrategy";
 import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
 import { defaultAnalystPreparation } from "../../shared/competitiveAnalystTemplate";
+import { defaultOperatingModel } from "../../shared/operatingModelTemplate";
 
 describe("strategy persistence and HTTP boundaries", () => {
   let rows: Map<string, ProjectModelState>, app: express.Express, pool: Pool;
@@ -53,6 +54,34 @@ describe("strategy persistence and HTTP boundaries", () => {
     return request(app).post(url).set("x-test-user", owner).set("Host", "127.0.0.1")
       .set("Origin", "http://127.0.0.1").send({ revision: revision ?? rows.get(owner)!.revision, command });
   }
+  it("round-trips organisation with history, no-op retries and owner / Dev isolation", async () => {
+    const before = copy(rows.get("owner")!), second = copy(rows.get("second")!);
+    const data = defaultOperatingModel();
+    const cmd = { type: "saveOperatingModel" as const, baseVersion: 0, data };
+    expect((await request(app).post(path).send({ revision: 0, command: cmd })).status).toBe(401);
+    expect((await request(app).post(path).set("x-test-user", "owner").set("Origin", "https://other.example")
+      .send({ revision: 0, command: cmd })).status).toBe(403);
+    expect((await post(cmd, "owner", undefined, "/api/admin/project-model")).status).toBe(409);
+    const saved = await post(cmd); expect(saved.status).toBe(200);
+    expect(saved.body.operatingModel.revisions[0].actor).toBe("owner");
+    app = mount();
+    const reread = await request(app).get(path).set("x-test-user", "owner");
+    expect(reread.body.operatingModel).toEqual(saved.body.operatingModel);
+    expect((await post({ ...cmd, baseVersion: 1 })).body).toEqual(reread.body);
+    const changed = copy(data); changed.nodes[0].code = "TH-NEW";
+    const updated = await post({ ...cmd, baseVersion: 1, data: changed });
+    expect(updated.status).toBe(200);
+    expect(updated.body.operatingModel.revisions).toHaveLength(2);
+    expect((await post({ ...cmd, baseVersion: 1 })).status).toBe(409);
+    expect(rows.get("owner")!.elements).toEqual(before.elements);
+    expect(rows.get("second")).toEqual(second);
+    expect((await request(app).get(path).set("x-test-user", "second")).body.operatingModel).toBeUndefined();
+    const foreign = copy(data); foreign.nodes[0].referenceIds = ["foreign-owner-only"];
+    expect((await post({ ...cmd, data: foreign }, "second")).status).toBe(400);
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await post({ ...cmd, baseVersion: 2 })).status).toBe(404);
+    expect((await request(app).get(path).set("x-test-user", "owner")).status).toBe(404);
+  });
   it("round-trips nodes, dependencies, impacts and reviews through SQL JSON and a new repository/API instance", async () => {
     const original = copy(rows.get("owner")!), other = copy(rows.get("second")!);
     const created = await post({ type: "saveStrategyNode", baseVersion: 0, node: { ...emptyStrategyNode(), title: "Основание" } });

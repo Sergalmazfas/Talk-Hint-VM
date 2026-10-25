@@ -635,3 +635,17 @@ mtime_ms = 1792912136918
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fb6bbb57-326d-4aa8-9db6-87ec1d3a544d/2cb11094-d015-4bc1-8835-761bb2c6754e"
 storage_version_token = "1792912149405335"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "VcDwI9fmpey7fwDVBJjaC"
+uri = "file://docs/talkhint-operating-model.md"
+type = "text"
+title = "TalkHint — организация через действия"
+description = "Руководство, сопоставление с Driver’s wallet, три прохода, шаблон следующего поручения, результаты проверок и ограничения. Только Dev."
+logical_id = "f082abfd-0323-4501-9684-4bcd32ea19cf"
+content_hash = "sha256:0fc41f77375f752bbc254a764dc9f9e5d13c724510fc9d76b0f74dc91c5e243b"
+size = 12354
+mtime_ms = 1792915642806
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f082abfd-0323-4501-9684-4bcd32ea19cf/e031d616-d1c2-47bf-a451-c287df04a42e"
+storage_version_token = "1792915652832882"
+content_type = "text/markdown"

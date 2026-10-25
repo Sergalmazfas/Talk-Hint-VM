@@ -93,6 +93,7 @@ export interface ModelTaskDraft {
   references: { id: string; version: number }[];
 }
 export interface ProjectModelState {
+  operatingModel?: import("./operatingModel").OperatingModel;
   schema: 1; revision: number; elements: ModelElement[]; relations: ModelRelation[];
   documents: ModelDocument[]; proposals: ModelProposal[]; decisions: ModelDecision[]; taskDrafts: ModelTaskDraft[];
   /** Independently editable alternatives in this owner's existing workspace. */
@@ -111,6 +112,7 @@ export interface ProjectModelState {
   };
 }
 export type ModelCommand =
+   | import("./operatingModel").SaveOperatingCommand
    | import("./competitiveAnalyst").AnalystPreparationCommand
   | import("./projectStrategy").StrategyCommand
   | import("./competitorAssessments").AddCompetitorReviewCommand
