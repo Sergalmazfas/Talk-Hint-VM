@@ -42,6 +42,10 @@ const dateLabel = (value: string) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 };
+const documentFilename = (title: string) => {
+  const safe = title.normalize("NFKD").replace(/[^\w\u0400-\u04FF._ -]+/g, "").replace(/[\s.]+$/g, "").trim();
+  return `${(safe || "saved-document").slice(0, 100)}.md`;
+};
 
 function Field({ label, value, onChange, multiline = false, hint }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; hint?: string }) {
   return <label className="om-field"><span>{label}</span>{multiline
@@ -63,6 +67,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
   const [newLink, setNewLink] = useState<{ from: string; to: string; kind: WorkLink["kind"]; reason: string }>({ from: "", to: "", kind: "requires", reason: "" });
   const submittedSnapshot = useRef<string | null>(null);
   const saveSignal = useRef(0);
+  const openedWorkQuery = useRef(false);
   const [signal, setSignal] = useState(0);
 
   useEffect(() => {
@@ -220,6 +225,13 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     });
   };
   const openNode = (id: string) => { selectNode(id); setActiveView("overview"); };
+  useEffect(() => {
+    if (openedWorkQuery.current || typeof window === "undefined") return;
+    const workId = new URLSearchParams(window.location.search).get("work");
+    if (!workId || !nodeMap.has(workId)) return;
+    openedWorkQuery.current = true;
+    openNode(workId);
+  }, [nodeMap]);
   const renderTree = (parentId: string | null, depth = 0, ancestors = new Set<string>()): React.ReactNode => (childrenByParent.get(parentId) ?? [])
     .filter((node) => visibleIds.has(node.id))
     .map((node) => {
@@ -440,7 +452,14 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
               return linkedNode ? <button type="button" key={`${reference}-${index}`} onClick={() => openNode(linkedNode.id)}>{linkedNode.code} · {linkedNode.name}</button>
                 : reference === "analyst-preparation" ? <a key={`${reference}-${index}`} href={`/admin/project-model?hypothesis=${encodeURIComponent(selectedHypothesis(state) ?? "new-country")}&view=overview#competitive-analyst`}>Паспорт AI-аналитика</a>
                   : strategy ? <a key={`${reference}-${index}`} href={strategy.href}>{strategy.title}</a>
-                    : document && safeDocumentUrl ? <a key={`${reference}-${index}`} href={safeDocumentUrl} target="_blank" rel="noreferrer">{document.title}</a>
+                 : document ? <div className="om-saved-document" key={`${reference}-${index}`} style={{ width: "100%", minWidth: 0 }}>
+                   <div><b>{document.title}</b><small>Сохранённый документ · обновлён {dateLabel(document.updatedAt)}</small></div>
+                   <div className="om-saved-document-actions">
+                     {safeDocumentUrl && <a href={safeDocumentUrl} target="_blank" rel="noreferrer">Открыть источник</a>}
+                     <a href={`data:text/markdown;charset=utf-8,${encodeURIComponent(`# ${document.title}\n\n${document.text}`)}`} download={documentFilename(document.title)}>Скачать Markdown</a>
+                   </div>
+                   <details><summary>Читать сохранённый текст</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "28rem", overflow: "auto" }}>{document.text}</pre></details>
+                 </div>
                       : element ? <a key={`${reference}-${index}`} href={`/admin/project-model?hypothesis=${encodeURIComponent(selectedHypothesis(state) ?? "new-country")}&view=overview&element=${encodeURIComponent(element.id)}`}>{element.title}</a>
                         : <span key={`${reference}-${index}`}>{reference} · основание не найдено</span>;
             })}</div>}

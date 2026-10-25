@@ -663,3 +663,17 @@ mtime_ms = 1792917287650
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/eeb63a6f-f025-4177-bdc7-40cfcc277c86/e04fefff-a681-439d-8bb8-41af7d0ecf4a"
 storage_version_token = "1792917333917838"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "icpXX8obr2t0BbGX5J_DN"
+uri = "file://generated-artifacts/landing-gear-case/talkhint-landing-gear-v1.html"
+type = "html"
+title = "TalkHint: случай landing gear — v1, для обсуждения"
+description = "Полный русский документ: свидетельства, девять действий команды, первичные источники конкурентов, техническая оценка, варианты и критерии приёмки. Экспорт из сохранённой Dev-модели; не отчёт о запуске CrewAI."
+logical_id = "201fda31-601b-4982-8a81-14d165ae4247"
+content_hash = "sha256:6474ba722d9d741c87e0c560be69913da5daf869c1194a8b9f3025326a425407"
+size = 53485
+mtime_ms = 1792950573643
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/201fda31-601b-4982-8a81-14d165ae4247/29abdbfa-ca15-40ed-a780-70100fbee3e1"
+storage_version_token = "1792950662819507"
+content_type = "text/html"
