@@ -47,6 +47,19 @@ evidence or a replacement of the original hypothesis's pilot segment.
 **How to apply:** preserve both purchase scenarios and the unvalidated status;
 do not import the original pilot's geography or competitors into this alternative.
 
+The new-country solution combines language support, an action-taking secretary
+and personal/business organization through one AI assistant. Context comes from
+connected mail and explicitly permitted calendars; the owner decides which
+actions may be autonomous and which require confirmation. Intended value is
+less organizational time, less dependence on others and more control over
+agreements; these are unmeasured targets, not verified effects.
+
+**Why:** the owner approved this solution framing while explicitly distinguishing
+the target concept from a report of working capabilities.
+
+**How to apply:** do not treat planning text as a runtime permission grant,
+mail/calendar connection or evidence that the complete workflows work.
+
 For the original AI-manager hypothesis, the US is the target market, starting
 in Miami-Dade, Broward and Palm Beach.
 The owner's confirmed decision dated 2026-10-23 selects independent licensed
