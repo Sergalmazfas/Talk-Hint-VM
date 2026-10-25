@@ -6,6 +6,7 @@ import sys
 
 REQUIRED_TESTS = {
     "SecretaryPersonalityTests": (
+        "testSettingsFixtureProvidesBothValidCallProfiles",
         "testSecretaryIDsKeepHyphensAndUUIDsWithoutDoubleEncoding",
         "testSecretaryIDsCannotInjectRoutesOrAlreadyEncodedEscapes",
         "testSavedKatyaV2IsReadBackByNewClientWithoutChangingOtherLine",

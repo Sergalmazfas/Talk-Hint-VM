@@ -488,10 +488,25 @@ final class SecretaryPersonalityUITests: XCTestCase {
         nav.pushViewController(UIViewController(), animated: false)
         await gate.release()
         await screen.finishPendingOperations()
+        let readsBeforeReturn = await server.recorded().filter {
+            $0.httpMethod == "GET" &&
+                $0.url?.path == "/api/secretary-personalities/numbers/work-line/outgoing"
+        }.count
         nav.popViewController(animated: false)
         try await waitUntil {
-            self.cell(screen, 1).textLabel?.text == "+12025550102" &&
-                self.cell(screen, 2).textLabel?.text == "Катя"
+            // Old cells can already contain these values. Require a new GET
+            // and the completed, non-busy UI before accepting them as readback.
+            let reads = await self.server.recorded().filter {
+                $0.httpMethod == "GET" &&
+                    $0.url?.path == "/api/secretary-personalities/numbers/work-line/outgoing"
+            }.count
+            return reads > readsBeforeReturn &&
+                self.nav.topViewController === screen &&
+                self.nav.transitionCoordinator == nil &&
+                screen.viewIfLoaded?.window === self.window &&
+                self.cell(screen, 1).textLabel?.text == "+12025550102" &&
+                self.cell(screen, 2).textLabel?.text == "Катя" &&
+                self.cell(screen, 5).textLabel?.text == NSLocalizedString("secretary.personality.save", comment: "")
         }
         XCTAssertNil(screen.presentedViewController)
         XCTAssertNil(SessionStore.shared.secretaryOutgoingNumberId)

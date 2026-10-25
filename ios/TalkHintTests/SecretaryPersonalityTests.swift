@@ -114,6 +114,20 @@ final class SecretaryPersonalityTests: XCTestCase {
         APIClient(transport: { try await fixture.send($0) }, tokenProvider: { "personality-fixture" })
     }
 
+    func testSettingsFixtureProvidesBothValidCallProfiles() async throws {
+        let fixture = SecretaryPersonalityFixture()
+        let profiles = try await client(fixture).callProfiles()
+        XCTAssertEqual(Set(profiles.profiles.map(\.id)), Set([.personal, .work]))
+        XCTAssertEqual(profiles.profile(.personal)?.numbers.first?.id, "personal-line")
+        XCTAssertEqual(profiles.profile(.personal)?.numbers.first?.phoneNumber, "+12025550101")
+        XCTAssertEqual(profiles.profile(.work)?.numbers.first?.id, "work-line")
+        XCTAssertEqual(profiles.profile(.work)?.numbers.first?.phoneNumber, "+12025550102")
+        XCTAssertFalse(profiles.incomingAiEnabled)
+        XCTAssertFalse(profiles.calendarConnected)
+        let requests = await fixture.recorded()
+        XCTAssertEqual(requests.map { $0.url?.path }, ["/api/call-profiles"])
+    }
+
     func testPersonalityAPIUsesExactPathsQueriesBearerAndExplicitSaveBody() async throws {
         let fixture = SecretaryPersonalityFixture()
         let api = client(fixture)

@@ -78,6 +78,13 @@ class PersonalityLifecycleGuards(unittest.TestCase):
         for private in ("httpBody", "Authorization", "token"):
             self.assertNotIn(private, wait)
 
+    def test_return_readback_requires_new_request_and_completed_ui_not_only_old_cells(self):
+        test = body(self.tests, "func testReturnAfterInterruptedSaveReadsSameLineWithoutAnotherPUT()")
+        self.assertLess(test.index("let readsBeforeReturn"), test.index("nav.popViewController"))
+        self.assertIn("reads > readsBeforeReturn", test)
+        self.assertIn('self.cell(screen, 5).textLabel?.text == NSLocalizedString("secretary.personality.save"', test)
+        self.assertIn('XCTAssertEqual(requests.filter { $0.httpMethod == "PUT" }.count, 1)', test)
+
 
 if __name__ == "__main__":
     unittest.main()

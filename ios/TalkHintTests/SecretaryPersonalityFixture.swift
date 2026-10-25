@@ -72,7 +72,18 @@ actor SecretaryPersonalityFixture {
         case ("GET", "/api/settings/hints"):
             return try response(["liveHintsEnabled": true, "translationEnabled": true])
         case ("GET", "/api/call-profiles"):
-            return try response(["profiles": [], "incomingAiEnabled": false, "calendarConnected": false])
+            // Match APIClient.callProfiles' real two-profile contract. An empty
+            // list incorrectly sends Settings down its /api/numbers fallback.
+            return try response(["profiles": [
+                ["id": "personal", "numbers": [
+                    ["id": "personal-line", "phoneNumber": "+12025550101",
+                     "name": "Fixture personal", "type": "personal"],
+                ], "secretaryOutboundReady": true],
+                ["id": "work", "numbers": [
+                    ["id": "work-line", "phoneNumber": "+12025550102",
+                     "name": "Fixture work", "type": "work"],
+                ], "secretaryOutboundReady": true],
+            ], "incomingAiEnabled": false, "calendarConnected": false])
         case ("GET", "/api/secretary-personalities/context"):
             return try response(["numbers": [
                 ["id": "personal-line", "type": "personal", "twilioNumber": "+12025550101"],
