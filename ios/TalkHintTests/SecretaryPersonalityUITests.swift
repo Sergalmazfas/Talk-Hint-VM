@@ -485,7 +485,21 @@ final class SecretaryPersonalityUITests: XCTestCase {
         await gate.arm(method: "PUT", path: "/api/secretary-personalities/numbers/work-line/outgoing")
         select(screen, 5)
         try await waitUntil { await gate.isHolding() }
-        nav.pushViewController(UIViewController(), animated: false)
+        try await waitUntil {
+            self.nav.topViewController === screen &&
+                screen.viewIfLoaded?.window === self.window &&
+                self.nav.transitionCoordinator == nil
+        }
+        let away = UIViewController()
+        nav.pushViewController(away, animated: false)
+        // A nonanimated push can still defer appearance callbacks. Do not drain
+        // a still-visible screen and then expect a pop to resume its lifecycle.
+        try await waitUntil {
+            self.nav.topViewController === away &&
+                away.viewIfLoaded?.window === self.window &&
+                screen.viewIfLoaded?.window == nil &&
+                self.nav.transitionCoordinator == nil
+        }
         await gate.release()
         await screen.finishPendingOperations()
         let readsBeforeReturn = await server.recorded().filter {
