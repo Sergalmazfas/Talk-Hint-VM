@@ -4,14 +4,19 @@ import {
   detailFields,
   implementationStatuses,
   projectPackageBlocks,
+  type ModelCommand,
   type ModelElement,
   type ProjectModelState,
 } from "@shared/projectModel";
+import CompetitorDirectory from "@/components/project-model/CompetitorDirectory";
 
 type Props = {
   state: ProjectModelState;
   view: string;
   openElement: (element: ModelElement) => void;
+  submit?: (command: ModelCommand) => Promise<boolean>;
+  saving?: boolean;
+  selectedCompetitorId?: string;
 };
 
 const viewNodeIds: Record<string, string[]> = {
@@ -168,7 +173,7 @@ function EvidenceLinks({ element, state, openElement }: { element: ModelElement;
   </div>;
 }
 
-export default function PackageViews({ state, view, openElement }: Props) {
+export default function PackageViews({ state, view, openElement, submit, saving = false, selectedCompetitorId }: Props) {
   const hypothesisId = selectedHypothesisId(state);
   const talkhint = state.elements.filter((element) => element.scope === "talkhint");
   const packageElements = projectPackageBlocks.map((block) => ({
@@ -194,19 +199,30 @@ export default function PackageViews({ state, view, openElement }: Props) {
     <div className="pm-package-blocks">{packageElements.map(({ block, element }, index) => {
       const documents = element ? state.documents.filter((document) => document.elementIds.includes(element.id)) : [];
       const description = element ? parseDescription(element.description) : null;
+      const showCompetitorDirectory = block.id === "TH-PILOT-COMPETITORS" && state.hypothesisContext?.selectedId === "new-country";
       const blockView = "view" in block ? block.view : undefined;
       const route = blockView === "benchmark" ? projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)
         : blockView ? projectRoute(`view=${blockView}`, hypothesisId)
           : projectRoute(`view=overview&element=${encodeURIComponent(block.id)}`, hypothesisId);
       const sources = (element?.details.source ?? "").split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
-      return <details className="pm-package-block" key={block.id} open={description?.hasTables || undefined}>
+      const summaryDescription = showCompetitorDirectory
+        ? `${state.competitorDirectory?.records.length ?? 0} сохранённых карточек. Сравнение основано только на вручную внесённых данных.`
+        : description?.hasTables ? description.lead : element?.description || (element ? "Ещё не проработано." : "Узел не найден в сохранённой модели.");
+      return <details className="pm-package-block" key={block.id} open={showCompetitorDirectory || description?.hasTables || undefined}>
         <summary>
           <span className="pm-package-number">{String(index + 1).padStart(2, "0")}</span>
-           <span className="pm-package-block-main"><strong>{block.title}</strong><small>{description?.hasTables ? description.lead : element?.description || (element ? "Ещё не проработано." : "Узел не найден в сохранённой модели.")}</small></span>
+           <span className="pm-package-block-main"><strong>{block.title}</strong><small>{summaryDescription}</small></span>
           <span className={`pm-package-confidence ${element?.contentStatus ?? "missing"}`}>{element ? confidenceLabel(element) : "Нет узла"}</span>
         </summary>
         <div className="pm-package-detail">
-          {element ? <>
+          {showCompetitorDirectory ? <CompetitorDirectory
+            directory={state.competitorDirectory}
+            hypothesisId={state.hypothesisContext!.selectedId}
+            selectedId={selectedCompetitorId}
+            view="overview"
+            saving={saving}
+            submit={submit}
+          /> : element ? <>
             <div className="pm-package-meta">
               <span>Контент: {contentStatuses[element.contentStatus]}</span>
               <span>Реализация: {implementationStatuses[element.implementationStatus]}</span>

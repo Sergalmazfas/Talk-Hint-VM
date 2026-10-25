@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { modelSections, elementKinds, detailFields, contentStatuses, implementationStatuses } from "../../shared/projectModel";
 import type { ModelCommand, ProjectModelState, ModelElement, ModelDecision } from "../../shared/projectModel";
+import { competitorScenarios } from "../../shared/projectCompetitors";
+import { saveCompetitorSchema } from "./competitorSchema";
 
 const str = (max = 12000) => z.string().max(max);
 const nonempty = (max = 2000) => z.string().trim().min(1).max(max);
@@ -15,6 +17,7 @@ export const elementSchema = z.object({
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
+  saveCompetitorSchema,
   z.object({ type: z.literal("createElement"), id: id.regex(/^[A-Z][A-Z0-9-]{2,90}$/), element: elementSchema }).strict(),
   z.object({ type: z.literal("saveElement"), id: id.optional(), element: elementSchema }).strict(),
   z.object({ type: z.literal("saveProposal"), id: id.optional(), targetId: id, source: nonempty(20000), rationale: nonempty(12000), relatedIds: ids, change: elementSchema }).strict(),
@@ -52,6 +55,46 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     affected.forEach(id => { element(id).needsReview = true; });
   }
   switch (c.type) {
+    case "saveCompetitor": {
+      const block = element("TH-PILOT-COMPETITORS");
+      const directory = s.competitorDirectory ??= {
+        records: [],
+        talkhint: {
+          checkedAt: "", note: "Состояние TalkHint этим справочником ещё не проверено.",
+          scenarios: Object.keys(competitorScenarios).map(scenario => ({
+            scenario: scenario as keyof typeof competitorScenarios,
+            status: "unknown", note: "Не подтверждено", sourceUrls: [],
+          })),
+        },
+      };
+      const record = c.id ? directory.records.find(record => record.id === c.id) : undefined;
+      if (c.id && !record) fail("Карточка конкурента не найдена", 404);
+      const normalizeUrl = (value: string) => value ? value.split(/[?#]/)[0].replace(/\/+$/, "") : "";
+      const duplicate = directory.records.some(other => {
+        if (other.id === record?.id) return false;
+        const snapshot = other.revisions.at(-1)?.snapshot;
+        return snapshot && (
+          (c.snapshot.appStore && normalizeUrl(snapshot.appStore) === normalizeUrl(c.snapshot.appStore)) ||
+          (snapshot.name.trim().toLowerCase() === c.snapshot.name.trim().toLowerCase() &&
+            normalizeUrl(snapshot.website) === normalizeUrl(c.snapshot.website))
+        );
+      });
+      if (duplicate) fail("Карточка такого конкурента уже существует. Откройте её для обновления, не создавайте дубликат.", 409);
+      const latestVersion = record?.revisions.at(-1)?.version ?? 0;
+      if (c.baseVersion !== latestVersion) fail("Устаревшая версия карточки; перечитайте изменения и сохраните заново", 409);
+      if (!record && directory.records.length >= 1000) fail("Достигнут лимит карточек", 413);
+      const revision = { version: latestVersion + 1, savedAt: now, reason: c.reason, snapshot: structuredClone(c.snapshot) };
+      const recordId = record?.id ?? newId("COMP");
+      if (record) record.revisions.push(revision);
+      else directory.records.push({ id: recordId, revisions: [revision] });
+      const updated = {
+        ...block, description: `Справочник конкурентов: ${directory.records.length} карточек. Предложения, тарифы и одинаковые сценарии сравнения; источники и история изменений. Обновление ручное, без расписания.`,
+        contentStatus: "hypothesis" as const, version: block.version + 1, updatedAt: now, needsReview: false,
+      };
+      s.elements[s.elements.indexOf(block)] = updated;
+      log("Сохранён снимок конкурента", `${c.reason}; ${recordId}; версия ${revision.version}`, [block.id], { before: block, after: updated });
+      break;
+    }
     case "createElement":
     case "saveElement": {
       if (c.element.contentStatus === "confirmed") fail("Подтверждение сведений возможно только через предложение", 409);

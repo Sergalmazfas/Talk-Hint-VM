@@ -1,3 +1,4 @@
+import type { CompetitorDirectory, SaveCompetitorCommand } from "./projectCompetitors";
 /** Internal TalkHint planning data. Never injected into phone-agent instructions. */
 export const modelSections = [
   "Обзор", "Бизнес-модель", "Рынок и конкуренты", "Экономика", "Процессы и Crew",
@@ -96,6 +97,7 @@ export interface ProjectModelState {
   /** Independently editable alternatives in this owner's existing workspace. */
   alternatives?: { id: string; title: string; model: ProjectModelState }[];
   primaryHypothesisId?: string | null;
+  competitorDirectory?: CompetitorDirectory;
   /** Response metadata only; viewing an alternative never selects a primary. */
   hypothesisContext?: {
     selectedId: string;
@@ -104,6 +106,7 @@ export interface ProjectModelState {
   };
 }
 export type ModelCommand =
+  | SaveCompetitorCommand
   | { type: "createElement"; id: string; element: ElementInput }
   | { type: "saveElement"; id?: string; element: ElementInput }
   | { type: "saveProposal"; id?: string; targetId: string; source: string; rationale: string; relatedIds: string[]; change: ElementInput }

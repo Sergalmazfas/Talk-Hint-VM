@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { modelRequest } from "@/lib/project-model-api";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import Benchmark from "@/components/project-model/Benchmark";
+import CompetitorDirectory from "@/components/project-model/CompetitorDirectory";
 import PackageViews from "@/components/project-model/PackageViews";
 import "./project-model.css";
 
@@ -48,6 +49,7 @@ export default function ProjectModel() {
   const initialParams = new URLSearchParams(window.location.search);
   const hypothesisId = initialParams.get("hypothesis") || "original";
   const requestedView = initialParams.get("view");
+  const selectedCompetitorId = initialParams.get("competitor")?.trim() || "";
   const initialView = projectViews.includes(requestedView as typeof projectViews[number]) ? requestedView as typeof projectViews[number] : "overview";
   const requestedSection = initialParams.get("section");
   const initialSection = sections.find((item) => item === requestedSection) ?? (initialView === "benchmark" ? "Рынок и конкуренты" : "Обзор");
@@ -372,7 +374,7 @@ export default function ProjectModel() {
 
           {state && tab === "overview" && !isFocusedTasks && !isFocusedHistory && (
             <>
-              {section === "Обзор" && <PackageViews state={state} view={currentView} openElement={openElement} />}
+              {section === "Обзор" && <PackageViews state={state} view={currentView} openElement={openElement} submit={submit} saving={saving} selectedCompetitorId={selectedCompetitorId} />}
               {section === "Обзор" && currentView === "overview" && startingSegment && <section className="pm-starting-segment" aria-label="Стартовый сегмент">
                 <div className="pm-starting-segment-copy">
                   <p className="pm-kicker">PILOT / STARTING SEGMENT</p>
@@ -393,7 +395,9 @@ export default function ProjectModel() {
                 </div>
               </section>}
 
-              {section === "Рынок и конкуренты" && benchmarkView && state && <Benchmark state={state} openElement={openElement} />}
+              {section === "Рынок и конкуренты" && benchmarkView && state && (selectedHypothesisId === "new-country"
+                ? <CompetitorDirectory directory={state.competitorDirectory} hypothesisId={selectedHypothesisId} selectedId={selectedCompetitorId} view="benchmark" submit={submit} saving={saving} />
+                : <Benchmark state={state} openElement={openElement} />)}
 
               {section === "Обзор" && currentView === "overview" && <section className="pm-gap-summary" aria-label="Сводка пробелов модели">
                 <div className="pm-section-list-head"><h2>Что ещё требует внимания</h2><span className="pm-help">Актуально по текущей версии</span></div>

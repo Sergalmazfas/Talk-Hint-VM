@@ -74,6 +74,21 @@ and prohibited invented city figures, penetration rates and working-number share
 **How to apply:** do not claim a new microdata calculation or validation when only
 formatting supplied figures; future city research must match cohort and geography.
 
+The new-country competitor directory starts only with the approved AI Phone
+record; do not discover or add other companies automatically. Preserve dated
+price snapshots and their differences, clearly distinguish supplied information
+from manual source verification, and never imply a successful automatic refresh
+when only an editor was opened. Show annual charges together with monthly
+equivalents; unknown inclusions are not zero and credits are not minutes without
+an official conversion rule.
+
+**Why:** the owner requested an incrementally maintained, evidence-based
+competitor reference, while excluding our costs, revenue and surveys from scope.
+
+**How to apply:** use the same six scenarios, distinguish official claims,
+code presence, live checks and plans; keep prior segment benchmarks untouched.
+Do not enable scheduled updates or silently advance verification dates.
+
 For the original AI-manager hypothesis, the US is the target market, starting
 in Miami-Dade, Broward and Palm Beach.
 The owner's confirmed decision dated 2026-10-23 selects independent licensed
