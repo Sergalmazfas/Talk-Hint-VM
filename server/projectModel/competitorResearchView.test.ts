@@ -13,7 +13,7 @@ const directory = (): CompetitorDirectory => ({
   talkhint: structuredClone(initialTalkHintBaseline),
 });
 describe("three-level research UI rendering", () => {
-  it("derives the nine-function matrix and sourced-price cells, with distinct current/target rows and no fabricated map points", () => {
+  it("derives the canonical function matrix and sourced-price cells, with distinct current/target rows and no fabricated map points", () => {
     const markup = renderToStaticMarkup(React.createElement(Workbench, {
       directory: directory(), initialSelectedIds: ["AI"], submit: vi.fn(),
     }));
@@ -26,7 +26,7 @@ describe("three-level research UI rendering", () => {
     expect(markup).toContain("Сравнить выбранных");
     expect(markup).toContain("Нет точек с достаточными проверяемыми данными");
     expect(markup).toContain("Не ранжирован");
-    expect(markup).toContain("18");
+    expect(markup).toContain("22");
     expect(markup).not.toContain('class="recharts-scatter');
   });
   it("exposes separately unfilled geography and function-specific language data, not zeros or inferred reach", () => {
@@ -36,7 +36,7 @@ describe("three-level research UI rendering", () => {
     expect(markup).toContain("География");
     expect(markup).toContain("Русский");
     expect(markup).toContain("Испанский");
-    expect(markup).toContain("Подтверждённое число");
+    expect(markup).toContain("Количество");
     expect(markup).toContain("Сохранённых сведений нет");
     for (const feature of Object.values(researchFeatures)) expect(markup).toContain(feature);
     expect(markup).not.toContain(">0</td>");

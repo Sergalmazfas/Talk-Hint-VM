@@ -81,8 +81,26 @@ presence are separate geography facts. Language counts and Russian/Spanish
 support are per function. Captions and Type to Speak are not generated
 real-time reply hints; unknown is neither absence nor zero.
 
-**Why:** the owner requested structure before further card research, and wants
+**Why:** the owner initially requested structure before further card research, and wants
 comparisons that do not infer functionality or reach from marketing.
+
+The subsequent approved focus is actual public-source research and filling
+the existing six-section cards, not more architecture. The approved set is
+VocaLingo, Lingvanex Phone Call Translator, AI Call by TaraAI, AI Phone, and
+Guardianly. This order expresses preliminary functional proximity, not size
+or quality. Preserve old cards and revisions; do not add other competitors
+without agreement. After each card, separate our strategic interpretation
+from official statements and live-test evidence. Manual purchases/testing
+and quarterly comparisons are later stages, not permission to perform them now.
+
+**Why:** the owner explicitly asked the agent to find, structure and save the
+facts rather than ask the user or ChatGPT to transfer each fact manually.
+
+**How to apply:** distinguish official counters, third-party estimates and
+unavailable metrics, including the platform and time period. Search snippets
+and fetched source pages can disagree; preserve the discrepancy rather than
+claiming growth. Unknown collection dates or rounded low-end estimates do
+not support rankings, market share, retention or paying-user calculations.
 
 **How to apply:** preserve existing AI Phone data and older hypotheses.
 Show current and target TalkHint separately; explain ranking and map methods,
@@ -92,8 +110,8 @@ manual, historical, comparable records with separate development conclusions.
 ChatGPT prepares reports externally; there is no automatic write integration
 with this workspace without a separate implementation and approval.
 
-The new-country competitor directory starts only with the approved AI Phone
-record; do not discover or add other companies automatically. Preserve dated
+The new-country competitor directory includes only individually approved companies;
+do not discover or add other companies automatically. Preserve dated
 price snapshots and their differences, clearly distinguish supplied information
 from manual source verification, and never imply a successful automatic refresh
 when only an editor was opened. Show annual charges together with monthly
@@ -103,9 +121,34 @@ an official conversion rule.
 **Why:** the owner requested an incrementally maintained, evidence-based
 competitor reference, while excluding our costs, revenue and surveys from scope.
 
-**How to apply:** use the same six scenarios, distinguish official claims,
+**How to apply:** use the same canonical scenario definitions, distinguish official claims,
 code presence, live checks and plans; keep prior segment benchmarks untouched.
 Do not enable scheduled updates or silently advance verification dates.
+
+Company cards use six sections: offer, prices, coverage, technical stack,
+funding and business scale. Contacts, history and chat are distinct functions.
+Language coverage belongs to a specific function; media/text language counts
+must not become telephone-call counts. Service availability, call destinations,
+number supply and customer locations must not be conflated.
+
+**Why:** the owner requested comparable, expanding competitor dossiers rather
+than marketing-based feature or geography inferences.
+
+**How to apply:** preserve old records and historical methodology when extending
+the comparison. Keep purchase channels separate, and never equate coins, credits
+and tokens without an official conversion rule. Unknown users, funding and revenue
+are not zero; downloads multiplied by a subscription price are not revenue.
+
+A live chat avatar requires evidence about the actual conversational character.
+An icon, decorative circle, demo video or lip-synced translated media is not proof.
+Published file-tool or chat providers do not establish the live call's telephony,
+STT, LLM, translation or TTS stack.
+
+**Why:** the owner explicitly prohibited these misleading equivalences and asked
+for source, date and verification status for each fact.
+
+**How to apply:** keep uncertain avatar and live-call stack fields unconfirmed;
+record technology with its actual tool and scope, not as a platform-wide claim.
 
 For the original AI-manager hypothesis, the US is the target market, starting
 in Miami-Dade, Broward and Palm Beach.

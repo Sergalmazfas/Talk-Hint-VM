@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { modelSections, elementKinds, detailFields, contentStatuses, implementationStatuses } from "../../shared/projectModel";
 import type { ModelCommand, ProjectModelState, ModelElement, ModelDecision } from "../../shared/projectModel";
-import { competitorScenarios } from "../../shared/projectCompetitors";
+import { competitorScenarios, normalizeCompetitorSnapshot } from "../../shared/projectCompetitors";
 import { saveCompetitorSchema, captureCompetitorQuarterSchema, saveTalkHintResearchSchema } from "./competitorSchema";
 
 const str = (max = 12000) => z.string().max(max);
@@ -67,7 +67,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       const { researchHistory: _history, ...talkhintSnapshot } = directory.talkhint;
       (directory.quarters ??= []).push({
         id: `QUARTER-${randomUUID()}`, quarter: c.quarter, capturedAt: new Date().toISOString(),
-        reason: c.reason, direction: c.direction, methodologyVersion: 1,
+        reason: c.reason, direction: c.direction, methodologyVersion: 2,
         competitorVersions: directory.records.flatMap(record => {
           const revision = record.revisions.at(-1);
           return revision ? [{ id: record.id, version: revision.version }] : [];
@@ -116,14 +116,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       const latestVersion = record?.revisions.at(-1)?.version ?? 0;
       if (c.baseVersion !== latestVersion) fail("Устаревшая версия карточки; перечитайте изменения и сохраните заново", 409);
       if (!record && directory.records.length >= 1000) fail("Достигнут лимит карточек", 413);
-      const snapshot = structuredClone(c.snapshot);
-      if (snapshot.research) {
-        // The six legacy fields are derived compatibility data, not a second manual source.
-        snapshot.scenarios = snapshot.scenarios.map(scenario => {
-          const evidence = snapshot.research!.features[scenario.scenario];
-          return evidence ? { scenario: scenario.scenario, status: evidence.status, note: evidence.note, sourceUrls: [...evidence.sourceUrls] } : scenario;
-        });
-      }
+      const snapshot = normalizeCompetitorSnapshot(c.snapshot);
       const revision = { version: latestVersion + 1, savedAt: now, reason: c.reason, snapshot };
       const recordId = record?.id ?? newId("COMP");
       if (record) record.revisions.push(revision);

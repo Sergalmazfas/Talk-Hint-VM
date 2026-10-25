@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import Directory from "../../client/src/components/project-model/CompetitorDirectory";
 import { initialAIPhoneSnapshot, initialTalkHintBaseline } from "./competitorInitial";
-import { competitorScenarios, type CompetitorDirectory } from "../../shared/projectCompetitors";
+import { type CompetitorDirectory } from "../../shared/projectCompetitors";
+import { dossierSections } from "../../shared/competitorDossier";
+import { researchFeatures } from "../../shared/competitorResearch";
 
 function directory(): CompetitorDirectory {
   return {
@@ -31,18 +33,17 @@ describe("competitor directory rendering", () => {
     expect(markup).toContain("автоматического поиска, проверки или обновления нет");
     expect(markup).not.toContain("Jobber");
   });
-  it("opens four evidence sections and all six same-scenario rows without inventing readiness", () => {
+  it("opens exactly six dossier sections and all canonical scenarios without inventing readiness", () => {
     const markup = renderToStaticMarkup(React.createElement(Directory, {
       directory: directory(), hypothesisId: "new-country", selectedId: "comp-ai-phone", view: "benchmark", submit: vi.fn(),
     }));
-    for (const heading of ["Предложение", "Тарифы и ограничения", "Функциональное сравнение", "Источники и история"])
-      expect(markup).toContain(heading);
-    for (const scenario of Object.values(competitorScenarios)) expect(markup).toContain(scenario);
+    expect(markup.match(/class="pm-dossier-section"/g)).toHaveLength(6);
+    for (const heading of dossierSections) expect(markup).toContain(`<h3>${heading}</h3>`);
+    for (const scenario of Object.values(researchFeatures)) expect(markup).toContain(scenario);
     expect(markup).toContain("Second Phone Number Inc");
     expect(markup).toContain("Заявлено официально");
-    expect(markup).toContain("Есть в коде; не проверено этим сравнением");
-    expect(markup).toContain("Целевая концепция / план");
-    expect(markup).toContain("Не подтверждено; требуется проверка в приложении");
+    expect(markup).toContain("Не подтверждено");
+    expect(markup).toContain("Живой персонаж-собеседник в чате");
     expect(markup).toContain("независимая проверка не заявлена");
     expect(markup).toContain("https://www.aiphone.ai/");
     expect(markup).toContain("id6465173251");

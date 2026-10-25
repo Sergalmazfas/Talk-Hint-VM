@@ -1,4 +1,5 @@
 import type { CompetitorResearch, QuarterlyCompetitorSnapshot, CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand } from "./competitorResearch";
+import type { CompetitorDossier } from "./competitorDossier";
 export type { CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand };
 /** Internal research only; no connection to phone-agent capabilities or prices. */
 export const competitorScenarios = {
@@ -11,6 +12,7 @@ export const competitorScenarios = {
 } as const;
 export const competitorEvidenceStatuses = {
   official_claim: "Заявлено официально",
+  independent_estimate: "Независимая оценка · не подтверждённая отчётность",
   code_present: "Есть в коде; не проверено этим сравнением",
   live_verified: "Проверено живым сценарием",
   planned: "Целевая концепция / план",
@@ -38,6 +40,9 @@ export interface CompetitorPlan {
   overages: string;
   limitations: string;
   sourceUrl: string;
+  purchaseChannel?: string;
+  includedUnits?: { unit: "coins" | "credits" | "tokens"; amount: number | null };
+  evidence?: import("./competitorResearch").ResearchEvidence;
 }
 export interface CompetitorSnapshot {
   name: string;
@@ -53,6 +58,7 @@ export interface CompetitorSnapshot {
   sources: { url: string; checkedAt: string; note: string }[];
   limitations: string;
   research?: CompetitorResearch;
+  dossier?: CompetitorDossier;
 }
 export interface CompetitorRevision {
   version: number;
@@ -88,6 +94,15 @@ export function emptyCompetitorSnapshot(): CompetitorSnapshot {
     })),
     sources: [], limitations: "",
   };
+}
+/** A compatibility projection for old readers. Structured features remain the sole editable truth. */
+export function normalizeCompetitorSnapshot(value: CompetitorSnapshot): CompetitorSnapshot {
+  const snapshot = structuredClone(value);
+  if (snapshot.research) snapshot.scenarios = snapshot.scenarios.map(scenario => {
+    const evidence = snapshot.research!.features[scenario.scenario];
+    return evidence ? { scenario: scenario.scenario, status: evidence.status, note: evidence.note, sourceUrls: [...evidence.sourceUrls] } : scenario;
+  });
+  return snapshot;
 }
 /** Null is unknown, never a free price; credits never acquire a minute conversion. */
 export function competitorPrice(plan: CompetitorPlan): string {

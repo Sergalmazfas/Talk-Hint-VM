@@ -105,7 +105,7 @@ export default function CompetitorQuarterArchive({ directory, submit, saving }: 
         </select></label>
       </div>
       {quarters.map((item) => <article className="pm-cr-quarter-card" key={item.id}>
-        <div><strong>{item.quarter}</strong><span>{dateLabel(item.capturedAt)} · {item.competitorVersions.length} карточек</span></div>
+        <div><strong>{item.quarter}</strong><span>{dateLabel(item.capturedAt)} · {item.competitorVersions.length} карточек · методика v{item.methodologyVersion}</span></div>
         <p><b>Причина:</b> {item.reason}</p>
         <p><b>Ручной вывод направления:</b> {item.direction}</p>
       </article>)}

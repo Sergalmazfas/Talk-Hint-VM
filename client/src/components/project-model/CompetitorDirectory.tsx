@@ -1,18 +1,18 @@
 import React, { useRef, useState } from "react";
 import {
-  competitorScenarios,
   competitorPrice,
   competitorSnapshotDiff,
   emptyCompetitorSnapshot,
   type CompetitorDirectory as CompetitorDirectoryData,
   type CompetitorPlan,
-  type CompetitorScenario,
   type CompetitorSnapshot,
 } from "@shared/projectCompetitors";
 import type { ModelCommand } from "@shared/projectModel";
 import { emptyCompetitorResearch, researchFor } from "@shared/competitorResearch";
-import { CompetitorResearchEditor, CompetitorResearchProfile } from "@/components/project-model/CompetitorResearchProfile";
+import { dossierFor } from "@shared/competitorDossier";
+import { CompetitorResearchEditor, ResearchEvidenceEditor } from "@/components/project-model/CompetitorResearchProfile";
 import CompetitorResearchWorkbench from "@/components/project-model/CompetitorResearchWorkbench";
+import { CompetitorDossierEditor, CompetitorDossierView, planEvidenceForSnapshot } from "@/components/project-model/CompetitorDossier";
 
 type Props = {
   directory?: CompetitorDirectoryData;
@@ -24,13 +24,12 @@ type Props = {
 };
 type Draft = { id?: string; baseVersion: number; reason: string; snapshot: CompetitorSnapshot };
 type PlanKey = keyof CompetitorPlan;
-type ScenarioKey = keyof typeof competitorScenarios;
 
 const periodLabels: Record<CompetitorPlan["period"], string> = {
   week: "Неделя", month: "Месяц", year: "Год", one_time: "Разовая оплата", unknown: "Не подтверждён",
 };
 const kindLabels: Record<CompetitorPlan["kind"], string> = {
-  subscription: "Подписка", credit_pack: "Пакет кредитов",
+  subscription: "Подписка", credit_pack: "Пакет единиц",
 };
 const evidenceFieldLabels: Record<string, string> = {
   name: "Название", developer: "Разработчик", audience: "Аудитория", website: "Сайт", appStore: "Магазин приложений",
@@ -43,13 +42,12 @@ const nestedFieldLabels: Record<string, Record<string, string>> = {
   plans: {
     id: "ID тарифа", name: "Название тарифа", kind: "Тип тарифа", currency: "Валюта", region: "Регион",
     period: "Период оплаты", price: "Цена", includedNumbers: "Включено номеров",
-    includedMinutes: "Включено минут", includedCredits: "Включено кредитов",
+    includedMinutes: "Включено минут", includedCredits: "Включено единиц",
     includedSms: "Включено SMS", overages: "Сверх лимита", limitations: "Ограничения", sourceUrl: "Источник тарифа",
   },
   scenarios: { scenario: "Сценарий", status: "Статус доказательства", note: "Основание", sourceUrls: "Источники" },
   sources: { url: "URL источника", checkedAt: "Дата проверки источника", note: "Заметка источника" },
 };
-const scenarioEntries = Object.entries(competitorScenarios) as [ScenarioKey, string][];
 
 function latestRevision(directory: CompetitorDirectoryData | undefined, id: string) {
   const record = directory?.records.find((item) => item.id === id);
@@ -61,13 +59,9 @@ function cloneSnapshot(snapshot: CompetitorSnapshot): CompetitorSnapshot {
     ...snapshot,
     offer: { ...snapshot.offer },
     research: snapshot.research ? structuredClone(snapshot.research) : undefined,
-    plans: snapshot.plans.map((plan) => ({ ...plan })),
-    scenarios: scenarioEntries.map(([scenario]) => {
-      const current = snapshot.scenarios.find((item) => item.scenario === scenario);
-      return current ? { ...current, sourceUrls: [...current.sourceUrls] } : {
-        scenario, status: "unknown", note: "Не подтверждено", sourceUrls: [],
-      };
-    }),
+    dossier: snapshot.dossier ? structuredClone(snapshot.dossier) : undefined,
+    plans: snapshot.plans.map((plan) => structuredClone(plan)),
+    scenarios: snapshot.scenarios.map((item) => ({ ...item, sourceUrls: [...item.sourceUrls] })),
     sources: snapshot.sources.map((source) => ({ ...source })),
   };
 }
@@ -125,84 +119,11 @@ function LinkValue({ value }: { value: string }) {
   return href ? <a href={href} target="_blank" rel="noreferrer">{value}</a> : <span>{showValue(value)}</span>;
 }
 
-function OfferSection({ snapshot }: { snapshot: CompetitorSnapshot }) {
-  return <section className="pm-cd-section">
-    <div className="pm-cd-section-head"><span>01 / OFFER</span><h3>Предложение</h3></div>
-    <dl className="pm-cd-facts">
-      <div><dt>Разработчик</dt><dd>{showValue(snapshot.developer)}</dd></div>
-      <div><dt>Целевая аудитория</dt><dd>{showValue(snapshot.audience)}</dd></div>
-      <div><dt>Функции</dt><dd>{showValue(snapshot.offer.features)}</dd></div>
-      <div><dt>Каналы</dt><dd>{showValue(snapshot.offer.channels)}</dd></div>
-      <div><dt>Ограничения</dt><dd>{showValue(snapshot.limitations)}</dd></div>
-    </dl>
-    <div className="pm-cd-links"><span>Официальный сайт <LinkValue value={snapshot.website} /></span><span>Магазин приложений <LinkValue value={snapshot.appStore} /></span></div>
-  </section>;
-}
-
-function TariffsSection({ snapshot }: { snapshot: CompetitorSnapshot }) {
-  return <section className="pm-cd-section">
-    <div className="pm-cd-section-head"><span>02 / PLANS</span><h3>Тарифы и ограничения</h3></div>
-    {snapshot.plans.length ? <div className="pm-cd-plan-list">{snapshot.plans.map((plan, index) => <article className="pm-cd-plan" key={plan.id || `${plan.name}-${index}`}>
-      <div className="pm-cd-plan-heading"><div><span className="pm-cd-plan-kind">{kindLabels[plan.kind]}</span><h4>{showValue(plan.name)}</h4></div><strong>{competitorPrice(plan)}</strong></div>
-      <dl className="pm-cd-facts">
-        <div><dt>Валюта</dt><dd>{showValue(plan.currency)}</dd></div>
-        <div><dt>Регион</dt><dd>{showValue(plan.region)}</dd></div>
-        <div><dt>Период оплаты</dt><dd>{periodLabels[plan.period]}</dd></div>
-        <div><dt>Включено номеров</dt><dd>{showValue(plan.includedNumbers)}</dd></div>
-        <div><dt>Включено минут</dt><dd>{showValue(plan.includedMinutes)}</dd></div>
-        <div><dt>Включено кредитов</dt><dd>{showValue(plan.includedCredits)}</dd></div>
-        <div><dt>Включено SMS</dt><dd>{showValue(plan.includedSms)}</dd></div>
-        <div><dt>Сверх лимита</dt><dd>{showValue(plan.overages)}</dd></div>
-        <div className="pm-cd-wide"><dt>Ограничения</dt><dd>{showValue(plan.limitations)}</dd></div>
-        <div className="pm-cd-wide"><dt>Источник тарифа</dt><dd><LinkValue value={plan.sourceUrl} /></dd></div>
-      </dl>
-    </article>)}</div> : <div className="pm-cd-empty">Тарифы не сохранены. Неизвестная цена не считается нулевой.</div>}
-  </section>;
-}
-
-function LegacyScenarioCell({ evidence }: { evidence?: Pick<CompetitorScenario, "status" | "note" | "sourceUrls"> }) {
-  const status = evidence?.status ?? "unknown";
-  const statusLabels = {
-    official_claim: "Заявлено официально",
-    code_present: "Есть в коде; не проверено этим сравнением",
-    live_verified: "Проверено живым сценарием",
-    planned: "Целевая концепция / план",
-    not_supported: "Не поддерживается по источнику",
-    unknown: "Не подтверждено",
-  } as const;
-  return <div className="pm-cr-legacy-cell">
-    <span className={`pm-cr-status status-${status}`}>{statusLabels[status]}</span>
-    <p>{evidence?.note || "Не подтверждено"}</p>
-    {evidence?.sourceUrls.map((source, index) => <LinkValue value={source} key={`${source}-${index}`} />)}
-  </div>;
-}
-
-function LegacyScenarioReadOnly({ snapshot, directory }: { snapshot: CompetitorSnapshot; directory: CompetitorDirectoryData }) {
-  return <section className="pm-cr-legacy-compat pm-cd-section">
-    <div className="pm-cd-section-head"><span>READ-ONLY COMPATIBILITY</span><h3>Функциональное сравнение</h3></div>
-    <p>Совместимое представление прежних шести сценариев для старых сохранённых данных. Поля только для чтения; редактирование ведётся в едином редакторе девяти функций выше.</p>
-    <div className="pm-cr-legacy-table-wrap"><table className="pm-cr-legacy-table">
-      <thead><tr><th scope="col">Совместимый сценарий</th><th scope="col">TalkHint · текущая позиция</th><th scope="col">TalkHint · цель</th><th scope="col">{snapshot.name}</th></tr></thead>
-      <tbody>{scenarioEntries.map(([scenario, label]) => {
-        const baseline = directory.talkhint.scenarios.find((item) => item.scenario === scenario);
-        const current = directory.talkhint.research?.current.features[scenario] ?? baseline;
-        const target = directory.talkhint.research?.target.features[scenario];
-        const competitor = snapshot.scenarios.find((item) => item.scenario === scenario);
-        return <tr key={scenario}><th scope="row">{label}</th>
-          <td><LegacyScenarioCell evidence={current} /></td>
-          <td><LegacyScenarioCell evidence={target} /></td>
-          <td><LegacyScenarioCell evidence={competitor} /></td>
-        </tr>;
-      })}</tbody>
-    </table></div>
-  </section>;
-}
-
 function EvidenceSection({ directory, id, snapshot }: { directory: CompetitorDirectoryData; id: string; snapshot: CompetitorSnapshot }) {
   const record = directory.records.find((item) => item.id === id);
   const revisions = record?.revisions ?? [];
-  return <section className="pm-cd-section">
-    <div className="pm-cd-section-head"><span>04 / SOURCES & HISTORY</span><h3>Источники и история</h3></div>
+  return <div className="pm-cd-evidence-support">
+    <div className="pm-cd-section-head"><span>SUPPORTING FOOTER</span><h4>Источники и история</h4></div>
     <p className="pm-cd-verification">{snapshot.verification === "manual" ? "Проверка источников выполняется вручную. Автоматического сканирования или обновления нет." : "Сведения предоставлены; независимая проверка не заявлена."}</p>
     <p className="pm-cd-checked">Снимок: {dateLabel(snapshot.checkedAt)}</p>
     {snapshot.sources.length ? <ul className="pm-cd-source-list">{snapshot.sources.map((source, index) => <li key={`${source.url}-${index}`}>
@@ -224,7 +145,7 @@ function EvidenceSection({ directory, id, snapshot }: { directory: CompetitorDir
         </details>;
       })}
     </div>}
-  </section>;
+  </div>;
 }
 
 function DirectoryEditor({
@@ -248,6 +169,8 @@ function DirectoryEditor({
     patchSnapshot({ offer: { ...snapshot.offer, [key]: value } });
   const updatePlan = (index: number, key: PlanKey, value: string | number | null) =>
     patchSnapshot({ plans: snapshot.plans.map((plan, planIndex) => planIndex === index ? { ...plan, [key]: value } : plan) });
+  const patchPlan = (index: number, updates: Partial<CompetitorPlan>) =>
+    patchSnapshot({ plans: snapshot.plans.map((plan, planIndex) => planIndex === index ? { ...plan, ...updates } : plan) });
   const rebaseDiff = rebaseSnapshot ? competitorSnapshotDiff(rebaseSnapshot, snapshot) : [];
   return <form className="pm-cd-editor" onSubmit={onSave}>
     <div className="pm-cd-editor-head">
@@ -288,20 +211,28 @@ function DirectoryEditor({
         <div className="pm-cd-edit-card-head"><strong>Тариф {index + 1}</strong><button className="pm-btn small danger" type="button" onClick={() => patchSnapshot({ plans: snapshot.plans.filter((_, planIndex) => planIndex !== index) })}>Удалить тариф</button></div>
         <div className="pm-cd-form-grid">
           <label>Название<input value={plan.name} onChange={(event) => updatePlan(index, "name", event.target.value)} /></label>
-          <label>Тип<select value={plan.kind} onChange={(event) => updatePlan(index, "kind", event.target.value as CompetitorPlan["kind"])}><option value="subscription">Подписка</option><option value="credit_pack">Пакет кредитов</option></select></label>
+          <label>Тип<select value={plan.kind} onChange={(event) => updatePlan(index, "kind", event.target.value as CompetitorPlan["kind"])}><option value="subscription">Подписка</option><option value="credit_pack">Пакет единиц</option></select></label>
           <label>Цена<input type="number" min="0" step="any" value={plan.price ?? ""} placeholder="Не подтверждена" onChange={(event) => updatePlan(index, "price", event.target.value === "" ? null : Number(event.target.value))} /></label>
           <label>Валюта<input value={plan.currency} onChange={(event) => updatePlan(index, "currency", event.target.value)} placeholder="Например USD" /></label>
           <label>Регион<input value={plan.region} onChange={(event) => updatePlan(index, "region", event.target.value)} /></label>
           <label>Период<select value={plan.period} onChange={(event) => updatePlan(index, "period", event.target.value as CompetitorPlan["period"])}>
             {Object.entries(periodLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
           </select></label>
+          <label>Канал покупки<input value={plan.purchaseChannel ?? ""} onChange={(event) => updatePlan(index, "purchaseChannel", event.target.value)} placeholder="Не подтверждено" /></label>
+          <label>Тип дополнительной единицы<select value={plan.includedUnits?.unit ?? ""} onChange={(event) => {
+            const unit = event.target.value as NonNullable<CompetitorPlan["includedUnits"]>["unit"] | "";
+            patchPlan(index, { includedUnits: unit ? { unit, amount: plan.includedUnits?.amount ?? null } : undefined });
+          }}>
+            <option value="">Не указано</option><option value="coins">Монеты</option><option value="credits">Кредиты</option><option value="tokens">Токены</option>
+          </select></label>
+          <label>Количество единиц<input type="number" min="0" step="any" disabled={!plan.includedUnits?.unit} value={plan.includedUnits?.amount ?? ""} onChange={(event) => patchPlan(index, { includedUnits: plan.includedUnits ? { ...plan.includedUnits, amount: event.target.value === "" ? null : Number(event.target.value) } : undefined })} /></label>
           {([
             ["includedNumbers", "Включено номеров"], ["includedMinutes", "Включено минут"],
             ["includedCredits", "Включено кредитов"], ["includedSms", "Включено SMS"],
             ["overages", "Сверх лимита"], ["limitations", "Ограничения"],
           ] as [PlanKey, string][]).map(([key, label]) => <label key={key}>{label}<textarea value={plan[key] as string} onChange={(event) => updatePlan(index, key, event.target.value)} /></label>)}
-          <label className="pm-cd-form-wide">Источник тарифа<input type="url" value={plan.sourceUrl} onChange={(event) => updatePlan(index, "sourceUrl", event.target.value)} /></label>
         </div>
+        <ResearchEvidenceEditor label="Источник, дата и статус цены" evidence={planEvidenceForSnapshot(plan, snapshot)} onChange={(evidence) => patchPlan(index, { evidence })} />
       </article>)}</div>
       <button className="pm-btn small" type="button" onClick={() => patchSnapshot({ plans: [...snapshot.plans, {
         id: `plan-${Date.now()}`, name: "", kind: "subscription", currency: "", region: "", period: "unknown", price: null,
@@ -316,6 +247,10 @@ function DirectoryEditor({
         research={snapshot.research ?? researchFor(snapshot)}
         onChange={(research) => patchSnapshot({ research })}
       />
+    </fieldset>
+    <fieldset disabled={saving || needsRebase}>
+      <legend>Досье · шесть разделов</legend>
+      <CompetitorDossierEditor dossier={dossierFor(snapshot)} onChange={(dossier) => patchSnapshot({ dossier })} />
     </fieldset>
     <fieldset disabled={saving || needsRebase}>
       <legend>Источники и даты проверки</legend>
@@ -420,12 +355,9 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
       {saveError && <p className="pm-cd-save-error" role="alert">{saveError}</p>}
       {draft && <DirectoryEditor draft={draft} setDraft={setDraft} onClose={closeEditor} onSave={(event) => void saveDraft(event)} saving={saving} needsRebase={needsRebase} onRebase={rebaseDraft} rebaseSnapshot={latestSnapshot(directory, draft.id || "")} />}
       <div className="pm-cd-detail-grid">
-        <OfferSection snapshot={selectedSnapshot} />
-        <TariffsSection snapshot={selectedSnapshot} />
-        <CompetitorResearchProfile research={researchFor(selectedSnapshot)} />
-        {directory && <LegacyScenarioReadOnly snapshot={selectedSnapshot} directory={directory} />}
-        {directory && <EvidenceSection directory={directory} id={selectedRecord.id} snapshot={selectedSnapshot} />}
+        <CompetitorDossierView snapshot={selectedSnapshot} research={researchFor(selectedSnapshot)} />
       </div>
+      {directory && <footer className="pm-cd-evidence-footer"><EvidenceSection directory={directory} id={selectedRecord.id} snapshot={selectedSnapshot} /></footer>}
     </section>;
   }
 
@@ -448,10 +380,10 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
           const snapshot = revision.snapshot;
           const subscriptions = snapshot.plans.filter((plan) => plan.kind === "subscription");
           const extras = snapshot.plans.flatMap((plan) => [
-            plan.kind === "credit_pack" && `${plan.name || "Пакет кредитов"}: ${competitorPrice(plan)}`,
+            plan.kind === "credit_pack" && `${plan.name || "Пакет единиц"}: ${competitorPrice(plan)}`,
             plan.includedNumbers && `Номера: ${plan.includedNumbers}`,
             plan.includedMinutes && `Минуты: ${plan.includedMinutes}`,
-            plan.includedCredits && `Кредиты: ${plan.includedCredits}`,
+            plan.includedCredits && `Единицы: ${plan.includedCredits}`,
             plan.includedSms && `SMS: ${plan.includedSms}`,
             plan.overages && `Сверх лимита: ${plan.overages}`,
             plan.limitations && `Ограничения: ${plan.limitations}`,

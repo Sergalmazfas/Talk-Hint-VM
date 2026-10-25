@@ -1,4 +1,5 @@
 import { emptyCompetitorSnapshot, type CompetitorDirectory, type CompetitorSnapshot, type CompetitorScenario } from "./projectCompetitors";
+import { dossierFor } from "./competitorDossier";
 
 export const researchFeatures = {
   secretary_outgoing: "Исходящие поручения AI-секретарю",
@@ -9,9 +10,14 @@ export const researchFeatures = {
   sms: "SMS",
   email: "Почта",
   calendar: "Календарь / запись",
-  contacts_history: "Контакты / история общения",
+  contacts: "Контакты",
+  history: "История общения",
+  chat: "AI-чат",
 } as const;
-export type ResearchFeature = keyof typeof researchFeatures;
+/** The old combined metric is retained only for reading saved snapshots, never split into proofs. */
+export type ResearchFeature = keyof typeof researchFeatures | "contacts_history";
+export type LanguageFeature = ResearchFeature | "media" | "text";
+export const languageFeatures = { ...researchFeatures, media: "Медиа и аудиофайлы", text: "Текстовый перевод" } as const;
 export interface ResearchEvidence {
   status: CompetitorScenario["status"];
   note: string;
@@ -25,8 +31,9 @@ export interface ResearchCoverage {
   evidence: ResearchEvidence;
 }
 export interface ResearchLanguage {
-  feature: ResearchFeature;
+  feature: LanguageFeature;
   count: number | null;
+  countQualifier?: "exact" | "at_least";
   russian: "yes" | "no" | "unknown";
   spanish: "yes" | "no" | "unknown";
   evidence: ResearchEvidence;
@@ -47,7 +54,7 @@ export interface QuarterlyCompetitorSnapshot {
   capturedAt: string;
   reason: string;
   direction: string;
-  methodologyVersion: 1;
+  methodologyVersion: 1 | 2;
   competitorVersions: { id: string; version: number }[];
   talkhint: CompetitorDirectory["talkhint"];
 }
@@ -125,10 +132,12 @@ export function featureStatusLabel(row: ResearchRow, key: ResearchFeature): stri
   if (row.kind !== "competitor") return ({
     live_verified: "Работает — проверено", code_present: "Проверяется — есть в коде",
     planned: "Запланировано", official_claim: "Заявлено, ещё проверяется",
+    independent_estimate: "Независимая оценка — не проверено",
     unknown: "Не подтверждено", not_supported: "Не поддерживается по источнику",
   })[status];
   return ({
     live_verified: "Проверено нами", official_claim: "Официально заявлено",
+    independent_estimate: "Независимая оценка — не проверено",
     code_present: "Не подтверждено — есть сведения о коде", planned: "Не подтверждено — заявлен план",
     unknown: "Не подтверждено", not_supported: "Не поддерживается по источнику",
   })[status];
@@ -146,7 +155,7 @@ export function matchesResearchFilters(row: ResearchRow, region: string, languag
 }
 export const proximityWeights: Record<ResearchFeature, number> = {
   secretary_outgoing: 3, incoming: 3, dedicated_number: 1, translation: 1,
-  live_hints: 2, sms: 2, email: 2, calendar: 2, contacts_history: 1,
+  live_hints: 2, sms: 2, email: 2, calendar: 2, contacts: 1, history: 1, chat: 2, contacts_history: 1,
 };
 const verified = (evidence: ResearchEvidence) => evidence.status === "live_verified" &&
   evidence.sourceUrls.length > 0 && !!evidence.checkedAt && !!evidence.note.trim();
@@ -164,10 +173,13 @@ export function researchProximity(row: ResearchRow) {
     explanation: "Нижняя граница взвешенного совпадения действий; баллы только за живую проверку с источником и датой. Заявления, размер компании и неизвестное не дают баллов. Это не рейтинг качества.",
   };
 }
-export function positioningFor(row: ResearchRow) {
+export function positioningFor(row: ResearchRow, methodologyVersion: 1 | 2 = 2) {
   const target = row.kind === "talkhint_target";
   let lower = 0, unresolved = 0;
-  for (const key of Object.keys(researchFeatures) as ResearchFeature[]) {
+  const keys: ResearchFeature[] = methodologyVersion === 1
+    ? ["secretary_outgoing", "incoming", "dedicated_number", "translation", "live_hints", "sms", "email", "calendar", "contacts_history"]
+    : Object.keys(researchFeatures) as ResearchFeature[];
+  for (const key of keys) {
     const evidence = featureFor(row, key);
     const supported = target
       ? ["planned", "live_verified"].includes(evidence.status) && evidence.sourceUrls.length > 0 && !!evidence.checkedAt && !!evidence.note.trim()
@@ -224,18 +236,25 @@ export function quarterChanges(directory: CompetitorDirectory, before: Quarterly
       [key, research?.features[key as ResearchFeature]?.status ?? "unknown",
         [...research?.features[key as ResearchFeature]?.contexts ?? []].sort()]);
     const languageFacts = (research: CompetitorResearch | null) => research?.languages.map(item =>
-      ({ feature: item.feature, count: item.count, russian: item.russian, spanish: item.spanish })).sort((a, b) => a.feature.localeCompare(b.feature)) ?? [];
+      ({ feature: item.feature, count: item.count, countQualifier: item.count === null ? null : item.countQualifier ?? "exact",
+        russian: item.russian, spanish: item.spanish })).sort((a, b) => a.feature.localeCompare(b.feature)) ?? [];
     const geographyFacts = (research: CompetitorResearch | null) => Object.fromEntries(
       ["service", "phoneNumbers", "customers"].map(key => [key,
         research?.geography[key as keyof CompetitorResearch["geography"]].map(item =>
           ({ region: item.region, status: item.evidence.status })).sort((a, b) => a.region.localeCompare(b.region)) ?? []]));
-    const tariffFacts = (snapshot?: CompetitorSnapshot) => snapshot?.plans.map(({ sourceUrl, ...plan }) => plan).sort((a, b) => a.id.localeCompare(b.id)) ?? [];
+    const tariffFacts = (snapshot?: CompetitorSnapshot) => snapshot?.plans.map(({ sourceUrl, evidence, ...plan }) => plan).sort((a, b) => a.id.localeCompare(b.id)) ?? [];
+    const oldDossier = old ? dossierFor(old.snapshot) : null, newDossier = dossierFor(row.snapshot);
+    const extraFacts = (rows?: { id: string; title: string; value: string | null }[]) =>
+      rows?.map(({ id, title, value }) => ({ id, title, value })).sort((a, b) => a.id.localeCompare(b.id)) ?? [];
+    const avatarFacts = (dossier: typeof oldDossier) => Object.entries(dossier?.avatar ?? {}).map(([key, fact]) =>
+      [key, fact?.value ?? null, fact?.evidence.status ?? "unknown"]).sort(([a], [b]) => String(a).localeCompare(String(b)));
     return {
       id: row.id, name: row.snapshot.name, added: !old, removed: false,
-      features: changed(featureFacts(a), featureFacts(b)),
+      features: changed(featureFacts(a), featureFacts(b)) ||
+        changed(avatarFacts(oldDossier), avatarFacts(newDossier)) || changed(extraFacts(oldDossier?.offerFacts), extraFacts(newDossier.offerFacts)),
       languages: changed(languageFacts(a), languageFacts(b)),
-      coverage: changed(geographyFacts(a), geographyFacts(b)),
-      prices: changed(tariffFacts(old?.snapshot), tariffFacts(row.snapshot)),
+      coverage: changed(geographyFacts(a), geographyFacts(b)) || changed(extraFacts(oldDossier?.coverageFacts), extraFacts(newDossier.coverageFacts)),
+      prices: changed(tariffFacts(old?.snapshot), tariffFacts(row.snapshot)) || changed(extraFacts(oldDossier?.pricingNotes), extraFacts(newDossier.pricingNotes)),
     };
   });
 }

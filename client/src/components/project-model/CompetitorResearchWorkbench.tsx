@@ -6,6 +6,7 @@ import {
   featureFor,
   featureStatusLabel,
   emptyCompetitorResearch,
+  languageFeatures,
   matchesResearchFilters,
   positioningFor,
   proximityWeights,
@@ -13,11 +14,15 @@ import {
   researchProximity,
   researchRows,
   researchFor,
+  unknownResearchEvidence,
   type ResearchFeature,
+  type ResearchLanguage,
+  type LanguageFeature,
   type CompetitorResearch,
   type ResearchRow,
   type ResearchEvidence,
 } from "@shared/competitorResearch";
+import { avatarFields, dossierFor } from "@shared/competitorDossier";
 import {
   competitorEvidenceStatuses,
   competitorPrice,
@@ -48,6 +53,13 @@ type MatrixLine = { id: string; label: string; group: string; cell: (row: Resear
 type TalkHintDraft = { current: CompetitorResearch; target: CompetitorResearch; checkedAt: string; reason: string };
 
 const featureEntries = Object.entries(researchFeatures) as [ResearchFeature, string][];
+const languageFeatureEntries = Object.entries(languageFeatures).filter(([key]) => key !== "contacts_history") as [LanguageFeature, string][];
+function languageCount(item: ResearchLanguage) {
+  if (item.count === null) return "не подтверждено";
+  if (item.countQualifier === "at_least") return `${item.count.toLocaleString("ru-RU")}+`;
+  if (item.countQualifier === "exact") return item.count.toLocaleString("ru-RU");
+  return `${item.count.toLocaleString("ru-RU")} (формат не указан)`;
+}
 const geographyOptions = [
   ["service", "География сервиса"],
   ["phoneNumbers", "География доступности телефонных номеров"],
@@ -73,13 +85,14 @@ function sourceHref(raw: string) {
 function evidenceCell(title: string, evidence: ResearchEvidence, value = evidence.note): EvidenceDialogData {
   return { title, value, status: evidence.status, statusText: title, note: evidence.note, checkedAt: evidence.checkedAt, sources: evidence.sourceUrls };
 }
-function languageText(row: ResearchRow, feature: ResearchFeature): EvidenceDialogData {
+function languageText(row: ResearchRow, feature: LanguageFeature | "contacts_history"): EvidenceDialogData {
   const language = researchFor(row.snapshot).languages.find((item) => item.feature === feature);
   const answer = (value: string) => value === "yes" ? "Да" : value === "no" ? "Нет" : "Не подтверждено";
+  const featureLabel = feature === "contacts_history" ? "Контакты и история · единое старое поле" : languageFeatures[feature];
   return {
-    title: `${researchFeatures[feature]} · языковое покрытие`,
+    title: `${featureLabel} · языковое покрытие`,
     value: language
-      ? `Количество: ${language.count === null ? "не подтверждено" : language.count.toLocaleString("ru-RU")}; русский: ${answer(language.russian)}; испанский: ${answer(language.spanish)}`
+      ? `Количество: ${languageCount(language)}; русский: ${answer(language.russian)}; испанский: ${answer(language.spanish)}`
       : "Количество и языковая поддержка не подтверждены.",
     status: language?.evidence.status ?? "unknown",
     statusText: language ? competitorEvidenceStatuses[language.evidence.status] : competitorEvidenceStatuses.unknown,
@@ -103,12 +116,49 @@ function coverageText(row: ResearchRow, kind: "service" | "phoneNumbers" | "cust
 }
 function priceText(row: ResearchRow): EvidenceDialogData {
   const plans = row.snapshot.plans;
+  const evidenceFor = (plan: (typeof plans)[number]): ResearchEvidence => plan.evidence ?? {
+    status: plan.sourceUrl ? "official_claim" : "unknown",
+    note: plan.sourceUrl ? "Сохранённые источник и дата исходного тарифа; свежая проверка не выполнялась." : "Доказательство тарифа не сохранено.",
+    sourceUrls: plan.sourceUrl ? [plan.sourceUrl] : [],
+    checkedAt: row.snapshot.checkedAt || null,
+  };
+  const planEvidence = plans.map(evidenceFor);
+  const unitLabel = { coins: "монеты", credits: "кредиты", tokens: "токены" } as const;
   return {
     title: `${row.snapshot.name} · тарифы`,
-    value: plans.length ? plans.map((plan) => `${plan.name || (plan.kind === "credit_pack" ? "Пакет кредитов" : "Тариф")}: ${competitorPrice(plan)} · валюта: ${display(plan.currency)} · регион тарифа: ${display(plan.region)} · период: ${plan.period} · номера: ${display(plan.includedNumbers)} · минуты: ${display(plan.includedMinutes)} · кредиты: ${display(plan.includedCredits)} · SMS: ${display(plan.includedSms)} · сверх лимита: ${display(plan.overages)} · ограничения: ${display(plan.limitations)}`).join("\n") : "Сохранённых тарифов нет; цена не подтверждена.",
-    note: plans.length ? "Сумма и эквиваленты показаны через общий helper competitorPrice; кредиты не переводятся в минуты." : "Отсутствие записи не является бесплатным тарифом.",
-    checkedAt: row.snapshot.checkedAt || null,
-    sources: plans.map((plan) => plan.sourceUrl).filter(Boolean),
+    value: plans.length ? plans.map((plan) => {
+      const units = plan.includedUnits?.unit ? `${plan.includedUnits.amount === null ? "Количество неизвестно" : plan.includedUnits.amount} ${unitLabel[plan.includedUnits.unit]}` : "Единица не указана";
+      return `${plan.name || (plan.kind === "credit_pack" ? "Пакет единиц" : "Тариф")}: ${competitorPrice(plan)} · канал покупки: ${display(plan.purchaseChannel)} · валюта: ${display(plan.currency)} · регион тарифа: ${display(plan.region)} · период: ${plan.period} · номера: ${display(plan.includedNumbers)} · минуты: ${display(plan.includedMinutes)} · единицы: ${display(plan.includedCredits)} · SMS: ${display(plan.includedSms)} · дополнительные единицы: ${units} · сверх лимита: ${display(plan.overages)} · ограничения: ${display(plan.limitations)}`;
+    }).join("\n") : "Сохранённых тарифов нет; цена не подтверждена.",
+    status: planEvidence.length === 1 ? planEvidence[0].status : undefined,
+    statusText: planEvidence.length === 1 ? competitorEvidenceStatuses[planEvidence[0].status] : undefined,
+    note: planEvidence.map((item) => item.note).filter(Boolean).join("\n") || (plans.length ? "Сумма и эквиваленты показаны через общий helper competitorPrice; кредиты не переводятся в минуты." : "Отсутствие записи не является бесплатным тарифом."),
+    checkedAt: planEvidence.map((item) => item.checkedAt).filter(Boolean).join(", ") || null,
+    sources: planEvidence.flatMap((item) => item.sourceUrls),
+  };
+}
+function avatarText(row: ResearchRow): EvidenceDialogData {
+  const dossier = dossierFor(row.snapshot);
+  const presence = dossier.avatar.presence ?? { value: null, evidence: unknownResearchEvidence() };
+  const details = Object.entries(avatarFields).map(([key, label]) => {
+    const fact = dossier.avatar[key as keyof typeof avatarFields];
+    const value = fact?.value?.trim() || "Не подтверждено";
+    const status = fact?.evidence ? competitorEvidenceStatuses[fact.evidence.status] : competitorEvidenceStatuses.unknown;
+    const date = fact?.evidence.checkedAt ? dateDisplay(fact.evidence.checkedAt) : "дата не указана";
+    const note = fact?.evidence.note?.trim() || "основание не указано";
+    const citations = fact?.evidence.sourceUrls.length ? fact.evidence.sourceUrls.join(", ") : "источник не указан";
+    return `${label}: ${value} · ${status} · ${date} · ${note} · источники: ${citations}`;
+  });
+  const sources = Array.from(new Set(Object.values(dossier.avatar).flatMap((fact) => fact?.evidence.sourceUrls ?? [])));
+  const checkedAt = Array.from(new Set(Object.values(dossier.avatar).map((fact) => fact?.evidence.checkedAt).filter((date): date is string => !!date)));
+  return {
+    title: `${row.snapshot.name} · все поля аватара`,
+    value: `Наличие живого аватара в чате: ${presence.value?.trim() || "Не подтверждено"}\n\n${details.join("\n")}`,
+    status: presence.evidence.status,
+    statusText: competitorEvidenceStatuses[presence.evidence.status],
+    note: details.join("\n"),
+    checkedAt: checkedAt.length ? checkedAt.join(", ") : null,
+    sources,
   };
 }
 function matchesWorkbenchFilters(
@@ -131,7 +181,7 @@ function matchesWorkbenchFilters(
 
 function makeMatrixLines(): MatrixLine[] {
   const features: MatrixLine[] = featureEntries.map(([key, label]) => ({
-    id: `feature-${key}`, group: "Девять функций", label,
+    id: `feature-${key}`, group: "Одиннадцать функций", label,
     cell: (row) => {
       const evidence = featureFor(row, key);
       const statusText = featureStatusLabel(row, key);
@@ -139,10 +189,14 @@ function makeMatrixLines(): MatrixLine[] {
       return { ...evidenceCell(statusText, evidence, `${statusText}\nСценарии: ${scope}\n${display(evidence.note)}`), statusText };
     },
   }));
-  const languages: MatrixLine[] = featureEntries.map(([key, label]) => ({
-    id: `language-${key}`, group: "Язык и число · по функции", label,
-    cell: (row) => languageText(row, key),
-  }));
+  const languages: MatrixLine[] = [
+    ...languageFeatureEntries.map(([key, label]): MatrixLine => ({
+    id: `language-${key}`, group: "Язык и число · функции, медиа, текст", label,
+    cell: (row: ResearchRow) => languageText(row, key),
+    })),
+    { id: "language-contacts_history-legacy", group: "Язык и число · совместимость", label: "Контакты и история · единое старое поле", cell: (row) => languageText(row, "contacts_history") },
+  ];
+  const avatarLine: MatrixLine = { id: "dossier-avatar-chat", group: "Досье · sourced facts", label: "Аватар в чате", cell: avatarText };
   const coverage: MatrixLine[] = geographyOptions.map(([key, label]) => ({
     id: `coverage-${key}`, group: "География · категории не смешиваются", label,
     cell: (row) => coverageText(row, key),
@@ -150,6 +204,7 @@ function makeMatrixLines(): MatrixLine[] {
   return [
     ...features,
     ...languages,
+    avatarLine,
     ...coverage,
     { id: "prices", group: "Тарифы", label: "Цена, лимиты и период", cell: priceText },
   ];
@@ -297,7 +352,7 @@ function ProximityRanking({ rows }: { rows: ResearchRow[] }) {
       return <li key={row.id}>
         <div className="pm-cr-rank-main"><strong>{row.snapshot.name}</strong>
           {proximity.score === null ? <span className="pm-cr-unranked">Не ранжирован · нет подтверждённых совпадений</span>
-            : <span className="pm-cr-ranked">{proximity.score} подтверждённых весовых баллов · верхняя граница {proximity.upper} · {proximity.confirmed}/9</span>}
+            : <span className="pm-cr-ranked">{proximity.score} подтверждённых весовых баллов · верхняя граница {proximity.upper} · {proximity.confirmed}/11</span>}
           <small>{proximity.explanation}</small>
         </div>
         <div className="pm-cr-size-metric"><b>Размер · отдельно</b>{size ? <><span>{research.companySize!.metric}: {research.companySize!.value}</span>{research.companySize!.evidence.sourceUrls.map((source, index) => <a key={`${source}-${index}`} href={sourceHref(source) || undefined}>{source}</a>)}</> : <span>Нет sourced-метрики</span>}</div>
@@ -315,14 +370,14 @@ function PositioningMap({ rows }: { rows: ResearchRow[] }) {
   const target = plotted.filter(({ row }) => row.kind === "talkhint_target").map(({ row, position }) => ({ x: position.x!, y: position.y!, name: row.snapshot.name, label: "Целевая концепция" }));
   return <section className="pm-cr-section pm-cr-positioning">
     <div className="pm-cr-section-head"><span>POSITIONING / EVIDENCE BOUNDS</span><h3>Карта функций и самостоятельности</h3></div>
-    <p className="pm-cr-ranking-note">X: число личных и бизнес-сценариев, подтверждённых явно для девяти функций (18 возможных пар). Y: только помощь оператору, подтверждённые задачи или ограниченная автономия. Цель TalkHint выделена отдельно и не считается достигнутой.</p>
+    <p className="pm-cr-ranking-note">X: число личных и бизнес-сценариев, подтверждённых явно для 11 функций (22 возможные пары). Y: только помощь оператору, подтверждённые задачи или ограниченная автономия. Цель TalkHint выделена отдельно и не считается достигнутой.</p>
     {plotted.length ? <div className="pm-cr-position-chart">
       <ResponsiveContainer width="100%" height={320}>
         <ScatterChart margin={{ top: 14, right: 18, bottom: 22, left: 14 }}>
           <CartesianGrid stroke="#d8e5e5" />
-          <XAxis type="number" dataKey="x" name="Явно подтверждённые сценарии" domain={[0, 18]} ticks={[0,2,4,6,8,10,12,14,16,18]} label={{ value: "Явно подтверждённые личные + бизнес-сценарии из 18", position: "insideBottom", offset: -12 }} />
+          <XAxis type="number" dataKey="x" name="Явно подтверждённые сценарии" domain={[0, 22]} ticks={[0,2,4,6,8,10,12,14,16,18,20,22]} label={{ value: "Явно подтверждённые личные + бизнес-сценарии из 22", position: "insideBottom", offset: -12 }} />
           <YAxis type="number" dataKey="y" name="Самостоятельность" domain={[0, 2]} ticks={[0,1,2]} tickFormatter={(value: number) => yLabels[value] || ""} width={142} />
-          <Tooltip cursor={{ strokeDasharray: "3 3" }} formatter={(value: number, name: string) => [name === "x" ? `${value} из 18` : yLabels[value] || value, name === "x" ? "Явные сценарии" : "Режим"]} />
+          <Tooltip cursor={{ strokeDasharray: "3 3" }} formatter={(value: number, name: string) => [name === "x" ? `${value} из 22` : yLabels[value] || value, name === "x" ? "Явные сценарии" : "Режим"]} />
           <Legend />
           <Scatter name="Текущая позиция TalkHint" data={current} fill="#087e83"><LabelList dataKey="name" position="top" /></Scatter>
           <Scatter name="Целевая концепция TalkHint" data={target} fill="#a96720" shape="triangle"><LabelList dataKey="name" position="top" /></Scatter>
@@ -332,7 +387,7 @@ function PositioningMap({ rows }: { rows: ResearchRow[] }) {
     </div> : <div className="pm-cd-empty">Нет точек с достаточными проверяемыми данными. Точки не подменяются предполагаемыми позициями.</div>}
     <div className="pm-cr-position-bounds">{items.map(({ row, position }) => <article key={row.id}>
       <strong>{row.snapshot.name}{row.kind === "talkhint_target" ? " · цель" : ""}</strong>
-      <span>Явные сценарии: {position.lower}–{position.upper} из 18 подтверждено / не разрешено</span>
+      <span>Явные сценарии: {position.lower}–{position.upper} из 22 подтверждено / не разрешено</span>
       <p>{position.reason}</p>
     </article>)}</div>
   </section>;
