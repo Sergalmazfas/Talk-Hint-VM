@@ -60,6 +60,20 @@ the target concept from a report of working capabilities.
 **How to apply:** do not treat planning text as a runtime permission grant,
 mail/calendar connection or evidence that the complete workflows work.
 
+For the new-country market slide, distinguish the supplied ACS language-audience
+estimates from immigrants, customers, revenue or proven demand. The cohort is
+adults with home Spanish/Russian and English below “very well”, regardless of
+birthplace. Add only non-overlapping state estimates; NYC is inside New York
+state and must not be added again. City figures cannot be replaced by counties,
+metros or entire states. Keep exact values/method/source in an explanation and
+round display values independently; sampling error has not been calculated.
+
+**Why:** the owner explicitly limited this slide to existing comparable estimates
+and prohibited invented city figures, penetration rates and working-number shares.
+
+**How to apply:** do not claim a new microdata calculation or validation when only
+formatting supplied figures; future city research must match cohort and geography.
+
 For the original AI-manager hypothesis, the US is the target market, starting
 in Miami-Dade, Broward and Palm Beach.
 The owner's confirmed decision dated 2026-10-23 selects independent licensed

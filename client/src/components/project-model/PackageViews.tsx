@@ -25,6 +25,10 @@ const detailKeysByView: Record<string, (keyof typeof detailFields)[]> = {
   difference: ["differentiation", "contentEditing", "paidAdvertising", "attribution", "convenience", "netIncome", "positionIntent", "measurement", "rules", "aiAllowed", "humanHandoff", "unknown", "evidence", "metrics"],
 };
 type CuratedDetailKey = keyof typeof detailFields | "consent";
+type DescriptionBlock =
+  | { type: "heading"; text: string }
+  | { type: "paragraph"; text: string }
+  | { type: "table"; headers: string[]; rows: string[][] };
 const differenceConsentKey: CuratedDetailKey = "consent";
 const confidenceLabel = (element: ModelElement) =>
   element.contentStatus === "confirmed" ? "Согласовано"
@@ -56,6 +60,82 @@ const projectRoute = (query: string, hypothesisId?: string) => {
   if (hypothesisId) params.set("hypothesis", hypothesisId);
   return `/admin/project-model?${params.toString()}`;
 };
+
+function markdownCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
+function isTableSeparator(line: string, columnCount: number): boolean {
+  const cells = markdownCells(line);
+  return cells.length === columnCount && cells.length > 1 &&
+    cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseDescription(raw: string): { blocks: DescriptionBlock[]; lead: string; hasTables: boolean } {
+  const lines = raw.split(/\r?\n/);
+  const blocks: DescriptionBlock[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const header = markdownCells(lines[index]);
+    const separator = lines[index + 1];
+    if (lines[index].includes("|") && separator && isTableSeparator(separator, header.length)) {
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && lines[index].includes("|")) {
+        const candidate = markdownCells(lines[index]);
+        if (isTableSeparator(lines[index], header.length)) {
+          index += 1;
+          continue;
+        }
+        if (candidate.length === header.length) rows.push(candidate);
+        index += 1;
+      }
+      blocks.push({ type: "table", headers: header, rows });
+      continue;
+    }
+
+    const line = lines[index].trim();
+    index += 1;
+    if (!line) continue;
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    if (heading) {
+      blocks.push({ type: "heading", text: heading[1] });
+      continue;
+    }
+    const paragraph = [line];
+    while (index < lines.length && lines[index].trim() && !/^#{1,6}\s+/.test(lines[index].trim())) {
+      const nextHeader = markdownCells(lines[index]);
+      const nextSeparator = lines[index + 1];
+      if (lines[index].includes("|") && nextSeparator && isTableSeparator(nextSeparator, nextHeader.length)) break;
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+  }
+  const firstTable = blocks.findIndex((block) => block.type === "table");
+  const lead = (firstTable < 0 ? blocks : blocks.slice(0, firstTable))
+    .flatMap((block) => block.type === "table" ? [] : [block.text])
+    .join(" ");
+  return { blocks, lead, hasTables: firstTable >= 0 };
+}
+
+function DescriptionContent({ blocks }: { blocks: DescriptionBlock[] }) {
+  return <div className="pm-package-description">
+    {blocks.map((block, index) => {
+      if (block.type === "heading") return <h4 key={`heading-${index}`}>{block.text}</h4>;
+      if (block.type === "paragraph") return <p key={`paragraph-${index}`}>{block.text}</p>;
+      return <div className="pm-package-table-wrap" key={`table-${index}`}>
+        <table>
+          <thead><tr>{block.headers.map((header, cellIndex) => <th scope="col" key={`head-${cellIndex}`}>{header}</th>)}</tr></thead>
+          <tbody>{block.rows.map((row, rowIndex) => <tr key={`row-${rowIndex}`}>
+            {row.map((cell, cellIndex) => <td key={`cell-${cellIndex}`}>{cell}</td>)}
+          </tr>)}</tbody>
+        </table>
+      </div>;
+    })}
+  </div>;
+}
 
 function EvidenceLinks({ element, state, openElement }: { element: ModelElement; state: ProjectModelState; openElement: (element: ModelElement) => void }) {
   const hypothesisId = selectedHypothesisId(state);
@@ -113,15 +193,16 @@ export default function PackageViews({ state, view, openElement }: Props) {
     </div>
     <div className="pm-package-blocks">{packageElements.map(({ block, element }, index) => {
       const documents = element ? state.documents.filter((document) => document.elementIds.includes(element.id)) : [];
+      const description = element ? parseDescription(element.description) : null;
       const blockView = "view" in block ? block.view : undefined;
       const route = blockView === "benchmark" ? projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)
         : blockView ? projectRoute(`view=${blockView}`, hypothesisId)
           : projectRoute(`view=overview&element=${encodeURIComponent(block.id)}`, hypothesisId);
       const sources = (element?.details.source ?? "").split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
-      return <details className="pm-package-block" key={block.id}>
+      return <details className="pm-package-block" key={block.id} open={description?.hasTables || undefined}>
         <summary>
           <span className="pm-package-number">{String(index + 1).padStart(2, "0")}</span>
-           <span className="pm-package-block-main"><strong>{block.title}</strong><small>{element?.description || (element ? "Ещё не проработано." : "Узел не найден в сохранённой модели.")}</small></span>
+           <span className="pm-package-block-main"><strong>{block.title}</strong><small>{description?.hasTables ? description.lead : element?.description || (element ? "Ещё не проработано." : "Узел не найден в сохранённой модели.")}</small></span>
           <span className={`pm-package-confidence ${element?.contentStatus ?? "missing"}`}>{element ? confidenceLabel(element) : "Нет узла"}</span>
         </summary>
         <div className="pm-package-detail">
@@ -132,6 +213,7 @@ export default function PackageViews({ state, view, openElement }: Props) {
               <span>Обновлено: {dateLabel(element.updatedAt)}</span>
               {element.details.sourceDate && <span>Дата источника: {element.details.sourceDate}</span>}
             </div>
+            {description?.hasTables && <DescriptionContent blocks={description.blocks} />}
             {sources.length > 0 && <div className="pm-package-sources"><b>Источники</b>{sources.map((source, index) => {
               const href = safeUrl(source, hypothesisId);
               return href ? <a key={`${source}-${index}`} href={href} target="_blank" rel="noreferrer">{source}</a>

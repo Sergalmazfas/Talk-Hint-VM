@@ -82,6 +82,59 @@ describe("PackageViews SSR", () => {
     expect(markup).toContain("/admin/project-model?view=overview&amp;element=TH-PROBLEM");
   });
 
+  it("renders description pipe tables as semantic tables and keeps NYC in its separate table", () => {
+    const tableState = makeState();
+    const market = tableState.elements.find((element) => element.id === "TH-MARKET")!;
+    market.description = [
+      "Market sizing notes.",
+      "",
+      "| State | Reach |",
+      "| --- | ---: |",
+      "| State A | 1,234 |",
+      "| State B | 2,345 |",
+      "| State C | 3,456 |",
+      "| State D | 4,567 |",
+      "| State E | 5,678 |",
+      "",
+      "City estimate is separate.",
+      "",
+      "| City | Reach |",
+      "| --- | ---: |",
+      "| NYC | 9,876 |",
+    ].join("\n");
+    const markup = renderToStaticMarkup(React.createElement(PackageViews, { state: tableState, view: "overview", openElement: vi.fn() }));
+    const marketBlock = markup.match(/<details class="pm-package-block" open="">[\s\S]*?<strong>Рынок и сегменты<\/strong>[\s\S]*?<\/details>/)?.[0] ?? "";
+    expect(markup).toContain("<small>Market sizing notes.</small>");
+    expect(marketBlock.match(/<table>/g)).toHaveLength(2);
+    expect(marketBlock.match(/<tbody>/g)).toHaveLength(2);
+    expect(marketBlock).not.toContain("<td>---</td>");
+    expect(marketBlock).not.toContain("<td>---:</td>");
+    const tables = marketBlock.match(/<table>[\s\S]*?<\/table>/g) ?? [];
+    expect(tables[0].match(/<tr>/g)).toHaveLength(6);
+    expect(tables[1].match(/<tr>/g)).toHaveLength(2);
+    expect(tables[0]).not.toContain("NYC");
+    expect(tables[1]).toContain("<td>NYC</td>");
+  });
+
+  it("escapes table cell content and leaves non-table overview descriptions unchanged", () => {
+    const plainState = makeState();
+    plainState.elements.find((element) => element.id === "TH-MARKET")!.description = "Legacy text stays as-is.";
+    const plainMarkup = renderToStaticMarkup(React.createElement(PackageViews, { state: plainState, view: "overview", openElement: vi.fn() }));
+    expect(plainMarkup).toContain("<small>Legacy text stays as-is.</small>");
+    expect(plainMarkup).not.toContain("pm-package-table-wrap");
+
+    const safeState = makeState();
+    safeState.elements.find((element) => element.id === "TH-MARKET")!.description = [
+      "Safe table.",
+      "| Item | Note |",
+      "| --- | --- |",
+      "| <script>alert(1)</script> | &quoted; |",
+    ].join("\n");
+    const safeMarkup = renderToStaticMarkup(React.createElement(PackageViews, { state: safeState, view: "overview", openElement: vi.fn() }));
+    expect(safeMarkup).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(safeMarkup).not.toContain("<script>");
+  });
+
   it("shows persisted needs, alternatives, economics, and evidence on the segment view", () => {
     const markup = renderToStaticMarkup(React.createElement(PackageViews, { state, view: "segment", openElement: vi.fn() }));
     expect(markup).toContain("Трудно отслеживать обращения");
