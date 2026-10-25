@@ -15,6 +15,23 @@ explicitly requested the model for detailed work on TalkHint with ChatGPT.
 separate from implementation readiness. Crew represents obligations, not
 automatically executing agents. Future ChatGPT model tools need separate approval.
 
+The owner now wants a real product-work crew, not planning as the final result.
+Maintain one sequential roadmap starting with intake from owner, users/support,
+competitors/research and crew itself. A finding needs provenance, evidence/type,
+client/need, related process, responsibility and a next step; one case can have
+several linked works without losing its single accountable owner. Reuse existing
+cases and results rather than switching to unrelated tasks.
+
+**Why:** the owner explicitly asked for “единый последовательный roadmap” to
+“перестать переключаться между несвязанными задачами” and said “Цель владельца —
+реально запустить crew”.
+
+**How to apply:** first complete one traceable intake-to-accepted-result cycle.
+Define acceptance before execution. Distinguish role preparation, manual Replit
+research, offline fixtures and an actual worker run. If the real executor or its
+authorized tools/profile are missing, state the concrete blocker and next action;
+do not present described roles or manual work as an autonomous crew.
+
 Keep independent product hypotheses, not successive replacements of one model.
 Neither has been chosen as the primary hypothesis. The original is TalkHint as
 an AI manager of a small business with specialist roles; retain all its ten

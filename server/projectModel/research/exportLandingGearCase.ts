@@ -2,6 +2,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dbReady, isDevDatabase, pool } from "../../db";
 import { landingGearDocumentTitle } from "./landingGearCaseContent";
+import { crewRoadmapTitle } from "./crewRoadmapContent";
 import { readHypothesis } from "../hypotheses";
 const escape = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 function inline(text: string) {
@@ -32,12 +33,14 @@ async function main() {
   const { rows } = await pool.query(`SELECT state FROM talkhint_project_models WHERE EXISTS
     (SELECT 1 FROM jsonb_array_elements(coalesce(state->'alternatives','[]'::jsonb)) a WHERE a->>'id'='new-country')`);
   if (rows.length !== 1) throw new Error("Ambiguous owner; no export");
-  const doc = readHypothesis(rows[0].state, "new-country").documents.find(d => d.title === landingGearDocumentTitle);
+  const roadmap = process.argv.includes("--crew-roadmap");
+  const doc = readHypothesis(rows[0].state, "new-country").documents.find(d => d.title === (roadmap ? crewRoadmapTitle : landingGearDocumentTitle));
   if (!doc) throw new Error("Saved case document not found");
-  const folder = "generated-artifacts/landing-gear-case";
+  const folder = roadmap ? "generated-artifacts/crew-roadmap" : "generated-artifacts/landing-gear-case";
+  const filename = roadmap ? "talkhint-crew-roadmap-v1" : "talkhint-landing-gear-v1";
   await mkdir(folder, { recursive: true });
-  await writeFile(`${folder}/talkhint-landing-gear-v1.md`, doc.text);
-  await writeFile(`${folder}/talkhint-landing-gear-v1.html`, `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  await writeFile(`${folder}/${filename}.md`, doc.text);
+  await writeFile(`${folder}/${filename}.html`, `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(doc.title)}</title><style>
 *{box-sizing:border-box}body{margin:0;background:#f3f7f7;color:#193133;font:16px/1.65 system-ui,-apple-system,sans-serif}
 main{max-width:1200px;margin:24px auto;background:white;padding:38px;border-radius:16px}header{color:#496063;border-bottom:1px solid #dce6e5;padding-bottom:18px}

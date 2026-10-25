@@ -677,3 +677,17 @@ mtime_ms = 1792950573643
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/201fda31-601b-4982-8a81-14d165ae4247/29abdbfa-ca15-40ed-a780-70100fbee3e1"
 storage_version_token = "1792950662819507"
 content_type = "text/html"
+
+[[outputs]]
+id = "9KantdLFMyZ9TkCkuf9lN"
+uri = "file://generated-artifacts/crew-roadmap/talkhint-crew-roadmap-v1.html"
+type = "html"
+title = "TalkHint — единый roadmap работы crew, v1"
+description = "Для обсуждения. Инвентаризация, общий приём находок, последовательность этапов, обязанности семи ролей, первый цикл landing gear, критерии приёмки и конкретные блокеры рабочего запуска. Экспорт сохранённого документа Dev."
+logical_id = "bccdc65e-c0fe-400d-b8fb-dab72b64ac11"
+content_hash = "sha256:0f410c2bc037a7f2f623e73dda4bbb1fd971775145e4f5c2418c668fc5d77c8e"
+size = 47455
+mtime_ms = 1792951269027
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bccdc65e-c0fe-400d-b8fb-dab72b64ac11/2652f4ed-06f6-4c4b-9238-b5309114c3c2"
+storage_version_token = "1792951369477691"
+content_type = "text/html"
