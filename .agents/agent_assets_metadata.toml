@@ -598,14 +598,14 @@ content_type = "text/html"
 id = "SF0OSSFhu0ddpN52kbeJ5"
 uri = "file://docs/CLAUDE-PRODUCTION-SECRETARY-CHECK.md"
 type = "text"
-title = "Задание Claude — запуск Secretary на production"
-description = "Готовый текст для копирования: существующая сборка, правильный сервер, личная линия, Катя v2, без автоматического звонка."
+title = "Задание Claude: Катя + Retell, сборка для production"
+description = "Сборка существующего Swift-приложения, проверка выбора Кати и запуска с talkhint.app. Без подключения к Dev и без автоматических звонков."
 logical_id = "6347dc58-96c7-41e6-985a-f0bc5dcc4752"
-content_hash = "sha256:098991ed7345c6e5cdf298bcac0cd130c5ff03482a6a613b321ab9fa9759a317"
-size = 3798
-mtime_ms = 1792896822534
-storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6347dc58-96c7-41e6-985a-f0bc5dcc4752/cde17712-b457-41ee-b901-893556f669aa"
-storage_version_token = "1792897063840393"
+content_hash = "sha256:06d8b3c63858706743f02b00cf83361353295121b53e19f0c7c95dc1a8dbb82c"
+size = 5599
+mtime_ms = 1792897818866
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6347dc58-96c7-41e6-985a-f0bc5dcc4752/a201b893-0c6d-4574-8cc1-3ac6b38edc6c"
+storage_version_token = "1792898024454519"
 content_type = "text/markdown"
 
 [[outputs]]

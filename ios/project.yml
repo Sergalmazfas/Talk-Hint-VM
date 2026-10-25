@@ -72,6 +72,10 @@ schemes:
       targets:
         TalkHint: all
         TalkHintTests: [test]
+    run:
+      config: Debug
+      environmentVariables:
+        TALKHINT_API_BASE_URL: https://talkhint.app
     test:
       targets:
         - TalkHintTests

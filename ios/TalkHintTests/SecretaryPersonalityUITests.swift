@@ -192,9 +192,13 @@ final class SecretaryPersonalityUITests: XCTestCase {
 
     func testSettingsKatyaCharacterExplicitCardsSaveAndReopen() async throws {
         let screen = try await open()
+        XCTAssertEqual(cell(screen, 0).textLabel?.text, SecretaryVoiceProviderPreference.retell.displayName)
         XCTAssertEqual(cell(screen, 2).textLabel?.text, NSLocalizedString("secretary.personality.none", comment: ""))
         XCTAssertEqual(cell(screen, 4).accessoryType, .none)
         try await chooseKatya(screen)
+        XCTAssertEqual(cell(screen, 2).textLabel?.text, "Катя")
+        XCTAssertFalse(cell(screen, 2).detailTextLabel?.text?.contains(
+            NSLocalizedString("secretary.personality.version", comment: "")) == true)
         XCTAssertEqual(cell(screen, 3).textLabel?.text, "Fixture: situational humor, no invented biography.")
         XCTAssertTrue(cell(screen, 3).detailTextLabel?.text?.contains("Fixture personal guidance") == true)
         XCTAssertTrue(cell(screen, 3).detailTextLabel?.text?.contains("Fixture example") == true)
@@ -696,6 +700,17 @@ final class SecretaryPersonalityUITests: XCTestCase {
         let requests = await server.recorded()
         XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/outgoing") == true },
                        "A stale line must not be replaced by the first available line")
+    }
+
+    func testSharedOutgoingDefaultDecodingKeepsLegacyAndRejectsIncompleteBinding() throws {
+        let data = Data(#"{"numbers":[{"id":"personal-line","type":"personal","twilioNumber":"+12025550101"}],"defaultOutgoing":{"numberId":"personal-line","provider":"retell"}}"#.utf8)
+        let context = try JSONDecoder().decode(SecretaryPersonalityContext.self, from: data)
+        XCTAssertEqual(context.defaultOutgoing?.provider, "retell")
+        XCTAssertEqual(context.defaultOutgoing?.numberId, context.numbers.first?.id)
+        let legacy = try JSONDecoder().decode(SecretaryPersonalityContext.self, from: Data(#"{"numbers":[]}"#.utf8))
+        XCTAssertNil(legacy.defaultOutgoing)
+        XCTAssertThrowsError(try JSONDecoder().decode(SecretaryPersonalityContext.self,
+            from: Data(#"{"numbers":[],"defaultOutgoing":{"numberId":"personal-line"}}"#.utf8)))
     }
 
     func testReviewBlocksRetellWithoutSavedOutgoingLine() throws {
