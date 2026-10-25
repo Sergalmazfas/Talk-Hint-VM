@@ -85,6 +85,23 @@ class PersonalityLifecycleGuards(unittest.TestCase):
         self.assertIn('self.cell(screen, 5).textLabel?.text == NSLocalizedString("secretary.personality.save"', test)
         self.assertIn('XCTAssertEqual(requests.filter { $0.httpMethod == "PUT" }.count, 1)', test)
 
+    def test_interrupted_save_observes_departure_before_release_and_drain(self):
+        test = body(self.tests, "func testReturnAfterInterruptedSaveReadsSameLineWithoutAnotherPUT()")
+        push = test.index("nav.pushViewController(away, animated: false)")
+        departure = test.index("screen.viewIfLoaded?.window == nil", push)
+        release = test.index("await gate.release()", push)
+        drain = test.index("await screen.finishPendingOperations()", push)
+        pop = test.index("nav.popViewController(animated: false)", push)
+        self.assertLess(departure, release)
+        self.assertLess(release, drain)
+        self.assertLess(drain, pop)
+        self.assertIn("self.nav.topViewController === screen", test[:push])
+        self.assertIn("self.nav.transitionCoordinator == nil", test[:push])
+        self.assertIn("self.nav.topViewController === away", test[push:release])
+        self.assertIn("away.viewIfLoaded?.window === self.window", test[push:release])
+        self.assertIn("self.nav.transitionCoordinator == nil", test[push:release])
+        self.assertIn("screen.viewIfLoaded?.window === self.window", test[pop:])
+
 
 if __name__ == "__main__":
     unittest.main()
