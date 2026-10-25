@@ -1,3 +1,5 @@
+import type { CompetitorResearch, QuarterlyCompetitorSnapshot, CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand } from "./competitorResearch";
+export type { CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand };
 /** Internal research only; no connection to phone-agent capabilities or prices. */
 export const competitorScenarios = {
   translation: "Перевод разговора",
@@ -50,6 +52,7 @@ export interface CompetitorSnapshot {
   scenarios: CompetitorScenario[];
   sources: { url: string; checkedAt: string; note: string }[];
   limitations: string;
+  research?: CompetitorResearch;
 }
 export interface CompetitorRevision {
   version: number;
@@ -60,7 +63,12 @@ export interface CompetitorRevision {
 export interface CompetitorRecord { id: string; revisions: CompetitorRevision[] }
 export interface CompetitorDirectory {
   records: CompetitorRecord[];
-  talkhint: { checkedAt: string; note: string; scenarios: CompetitorScenario[] };
+  talkhint: {
+    checkedAt: string; note: string; scenarios: CompetitorScenario[];
+    research?: { current: CompetitorResearch; target: CompetitorResearch; checkedAt: string; reason: string };
+    researchHistory?: { version: number; savedAt: string; research: NonNullable<CompetitorDirectory["talkhint"]["research"]> }[];
+  };
+  quarters?: QuarterlyCompetitorSnapshot[];
 }
 export interface SaveCompetitorCommand {
   type: "saveCompetitor";

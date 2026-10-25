@@ -74,6 +74,24 @@ and prohibited invented city figures, penetration rates and working-number share
 **How to apply:** do not claim a new microdata calculation or validation when only
 formatting supplied figures; future city research must match cohort and geography.
 
+The new-country competitor workspace has three levels: canonical company
+cards, a matrix derived from those cards, and evidence-based positioning.
+Service availability, obtainable phone numbers and evidenced customer
+presence are separate geography facts. Language counts and Russian/Spanish
+support are per function. Captions and Type to Speak are not generated
+real-time reply hints; unknown is neither absence nor zero.
+
+**Why:** the owner requested structure before further card research, and wants
+comparisons that do not infer functionality or reach from marketing.
+
+**How to apply:** preserve existing AI Phone data and older hypotheses.
+Show current and target TalkHint separately; explain ranking and map methods,
+and withhold confident positions without evidence. Company size needs a source
+and is not a substitute for functional similarity. Quarterly snapshots are
+manual, historical, comparable records with separate development conclusions.
+ChatGPT prepares reports externally; there is no automatic write integration
+with this workspace without a separate implementation and approval.
+
 The new-country competitor directory starts only with the approved AI Phone
 record; do not discover or add other companies automatically. Preserve dated
 price snapshots and their differences, clearly distinguish supplied information

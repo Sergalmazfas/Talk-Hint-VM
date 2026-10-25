@@ -1,4 +1,4 @@
-import type { CompetitorDirectory, SaveCompetitorCommand } from "./projectCompetitors";
+import type { CompetitorDirectory, SaveCompetitorCommand, CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand } from "./projectCompetitors";
 /** Internal TalkHint planning data. Never injected into phone-agent instructions. */
 export const modelSections = [
   "Обзор", "Бизнес-модель", "Рынок и конкуренты", "Экономика", "Процессы и Crew",
@@ -107,6 +107,8 @@ export interface ProjectModelState {
 }
 export type ModelCommand =
   | SaveCompetitorCommand
+  | CaptureCompetitorQuarterCommand
+  | SaveTalkHintResearchCommand
   | { type: "createElement"; id: string; element: ElementInput }
   | { type: "saveElement"; id?: string; element: ElementInput }
   | { type: "saveProposal"; id?: string; targetId: string; source: string; rationale: string; relatedIds: string[]; change: ElementInput }

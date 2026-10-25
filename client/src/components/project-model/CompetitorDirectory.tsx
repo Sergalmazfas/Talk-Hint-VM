@@ -1,6 +1,5 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
-  competitorEvidenceStatuses,
   competitorScenarios,
   competitorPrice,
   competitorSnapshotDiff,
@@ -11,6 +10,9 @@ import {
   type CompetitorSnapshot,
 } from "@shared/projectCompetitors";
 import type { ModelCommand } from "@shared/projectModel";
+import { emptyCompetitorResearch, researchFor } from "@shared/competitorResearch";
+import { CompetitorResearchEditor, CompetitorResearchProfile } from "@/components/project-model/CompetitorResearchProfile";
+import CompetitorResearchWorkbench from "@/components/project-model/CompetitorResearchWorkbench";
 
 type Props = {
   directory?: CompetitorDirectoryData;
@@ -48,7 +50,6 @@ const nestedFieldLabels: Record<string, Record<string, string>> = {
   sources: { url: "URL источника", checkedAt: "Дата проверки источника", note: "Заметка источника" },
 };
 const scenarioEntries = Object.entries(competitorScenarios) as [ScenarioKey, string][];
-const evidenceEntries = Object.entries(competitorEvidenceStatuses) as [CompetitorScenario["status"], string][];
 
 function latestRevision(directory: CompetitorDirectoryData | undefined, id: string) {
   const record = directory?.records.find((item) => item.id === id);
@@ -59,6 +60,7 @@ function cloneSnapshot(snapshot: CompetitorSnapshot): CompetitorSnapshot {
   return {
     ...snapshot,
     offer: { ...snapshot.offer },
+    research: snapshot.research ? structuredClone(snapshot.research) : undefined,
     plans: snapshot.plans.map((plan) => ({ ...plan })),
     scenarios: scenarioEntries.map(([scenario]) => {
       const current = snapshot.scenarios.find((item) => item.scenario === scenario);
@@ -130,9 +132,6 @@ function OfferSection({ snapshot }: { snapshot: CompetitorSnapshot }) {
       <div><dt>Разработчик</dt><dd>{showValue(snapshot.developer)}</dd></div>
       <div><dt>Целевая аудитория</dt><dd>{showValue(snapshot.audience)}</dd></div>
       <div><dt>Функции</dt><dd>{showValue(snapshot.offer.features)}</dd></div>
-      <div><dt>Языки</dt><dd>{showValue(snapshot.offer.languages)}</dd></div>
-      <div><dt>Регионы</dt><dd>{showValue(snapshot.offer.regions)}</dd></div>
-      <div><dt>Телефонные номера</dt><dd>{showValue(snapshot.offer.numbers)}</dd></div>
       <div><dt>Каналы</dt><dd>{showValue(snapshot.offer.channels)}</dd></div>
       <div><dt>Ограничения</dt><dd>{showValue(snapshot.limitations)}</dd></div>
     </dl>
@@ -161,32 +160,42 @@ function TariffsSection({ snapshot }: { snapshot: CompetitorSnapshot }) {
   </section>;
 }
 
-function ScenarioStatus({ status }: { status: CompetitorScenario["status"] }) {
-  return <span className={`pm-cd-status status-${status}`}>{competitorEvidenceStatuses[status]}</span>;
-}
-
-function ScenarioMatrix({ directory, snapshots }: { directory: CompetitorDirectoryData; snapshots: { id: string; snapshot: CompetitorSnapshot }[] }) {
-  const baseline = new Map(directory.talkhint.scenarios.map((item) => [item.scenario, item]));
-  return <div className="pm-cd-matrix-wrap"><table className="pm-cd-matrix">
-    <thead><tr><th scope="col">Сценарий</th><th scope="col">TalkHint · сохранённая база</th>{snapshots.map(({ id, snapshot }) => <th scope="col" key={id}>{snapshot.name}</th>)}</tr></thead>
-    <tbody>{scenarioEntries.map(([scenario, label]) => {
-      const talkhint = baseline.get(scenario);
-      return <tr key={scenario}>
-        <th scope="row">{label}</th>
-        <td><ScenarioCell scenario={talkhint} /></td>
-        {snapshots.map(({ id, snapshot }) => <td key={id}><ScenarioCell scenario={snapshot.scenarios.find((item) => item.scenario === scenario)} /></td>)}
-      </tr>;
-    })}</tbody>
-  </table></div>;
-}
-
-function ScenarioCell({ scenario }: { scenario?: CompetitorScenario }) {
-  if (!scenario) return <div className="pm-cd-scenario"><ScenarioStatus status="unknown" /><span>Не подтверждено</span></div>;
-  return <div className="pm-cd-scenario">
-    <ScenarioStatus status={scenario.status} />
-    <span>{showValue(scenario.note)}</span>
-    {scenario.sourceUrls.map((source, index) => <LinkValue key={`${source}-${index}`} value={source} />)}
+function LegacyScenarioCell({ evidence }: { evidence?: Pick<CompetitorScenario, "status" | "note" | "sourceUrls"> }) {
+  const status = evidence?.status ?? "unknown";
+  const statusLabels = {
+    official_claim: "Заявлено официально",
+    code_present: "Есть в коде; не проверено этим сравнением",
+    live_verified: "Проверено живым сценарием",
+    planned: "Целевая концепция / план",
+    not_supported: "Не поддерживается по источнику",
+    unknown: "Не подтверждено",
+  } as const;
+  return <div className="pm-cr-legacy-cell">
+    <span className={`pm-cr-status status-${status}`}>{statusLabels[status]}</span>
+    <p>{evidence?.note || "Не подтверждено"}</p>
+    {evidence?.sourceUrls.map((source, index) => <LinkValue value={source} key={`${source}-${index}`} />)}
   </div>;
+}
+
+function LegacyScenarioReadOnly({ snapshot, directory }: { snapshot: CompetitorSnapshot; directory: CompetitorDirectoryData }) {
+  return <section className="pm-cr-legacy-compat pm-cd-section">
+    <div className="pm-cd-section-head"><span>READ-ONLY COMPATIBILITY</span><h3>Функциональное сравнение</h3></div>
+    <p>Совместимое представление прежних шести сценариев для старых сохранённых данных. Поля только для чтения; редактирование ведётся в едином редакторе девяти функций выше.</p>
+    <div className="pm-cr-legacy-table-wrap"><table className="pm-cr-legacy-table">
+      <thead><tr><th scope="col">Совместимый сценарий</th><th scope="col">TalkHint · текущая позиция</th><th scope="col">TalkHint · цель</th><th scope="col">{snapshot.name}</th></tr></thead>
+      <tbody>{scenarioEntries.map(([scenario, label]) => {
+        const baseline = directory.talkhint.scenarios.find((item) => item.scenario === scenario);
+        const current = directory.talkhint.research?.current.features[scenario] ?? baseline;
+        const target = directory.talkhint.research?.target.features[scenario];
+        const competitor = snapshot.scenarios.find((item) => item.scenario === scenario);
+        return <tr key={scenario}><th scope="row">{label}</th>
+          <td><LegacyScenarioCell evidence={current} /></td>
+          <td><LegacyScenarioCell evidence={target} /></td>
+          <td><LegacyScenarioCell evidence={competitor} /></td>
+        </tr>;
+      })}</tbody>
+    </table></div>
+  </section>;
 }
 
 function EvidenceSection({ directory, id, snapshot }: { directory: CompetitorDirectoryData; id: string; snapshot: CompetitorSnapshot }) {
@@ -239,8 +248,6 @@ function DirectoryEditor({
     patchSnapshot({ offer: { ...snapshot.offer, [key]: value } });
   const updatePlan = (index: number, key: PlanKey, value: string | number | null) =>
     patchSnapshot({ plans: snapshot.plans.map((plan, planIndex) => planIndex === index ? { ...plan, [key]: value } : plan) });
-  const updateScenario = (scenario: ScenarioKey, key: keyof CompetitorScenario, value: string | string[]) =>
-    patchSnapshot({ scenarios: snapshot.scenarios.map((item) => item.scenario === scenario ? { ...item, [key]: value } : item) });
   const rebaseDiff = rebaseSnapshot ? competitorSnapshotDiff(rebaseSnapshot, snapshot) : [];
   return <form className="pm-cd-editor" onSubmit={onSave}>
     <div className="pm-cd-editor-head">
@@ -267,8 +274,7 @@ function DirectoryEditor({
           <option value="manual">Проверка источников вручную</option><option value="provided">Сведения предоставлены, не проверены</option>
         </select></label>
         {([
-          ["features", "Функции"], ["languages", "Языки"], ["regions", "Регионы"],
-          ["numbers", "Телефонные номера"], ["channels", "Каналы"],
+          ["features", "Описание функций"], ["channels", "Каналы"],
         ] as [keyof CompetitorSnapshot["offer"], string][]).map(([key, label]) => <label key={key}>{label}
           <textarea value={snapshot.offer[key]} onChange={(event) => patchOffer(key, event.target.value)} /></label>)}
         <label className="pm-cd-form-wide">Ограничения<textarea value={snapshot.limitations} onChange={(event) => patchSnapshot({ limitations: event.target.value })} /></label>
@@ -304,19 +310,13 @@ function DirectoryEditor({
     </fieldset>
 
     <fieldset disabled={saving || needsRebase}>
-      <legend>Шесть стандартных сценариев</legend>
-      <div className="pm-cd-editor-list">{snapshot.scenarios.map((scenario) => <article className="pm-cd-edit-card" key={scenario.scenario}>
-        <div className="pm-cd-edit-card-head"><strong>{competitorScenarios[scenario.scenario]}</strong></div>
-        <div className="pm-cd-form-grid">
-          <label>Статус<select value={scenario.status} onChange={(event) => updateScenario(scenario.scenario, "status", event.target.value)}>
-            {evidenceEntries.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-          </select></label>
-          <label className="pm-cd-form-wide">Примечание / доказательство<textarea value={scenario.note} onChange={(event) => updateScenario(scenario.scenario, "note", event.target.value)} /></label>
-          <label className="pm-cd-form-wide">URL источников, по одному на строку<textarea value={scenario.sourceUrls.join("\n")} onChange={(event) => updateScenario(scenario.scenario, "sourceUrls", event.target.value.split("\n").map((value) => value.trim()).filter(Boolean))} /></label>
-        </div>
-      </article>)}</div>
+      <legend>Структурированное исследование</legend>
+      <p className="pm-cr-editor-intro">Старые сценарии читаются как совместимые сведения. Новые поля остаются неизвестными, пока не внесены с источником.</p>
+      <CompetitorResearchEditor
+        research={snapshot.research ?? researchFor(snapshot)}
+        onChange={(research) => patchSnapshot({ research })}
+      />
     </fieldset>
-
     <fieldset disabled={saving || needsRebase}>
       <legend>Источники и даты проверки</legend>
       <div className="pm-cd-editor-list">{snapshot.sources.map((source, index) => <article className="pm-cd-edit-card" key={`source-${index}`}>
@@ -349,16 +349,12 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
   const selectedRevision = selectedId ? latestRevision(directory, selectedId) : undefined;
   const selectedRecord = selectedId ? records.find((record) => record.id === selectedId) : undefined;
   const selectedSnapshot = selectedRevision?.snapshot;
-  const selectedComparisons = useMemo(() => comparedIds.flatMap((id) => {
-    const snapshot = latestSnapshot(directory, id);
-    return snapshot ? [{ id, snapshot }] : [];
-  }), [directory, comparedIds]);
 
   function startNew() {
     setSavedNotice("");
     setSaveError("");
     setNeedsRebase(false);
-    setDraft({ baseVersion: 0, reason: "", snapshot: emptyCompetitorSnapshot() });
+    setDraft({ baseVersion: 0, reason: "", snapshot: { ...emptyCompetitorSnapshot(), research: emptyCompetitorResearch() } });
   }
   function startEdit(id: string) {
     const revision = latestRevision(directory, id);
@@ -366,7 +362,9 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
     setSavedNotice("");
     setSaveError("");
     setNeedsRebase(false);
-    setDraft({ id, baseVersion: revision.version, reason: "", snapshot: cloneSnapshot(revision.snapshot) });
+    const snapshot = cloneSnapshot(revision.snapshot);
+    snapshot.research = researchFor(revision.snapshot);
+    setDraft({ id, baseVersion: revision.version, reason: "", snapshot });
   }
   function closeEditor() {
     setDraft(null);
@@ -424,12 +422,8 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
       <div className="pm-cd-detail-grid">
         <OfferSection snapshot={selectedSnapshot} />
         <TariffsSection snapshot={selectedSnapshot} />
-        <section className="pm-cd-section pm-cd-scenarios">
-          <div className="pm-cd-section-head"><span>03 / SIX SCENARIOS</span><h3>Функциональное сравнение</h3></div>
-          <p className="pm-cd-baseline-note">Статусы TalkHint взяты из отдельной сохранённой базы; заявленное, присутствующее в коде, запланированное и живое подтверждение различаются.</p>
-          {directory?.talkhint.scenarios?.length ? <ScenarioMatrix directory={directory} snapshots={[{ id: selectedRecord.id, snapshot: selectedSnapshot }]} />
-            : <div className="pm-cd-empty">База сценариев TalkHint не заполнена; сравнение не подменяется предположениями.</div>}
-        </section>
+        <CompetitorResearchProfile research={researchFor(selectedSnapshot)} />
+        {directory && <LegacyScenarioReadOnly snapshot={selectedSnapshot} directory={directory} />}
         {directory && <EvidenceSection directory={directory} id={selectedRecord.id} snapshot={selectedSnapshot} />}
       </div>
     </section>;
@@ -477,27 +471,22 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
     </div>
     {!records.length && <div className="pm-cd-empty">Сохранённых карточек пока нет. Добавьте конкурента вручную после выбора источников; автоматического обнаружения нет.</div>}
 
-    <section className="pm-cd-comparison">
-      <div className="pm-cd-section-head"><span>COMPARE / SAVED EVIDENCE</span><h3>Сценарии и стоимость</h3></div>
-      <div className="pm-cd-comparison-actions">
-        <p>{comparedIds.length ? `В сравнении карточек: ${comparedIds.length}. Отметьте строки и примените выбор, чтобы изменить матрицу.` : "Отметьте одну или несколько карточек, затем нажмите «Сравнить выбранных»."}</p>
-        <div className="pm-cd-comparison-buttons">
-          <button className="pm-btn primary small" type="button" disabled={!comparisonSelection.length} onClick={() => setComparedIds([...comparisonSelection])}>Сравнить выбранных</button>
-          {(comparisonSelection.length > 0 || comparedIds.length > 0) && <button className="pm-btn small" type="button" onClick={() => { setComparisonSelection([]); setComparedIds([]); }}>Очистить выбор</button>}
-        </div>
+    <div className="pm-cd-comparison-actions">
+      <p>{comparedIds.length ? `В матрице карточек: ${comparedIds.length}. Измените отмеченные строки и примените выбор.` : "Отметьте карточки, затем примените выбранный набор к матрице."}</p>
+      <div className="pm-cd-comparison-buttons">
+        <button className="pm-btn primary small" type="button" disabled={!comparisonSelection.length} onClick={() => setComparedIds([...comparisonSelection])}>Сравнить выбранных</button>
+        {(comparisonSelection.length > 0 || comparedIds.length > 0) && <button className="pm-btn small" type="button" onClick={() => { setComparisonSelection([]); setComparedIds([]); }}>Очистить выбор</button>}
       </div>
-      {comparedIds.length > 0 && directory && <>
-        <ScenarioMatrix directory={directory} snapshots={selectedComparisons} />
-        <div className="pm-cd-costs">
-          {selectedComparisons.map(({ id, snapshot }) => <article className="pm-cd-cost-card" key={id}>
-            <h4>{snapshot.name}</h4>
-            {snapshot.plans.length ? snapshot.plans.map((plan, index) => <p key={plan.id || index}><strong>{plan.name || kindLabels[plan.kind]}:</strong> {competitorPrice(plan)} · {showValue(plan.includedNumbers)} номеров · {showValue(plan.includedMinutes)} минут · {showValue(plan.includedCredits)} кредитов · {showValue(plan.includedSms)} SMS</p>)
-              : <p>Тарифы не указаны; цена неизвестна.</p>}
-          </article>)}
-        </div>
-      </>}
-      {comparedIds.length > 0 && !directory?.talkhint.scenarios?.length && <div className="pm-cd-empty">Базовые сценарии TalkHint пока не сохранены; доступны только данные выбранных карточек.</div>}
-    </section>
+    </div>
+
+    {directory && (view === "benchmark" || comparedIds.length > 0) && <CompetitorResearchWorkbench
+      directory={directory}
+      initialSelectedIds={comparedIds}
+      submit={submit}
+      saving={saving}
+      showSelectionControls={view === "benchmark"}
+      onClearInitialSelection={() => { setComparisonSelection([]); setComparedIds([]); }}
+    />}
     {directory && <section className="pm-cd-talkhint-note">
       <div><h3>TalkHint · baseline</h3><span>Проверено: {dateLabel(directory.talkhint.checkedAt)}</span></div>
       <p>{showValue(directory.talkhint.note)}</p>

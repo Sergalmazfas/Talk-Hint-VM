@@ -14,6 +14,7 @@ import { initialModel } from "./seed";
 import { applyHypothesisCommand, readHypothesis } from "./hypotheses";
 import { ModelError } from "./domain";
 import { initialAIPhoneSnapshot } from "./competitorInitial";
+import { emptyCompetitorResearch } from "../../shared/competitorResearch";
 import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
 import type { ModelRepository } from "./repository";
 
@@ -67,6 +68,28 @@ describe("competitor directory HTTP protections", () => {
     expect(other.body.competitorDirectory).toBeUndefined();
     const original = await request(app).get("/api/admin/project-model").set("x-test-user", "owner");
     expect(original.body.competitorDirectory).toBeUndefined();
+  });
+  it("saves and rereads manual quarterly snapshots and TalkHint-only research with the same owner/revision protections", async () => {
+    const saved = await post(mutation());
+    expect(saved.status).toBe(200);
+    const now = new Date(), quarter = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+    const capture = { type: "captureCompetitorQuarter", quarter, reason: "Ручная сверка", direction: "Без утверждения о готовности функций" };
+    const captured = await post({ revision: saved.body.revision, command: capture });
+    expect(captured.status).toBe(200);
+    expect(captured.body.competitorDirectory.quarters).toHaveLength(1);
+    expect((await post({ revision: captured.body.revision, command: { ...capture, competitorVersions: [] } })).status).toBe(400);
+    const command = { type: "saveTalkHintResearch", current: emptyCompetitorResearch(), target: emptyCompetitorResearch(), checkedAt: "2026-10-24", reason: "Только исследовательская карточка" };
+    expect((await post({ revision: saved.body.revision, command })).status).toBe(409);
+    const updated = await post({ revision: captured.body.revision, command });
+    expect(updated.status).toBe(200);
+    expect(updated.body.competitorDirectory.talkhint.researchHistory).toHaveLength(1);
+    const reread = await request(app).get(path).set("x-test-user", "owner");
+    expect(reread.body.competitorDirectory.quarters).toEqual(captured.body.competitorDirectory.quarters);
+    expect(reread.body.competitorDirectory.records[0].revisions[0].snapshot).toEqual(initialAIPhoneSnapshot);
+    const second = await request(app).get(path).set("x-test-user", "second");
+    expect(second.body.competitorDirectory).toBeUndefined();
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await post({ revision: updated.body.revision, command: capture })).status).toBe(404);
   });
   it("rejects duplicate stale requests and stale individual card updates", async () => {
     const saved = await post(mutation());

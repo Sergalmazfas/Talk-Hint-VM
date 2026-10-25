@@ -3,7 +3,7 @@ import { z } from "zod";
 import { modelSections, elementKinds, detailFields, contentStatuses, implementationStatuses } from "../../shared/projectModel";
 import type { ModelCommand, ProjectModelState, ModelElement, ModelDecision } from "../../shared/projectModel";
 import { competitorScenarios } from "../../shared/projectCompetitors";
-import { saveCompetitorSchema } from "./competitorSchema";
+import { saveCompetitorSchema, captureCompetitorQuarterSchema, saveTalkHintResearchSchema } from "./competitorSchema";
 
 const str = (max = 12000) => z.string().max(max);
 const nonempty = (max = 2000) => z.string().trim().min(1).max(max);
@@ -18,6 +18,8 @@ export const elementSchema = z.object({
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
   saveCompetitorSchema,
+  captureCompetitorQuarterSchema,
+  saveTalkHintResearchSchema,
   z.object({ type: z.literal("createElement"), id: id.regex(/^[A-Z][A-Z0-9-]{2,90}$/), element: elementSchema }).strict(),
   z.object({ type: z.literal("saveElement"), id: id.optional(), element: elementSchema }).strict(),
   z.object({ type: z.literal("saveProposal"), id: id.optional(), targetId: id, source: nonempty(20000), rationale: nonempty(12000), relatedIds: ids, change: elementSchema }).strict(),
@@ -55,6 +57,37 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     affected.forEach(id => { element(id).needsReview = true; });
   }
   switch (c.type) {
+    case "captureCompetitorQuarter": {
+      const directory = s.competitorDirectory;
+      if (!directory) fail("Справочник конкурентов пока не создан", 409);
+      const now = new Date();
+      const currentQuarter = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+      if (c.quarter !== currentQuarter) fail("Ручной снимок фиксирует текущие данные и текущий квартал; историю нельзя датировать задним числом", 409);
+      if ((directory.quarters?.length ?? 0) >= 100) fail("Достигнут лимит 100 квартальных снимков рабочего пространства", 409);
+      const { researchHistory: _history, ...talkhintSnapshot } = directory.talkhint;
+      (directory.quarters ??= []).push({
+        id: `QUARTER-${randomUUID()}`, quarter: c.quarter, capturedAt: new Date().toISOString(),
+        reason: c.reason, direction: c.direction, methodologyVersion: 1,
+        competitorVersions: directory.records.flatMap(record => {
+          const revision = record.revisions.at(-1);
+          return revision ? [{ id: record.id, version: revision.version }] : [];
+        }),
+        talkhint: structuredClone(talkhintSnapshot),
+      });
+      log("Квартальный снимок конкурентов", c.reason, ["TH-PILOT-COMPETITORS"]);
+      break;
+    }
+    case "saveTalkHintResearch": {
+      const directory = s.competitorDirectory;
+      if (!directory) fail("Справочник конкурентов пока не создан", 409);
+      directory.talkhint.research = {
+        current: structuredClone(c.current), target: structuredClone(c.target), checkedAt: c.checkedAt, reason: c.reason,
+      };
+      const history = directory.talkhint.researchHistory ??= [];
+      history.push({ version: (history.at(-1)?.version ?? 0) + 1, savedAt: now, research: structuredClone(directory.talkhint.research) });
+      log("Сверка текущей и целевой карточек TalkHint", c.reason, ["TH-PILOT-COMPETITORS"]);
+      break;
+    }
     case "saveCompetitor": {
       const block = element("TH-PILOT-COMPETITORS");
       const directory = s.competitorDirectory ??= {
@@ -83,7 +116,15 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       const latestVersion = record?.revisions.at(-1)?.version ?? 0;
       if (c.baseVersion !== latestVersion) fail("Устаревшая версия карточки; перечитайте изменения и сохраните заново", 409);
       if (!record && directory.records.length >= 1000) fail("Достигнут лимит карточек", 413);
-      const revision = { version: latestVersion + 1, savedAt: now, reason: c.reason, snapshot: structuredClone(c.snapshot) };
+      const snapshot = structuredClone(c.snapshot);
+      if (snapshot.research) {
+        // The six legacy fields are derived compatibility data, not a second manual source.
+        snapshot.scenarios = snapshot.scenarios.map(scenario => {
+          const evidence = snapshot.research!.features[scenario.scenario];
+          return evidence ? { scenario: scenario.scenario, status: evidence.status, note: evidence.note, sourceUrls: [...evidence.sourceUrls] } : scenario;
+        });
+      }
+      const revision = { version: latestVersion + 1, savedAt: now, reason: c.reason, snapshot };
       const recordId = record?.id ?? newId("COMP");
       if (record) record.revisions.push(revision);
       else directory.records.push({ id: recordId, revisions: [revision] });

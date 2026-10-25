@@ -23,7 +23,7 @@ export function readHypothesis(root: ProjectModelState, id = "original"): Projec
 
 export function applyHypothesisCommand(root: ProjectModelState, id: string,
   command: ModelCommand, actor: string): ProjectModelState {
-  if (command.type === "saveCompetitor" && id !== "new-country")
+  if (["saveCompetitor", "captureCompetitorQuarter", "saveTalkHintResearch"].includes(command.type) && id !== "new-country")
     throw new ModelError(409, "Новый справочник доступен только в отдельной гипотезе new-country; прежние исследования не изменены.");
   if (id === "original") return applyCommand(root, command, actor);
   const index = root.alternatives?.findIndex(item => item.id === id) ?? -1;
