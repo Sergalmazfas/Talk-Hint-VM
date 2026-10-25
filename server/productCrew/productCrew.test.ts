@@ -164,6 +164,63 @@ describe("shared owner/hypothesis coordination", () => {
     expect(again.launched).toBe(false);
   });
 });
+describe("owner-approved public Dev MCP", () => {
+  it("reads and writes only the bound workspace without credentials, keeps replay protection and protected admin downloads", async () => {
+    const repo = new Repository(), other = structuredClone(repo.roots.get("other"));
+    const app = express();
+    registerProductCrew(app, { origin, key, store: new Store(), repo,
+      admin: (_req, res) => { res.sendStatus(403); },
+      authorizedOwner: async id => id === "owner", publicDevOwner: async () => "owner" });
+    const server = await new Promise<Server>(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    const url = `http://127.0.0.1:${(server.address() as any).port}`;
+    const call = async (method: string, params?: unknown) => {
+      const r = await fetch(`${url}/api/product-crew/mcp`, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+      expect(r.status).toBe(200);
+      return (await r.json() as any).result;
+    };
+    try {
+      expect((await call("initialize")).instructions).toContain("публичный");
+      const tools = (await call("tools/list")).tools;
+      expect(tools).toHaveLength(12);
+      expect(tools.every((t: any) => t.securitySchemes[0].type === "noauth")).toBe(true);
+      expect((await fetch(`${url}/.well-known/oauth-protected-resource/api/product-crew/mcp`)).status).toBe(404);
+      expect((await call("tools/call", { name: "get_team", arguments: {} })).isError).toBe(false);
+      const args = workInput();
+      const created = (await call("tools/call", { name: "create_work", arguments: args })).structuredContent.result;
+      expect(created.saved).toBe(true);
+      expect((await call("tools/call", { name: "create_work", arguments: args })).structuredContent.result.replayed).toBe(true);
+      const result = (await call("tools/call", { name: "submit_result", arguments: {
+        revision: created.revision, requestId: randomUUID(), recordId: created.record.id,
+        title: "Fixture result", text: "Synthetic document", nextStep: "Review" } })).structuredContent.result;
+      const docId = result.record.coordination.resultDocumentId;
+      const doc = (await call("tools/call", { name: "get_document", arguments: { documentId: docId } })).structuredContent.result;
+      expect(doc.downloadPath).toContain("/api/product-crew/documents/");
+      expect(await (await fetch(`${url}${doc.downloadPath}`)).text()).toBe("Synthetic document");
+      expect((await fetch(`${url}/api/admin/product-crew/documents/${docId}/download`)).status).toBe(403);
+      expect((await call("tools/call", { name: "get_team", arguments: { owner: "other" } })).isError).toBe(true);
+      expect(repo.roots.get("other")).toEqual(other);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+  it("never enables the public option in production", async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    let resolved = false;
+    const app = express();
+    registerProductCrew(app, { origin, key, store: new Store(), repo: new Repository(),
+      admin: (_req, res) => { res.sendStatus(403); }, authorizedOwner: async () => true,
+      publicDevOwner: async () => { resolved = true; return "owner"; } });
+    process.env.NODE_ENV = previous;
+    const server = await new Promise<Server>(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    try {
+      const r = await fetch(`http://127.0.0.1:${(server.address() as any).port}/api/product-crew/mcp`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
+      expect(r.status).toBe(401);
+      expect(resolved).toBe(false);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+});
 describe("HTTP plugin contract", () => {
   let server: Server, baseURL: string, access: string, writeAccess: string;
   const store = new Store(), repo = new Repository();
