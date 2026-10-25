@@ -1,6 +1,7 @@
 import { pool, dbReady, isDevDatabase } from "../../db";
 import { persistModelUpdate } from "../materialImport";
 import { refineT01 } from "./refineT01";
+import { defineMkt1Result } from "./defineMkt1Result";
 import { readHypothesis } from "../hypotheses";
 import { isDeepStrictEqual } from "node:util";
 async function main() {
@@ -11,7 +12,8 @@ async function main() {
     (SELECT 1 FROM jsonb_array_elements(coalesce(state->'alternatives','[]'::jsonb)) h WHERE h->>'id'='new-country')`);
   if (candidates.rows.length !== 1) throw new Error("Ambiguous owner; no update");
   const owner = candidates.rows[0].owner_key;
-  const updated = await persistModelUpdate(pool, owner, root => refineT01(root, owner), true);
+  const transform = process.argv.includes("--result-spec") ? defineMkt1Result : refineT01;
+  const updated = await persistModelUpdate(pool, owner, root => transform(root, owner), true);
   const rows = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
   const actual = readHypothesis(rows.rows[0].state, "new-country").operatingModel!;
   if (!isDeepStrictEqual(actual, readHypothesis(updated, "new-country").operatingModel)) throw new Error("Readback mismatch");

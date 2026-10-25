@@ -294,6 +294,16 @@ B2B-inside-B2C containment; both audiences must remain distinct.
 research. Agree required results and their customers first, then detail actions
 before deriving duties, skills and authority.
 
+An audience-research report can be accepted despite insufficient evidence if it
+clearly exposes the gap and proposes a way to check it. Acceptance is not proof
+of the hypothesis, demand or willingness to pay. B2C/B2B share one result standard
+but keep separate findings; B2B distinguishes user, buyer and decision-maker.
+
+**Why:** The user expressly set these acceptance and research-separation rules.
+
+**How to apply:** Preserve uncertainty in accepted reports and downstream decisions;
+do not invent interviews, tests or evidence to satisfy a completeness check.
+
 ## CrewAI checkpoint boundary
 
 Never silently create a new research run when a requested checkpoint is missing.
