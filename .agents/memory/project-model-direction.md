@@ -284,6 +284,16 @@ research separately from acquisition, and distinguish described work from outlin
 placeholders. Classify execution uncertainty at process/action level, not department
 level; completed work does not establish market effect.
 
+Audience research is not customer acquisition. B2C and B2B research must be sibling
+branches within shared audience research, never B2B nested inside B2C.
+
+**Why:** The user corrected the confusing “Поиск клиентов” research label and the
+B2B-inside-B2C containment; both audiences must remain distinct.
+
+**How to apply:** Preserve stable references and history when renaming or moving
+research. Agree required results and their customers first, then detail actions
+before deriving duties, skills and authority.
+
 ## CrewAI checkpoint boundary
 
 Never silently create a new research run when a requested checkpoint is missing.
