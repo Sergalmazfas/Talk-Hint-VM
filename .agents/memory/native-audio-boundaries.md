@@ -125,3 +125,15 @@ containing navigation controller.
 sheet, window attachment and settled transitions, and dismiss via the actual
 presenter. Requiring the navigation controller alone would make the opposite
 assumption rather than solve the underlying test-design problem.
+
+Successful instrumented single runs do not diagnose failures seen only with
+XCTest repetition enabled.
+
+**Why:** Mac observation confirmed the navigation presenter and the same window
+and scene for the sheet, but both observed single runs passed while repetition
+still failed. Simulator load and observer-induced timing changes remain
+hypotheses, not established causes.
+
+**How to apply:** Capture predicate values at failure under the original runner
+flags before another fix. Do not remove window checks or raise timeouts based
+solely on passing instrumented runs or simulator performance warnings.
