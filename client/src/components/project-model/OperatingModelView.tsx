@@ -77,7 +77,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       if (view === "team") params.set("workView", "team");
-      else params.delete("workView");
+      else { params.delete("workView"); params.delete("teamView"); }
       window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
     }
   };

@@ -10,6 +10,7 @@ import {
   buildTeamSnapshot, extractTeamPassportSections, getLinkedTeamDocuments,
   teamLinkIssueLabel,
 } from "./teamView";
+import TeamResultsView from "./TeamResultsView";
 
 type Props = { data: OperatingData | null; state: ProjectModelState };
 type CardData = { item: WorkNode; count?: number; expanded?: boolean; onToggle?: (id: string) => void; onSelect: (id: string) => void; selected: boolean };
@@ -65,6 +66,9 @@ function FlowToolbar({ onFit, onExpand, onCollapse }: { onFit: () => void; onExp
 
 function TeamCanvas({ data, state }: Props) {
   const snapshot = useMemo(() => data ? buildTeamSnapshot(data) : null, [data]);
+  const [representation, setRepresentation] = useState<"hierarchy" | "results">(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("teamView") === "results" ? "results" : "hierarchy",
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
@@ -88,7 +92,21 @@ function TeamCanvas({ data, state }: Props) {
     extractTeamPassportSections(doc.text).map((section) => ({ ...section, document: doc })),
   ), [state.documents]);
 
+  const setView = (next: "hierarchy" | "results") => {
+    setRepresentation(next);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("workView", "team");
+    if (next === "results") params.set("teamView", "results");
+    else params.delete("teamView");
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
+  };
+  if (representation === "results") return <TeamResultsView data={data} state={state} onHierarchy={() => setView("hierarchy")} />;
   if (!snapshot || !data) return <section className="team-empty-state">
+    <div className="team-representation-switch" role="tablist" aria-label="Представление команды">
+      <button type="button" role="tab" aria-selected="true">Подчинение и состав</button>
+      <button type="button" role="tab" aria-selected="false" onClick={() => setView("results")}>Передача результатов</button>
+    </div>
     <p className="pm-kicker">PERSISTED OPERATING MODEL</p><h3>Сохранённой структуры пока нет</h3>
     <p>Представление команды строится только из последней сохранённой ревизии операционной модели. Чистый шаблон и локальный черновик здесь не показываются.</p>
   </section>;
@@ -210,6 +228,10 @@ function TeamCanvas({ data, state }: Props) {
   const resourceNames = (node: WorkNode) => node.resourceIds.map((id) => snapshot.byId.get(id)?.name ?? `ID не найден: ${id}`);
 
   return <section className="team-view">
+    <div className="team-representation-switch" role="tablist" aria-label="Представление команды">
+      <button type="button" role="tab" aria-selected="true">Подчинение и состав</button>
+      <button type="button" role="tab" aria-selected="false" onClick={() => setView("results")}>Передача результатов</button>
+    </div>
     <header className="team-view-heading">
       <div><p className="pm-kicker">TEAM MAP / PLANNING ONLY</p><h3>Команда и линия управления</h3>
         <p>Снимок v{state.operatingModel?.revisions.at(-1)?.version ?? "—"} · направления группируют роли; руководитель определяется только по managerId.</p></div>
