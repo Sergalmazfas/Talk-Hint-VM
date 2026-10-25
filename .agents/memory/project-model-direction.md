@@ -144,6 +144,20 @@ An icon, decorative circle, demo video or lip-synced translated media is not pro
 Published file-tool or chat providers do not establish the live call's telephony,
 STT, LLM, translation or TTS stack.
 
+Design, usability and support quality are separate personal-test assessments.
+Sergey assigns the overall category scores himself; AI conclusions and store
+ratings must not populate them. No overall composite score is agreed. Support
+quality requires an actual support contact; an immediate bot response is not a
+resolved issue. Public support promises, helpdesk/chat, knowledge-base software
+and internal CRM remain separate sourced facts, not personal experience.
+
+**Why:** the owner explicitly requested these distinctions for competitor
+reviews and prohibited purchases or support contacts within the preparation.
+
+**How to apply:** leave untested scores empty, allow written observations
+without scores, preserve dated/versioned review history, and never penalize
+missing avatars automatically.
+
 **Why:** the owner explicitly prohibited these misleading equivalences and asked
 for source, date and verification status for each fact.
 
