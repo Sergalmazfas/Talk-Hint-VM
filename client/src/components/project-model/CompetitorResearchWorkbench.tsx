@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { assessmentCategories, assessmentScore, assessmentHref, latestAssessment, type AssessmentCategory } from "@shared/competitorAssessments";
 import {
   CartesianGrid, LabelList, Legend, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
@@ -48,6 +49,7 @@ type EvidenceDialogData = {
   note: string;
   checkedAt: string | null;
   sources: string[];
+  reviewHref?: string;
 };
 type MatrixLine = { id: string; label: string; group: string; cell: (row: ResearchRow) => EvidenceDialogData };
 type TalkHintDraft = { current: CompetitorResearch; target: CompetitorResearch; checkedAt: string; reason: string };
@@ -202,6 +204,16 @@ function makeMatrixLines(): MatrixLine[] {
     cell: (row) => coverageText(row, key),
   }));
   return [
+    ...(Object.keys(assessmentCategories) as AssessmentCategory[]).map(category => ({
+      id: `personal-review-${category}`, group: "Наши личные проверки · независимые оценки", label: assessmentCategories[category],
+      cell: (row: ResearchRow): EvidenceDialogData => {
+        const review = latestAssessment(row.snapshot, category);
+        return { title: assessmentCategories[category], value: row.kind === "competitor" ? assessmentScore(review, category) : "Не применимо к TalkHint в этой таблице",
+          note: review ? `${review.author} · ${review.testedAt} · ${review.platform} · версия ${review.appVersion || "не указана"}` : "Личная проверка ещё не сохранена",
+          checkedAt: review?.testedAt ?? null, sources: [], ...(row.kind === "competitor" ? { reviewHref: assessmentHref(row.id, category) } : {}),
+        };
+      },
+    })),
     ...features,
     ...languages,
     avatarLine,
@@ -254,6 +266,9 @@ function ResearchMatrix({
         <tr className="pm-cr-matrix-group-label"><th colSpan={columns.length + 1}>{line.group}</th></tr>
         <tr><th scope="row">{line.label}</th>{columns.map((row) => {
           const cell = line.cell(row);
+          if (cell.reviewHref) return <td key={row.id}><a className="pm-cr-matrix-cell" href={cell.reviewHref}>
+            <span>{cell.value}</span><small>{cell.note}</small><small>Открыть разбор и историю</small>
+          </a></td>;
           return <td key={row.id}><button type="button" className="pm-cr-matrix-cell" onClick={() => onCell(cell)}>
             {cell.status && <span className={`pm-cr-status status-${cell.status}`}>{cell.statusText ?? competitorEvidenceStatuses[cell.status]}</span>}
             <span>{cell.value}</span><small>Открыть источник и подробности</small>

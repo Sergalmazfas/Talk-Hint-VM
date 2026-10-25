@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { modelSections, elementKinds, detailFields, contentStatuses, implementationStatuses } from "../../shared/projectModel";
 import type { ModelCommand, ProjectModelState, ModelElement, ModelDecision } from "../../shared/projectModel";
 import { competitorScenarios, normalizeCompetitorSnapshot } from "../../shared/projectCompetitors";
 import { saveCompetitorSchema, captureCompetitorQuarterSchema, saveTalkHintResearchSchema } from "./competitorSchema";
+import { addCompetitorReviewSchema, saveCompetitorSupportSchema } from "./assessmentSchema";
 
 const str = (max = 12000) => z.string().max(max);
 const nonempty = (max = 2000) => z.string().trim().min(1).max(max);
@@ -17,6 +19,8 @@ export const elementSchema = z.object({
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
+  addCompetitorReviewSchema,
+  saveCompetitorSupportSchema,
   saveCompetitorSchema,
   captureCompetitorQuarterSchema,
   saveTalkHintResearchSchema,
@@ -57,6 +61,29 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     affected.forEach(id => { element(id).needsReview = true; });
   }
   switch (c.type) {
+    case "addCompetitorReview":
+    case "saveCompetitorSupport": {
+      const record = old.competitorDirectory?.records.find(row => row.id === c.id);
+      const latest = record?.revisions.at(-1);
+      if (!latest) fail("Карточка конкурента не найдена", 404);
+      if (latest.version !== c.baseVersion) fail("Устаревшая версия карточки; перечитайте данные перед повтором", 409);
+      const snapshot = structuredClone(latest.snapshot);
+      // Reuse the existing revision/transaction/audit path without allowing arbitrary
+      // history replacement through the general-purpose card editor.
+      const next = applyCommand(old, { type: "saveCompetitor", id: c.id, baseVersion: c.baseVersion,
+        reason: c.type === "addCompetitorReview" ? `Личная проверка: ${c.review.category}` : "Публичные сведения о поддержке",
+        snapshot }, actor);
+      const nextSnapshot = next.competitorDirectory!.records.find(row => row.id === c.id)!.revisions.at(-1)!.snapshot;
+      if (c.type === "addCompetitorReview") {
+        if (Object.values(snapshot.assessments ?? {}).flat().some(review => review.id === c.requestId))
+          fail("Эта проверка уже сохранена; повтор не добавлен", 409);
+        const reviews = (nextSnapshot.assessments ??= {})[c.review.category] ??= [];
+        if (reviews.length >= 100) fail("Достигнут лимит проверок категории; история сохранена", 413);
+        reviews.push({ ...structuredClone(c.review), id: c.requestId, savedAt: now, recordedBy: actor });
+      } else nextSnapshot.supportResearch = structuredClone(c.support);
+      if (JSON.stringify(next).length > 5_000_000) fail("Модель превысила допустимый размер", 413);
+      return next;
+    }
     case "captureCompetitorQuarter": {
       const directory = s.competitorDirectory;
       if (!directory) fail("Справочник конкурентов пока не создан", 409);
@@ -115,6 +142,10 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
       if (duplicate) fail("Карточка такого конкурента уже существует. Откройте её для обновления, не создавайте дубликат.", 409);
       const latestVersion = record?.revisions.at(-1)?.version ?? 0;
       if (c.baseVersion !== latestVersion) fail("Устаревшая версия карточки; перечитайте изменения и сохраните заново", 409);
+      const previous = record?.revisions.at(-1)?.snapshot;
+      if (!isDeepStrictEqual(c.snapshot.assessments, previous?.assessments) ||
+        !isDeepStrictEqual(c.snapshot.supportResearch, previous?.supportResearch))
+        fail("Проверки и сведения поддержки сохраняются отдельными действиями; историю нельзя заменять", 409);
       if (!record && directory.records.length >= 1000) fail("Достигнут лимит карточек", 413);
       const snapshot = normalizeCompetitorSnapshot(c.snapshot);
       const revision = { version: latestVersion + 1, savedAt: now, reason: c.reason, snapshot };

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { competitorEvidenceStatuses, competitorScenarios } from "../../shared/projectCompetitors";
 import { researchFeatures, languageFeatures, type ResearchFeature, type LanguageFeature } from "../../shared/competitorResearch";
 import { avatarFields, scaleFields } from "../../shared/competitorDossier";
+import { assessmentsSchema, supportResearchSchema } from "./assessmentSchema";
 
 const text = z.string().max(12000);
 const required = z.string().trim().min(1).max(1000);
@@ -106,6 +107,8 @@ export const competitorSnapshotSchema = z.object({
   limitations: text,
   research: competitorResearchSchema.optional(),
   dossier: competitorDossierSchema.optional(),
+  assessments: assessmentsSchema.optional(),
+  supportResearch: supportResearchSchema.optional(),
 }).strict();
 export const captureCompetitorQuarterSchema = z.object({
   type: z.literal("captureCompetitorQuarter"),

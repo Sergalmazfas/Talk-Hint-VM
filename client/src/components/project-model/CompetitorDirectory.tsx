@@ -12,6 +12,7 @@ import { emptyCompetitorResearch, researchFor } from "@shared/competitorResearch
 import { dossierFor } from "@shared/competitorDossier";
 import { CompetitorResearchEditor, ResearchEvidenceEditor } from "@/components/project-model/CompetitorResearchProfile";
 import CompetitorResearchWorkbench from "@/components/project-model/CompetitorResearchWorkbench";
+import CompetitorAssessments, { AssessmentLinks } from "./CompetitorAssessments";
 import { CompetitorDossierEditor, CompetitorDossierView, planEvidenceForSnapshot } from "@/components/project-model/CompetitorDossier";
 
 type Props = {
@@ -335,7 +336,9 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
   function rebaseDraft() {
     if (!draft) return;
     const current = draft.id ? latestRevision(directory, draft.id) : undefined;
-    setDraft((value) => value ? { ...value, baseVersion: current?.version ?? 0 } : value);
+    setDraft((value) => value ? { ...value, baseVersion: current?.version ?? 0, snapshot: {
+      ...value.snapshot, assessments: current?.snapshot.assessments, supportResearch: current?.snapshot.supportResearch,
+    } } : value);
     setNeedsRebase(false);
     setSaveError("");
   }
@@ -354,6 +357,7 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
       {savedNotice && <p className="pm-cd-success" role="status">{savedNotice}</p>}
       {saveError && <p className="pm-cd-save-error" role="alert">{saveError}</p>}
       {draft && <DirectoryEditor draft={draft} setDraft={setDraft} onClose={closeEditor} onSave={(event) => void saveDraft(event)} saving={saving} needsRebase={needsRebase} onRebase={rebaseDraft} rebaseSnapshot={latestSnapshot(directory, draft.id || "")} />}
+      <CompetitorAssessments key={selectedRecord.id} id={selectedRecord.id} snapshot={selectedSnapshot} version={selectedRevision.version} submit={draft ? undefined : submit} busy={saving} />
       <div className="pm-cd-detail-grid">
         <CompetitorDossierView snapshot={selectedSnapshot} research={researchFor(selectedSnapshot)} />
       </div>
@@ -373,7 +377,7 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
 
     <div className="pm-cd-table-scroll">
       <table className="pm-cd-directory-table">
-        <thead><tr><th scope="col">Сравнить</th><th scope="col">Продукт</th><th scope="col">Аудитория</th><th scope="col">Функции</th><th scope="col">Подписка и цена</th><th scope="col">Дополнительно</th><th scope="col">Проверено</th><th scope="col">Действие</th></tr></thead>
+        <thead><tr><th scope="col">Сравнить</th><th scope="col">Продукт</th><th scope="col">Аудитория</th><th scope="col">Функции</th><th scope="col">Подписка и цена</th><th scope="col">Дополнительно</th><th scope="col">Наши оценки</th><th scope="col">Проверено</th><th scope="col">Действие</th></tr></thead>
         <tbody>{records.map((record) => {
           const revision = record.revisions[record.revisions.length - 1];
           if (!revision) return null;
@@ -395,6 +399,7 @@ export default function CompetitorDirectory({ directory, hypothesisId, selectedI
             <td>{showValue(snapshot.offer.features)}</td>
             <td>{subscriptions.length ? subscriptions.map((plan) => <span className="pm-cd-table-line" key={plan.id}>{plan.name || "Тариф"} · {competitorPrice(plan)}</span>) : <span>Подписки не указаны</span>}</td>
             <td>{extras.length ? extras.join(" · ") : "Дополнения не указаны"}</td>
+            <td><AssessmentLinks snapshot={snapshot} id={record.id} /></td>
             <td>{dateLabel(snapshot.checkedAt)}</td>
             <td>{submit && <button className="pm-btn small" type="button" disabled={!!draft || saving} onClick={() => startEdit(record.id)}>Обновить данные</button>}</td>
           </tr>;

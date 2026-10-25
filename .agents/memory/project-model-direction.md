@@ -164,6 +164,16 @@ for source, date and verification status for each fact.
 **How to apply:** keep uncertain avatar and live-call stack fields unconfirmed;
 record technology with its actual tool and scope, not as a platform-wide claim.
 
+Research-content delivery must remain an explicit owner-scoped Dev update, not
+a startup refresh of the user's cards.
+
+**Why:** restarting the server must not replace subsequent manual corrections;
+a passing code check alone does not establish that saved owner data was updated.
+
+**How to apply:** verify persisted profiles after an approved import and check
+that a repeated import adds no revisions. Stop for reconciliation when stored
+public facts differ; do not introduce automatic seeding to demonstrate delivery.
+
 For the original AI-manager hypothesis, the US is the target market, starting
 in Miami-Dade, Broward and Palm Beach.
 The owner's confirmed decision dated 2026-10-23 selects independent licensed

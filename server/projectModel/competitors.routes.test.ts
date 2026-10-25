@@ -17,6 +17,10 @@ import { initialAIPhoneSnapshot } from "./competitorInitial";
 import { emptyCompetitorResearch } from "../../shared/competitorResearch";
 import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
 import type { ModelRepository } from "./repository";
+import { randomUUID } from "node:crypto";
+import { newReview } from "../../shared/competitorAssessments";
+import { persistPublicSupport, publicSupportResearch } from "./research/publicSupport";
+import type { Pool } from "pg";
 
 class Repository implements ModelRepository {
   rows = new Map<string, ProjectModelState>();
@@ -57,6 +61,85 @@ describe("competitor directory HTTP protections", () => {
     repo = new Repository(); app = express(); app.use(express.json()); registerProjectModel(app, repo);
   });
   afterEach(() => vi.unstubAllEnvs());
+  it("imports all five support profiles into the SAME owner repository, reloads them through the API and makes repeat imports a no-op", async () => {
+    // SQL boundary round-trips JSON just like jsonb. It shares the exact repository
+    // used by the authenticated HTTP route, not a parallel content collection.
+    const query = vi.fn(async (sql: string, values?: unknown[]) => {
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      const owner = String(values![0]);
+      if (sql.startsWith("SELECT state")) return { rows: [{ state: JSON.parse(JSON.stringify(repo.root(owner))) }] };
+      if (sql.startsWith("UPDATE talkhint_project_models")) {
+        const next = JSON.parse(String(values![1])); expect(next.revision).toBe(values![2]);
+        repo.rows.set(owner, next); return { rows: [] };
+      }
+      throw new Error(`Unexpected test query: ${sql}`);
+    });
+    const pool = { query, connect: async () => ({ query, release: vi.fn() }) } as unknown as Pool;
+    for (const appId of Object.keys(publicSupportResearch)) {
+      const current = await request(app).get(path).set("x-test-user", "owner");
+      const body = mutation();
+      body.revision = current.body.revision;
+      body.command.snapshot.name = `Existing competitor ${appId}`;
+      body.command.snapshot.appStore = `https://apps.apple.com/us/app/id${appId}`;
+      const saved = await post(body); expect(saved.status).toBe(200);
+    }
+    const before = await request(app).get(path).set("x-test-user", "owner");
+    const oldIds = before.body.competitorDirectory.records.map((r: any) => r.id);
+    expect(before.body.competitorDirectory.records.every((r: any) => !r.revisions.at(-1).snapshot.supportResearch)).toBe(true);
+    const imported = await persistPublicSupport(pool, "owner");
+    expect(imported).toMatchObject({ changed: 5, completeReadback: true, otherMaterialsPreserved: true });
+    const reloaded = await request(app).get(path).set("x-test-user", "owner");
+    expect(reloaded.status).toBe(200);
+    expect(reloaded.body.competitorDirectory.records.map((r: any) => r.id)).toEqual(oldIds);
+    for (const record of reloaded.body.competitorDirectory.records) {
+      const snapshot = record.revisions.at(-1).snapshot, appId = snapshot.appStore.match(/\/id(\d+)/)[1];
+      expect(snapshot.supportResearch).toEqual(publicSupportResearch[appId]);
+      expect(snapshot.assessments).toBeUndefined();
+      expect(record.revisions[0]).toEqual(before.body.competitorDirectory.records.find((r: any) => r.id === record.id).revisions[0]);
+    }
+    const second = await persistPublicSupport(pool, "owner");
+    expect(second).toMatchObject({ changed: 0, revision: imported.revision, completeReadback: true });
+    expect(query.mock.calls.filter(([sql]) => sql.startsWith("UPDATE "))).toHaveLength(1);
+    const unchanged = await request(app).get(path).set("x-test-user", "owner");
+    expect(unchanged.body).toEqual(reloaded.body);
+    // A new repository/app instance reads the persisted JSON after a restart.
+    const rows = JSON.parse(JSON.stringify(Array.from(repo.rows.entries())));
+    repo = new Repository(); rows.forEach(([owner, state]: [string, ProjectModelState]) => repo.rows.set(owner, state));
+    app = express(); app.use(express.json()); registerProjectModel(app, repo);
+    const reopened = await request(app).get(path).set("x-test-user", "owner");
+    expect(reopened.body).toEqual(reloaded.body);
+    const other = await request(app).get(path).set("x-test-user", "second");
+    expect(other.body.competitorDirectory).toBeUndefined();
+    const row = repo.root("owner").alternatives!.find(a => a.id === "new-country")!.model.competitorDirectory!.records[0];
+    row.revisions.at(-1)!.snapshot.supportResearch!.channels!.note = "Последующее ручное уточнение";
+    const manualState = JSON.parse(JSON.stringify(repo.root("owner")));
+    await expect(persistPublicSupport(pool, "owner")).rejects.toThrow("manual merge required");
+    expect(repo.root("owner")).toEqual(manualState);
+  });
+  it("saves personal checks through the existing authenticated store, rejects cross-owner/stale/replayed and production writes", async () => {
+    const initial = await post(mutation()), id = initial.body.competitorDirectory.records[0].id;
+    const review = { ...newReview("design"), author: "Личный тест", platform: "iPhone", testedAt: "2026-10-24", score: 7, rationale: "Реальная проверка" };
+    const command = { type: "addCompetitorReview", id, baseVersion: 1, requestId: randomUUID(), review };
+    expect((await request(app).post(path).send({ revision: initial.body.revision, command })).status).toBe(401);
+    expect((await request(app).post(path).set("x-test-user", "owner").set("Host", "127.0.0.1").set("Origin", "http://attacker.example").send({ revision: initial.body.revision, command })).status).toBe(403);
+    const saved = await post({ revision: initial.body.revision, command });
+    expect(saved.status).toBe(200);
+    const reload = await request(app).get(path).set("x-test-user", "owner");
+    const snapshot = reload.body.competitorDirectory.records[0].revisions.at(-1).snapshot;
+    expect(snapshot.assessments.design[0].score).toBe(7);
+    expect(snapshot.assessments.design[0].recordedBy).toBe("owner");
+    expect(snapshot.assessments.usability).toBeUndefined();
+    expect((await post({ revision: initial.body.revision, command })).status).toBe(409);
+    expect((await post({ revision: saved.body.revision, command: { ...command, baseVersion: 2 } })).status).toBe(409);
+    const other = await request(app).post(path).set("x-test-user", "second").set("Host", "127.0.0.1").set("Origin", "http://127.0.0.1").send({ revision: 0, command });
+    expect(other.status).toBe(404);
+    const bad = await post({ revision: saved.body.revision, command: { ...command, baseVersion: 2, requestId: randomUUID(), review: { ...newReview("support"), author: "Личный тест", platform: "iOS", score: 9, rationale: "Не обращался" } } });
+    expect(bad.status).toBe(400);
+    const afterBad = await request(app).get(path).set("x-test-user", "owner");
+    expect(afterBad.body).toEqual(reload.body);
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await post({ revision: saved.body.revision, command })).status).toBe(404);
+  });
   it("persists and reloads only the authenticated owner's selected hypothesis", async () => {
     expect((await request(app).get(path)).status).toBe(401);
     const result = await post(mutation());

@@ -106,6 +106,8 @@ export interface ProjectModelState {
   };
 }
 export type ModelCommand =
+  | import("./competitorAssessments").AddCompetitorReviewCommand
+  | import("./competitorAssessments").SaveCompetitorSupportCommand
   | SaveCompetitorCommand
   | CaptureCompetitorQuarterCommand
   | SaveTalkHintResearchCommand

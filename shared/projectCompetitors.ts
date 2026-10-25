@@ -1,5 +1,6 @@
 import type { CompetitorResearch, QuarterlyCompetitorSnapshot, CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand } from "./competitorResearch";
 import type { CompetitorDossier } from "./competitorDossier";
+import type { CompetitorAssessments, SupportResearch } from "./competitorAssessments";
 export type { CaptureCompetitorQuarterCommand, SaveTalkHintResearchCommand };
 /** Internal research only; no connection to phone-agent capabilities or prices. */
 export const competitorScenarios = {
@@ -59,6 +60,8 @@ export interface CompetitorSnapshot {
   limitations: string;
   research?: CompetitorResearch;
   dossier?: CompetitorDossier;
+  assessments?: CompetitorAssessments;
+  supportResearch?: SupportResearch;
 }
 export interface CompetitorRevision {
   version: number;
