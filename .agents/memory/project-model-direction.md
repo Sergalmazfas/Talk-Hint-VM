@@ -15,14 +15,40 @@ explicitly requested the model for detailed work on TalkHint with ChatGPT.
 separate from implementation readiness. Crew represents obligations, not
 automatically executing agents. Future ChatGPT model tools need separate approval.
 
-TalkHint is B2B; its buyer is the business owner. Its own model is distinct from
-models of businesses it serves. The owner subsequently broadened the agreed
-vision to an AI manager of a small service business with specialist Crew:
-secretary is one role, not the whole target product. The owner retains approval
-and control; detailed authority belongs in later procedures, not implied autonomy.
-This is agreed target positioning, not evidence that these functions exist.
+Keep independent product hypotheses, not successive replacements of one model.
+Neither has been chosen as the primary hypothesis. The original is TalkHint as
+an AI manager of a small business with specialist roles; retain all its ten
+blocks and research. The separate alternative is a multilingual AI assistant
+for life and small business in a new country: one chat, overlapping personal/work
+contacts, contact-linked calendar/history, one or two numbers and configurable
+secretaries; WhatsApp later, no marketing-role team. Develop each block
+independently; unresolved sections stay unknown, not inherited from the original.
+Both describe target concepts, not proof that all functions work.
 
-The US is the target market, starting in Miami-Dade, Broward and Palm Beach.
+**Why:** the owner corrected the previous instruction: “две сохранённые
+альтернативы вместо замены”. The original product must be recovered from actual
+history, never reconstructed from memory or invented.
+
+**How to apply:** viewing a hypothesis is not choosing a primary. Keep edits,
+history and claims isolated; never automatically copy market/competitor claims
+between alternatives or replace the massage/cleaning research.
+
+The new-country hypothesis's agreed client framing includes both B2C personal
+affairs and B2B self-employment/small service business. Initially the user and
+payer are the individual or business owner, who may use both modes. Massage
+therapists, cleaners and repair workers are examples to test, not audience limits.
+Demand and willingness to pay remain unconfirmed. The problem framing is based
+on the founder's personal experience, not evidence from market research.
+
+**Why:** the owner approved the client/problem framing as hypotheses and explicitly
+identified personal experience as the problem's source, not validated market
+evidence or a replacement of the original hypothesis's pilot segment.
+
+**How to apply:** preserve both purchase scenarios and the unvalidated status;
+do not import the original pilot's geography or competitors into this alternative.
+
+For the original AI-manager hypothesis, the US is the target market, starting
+in Miami-Dade, Broward and Palm Beach.
 The owner's confirmed decision dated 2026-10-23 selects independent licensed
 massage therapists with their own small private practice and no administrator
 for the first pilot. This is a segment to test, not proof of profitability,
@@ -48,7 +74,7 @@ capacity or assumptions into real customers' cards or the general phone agent.
 The salon's $20 per session is revenue before expenses, not profit; conditional
 price/capacity examples are not actual utilization or market research.
 
-The proposed differentiation combines conversational practice management and
+The original hypothesis's proposed differentiation combines conversational practice management and
 advertising/content Crew. The owner supplies original video; the hypothesis is
 editing that video, not generating new scenes. Publication and advertising/budget
 need separate approvals. End-to-end Meta advertising, attribution and increased

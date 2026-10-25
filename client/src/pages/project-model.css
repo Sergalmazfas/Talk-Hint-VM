@@ -178,6 +178,30 @@
 
 /* Readable utility scale and robust mobile targets. */
 .pm-heading p { font-size: 14px; }
+.pm-hypothesis-switcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, .7fr);
+  gap: 22px;
+  align-items: center;
+  margin: 0 0 20px;
+  padding: 17px 19px;
+  border: 1px solid #b9d4d0;
+  border-left: 4px solid var(--pm-teal);
+  border-radius: 10px;
+  background: #eaf4f1;
+}
+.pm-hypothesis-title h2 { margin: 0; color: var(--pm-ink); font: 800 clamp(18px,2vw,23px)/1.2 Manrope,sans-serif; letter-spacing: -.035em; }
+.pm-hypothesis-title > p:last-child { max-width: 650px; margin: 7px 0 0; color: #55717a; font-size: 12px; line-height: 1.55; }
+.pm-hypothesis-control { display: grid; gap: 6px; }
+.pm-hypothesis-control label { color: #526e78; font-size: 11px; font-weight: 700; }
+.pm-hypothesis-control select { width: 100%; min-height: 42px; padding: 8px 34px 8px 10px; border: 1px solid #b9d2ce; border-radius: 7px; background: #fbfdfc; color: var(--pm-ink); font-size: 13px; }
+.pm-hypothesis-control select:focus { outline: 2px solid #087e8340; border-color: var(--pm-teal); }
+.pm-hypothesis-control select:disabled { opacity: .65; }
+.pm-hypothesis-note, .pm-hypothesis-primary-none { color: #60777d; font-size: 11px; line-height: 1.45; }
+.pm-hypothesis-primary-none { color: #805522; font-weight: 700; }
+@media (max-width: 720px) {
+  .pm-hypothesis-switcher { grid-template-columns: 1fr; gap: 14px; padding: 15px; }
+}
 .pm-nav button { min-height: 40px; font-size: 13px; }
 .pm-btn, .pm-btn.small { min-height: 40px; font-size: 12px; }
 .pm-tabs button { min-height: 42px; font-size: 13px; }

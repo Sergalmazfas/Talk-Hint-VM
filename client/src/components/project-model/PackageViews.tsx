@@ -29,9 +29,17 @@ const differenceConsentKey: CuratedDetailKey = "consent";
 const confidenceLabel = (element: ModelElement) =>
   element.contentStatus === "confirmed" ? "Согласовано"
     : element.contentStatus === "hypothesis" ? "Гипотеза" : "Требует исследования";
-const safeUrl = (raw: string) => {
+const selectedHypothesisId = (state: ProjectModelState) =>
+  state.hypothesisContext?.selectedId ||
+  (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("hypothesis") : null) ||
+  undefined;
+const safeUrl = (raw: string, hypothesisId?: string) => {
   const trimmed = raw.trim();
-  if (trimmed.startsWith("/admin/project-model?") && !trimmed.startsWith("//") && !trimmed.includes("\n")) return trimmed;
+  if (trimmed.startsWith("/admin/project-model?") && !trimmed.startsWith("//") && !trimmed.includes("\n")) {
+    const url = new URL(trimmed, "http://project-model.local");
+    if (hypothesisId) url.searchParams.set("hypothesis", hypothesisId);
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
   try {
     const url = new URL(trimmed);
     return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : "";
@@ -43,20 +51,26 @@ const dateLabel = (raw: string) => {
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? raw : date.toLocaleDateString("ru-RU", { dateStyle: "medium" });
 };
+const projectRoute = (query: string, hypothesisId?: string) => {
+  const params = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query);
+  if (hypothesisId) params.set("hypothesis", hypothesisId);
+  return `/admin/project-model?${params.toString()}`;
+};
 
 function EvidenceLinks({ element, state, openElement }: { element: ModelElement; state: ProjectModelState; openElement: (element: ModelElement) => void }) {
+  const hypothesisId = selectedHypothesisId(state);
   const sources = (element.details.source ?? "").split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
   const documents = state.documents.filter((document) => document.elementIds.includes(element.id));
   const relations = state.relations.filter((relation) => relation.from === element.id || relation.to === element.id);
   if (!sources.length && !documents.length && !relations.length) return null;
   return <div className="pm-node-evidence">
     {sources.map((source, index) => {
-      const href = safeUrl(source);
+      const href = safeUrl(source, hypothesisId);
       return href ? <a key={`${source}-${index}`} href={href} target="_blank" rel="noreferrer">Источник: {source}</a>
         : <span key={`${source}-${index}`}>Источник: {source}</span>;
     })}
     {documents.map((document) => {
-      const href = safeUrl(document.url);
+      const href = safeUrl(document.url, hypothesisId);
       return <div className="pm-curated-document" key={document.id}>
         <span>Документ: {href
           ? <a href={href} target={href.startsWith("/admin/") ? undefined : "_blank"} rel={href.startsWith("/admin/") ? undefined : "noreferrer"}>{document.title}</a>
@@ -75,6 +89,7 @@ function EvidenceLinks({ element, state, openElement }: { element: ModelElement;
 }
 
 export default function PackageViews({ state, view, openElement }: Props) {
+  const hypothesisId = selectedHypothesisId(state);
   const talkhint = state.elements.filter((element) => element.scope === "talkhint");
   const packageElements = projectPackageBlocks.map((block) => ({
     block,
@@ -94,19 +109,19 @@ export default function PackageViews({ state, view, openElement }: Props) {
   if (view === "overview") return <section className="pm-package-overview" aria-label="Краткий пакет проекта">
     <div className="pm-package-intro">
       <div><p className="pm-kicker">OWNER RESEARCH / PROJECT BRIEF</p><h2>Десять блоков, одна рабочая версия</h2><p>Краткие ответы берутся из текущих узлов модели. Раскройте блок для основания, даты и источников.</p></div>
-      <span className="pm-package-count">{packageElements.filter(({ element }) => element).length}<small>/ 10 заполнено</small></span>
+      <span className="pm-package-count">{packageElements.filter(({ element }) => !!element?.description.trim()).length}<small>/ 10 заполнено</small></span>
     </div>
     <div className="pm-package-blocks">{packageElements.map(({ block, element }, index) => {
       const documents = element ? state.documents.filter((document) => document.elementIds.includes(element.id)) : [];
       const blockView = "view" in block ? block.view : undefined;
-      const route = blockView === "benchmark" ? "/admin/project-model?view=benchmark&suite=pilot&filter=primary"
-        : blockView ? `/admin/project-model?view=${blockView}`
-          : `/admin/project-model?view=overview&element=${encodeURIComponent(block.id)}`;
+      const route = blockView === "benchmark" ? projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)
+        : blockView ? projectRoute(`view=${blockView}`, hypothesisId)
+          : projectRoute(`view=overview&element=${encodeURIComponent(block.id)}`, hypothesisId);
       const sources = (element?.details.source ?? "").split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
       return <details className="pm-package-block" key={block.id}>
         <summary>
           <span className="pm-package-number">{String(index + 1).padStart(2, "0")}</span>
-          <span className="pm-package-block-main"><strong>{block.title}</strong><small>{element?.description || (element ? "Краткий ответ пока не заполнен." : "Узел не найден в сохранённой модели.")}</small></span>
+           <span className="pm-package-block-main"><strong>{block.title}</strong><small>{element?.description || (element ? "Ещё не проработано." : "Узел не найден в сохранённой модели.")}</small></span>
           <span className={`pm-package-confidence ${element?.contentStatus ?? "missing"}`}>{element ? confidenceLabel(element) : "Нет узла"}</span>
         </summary>
         <div className="pm-package-detail">
@@ -118,12 +133,12 @@ export default function PackageViews({ state, view, openElement }: Props) {
               {element.details.sourceDate && <span>Дата источника: {element.details.sourceDate}</span>}
             </div>
             {sources.length > 0 && <div className="pm-package-sources"><b>Источники</b>{sources.map((source, index) => {
-              const href = safeUrl(source);
+              const href = safeUrl(source, hypothesisId);
               return href ? <a key={`${source}-${index}`} href={href} target="_blank" rel="noreferrer">{source}</a>
                 : <span key={`${source}-${index}`}>{source}</span>;
             })}</div>}
             {documents.map((document) => {
-              const href = safeUrl(document.url);
+              const href = safeUrl(document.url, hypothesisId);
               return <div className="pm-package-doc" key={document.id}><b>{document.title}</b>
                 {document.updatedAt && <small>{dateLabel(document.updatedAt)}</small>}
                 {href && <a href={href} target="_blank" rel="noreferrer">{document.url}</a>}
@@ -153,7 +168,7 @@ export default function PackageViews({ state, view, openElement }: Props) {
       {pipelineText ? <p className="pm-pipeline-source">{pipelineText}</p> : <div className="pm-empty"><strong>Маршрут не заполнен в модели</strong>Описание появится после сохранения узла TH-CONTENT-PIPELINE.</div>}
     </section>}
     {view === "difference" && <p className="pm-research-note">Гипотеза отличия — единый разговорный интерфейс вместе с командой контента и рекламы. Конкуренты уже имеют маркетинг, документы и платежи; преимущество не предполагается без проверки.</p>}
-    {view === "difference" && <a className="pm-btn small pm-difference-matrix-link" href="/admin/project-model?view=benchmark&suite=difference&filter=primary">Открыть бенчмарк отличия и двух осей</a>}
+     {view === "difference" && <a className="pm-btn small pm-difference-matrix-link" href={projectRoute("view=benchmark&suite=difference&filter=primary", hypothesisId)}>Открыть бенчмарк отличия и двух осей</a>}
     {view === "market" && <p className="pm-research-note">Размер рынка не рассчитан. Здесь показываются только сохранённые формулы и допущения; неизвестные величины остаются пустыми.</p>}
 
     {viewNodes.length ? <div className="pm-list">{viewNodes.map((element) => {
@@ -176,14 +191,14 @@ export default function PackageViews({ state, view, openElement }: Props) {
     })}</div> : <div className="pm-empty"><strong>Узлы для этого представления не найдены</strong>Данные не подменяются демонстрационными значениями.</div>}
 
     {view === "segment" && <section className="pm-segment-competitors">
-      <div className="pm-section-list-head"><div><h3>Основные конкуренты стартового сегмента</h3><span className="pm-help">Сохранённые профили с приоритетом TH-SEGMENT.</span></div><a className="pm-btn small" href="/admin/project-model?view=benchmark&suite=pilot&filter=primary">Открыть матрицу конкурентов</a></div>
+      <div className="pm-section-list-head"><div><h3>Основные конкуренты стартового сегмента</h3><span className="pm-help">Сохранённые профили с приоритетом TH-SEGMENT.</span></div><a className="pm-btn small" href={projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)}>Открыть матрицу конкурентов</a></div>
       {primaryCompetitors.length ? <div className="pm-list">{primaryCompetitors.map((competitor) => <article className="pm-curated-node pm-segment-competitor" key={competitor.id}>
         <div><span className="pm-benchmark-id">{competitor.id}</span><h4>{competitor.title}</h4><p>{competitor.description || "Профиль без краткого описания."}</p></div>
-        <a className="pm-btn small" href={`/admin/project-model?view=benchmark&filter=primary&element=${encodeURIComponent(competitor.id)}`}>Открыть профиль</a>
+        <a className="pm-btn small" href={projectRoute(`view=benchmark&filter=primary&element=${encodeURIComponent(competitor.id)}`, hypothesisId)}>Открыть профиль</a>
       </article>)}</div> : <div className="pm-empty"><strong>Сохранённых основных профилей пока нет</strong>Список формируется только по конкурентным узлам с приоритетом TH-SEGMENT.</div>}
     </section>}
-    {view === "segment" && <a className="pm-btn small" href="/admin/project-model?view=market">Перейти к рынку и формулам</a>}
-    {view === "market" && <a className="pm-btn small" href="/admin/project-model?view=benchmark&suite=pilot&filter=primary">Основные конкуренты стартового сегмента</a>}
+    {view === "segment" && <a className="pm-btn small" href={projectRoute("view=market", hypothesisId)}>Перейти к рынку и формулам</a>}
+    {view === "market" && <a className="pm-btn small" href={projectRoute("view=benchmark&suite=pilot&filter=primary", hypothesisId)}>Основные конкуренты стартового сегмента</a>}
     {view === "difference" && <div className="pm-validation-note"><strong>Проверка гипотезы — результаты не внесены</strong><span>Интервью владельцев · удобство управления · чистая прибыль после расходов · практические тесты. До появления записанных результатов преимуществ нет.</span></div>}
   </section>;
 }

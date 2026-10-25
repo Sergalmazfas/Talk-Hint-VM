@@ -17,11 +17,16 @@ export function registerProjectModel(app: Express, repo: ModelRepository = repos
     res.set("Cache-Control", "no-store");
     const owner = String(req.user!.id);
     try {
-      if (req.method === "GET") return res.json(await repo.read(owner));
+      const hypothesis = req.query.hypothesis ?? "original";
+      if (typeof hypothesis !== "string" || !/^[a-z][a-z0-9-]{0,79}$/.test(hypothesis))
+        return res.status(400).json({ error: "Некорректная гипотеза." });
+      if (hypothesis !== "original" && process.env.NODE_ENV !== "development")
+        return res.status(404).json({ error: "Сравнение гипотез пока доступно только в Dev." });
+      if (req.method === "GET") return res.json(await repo.read(owner, hypothesis));
       if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
       const parsed = requestSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: "Некорректное изменение модели", details: parsed.error.flatten() });
-      return res.json(await repo.update(owner, parsed.data.revision, parsed.data.command));
+      return res.json(await repo.update(owner, parsed.data.revision, parsed.data.command, hypothesis));
     } catch (error) {
       if (error instanceof ModelError) return res.status(error.status).json({ error: error.message });
       // Never echo SQL / connection strings / raw submitted content.

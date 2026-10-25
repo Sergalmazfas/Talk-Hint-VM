@@ -93,6 +93,15 @@ export interface ModelTaskDraft {
 export interface ProjectModelState {
   schema: 1; revision: number; elements: ModelElement[]; relations: ModelRelation[];
   documents: ModelDocument[]; proposals: ModelProposal[]; decisions: ModelDecision[]; taskDrafts: ModelTaskDraft[];
+  /** Independently editable alternatives in this owner's existing workspace. */
+  alternatives?: { id: string; title: string; model: ProjectModelState }[];
+  primaryHypothesisId?: string | null;
+  /** Response metadata only; viewing an alternative never selects a primary. */
+  hypothesisContext?: {
+    selectedId: string;
+    options: { id: string; title: string }[];
+    primaryId: string | null;
+  };
 }
 export type ModelCommand =
   | { type: "createElement"; id: string; element: ElementInput }

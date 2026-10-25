@@ -21,6 +21,11 @@ type Tab = "overview" | "links" | "documents";
 const projectViews = ["overview", "segment", "market", "difference", "benchmark"] as const;
 const projectTabs: Tab[] = ["overview", "links", "documents"];
 const sections = modelSections;
+const projectHref = (query: string) => {
+  const params = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query);
+  if (!params.has("hypothesis")) params.set("hypothesis", new URLSearchParams(window.location.search).get("hypothesis") || "original");
+  return `/admin/project-model?${params.toString()}`;
+};
 const emptyElement = (section: ElementInput["section"] = "Обзор"): ElementInput => ({
   title: "", section, scope: "talkhint", kind: "context", description: "",
   contentStatus: "proposal", implementationStatus: "not_started", details: {},
@@ -41,6 +46,7 @@ export default function ProjectModel() {
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState("");
   const initialParams = new URLSearchParams(window.location.search);
+  const hypothesisId = initialParams.get("hypothesis") || "original";
   const requestedView = initialParams.get("view");
   const initialView = projectViews.includes(requestedView as typeof projectViews[number]) ? requestedView as typeof projectViews[number] : "overview";
   const requestedSection = initialParams.get("section");
@@ -69,14 +75,15 @@ export default function ProjectModel() {
     if (showLoading) setLoading(true);
     setError("");
     try {
-      const result = await modelRequest(authToken);
+      const result = await modelRequest(authToken, undefined, undefined, hypothesisId);
       setState(result);
     } catch (e) {
+      setState(null);
       setError(e instanceof Error ? e.message : "Не удалось загрузить модель.");
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [authToken]);
+  }, [authToken, hypothesisId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -108,13 +115,13 @@ export default function ProjectModel() {
     setError("");
     setConflict("");
     try {
-      const result = await modelRequest(authToken, command, state.revision);
+      const result = await modelRequest(authToken, command, state.revision, hypothesisId);
       setState(result);
       return true;
     } catch (e) {
       const message = e instanceof Error ? e.message : "Не удалось сохранить изменения.";
       let latest: ProjectModelState | null = null;
-      try { latest = await modelRequest(authToken); } catch { /* Preserve the original save error. */ }
+      try { latest = await modelRequest(authToken, undefined, undefined, hypothesisId); } catch { /* Preserve the original save error. */ }
       if (/409|conflict|конфликт|устаревш/i.test(message) || (latest && latest.revision !== state.revision)) {
         if (latest) setState(latest);
         setConflict(latest
@@ -127,9 +134,12 @@ export default function ProjectModel() {
     } finally {
       setSaving(false);
     }
-  }, [authToken, state]);
+  }, [authToken, hypothesisId, state]);
 
   const elements = state?.elements ?? [];
+  const hypothesisContext = state?.hypothesisContext;
+  const selectedHypothesisId = hypothesisContext?.selectedId || hypothesisId;
+  const selectedHypothesisTitle = hypothesisContext?.options.find((option) => option.id === selectedHypothesisId)?.title || selectedHypothesisId;
   const talkhintElements = useMemo(() => elements.filter((element) => element.scope === "talkhint"), [elements]);
   const selectedElements = useMemo(() => elements.filter((element) =>
     element.section === section && (element.scope === "talkhint" || section === "Модели клиентов")), [elements, section]);
@@ -246,6 +256,7 @@ export default function ProjectModel() {
 
   const setUrlState = (updates: Record<string, string | null>) => {
     const params = new URLSearchParams(window.location.search);
+    params.set("hypothesis", params.get("hypothesis") || "original");
     Object.entries(updates).forEach(([key, value]) => value === null ? params.delete(key) : params.set(key, value));
     window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
   };
@@ -285,7 +296,7 @@ export default function ProjectModel() {
                 <button type="button" onClick={() => changeSection(item)} className={section === item ? "active" : ""} aria-current={section === item ? "page" : undefined}>
                   <span className="pm-nav-index">{String(index + 1).padStart(2, "0")}</span>{item}
                 </button>
-                {item === "Рынок и конкуренты" && <a className={`pm-nav-subitem ${benchmarkView && section === item ? "active" : ""}`} href="/admin/project-model?view=benchmark" aria-current={benchmarkView && section === item ? "page" : undefined}>Конкурентный бенчмаркинг</a>}
+                {item === "Рынок и конкуренты" && <a className={`pm-nav-subitem ${benchmarkView && section === item ? "active" : ""}`} href={projectHref("view=benchmark")} aria-current={benchmarkView && section === item ? "page" : undefined}>Конкурентный бенчмаркинг</a>}
               </div>
             ))}
           </nav>
@@ -310,12 +321,40 @@ export default function ProjectModel() {
             </div>
           </div>
 
+          {hypothesisContext && <section className="pm-hypothesis-switcher" aria-label="Рабочая гипотеза">
+            <div className="pm-hypothesis-title">
+              <p className="pm-kicker">НЕЗАВИСИМАЯ ГИПОТЕЗА</p>
+              <h2>{selectedHypothesisTitle}</h2>
+              <p>Отдельная модель и собственные материалы. Переключение меняет только просмотр и не выбирает основную гипотезу.</p>
+            </div>
+            <div className="pm-hypothesis-control">
+              <label htmlFor="pm-hypothesis-select">Рабочая гипотеза</label>
+              <select id="pm-hypothesis-select" value={selectedHypothesisId} disabled={loading || saving || !hypothesisContext.options.length}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  if (nextId === selectedHypothesisId) return;
+                  if (editor && !window.confirm("В редакторе есть несохранённые данные. Перейти к другой гипотезе и закрыть редактор?")) {
+                    event.currentTarget.value = selectedHypothesisId;
+                    return;
+                  }
+                  window.location.assign(projectHref(`view=overview&hypothesis=${encodeURIComponent(nextId)}`));
+                }}>
+                {hypothesisContext.options.map((option) => <option key={option.id} value={option.id}>{option.title}</option>)}
+              </select>
+              <span className={hypothesisContext.primaryId === null ? "pm-hypothesis-primary-none" : "pm-hypothesis-note"}>
+                {hypothesisContext.primaryId === null
+                  ? "Основная гипотеза ещё не выбрана."
+                  : "Смена представления не меняет выбранную основную гипотезу."}
+              </span>
+            </div>
+          </section>}
+
           <nav className="pm-package-nav" aria-label="Пакет проекта">
-            <a className={currentView === "overview" ? "active" : ""} href="/admin/project-model?view=overview">Обзор пакета</a>
-            <a className={currentView === "segment" ? "active" : ""} href="/admin/project-model?view=segment">Сегмент</a>
-            <a className={currentView === "market" ? "active" : ""} href="/admin/project-model?view=market">Рынок и экономика</a>
-            <a className={currentView === "difference" ? "active" : ""} href="/admin/project-model?view=difference">Отличие и проверка</a>
-            <a className={benchmarkView ? "active" : ""} href="/admin/project-model?view=benchmark&suite=pilot&filter=primary">Основные конкуренты</a>
+            <a className={currentView === "overview" ? "active" : ""} href={projectHref("view=overview")}>Обзор пакета</a>
+            <a className={currentView === "segment" ? "active" : ""} href={projectHref("view=segment")}>Сегмент</a>
+            <a className={currentView === "market" ? "active" : ""} href={projectHref("view=market")}>Рынок и экономика</a>
+            <a className={currentView === "difference" ? "active" : ""} href={projectHref("view=difference")}>Отличие и проверка</a>
+            <a className={benchmarkView ? "active" : ""} href={projectHref("view=benchmark&suite=pilot&filter=primary")}>Основные конкуренты</a>
           </nav>
 
           {conflict && <div role="alert" className="pm-alert"><AlertCircle size={16} />{conflict} <button className="pm-btn small" type="button" onClick={() => setConflict("")}>Понятно</button></div>}
@@ -345,10 +384,10 @@ export default function ProjectModel() {
                   </div>
                 </div>
                 <div className="pm-starting-segment-actions">
-                  <a className="pm-btn small" href="/admin/project-model?view=benchmark&filter=primary">Основные конкуренты</a>
-                  <a className="pm-btn small" href="/admin/project-model?view=benchmark&suite=pilot">Пилотные сценарии</a>
+                  <a className="pm-btn small" href={projectHref("view=benchmark&filter=primary")}>Основные конкуренты</a>
+                  <a className="pm-btn small" href={projectHref("view=benchmark&suite=pilot")}>Пилотные сценарии</a>
                   {primaryCompetitors.map((competitor) => <a className="pm-segment-company" key={competitor.id}
-                    href={`/admin/project-model?view=benchmark&element=${encodeURIComponent(competitor.id)}`}>
+                    href={projectHref(`view=benchmark&element=${encodeURIComponent(competitor.id)}`)}>
                     Профиль: {competitor.title} <span>{competitor.id}</span>
                   </a>)}
                 </div>

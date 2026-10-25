@@ -73,6 +73,7 @@ function Value({ value }: { value?: string }) {
 
 function queryHref(updates: Record<string, string | null>) {
   const params = new URLSearchParams(window.location.search);
+  params.set("hypothesis", params.get("hypothesis") || "original");
   params.set("view", "benchmark");
   Object.entries(updates).forEach(([key, value]) => value === null ? params.delete(key) : params.set(key, value));
   return `${window.location.pathname}?${params.toString()}`;
@@ -177,7 +178,7 @@ export default function Benchmark({ state, openElement }: Props) {
     </section>}
     {suite === "difference" && <section className="pm-benchmark-note pm-difference-method" aria-label="Ограничения сравнения отличий">
       <div><strong>Качественная матрица гипотез</strong><p>Пустые оценки не означают отсутствия функции. Удобство и влияние на доход после расходов не измерены; у TalkHint показан только желаемый замысел, не результат.</p></div>
-      <a className="pm-btn small" href="/admin/project-model?view=difference">Вернуться к карте двух осей</a>
+      <a className="pm-btn small" href={queryHref({ view: "difference", suite: null, filter: null, element: null })}>Вернуться к карте двух осей</a>
     </section>}
 
     {selected && <section className="pm-benchmark-profile-focus" aria-label={`Профиль ${selected.title}`}>
