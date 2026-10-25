@@ -356,10 +356,26 @@ final class SecretaryPersonalityUITests: XCTestCase {
         await screen.load("work-line")
         try await save(screen)
         nav.popToRootViewController(animated: false)
+        // The navigation stack changes before UIKit finishes reattaching Settings.
+        // Presenting the provider sheet before then races its appearance lifecycle.
+        try await waitUntil {
+            self.nav.topViewController === self.settings &&
+                self.settings.viewIfLoaded?.window === self.window &&
+                screen.viewIfLoaded?.window == nil &&
+                self.nav.transitionCoordinator == nil &&
+                self.settings.presentedViewController == nil
+        }
         let pending = draft(attempted: false)
         XCTAssertTrue(SessionStore.shared.savePendingSecretaryCall(pending))
         select(settings, 3, 0)
-        try await waitUntil { self.settings.presentedViewController is UIAlertController }
+        try await waitUntil {
+            guard let sheet = self.settings.presentedViewController as? UIAlertController else { return false }
+            return sheet.presentingViewController === self.settings &&
+                sheet.viewIfLoaded?.window === self.window &&
+                !sheet.isBeingPresented && !sheet.isBeingDismissed &&
+                sheet.transitionCoordinator == nil &&
+                self.settings.transitionCoordinator == nil
+        }
         let sheet = try XCTUnwrap(settings.presentedViewController as? UIAlertController)
         XCTAssertEqual(sheet.actions.filter { $0.style != .cancel }.count, 2)
         try await dismissAlert()

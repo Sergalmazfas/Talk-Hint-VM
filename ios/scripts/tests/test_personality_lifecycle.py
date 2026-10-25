@@ -103,5 +103,28 @@ class PersonalityLifecycleGuards(unittest.TestCase):
         self.assertIn("screen.viewIfLoaded?.window === self.window", test[pop:])
 
 
+    def test_provider_selection_waits_for_settings_and_sheet_appearance(self):
+        test = body(self.tests, "func testGPTAndRetellSelectionOnlyChangesFutureDrafts()")
+        pop = test.index("nav.popToRootViewController(animated: false)")
+        select = test.index("select(settings, 3, 0)")
+        dismiss = test.index("try await dismissAlert()")
+        returned = test[pop:select]
+        for check in ("self.nav.topViewController === self.settings",
+                      "self.settings.viewIfLoaded?.window === self.window",
+                      "screen.viewIfLoaded?.window == nil",
+                      "self.nav.transitionCoordinator == nil"):
+            self.assertIn(check, returned)
+        appearance = test[select:dismiss]
+        for check in ("sheet.presentingViewController === self.settings",
+                      "sheet.viewIfLoaded?.window === self.window",
+                      "!sheet.isBeingPresented", "!sheet.isBeingDismissed",
+                      "sheet.transitionCoordinator == nil",
+                      "self.settings.transitionCoordinator == nil"):
+            self.assertIn(check, appearance)
+        # Preserve the behavioral assertions, not just the sheet interaction.
+        self.assertIn("XCTAssertEqual(changed.clientRequestId, pending.clientRequestId)", test)
+        self.assertIn('XCTAssertEqual(stored.numberId, "work-line")', test)
+
+
 if __name__ == "__main__":
     unittest.main()
