@@ -32,6 +32,17 @@ research, offline fixtures and an actual worker run. If the real executor or its
 authorized tools/profile are missing, state the concrete blocker and next action;
 do not present described roles or manual work as an autonomous crew.
 
+Distinguish model-payload capacity from compute capacity before recommending a
+larger machine. Preserve complete organisation revisions and prior audit history;
+new audit entries may reference canonical revisions instead of copying them.
+
+**Why:** preparing the crew resource plan hit the model-size guard through
+duplicated history payloads, not demonstrated CPU/RAM exhaustion. Buying a larger
+VM would not address that failure, and deleting history would lose owner work.
+
+**How to apply:** inspect payload growth and persistence errors first. Measure
+worker/app memory, CPU and concurrency separately before proposing paid capacity.
+
 Keep independent product hypotheses, not successive replacements of one model.
 Neither has been chosen as the primary hypothesis. The original is TalkHint as
 an AI manager of a small business with specialist roles; retain all its ten

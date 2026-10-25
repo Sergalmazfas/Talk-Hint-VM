@@ -691,3 +691,17 @@ mtime_ms = 1792951269027
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bccdc65e-c0fe-400d-b8fb-dab72b64ac11/2652f4ed-06f6-4c4b-9238-b5309114c3c2"
 storage_version_token = "1792951369477691"
 content_type = "text/html"
+
+[[outputs]]
+id = "PmaOMfr6ctz6_rd7pXHKW"
+uri = "file://generated-artifacts/crew-roadmap/talkhint-crew-roadmap-v2.html"
+type = "html"
+title = "TalkHint Crew — состав, обязанности, ресурсы и подключение ChatGPT · v2"
+description = "Обновлённый единый roadmap для обсуждения. 12 специализаций, действия и клиенты результатов, ресурсные паспорта, выбор CrewAI, план мощности и контракт отдельного управляющего плагина. Плагин и исполнители ещё не подключены."
+logical_id = "9c884a75-fc87-4438-9014-adf9c4955f0a"
+content_hash = "sha256:34a0f9a7553c7a85be73dfe4f03416c7f3784b96acccf51498abee8ffd34a3dc"
+size = 90803
+mtime_ms = 1792954276202
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9c884a75-fc87-4438-9014-adf9c4955f0a/0e261f22-a2d0-49d1-b985-2cfdd96f998a"
+storage_version_token = "1792954333061559"
+content_type = "text/html"

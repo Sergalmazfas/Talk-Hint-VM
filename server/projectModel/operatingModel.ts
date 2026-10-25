@@ -92,7 +92,12 @@ export function saveOperatingModel(old: ProjectModelState, command: SaveOperatin
   (next.operatingModel ??= { revisions: [] }).revisions.push(revision);
   next.decisions.push({ id: `DEC-${randomUUID()}`, at, actor, action: "Обновлена модель организации через действия",
     reason: "Проектирование в Dev; сотрудники и расписания не запущены.", elementIds: [],
-    strategyChange: { command: c.type, before: last ?? null, after: revision } });
+    // Full immutable snapshots already live in operatingModel.revisions.
+    // Reference them rather than duplicating both payloads in every audit event.
+    // Existing audit records remain untouched and readable.
+    strategyChange: { command: c.type,
+      before: { operatingModelVersion: last?.version ?? null },
+      after: { operatingModelVersion: revision.version } } });
   next.revision++;
   if (JSON.stringify(next).length > 5_000_000) throw new ModelError(413, "Размер модели превышен; история не удалена.");
   return next;
