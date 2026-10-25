@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 /** Read the canonical owner-scoped Dev document and produce a static export, not another store. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dbReady, isDevDatabase, pool } from "../../db";
@@ -32,13 +33,13 @@ function render(text: string) {
 async function main() {
   if (process.env.NODE_ENV !== "development" || !isDevDatabase) throw new Error("Dev only");
   await dbReady; if (!pool) throw new Error("Database unavailable");
-  const { rows } = await pool.query(`SELECT state FROM talkhint_project_models WHERE EXISTS
+  const { rows } = await pool.query(`SELECT owner_key,state FROM talkhint_project_models WHERE EXISTS
     (SELECT 1 FROM jsonb_array_elements(coalesce(state->'alternatives','[]'::jsonb)) a WHERE a->>'id'='new-country')`);
   if (rows.length !== 1) throw new Error("Ambiguous owner; no export");
   const roadmap = process.argv.includes("--crew-roadmap");
   const setup = process.argv.includes("--crew-setup");
   const product = process.argv.includes("--product-crew");
-  const doc = readHypothesis(rows[0].state, "new-country").documents.find(d => d.title === (product ? productCrewGuideTitle : setup ? crewSetupTitle : roadmap ? crewRoadmapTitle : landingGearDocumentTitle));
+  const doc = readHypothesis(await unpackModel(pool, rows[0].owner_key, rows[0].state), "new-country").documents.find(d => d.title === (product ? productCrewGuideTitle : setup ? crewSetupTitle : roadmap ? crewRoadmapTitle : landingGearDocumentTitle));
   if (!doc) throw new Error("Saved case document not found");
   const folder = roadmap || setup || product ? "generated-artifacts/crew-roadmap" : "generated-artifacts/landing-gear-case";
   const filename = product ? "talkhint-product-crew-connection-v1" : setup ? "talkhint-crew-roadmap-v2" : roadmap ? "talkhint-crew-roadmap-v1" : "talkhint-landing-gear-v1";

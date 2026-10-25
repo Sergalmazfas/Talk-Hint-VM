@@ -1,3 +1,4 @@
+import { unpackModel } from "../projectModel/history";
 import { dbReady, pool, isDevDatabase } from "../db";
 import { persistModelUpdate } from "../projectModel/materialImport";
 import { readHypothesis } from "../projectModel/hypotheses";
@@ -11,7 +12,7 @@ async function main() {
   const owner = rows[0].owner_key;
   await persistModelUpdate(pool, owner, s => prepareProductCrewConnection(s, owner, `https://${process.env.REPLIT_DEV_DOMAIN}`), true);
   const saved = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const model = readHypothesis(saved.rows[0].state, "new-country"), data = model.operatingModel!.revisions.at(-1)!;
+  const model = readHypothesis(await unpackModel(pool, owner, saved.rows[0].state), "new-country"), data = model.operatingModel!.revisions.at(-1)!;
   if (!model.documents.some(d => d.title === productCrewGuideTitle) || data.data.nodes.find(n => n.id === "head-engineering")?.executorId !== "replit-current-dev-session") throw Error("Readback mismatch");
   console.log(JSON.stringify({ savedAndReread: true, operatingVersion: data.version, chiefEngineer: "head-engineering", executor: "current Replit session only", pluginInstalledInChatGPT: false }));
 }

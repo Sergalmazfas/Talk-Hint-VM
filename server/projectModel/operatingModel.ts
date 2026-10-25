@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { activeModelSize, modelSizeBudget } from "./sizeBudget";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { workKinds, workLinks, type SaveOperatingCommand } from "../../shared/operatingModel";
@@ -99,6 +100,6 @@ export function saveOperatingModel(old: ProjectModelState, command: SaveOperatin
       before: { operatingModelVersion: last?.version ?? null },
       after: { operatingModelVersion: revision.version } } });
   next.revision++;
-  if (JSON.stringify(next).length > 5_000_000) throw new ModelError(413, "Размер модели превышен; история не удалена.");
+  if (activeModelSize(next) > modelSizeBudget(next)) throw new ModelError(413, "Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.");
   return next;
 }

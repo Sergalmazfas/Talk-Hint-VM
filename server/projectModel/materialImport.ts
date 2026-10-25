@@ -1,3 +1,4 @@
+import { archiveModel, ensureModelHistory, unpackModel } from "./history";
 /**
  * Explicit, one-off OWNER-APPROVED Dev content import. Not called at server boot.
  * No provider, telephone, calendar or notification transports.
@@ -93,14 +94,19 @@ export async function persistModelUpdate(pool: Pool, owner: string, transform: (
       await client.query("INSERT INTO talkhint_project_models(owner_key,revision,state) VALUES($1,0,$2::jsonb) ON CONFLICT(owner_key) DO NOTHING", [owner, JSON.stringify(initialModel())]);
     const row = await client.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
     if (!row.rows.length) throw new Error("Existing model required; no new namespace created");
-    next = transform(row.rows[0].state);
-    if (next !== row.rows[0].state)
-      await client.query("UPDATE talkhint_project_models SET state=$2::jsonb,revision=$3,updated_at=now() WHERE owner_key=$1", [owner, JSON.stringify(next), next.revision]);
+    const before = await unpackModel(client, owner, row.rows[0].state);
+    next = transform(before);
+    if (next !== before) {
+      await ensureModelHistory(client);
+      await archiveModel(client, owner, before);
+      const stored = await archiveModel(client, owner, next);
+      await client.query("UPDATE talkhint_project_models SET state=$2::jsonb,revision=$3,updated_at=now() WHERE owner_key=$1", [owner, JSON.stringify(stored), next.revision]);
+    }
     await client.query("COMMIT");
   } catch (e) { await client.query("ROLLBACK"); throw e; }
   finally { client.release(); }
   const read = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const persisted = read.rows[0].state as ProjectModelState;
+  const persisted = await unpackModel(pool, owner, read.rows[0].state);
   // jsonb changes property order; semantic comparison covers ALL saved fields,
   // sources, relations and audit snapshots rather than checking counts alone.
   if (!isDeepStrictEqual(persisted, JSON.parse(JSON.stringify(next)))) throw new Error("Full material readback mismatch (possibly concurrent update)");

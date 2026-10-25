@@ -97,7 +97,6 @@ export class ProductCrewService {
       id = `PC-PASSPORT-${hash(a.roleId).slice(0, 24).toUpperCase()}`;
       const prior = state.elements.find(e => e.id === id);
       const operations = [...(prior?.coordination?.operations ?? []), operation];
-      if (operations.length > 100) return fail(413, "Достигнут лимит версий паспорта; история сохранена");
       element = { title: `Должностной паспорт: ${selected.name}`.slice(0, 240),
         section: modelSections.find(s => s.includes("роцесс")) ?? modelSections[0], scope: "talkhint", kind: "procedure",
         description: "Действия, клиенты результатов, входы/выходы и ресурсы роли. Паспорт не подключает API и не меняет технических прав или руководителя.",
@@ -129,7 +128,6 @@ export class ProductCrewService {
       id = existing.id; element = structuredClone(existing);
       delete (element as any).id; delete (element as any).version; delete (element as any).updatedAt; delete (element as any).needsReview;
       const c = element.coordination!;
-      if (c.operations.length >= 100) return fail(413, "Достигнут лимит переходов записи; история сохранена");
       c.operations.push(operation); c.nextStep = a.nextStep;
       element.details.nextStep = a.nextStep;
       if (name === "update_work") {

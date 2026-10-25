@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import request from "supertest";
+import { unpackModel } from "./history";
 vi.mock("../db", () => ({ pool: null, dbReady: Promise.resolve() }));
 vi.mock("../auth", () => ({
   authMiddleware: (req: any, res: any, next: any) => {
@@ -64,13 +65,20 @@ describe("competitor directory HTTP protections", () => {
   it("imports all five support profiles into the SAME owner repository, reloads them through the API and makes repeat imports a no-op", async () => {
     // SQL boundary round-trips JSON just like jsonb. It shares the exact repository
     // used by the authenticated HTTP route, not a parallel content collection.
-    const query = vi.fn(async (sql: string, values?: unknown[]) => {
+    const archives = new Map<string, any>();
+    const query = vi.fn(async (sql: string, values?: unknown[]): Promise<any> => {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.startsWith("CREATE TABLE")) return { rows: [] };
       const owner = String(values![0]);
+      if (sql.startsWith("INSERT INTO talkhint_project_model_history")) {
+        for (const row of JSON.parse(String(values![1]))) archives.set(row.key, row.payload);
+        return { rows: [] };
+      }
+      if (sql.startsWith("WITH RECURSIVE")) return { rows: Array.from(archives, ([key, payload]) => ({ key, payload })) };
       if (sql.startsWith("SELECT state")) return { rows: [{ state: JSON.parse(JSON.stringify(repo.root(owner))) }] };
       if (sql.startsWith("UPDATE talkhint_project_models")) {
         const next = JSON.parse(String(values![1])); expect(next.revision).toBe(values![2]);
-        repo.rows.set(owner, next); return { rows: [] };
+        repo.rows.set(owner, await unpackModel({ query } as any, owner, next)); return { rows: [] };
       }
       throw new Error(`Unexpected test query: ${sql}`);
     });

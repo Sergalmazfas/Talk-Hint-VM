@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniqueIndex, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniqueIndex, foreignKey, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -694,6 +694,13 @@ export const talkhintProjectModels = pgTable("talkhint_project_models", {
   state: jsonb("state").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Immutable chunks and owner revision checkpoints of the SAME project model.
+export const talkhintProjectModelHistory = pgTable("talkhint_project_model_history", {
+  ownerKey: text("owner_key").notNull().references(() => talkhintProjectModels.ownerKey),
+  key: text("key").notNull(),
+  payload: jsonb("payload").notNull(),
+}, t => ({ pk: primaryKey({ columns: [t.ownerKey, t.key] }) }));
 
 // Explicitly consented Dev voice-bench snapshots, separate from call history.
 export const secretaryLabComparisons = pgTable("secretary_lab_comparisons", {

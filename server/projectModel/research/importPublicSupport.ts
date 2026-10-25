@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 /**
  * Explicit one-off command, never imported by the application:
  * NODE_ENV=development npx tsx server/projectModel/research/importPublicSupport.ts --verify --owner EXISTING_OWNER
@@ -24,7 +25,7 @@ async function main() {
     const importResult = args[0] === "--apply" ? await persistPublicSupport(pool, owner) : null;
     const row = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
     if (row.rows.length !== 1) throw new Error("Existing owner model required");
-    const root = row.rows[0].state, model = readHypothesis(root, "new-country");
+    const root = await unpackModel(pool, owner, row.rows[0].state), model = readHypothesis(root, "new-country");
     const records = model.competitorDirectory?.records ?? [];
     const verified = Object.entries(publicSupportResearch).map(([appId, expected]) => {
       const matches = records.filter(r => r.revisions.at(-1)?.snapshot.appStore.match(/\/id(\d+)/)?.[1] === appId);

@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 /** Explicit Dev-only one-time preparation. No calls, external APIs, scheduling or production bootstrap. */
 import { pool, dbReady, isDevDatabase } from "../../db";
 import { persistAnalystPackage } from "./prepareAnalyst";
@@ -15,9 +16,9 @@ async function main() {
   const owner: string = candidates.rows[0].owner_key;
   const saved = await persistAnalystPackage(pool, owner);
   const row = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const actual = row.rows[0]?.state?.alternatives?.find((x: { id: string }) => x.id === "new-country")?.model?.analystPreparation;
+  const actual = (await unpackModel(pool, owner, row.rows[0].state)).alternatives?.find(x => x.id === "new-country")?.model?.analystPreparation;
   if (!isDeepStrictEqual(actual, saved.analystPreparation)) throw new Error("Readback mismatch");
-  const latest = actual.revisions.at(-1)!;
+  const latest = actual!.revisions.at(-1)!;
   console.log(JSON.stringify({ saved: true, readback: true, version: latest.version, status: latest.status,
     competitors: latest.basisVersions.length, sources: latest.data.sources.length,
     pilotSourceCount: latest.data.pilot.sourceIds.length, liveRunStarted: false, otherMaterialsPreserved: true }));

@@ -35,6 +35,7 @@ async function main() {
     assert.equal((await repo.read(owner)).revision, 1);
     console.log("Project Model Dev PG smoke PASS: persistence/restart, Unicode, concurrent lease/conflict, no duplicate mutation, audit snapshot, isolation, stale retry. No external actions.");
   } finally {
+    await pool.query("DELETE FROM talkhint_project_model_history WHERE owner_key = ANY($1::text[])", [[owner, other]]);
     await pool.query("DELETE FROM talkhint_project_models WHERE owner_key = ANY($1::text[])", [[owner, other]]);
     await pool.end();
   }

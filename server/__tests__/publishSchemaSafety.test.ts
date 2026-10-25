@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import {
-  mobileSecretaryDev, mobileSecretaryState, talkhintProjectModels,
+  mobileSecretaryDev, mobileSecretaryState, talkhintProjectModels, talkhintProjectModelHistory,
 } from "../../shared/schema";
 
 const columns = (table: Parameters<typeof getTableConfig>[0]) =>
@@ -37,5 +37,12 @@ describe("Publish preserves independent runtime tables", () => {
     expect(config.columns.find(c => c.name === "updated_at")?.hasDefault).toBe(true);
     expect(config.foreignKeys).toHaveLength(0);
     expect(getTableConfig(mobileSecretaryState).columns.every(c => !c.hasDefault || c.primary)).toBe(true);
+  });
+  it("preserves the immutable owner-scoped model archive in the publish schema", () => {
+    const config = getTableConfig(talkhintProjectModelHistory);
+    expect(config.name).toBe("talkhint_project_model_history");
+    expect(config.columns.map(c => c.name)).toEqual(["owner_key", "key", "payload"]);
+    expect(config.primaryKeys[0].columns.map(c => c.name)).toEqual(["owner_key", "key"]);
+    expect(config.foreignKeys[0].reference().foreignTable).toBe(talkhintProjectModels);
   });
 });

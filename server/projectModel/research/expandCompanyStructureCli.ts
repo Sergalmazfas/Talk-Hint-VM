@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 import { pool, dbReady, isDevDatabase } from "../../db";
 import { persistModelUpdate } from "../materialImport";
 import { expandCompanyStructure } from "./expandCompanyStructure";
@@ -14,7 +15,7 @@ async function main() {
   const owner = candidates.rows[0].owner_key as string;
   const root = await persistModelUpdate(pool, owner, state => expandCompanyStructure(state, owner), true);
   const reread = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const actual = readHypothesis(reread.rows[0].state, "new-country").operatingModel;
+  const actual = readHypothesis(await unpackModel(pool, owner, reread.rows[0].state), "new-country").operatingModel;
   if (!isDeepStrictEqual(actual, readHypothesis(root, "new-country").operatingModel)) throw new Error("Readback mismatch");
   const latest = actual!.revisions.at(-1)!;
   console.log(JSON.stringify({ saved: true, readback: true, version: latest.version, objects: latest.data.nodes.length,

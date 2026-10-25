@@ -1,3 +1,4 @@
+import { activeModelSize, modelSizeBudget } from "./sizeBudget";
 import { randomUUID, createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { ProjectModelState } from "../../shared/projectModel";
@@ -57,7 +58,6 @@ export function applyStrategyCommand(old: ProjectModelState, command: StrategyCo
         fail("Запись не может зависеть от себя", 400);
       if (isDeepStrictEqual(latest(record)?.data, c.node)) return old;
       if (strategy.nodes.length >= 500 && !record) fail("Достигнут лимит записей", 413);
-      if ((record?.revisions.length ?? 0) >= 100) fail("Достигнут лимит версий; история сохранена", 413);
       const target: StrategyNode = record ?? { id: id("NODE"), revisions: [] };
       before = latest(target)?.data ?? null;
       target.revisions.push({ version: c.baseVersion + 1, at: now, actor, data: structuredClone(c.node) });
@@ -79,7 +79,6 @@ export function applyStrategyCommand(old: ProjectModelState, command: StrategyCo
         fail("Заменить можно только другое принятое решение");
       if (isDeepStrictEqual(previous?.data, c.decision)) return old;
       if (strategy.decisions.length >= 500 && !record) fail("Достигнут лимит решений", 413);
-      if ((record?.revisions.length ?? 0) >= 100) fail("Достигнут лимит версий решения", 413);
       const target: StrategyDecision = record ?? { id: id("STRATEGY-DEC"), revisions: [] };
       before = previous?.data ?? null;
       target.revisions.push({ version: c.baseVersion + 1, at: now, actor, data: structuredClone(c.decision) });
@@ -136,7 +135,6 @@ export function applyStrategyCommand(old: ProjectModelState, command: StrategyCo
         if (c.map.points.length) fail("В методике v2 точки вычисляются из свидетельств, не задаются вручную", 400);
       }
       if (isDeepStrictEqual(strategy.mapVersions.at(-1)?.data, c.map)) return old;
-      if (strategy.mapVersions.length >= 100) fail("Достигнут лимит версий методики", 413);
       if (!strategy.mapVersions.length) strategy.mapVersions.push(captureStrategyMap(s, {
         id: id("MAP"), version: 0, at: now, actor, data: defaultStrategyMap(),
       }));
@@ -179,7 +177,6 @@ export function collectStrategyImpacts(old: ProjectModelState, next: ProjectMode
   const active = strategy.mapVersions.at(-1);
   let recalculated = false;
   if (active?.data.mode === "scenario_v2" && mapSources.size > 0) {
-    if (strategy.mapVersions.length >= 100) fail("Достигнут лимит версий карты; история сохранена", 413);
     const now = new Date().toISOString();
     const captured = captureStrategyMap(next, {
       id: id("MAP"), version: active.version + 1, at: now, actor, data: structuredClone(active.data),
@@ -227,6 +224,6 @@ export function collectStrategyImpacts(old: ProjectModelState, next: ProjectMode
       const e = next.elements.find(e => `element:${e.id}` === impact.target);
       if (e) e.needsReview = true;
     }
-  if (JSON.stringify(next).length > 5_000_000) fail("Модель превысила допустимый размер; история не обрезана", 413);
+  if (activeModelSize(next) > modelSizeBudget(next)) fail("Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.", 413);
   return next;
 }

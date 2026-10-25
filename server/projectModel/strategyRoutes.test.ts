@@ -34,11 +34,23 @@ describe("strategy persistence and HTTP boundaries", () => {
     vi.stubEnv("BENCHMARK_ADMIN_EMAILS", "owner@example.test,second@example.test");
     rows = new Map([["owner", root()], ["second", root()]]);
     let pending: Map<string, ProjectModelState> | null = null;
+    let archives = new Map<string, any>(), pendingArchives: Map<string, any> | null = null;
     const query = vi.fn(async (sql: string, args: any[] = []) => {
+      if (sql.startsWith("INSERT INTO talkhint_project_model_history")) {
+        const target = pendingArchives ?? archives;
+        for (const row of JSON.parse(args[1])) if (!target.has(`${args[0]}:${row.key}`)) target.set(`${args[0]}:${row.key}`, row);
+        return { rows: [] };
+      }
+      if (sql.startsWith("WITH RECURSIVE"))
+        return { rows: Array.from((pendingArchives ?? archives).entries()).filter(([key]) => key.startsWith(`${args[0]}:`)).map(([, row]) => copy(row)) };
+      if (sql.startsWith("SELECT payload")) {
+        const row = archives.get(`${args[0]}:${args[1]}`);
+        return { rows: row ? [{ payload: copy(row.payload) }] : [] };
+      }
       if (sql.startsWith("CREATE") || sql.startsWith("INSERT")) return { rows: [] };
-      if (sql === "BEGIN") { pending = new Map(Array.from(rows, ([k, v]) => [k, copy(v)])); return { rows: [] }; }
-      if (sql === "COMMIT") { rows = pending!; pending = null; return { rows: [] }; }
-      if (sql === "ROLLBACK") { pending = null; return { rows: [] }; }
+      if (sql === "BEGIN") { pending = new Map(Array.from(rows, ([k, v]) => [k, copy(v)])); pendingArchives = new Map(archives); return { rows: [] }; }
+      if (sql === "COMMIT") { rows = pending!; pending = null; archives = pendingArchives!; pendingArchives = null; return { rows: [] }; }
+      if (sql === "ROLLBACK") { pending = null; pendingArchives = null; return { rows: [] }; }
       if (sql.startsWith("SELECT state")) {
         const state = (pending ?? rows).get(args[0]); return { rows: state ? [{ state: copy(state), revision: state.revision }] : [] };
       }
@@ -55,6 +67,28 @@ describe("strategy persistence and HTTP boundaries", () => {
     return request(app).post(url).set("x-test-user", owner).set("Host", "127.0.0.1")
       .set("Origin", "http://127.0.0.1").send({ revision: revision ?? rows.get(owner)!.revision, command });
   }
+  it("reads owner/hypothesis historical snapshots without allowing historical writes or a fabricated revision", async () => {
+    expect((await post({ type: "saveOperatingModel", baseVersion: 0, data: defaultOperatingModel() })).status).toBe(200);
+    const past = `${path}&revision=0`;
+    const snapshot = await request(app).get(past).set("x-test-user", "owner");
+    expect(snapshot.status).toBe(200);
+    expect(snapshot.headers["x-model-snapshot"]).toBe("read-only");
+    expect(snapshot.headers["cache-control"]).toBe("no-store");
+    expect(snapshot.body.revision).toBe(0);
+    expect(snapshot.body.operatingModel).toBeUndefined();
+    const other = await request(app).get(past).set("x-test-user", "second");
+    expect(other.status).toBe(200); // Their OWN current revision 0 is available, not owner's checkpoint.
+    expect(other.body.operatingModel).toBeUndefined();
+    expect(rows.get("second")!.revision).toBe(0);
+    expect((await request(app).get(past)).status).toBe(401);
+    for (const revision of ["-1", "1.5", "abc", "9007199254740992"])
+      expect((await request(app).get(`${path}&revision=${revision}`).set("x-test-user", "owner")).status).toBe(400);
+    expect((await request(app).get(`${path}&revision=99`).set("x-test-user", "owner")).status).toBe(404);
+    expect((await post({ type: "saveDocument", title: "Do not write", text: "", url: "", elementIds: [] }, "owner", 1, past)).status).toBe(400);
+    expect(rows.get("owner")!.revision).toBe(1);
+    vi.stubEnv("NODE_ENV", "production");
+    expect((await request(app).get(past).set("x-test-user", "owner")).status).toBe(404);
+  });
   it("persists company hierarchy, managers and journey in the existing row across API recreation", async () => {
     const before = copy(rows.get("owner")!), other = copy(rows.get("second")!);
     const legacy = defaultOperatingModel();

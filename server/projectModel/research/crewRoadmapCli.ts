@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 import { dbReady, isDevDatabase, pool } from "../../db";
 import { persistModelUpdate } from "../materialImport";
 import { prepareCrewRoadmap } from "./crewRoadmap";
@@ -13,7 +14,7 @@ async function main() {
   const owner = r.rows[0].owner_key;
   const expected = await persistModelUpdate(pool, owner, s => prepareCrewRoadmap(s, owner), true);
   const saved = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const actual = readHypothesis(saved.rows[0].state, "new-country");
+  const actual = readHypothesis(await unpackModel(pool, owner, saved.rows[0].state), "new-country");
   if (!isDeepStrictEqual(actual, readHypothesis(expected, "new-country"))) throw new Error("Readback mismatch");
   const latest = actual.operatingModel!.revisions.at(-1)!;
   console.log(JSON.stringify({ readback: true, version: latest.version, roadmap: crewRoadmapId,

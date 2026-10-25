@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 import { dbReady, isDevDatabase, pool } from "../../db";
 import { persistModelUpdate } from "../materialImport";
 import { prepareLandingGearCase } from "./landingGearCase";
@@ -15,7 +16,7 @@ async function main() {
   const owner = owners.rows[0].owner_key;
   const updated = await persistModelUpdate(pool, owner, s => prepareLandingGearCase(s, owner), true);
   const saved = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const actual = readHypothesis(saved.rows[0].state, "new-country");
+  const actual = readHypothesis(await unpackModel(pool, owner, saved.rows[0].state), "new-country");
   if (!isDeepStrictEqual(actual, readHypothesis(updated, "new-country"))) throw new Error("Readback mismatch");
   const latest = actual.operatingModel!.revisions.at(-1)!;
   const doc = actual.documents.find(d => d.title === landingGearDocumentTitle)!;

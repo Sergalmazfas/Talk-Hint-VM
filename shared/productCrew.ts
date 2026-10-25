@@ -12,6 +12,6 @@ export const crewCoordinationSchema = z.object({
   origin: z.literal("owner_chatgpt"),
   operations: z.array(z.object({
     id: z.string().uuid(), fingerprint: z.string().max(64), at: z.string().datetime(),
-  }).strict()).min(1).max(100),
+  }).strict()).min(1),
 }).strict();
 export type CrewCoordination = z.infer<typeof crewCoordinationSchema>;

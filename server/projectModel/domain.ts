@@ -10,7 +10,7 @@ import { strategyCommandSchemas, strategyCommandTypes } from "./strategySchema";
 import { applyStrategyCommand, collectStrategyImpacts, captureStrategyMap } from "./strategyDomain";
 import { latestImpactOutcome, type StrategyCommand } from "../../shared/projectStrategy";
 import { ModelError } from "./modelError";
-import { modelSizeBudget } from "./sizeBudget";
+import { activeModelSize, modelSizeBudget } from "./sizeBudget";
 import { crewCoordinationSchema } from "../../shared/productCrew";
  import { saveAnalystPreparationSchema, saveAnalystPreparation } from "./analystPreparation";
 import { saveOperatingModelSchema, saveOperatingModel } from "./operatingModel";
@@ -99,7 +99,7 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
         if (reviews.length >= 100) fail("Достигнут лимит проверок категории; история сохранена", 413);
         reviews.push({ ...structuredClone(c.review), id: c.requestId, savedAt: now, recordedBy: actor });
       } else nextSnapshot.supportResearch = structuredClone(c.support);
-      if (JSON.stringify(next).length > modelSizeBudget(next)) fail("Модель превысила допустимый размер", 413);
+      if (activeModelSize(next) > modelSizeBudget(next)) fail("Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.", 413);
       return collect ? collectStrategyImpacts(old, next, actor) : next;
     }
     case "captureCompetitorQuarter": {
@@ -279,6 +279,6 @@ export function applyCommand(old: ProjectModelState, raw: ModelCommand, actor: s
     }
   }
   s.revision++;
-  if (JSON.stringify(s).length > modelSizeBudget(s)) fail("Модель превысила допустимый размер; требуется архивирование", 413);
+  if (activeModelSize(s) > modelSizeBudget(s)) fail("Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.", 413);
   return collect ? collectStrategyImpacts(old, s, actor) : s;
 }

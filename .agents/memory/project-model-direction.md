@@ -370,3 +370,19 @@ new state. That could repeat paid collection or writes while appearing to resume
 **How to apply:** A future worker must verify owner, hypothesis, run identity,
 approved inputs and persisted version before continuation; reject unknown IDs
 and use atomic revision checks and stable operation identities for writes.
+
+## History-format rollback boundary
+
+Do not downgrade to a binary that assumes inline history while archived heads
+remain in current owner rows. Preserve both current model and archive together
+in backups; never delete archive blocks to make a rollback pass.
+
+**Why:** Historical compatibility was deliberately kept at the repository
+boundary, so older direct-SQL consumers cannot distinguish a retained history
+tail from the complete array. A blind code downgrade can silently lose history
+on its next write even though the archive itself still exists.
+
+**How to apply:** Before an explicitly approved legacy-code rollback, stop
+writers, materialize and verify the full current model under each owner lock
+without changing CAS revision, and retain its archive. This is not permission
+to alter production. Operational details are in `docs/project-model-history.md`.

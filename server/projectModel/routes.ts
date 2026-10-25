@@ -22,7 +22,18 @@ export function registerProjectModel(app: Express, repo: ModelRepository = repos
         return res.status(400).json({ error: "Некорректная гипотеза." });
       if (hypothesis !== "original" && process.env.NODE_ENV !== "development")
         return res.status(404).json({ error: "Сравнение гипотез пока доступно только в Dev." });
-      if (req.method === "GET") return res.json(await repo.read(owner, hypothesis));
+      if (req.method === "GET") {
+        if (req.query.revision !== undefined) {
+          if (typeof req.query.revision !== "string" || !/^(0|[1-9][0-9]*)$/.test(req.query.revision) ||
+              !Number.isSafeInteger(Number(req.query.revision)))
+            return res.status(400).json({ error: "Некорректная ревизия." });
+          if (!repo.readRevision) return res.status(503).json({ error: "Чтение прежних ревизий недоступно." });
+          res.set("X-Model-Snapshot", "read-only");
+          return res.json(await repo.readRevision(owner, Number(req.query.revision), hypothesis));
+        }
+        return res.json(await repo.read(owner, hypothesis));
+      }
+      if (req.query.revision !== undefined) return res.status(400).json({ error: "Прежняя ревизия доступна только для чтения." });
       if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
       const parsed = requestSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: "Некорректное изменение модели", details: parsed.error.flatten() });

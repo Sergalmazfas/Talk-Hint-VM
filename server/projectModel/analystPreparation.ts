@@ -1,3 +1,4 @@
+import { activeModelSize, modelSizeBudget } from "./sizeBudget";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -68,7 +69,6 @@ export function saveAnalystPreparation(old: ProjectModelState, raw: AnalystPrepa
     throw new ModelError(409, "Источники пилота должны относиться к выбранному конкуренту и быть рекомендованы.");
   if (data.pilot.sourceIds.length > data.limits.maxSources) throw new ModelError(409, "Источников пилота больше предложенного лимита.");
   if (isDeepStrictEqual(last?.data, data)) return old;
-  if ((old.analystPreparation?.revisions.length ?? 0) >= 100) throw new ModelError(413, "Достигнут лимит версий; история сохранена.");
   const next = structuredClone(old), at = new Date().toISOString();
   const revision = {
     version: c.baseVersion + 1, at, actor, status: "awaiting_approval" as const, data: structuredClone(data),
@@ -81,6 +81,6 @@ export function saveAnalystPreparation(old: ProjectModelState, raw: AnalystPrepa
     action: "Подготовлен паспорт AI-аналитика", reason: "Ожидает согласования; рабочий запуск и расписание не включены.",
     elementIds: [], strategyChange: { command: c.type, before: structuredClone(last ?? null), after: revision } });
   next.revision++;
-  if (JSON.stringify(next).length > 5_000_000) throw new ModelError(413, "Модель превысила допустимый размер; история не удалена.");
+  if (activeModelSize(next) > modelSizeBudget(next)) throw new ModelError(413, "Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.");
   return next;
 }

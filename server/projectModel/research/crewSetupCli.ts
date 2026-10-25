@@ -1,3 +1,4 @@
+import { unpackModel } from "../history";
 import { dbReady, isDevDatabase, pool } from "../../db";
 import { persistModelUpdate } from "../materialImport";
 import { readHypothesis } from "../hypotheses";
@@ -11,7 +12,7 @@ async function main() {
   const owner = rows[0].owner_key;
   await persistModelUpdate(pool, owner, s => prepareCrewSetup(s, owner), true);
   const saved = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
-  const model = readHypothesis(saved.rows[0].state, "new-country");
+  const model = readHypothesis(await unpackModel(pool, owner, saved.rows[0].state), "new-country");
   const doc = model.documents.find(d => d.title === crewSetupTitle);
   if (!doc || !crewPositions.every(p => model.operatingModel!.revisions.at(-1)!.data.nodes.some(n => n.id === `resource-profile-${p.id}`))) throw new Error("Readback mismatch");
   console.log(JSON.stringify({ readback: true, modelVersion: model.operatingModel!.revisions.at(-1)!.version,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { modelSizeBudget } from "./sizeBudget";
+import { activeModelSize, modelSizeBudget } from "./sizeBudget";
 import { projectPackageBlocks, type ModelCommand, type ModelElement, type ProjectModelState } from "../../shared/projectModel";
 import { applyCommand, ModelError } from "./domain";
 import { strategyCommandTypes } from "./strategySchema";
@@ -34,7 +34,13 @@ export function applyHypothesisCommand(root: ProjectModelState, id: string,
     throw new ModelError(409, "Связная модель доступна только в новой гипотезе; исходная модель не изменена.");
   if (["saveCompetitor", "captureCompetitorQuarter", "saveTalkHintResearch", "addCompetitorReview", "saveCompetitorSupport"].includes(command.type) && id !== "new-country")
     throw new ModelError(409, "Новый справочник доступен только в отдельной гипотезе new-country; прежние исследования не изменены.");
-  if (id === "original") return applyCommand(root, command, actor);
+  if (id === "original") {
+    const next = applyCommand(root, command, actor);
+    const { alternatives: _alternatives, ...original } = next;
+    if (activeModelSize(original) > 5_000_000)
+      throw new ModelError(413, "Актуальные данные исходной гипотезы превысили лимит размера; история сохранена. Это не лимит CPU/RAM.");
+    return next;
+  }
   const index = root.alternatives?.findIndex(item => item.id === id) ?? -1;
   if (index < 0) throw new ModelError(404, "Гипотеза не найдена.");
   const next = structuredClone(root);
@@ -44,8 +50,8 @@ export function applyHypothesisCommand(root: ProjectModelState, id: string,
   if (updated === selected) return root;
   alternative.model = updated;
   next.revision++;
-  if (JSON.stringify(next).length > modelSizeBudget(next))
-    throw new ModelError(413, "Модель превысила допустимый размер.");
+  if (activeModelSize(next) > modelSizeBudget(next))
+    throw new ModelError(413, "Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.");
   return next;
 }
 
