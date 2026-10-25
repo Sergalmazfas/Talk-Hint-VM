@@ -113,3 +113,15 @@ visible screen and then incorrectly expected reappearance to resume it.
 settling before draining; await actual attachment on return. Do not infer an app
 lifecycle bug from a test that skipped those preconditions or accept one green
 run as proof an intermittent failure is resolved.
+
+Hosted UIKit tests must validate the actual presentation relationship, not
+assume a child controller is its sheet's presenter.
+
+**Why:** Once navigation timing was stabilized on Mac, an assertion requiring
+Settings itself as presenter failed; UIKit may delegate presentation to the
+containing navigation controller.
+
+**How to apply:** Accept only the expected child/container, verify its presented
+sheet, window attachment and settled transitions, and dismiss via the actual
+presenter. Requiring the navigation controller alone would make the opposite
+assumption rather than solve the underlying test-design problem.

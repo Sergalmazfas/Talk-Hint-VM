@@ -115,12 +115,17 @@ class PersonalityLifecycleGuards(unittest.TestCase):
                       "self.nav.transitionCoordinator == nil"):
             self.assertIn(check, returned)
         appearance = test[select:dismiss]
-        for check in ("sheet.presentingViewController === self.settings",
+        for check in ("let presenter = sheet.presentingViewController",
+                      "(presenter === self.settings || presenter === self.nav)",
+                      "presenter.presentedViewController === sheet",
+                      "presenter.viewIfLoaded?.window === self.window",
                       "sheet.viewIfLoaded?.window === self.window",
                       "!sheet.isBeingPresented", "!sheet.isBeingDismissed",
                       "sheet.transitionCoordinator == nil",
+                      "presenter.transitionCoordinator == nil",
                       "self.settings.transitionCoordinator == nil"):
             self.assertIn(check, appearance)
+        self.assertNotIn("sheet.presentingViewController === self.settings", appearance)
         # Preserve the behavioral assertions, not just the sheet interaction.
         self.assertIn("XCTAssertEqual(changed.clientRequestId, pending.clientRequestId)", test)
         self.assertIn('XCTAssertEqual(stored.numberId, "work-line")', test)
