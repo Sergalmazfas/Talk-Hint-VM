@@ -719,3 +719,17 @@ mtime_ms = 1792955639603
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f0c46917-409b-4b6f-a672-01ef6b7ad835/7f86c68a-27be-474e-b57b-a9635eccdb0e"
 storage_version_token = "1792955693850121"
 content_type = "text/html"
+
+[[outputs]]
+id = "kE6NqCmwM7ktprsJ2-rIN"
+uri = "file://generated-artifacts/company-preview/01-company-390.png"
+type = "image"
+title = "Компания TalkHint — мобильный образец"
+description = "Экран шириной 390 px. Реальный компонент на текущем сохранённом снимке структуры, проверенный в локальном браузерном тесте; не скриншот авторизованного сеанса админки."
+logical_id = "b50c386e-ed54-49c5-a584-931035587654"
+content_hash = "sha256:1773a988c2d030eb7177a8b4ec32cb6609dc34b3fe24f2aa9528df51c42c0884"
+size = 140552
+mtime_ms = 1792997311689
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b50c386e-ed54-49c5-a584-931035587654/22b61962-c945-4710-9b06-c214c1441d39"
+storage_version_token = "1792997356511672"
+content_type = "image/png"

@@ -14,6 +14,7 @@ import IncomingSecretary from "@/pages/incoming-secretary";
 import NotFound from "@/pages/not-found";
 import Onboarding from "@/pages/onboarding";
 import ProjectModel from "@/pages/project-model";
+import CompanyPreview from "@/pages/company-preview";
 import SecretaryLab from "@/pages/secretary-lab";
 import VoiceLab from "@/pages/voice-lab";
 
@@ -95,6 +96,7 @@ function AdminRoutes() {
         <Route path="/incoming-secretary-preview" component={IncomingSecretary} />
         <Route path="/diagnostics" component={AdminDiagnostics} />
         <Route path="/project-model" component={ProjectModel} />
+        {import.meta.env.DEV && <Route path="/company-preview" component={CompanyPreview} />}
         <Route path="/voice-lab" component={VoiceLab} />
         <Route path="/secretary-lab" component={SecretaryLab} />
         <Route component={NotFound} />
