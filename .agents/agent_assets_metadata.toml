@@ -747,3 +747,45 @@ mtime_ms = 1793001442301
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/54a69f62-a710-4061-a315-783d9ca6675f/51a5704e-d5b4-4be1-8e97-a28172d19a19"
 storage_version_token = "1793001452964367"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "jrspM_GWq6tdgls_QahL-"
+uri = "file://generated-artifacts/talkhint-company-rev737/TalkHint_inventory_report_rev737.html"
+type = "html"
+title = "TalkHint — отчёт по структуре · rev737"
+description = "Читаемый отчёт: направления, 39 должностей, действия, заполненность, паспорта, запросы и технические пробелы. Начните с него."
+logical_id = "1c848746-aed4-4535-85e6-c535cd57a5fa"
+content_hash = "sha256:a718354d462d34ff2cf7797b517b9fe45a7e86c5bf32505c55c6848ab1765573"
+size = 180919
+mtime_ms = 1793007448643
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1c848746-aed4-4535-85e6-c535cd57a5fa/fbc11444-a6c1-443a-8d56-d6a15879475e"
+storage_version_token = "1793007480568445"
+content_type = "text/html"
+
+[[outputs]]
+id = "Me-XratZWaWj4j01Yftg8"
+uri = "file://generated-artifacts/talkhint-company-rev737/TalkHint_company_package_rev737.zip"
+type = "unspecified"
+title = "TalkHint — полный пакет для передачи · rev737"
+description = "Архив около 5 МБ: текущий JSON, полная история, отчёт, инструкция, пакет P-BENCH, Excel и PDF Claude. Внутренние материалы, не для публикации."
+logical_id = "dfc1c6ab-3287-4e8d-9979-c9b3fa912cce"
+content_hash = "sha256:25fb8262cbff69ea892554314764e07a3c4cfd4d61f12c6e837980dbb72f96f3"
+size = 5096322
+mtime_ms = 1793007451122
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dfc1c6ab-3287-4e8d-9979-c9b3fa912cce/42523198-983f-411a-ac09-4729d275af00"
+storage_version_token = "1793007481519481"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "2NlVQvjWqAQA7bJ_XCrT2"
+uri = "file://generated-artifacts/talkhint-company-rev737/TalkHint_company_inventory_rev737.json"
+type = "unspecified"
+title = "TalkHint — текущая модель JSON · rev737"
+description = "Все текущие записи new-country, схемы полей, аудит заполненности и предложения проверок. Около 15 МБ; прежние ревизии отдельно в полном архиве."
+logical_id = "3fe4176d-207e-4ae7-82d6-467177657101"
+content_hash = "sha256:e46f5b255663cee7dd80b56fb77594253128689852acd8a23c31c1ca6008c9d3"
+size = 14976416
+mtime_ms = 1793007448626
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3fe4176d-207e-4ae7-82d6-467177657101/66f01d1b-8f1a-4aa2-b3ee-018b5b8a173b"
+storage_version_token = "1793007482501856"
+content_type = "application/octet-stream"
