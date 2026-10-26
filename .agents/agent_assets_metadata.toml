@@ -831,3 +831,17 @@ mtime_ms = 1793035489080
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f5ad9d75-1055-4c68-9ed0-70cc0a8d4244/4fde9f09-4ba8-472c-a5a8-c886fe8c667c"
 storage_version_token = "1793035614899550"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "MVfRgV0tlF8M4ps2kVm71"
+uri = "file://generated-artifacts/pbench/TalkHint_PBENCH_v2_rev744.zip"
+type = "unspecified"
+title = "Скачать ZIP — P-BENCH v2"
+description = "Архив ≈290 КБ. Внутри полный рабочий JSON: 24 действия, база TalkHint, пять конкурентов, формы и протокол проверки."
+logical_id = "689f1389-8457-47fe-816f-81a37eb4c0f8"
+content_hash = "sha256:12cd0f1b9bc14072bcc2c7712c091086003977702ec6d0d8787df8825ee489c1"
+size = 296598
+mtime_ms = 1793035705024
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/689f1389-8457-47fe-816f-81a37eb4c0f8/6ffc1af5-c6d5-4947-bd2e-bb6ed0b1d618"
+storage_version_token = "1793035717282296"
+content_type = "application/octet-stream"
