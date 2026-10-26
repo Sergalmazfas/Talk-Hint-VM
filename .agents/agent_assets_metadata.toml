@@ -887,3 +887,31 @@ mtime_ms = 1793038694642
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2cfee0a7-729f-4356-b379-5fbe44b79b48/270a02c0-3801-468c-b21d-d6b883a1039b"
 storage_version_token = "1793038719101041"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "YeEtQamgHP8JuWv0ZPJ7_"
+uri = "file://generated-artifacts/product-passport/TalkHint_audio_passport_v1_rev758.html"
+type = "html"
+title = "Открыть паспорт работы со звуком"
+description = "Для телефона: маршруты Hint, Translator, Copilot и Кати, Xcode-аудиослой, стенды/workflows, источники и ограничения. Аудиопаспорт v1, ревизия 758, на согласовании."
+logical_id = "7f43753a-ad0b-43f3-94fb-ce127dbdb77d"
+content_hash = "sha256:a1b967af0c54ec2d26993e6f4ab6761c8e2eeab9df66ffaf598116b3984a7e50"
+size = 50177
+mtime_ms = 1793046002070
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7f43753a-ad0b-43f3-94fb-ce127dbdb77d/20a45665-d170-4daa-9f3b-ffa919d25f6b"
+storage_version_token = "1793046029960185"
+content_type = "text/html"
+
+[[outputs]]
+id = "oM6aGsO1ZDxcHaHeLm282"
+uri = "file://generated-artifacts/product-passport/TalkHint_audio_passport_v1_rev758.zip"
+type = "unspecified"
+title = "Скачать аудиопаспорт — HTML + JSON + Markdown"
+description = "Полный пакет около 51 КБ. 34 источника с файлами и строками; текущий код отдельно от исторических замеров и device-проверок. Приложения и настройки не менялись."
+logical_id = "b7964aff-f814-4ead-a9b1-c979cad9eb50"
+content_hash = "sha256:e004901dc3621ad773613108a9e766a6ffd62527b27dc93f5b749ebf345a55e6"
+size = 52596
+mtime_ms = 1793046022330
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b7964aff-f814-4ead-a9b1-c979cad9eb50/147e1450-6aa8-42ae-a6a6-cf21cb360199"
+storage_version_token = "1793046030735435"
+content_type = "application/octet-stream"
