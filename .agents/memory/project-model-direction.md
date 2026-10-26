@@ -294,15 +294,18 @@ archive captures must stay frozen while a newer calculation is shown as current.
 
 ## AI staff direction
 
-«Вся будущая команда — AI-сотрудники и Сергей». Начинать с одной должности:
-AI-аналитик конкурентного бенчмаркинга. Сначала паспорт, источники, инструменты
-и процедура для согласования; только после согласования — ограниченный пилот.
+«Вся будущая команда — AI-сотрудники и Сергей». Текущий порядок владельца:
+сначала полностью описать всю структуру через действия, результаты и клиентов,
+включая руководство и все технические специализации приложения. Подключение
+исполнителей — отдельный будущий этап, не следующий шаг после одной карточки.
 
-**Why:** The owner explicitly set this staffing direction and approval sequence.
+**Why:** The owner explicitly corrected the premature move toward a worker pilot
+and requested completion of the whole company description first.
 
-**How to apply:** Do not invent human hires or activate further employees.
-CrewAI executes processes; the existing TalkHint model remains the data source,
-and Sergey makes strategic decisions.
+**How to apply:** Discuss one existing card, save the agreed version, check its
+completeness and links, then identify the next unfinished item. Draft, ready for
+discussion and Sergey-approved are distinct. Missing live executors must not block
+description readiness. Keep one roadmap and model; do not install or run CrewAI.
 
 ## Organisation through work
 
@@ -326,7 +329,7 @@ its scope, dependencies, gaps and next step. Derive departments from work, prese
 the existing hypotheses, shared owner storage and analyst passport, and label
 unapproved structure as proposals.
 
-The next agreed priority is the upper picture before detailing B2C.1.1:
+The upper picture is the framework for subsequent one-card-at-a-time detailing:
 strategy → ten tactical directions → major operational processes. Line management
 is a separate scheme from client-path transfers. Each position has one immediate
 manager; receiving another department's report does not establish another boss.
