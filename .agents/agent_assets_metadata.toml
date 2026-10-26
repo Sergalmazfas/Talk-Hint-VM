@@ -985,3 +985,31 @@ mtime_ms = 1793057738691
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/089cf858-5190-4348-bc53-8bbc9d4564b1/8752a12e-113d-409b-b9fa-d0e5e09bb5d1"
 storage_version_token = "1793057765205780"
 content_type = "text/html"
+
+[[outputs]]
+id = "MlUheTUhN1wyRDWWr5oOj"
+uri = "file://generated-artifacts/hint-lab-diff-v3/TalkHint_lab_Hint_diff_rev762_v3.zip"
+type = "unspecified"
+title = "Скачать исправленный пакет v3 — без сроков ожидания"
+description = "Заменяет diff v2. Событийная цепочка после каждого звонка, письмо владельцу, отдельные дневные/недельные/месячные сводки. Бланк письма, ресурсы и предлагаемые лимиты включены. Ничего не применено и не включено."
+logical_id = "7dfb8af0-6dcf-429f-859a-f6bbe96728e7"
+content_hash = "sha256:ee36e06e3d3c8cb9343f4b0e12268ed63f214dd2db18a62c113f5cfe5cecb8e6"
+size = 222038
+mtime_ms = 1793059130759
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7dfb8af0-6dcf-429f-859a-f6bbe96728e7/a557a865-1a8f-4576-b650-796991e2fcf1"
+storage_version_token = "1793059151905980"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "i02QgrJPwXxIx5cNXWFTq"
+uri = "file://generated-artifacts/hint-lab-diff-v3/%D0%9E%D0%A2%D0%9A%D0%A0%D0%AB%D0%A2%D0%AC_%D0%A1%D0%9D%D0%90%D0%A7%D0%90%D0%9B%D0%90.html"
+type = "html"
+title = "Прочитать v3 на телефоне"
+description = "Единый проект для обсуждения без распаковки. Старые сроки сохранены только как история в колонках «было»; в предлагаемых действиях их нет."
+logical_id = "e2469ef2-b0b1-4a9b-8a8a-fcfa77f3752a"
+content_hash = "sha256:d70e047967d923fcaa8400efec4b7fc29dc14cd0d7eb2d2f0b5cdc6a33cc14d1"
+size = 355728
+mtime_ms = 1793059130714
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e2469ef2-b0b1-4a9b-8a8a-fcfa77f3752a/13528a02-d3f2-4d53-8232-a6082c6e042c"
+storage_version_token = "1793059152601864"
+content_type = "text/html"
