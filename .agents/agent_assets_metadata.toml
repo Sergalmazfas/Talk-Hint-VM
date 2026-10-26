@@ -957,3 +957,31 @@ mtime_ms = 1793055295411
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bb94f426-a2f1-4e7d-bf1b-1a5995b3cb70/c7d6b93f-3e57-4af0-bb12-0de348bff20e"
 storage_version_token = "1793055362373852"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "6o_gSscd3VSi1GWzPm2kR"
+uri = "file://generated-artifacts/hint-lab-diff-v2/TalkHint_lab_Hint_diff_rev762_v2.zip"
+type = "unspecified"
+title = "Скачать единый diff лабораторий TalkHint — v2"
+description = "Один ZIP: было→стало, P.LAB/P.TECH, 20 исходных строк и парные приёмы, 5 стендов, защищённый маршрут звонков, юридические действия, KPI, общая форма и сверка всех 40 должностей. Только проект изменений; ничего не применено."
+logical_id = "647e67fe-6b80-4f70-91b0-e7d12c492135"
+content_hash = "sha256:cc5e9a92ab9eef89daed013ae61b2f85214c062bb30c147a52b4bc1004fe3249"
+size = 204005
+mtime_ms = 1793057738735
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/647e67fe-6b80-4f70-91b0-e7d12c492135/7777b9f3-3cd5-49cc-8b33-a0d4ff9f8770"
+storage_version_token = "1793057764455840"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "nly8gDHtcgkMNbNkKCkE2"
+uri = "file://generated-artifacts/hint-lab-diff-v2/%D0%9E%D0%A2%D0%9A%D0%A0%D0%AB%D0%A2%D0%AC_%D0%A1%D0%9D%D0%90%D0%A7%D0%90%D0%9B%D0%90.html"
+type = "html"
+title = "Прочитать diff без распаковки ZIP"
+description = "Самодостаточный отчёт с раскрываемыми разделами. Основание — модель rev762, книга v8. Подтверждённые условия отделены от предлагаемых сроков хранения и незакрытых вопросов."
+logical_id = "089cf858-5190-4348-bc53-8bbc9d4564b1"
+content_hash = "sha256:d8db422893ab6e527c2ff47859318409f2cc20d73bcb16ba745bb0f54d3d8738"
+size = 327622
+mtime_ms = 1793057738691
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/089cf858-5190-4348-bc53-8bbc9d4564b1/8752a12e-113d-409b-b9fa-d0e5e09bb5d1"
+storage_version_token = "1793057765205780"
+content_type = "text/html"
