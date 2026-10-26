@@ -873,3 +873,17 @@ mtime_ms = 1793037823006
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c8d2170b-6747-40a0-b61b-af21b3a34184/d1ae08e3-423d-4e8f-b6d3-605abe773ed4"
 storage_version_token = "1793037914029872"
 content_type = "text/html"
+
+[[outputs]]
+id = "zUnAHePWUA9_hERPxz_Nq"
+uri = "file://generated-artifacts/product-passport/TalkHint_product_passport_v5_rev753.zip"
+type = "unspecified"
+title = "Скачать полный паспорт TalkHint v5"
+description = "Rev753: книга v5, технический паспорт v3, полный источник другого проекта, сопоставление и оригинальный ZIP. Внутри есть читаемый HTML и JSON; около 161 КБ."
+logical_id = "2cfee0a7-729f-4356-b379-5fbe44b79b48"
+content_hash = "sha256:f8d463076cb0226d80978284f330e2760c8bc00017ab40c4876fc897d3d5a0bb"
+size = 164734
+mtime_ms = 1793038694642
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2cfee0a7-729f-4356-b379-5fbe44b79b48/270a02c0-3801-468c-b21d-d6b883a1039b"
+storage_version_token = "1793038719101041"
+content_type = "application/octet-stream"
