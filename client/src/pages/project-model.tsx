@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import Benchmark from "@/components/project-model/Benchmark";
 import CompetitorDirectory from "@/components/project-model/CompetitorDirectory";
 import PackageViews from "@/components/project-model/PackageViews";
+import ProductBookView from "@/components/project-model/ProductBookView";
 import "./project-model.css";
 import "@xyflow/react/dist/style.css";
 import "@/components/project-model/TeamView.css";
@@ -51,6 +52,7 @@ export default function ProjectModel() {
   const initialParams = new URLSearchParams(window.location.search);
   const hypothesisId = initialParams.get("hypothesis") || "original";
   const requestedView = initialParams.get("view");
+  const isProductBook = requestedView === "book" && hypothesisId === "new-country";
   const selectedCompetitorId = initialParams.get("competitor")?.trim() || "";
   const initialView = projectViews.includes(requestedView as typeof projectViews[number]) ? requestedView as typeof projectViews[number] : "overview";
   const requestedSection = initialParams.get("section");
@@ -291,7 +293,7 @@ export default function ProjectModel() {
         </div>
       </header>
 
-      <div className={`pm-shell ${isFocusedTasks || isFocusedHistory ? "pm-shell-focused" : ""}`}>
+      <div className={`pm-shell ${isFocusedTasks || isFocusedHistory || isProductBook ? "pm-shell-focused" : ""}`}>
         <aside className="pm-sidebar" aria-label="Разделы модели">
           <p className="pm-overline">Project model / 01</p>
           <nav className="pm-nav">
@@ -303,6 +305,9 @@ export default function ProjectModel() {
                 {item === "Рынок и конкуренты" && <a className={`pm-nav-subitem ${benchmarkView && section === item ? "active" : ""}`} href={projectHref("view=benchmark")} aria-current={benchmarkView && section === item ? "page" : undefined}>Конкурентный бенчмаркинг</a>}
               </div>
             ))}
+            {hypothesisId === "new-country" && <a className={`pm-nav-book ${isProductBook ? "active" : ""}`} href={projectHref("view=book&chapter=home")}>
+              <span className="pm-nav-index">BK</span>Живая книга продукта
+            </a>}
           </nav>
           <div className="pm-side-note">Только планирование TalkHint. Содержимое этой модели не добавляется в инструкции телефонного агента.</div>
           <div className="pm-side-links" aria-label="Другие административные инструменты">
@@ -316,12 +321,12 @@ export default function ProjectModel() {
         <main className="pm-main">
           <div className="pm-heading">
             <div>
-              <p className="pm-kicker">INTERNAL / ADMIN WORKSPACE</p>
-              <h1>Модель проекта</h1>
-              <p>Структура продукта, процессов и решений TalkHint. Подтверждение в модели не запускает разработку и не исполняет агентов.</p>
+              <p className="pm-kicker">{isProductBook ? "NEW-COUNTRY / PRODUCT PASSPORT" : "INTERNAL / ADMIN WORKSPACE"}</p>
+              <h1>{isProductBook ? "Живая книга продукта" : "Модель проекта"}</h1>
+              <p>{isProductBook ? "Единый паспорт TalkHint: действующие записи, честные неизвестные и ответственность." : "Структура продукта, процессов и решений TalkHint. Подтверждение в модели не запускает разработку и не исполняет агентов."}</p>
             </div>
             <div className="pm-heading-tools">
-              <button className="pm-btn" type="button" onClick={() => openElement()}><Plus size={14} /> Новый элемент</button>
+              {!isProductBook && <button className="pm-btn" type="button" onClick={() => openElement()}><Plus size={14} /> Новый элемент</button>}
             </div>
           </div>
 
@@ -353,24 +358,26 @@ export default function ProjectModel() {
             </div>
           </section>}
 
-          <nav className="pm-package-nav" aria-label="Пакет проекта">
+          {!isProductBook && <nav className="pm-package-nav" aria-label="Пакет проекта">
             <a className={currentView === "overview" ? "active" : ""} href={projectHref("view=overview")}>Обзор пакета</a>
             <a className={currentView === "segment" ? "active" : ""} href={projectHref("view=segment")}>Сегмент</a>
             <a className={currentView === "market" ? "active" : ""} href={projectHref("view=market")}>Рынок и экономика</a>
             <a className={currentView === "difference" ? "active" : ""} href={projectHref("view=difference")}>Отличие и проверка</a>
             <a className={benchmarkView ? "active" : ""} href={projectHref("view=benchmark&suite=pilot&filter=primary")}>Основные конкуренты</a>
-          </nav>
+          </nav>}
 
           {conflict && <div role="alert" className="pm-alert"><AlertCircle size={16} />{conflict} <button className="pm-btn small" type="button" onClick={() => setConflict("")}>Понятно</button></div>}
           {error && <div role="alert" className="pm-alert pm-error"><AlertCircle size={16} /><span>{error}</span><button className="pm-btn small" type="button" onClick={() => void load()}>Повторить</button></div>}
           {deepLinkError && <div role="alert" className="pm-alert pm-error"><AlertCircle size={16} /><span>{deepLinkError}</span><button className="pm-btn small" type="button" onClick={() => setDeepLinkError("")}>Закрыть</button></div>}
 
-          <div className="pm-tabs" role="tablist" aria-label="Представление модели">
+          {!isProductBook && <div className="pm-tabs" role="tablist" aria-label="Представление модели">
             <button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => changeTab("overview")}>Обзор <span className="pm-count">{talkhintElements.length}</span></button>
             <button type="button" role="tab" aria-selected={tab === "links"} className={tab === "links" ? "active" : ""} onClick={() => changeTab("links")}>Связи <span className="pm-count">{state?.relations.length ?? 0}</span></button>
             <button type="button" role="tab" aria-selected={tab === "documents"} className={tab === "documents" ? "active" : ""} onClick={() => changeTab("documents")}>Документы <span className="pm-count">{state?.documents.length ?? 0}</span></button>
-          </div>
+          </div>}
 
+          {isProductBook && state && <ProductBookView state={state} saving={saving} onSave={submit} />}
+          {!isProductBook && <>
           {loading && !state ? <div className="pm-overview-grid" aria-label="Загрузка модели"><div className="pm-skeleton" /><div className="pm-skeleton" /><div className="pm-skeleton" /><div className="pm-skeleton" /></div> : null}
           {!loading && !state && !error && <div className="pm-empty"><strong>Модель пока недоступна</strong>Повторите загрузку, чтобы получить актуальное состояние.</div>}
 
@@ -523,9 +530,10 @@ export default function ProjectModel() {
               <details className="pm-audit-details"><summary>Все снимки и поля записи</summary><pre>{JSON.stringify(decision, null, 2)}</pre></details>
             </article>)}</div> : <div className="pm-empty"><strong>Решений пока нет</strong>История появится после первых сохранений и подтверждений.</div>}
           </section>}
+          </>}
         </main>
 
-        {!isFocusedTasks && !isFocusedHistory && <aside className="pm-panel" aria-label="От разговора к модели">
+        {!isFocusedTasks && !isFocusedHistory && !isProductBook && <aside className="pm-panel" aria-label="От разговора к модели">
           <p className="pm-kicker">MANUAL INTAKE</p>
           <h2 className="pm-panel-title">От разговора к модели</h2>
           <p className="pm-panel-subtitle">Ручной перенос контекста и правок. Интеграции с ChatGPT здесь нет — следующий этап требует отдельного подключения и проверки.</p>
