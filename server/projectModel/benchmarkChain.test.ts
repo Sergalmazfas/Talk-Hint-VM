@@ -27,6 +27,7 @@ import { companyActions, companyDirections, reportingPeriods } from "./research/
 import { actionDirection, effortMinutes } from "../../shared/actionRegister";
 import { companyCoverage } from "../../shared/operatingModel";
 import { benchmarkReadinessSpecs, benchmarkReadinessTitle, prepareBenchmarkReadiness } from "./research/benchmarkReadiness";
+import { passportRoadmapTitle, prepareProductPassport, productPassportId, productPassportTitle } from "./research/productPassport";
 function fixture() {
   const root = initialModel();
   const model = applyCommand(initialModel(), { type: "saveOperatingModel", baseVersion: 0,
@@ -36,6 +37,72 @@ function fixture() {
   return prepareActionRegister(prepareStructureFirst(prepareCrewSetup(prepareCrewRoadmap(
     prepareLandingGearCase(defineMkt1Result(refineT01(root, "owner"), "owner"), "owner"), "owner"), "owner"), "owner"), "owner", "2026-10-26");
 }
+describe("one user-facing TalkHint product passport awaiting owner approval", () => {
+  const before = () => prepareBenchmarkReadiness(prepareCompanyRegister(prepareLegalChain(
+    prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner"), "owner"), "owner");
+  it("updates the original product identity and preserves its history, other hypotheses and existing actions", () => {
+    const root = before(), snapshot = structuredClone(root), next = prepareProductPassport(root, "owner");
+    expect(root).toEqual(snapshot);
+    expect(next.elements).toEqual(root.elements);
+    expect(next.alternatives![1]).toEqual(root.alternatives![1]);
+    const a = readHypothesis(root, "new-country"), b = readHypothesis(next, "new-country");
+    const old = a.elements.find(e => e.id === "TH-PRODUCT")!, current = b.elements.find(e => e.id === old.id)!;
+    expect(current.version).toBe(old.version + 1);
+    expect(current.contentStatus).toBe("proposal");
+    expect(current.details.output).toContain("На согласовании");
+    expect(b.decisions.some(d => d.before?.id === old.id && d.before.description === old.description)).toBe(true);
+    expect(b.documents).toHaveLength(a.documents.length + 1);
+    const doc = b.documents.find(d => d.id === productPassportId)!;
+    expect(doc.id).toBe(productPassportId);
+    expect(doc.title).toBe(productPassportTitle);
+    expect(doc.elementIds).toContain(old.id);
+    expect(b.competitorDirectory).toEqual(a.competitorDirectory);
+    expect(b.analystPreparation).toEqual(a.analystPreparation);
+    expect(b.operatingModel!.revisions.slice(0, -1)).toEqual(a.operatingModel!.revisions);
+    const oldData = a.operatingModel!.revisions.at(-1)!.data, data = b.operatingModel!.revisions.at(-1)!.data;
+    expect(data.nodes.map(n => n.id)).toEqual(oldData.nodes.map(n => n.id));
+    expect(data.links).toEqual(oldData.links);
+    const ids = new Set(["company-action-product-reference", "company-action-context-receive", "company-action-context-check"]);
+    expect(actionChainGaps(data, ids)).toEqual([]);
+    for (const id of ids) {
+      const n = data.nodes.find(n => n.id === id)!;
+      expect(n.referenceIds).toContain(doc.id);
+      expect(n.executorId).toBeNull();
+      expect(n.register?.approval).toBe("discussion");
+    }
+    const roadmap = b.documents.find(d => d.title === passportRoadmapTitle)!;
+    expect(a.documents.some(d => d.id === roadmap.id)).toBe(true);
+    expect(prepareProductPassport(next, "owner")).toBe(next);
+  });
+  it("separates owner confirmation, implementation limits and plans without inventing link or approval", () => {
+    const m = readHypothesis(prepareProductPassport(before(), "owner"), "new-country");
+    const text = m.documents.find(d => d.id === productPassportId)!.text;
+    for (const value of ["25 октября 2026", "В разработке", "На согласовании", "B2C", "B2B",
+      "Подтверждено владельцем", "Проверено реализацией/демонстрацией", "Только запланировано",
+      "одну разработанную персону", "Нет встроенного чата для работы с почтой",
+      "Назначение произнесённого слова не установлено", "Тарифы и лимиты", "Заявленное развитие",
+      "не заменяют испытания", "MKT.2.7", "MKT.2.8", "Работа аналитика"])
+      expect(text).toContain(value);
+    expect(text).not.toContain("API-ключ");
+    expect(text).not.toContain("CPU");
+    expect(text).not.toContain("стенд");
+    expect(text.length).toBeLessThan(50000);
+    expect(m.operatingModel!.revisions.at(-1)!.data.nodes.find(n => n.id === "company-action-context-receive")!.description)
+      .toContain("получения аналитиком — ожидается");
+  });
+  it("reuses an existing passport document and fails closed on ambiguous passports or namespace", () => {
+    const root = before(), m = readHypothesis(root, "new-country");
+    m.documents.push({ id: "existing-product-document", title: "TalkHint — паспорт продукта", text: "Старая редакция",
+      url: "", elementIds: ["TH-PRODUCT"], updatedAt: "2026-10-25T00:00:00Z" });
+    const next = readHypothesis(prepareProductPassport(root, "owner"), "new-country");
+    expect(next.documents).toHaveLength(m.documents.length);
+    expect(next.elements.find(e => e.id === "TH-PRODUCT")!.details.output).toContain("existing-product-document");
+    expect(next.decisions.some(d => d.documentBefore?.text === "Старая редакция")).toBe(true);
+    m.documents.push({ ...m.documents.at(-1)!, id: "conflicting-passport" });
+    expect(() => prepareProductPassport(root, "owner")).toThrow("Ambiguous");
+    expect(() => prepareProductPassport(initialModel(), "owner")).toThrow();
+  });
+});
 describe("benchmark analyst preparation is management work, not execution", () => {
   const before = () => prepareCompanyRegister(prepareLegalChain(
     prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner"), "owner");
