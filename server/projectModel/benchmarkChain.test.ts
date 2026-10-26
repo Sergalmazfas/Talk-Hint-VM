@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialModel } from "./seed";
 import { applyCommand } from "./domain";
-import { defaultOperatingModel } from "../../shared/operatingModelTemplate";
+import { defaultOperatingModel, emptyWorkNode } from "../../shared/operatingModelTemplate";
 import { buildCompanyStructure } from "../../shared/companyStructure";
 import { refineT01 } from "./research/refineT01";
 import { defineMkt1Result } from "./research/defineMkt1Result";
@@ -26,6 +26,7 @@ import { prepareCompanyRegister, companyRegisterTitle, companyReportActions, man
 import { companyActions, companyDirections, reportingPeriods } from "./research/companyRegisterSpec";
 import { actionDirection, effortMinutes } from "../../shared/actionRegister";
 import { companyCoverage } from "../../shared/operatingModel";
+import { benchmarkReadinessSpecs, benchmarkReadinessTitle, prepareBenchmarkReadiness } from "./research/benchmarkReadiness";
 function fixture() {
   const root = initialModel();
   const model = applyCommand(initialModel(), { type: "saveOperatingModel", baseVersion: 0,
@@ -35,6 +36,73 @@ function fixture() {
   return prepareActionRegister(prepareStructureFirst(prepareCrewSetup(prepareCrewRoadmap(
     prepareLandingGearCase(defineMkt1Result(refineT01(root, "owner"), "owner"), "owner"), "owner"), "owner"), "owner"), "owner", "2026-10-26");
 }
+describe("benchmark analyst preparation is management work, not execution", () => {
+  const before = () => prepareCompanyRegister(prepareLegalChain(
+    prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner"), "owner");
+  it("updates the one canonical roadmap, preserves all history and hypotheses, and is idempotent", () => {
+    const root = before(), snapshot = structuredClone(root);
+    const next = prepareBenchmarkReadiness(root, "owner");
+    expect(root).toEqual(snapshot);
+    expect(next.elements).toEqual(root.elements);
+    expect(next.alternatives![1]).toEqual(root.alternatives![1]);
+    const a = readHypothesis(root, "new-country"), b = readHypothesis(next, "new-country");
+    expect(b.documents).toHaveLength(a.documents.length);
+    expect(b.competitorDirectory).toEqual(a.competitorDirectory);
+    expect(b.analystPreparation).toEqual(a.analystPreparation);
+    const oldDoc = a.documents.find(d => d.title === companyRegisterTitle)!;
+    const newDoc = b.documents.find(d => d.title === benchmarkReadinessTitle)!;
+    expect(newDoc.id).toBe(oldDoc.id);
+    expect(b.decisions.some(d => d.documentBefore?.text === oldDoc.text)).toBe(true);
+    expect(b.operatingModel!.revisions.slice(0, -1)).toEqual(a.operatingModel!.revisions);
+    const old = a.operatingModel!.revisions.at(-1)!.data, data = b.operatingModel!.revisions.at(-1)!.data;
+    expect(data.nodes.filter(n => n.kind === "role")).toEqual(old.nodes.filter(n => n.kind === "role"));
+    expect(data.nodes.filter(n => n.kind === "crew")).toEqual(old.nodes.filter(n => n.kind === "crew"));
+    for (const n of old.nodes) expect(data.nodes.some(x => x.id === n.id && x.code === n.code)).toBe(true);
+    expect(newDoc.text.length).toBeLessThan(50000);
+    expect(prepareBenchmarkReadiness(next, "owner")).toBe(next);
+  });
+  it("has complete chains, actual resource IDs, explicit blockers and no fabricated acceptance", () => {
+    const next = prepareBenchmarkReadiness(before(), "owner");
+    const m = readHypothesis(next, "new-country"), data = m.operatingModel!.revisions.at(-1)!.data;
+    const ids = new Set(benchmarkReadinessSpecs.map(s => s.id));
+    expect(actionChainGaps(data, ids)).toEqual([]);
+    expect(companyCoverage(data)).not.toContain("Не представлены все десять направлений");
+    for (const s of benchmarkReadinessSpecs) {
+      const n = data.nodes.find(n => n.id === s.id)!;
+      expect(n.executorId).toBeNull();
+      expect(n.register?.approval).toBe("discussion");
+      expect(n.register?.operationsPerPeriod).toBeNull();
+      expect(n.register?.minutesPerOperation).toBeNull();
+      expect(n.register?.source).toContain("Поручение Сергея");
+      expect(n.procedure).toContain("Нет разрешения");
+      expect(n.description).toContain(s.state);
+      for (const id of [n.parentId, n.roleId, ...n.resourceIds])
+        expect(data.nodes.some(x => x.id === id)).toBe(true);
+      expect(n.reporting?.formStatus).not.toBe("approved");
+    }
+    const node = (id: string) => data.nodes.find(n => n.id === `benchmark-ready-${id}`)!;
+    expect(node("search").nextId).toBe("benchmark-ready-qa");
+    expect(node("search-key").procedure).toContain("Только если");
+    expect(node("search-key").procedure).toContain("Не просить ключ в чате");
+    expect(node("browser").procedure).toContain("не дают доступа к установленным iOS/Android");
+    expect(node("qa").description).toContain("Заблокировано");
+    expect(node("forms-review").acceptorId).toBe("owner");
+    expect(node("forms").procedure).toContain("ChatGPT готовит");
+    expect(node("runtime").procedure).toContain("не новый запуск");
+    expect(node("storage").procedure).toContain("owner/new-country");
+    const doc = m.documents.find(d => d.title === benchmarkReadinessTitle)!;
+    expect(doc.text).toContain("Совместный разговор втроём не доказан");
+    expect(doc.text).toContain("В текущем проходе заново не перепроверены");
+    expect(doc.text).toContain("40 требований");
+  });
+  it("fails closed without the existing namespace or with conflicting identities", () => {
+    expect(() => prepareBenchmarkReadiness(initialModel(), "owner")).toThrow();
+    const root = before();
+    readHypothesis(root, "new-country").operatingModel!.revisions.at(-1)!.data.nodes
+      .push({ ...emptyWorkNode("collision", "ENG.BENCH.1", "collision", "action", "crew-equipment") });
+    expect(() => prepareBenchmarkReadiness(root, "owner")).toThrow("Duplicate identity");
+  });
+});
 describe("company action register and management reporting requirements", () => {
   function before() {
     return prepareLegalChain(prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner");
