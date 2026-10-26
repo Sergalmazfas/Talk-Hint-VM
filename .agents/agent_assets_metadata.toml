@@ -845,3 +845,31 @@ mtime_ms = 1793035705024
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/689f1389-8457-47fe-816f-81a37eb4c0f8/6ffc1af5-c6d5-4947-bd2e-bb6ed0b1d618"
 storage_version_token = "1793035717282296"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "pbVY9faLLB1u2X20eLzIK"
+uri = "file://generated-artifacts/product-passport/TalkHint_product_passport_v4_rev749.zip"
+type = "unspecified"
+title = "Скачать ZIP — паспорт TalkHint v4"
+description = "Снимок rev749: полный JSON, читаемая HTML-сводка и Markdown. Технический паспорт v2, вклад десяти направлений, источники и открытые вопросы. Архив около 73 КБ."
+logical_id = "7a7fbbb2-a391-4a07-82fa-1e2655bfaf8c"
+content_hash = "sha256:8d145e5a92918d9e1c3e2fb266169c9d9797160bb623b7fb2e2b86b1be755cf5"
+size = 75040
+mtime_ms = 1793037823026
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7a7fbbb2-a391-4a07-82fa-1e2655bfaf8c/2c997bfe-6196-4ee3-9648-c14f71a5001c"
+storage_version_token = "1793037912792922"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "eMVUQNVAF6cni1C6GucfM"
+uri = "file://generated-artifacts/product-passport/TalkHint_product_passport_v4_rev749.html"
+type = "html"
+title = "Открыть сводку паспорта TalkHint"
+description = "Читаемая версия для телефона: приложения и серверы, возможности, вклад отделов, право/экономика и что ещё требуется подтвердить. Статус — на согласовании."
+logical_id = "c8d2170b-6747-40a0-b61b-af21b3a34184"
+content_hash = "sha256:93f27b6efed2f32f6d05312709cfef4ebe86320f5d6dc6b4b637e3a455a5ee7c"
+size = 123663
+mtime_ms = 1793037823006
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c8d2170b-6747-40a0-b61b-af21b3a34184/d1ae08e3-423d-4e8f-b6d3-605abe773ed4"
+storage_version_token = "1793037914029872"
+content_type = "text/html"
