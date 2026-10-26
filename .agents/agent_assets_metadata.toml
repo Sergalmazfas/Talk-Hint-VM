@@ -789,3 +789,31 @@ mtime_ms = 1793007448626
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3fe4176d-207e-4ae7-82d6-467177657101/66f01d1b-8f1a-4aa2-b3ee-018b5b8a173b"
 storage_version_token = "1793007482501856"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "JfcjRsr8lObduHgcL-1qJ"
+uri = "file://generated-artifacts/pbench-v3-review/TalkHint_PBENCH_v3_diff_rev737.html"
+type = "html"
+title = "P-BENCH и методолог — изменения на подтверждение"
+description = "Сравнение пакета v3 с актуальной rev737: все 18 действий, шесть дополнений и пересечения методолога. Модель не изменена."
+logical_id = "0d753c6b-7f80-454b-8110-eb98e76288e8"
+content_hash = "sha256:108100201314cb633e57c7cfe7d14b6ec0aa0b1e0a2d527f99fec86600bccdd2"
+size = 51237
+mtime_ms = 1793034742225
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0d753c6b-7f80-454b-8110-eb98e76288e8/e113f430-bd1e-4437-9dfa-f063307f26ae"
+storage_version_token = "1793034754675572"
+content_type = "text/html"
+
+[[outputs]]
+id = "jOSOx5fHxfvkvo010NQx0"
+uri = "file://generated-artifacts/pbench-v3-review/TalkHint_PBENCH_v3_diff_rev737.json"
+type = "unspecified"
+title = "JSON предложенных изменений · rev737"
+description = "Полные исходные карточки и предлагаемые изменения; семь решений, коды дополнений, методолог, два сценария проверки и пустой протокол. Не команда импорта и не паспорт v2."
+logical_id = "2520a10b-7396-4738-b82e-465906ab6c1d"
+content_hash = "sha256:713fd88c1d363c92c8d5760f73a4b879e0d9261f3ec1c3f70ff8fdf3b8e780b0"
+size = 423741
+mtime_ms = 1793034742224
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2520a10b-7396-4738-b82e-465906ab6c1d/60bf9db5-81c5-4b14-a6d3-9c496c36edac"
+storage_version_token = "1793034755501969"
+content_type = "application/octet-stream"
