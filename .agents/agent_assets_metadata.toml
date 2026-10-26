@@ -733,3 +733,17 @@ mtime_ms = 1792997311689
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b50c386e-ed54-49c5-a584-931035587654/22b61962-c945-4710-9b06-c214c1441d39"
 storage_version_token = "1792997356511672"
 content_type = "image/png"
+
+[[outputs]]
+id = "44hNMHYjFMpOCBk4r0LS5"
+uri = "file://generated-artifacts/pbench/pbench-work-package-v1-rev736.json"
+type = "unspecified"
+title = "P-BENCH — полный рабочий пакет JSON · v1 · rev736"
+description = "18 существующих действий, 5 карточек конкурентов, актуальная база TalkHint, формы и KPI, запросы и незаполненный протокол пробного прохода. Снимок для работы ChatGPT; не утверждённое задание и не выполненное исследование."
+logical_id = "54a69f62-a710-4061-a315-783d9ca6675f"
+content_hash = "sha256:de4961b3587558ccb17eaaf5331a2eadbb5ae719dd0eebfbaca986b52cdb004b"
+size = 2144233
+mtime_ms = 1793001442301
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/54a69f62-a710-4061-a315-783d9ca6675f/51a5704e-d5b4-4be1-8e97-a28172d19a19"
+storage_version_token = "1793001452964367"
+content_type = "application/octet-stream"
