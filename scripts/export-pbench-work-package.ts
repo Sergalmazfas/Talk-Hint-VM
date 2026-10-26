@@ -65,7 +65,12 @@ async function main() {
     const role = node(roleId)!;
     const actions = nodes.filter(n => n.kind === "action" && n.roleId === roleId);
     assert.equal(role.code, "P-BENCH");
-    assert.equal(actions.length, 18);
+    const approvedReportText = model.documents.find(d => d.id === "DOC-PBENCH-WEEKLY-TEMPLATE")?.text ?? "";
+    const reportMarker = "<!-- PBENCH-REPORT-SPEC-V2 -->";
+    const reportSpec = approvedReportText.includes(reportMarker)
+      ? JSON.parse(approvedReportText.slice(approvedReportText.indexOf(reportMarker) + reportMarker.length).trim()) : null;
+    const expectedActionCount = reportSpec ? 24 : 18;
+    assert.equal(actions.length, expectedActionCount);
     const existing = model.documents.find(d => d.id === manifestId);
     const similar = model.documents.filter(d => /рабочий пакет.*P-BENCH|P-BENCH.*рабочий пакет/i.test(d.title));
     assert.ok(similar.every(d => d.id === manifestId), "reconcile existing package identity before export");
@@ -89,6 +94,7 @@ async function main() {
       "DOC-BENCHMARK-OWNERSHIP-HANDOFF", "DOC-BENCH-CANDIDATES-TEMPLATE",
       "DOC-BENCH-LIST-DECISION-TEMPLATE", "DOC-d4cd67c1-c2ec-4cc1-9dd7-3a4de41ec57d",
       "DOC-ad64fd80-8258-4911-af77-760c81f4ea51",
+      ...(reportSpec ? ["DOC-PORG-OPERATING-PASSPORT"] : []),
     ].map(document);
     const requests = model.elements.filter(e => /^(BENCH-REQ-|PB-GAP-TECH$|INFO-LG-(VOCALINGO|LINGVANEX|NEED)$|BENCH-PASS-)/.test(e.id));
     const book = document("DOC-TALKHINT-PRODUCT-PASSPORT");
@@ -110,7 +116,8 @@ async function main() {
     assert.ok(focusUrls.every(u => vc.sources.some(s => s.url === u)), "all focus URLs saved in the selected card");
     const order = ["MKT.2.7", "MKT.2.8", "MKT.2.1", "MKT.2.2", "MKT.2.11", "MKT.2.10",
       "MKT.2.4", "MKT.2.5", "MKT.2.6", "MKT.2.18", "MKT.2.13", "MKT.2.14",
-      "RM.W.VOC", "RM.W.LING", "RM.W.QUO", "MKT.LEG.1", "MKT.LEG.2", "ACQ.CA.05"];
+      "RM.W.VOC", "RM.W.LING", "RM.W.QUO", "MKT.LEG.1", "MKT.LEG.2", "ACQ.CA.05",
+      ...(reportSpec ? ["MKT.2.20", "MKT.2.21", "MKT.2.22", "MKT.2.23", "MKT.2.24", "MKT.2.25"] : [])];
     const firstPass = ["MKT.2.7", "MKT.2.8", "MKT.2.2", "MKT.2.11", "MKT.2.10",
       "MKT.2.4", "MKT.2.5", "MKT.2.6", "MKT.2.18"];
     const evidenceClasses = ["official_claim", "source_read", "source_conflict", "user_report",
@@ -200,6 +207,12 @@ async function main() {
       "MKT.LEG.1": ["Только по PRD.LEG.3: найти принятую версию списка, если нет — адресный возврат. Не выдумывать утверждение и правовой вывод."],
       "MKT.LEG.2": ["Только после предыдущего: передать происхождение/версию/статус через PRD.LEG.4/5, не юридическое заключение."],
       "ACQ.CA.05": ["Только по запросу регионального директора: сегмент/язык/территория, применимые сценарии/цены/ограничения, неизвестное продукту/финансам. Это не выбор географии пилота и не утверждение бюджета."],
+      "MKT.2.20": ["Сохранить помесячные показатели с определением/единицей/платформой/территорией/методом/датой источника. Сравнить с прошлым месяцем и годом только при сопоставимости. Порог загрузок не даёт месячные установки. Неизвестное null."],
+      "MKT.2.21": ["Собрать доступные отзывы, относящиеся к функции и версии; указать отбор, окно, ссылки и количество. Доля положительных только внутри выборки; не статистика оттока/всех пользователей. Не выдумывать выборку ради заполнения графика."],
+      "MKT.2.22": ["Подготовить месяц из дневных/недельных записей, функций, направлений roadmap, метрик и ответов продукта. Использовать reportSpecification; доли группы не называть долей всего рынка. Передать MKT.2.15; не принять за HEAD.01."],
+      "MKT.2.23": ["Сравнить направления кварталов, публичные планы и наши гипотезы; Lingvanex/Guardianly наблюдать квартально. Передать предложение состава MKT.2.9, не утверждать его самостоятельно."],
+      "MKT.2.24": ["Передать продукту вопросы и черновик чек-листа: сценарий, версия, шаги, материалы и возможные расходы. MKT.2.19 у продукта; тестирует Сергей. Не звонить, не покупать и не регистрироваться."],
+      "MKT.2.25": ["Оценить пригодность доступных источников: охват, история, метод оценок, цена, лимиты и API/выгрузка. Передать финансовые и технические вопросы адресатам, итог ORG.REG.2. Это разовая оценка без подключения и расхода."],
     };
     const actionContracts = order.map(code => {
       const n = actions.find(n => n.code === code);
@@ -281,7 +294,12 @@ async function main() {
       },
       assignment: {
         agreed: { scope: "Подготовить и получить пакет для самостоятельного пробного прохождения ChatGPT. Сохранить 18 действий/идентичности и не выполнять исследование за него.",
-          approvedCompetitorSelectionDecision: null, approvedRunId: null, audience: null, geography: null,
+          approvedCompetitorSelectionDecision: reportSpec ? {
+            confirmedBy: reportSpec.confirmedBy, confirmation: reportSpec.confirmation,
+            core: reportSpec.selection.core, quarterly: reportSpec.selection.quarterly,
+            caseOnly: reportSpec.selection.caseOnly,
+            note: "Подтверждён состав наблюдения, не объективное ранжирование и не запуск.",
+          } : null, approvedRunId: null, audience: null, geography: null,
           platformBuild: null, comparisonPeriods: null, responseDeadline: null, approvedBudget: null },
         savedProposal: prep.data.pilot, savedProposedLimits: prep.data.limits,
         proposedConfiguration: {
@@ -351,6 +369,13 @@ async function main() {
           contents: ["изменения функций/цен/покрытия", "решения/возвраты/блокеры", "план-факт", "качество/учтённые расходы", "предложения следующего месяца", "ссылки на недели/журнал"],
           periodAndDeadline: null, cumulativeCountersMustNotBeSummed: true },
       },
+      reportSpecification: reportSpec,
+      readiness: {
+        descriptionChanges: reportSpec ? "Подтверждены владельцем; 18 прежних действий и шесть дополнений сохранены." : "Предложение",
+        fullPassportAccepted: false, trialAccepted: false, resourcesVerifiedForExecutor: false,
+        executorConnected: false,
+        sourceSchemaCaveat: "analystPreparation.status=awaiting_approval относится к общей готовности; согласование описания отдельно зафиксировано в документах/правилах.",
+      },
       metrics: {
         definitions: metrics, proposedComparisonPeriods: periods, quantitativeWorksheet: quantitativeRows,
         formulas: { absolute: "current - previous", relativePercent: "(current - previous) / previous * 100",
@@ -395,6 +420,15 @@ async function main() {
         })),
         overall: { status: "not_run", chatgptConclusion: null, completedAt: null, ownerAcceptance: null },
       },
+      trialTests: [
+        { id: "normal", status: "not_run",
+          input: "Один конкурент из постоянного состава, выбранный вопрос, версия базы и период; публичные источники при фактически доступном инструменте.",
+          expected: "Проверенные изменения, источники/даты/платформы, сравнение, сообщение продукту и настоящий ответ либо честное ожидание. Самоприёмка не создаётся." },
+        { id: "missing_input", status: "not_run",
+          input: "Нет согласованной базы либо сопоставимых месячных метрик/инструмента.",
+          expected: "Адресный запрос поставщику, blocked только соответствующей ветви, неизвестные значения null; доступные части выполнить, расходы не запускать." },
+      ],
+      trialProtocol: [],
       provenanceAndRecovery: {
         sourceComparison: "Все sourceRecord/sourceSnapshot/documents — точные копии выбранной ревизии; операторские настройки/метрики/пустые формы отделены.",
         sourceHistoryPreservedInCanonicalStorage: true,
@@ -468,8 +502,8 @@ async function main() {
     // Validate JSON round-trip, completeness and exact correspondence BEFORE any write.
     const serialized = JSON.stringify(packet, null, 2) + "\n";
     const parsed = JSON.parse(serialized);
-    assert.equal(parsed.actions.length, 18);
-    assert.equal(new Set(parsed.actions.map((a: any) => a.id)).size, 18);
+    assert.equal(parsed.actions.length, expectedActionCount);
+    assert.equal(new Set(parsed.actions.map((a: any) => a.id)).size, expectedActionCount);
     assert.equal(parsed.competitors.length, 5);
     assert.deepEqual(new Set(parsed.actions.map((a: any) => a.id)), new Set(actions.map(a => a.id)));
     parsed.actions.forEach((a: any) => assert.deepEqual(resolve(a.sourceRecord), actions.find(n => n.id === a.id)));

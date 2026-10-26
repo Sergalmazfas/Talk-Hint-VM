@@ -817,3 +817,17 @@ mtime_ms = 1793034742224
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2520a10b-7396-4738-b82e-465906ab6c1d/60bf9db5-81c5-4b14-a6d3-9c496c36edac"
 storage_version_token = "1793034755501969"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "yln0iqJ7qGYdcOsek6QIb"
+uri = "file://generated-artifacts/pbench/pbench-work-package-v2-rev744.json"
+type = "unspecified"
+title = "P-BENCH — рабочий пакет v2 · 24 действия"
+description = "Сохранённый снимок rev744, операционная модель v24. Все инструкции, пять карточек конкурентов, база TalkHint, формы и KPI; два сценария проверки, незаполненный протокол. JSON ≈2,4 МБ — скачать и передать в ChatGPT или Claude."
+logical_id = "f5ad9d75-1055-4c68-9ed0-70cc0a8d4244"
+content_hash = "sha256:5ee14a7726b3ba3f80a8f2646e80715fba1ddf812663f3f7043a5b84a8053450"
+size = 2413189
+mtime_ms = 1793035489080
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f5ad9d75-1055-4c68-9ed0-70cc0a8d4244/4fde9f09-4ba8-472c-a5a8-c886fe8c667c"
+storage_version_token = "1793035614899550"
+content_type = "application/octet-stream"
