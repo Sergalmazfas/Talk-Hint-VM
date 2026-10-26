@@ -12,7 +12,10 @@ import { prepareStructureFirst } from "./research/structureFirst";
 import { prepareActionRegister } from "./research/actionRegister";
 import { prepareBenchmarkChain, benchmarkRoadmapTitle } from "./research/benchmarkChain";
 import { benchmarkChain, chainId, chainResult } from "./research/benchmarkChainSpec";
-import { readHypothesis } from "./hypotheses";
+import { applyHypothesisCommand, readHypothesis } from "./hypotheses";
+import { lingvanexSnapshot } from "./competitorLingvanex";
+import { prepareBenchmarkOwnership, ownershipDocumentId, ownershipRoadmapTitle } from "./research/benchmarkOwnership";
+import { prepareThreeCards, prepareThreeCardSnapshot, threeCardSpecs, threeCardsRoadmapTitle, ownerTestActionId } from "./research/competitorOwnerTests";
 import { actionChainGaps, inputSupplier } from "../../shared/actionChainCoverage";
 import { ProductCrewService } from "../productCrew/service";
 import type { ModelRepository } from "./repository";
@@ -37,6 +40,131 @@ function fixture() {
   return prepareActionRegister(prepareStructureFirst(prepareCrewSetup(prepareCrewRoadmap(
     prepareLandingGearCase(defineMkt1Result(refineT01(root, "owner"), "owner"), "owner"), "owner"), "owner"), "owner"), "owner", "2026-10-26");
 }
+describe("new owner allocation reuses roles, competitor identity and paired handoffs", () => {
+  const before = () => {
+    let root = prepareProductPassport(prepareBenchmarkReadiness(prepareCompanyRegister(prepareLegalChain(
+      prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner"), "owner"), "owner"), "owner");
+    const alternative = root.alternatives!.find(a=>a.id==="new-country")!;
+    if(!alternative.model.elements.some(e=>e.id==="TH-PILOT-COMPETITORS"))
+      alternative.model.elements.push({...structuredClone(alternative.model.elements.find(e=>e.id==="TH-PRODUCT")!),
+        id:"TH-PILOT-COMPETITORS",title:"Конкуренты",section:"Рынок и конкуренты",version:1});
+    alternative.model.analystPreparation = {revisions:[{version:1,at:"2026-10-25T00:00:00Z",actor:"owner",status:"awaiting_approval",basisVersions:[],data:{
+      passport:{purpose:"Prior",duties:"Prior",inputs:"Prior",outputs:"Prior",frequency:"Prior",quality:"Prior",handoff:"Prior"},
+      limits:{maxMinutes:20,maxEstimatedUsd:1,maxSources:10,maxSearches:5,maxAttempts:2,maxOutputTokens:4000,maxVideoSeconds:0},
+      sources:[],pilot:{competitorId:null,sourceIds:[],questions:"На согласовании",rationale:"Пилот не разрешён"},
+      approvalNotes:"На согласовании",toolResearchVersion:"2026-10-25",
+    }}]};
+    root=applyHypothesisCommand(root,"new-country",{type:"saveCompetitor",baseVersion:0,reason:"Fixture initial sources",snapshot:lingvanexSnapshot()},"owner");
+    return root;
+  };
+  it("updates existing responsibilities with preserved histories, not autonomous execution", () => {
+    const root=before(), copy=structuredClone(root), next=prepareBenchmarkOwnership(root,"owner");
+    expect(root).toEqual(copy);
+    expect(next.elements).toEqual(root.elements);
+    expect(next.alternatives!.find(a=>a.id==="other")).toEqual(root.alternatives!.find(a=>a.id==="other"));
+    const a=readHypothesis(root,"new-country"),b=readHypothesis(next,"new-country");
+    const old=a.operatingModel!.revisions.at(-1)!.data,data=b.operatingModel!.revisions.at(-1)!.data;
+    expect(b.operatingModel!.revisions.slice(0,-1)).toEqual(a.operatingModel!.revisions);
+    expect(data.nodes.filter(n=>n.kind==="role")).toHaveLength(old.nodes.filter(n=>n.kind==="role").length);
+    expect(old.nodes.every(n=>data.nodes.some(x=>x.id===n.id))).toBe(true);
+    expect(data.nodes.filter(n=>n.kind==="action")).toHaveLength(old.nodes.filter(n=>n.kind==="action").length+6);
+    expect(data.nodes.find(n=>n.id==="company-action-compare")!.roleId).toBe("product-manager-specialist");
+    expect(data.nodes.find(n=>n.id==="company-action-product-reference")!.roleId).toBe("head-product");
+    const changed=new Set(data.nodes.filter(n=>n.kind==="action"&&n.referenceIds.includes(ownershipDocumentId)).map(n=>n.id));
+    expect(actionChainGaps(data,changed)).toEqual([]);
+    expect(data.nodes.filter(n=>changed.has(n.id)).every(n=>n.executorId===null)).toBe(true);
+    expect(b.documents.find(d=>d.title===ownershipRoadmapTitle)!.id).toBe(a.documents.find(d=>d.title===passportRoadmapTitle)!.id);
+    expect(b.documents.find(d=>d.id===productPassportId)).toEqual(a.documents.find(d=>d.id===productPassportId));
+    expect(b.analystPreparation!.revisions.slice(0,-1)).toEqual(a.analystPreparation!.revisions);
+    expect(b.analystPreparation!.revisions.at(-1)!.data.limits).toEqual(a.analystPreparation!.revisions.at(-1)!.data.limits);
+    expect(b.analystPreparation!.revisions.at(-1)!.status).toBe("awaiting_approval");
+    expect(prepareBenchmarkOwnership(next,"owner")).toBe(next);
+  }, 15000);
+  it("adds a sourced draft to the same Lingvanex card, preserving other competitors and pending acceptance", () => {
+    const root=before(), a=readHypothesis(root,"new-country"),b=readHypothesis(prepareBenchmarkOwnership(root,"owner"),"new-country");
+    const old=a.competitorDirectory!.records.find(r=>r.revisions.at(-1)!.snapshot.appStore.includes("1367461351"))!;
+    const current=b.competitorDirectory!.records.find(r=>r.id===old.id)!;
+    expect(b.competitorDirectory!.records).toHaveLength(a.competitorDirectory!.records.length);
+    expect(current.revisions.slice(0,-1)).toEqual(old.revisions);
+    expect(b.competitorDirectory!.records.filter(r=>r.id!==old.id)).toEqual(a.competitorDirectory!.records.filter(r=>r.id!==old.id));
+    const s=current.revisions.at(-1)!.snapshot;
+    expect(s.plans).toEqual(old.revisions.at(-1)!.snapshot.plans);
+    expect(s.limitations).toContain("СНИМОК НА ПРИЁМКЕ / ЧЕРНОВИК");
+    const fact=s.dossier!.offerFacts.find(f=>f.id==="intake-20261025-passport")!;
+    expect(fact.evidence.status).toBe("official_claim");
+    expect(fact.evidence.checkedAt).toBe("2026-10-25");
+    expect(fact.value).toContain("одновременное участие человека+AI не установлены");
+    const text=b.documents.find(d=>d.id===ownershipDocumentId)!.text;
+    for(const phrase of ["transfer с выходом Sona","не дата выпуска","утверждение Сергей","Инструменты ChatGPT","не подтверждён"])expect(text).toContain(phrase);
+  });
+  it("fails closed without existing competitor identity or a single current roadmap", () => {
+    const root=before(), m=root.alternatives!.find(a=>a.id==="new-country")!.model;
+    m.competitorDirectory!.records=[];
+    expect(()=>prepareBenchmarkOwnership(root,"owner")).toThrow("Exactly one");
+    m.documents.push({...m.documents.find(d=>d.title===passportRoadmapTitle)!,id:"duplicate-current"});
+    expect(()=>prepareBenchmarkOwnership(root,"owner")).toThrow("unique current roadmap");
+  });
+  it("stores all three protocols inside existing cards and routes owner evidence to product without a new role", () => {
+    let root=prepareBenchmarkOwnership(before(),"owner");
+    for(const spec of threeCardSpecs.slice(1)){
+      const snapshot=lingvanexSnapshot();
+      snapshot.name=spec.name;
+      snapshot.appStore=`https://apps.apple.com/us/app/test/id${spec.appId}`;
+      root=applyHypothesisCommand(root,"new-country",{type:"saveCompetitor",baseVersion:0,reason:"Public-source fixture",snapshot},"owner");
+    }
+    const copy=structuredClone(root),a=readHypothesis(root,"new-country");
+    const next=prepareThreeCards(root,"owner","2026-10-26"),b=readHypothesis(next,"new-country");
+    expect(root).toEqual(copy);
+    expect(next.elements).toEqual(root.elements);
+    expect(next.alternatives!.find(h=>h.id==="other")).toEqual(root.alternatives!.find(h=>h.id==="other"));
+    expect(b.competitorDirectory!.records).toHaveLength(a.competitorDirectory!.records.length);
+    for(const spec of threeCardSpecs){
+      const old=a.competitorDirectory!.records.find(r=>r.revisions.at(-1)!.snapshot.appStore.includes(spec.appId))!;
+      const current=b.competitorDirectory!.records.find(r=>r.id===old.id)!;
+      expect(current.revisions.slice(0,-1)).toEqual(old.revisions);
+      expect(current.revisions.at(-1)!.version).toBe(old.revisions.at(-1)!.version+1);
+      expect(current.revisions.at(-1)!.snapshot.plans).toEqual(old.revisions.at(-1)!.snapshot.plans);
+      const task=current.revisions.at(-1)!.snapshot.dossier!.offerFacts.find(f=>f.id==="owner-manual-test")!;
+      for(const text of ["Сергей","НЕ НАЧАТ"])expect(`${task.title} ${task.value}`).toContain(text);
+      for(const text of ["Вопрос/цель:","Шаги:","Скриншоты и наблюдения:","Аккаунт/подписка:","тест владельца"])expect(task.value).toContain(text);
+      expect(task.evidence.status).toBe("planned");
+    }
+    const data=b.operatingModel!.revisions.at(-1)!.data,oldData=a.operatingModel!.revisions.at(-1)!.data;
+    expect(data.nodes.filter(n=>n.kind==="role").map(n=>({id:n.id,manager:n.managerId})))
+      .toEqual(oldData.nodes.filter(n=>n.kind==="role").map(n=>({id:n.id,manager:n.managerId})));
+    const action=data.nodes.find(n=>n.id===ownerTestActionId)!;
+    expect(action.executorId).toBe("owner");
+    expect(action.roleId).toBe("product-manager-specialist");
+    expect(actionChainGaps(data,new Set([ownerTestActionId,"company-action-product","company-action-dispatch","company-action-product-return"]))).toEqual([]);
+    expect(b.documents.find(d=>d.title===threeCardsRoadmapTitle)!.id).toBe(a.documents.find(d=>d.title===ownershipRoadmapTitle)!.id);
+    expect(b.analystPreparation!.revisions.at(-1)!.data.limits).toEqual(a.analystPreparation!.revisions.at(-1)!.data.limits);
+    expect(b.competitorDirectory!.talkhint).toEqual(a.competitorDirectory!.talkhint);
+    expect(b.documents.find(d=>d.id===productPassportId)).toEqual(a.documents.find(d=>d.id===productPassportId));
+    expect(prepareThreeCards(next,"owner","2026-10-26")).toBe(next);
+  },20000);
+  it("keeps public claims distinct from live tests and makes current/planned comparisons explicit", () => {
+    for(const spec of threeCardSpecs){
+      const snapshot=lingvanexSnapshot();snapshot.appStore=`https://apps.apple.com/us/app/test/id${spec.appId}`;
+      const old=structuredClone(snapshot),next=prepareThreeCardSnapshot(snapshot,spec.appId,"2026-10-26");
+      expect(snapshot).toEqual(old);
+      expect(next.checkedAt).toBe("2026-10-25");
+      expect(next.dossier!.offerFacts.some(f=>f.id==="comparison-current-talkhint")).toBe(true);
+      expect(next.dossier!.offerFacts.some(f=>f.id==="comparison-planned-talkhint")).toBe(true);
+      expect(next.sources.some(s=>s.checkedAt==="2026-10-26")).toBe(true);
+      expect(next.research!.features.incoming!.status).toBe("unknown");
+      expect(next.research!.features.secretary_outgoing!.status).toBe(spec.appId==="6758815817"?"unknown":"official_claim");
+      expect(next.research!.features.translation!.status).not.toBe("live_verified");
+      expect(next.limitations).toContain("дата появления функций не установлены");
+      expect(next.assessments).toEqual(old.assessments);
+    }
+    expect(()=>prepareThreeCardSnapshot(lingvanexSnapshot(),"6758815817","2026-10-26")).toThrow("Existing matching");
+  });
+  it("does not create missing competitors or claim missing public sources are live evidence", () => {
+    const root=prepareBenchmarkOwnership(before(),"owner"),copy=structuredClone(root);
+    expect(()=>prepareThreeCards(root,"owner","2026-10-26")).toThrow("Exactly one existing VocaLingo");
+    expect(root).toEqual(copy);
+  },15000);
+});
 describe("one user-facing TalkHint product passport awaiting owner approval", () => {
   const before = () => prepareBenchmarkReadiness(prepareCompanyRegister(prepareLegalChain(
     prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner"), "owner"), "owner");

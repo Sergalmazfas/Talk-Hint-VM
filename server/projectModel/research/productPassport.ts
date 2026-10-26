@@ -129,7 +129,7 @@ export function prepareProductPassport(root: ProjectModelState, actor: string): 
   const roadmaps = model.documents.filter(d => [benchmarkReadinessTitle, passportRoadmapTitle].includes(d.title));
   if (!product || !rev || roadmaps.length !== 1) throw Error("Existing product identity, operating model and one current roadmap required");
   const passports = model.documents.filter(d => d.id === productPassportId ||
-    /^TalkHint\s*[—·-]\s*паспорт продукта(?:\s*[—·-]|\s*$)/iu.test(d.title));
+    /^TalkHint\s*[—·-]\s*паспорт продукта(?:\s*[—·-]|\s*$)/i.test(d.title));
   if (passports.length > 1) throw Error("Ambiguous existing product passport; reconcile before writing");
   const existing = passports[0];
   if (existing?.text.includes(productPassportMarker)) return root;
