@@ -915,3 +915,17 @@ mtime_ms = 1793046022330
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b7964aff-f814-4ead-a9b1-c979cad9eb50/147e1450-6aa8-42ae-a6a6-cf21cb360199"
 storage_version_token = "1793046030735435"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "OuDFfOc-DiAVSNHDNNow5"
+uri = "file://generated-artifacts/hint-chapter/TalkHint-Hint-chapter-v1-rev761.zip"
+type = "unspecified"
+title = "Hint v1 — JSON главы и инструкция"
+description = "Книга v7, Dev rev761. Полный пакет для ручного прохода, результаты проверок и ссылка. На согласовании, не принят владельцем."
+logical_id = "a830f59f-bbef-410e-ba51-487026983738"
+content_hash = "sha256:e46655c75c60a061d56e0938162dae3eb95209ac6ad5832e3f69bbaa5c452a93"
+size = 44330
+mtime_ms = 1793051871431
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a830f59f-bbef-410e-ba51-487026983738/2f33dfb0-093a-4c1c-a344-8dfb87dd5b6f"
+storage_version_token = "1793051939928376"
+content_type = "application/octet-stream"

@@ -44,7 +44,10 @@ describe("incoming-only policy",()=>{
   });
   it("never invents fixed hours, travel or service rules from number settings",()=>{
     const text=buildInstructions({...configured(),business:{days:[1],opens:"04:00",closes:"05:00",travelMinutes:99}},[]);
-    expect(text).not.toMatch(/massage|08:00|22:00|30 minutes|04:00|05:00|travelMinutes.*99/);
+    // The runtime UTC clock is not a business schedule. Otherwise this test
+    // fails every day during 22:00/04:00/05:00 despite unchanged instructions.
+    const businessText = text.replace(/^Current UTC time \(not the business timezone\): .+$/m, "");
+    expect(businessText).not.toMatch(/massage|08:00|22:00|30 minutes|04:00|05:00|travelMinutes.*99/);
     expect(warnings(complete,configured()).join(" ")).toContain("Missing facts are unknown");
   });
   it("resets phone confirmation and review when details are corrected",()=>{

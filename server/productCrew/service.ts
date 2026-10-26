@@ -7,6 +7,7 @@ import { ModelError } from "../projectModel/modelError";
 import { modelSections } from "../../shared/projectModel";
 import { actionDirection, actionOutputs, effortMinutes } from "../../shared/actionRegister";
 import { actionChainGaps, inputSupplier } from "../../shared/actionChainCoverage";
+import { getPassportChapterPacket } from "../../shared/passportChapter";
 const text = (n = 3000) => z.string().trim().min(1).max(n);
 const key = text(120), ids = z.array(key).max(40);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid() };
@@ -17,6 +18,7 @@ export const inputs = {
   get_team: z.object({ roleId: key.optional() }).strict(),
   search_materials: z.object({ query: text(200) }).strict(),
   get_document: z.object({ documentId: key }).strict(),
+  get_product_chapter: z.object({ mode: z.enum(["hint"]) }).strict(),
   get_work: z.object({ recordId: key }).strict(),
   record_information: z.object({ ...base, ...record, source: text(), sourceDate: text(100),
     evidence: text(6000), classification: z.enum(["fact", "user_report", "hypothesis", "proposal", "problem"]) }).strict(),
@@ -47,6 +49,11 @@ export class ProductCrewService {
     const allIds = new Set([...state.elements.map(e => e.id), ...data.nodes.map(n => n.id)]);
     const role = (id: string) => data.nodes.find(n => n.id === id && n.kind === "role") ?? fail(400, "Роль не найдена в общей структуре");
     const work = (id: string) => state.elements.find(e => e.id === id && e.coordination) ?? fail(404, "Запись не найдена");
+    if (name === "get_product_chapter") {
+      const packet = getPassportChapterPacket(state, a.mode);
+      if (!packet) return fail(404, "Глава не найдена или не связана с текущей книгой; чужие данные не подставлены");
+      return packet;
+    }
     if (name === "get_roadmap") return {
       revision: state.revision, operatingVersion: state.operatingModel!.revisions.at(-1)!.version,
       roadmap: data.nodes.filter(n => n.id === "crew-product-roadmap" || /^crew-roadmap-phase-/.test(n.id)),

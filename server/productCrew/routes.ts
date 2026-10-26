@@ -124,6 +124,11 @@ export function registerProductCrew(app: Express, options: {
     res.setHeader("Content-Disposition", 'attachment; filename="talkhint-product-document.md"');
     res.type("text/markdown; charset=utf-8").send(d.text);
   }));
+  app.get("/api/admin/product-crew/chapters/:mode/download", options.admin, wrap(async (req, res) => {
+    const packet = await service.call(req.user!.id, "get_product_chapter", { mode: req.params.mode });
+    res.setHeader("Content-Disposition", 'attachment; filename="TalkHint-Hint-chapter.json"');
+    res.type("application/json; charset=utf-8").send(JSON.stringify(packet, null, 2));
+  }));
 }
 // Confined to the current, tested Zod 3 input types. A schema-library upgrade
 // must pass the tools/list contract test before changing this adapter.
@@ -148,6 +153,7 @@ const toolDescription: Record<ToolName, string> = {
   get_team: "Общая структура: роли, подчинение, действия, клиенты результатов, ресурсы и состояние подключения.",
   search_materials: "Поиск связанных материалов и кандидатов дублей в существующей модели владельца.",
   get_document: "Получить полный сохранённый документ и ссылку скачивания с входом владельца.",
+  get_product_chapter: "Прочитать JSON главы Hint текущей книги с источниками, ролями, действиями и протоколом прохода. Не запускать испытания.",
   get_work: "Повторно прочитать входящую запись или работу, её ответственного, статус, результат и следующий шаг.",
   record_information: "Сохранить входящую информацию с источником, датой, доказательством, типом, клиентом/потребностью и следующим ответственным. Fact не означает проверенный факт.",
   create_work: "Создать связанную работу и назначить существующей роли; указать результат и приёмку. Не запускает сотрудника.",

@@ -4,10 +4,11 @@ import type { ModelCommand, ProjectModelState } from "@shared/projectModel";
 import { bookChapters, featureFieldLabels, productBookDocument, productBookText, readProductBook, type ProductBook, type ProductBookFeature } from "@shared/productBook";
 import { researchFeatures } from "@shared/competitorResearch";
 import { competitorPrice, competitorSnapshotDiff } from "@shared/projectCompetitors";
+import PassportChapterView from "./PassportChapterView";
 import "./ProductBookView.css";
 
 type Props = { state: ProjectModelState; saving: boolean; onSave: (command: ModelCommand) => Promise<boolean> };
-type Chapter = typeof bookChapters[number][0];
+type Chapter = typeof bookChapters[number][0] | "hint";
 
 const noData = "Нет данных";
 const dateLabel = (value?: string | null) => {
@@ -23,7 +24,7 @@ const safeHref = (value: string) => {
 export default function ProductBookView({ state, saving, onSave }: Props) {
   const params = new URLSearchParams(window.location.search);
   const requestedChapter = params.get("chapter") as Chapter | null;
-  const [chapter, setChapter] = useState<Chapter>(bookChapters.some(([id]) => id === requestedChapter) ? requestedChapter! : "home");
+  const [chapter, setChapter] = useState<Chapter>(requestedChapter === "hint" || bookChapters.some(([id]) => id === requestedChapter) ? requestedChapter! : "home");
   const doc = productBookDocument(state);
   const sourceBook = readProductBook(doc);
   const [draft, setDraft] = useState<ProductBook | null>(sourceBook);
@@ -136,9 +137,9 @@ export default function ProductBookView({ state, saving, onSave }: Props) {
         <p>Живая редакция паспорта TalkHint: план, факты, ответственность и пробелы — отдельно.</p></div>
       <div className="pb-meta"><span>РЕДАКЦИЯ <b>V{book.version}</b></span><span>СНИМОК <b>{dateLabel(book.snapshotDate)}</b></span>
         <span className="pb-status"><i />{book.status || noData}</span>
-        <button className="pm-btn primary" type="button" onClick={() => void save()} disabled={!dirty || saving}><Save size={14} />{saving ? "Сохраняем…" : "Сохранить книгу"}</button>
-        {dirty && <button type="button" className="pm-btn" onClick={() => downloadDocument("TalkHint-черновик", productBookText(book))}><Download size={14} />Скачать черновик</button>}
-        {dirty && doc.text !== draftBase && <button type="button" className="pm-btn" onClick={() => {
+        {chapter !== "hint" && <button className="pm-btn primary" type="button" onClick={() => void save()} disabled={!dirty || saving}><Save size={14} />{saving ? "Сохраняем…" : "Сохранить книгу"}</button>}
+        {chapter !== "hint" && dirty && <button type="button" className="pm-btn" onClick={() => downloadDocument("TalkHint-черновик", productBookText(book))}><Download size={14} />Скачать черновик</button>}
+        {chapter !== "hint" && dirty && doc.text !== draftBase && <button type="button" className="pm-btn" onClick={() => {
           if (!window.confirm("Заменить несохранённый черновик актуальной редакцией? Сначала скачайте нужные правки.")) return;
           setDraft(sourceBook); setDraftBase(doc.text); setDirty(false); setNotice("Загружена актуальная редакция.");
         }}>Загрузить актуальную редакцию</button>}
@@ -151,19 +152,25 @@ export default function ProductBookView({ state, saving, onSave }: Props) {
         {bookChapters.map(([id, label], index) => <button type="button" key={id} className={chapter === id ? "active" : ""} onClick={() => moveTo(id)}>
           <span>{String(index + 1).padStart(2, "0")}</span>{label}{chapter === id && <ChevronRight size={14} />}
         </button>)}
+        <button type="button" className={`pm-nav-book${chapter === "hint" ? " active" : ""}`} onClick={() => moveTo("hint")}>
+          <span className="pm-nav-index">H</span>Hint · рабочая глава{chapter === "hint" && <ChevronRight size={14} />}
+        </button>
         <div className="pb-chapter-foot"><b>Только текущая модель</b><span>Ревизия operating model: {revision ? `v${revision.version}` : noData}</span></div>
       </nav>
       <main className="pb-content">
-        <div className="pb-chapter-heading"><span>{String(activeIndex + 1).padStart(2, "0")} / 10</span><h3>{bookChapters[activeIndex]?.[1]}</h3>
+        {chapter === "hint" ? <div className="pb-chapter-heading"><span>HINT / 01</span><h3>Рабочая глава</h3>
+          <div className="pb-pager"><button type="button" aria-label="Вернуться к главной" onClick={() => moveTo("home")}><ChevronLeft size={16} /></button><button type="button" aria-label="Перейти к возможностям" onClick={() => moveTo("features")}><ChevronRight size={16} /></button></div>
+        </div> : <div className="pb-chapter-heading"><span>{String(activeIndex + 1).padStart(2, "0")} / 10</span><h3>{bookChapters[activeIndex]?.[1]}</h3>
           <div className="pb-pager"><button type="button" aria-label="Предыдущая глава" disabled={activeIndex <= 0} onClick={() => moveTo(bookChapters[activeIndex - 1][0])}><ChevronLeft size={16} /></button><button type="button" aria-label="Следующая глава" disabled={activeIndex >= bookChapters.length - 1} onClick={() => moveTo(bookChapters[activeIndex + 1][0])}><ChevronRight size={16} /></button></div>
-        </div>
+        </div>}
         {chapter === "home" && <section className="pb-home">
           <div className="pb-home-lead"><span className="pb-stamp">TALKHINT · PASSPORT</span><p className="pb-serif">{book.vision || book.purpose || noData}</p>
             <span className="pb-home-caption">Формулировка из текущего паспорта · редактируется в главе «Видение и аудитория»</span></div>
           <div className="pb-home-columns"><article><span>01 / СЕЙЧАС</span><p>{book.current || noData}</p></article><article><span>02 / СЛЕДОМ</span><p>{book.nextStage || noData}</p></article><article><span>03 / СОСТОЯНИЕ</span><p>{book.lifecycle || noData}</p><small>Документ: {book.status || noData}</small></article></div>
           <div className="pb-truth"><b>Правило книги</b><p>Запись в плане — не работающий продукт. Неизвестное остаётся неизвестным; изменение текста не означает согласования.</p></div>
-          <div className="pb-home-actions"><button type="button" className="pm-btn" onClick={() => moveTo("features")}>К матрице возможностей <ArrowUpRight size={14} /></button><button type="button" className="pm-btn" onClick={() => moveTo("history")}>Смотреть историю решений <ArrowUpRight size={14} /></button></div>
+          <div className="pb-home-actions"><button type="button" className="pm-btn" onClick={() => moveTo("hint")}>Открыть главу Hint <ArrowUpRight size={14} /></button><button type="button" className="pm-btn" onClick={() => moveTo("features")}>К матрице возможностей <ArrowUpRight size={14} /></button><button type="button" className="pm-btn" onClick={() => moveTo("history")}>Смотреть историю решений <ArrowUpRight size={14} /></button></div>
         </section>}
+        {chapter === "hint" && <PassportChapterView state={state} />}
         {chapter === "vision" && <div className="pb-narratives">
           <p className="pb-intro">Нарратив — редактируемая часть этого же паспорта. Сохраняется как новая версия документа.</p>
           {([
@@ -251,7 +258,7 @@ export default function ProductBookView({ state, saving, onSave }: Props) {
           {state.documents.length ? state.documents.map((item) => <DocCard key={item.id} item={item} onDownload={downloadDocument}
             version={item.id === doc.id ? `v${book.version}` : undefined} status={item.id === doc.id ? book.status : undefined} />) : <div className="pb-empty">Документов нет.</div>}
         </section>}
-        <footer className="pb-footer"><span>{dirty ? "ЕСТЬ НЕСОХРАНЁННЫЙ ЧЕРНОВИК" : "СОХРАНЕНО В КАНОНИЧЕСКОМ ПАСПОРТЕ"}</span><b>{doc.id}</b><span>Изменено: {dateLabel(book.updatedAt)} · автор: см. историю решений</span></footer>
+        <footer className="pb-footer"><span>{chapter === "hint" ? "КАНОНИЧЕСКИЙ СНИМОК · ТОЛЬКО ЧТЕНИЕ" : dirty ? "ЕСТЬ НЕСОХРАНЁННЫЙ ЧЕРНОВИК" : "СОХРАНЕНО В КАНОНИЧЕСКОМ ПАСПОРТЕ"}</span><b>{chapter === "hint" ? "ГЛАВА HINT" : doc.id}</b><span>{chapter === "hint" ? "Изменение возможно только в источнике данных" : `Изменено: ${dateLabel(book.updatedAt)} · автор: см. историю решений`}</span></footer>
       </main>
     </div>
   </section>;

@@ -18,12 +18,24 @@ it.each([
   const instructions=buildInstructions(settings,allowedCards(cards,"alice",settings.cardIds));
   expect(instructions).toContain(JSON.stringify({title,body}));
   expect(instructions).not.toMatch(/Pacific\/Honolulu|03:17|04:19|FOREIGN SECRET|PRIVATE SECRET|UNAPPROVED SECRET/);
-  if(title!=="Massage")expect(instructions).not.toMatch(/massage|30 minutes|08:00|22:00/);
+  // Exclude only the separate runtime UTC line, never business-card content.
+  const businessInstructions=instructions.replace(/^Current UTC time \(not the business timezone\): .+$/m,"");
+  if(title!=="Massage")expect(businessInstructions).not.toMatch(/massage|30 minutes|08:00|22:00/);
 });
 it("has no industry-specific voice-layer instruction in addition to backend facts",()=>{
-  const config=JSON.stringify(liveConfig(buildInstructions(defaults("dev-sandbox"),[])));
+  const instructions=buildInstructions(defaults("dev-sandbox"),[]).replace(/^Current UTC time \(not the business timezone\): .+$/m,"");
+  const config=JSON.stringify(liveConfig(instructions));
   expect(config).not.toMatch(/massage|Monday|Tue.Sun|30 minutes|08:00|22:00|future mobile/);
   expect(config).toContain("ONLY source");expect(config).toContain("virtual secretary");
+});
+it.each(["2026-10-26T22:00:08.301Z","2026-10-26T04:00:00.000Z","2026-10-26T05:00:00.000Z"])("distinguishes UTC clock %s from invented business hours",(utc)=>{
+  const clock=vi.spyOn(Date.prototype,"toISOString").mockReturnValue(utc);
+  try {
+    const instructions=buildInstructions(defaults("dev-sandbox"),[]);
+    expect(instructions).toContain(`Current UTC time (not the business timezone): ${utc}.`);
+    const business=instructions.replace(/^Current UTC time \(not the business timezone\): .+$/m,"");
+    expect(business).not.toMatch(/08:00|22:00|04:00|05:00|30 minutes/);
+  } finally { clock.mockRestore(); }
 });
 it("can save a general callback request without inventing an address, appointment duration or timezone",async()=>{
   const session=new IntakeSession("alice","isolated-general-request",defaults("work"),new MemoryRequests());

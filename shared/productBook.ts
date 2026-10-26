@@ -24,6 +24,7 @@ export interface ProductBook {
   features: ProductBookFeature[]; legal: string; finance: string;
   responsibilities: string; contradictions: string; roadmap: string;
   previousPassport: string;
+  chapterRefs?: Record<string, string>;
 }
 export function readProductBook(document?: ModelDocument): ProductBook | null {
   if (!document?.text.includes(productBookMarker)) return null;

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ProductBookView from "../../client/src/components/project-model/ProductBookView";
 // SSR assertions don't execute CSS; the real Vite build verifies the stylesheet.
 vi.mock("../../client/src/components/project-model/ProductBookView.css", () => ({}));
+vi.mock("../../client/src/components/project-model/PassportChapterView.css", () => ({}));
 import { initialModel } from "./seed";
 import { readHypothesis } from "./hypotheses";
 import { prepareProductBook } from "./research/productBook";

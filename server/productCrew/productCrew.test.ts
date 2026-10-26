@@ -182,7 +182,7 @@ describe("owner-approved public Dev MCP", () => {
     try {
       expect((await call("initialize")).instructions).toContain("публичный");
       const tools = (await call("tools/list")).tools;
-      expect(tools).toHaveLength(12);
+      expect(tools).toHaveLength(13);
       expect(tools.every((t: any) => t.securitySchemes[0].type === "noauth")).toBe(true);
       expect((await fetch(`${url}/.well-known/oauth-protected-resource/api/product-crew/mcp`)).status).toBe(404);
       expect((await call("tools/call", { name: "get_team", arguments: {} })).isError).toBe(false);
@@ -250,7 +250,7 @@ describe("HTTP plugin contract", () => {
     const initialized = await (await request(access, "initialize")).json() as any;
     expect(initialized.result.instructions).toContain("Должности определяются из действий");
     const tools = await (await request(access, "tools/list")).json() as any;
-    expect(tools.result.tools).toHaveLength(12);
+    expect(tools.result.tools).toHaveLength(13);
     for (const tool of tools.result.tools) expect(tool.inputSchema.type).toBe("object");
     expect((await request(access, "tools/call", { name: "create_work", arguments: workInput() })).status).toBe(403);
     expect((await request(writeAccess, "tools/call", {}, "https://attacker.test")).status).toBe(403);
