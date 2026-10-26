@@ -61,7 +61,7 @@ export function companyCoverage(data: OperatingData) {
   const stages = data.customerPath ?? [];
   const issues: string[] = [];
   if (data.companyStructureVersion) {
-    if (data.nodes.filter(n => n.level === "direction").length !== 10) issues.push("Не представлены все десять направлений");
+    if (data.nodes.filter(n => n.kind === "department" && n.level === "direction").length !== 10) issues.push("Не представлены все десять направлений");
     for (const n of data.nodes.filter(n => n.kind === "role")) {
       if (!n.managerId) issues.push(`Нет непосредственного руководителя: ${n.code}`);
     }
@@ -78,7 +78,7 @@ export function companyCoverage(data: OperatingData) {
     for (const s of stages) {
       if (s.b2bProcessId && !byId.has(s.b2bProcessId)) issues.push(`Нет отдельного B2B-процесса: ${s.name}`);
     }
-    for (const n of data.nodes.filter(n => n.level === "direction")) {
+    for (const n of data.nodes.filter(n => n.kind === "department" && n.level === "direction")) {
       if (!n.clientId || !n.roleId || !n.inputs.length || !n.purpose) issues.push(`Неполная карточка направления: ${n.code}`);
       if (!data.links.some(l => l.from === n.id && l.kind === "produces")) issues.push(`Нет выхода направления: ${n.code}`);
     }

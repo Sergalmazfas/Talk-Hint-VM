@@ -17,7 +17,7 @@ export function actionDirection(data: OperatingData, node: WorkNode): WorkNode |
   while (current && !seen.has(current.id)) {
     seen.add(current.id);
     if (current.kind === "department" && current.level === "direction") return current;
-    if (current.level === "direction" && current.kind !== "role") return current;
+    if (current.level === "direction" && current.kind !== "role" && current.kind !== "action") return current;
     current = current.parentId ? map.get(current.parentId) : undefined;
   }
   // A role's organisational parent is a fallback, never inferred from executor.

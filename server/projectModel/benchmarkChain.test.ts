@@ -22,6 +22,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ActionRegister from "../../client/src/components/project-model/ActionRegister";
 import { prepareLegalChain, legalRoleId, legalProcessId, legalRoadmapTitle } from "./research/legalChain";
 import { legalChain, legalActionId, legalResultId, legalForms } from "./research/legalChainSpec";
+import { prepareCompanyRegister, companyRegisterTitle, companyReportActions, managementActionId } from "./research/companyRegister";
+import { companyActions, companyDirections, reportingPeriods } from "./research/companyRegisterSpec";
+import { actionDirection, effortMinutes } from "../../shared/actionRegister";
+import { companyCoverage } from "../../shared/operatingModel";
 function fixture() {
   const root = initialModel();
   const model = applyCommand(initialModel(), { type: "saveOperatingModel", baseVersion: 0,
@@ -31,6 +35,82 @@ function fixture() {
   return prepareActionRegister(prepareStructureFirst(prepareCrewSetup(prepareCrewRoadmap(
     prepareLandingGearCase(defineMkt1Result(refineT01(root, "owner"), "owner"), "owner"), "owner"), "owner"), "owner"), "owner", "2026-10-26");
 }
+describe("company action register and management reporting requirements", () => {
+  function before() {
+    return prepareLegalChain(prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner");
+  }
+  it("preserves all identities, old report paths, hypotheses and full revisions; replays without another write", () => {
+    const root = before(), snapshot = structuredClone(root);
+    const next = prepareCompanyRegister(root, "owner");
+    expect(root).toEqual(snapshot);
+    expect(next.alternatives![1]).toEqual(root.alternatives![1]);
+    expect(next.elements).toEqual(root.elements);
+    const a = readHypothesis(root, "new-country"), b = readHypothesis(next, "new-country");
+    expect(b.documents).toHaveLength(a.documents.length);
+    const doc = b.documents.find(d => d.title === companyRegisterTitle)!;
+    const oldDoc = a.documents.find(d => d.id === doc.id)!;
+    expect(doc.text.startsWith(oldDoc.text)).toBe(true);
+    expect(b.decisions.some(d => d.documentBefore?.text === oldDoc.text)).toBe(true);
+    expect(b.operatingModel!.revisions.slice(0, -1)).toEqual(a.operatingModel!.revisions);
+    const old = a.operatingModel!.revisions.at(-1)!.data, data = b.operatingModel!.revisions.at(-1)!.data;
+    expect(data.nodes.filter(n => n.kind === "department")).toEqual(old.nodes.filter(n => n.kind === "department"));
+    for (const n of old.nodes) expect(data.nodes.some(x => x.id === n.id && x.code === n.code)).toBe(true);
+    for (const id of ["company-action-weekly-prepare", "company-action-monthly-prepare"])
+      expect(data.nodes.find(n => n.id === id)!.nextId).toBe(old.nodes.find(n => n.id === id)!.nextId);
+    expect(prepareCompanyRegister(next, "owner")).toBe(next);
+    expect(doc.text.length).toBeLessThanOrEqual(50000);
+  });
+  it("maps forty requirements to canonical actions with all receivers, control and unknown effort", () => {
+    const root = before(), next = prepareCompanyRegister(root, "owner");
+    const old = readHypothesis(root, "new-country").operatingModel!.revisions.at(-1)!.data;
+    const data = readHypothesis(next, "new-country").operatingModel!.revisions.at(-1)!.data;
+    expect(companyCoverage(data)).not.toContain("Не представлены все десять направлений");
+    expect(data.nodes.find(n => n.id === managementActionId("sales-plan"))!.level).toBe("direction");
+    expect(actionDirection(data, data.nodes.find(n => n.id === managementActionId("sales-plan"))!)?.id).toBe("dir-sales");
+    const reports = companyReportActions(data);
+    expect(reports).toHaveLength(40);
+    expect(new Set(reports.map(n => n.id)).size).toBe(40);
+    for (const [key] of companyDirections) for (const [, , unit] of reportingPeriods) {
+      expect(reports.filter(n => actionDirection(data, n)?.id === `dir-${key}` && n.register?.period === unit)).toHaveLength(1);
+    }
+    const ids = new Set(data.nodes.filter(n => n.kind === "action" && !old.nodes.some(x => x.id === n.id)).map(n => n.id));
+    reports.forEach(n => ids.add(n.id));
+    expect(actionChainGaps(data, ids)).toEqual([]);
+    for (const n of data.nodes.filter(n => ids.has(n.id))) {
+      expect(n.executorId).toBeNull();
+      expect(n.register?.operationsPerPeriod).toBeNull();
+      expect(n.register?.minutesPerOperation).toBeNull();
+      expect(effortMinutes(n)).toBeNull();
+      expect(n.reporting?.formStatus).toBe("required");
+      expect(n.reporting?.templateDocumentId).toBeNull();
+      expect(n.register?.approval).not.toBe("approved");
+    }
+    for (const n of reports) {
+      expect(n.procedure).toContain("B2C/B2B");
+      expect(n.procedure).toContain("подтверждённая причина либо гипотеза");
+      expect(n.procedure).toContain("утверждение — Сергей");
+    }
+  });
+  it("keeps legal/provider and two improvement inputs linked without inventing APIs, figures or compliance", () => {
+    const next = prepareCompanyRegister(before(), "owner");
+    const m = readHypothesis(next, "new-country"), data = m.operatingModel!.revisions.at(-1)!.data;
+    const node = (key: string) => data.nodes.find(n => n.id === managementActionId(key))!;
+    expect(node("service-issue").nextId).toBe("company-action-product");
+    expect(node("prototype").nextId).toBe("company-action-product-decision");
+    expect(node("finance-reconcile").procedure).toContain("EBITDA");
+    expect(node("finance-reconcile").procedure).toContain("денежный поток");
+    expect(node("cohorts").procedure).toContain("знаменатель");
+    expect(node("market-finance").procedure).toContain("3 млн/100 не данные");
+    expect(data.nodes.find(n => n.id === "management-resource-tools")!.resourceState).toBe("required");
+    expect(data.links.some(l => l.from === legalResultId("channels-study") && l.to === managementActionId("report-engineering-day"))).toBe(true);
+    const doc = m.documents.find(d => d.title === companyRegisterTitle)!;
+    expect(doc.text).toContain("Бинарный Excel и построчные данные не получены");
+    expect(doc.text).toContain("формы НЕ разработаны");
+    expect(data.nodes.filter(n => n.id.startsWith("management-role-")).every(n =>
+      n.kind === "role" && n.status === "proposal" && n.managerId && n.executorId === null)).toBe(true);
+    expect(companyActions.every(s => node(s.key).procedure.includes(s.work))).toBe(true);
+  });
+});
 describe("benchmarking through receiving actions, control and reports", () => {
   it("preserves all existing identities, roles, other hypotheses, documents and exact history; updates the one roadmap and replays safely", () => {
     const root = fixture(), snapshot = structuredClone(root);
