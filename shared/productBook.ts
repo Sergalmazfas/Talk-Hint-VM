@@ -44,7 +44,16 @@ export function productBookText(book: ProductBook): string {
     `## Право\n${book.legal}\n## Финансы\n${book.finance}\n## Roadmap\n${book.roadmap}`,
     "## Источник и предыдущая редакция v1\nПолный исходный паспорт сохранён в поле previousPassport структурированного блока и в истории документа; его утверждение не подразумевается.",
   ].join("\n\n");
-  return `${chapters}\n\n${productBookMarker}\n${JSON.stringify(book)}`;
+  const structured = `${productBookMarker}\n${JSON.stringify(book)}`;
+  const full = `${chapters}\n\n${structured}`;
+  if (full.length <= 50000) return full;
+  // Markdown is a convenient duplicate, not the source of truth. Both the UI
+  // and imports use this serializer so adding a standard cannot make the next
+  // ordinary edit unsaveable. Never trim canonical fields to fit a preamble.
+  const compact = `${chapters.split("\n\n")[0]}\n\nВсе главы, исходный паспорт и связи сохранены полностью в структурированном блоке; веб-книга открывает те же данные.\n\n## Ответственность\n${book.responsibilities}\n\n${structured}`;
+  if (compact.length <= 50000) return compact;
+  // A large responsibilities section must not be duplicated either.
+  return `# TalkHint — живая книга продукта · v${book.version}\nПолные данные глав сохранены ниже; прежние редакции — в истории документа.\n\n${structured}`;
 }
 export function productBookDocument(state: ProjectModelState) {
   return state.documents.find(d => d.id === productBookDocumentId);

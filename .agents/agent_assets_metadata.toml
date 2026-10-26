@@ -929,3 +929,31 @@ mtime_ms = 1793051871431
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a830f59f-bbef-410e-ba51-487026983738/2f33dfb0-093a-4c1c-a344-8dfb87dd5b6f"
 storage_version_token = "1793051939928376"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "jB2uHPM2Uf4ZKVYEXSvwk"
+uri = "file://generated-artifacts/hint-lab-audit/Hint-lab-audit-v1.html"
+type = "html"
+title = "Итоговый отчёт Hint — должности, ресурсы и отчётность"
+description = "20 действий, 5 стендов, 11 KPI, формы всех десяти направлений. Сохранённый стандарт: книга v8, модель rev762. Предложения отделены от внедрённого."
+logical_id = "0e3dfddd-834e-4ce3-a45f-c3ebed17d0fb"
+content_hash = "sha256:26fea30970cd783d19542ab80cdd5dbb33e73750febc4af2352866c3c1e05d07"
+size = 118290
+mtime_ms = 1793055295407
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0e3dfddd-834e-4ce3-a45f-c3ebed17d0fb/bd625654-a62f-48d4-945d-029260b4b2e0"
+storage_version_token = "1793055361714315"
+content_type = "text/html"
+
+[[outputs]]
+id = "wAeEhF2O_C_FyK54XrBrT"
+uri = "file://generated-artifacts/hint-lab-audit/TalkHint-Hint-lab-audit-v1-rev762.zip"
+type = "unspecified"
+title = "Итоговый ZIP Hint — v1, rev762"
+description = "Полный HTML-отчёт, JSON предложений, таблица 20 действий и инструкция. Ссылка скачивания книги проверена: HTTP 200. Повторное редактирование книги проходит без потери данных."
+logical_id = "bb94f426-a2f1-4e7d-bf1b-1a5995b3cb70"
+content_hash = "sha256:dc12d7c9696f45f68ba72aef52418bce8f696d905a8e2bb0f143c340ed18abe0"
+size = 43459
+mtime_ms = 1793055295411
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bb94f426-a2f1-4e7d-bf1b-1a5995b3cb70/c7d6b93f-3e57-4af0-bb12-0de348bff20e"
+storage_version_token = "1793055362373852"
+content_type = "application/octet-stream"
