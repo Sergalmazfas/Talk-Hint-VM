@@ -20,6 +20,21 @@ export interface WorkNode {
   storage: string; delivery: string; exceptions: string; questions: string;
   resourceState: "required" | "approved" | "connected" | null;
   referenceIds: string[];
+  /** Links to the existing model documents; a form's approval is independent of work acceptance. */
+  reporting?: {
+    required: boolean; formName: string; templateDocumentId: string | null;
+    templateVersion: string; storage: string;
+    formStatus: "required" | "draft" | "discussion" | "approved";
+    approvalEvidence: string;
+  };
+  /** Design estimates only; absence/null is unknown, never zero or measured utilisation. */
+  register?: {
+    availability: string; period: string;
+    operationsPerPeriod: number | null; minutesPerOperation: number | null;
+    estimateBasis: string;
+    approval: "draft" | "discussion" | "approved";
+    source: string; proposalReason: string;
+  };
 }
 export interface WorkLink { id: string; from: string; to: string; kind: typeof workLinks[number]; reason: string }
 export interface OperatingData {

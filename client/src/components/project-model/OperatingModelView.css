@@ -207,6 +207,65 @@
 .om-history details > summary i { color: #87938c; font-style: normal; }
 .om-history-content { padding: 0 10px 15px; }
 .om-history-content pre { max-height: 460px; overflow: auto; padding: 15px; color: #dce7dc; background: #304641; font: 10px/1.6 "Space Mono", monospace; }
+.om-action-register { padding: 22px 20px 18px; border-bottom: 1px solid var(--om-line); background: #f8faf5; }
+.om-action-register-heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 15px; }
+.om-action-register-heading .pm-kicker { margin-bottom: 5px; }
+.om-action-register-heading h3 { margin: 0; font: 500 25px/1.1 "Instrument Serif", Georgia, serif; }
+.om-action-register-heading p:not(.pm-kicker) { max-width: 700px; margin: 7px 0 0; color: #718078; font-size: 10px; line-height: 1.5; }
+.om-action-register-heading > span { color: var(--om-green); font: 10px "Space Mono", monospace; white-space: nowrap; }
+.om-action-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 18px; padding: 12px; border: 1px solid var(--om-line); background: #edf2eb; }
+.om-action-filters > label:first-child { display: grid; min-width: min(100%, 250px); gap: 4px; color: #687a73; font-size: 9px; font-weight: 600; }
+.om-action-filters select { min-height: 34px; border: 1px solid #d8e0d9; padding: 6px 8px; color: var(--om-ink); background: #fffefa; font-size: 10px; }
+.om-action-proposal-filter { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; color: #735c48; font-size: 10px; cursor: pointer; }
+.om-action-proposal-filter input { accent-color: var(--om-orange); }
+.om-action-filters > button { min-height: 32px; border: 0; padding: 6px 2px; color: var(--om-green); text-decoration: underline; text-underline-offset: 3px; background: transparent; cursor: pointer; font-size: 10px; }
+.om-duty-summary { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin: 10px 0; border-left: 2px solid #91a675; padding: 9px 12px; background: #f0f4eb; }
+.om-duty-summary > div { display: grid; gap: 3px; }
+.om-duty-summary > div span { color: #718078; font-size: 9px; }
+.om-duty-summary > div b { color: var(--om-green); font-size: 11px; }
+.om-duty-summary p { margin: 0; color: #65756d; font-size: 9px; line-height: 1.5; text-align: right; }
+.om-duty-list { display: flex; flex: 1 1 100%; flex-wrap: wrap; gap: 5px; border-top: 1px solid #dde6d9; padding-top: 8px; }
+.om-duty-list button { display: inline-flex; max-width: 100%; gap: 6px; border: 1px solid #d8e2d4; padding: 5px 7px; color: #496358; text-align: left; background: #f8faf5; cursor: pointer; font-size: 9px; }
+.om-duty-list button:hover { border-color: #a9bca5; background: #e8efe6; }
+.om-duty-list code { flex: 0 0 auto; color: #75857c; font: 8px "Space Mono", monospace; }
+.om-action-table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--om-line); background: #fbfcf8; }
+.om-action-table { width: max(100%, 1580px); border-collapse: separate; border-spacing: 0; font-size: 10px; }
+.om-action-table th, .om-action-table td { min-width: 105px; max-width: 210px; border-right: 1px solid #e7ece6; border-bottom: 1px solid #e4eae2; padding: 9px 8px; color: #53655e; text-align: left; vertical-align: top; font-size: 9px; font-weight: 400; line-height: 1.45; overflow-wrap: anywhere; }
+.om-action-table thead th { position: sticky; z-index: 1; top: 0; min-width: unset; padding: 10px 8px; color: #61746b; background: #e9efe7; font: 9px "Space Mono", monospace; white-space: nowrap; }
+.om-action-table tbody tr { cursor: pointer; }
+.om-action-table tbody tr:hover { background: #f0f5ed; }
+.om-action-table tbody tr.is-selected { background: #e4eee3; box-shadow: inset 2px 0 var(--om-green); }
+.om-action-table tbody th:first-child { min-width: 190px; }
+.om-action-open { display: grid; gap: 3px; border: 0; padding: 0; color: #263d37; text-align: left; background: transparent; cursor: pointer; }
+.om-action-open code { color: #708178; font: 9px "Space Mono", monospace; }
+.om-action-open b { font-size: 10px; font-weight: 600; }
+.om-action-open:hover b { color: #a45537; text-decoration: underline; text-underline-offset: 2px; }
+.om-action-table td > small, .om-action-table tbody th > small { display: block; margin-top: 4px; color: #87938c; font-size: 8px; line-height: 1.45; }
+.om-action-table .om-action-proposal-note { color: #986247; }
+.om-action-missing { color: #a45537; }
+.om-action-output { display: block; margin-bottom: 3px; color: #315f51; }
+.om-action-approval { display: inline-block; padding: 4px 6px; color: #8a583c; background: #f3e8dd; white-space: nowrap; font-size: 8px; }
+.om-action-approval.is-discussion { color: #775c36; background: #f2ecd9; }
+.om-action-approval.is-approved { color: #3d6958; background: #e1eee4; }
+.om-report-template-link { display: block; margin-top: 4px; color: #315f51; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.om-report-status { display: block; width: fit-content; max-width: 100%; margin-top: 5px; white-space: normal; }
+.om-report-status.is-required { color: #8a583c; background: #f3e8dd; }
+.om-report-status.is-draft { color: #735f48; background: #eee9df; }
+.om-report-status.is-discussion { color: #775c36; background: #f2ecd9; }
+.om-report-status.is-approved { color: #3d6958; background: #e1eee4; }
+.om-action-mobile-list { display: none; }
+.om-action-editor { background: #f5f8f1; }
+.om-action-editor .om-form-grid { align-items: start; }
+.om-action-editor .om-field input[type="number"] { font-variant-numeric: tabular-nums; }
+.om-reporting-editor { background: #f1f5ee; }
+.om-reporting-editor .om-form-grid { align-items: start; }
+.om-reporting-required { grid-template-columns: auto 1fr; align-items: center; column-gap: 9px; }
+.om-reporting-required > span, .om-reporting-required > small { grid-column: 2; }
+.om-reporting-required input { grid-column: 1; grid-row: 1 / span 2; width: 16px; height: 16px; accent-color: var(--om-green); }
+.om-reporting-current { margin: 10px 0 0; color: #496358; font-size: 10px; }
+.om-action-mobile-reporting { display: grid; gap: 4px; border-top: 1px solid #e1e8df; padding-top: 7px; color: #687a73; font-size: 9px; line-height: 1.45; }
+.om-action-mobile-reporting > b { color: #354d43; font-size: 10px; }
+.om-action-mobile-reporting a { width: fit-content; color: #315f51; text-decoration: underline; text-underline-offset: 2px; }
 .om-empty { padding: 28px 20px; color: #72817a; text-align: center; font-size: 11px; line-height: 1.6; }
 .om-empty strong { display: block; margin-bottom: 5px; color: var(--om-ink); font: 500 21px "Instrument Serif", Georgia, serif; }
 .om-no-selection { display: grid; min-height: 430px; align-content: center; justify-items: center; gap: 8px; }
@@ -224,6 +283,10 @@
 .om-savebar > button:hover { background: #244b40; }
 .om-savebar > button:disabled { opacity: .55; cursor: wait; }
 @media (max-width: 850px) {
+  .om-action-register { padding: 17px 12px; }
+  .om-action-register-heading h3 { font-size: 22px; }
+  .om-duty-summary { align-items: flex-start; flex-direction: column; }
+  .om-duty-summary p { text-align: left; }
   .om-operating-table { padding: 17px 12px; }
   .om-operating-table-heading h3 { font-size: 21px; }
   .om-toolbar { align-items: stretch; flex-direction: column; gap: 0; padding: 0 16px; }
@@ -236,6 +299,17 @@
   .om-remove-inline { justify-self: start; }
 }
 @media (max-width: 650px) {
+  .om-action-register-heading { align-items: flex-start; }
+  .om-action-register-heading h3 { font-size: 22px; }
+  .om-action-table-scroll { display: none; }
+  .om-action-mobile-list { display: grid; gap: 7px; }
+  .om-action-mobile-card { display: grid; gap: 6px; width: 100%; border: 1px solid var(--om-line); border-left: 2px solid #91a675; padding: 11px; color: var(--om-ink); text-align: left; background: #fbfcf8; }
+  .om-action-mobile-card:hover, .om-action-mobile-card.is-selected { background: #eaf0e8; }
+  .om-action-mobile-title { display: grid; gap: 3px; border: 0; padding: 0; color: inherit; text-align: left; background: transparent; cursor: pointer; }
+  .om-action-mobile-title code { color: #708178; font: 9px "Space Mono", monospace; }
+  .om-action-mobile-title b { font-size: 12px; }
+  .om-action-mobile-meta, .om-action-mobile-foot { color: #687a73; font-size: 9px; line-height: 1.45; }
+  .om-action-mobile-foot { border-top: 1px solid #e4eae2; padding-top: 6px; color: #795a48; }
   .om-shell { margin: 23px 0 38px; }
   .om-hero { padding: 24px 18px; }
   .om-hero-count { min-width: 92px; padding-right: 0; }

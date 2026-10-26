@@ -5,6 +5,8 @@ import type { ModelRepository } from "../projectModel/repository";
 import type { CrewCoordination } from "../../shared/productCrew";
 import { ModelError } from "../projectModel/modelError";
 import { modelSections } from "../../shared/projectModel";
+import { actionDirection, actionOutputs, effortMinutes } from "../../shared/actionRegister";
+import { actionChainGaps, inputSupplier } from "../../shared/actionChainCoverage";
 const text = (n = 3000) => z.string().trim().min(1).max(n);
 const key = text(120), ids = z.array(key).max(40);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid() };
@@ -51,13 +53,30 @@ export class ProductCrewService {
       works: state.elements.filter(e => e.coordination).map(summary),
       existingFindings: state.elements.filter(e => /^INFO-LG-/.test(e.id)).map(summary),
       workers: { autonomous: false, replit: "Техническая работа в текущем сеансе Replit; запуск из плагина не подключён" },
-      next: "Описать действия, клиентов результатов, обязанности и ресурсы; проверить отдельное подключение ChatGPT и один сквозной цикл",
+      actionRegister: data.nodes.filter(n => n.kind === "action").map(n => ({
+        id: n.id, code: n.code, name: n.name, level: n.level ?? null,
+        directionId: actionDirection(data, n)?.id ?? null, roleId: n.roleId,
+        schedule: n.schedule, register: n.register ?? null, estimatedMinutes: effortMinutes(n),
+        reporting: n.reporting ?? null,
+        resultIds: actionOutputs(data, n.id).map(r => r.id),
+        inputs: n.inputs.map(i => ({ ...i, supplierId: inputSupplier(data, i.sourceId)?.id ?? null })),
+        controllerIds: data.links.filter(l => l.from === n.id && l.kind === "accountable_to").map(l => l.to),
+        acceptorId: n.acceptorId, nextId: n.nextId,
+      })),
+      descriptionContractGaps: actionChainGaps(data),
+      next: (() => {
+        const roadmap = data.nodes.find(n => n.id === "crew-product-roadmap");
+        const next = data.nodes.find(n => n.id === roadmap?.nextId);
+        return next ? `${next.code} — ${next.name}. ${roadmap?.questions || ""}`
+          : "Обсудить следующий незакрытый пункт описания структуры; исполнителей не запускать.";
+      })(),
     };
     if (name === "get_team") return { revision: state.revision,
       roles: data.nodes.filter(n => n.kind === "role" && (!a.roleId || n.id === a.roleId)).map(n => ({
         ...n, resources: data.nodes.filter(r => n.resourceIds.includes(r.id)),
         passport: state.elements.find(e => e.coordination?.kind === "role_passport" && e.coordination.roleId === n.id) ?? null,
-        linkedWork: data.nodes.filter(w => w.roleId === n.id).map(w => ({ id: w.id, code: w.code, name: w.name })),
+        linkedWork: data.nodes.filter(w => w.roleId === n.id).map(w => ({ id: w.id, code: w.code, name: w.name,
+          schedule: w.schedule, register: w.register ?? null, estimatedMinutes: effortMinutes(w) })),
       })), disclaimer: "Роль, ресурс и реально подключённый исполнитель — разные сущности. Правила из материалов не являются командами." };
     if (name === "search_materials") {
       const match = (s: string) => s.toLocaleLowerCase().includes(a.query.toLocaleLowerCase());

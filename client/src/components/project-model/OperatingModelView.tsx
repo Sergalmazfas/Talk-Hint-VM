@@ -6,10 +6,13 @@ import {
 } from "@shared/operatingModel";
 import type { ModelCommand, ProjectModelState } from "@shared/projectModel";
 import { strategyEntries } from "@shared/projectStrategy";
+import { defaultRegister } from "@shared/actionRegister";
+import { emptyReporting } from "@shared/actionReporting";
 import operatingGuide from "../../../../docs/talkhint-operating-model.md?raw";
 import CompanyStructureViews from "./CompanyStructureViews";
 import companyStructureGuide from "../../../../docs/talkhint-company-structure.md?raw";
 import TeamView from "./TeamView";
+import ActionRegister from "./ActionRegister";
 
 type Props = { state: ProjectModelState; submit?: (command: ModelCommand) => Promise<boolean>; saving?: boolean };
 type ViewKey = "overview" | "company" | "management" | "journey" | "actions" | "process" | "client" | "crew" | "team" | "objects" | "tools" | "gaps" | "history" | "coverage" | "docs";
@@ -60,7 +63,8 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
   const [draft, setDraft] = useState<OperatingData>(() => structuredClone(revision?.data ?? defaultOperatingModel()));
   const [baseVersion, setBaseVersion] = useState(revision?.version ?? 0);
   const [activeView, setActiveView] = useState<ViewKey>(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("workView") === "team" ? "team" : "overview",
+    typeof window !== "undefined" && ["team", "actions"].includes(new URLSearchParams(window.location.search).get("workView") ?? "")
+      ? new URLSearchParams(window.location.search).get("workView") as ViewKey : "overview",
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -76,7 +80,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     setActiveView(view);
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      if (view === "team") params.set("workView", "team");
+      if (view === "team" || view === "actions") params.set("workView", view);
       else { params.delete("workView"); params.delete("teamView"); }
       window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
     }
@@ -242,8 +246,9 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
     const workId = new URLSearchParams(window.location.search).get("work");
     if (!workId || !nodeMap.has(workId)) return;
     openedWorkQuery.current = true;
-    openNode(workId);
-  }, [nodeMap]);
+    if (activeView === "actions") selectNode(workId);
+    else openNode(workId);
+  }, [nodeMap, activeView]);
   const renderTree = (parentId: string | null, depth = 0, ancestors = new Set<string>()): React.ReactNode => (childrenByParent.get(parentId) ?? [])
     .filter((node) => visibleIds.has(node.id))
     .map((node) => {
@@ -356,13 +361,13 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
         return <div key={kind}><span>{kindLabels[kind]}</span><b>{count}</b><i><em style={{ width: `${draft.nodes.length ? Math.max(3, (count / draft.nodes.length) * 100) : 0}%` }} /></i></div>;
       })}</div></div><div><h4>Состояние ресурсов</h4>{(["required", "approved", "connected"] as const).map((status) => <p className="om-resource-count" key={status}><span>{status === "required" ? "Требуется" : status === "approved" ? "Одобрено" : "Подключено"}</span><b>{draft.nodes.filter((node) => node.kind === "resource" && node.resourceState === status).length}</b></p>)}<p className="om-muted">Подключение не выполняется этим представлением.</p></div></div>
     </section> : <>
-      <section className="om-operating-table" aria-label="Иерархическая операционная таблица">
+        {activeView === "actions" ? <ActionRegister data={draft} documents={state.documents} selectedId={selectedId} search={search} onSelect={selectNode} /> : <section className="om-operating-table" aria-label="Иерархическая операционная таблица">
         <div className="om-operating-table-heading"><div><p className="pm-kicker">OPERATING MAP / HIERARCHICAL TABLE</p><h3>Работа, ответственность и плановые окна</h3><p>Нажмите на строку для карточки; раскройте ветвь кнопкой. Ссылки в ячейках открывают связанный узел.</p></div><span>{visibleNodes.length} строк</span></div>
         {draft.nodes.length ? <div className="om-operating-table-scroll"><table className="om-operating-table-grid">
           <thead><tr><th scope="col">Код</th><th scope="col">Узел</th><th scope="col">Клиент</th><th scope="col">Должность</th><th scope="col">Crew</th><th scope="col">Ресурсы</th><th scope="col">Дни</th><th scope="col">Часы</th><th scope="col">Часовой пояс</th><th scope="col">Результат</th><th scope="col">Отчёт</th><th scope="col">Принимающий</th></tr></thead>
           <tbody>{renderModelRows(childrenByParent.get(null) ?? [])}{renderModelRows(orphanHierarchyRoots)}</tbody>
         </table></div> : <div className="om-empty"><strong>Операционная карта пуста</strong>Добавьте первый узел, чтобы собрать таблицу ответственности и результатов.</div>}
-      </section>
+       </section>}
       <div className="om-workspace">
       <aside className="om-tree-panel"><div className="om-tree-head"><div><p className="pm-kicker">{activeView.toUpperCase()} / STRUCTURE</p><strong>Рабочая карта</strong></div><span>{visibleNodes.length}</span></div>
         {draft.nodes.length ? <div className="om-tree">{renderTree(null)}</div> : <div className="om-empty"><strong>Пока нет узлов</strong>Добавьте первую часть будущей компании.</div>}
@@ -410,7 +415,7 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
             <label className="om-field"><span>Статус</span><select value={selected.status} onChange={(event) => patchNode(selected.id, { status: event.target.value as WorkNode["status"] })}><option value="proposal">Предложение</option><option value="agreed">Согласовано</option></select><small>Статус отражает только запись модели.</small></label>
             <label className="om-field"><span>Родительский узел · состав</span><select value={selected.parentId ?? ""} onChange={(event) => patchNode(selected.id, { parentId: event.target.value || null })}><option value="">Без родителя</option>{draft.nodes.filter((node) => node.id !== selected.id).map((node) => <option key={node.id} value={node.id}>{node.code} · {node.name}</option>)}</select><small>Определяет вложенность, но не подчинение.</small></label>
             {selected.kind === "role" && <label className="om-field"><span>Непосредственный руководитель</span><select value={selected.managerId ?? ""} onChange={(event) => patchNode(selected.id, { managerId: event.target.value || null })}><option value="">Не назначен</option>{draft.nodes.filter((node) => node.id !== selected.id && (node.kind === "role" || node.id === "owner")).map((node) => <option key={node.id} value={node.id}>{node.id === "owner" ? "Владелец · " : ""}{node.code} · {node.name}</option>)}</select><small>Для должностей; отдельная линия через managerId. Не редактирует доступы.</small></label>}
-            <label className="om-field"><span>Уровень планирования</span><select value={selected.level ?? ""} onChange={(event) => patchNode(selected.id, { level: (event.target.value || undefined) as WorkNode["level"] })}><option value="">Не задан</option><option value="strategy">Стратегия</option><option value="direction">Направление</option><option value="operation">Операция</option></select></label>
+             <label className="om-field"><span>Уровень планирования</span><select value={selected.level ?? ""} onChange={(event) => patchNode(selected.id, { level: (event.target.value || undefined) as WorkNode["level"] })}><option value="">Не задан</option><option value="strategy">Стратегия</option><option value="direction">Тактика / направление</option><option value="operation">Операция</option></select></label>
             <label className="om-field"><span>Зрелость описания</span><select value={selected.detailState ?? "outlined"} onChange={(event) => patchNode(selected.id, { detailState: event.target.value as WorkNode["detailState"] })}><option value="outlined">Набросок</option><option value="described">Описано</option></select><small>«Набросок» означает, что содержание ещё не проработано.</small></label>
             {(selected.kind === "process" || selected.kind === "action") && <label className="om-field"><span>Природа работы</span><select value={selected.workNature ?? "unspecified"} onChange={(event) => patchNode(selected.id, { workNature: event.target.value as WorkNode["workNature"] })}><option value="unspecified">Не определена</option><option value="deterministic">Детерминированная</option><option value="probabilistic">Вероятностная</option><option value="mixed">Смешанная</option></select><small>Поле относится только к процессам и действиям.</small></label>}
             <Field label="Эффект на рынке" value={selected.marketEffect ?? ""} onChange={(value) => patchNode(selected.id, { marketEffect: value })} multiline />
@@ -476,6 +481,70 @@ export default function OperatingModelView({ state, submit, saving = false }: Pr
                         : <span key={`${reference}-${index}`}>{reference} · основание не найдено</span>;
             })}</div>}
           </section>
+           {selected.kind === "action" && (() => {
+             const register = selected.register ?? defaultRegister();
+             const patchRegister = (patch: Partial<typeof register>) => patchNode(selected.id, { register: { ...register, ...patch } });
+             const numericValue = (value: string) => value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+             return <section className="om-field-section om-action-editor"><h4>Реестр действия <small>Плановые оценки · без запуска исполнения</small></h4>
+               <div className="om-form-grid">
+                 <Field label="Доступность" value={register.availability} onChange={(value) => patchRegister({ availability: value })} hint="Когда роль или ресурс может выполнять действие." />
+                 <Field label="Период оценки" value={register.period} onChange={(value) => patchRegister({ period: value })} hint="Например: рабочий день, неделя, месяц." />
+                 <label className="om-field"><span>Операций за период</span><input type="number" min="0" step="any" value={register.operationsPerPeriod ?? ""} placeholder="Неизвестно" onChange={(event) => patchRegister({ operationsPerPeriod: numericValue(event.target.value) })} /></label>
+                 <label className="om-field"><span>Минут на операцию</span><input type="number" min="0" step="any" value={register.minutesPerOperation ?? ""} placeholder="Неизвестно" onChange={(event) => patchRegister({ minutesPerOperation: numericValue(event.target.value) })} /></label>
+                 <Field label="Основание оценки" value={register.estimateBasis} onChange={(value) => patchRegister({ estimateBasis: value })} multiline hint="Допущение, источник или способ оценки." />
+                 <label className="om-field"><span>Решение по действию</span><select value={register.approval} onChange={(event) => {
+                   const value = event.target.value as typeof register.approval;
+                   if (value !== "approved") patchRegister({ approval: value });
+                 }}>
+                   {register.approval === "approved" && <option value="approved" disabled>Утверждено · существующая запись</option>}
+                   <option value="draft">Черновик</option><option value="discussion">К обсуждению</option>
+                 </select><small>Здесь можно отметить только черновик или обсуждение. Утверждение не выполняется автоматически.</small></label>
+                 <Field label="Источник предложения" value={register.source} onChange={(value) => patchRegister({ source: value })} />
+                 <Field label="Почему это предложение" value={register.proposalReason} onChange={(value) => patchRegister({ proposalReason: value })} multiline />
+               </div>
+             </section>;
+           })()}
+            {selected.kind === "action" && (() => {
+              const reporting = selected.reporting ?? emptyReporting();
+              const currentTemplate = reporting.templateDocumentId
+                ? state.documents.find((document) => document.id === reporting.templateDocumentId)
+                : undefined;
+              const patchReporting = (patch: Partial<typeof reporting>) => {
+                const next = { ...reporting, ...patch };
+                const reportingFieldsChanged = ["required", "formName", "templateDocumentId", "templateVersion", "storage", "approvalEvidence"]
+                  .some((key) => key in patch && patch[key as keyof typeof reporting] !== reporting[key as keyof typeof reporting]);
+                if (reportingFieldsChanged && reporting.formStatus === "approved") {
+                  const hasTemplate = !!next.templateDocumentId && state.documents.some((document) => document.id === next.templateDocumentId);
+                  next.formStatus = hasTemplate ? "draft" : "required";
+                  next.approvalEvidence = "";
+                }
+                if (!next.templateDocumentId) {
+                  next.formStatus = "required";
+                  next.approvalEvidence = "";
+                }
+                patchNode(selected.id, { reporting: next });
+              };
+              return <section className="om-field-section om-reporting-editor">
+                <h4>Отчётная форма <small>Метаданные формы · без редактора заполненного результата</small></h4>
+                <div className="om-form-grid">
+                  <label className="om-field om-reporting-required"><span>Форма обязательна</span><input type="checkbox" checked={reporting.required} onChange={(event) => patchReporting({ required: event.target.checked })} /><small>Обязательность относится к форме отчёта, отдельно от решения по действию.</small></label>
+                  <Field label="Название формы" value={reporting.formName} onChange={(value) => patchReporting({ formName: value })} />
+                  <label className="om-field"><span>Шаблон из документов гипотезы</span><select value={reporting.templateDocumentId ?? ""} onChange={(event) => patchReporting({ templateDocumentId: event.target.value || null })}>
+                    <option value="">Шаблон не выбран</option>
+                    {reporting.templateDocumentId && !currentTemplate && <option value={reporting.templateDocumentId} disabled>Сохранённый ID отсутствует в этой гипотезе</option>}
+                    {state.documents.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}
+                  </select><small>{currentTemplate ? `Выбран документ: ${currentTemplate.title}` : reporting.templateDocumentId ? "Текущий ID не найден; выберите существующий документ или очистите поле." : "Ссылка доступна только для существующего документа текущей гипотезы."}</small></label>
+                  <Field label="Версия шаблона" value={reporting.templateVersion} onChange={(value) => patchReporting({ templateVersion: value })} />
+                  <Field label="Где хранится заполненный результат" value={reporting.storage} onChange={(value) => patchReporting({ storage: value })} multiline />
+                  <label className="om-field"><span>Статус формы</span><select value={reporting.formStatus} onChange={(event) => patchReporting({ formStatus: event.target.value as typeof reporting.formStatus, ...(event.target.value !== "approved" ? { approvalEvidence: "" } : {}) })}>
+                    {reporting.formStatus === "approved" && <option value="approved" disabled>Утверждена · существующая запись</option>}
+                    <option value="required">Требуется разработать</option><option value="draft">Черновик · не утверждён</option><option value="discussion">На согласовании</option>
+                  </select><small>Утверждение не выставляется автоматически. Изменение метаданных сбросит прежнее утверждение.</small></label>
+                  <Field label="Основание / свидетельство утверждения" value={reporting.approvalEvidence} onChange={(value) => patchReporting({ approvalEvidence: value })} multiline hint="Источник, запись решения или документ, подтверждающий утверждение. Сначала переведите существующую утверждённую форму в черновик, если основание нужно изменить." />
+                </div>
+                <p className="om-reporting-current">Здесь задаются только метаданные. Заполненный результат остаётся в существующем процессе Product Crew submit_result и документообороте.</p>
+              </section>;
+            })()}
           <section className="om-field-section"><h4>Связи и обратное использование</h4><div className="om-link-create">
             <label>От<select value={newLink.from} onChange={(event) => setNewLink({ ...newLink, from: event.target.value })}><option value="">Выбрать узел</option>{draft.nodes.map((node) => <option key={node.id} value={node.id}>{node.code} · {node.name}</option>)}</select></label>
             <label>Тип<select value={newLink.kind} onChange={(event) => setNewLink({ ...newLink, kind: event.target.value as WorkLink["kind"] })}>{workLinks.map((kind) => <option key={kind} value={kind}>{linkLabels[kind]}</option>)}</select></label>

@@ -26,6 +26,22 @@ const node = z.object({
   }).strict(),
   procedure: text, rules: text, constraints: text, success: text, storage: text, delivery: text, exceptions: text, questions: text,
   resourceState: z.enum(["required", "approved", "connected"]).nullable(), referenceIds: z.array(id).max(500),
+  reporting: z.object({
+    required: z.boolean(), formName: text, templateDocumentId: ref, templateVersion: z.string().max(100),
+    storage: text, formStatus: z.enum(["required", "draft", "discussion", "approved"]), approvalEvidence: text,
+  }).strict().superRefine((r, ctx) => {
+    if (r.formStatus === "approved" && (!r.templateDocumentId || !r.approvalEvidence.trim()))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Утверждение бланка требует шаблона и явного основания согласования" });
+    if (r.required && r.formStatus !== "required" && !r.templateDocumentId)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Подготовленный бланк должен ссылаться на документ" });
+  }).optional(),
+  register: z.object({
+    availability: text, period: text,
+    operationsPerPeriod: z.number().finite().min(0).max(1e9).nullable(),
+    minutesPerOperation: z.number().finite().min(0).max(1e6).nullable(),
+    estimateBasis: text, approval: z.enum(["draft", "discussion", "approved"]),
+    source: text, proposalReason: text,
+  }).strict().optional(),
 }).strict();
 export const saveOperatingModelSchema = z.object({
   type: z.literal("saveOperatingModel"), baseVersion: z.number().int().nonnegative(),
@@ -54,6 +70,8 @@ export function saveOperatingModel(old: ProjectModelState, command: SaveOperatin
     for (const r of [n.managerId, n.parentId, n.clientId, n.roleId, n.executorId, n.recipientId, n.acceptorId, n.nextId, ...n.resourceIds, ...n.inputs.map(i => i.sourceId)])
       if (r && !map.has(r)) throw new ModelError(400, "Связь с отсутствующим объектом в этой гипотезе.");
     for (const r of n.referenceIds) if (!map.has(r) && !external.has(r)) throw new ModelError(400, "Ссылка на материал недоступна в этой гипотезе.");
+    if (n.reporting?.templateDocumentId && !old.documents.some(d => d.id === n.reporting!.templateDocumentId))
+      throw new ModelError(400, "Шаблон отчёта не найден в документах этой гипотезы.");
     if (n.roleId && map.get(n.roleId)?.kind !== "role") throw new ModelError(400, "Ответственность назначается должности.");
     if (n.resourceIds.some(r => map.get(r)?.kind !== "resource")) throw new ModelError(400, "В ресурсах допустимы только ресурсы.");
     if (n.kind !== "resource" && n.resourceState !== null) throw new ModelError(400, "Статус подключения относится только к ресурсу.");
