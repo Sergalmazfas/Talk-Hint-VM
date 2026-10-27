@@ -92,6 +92,17 @@ extension CallHintStreamDelegate {
 /// `disconnect()` on call end. The task auto-reconnects while it is supposed to
 /// be running, so a brief network blip during a call does not lose the feed.
 final class CallHintStream: NSObject {
+    private var lastVisibilityFrame: (text: String, event: CallHintEvent)?
+
+    func reportCurrentHintVisibility() {
+        guard let frame = lastVisibilityFrame else { return }
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        for kind in delegate?.callHintStream(self, visibleKindsFor: frame.event) ?? [] {
+            if let payload = Self.visibilityPayload(forFrame: frame.text, kind: kind, at: Date(), build: build) {
+                send(payload)
+            }
+        }
+    }
     weak var delegate: CallHintStreamDelegate?
 
     private var task: CallHintSocket?
@@ -307,6 +318,18 @@ final class CallHintStream: NSObject {
               let text = String(data: data, encoding: .utf8) else { return false }
         task.send(.string(text)) { _ in }
         return true
+    }
+
+    /// Reports a real local Prepare presentation, not a generated/sent hint ID.
+    func reportOpeningVisible(callSid: String, presentationId: String, at: Date,
+                              translationVisible: Bool) {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        for kind in translationVisible ? ["opening", "translation_ru"] : ["opening"] {
+            send(["type": "ui_visible", "kind": kind, "origin": "prepare",
+                  "callSid": callSid, "presentationId": presentationId,
+                  "visibleAt": ISO8601DateFormatter().string(from: at),
+                  "build": String(build.prefix(40))])
+        }
     }
 
     private func openSocket() {
@@ -538,11 +561,9 @@ final class CallHintStream: NSObject {
             // produce no event, never a fabricated successful display.
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-                for kind in self.delegate?.callHintStream(self, visibleKindsFor: event) ?? [] {
-                    if let payload = Self.visibilityPayload(forFrame: text, kind: kind, at: Date(), build: build) {
-                        self.send(payload)
-                    }
+                if case .suggestion = event {
+                    self.lastVisibilityFrame = (text, event)
+                    self.reportCurrentHintVisibility()
                 }
             }
         }
