@@ -1041,3 +1041,31 @@ mtime_ms = 1793069675109
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f2a67ca2-a807-44d4-a412-360f882419b0/2dfff3eb-a905-4077-8992-2a6a2a8079fb"
 storage_version_token = "1793069715962164"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "8qf5tihXGVTYHIUOHNgWf"
+uri = "file://generated-artifacts/plab-synthetic/%D0%9F%D1%80%D0%BE%D0%B1%D0%BD%D0%BE%D0%B5_%D0%BF%D0%B8%D1%81%D1%8C%D0%BC%D0%BE_P-LAB.html"
+type = "html"
+title = "P.LAB — открыть пробное письмо"
+description = "Синтетический Hint-звонок: отдельные разбор, QA и письмо. QA принято. На почту не отправлено."
+logical_id = "b4cb61d5-f1f0-4b5a-a278-6f0fc7bda1ca"
+content_hash = "sha256:e95cf75c1bf22da6cc900426aa5f9993e59c01fe347ed35782974780c79d808d"
+size = 18295
+mtime_ms = 1793071768527
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b4cb61d5-f1f0-4b5a-a278-6f0fc7bda1ca/59ff7775-3177-4d54-b158-cd524b509453"
+storage_version_token = "1793071914844751"
+content_type = "text/html"
+
+[[outputs]]
+id = "chFy4RMWNvTAMvJikE2za"
+uri = "file://generated-artifacts/P-LAB_CrewAI_synthetic_rev780.zip"
+type = "unspecified"
+title = "Скачать проверку CrewAI · ревизия 780"
+description = "Машинный отчёт, HTML/TXT/EML-письмо и сохранённые документы установки. Без реальных звонков и секретов."
+logical_id = "14a97c0d-4466-4a58-9954-eed0aab0809c"
+content_hash = "sha256:9a33ebb23f921a57491a2e21406a25652b0f4aa0333fda333ad2b6e28d11d1ac"
+size = 31326
+mtime_ms = 1793071890540
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/14a97c0d-4466-4a58-9954-eed0aab0809c/f413efe7-5350-4b53-b9e9-3b94fe32c26f"
+storage_version_token = "1793071915445069"
+content_type = "application/octet-stream"

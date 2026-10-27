@@ -1,0 +1,25 @@
+{
+  "call_id": "synthetic-hint-001",
+  "mode": "hint",
+  "synthetic": true,
+  "environment": "dev-synthetic",
+  "owner_verified": true,
+  "processing_authorized": true,
+  "ended_at": "2026-10-26T20:00:00-06:00",
+  "duration_ms": 90000,
+  "languages": ["ru", "en"],
+  "goal": "Уточнить цену ремонта ручки; без выезда мастера",
+  "transcript": [
+    {"role": "guest", "text": "Can you bring the trailer tomorrow? The shop price depends on the part."},
+    {"role": "owner", "text": "I need the price first. No mobile service."},
+    {"role": "guest", "text": "Send a photo, then we can estimate the shop repair."}
+  ],
+  "hints": [
+    {"id": "hint-1", "text": "Could you estimate the shop repair after seeing a photo?", "outcome": "sent", "device_ack": true},
+    {"id": "hint-2", "text": "I agree to pay $400 for mobile service.", "outcome": "sent", "device_ack": true}
+  ],
+  "full_hint_history": false,
+  "reference_verified": false,
+  "latency_summary": null,
+  "limitations": ["Все реплики и события вымышлены. Не проверяет iPhone, PSTN или реальную доставку почты."]
+}

@@ -18,3 +18,6 @@ seed-config.json
 /generated-artifacts/
 /ios/TalkHint.xcodeproj/
 /ios/scripts/**/__pycache__/
+/.pythonlibs/
+**/__pycache__/
+*.pyc

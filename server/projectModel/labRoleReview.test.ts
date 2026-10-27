@@ -5,6 +5,7 @@ import { emptyWorkNode } from "../../shared/operatingModelTemplate";
 import { productBookText, productBookDocumentId } from "../../shared/productBook";
 import { prepareLabRole, labPacketId, labFormId, labRoleId } from "./research/labRole";
 import { reviseLabRole, reviewId, protocolId, rubricId, methodId } from "./research/labRoleReview";
+import { acceptLabPilot, pilotId } from "./research/labPilotApproval";
 const now = "2026-10-27T03:00:00Z";
 function fixture() {
   const root = initialModel(), model = initialModel();
@@ -34,6 +35,18 @@ function fixture() {
   return { root: prepared, pass };
 }
 describe("P.LAB v2 manual-review revision", () => {
+  it("records owner approval but keeps runtime off and assigns selective QA acceptance to HEAD.07", () => {
+    const { root, pass } = fixture();
+    const revised = reviseLabRole(root, pass, "", "", now);
+    const approved = readHypothesis(acceptLabPilot(revised, now, { synthetic: true }), "new-country");
+    const data = approved.operatingModel!.revisions.at(-1)!.data;
+    expect(data.nodes.find(n => n.code === "LAB.QA")!.acceptorId).toBe("HEAD.07");
+    const p = JSON.parse(approved.documents.find(d => d.id === labPacketId)!.text);
+    expect(p.gate).toMatchObject({ installationAllowed: true, workerStarted: false, mailEnabled: false });
+    expect(p.metadata.sourceRevision).toBe(approved.revision);
+    expect(p.actions.find((a: any) => a.code === "LAB.QA").acceptorId).toBe("HEAD.07");
+    expect(approved.documents.find(d => d.id === pilotId)!.text).toContain('"deployReady":false');
+  });
   it("preserves the submitted pass losslessly, identities, history, book and Hint", () => {
     const { root, pass } = fixture(), before = readHypothesis(root, "new-country");
     const next = reviseLabRole(root, pass, "11 corrections", "Hypotheses, no QA", now);
