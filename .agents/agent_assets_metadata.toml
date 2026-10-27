@@ -1153,3 +1153,31 @@ mtime_ms = 1793081426843
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4dec0213-62e2-4adf-a85a-49dfef149a0c/9ddff727-e49c-46f5-bce2-ae56849fb281"
 storage_version_token = "1793081451226887"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "2mkYPndyl4kgCrEfvd0Be"
+uri = "file://generated-artifacts/pops-work-package/P-OPS_manual_pass_v2_rev800.zip"
+type = "unspecified"
+title = "Дежурный P.OPS — пакет для ручного прохода"
+description = "JSON v2, форма ежедневного отчёта и инструкция. Ревизия 800. Не запуск агента."
+logical_id = "83ba3a20-53cd-40ad-91a5-247061c6dd74"
+content_hash = "sha256:38d350f90850d25fcee744e95499f70032aec75a2d547d4e6e408bf788a52012"
+size = 16191
+mtime_ms = 1793119703194
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/83ba3a20-53cd-40ad-91a5-247061c6dd74/e915078c-8976-447f-971f-d76a8e5886e8"
+storage_version_token = "1793119725882378"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "kWW8u7b1jPdPHofq-QcbX"
+uri = "file://generated-artifacts/pops-work-package/P-OPS_work_package_v2_rev800.json"
+type = "unspecified"
+title = "Рабочий JSON P.OPS v2"
+description = "15 действий, поставщики, ресурсы, получатели, контроль и незаполненный протокол вашего прохода."
+logical_id = "ae0243bc-97ff-4e04-8548-0d1637dfc667"
+content_hash = "sha256:f5b5ba6cb349f829f35967a2389dd3803f28ef0e32a6d6127a504cc359872517"
+size = 82562
+mtime_ms = 1793119592225
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ae0243bc-97ff-4e04-8548-0d1637dfc667/3b1682a1-bee3-4d5e-9144-3fea6281b80d"
+storage_version_token = "1793119727457984"
+content_type = "application/octet-stream"
