@@ -17,6 +17,19 @@ import XCTest
 /// Must be run on a Mac with Xcode / iOS simulator — these sources cannot be
 /// compiled on Linux. `xcodebuild test -scheme TalkHint -destination 'platform=iOS Simulator,name=iPhone 15'`.
 final class CallHintStreamEncodeTests: XCTestCase {
+    func testVisibilityRequiresCallAndUtteranceWithoutSendingContent() {
+        let frame = #"{"type":"suggestion","callSid":"fixture","utteranceId":7,"en":"private text"}"#
+        let payload = CallHintStream.visibilityPayload(forFrame: frame, kind: "hint",
+            at: Date(timeIntervalSince1970: 0), build: "fixture")
+        XCTAssertEqual(payload?["type"] as? String, "ui_visible")
+        XCTAssertEqual(payload?["callSid"] as? String, "fixture")
+        XCTAssertEqual(payload?["kind"] as? String, "hint")
+        XCTAssertNil(payload?["en"])
+        XCTAssertNil(CallHintStream.visibilityPayload(forFrame: #"{"type":"suggestion"}"#,
+            kind: "hint", at: Date(), build: "fixture"))
+        XCTAssertNil(CallHintStream.visibilityPayload(forFrame: frame,
+            kind: "read", at: Date(), build: "fixture"))
+    }
 
     /// Serializes a builder payload and parses it back, exactly as `send(_:)`
     /// puts it on the wire. Fails the test if serialization is not possible.
