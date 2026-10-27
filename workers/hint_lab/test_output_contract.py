@@ -47,7 +47,7 @@ class OutputContractTests(unittest.TestCase):
     def test_all_rubric_values_and_only_those_values_are_valid(self):
         for category in RUBRIC:
             self.assertEqual(Finding(**{**PAYLOAD["findings"][0], "category": category}).category, category)
-        for category in ["правильная", "good", "верная ", "", None, 1]:
+        for category in ["правильная", "без полноты", "good", "верная ", "", None, 1]:
             with self.subTest(category=category), self.assertRaises(ValidationError):
                 Finding(**{**PAYLOAD["findings"][0], "category": category})
 

@@ -6,7 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from crewai import LLM
-from workers.hint_lab.pipeline import Analysis, Finding, Letter, QA, run, validate_source, failure_diagnostic
+from workers.hint_lab.pipeline import (
+    Analysis, Finding, Letter, QA, run, validate_source, failure_diagnostic,
+    RUBRIC_CONTRACT, RUBRIC_TEXT, rubric_contract,
+)
 
 SOURCE = json.loads(Path("workers/hint_lab/synthetic.json").read_text())
 ANALYSIS = Analysis(summary_ru="Синтетический разбор", findings=[
@@ -17,8 +20,9 @@ LETTER = Letter(summary_ru="Проверочный отчёт", quality_ru="Од
 
 class FlowTests(unittest.TestCase):
     def call(self, values):
-        model = LLM(model="openai/gpt-5.2", api_key="offline-test-not-a-key")
-        with patch("workers.hint_lab.pipeline.single_pass", side_effect=values) as mocked:
+        with patch("socket.socket.connect", side_effect=AssertionError("NETWORK_FORBIDDEN")), \
+                patch("workers.hint_lab.pipeline.single_pass", side_effect=values) as mocked:
+            model = LLM(model="openai/gpt-5.2", api_key="offline-test-not-a-key")
             result = run(copy.deepcopy(SOURCE), llm=model)
         return result, mocked
 
@@ -32,6 +36,53 @@ class FlowTests(unittest.TestCase):
         self.assertIsNone(result["metrics"]["wer"])
         self.assertIsNone(result["metrics"]["confirmed_missed_hints"])
         self.assertIn("не выполнен", mocked.call_args_list[1].args[1])
+
+    def test_rubric_labels_and_meanings_match_schema_exactly(self):
+        categories = Finding.model_json_schema()["properties"]["category"]["enum"]
+        self.assertEqual(RUBRIC_CONTRACT["allowed_categories"], categories)
+        self.assertEqual(list(RUBRIC_CONTRACT["meanings"]), categories)
+        self.assertEqual(len(categories), 7)
+        self.assertEqual(RUBRIC_CONTRACT["insufficient_data_category"], "неизвестно")
+        self.assertIn("неизвестно", categories)
+        self.assertNotIn("без полноты", categories)
+        self.assertEqual(RUBRIC_CONTRACT["not_categories"], ["без полноты"])
+        self.assertTrue(all(RUBRIC_CONTRACT["meanings"].values()))
+
+    def test_author_reviewer_and_letter_get_identical_explicit_rubric(self):
+        _, mocked = self.call([(ANALYSIS.model_copy(deep=True), {}),
+                               (QA(verdict="accepted", issues=[]), {}), (LETTER, {})])
+        for call in mocked.call_args_list:
+            agent, prompt, _ = call.args
+            self.assertEqual(prompt.count(RUBRIC_TEXT), 1)
+            self.assertIn(RUBRIC_TEXT, agent.backstory)
+            self.assertIn("НЕ отдельная категория", prompt)
+            self.assertIn("Допустимая категория не гарантирует правильности оценки", prompt)
+
+    def test_schema_and_rubric_drift_fails_before_any_model_request(self):
+        schema = copy.deepcopy(Finding.model_json_schema())
+        schema["properties"]["category"]["enum"].append("без полноты")
+        with patch.object(Finding, "model_json_schema", return_value=schema):
+            with self.assertRaisesRegex(ValueError, "^RUBRIC_SCHEMA_MISMATCH$"):
+                rubric_contract()
+
+    def test_unknown_category_is_valid_but_acceptance_still_comes_from_qa(self):
+        unknown = ANALYSIS.model_copy(deep=True)
+        unknown.findings[0].category = "неизвестно"
+        unknown.findings[0].explanation = "Нет достаточных проверяемых данных."
+        result, _ = self.call([(unknown, {}), (QA(verdict="accepted", issues=[]), {}), (LETTER, {})])
+        self.assertEqual(result["analysis"]["findings"][0]["category"], "неизвестно")
+        self.assertEqual(result["qa_status"], "QA: принято")
+
+    def test_disputed_rubric_objection_is_preserved_not_overruled_into_acceptance(self):
+        issue = "Категория неизвестно недопустима, заменить на без полноты"
+        values = []
+        for _ in range(3):
+            values += [(ANALYSIS.model_copy(deep=True), {}), (QA(verdict="returned", issues=[issue]), {})]
+        result, mocked = self.call(values + [(LETTER, {})])
+        self.assertEqual(result["qa_status"], "QA: расхождения не устранены")
+        self.assertEqual(result["qa_issues"], [issue])
+        self.assertEqual(result["qa_returns"], 2)
+        self.assertEqual(mocked.call_count, 7)
 
     def test_qa_failure_does_not_block_letter(self):
         result, _ = self.call([(ANALYSIS.model_copy(deep=True), {}), RuntimeError("offline QA failure"), (LETTER, {})])
