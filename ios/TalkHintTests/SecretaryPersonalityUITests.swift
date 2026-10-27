@@ -713,7 +713,7 @@ final class SecretaryPersonalityUITests: XCTestCase {
             from: Data(#"{"numbers":[],"defaultOutgoing":{"numberId":"personal-line"}}"#.utf8)))
     }
 
-    func testReviewBlocksRetellWithoutSavedOutgoingLine() throws {
+    func testReviewBlocksRetellWithoutSavedOutgoingLine() async throws {
         SessionStore.shared.secretaryOutgoingNumberId = nil
         SessionStore.shared.secretaryVoiceProvider = .retell
         let review = SecretaryTaskReviewViewController(
@@ -721,10 +721,20 @@ final class SecretaryPersonalityUITests: XCTestCase {
             confirmationToken: "fixture-only", api: api)
         review.loadViewIfNeeded()
         let start = try XCTUnwrap(descendant(review.view, id: "button-secretary-start") as? UIButton)
+        let summaryLabel = try XCTUnwrap(descendant(review.view, id: "summary-secretary-configuration") as? UILabel)
+        // Without a saved line the review asks the server for a shared default.
+        // Start stays locked while that lookup is in flight.
+        XCTAssertTrue(summaryLabel.text?.contains(
+            NSLocalizedString("secretary.review.setup_loading", comment: "")) == true)
         XCTAssertFalse(start.isEnabled)
-        let summary = try XCTUnwrap(
-            (descendant(review.view, id: "summary-secretary-configuration") as? UILabel)?.text)
-        XCTAssertTrue(summary.contains(NSLocalizedString("secretary.review.setup_unavailable", comment: "")))
+        // The fixture offers no shared Retell default, so the lookup must end in refusal.
+        let unavailable = NSLocalizedString("secretary.review.setup_unavailable", comment: "")
+        try await waitUntil { summaryLabel.text?.contains(unavailable) == true }
+        XCTAssertFalse(start.isEnabled)
+        XCTAssertNil(SessionStore.shared.secretaryOutgoingNumberId)
+        let requests = await server.recorded()
+        XCTAssertTrue(requests.contains { $0.httpMethod == "GET" && $0.url?.path == "/api/secretary-personalities/context" })
+        XCTAssertFalse(requests.contains { $0.url?.path.hasPrefix("/api/secretary/tasks") == true })
     }
 }
 #endif
