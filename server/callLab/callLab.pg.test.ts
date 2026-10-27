@@ -181,4 +181,20 @@ describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL
     await store.retention(env, owner);
     expect((await client.query("SELECT count(*)::int AS n FROM call_lab_jobs")).rows[0].n).toBe(0);
   });
+  it("keeps an explicit cross-environment manual review out of automatic queues and under the same TTLs", async () => {
+    await client.query(`INSERT INTO call_lab_jobs(key,environment,owner_id,call_sid,status,source,report,journal)
+      VALUES('manual-fixture',$1,$2,'production-only-reference','manual_running',
+        '{"private":"fixture"}','{"manual_trigger":true}',
+        '[{"kind":"owner_requested_cross_environment_review"}]')`, [env, owner]);
+    await store.retention(env, owner);
+    expect((await client.query("SELECT count(*)::int AS n FROM call_lab_jobs")).rows[0].n).toBe(1);
+    await store.recover(env, owner);
+    expect(await store.claim(env, owner)).toBeNull();
+    await client.query("UPDATE call_lab_jobs SET created_at=now()-interval '8 days'");
+    await store.retention(env, owner);
+    expect((await client.query("SELECT source FROM call_lab_jobs")).rows[0].source).toBeNull();
+    await client.query("UPDATE call_lab_jobs SET created_at=now()-interval '91 days'");
+    await store.retention(env, owner);
+    expect((await client.query("SELECT count(*)::int AS n FROM call_lab_jobs")).rows[0].n).toBe(0);
+  });
 });

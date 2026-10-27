@@ -1,9 +1,9 @@
 import type { Pool } from "pg";
 import { isBenchmarkAdmin } from "../benchmark/adminGate";
 import { GmailLabMail } from "./mail";
-import { processReport } from "./processReport";
+import { completeLabReport } from "./processReport";
 import { LabStore } from "./store";
-import { runHintLab, checkHintLabRuntime, cleanupLabScratch } from "./process";
+import { runHintLab, checkHintLabRuntime, cleanupLabScratch, labAnalysisFailure } from "./process";
 import { authorizedHintSource, registerLabSourceOwner } from "./source";
 import { startHintWatchdog } from "./watchdog";
 import { labStartupReady, labStartupStatus, labStartupStep, labStartsPaused, resetLabStartup } from "./startup";
@@ -80,7 +80,10 @@ export function unavailableReport(call: any, reason: string) {
   return {
     format: "talkhint.plab.call-report", version: 1, mode: "hint", call_id: call.call_sid,
     environment: environment(), synthetic: false, ended_at: call.ended_at, languages: [],
-    duration_ms: null, framework: { version: "1.15.30" }, model: null,
+    duration_ms: Number.isFinite(Date.parse(call.ended_at) - Date.parse(call.started_at))
+      ? Date.parse(call.ended_at) - Date.parse(call.started_at) : null,
+    framework: { version: "1.15.30" }, model: process.env.LAB_MODEL || "gpt-5.2",
+    model_basis: "configured; execution not confirmed",
     execution: "analysis_not_completed",
     analysis: { summary_ru: "Разбор не завершён", findings: [], limitations: [reason], proposals: [] },
     replay: { status: "не выполнен" }, qa_status: "НЕ ПРОВЕРЕНО QA", qa_issues: [reason],
@@ -143,7 +146,9 @@ export async function hintLabTick(pool: Pool, dependencies: {
       } else {
         const source = authorizedHintSource(call, control, config.environment);
         if (!source) {
-          await store.finish(job.key, null, unavailableReport(call, "SOURCE_UNAVAILABLE: нет достаточного разрешённого сохранённого текста."));
+          await store.finish(job.key, null, completeLabReport(
+            unavailableReport(call, "SOURCE_UNAVAILABLE: нет достаточного разрешённого сохранённого текста."),
+            null, job.key));
         } else {
           active = new AbortController();
           const aborter = active;
@@ -161,15 +166,19 @@ export async function hintLabTick(pool: Pool, dependencies: {
             if (aborter.signal.aborted) {
               await store.fail(job.key, "analysis:canceled");
             } else {
-              report.private_report_path = `/api/admin/call-lab/reports/${job.key}`;
-              report.mail_form_version = 3;
-              report.process_plan_fact = processReport(report);
-              await store.finish(job.key, source, report);
+              await store.finish(job.key, source, completeLabReport(report, source, job.key));
               await store.note(job.key, `qa:${report.qa_status === "QA: принято" ? "accepted" : "unverified_or_returned"}`);
             }
-          } catch {
+          } catch (error) {
             if (aborter.signal.aborted) await store.fail(job.key, "analysis:canceled");
-            else await store.finish(job.key, null, unavailableReport(call, "MODEL_FAILURE: разбор не прошёл проверку; исходные данные не изменены."));
+            else {
+              const failure = labAnalysisFailure(error);
+              console.warn(`[HintLab] Analysis failed stage=${failure.stage} code=${failure.code}`);
+              const report = { ...unavailableReport(call, `MODEL_FAILURE: ${failure.code}; этап ${failure.stage}.`),
+                analysis_failure: failure };
+              await store.finish(job.key, source, completeLabReport(report, source, job.key));
+              await store.note(job.key, `analysis:failed:${failure.stage}:${failure.code}`);
+            }
           } finally {
             clearInterval(watcher);
             active = undefined;

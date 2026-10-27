@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from crewai import LLM
-from workers.hint_lab.pipeline import Analysis, Finding, Letter, QA, run, validate_source
+from workers.hint_lab.pipeline import Analysis, Finding, Letter, QA, run, validate_source, failure_diagnostic
 
 SOURCE = json.loads(Path("workers/hint_lab/synthetic.json").read_text())
 ANALYSIS = Analysis(summary_ru="Синтетический разбор", findings=[
@@ -66,6 +66,24 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(result["analysis"]["findings"][0]["category"], "неизвестно")
         self.assertIn("отклонена", result["analysis"]["limitations"][-1])
         self.assertIsNone(result["metrics"]["confirmed_missed_hints"])
+
+    def test_safe_diagnostics_never_include_exception_text(self):
+        for error, code in [(TimeoutError("PRIVATE"), "MODEL_TIMEOUT"),
+                            (ValueError("UNKNOWN_EVIDENCE_EVENT"), "UNKNOWN_EVIDENCE_EVENT"),
+                            (RuntimeError("PRIVATE token and prompt"), "MODEL_OR_INPUT_FAILURE")]:
+            value = failure_diagnostic(error)
+            self.assertEqual(value["code"], code)
+            self.assertNotIn("PRIVATE", json.dumps(value))
+
+    def test_schema_diagnostics_identify_fields_without_echoing_model_input(self):
+        try:
+            Analysis.model_validate({"summary_ru": "PRIVATE source"})
+        except Exception as error:
+            error.lab_schema = "Analysis"
+            details = failure_diagnostic(error)
+        self.assertEqual(details["schema"], "Analysis")
+        self.assertIn("findings", str(details["schema_issues"]))
+        self.assertNotIn("PRIVATE", json.dumps(details))
 
 
 if __name__ == "__main__":

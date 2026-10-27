@@ -64,6 +64,8 @@ export class LabStore {
   async retention(environment: string, owner: string) {
     await this.db.query(`DELETE FROM call_lab_jobs j WHERE environment=$1 AND owner_id=$2
       AND report->>'synthetic' IS DISTINCT FROM 'true'
+      AND NOT (environment='development' AND
+        journal @> '[{"kind":"owner_requested_cross_environment_review"}]'::jsonb)
       AND NOT EXISTS (SELECT 1 FROM calls c WHERE c.call_sid=j.call_sid AND c.user_id=j.owner_id)`, [environment, owner]);
     await this.db.query(`UPDATE call_lab_jobs SET source=NULL WHERE environment=$1 AND owner_id=$2
       AND source IS NOT NULL AND created_at<now()-interval '7 days'`, [environment, owner]);

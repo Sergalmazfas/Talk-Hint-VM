@@ -21,12 +21,13 @@ describe("v3 process plan/fact", () => {
       expect(processReport({ process_rubric: { ...process_rubric, ...patch } }).percent).toBeNull();
     }
   });
-  it("renders synthetic warning, eight lines and missing phone telemetry", () => {
+  it("renders a compact synthetic warning, eight stages and unknown measurements", () => {
     const mail = renderProcessLetter({ synthetic: true, duration_ms: 120000, qa_status: "НЕ ПРОВЕРЕНО QA" });
     expect(mail.subject).toContain("процесс ?");
     expect(mail.body).toContain("СИНТЕТИЧЕСКИЙ ПРИМЕР v3");
-    expect(mail.body.match(/План:/g)).toHaveLength(8);
-    expect(mail.body).toContain("нет подтверждённой телеметрии");
+    expect(mail.body).toContain("План — 100% применимых случаев");
+    expect(mail.body).toContain("Первая фраза: ?");
+    expect(mail.body).toContain("Измерения: нет сохранённого снимка");
     expect(mail.body).not.toContain("94%");
   });
   it("does not turn telemetry receipt into timely visibility or a successful goal", () => {

@@ -15,6 +15,32 @@ export async function cleanupLabScratch() {
   }
 }
 
+const failureCodes = new Set(["LAB_ANALYSIS_FAILED", "LAB_ANALYSIS_TIMEOUT", "LAB_INVALID_REPORT",
+  "LAB_PYTHON_UNAVAILABLE", "LAB_CANCELED", "LAB_OUTPUT_TOO_LARGE", "LAB_INPUT_FAILED",
+  "MODEL_TIMEOUT", "MODEL_RATE_LIMIT", "MODEL_AUTH", "MODEL_CONNECTION", "MODEL_HTTP_ERROR",
+  "OUTPUT_SCHEMA_INVALID", "UNKNOWN_EVIDENCE_EVENT", "MODEL_OR_INPUT_FAILURE"]);
+export function labAnalysisFailure(error: unknown) {
+  const e = error as any;
+  const value = e?.diagnostic;
+  const code = failureCodes.has(value?.code) ? value.code :
+    failureCodes.has(e?.message) ? e.message : "LAB_ANALYSIS_FAILED";
+  return {
+    code,
+    stage: ["analysis", "qa", "letter", "source"].includes(value?.stage) ? value.stage : "worker",
+    ...(Number.isInteger(value?.http_status) && value.http_status >= 400 && value.http_status <= 599
+      ? { http_status: value.http_status } : {}),
+    ...(typeof value?.model === "string" && /^[a-z0-9./_-]{1,80}$/i.test(value.model) ? { model: value.model } : {}),
+    ...(["Analysis", "QA", "Letter"].includes(value?.schema) ? { schema: value.schema } : {}),
+    ...(Array.isArray(value?.schema_issues) ? { schema_issues: value.schema_issues.slice(0, 5).map((issue: any) => ({
+      type: typeof issue?.type === "string" && /^[a-z_]{1,40}$/.test(issue.type) ? issue.type : "invalid",
+      fields: Array.isArray(issue?.fields) ? issue.fields.filter((part: unknown) =>
+        typeof part === "number" && Number.isSafeInteger(part) && part >= 0 && part <= 9999 ||
+        ["summary_ru", "findings", "category", "event_id", "evidence", "explanation", "limitations",
+          "proposals", "verdict", "issues", "quality_ru", "limitations_ru", "proposals_ru"].includes(String(part))) : [],
+    })) } : {}),
+  };
+}
+
 function workerEnv(): NodeJS.ProcessEnv {
   return {
     PATH: process.env.PATH, HOME: process.env.HOME,
@@ -55,7 +81,7 @@ export function runHintLab(source: unknown, options: { signal?: AbortSignal; tim
   const script = process.env.NODE_ENV === "production" ? "dist/workers/hint_lab/pipeline.py" : "workers/hint_lab/pipeline.py";
   return new Promise((resolve, reject) => {
     const child = spawn("python", [path.resolve(script)], { env, stdio: ["pipe", "pipe", "pipe"] });
-    let output = "", settled = false;
+    let output = "", stderr = "", settled = false;
     const end = (error?: Error, value?: any) => {
       if (settled) return;
       settled = true;
@@ -67,18 +93,31 @@ export function runHintLab(source: unknown, options: { signal?: AbortSignal; tim
       });
     };
     const abort = () => { child.kill("SIGKILL"); end(new Error("LAB_CANCELED")); };
-    const timer = setTimeout(abort, options.timeoutMs ?? 10 * 60_000);
+    const timer = setTimeout(() => end(new Error("LAB_ANALYSIS_TIMEOUT")), options.timeoutMs ?? 10 * 60_000);
     options.signal?.addEventListener("abort", abort, { once: true });
     child.stdout.on("data", chunk => {
       output += chunk.toString();
       if (Buffer.byteLength(output) > 250_000) { child.kill("SIGKILL"); end(new Error("LAB_OUTPUT_TOO_LARGE")); }
     });
     // Never log raw provider output; it can contain personal prompts.
-    child.stderr.resume();
+    child.stderr.on("data", chunk => { stderr = (stderr + chunk.toString()).slice(-8192); });
     child.once("error", () => end(new Error("LAB_PYTHON_UNAVAILABLE")));
     child.once("close", code => {
       if (settled) return;
-      if (code !== 0) return end(new Error("LAB_ANALYSIS_FAILED"));
+      if (code !== 0) {
+        const error = new Error("LAB_ANALYSIS_FAILED") as Error & { diagnostic?: unknown };
+        // Only the fixed structured envelope is retained, never raw provider text.
+        for (const line of stderr.trim().split("\n").reverse()) {
+          try {
+            const parsed = JSON.parse(line);
+            if (parsed.status === "failed") {
+              error.diagnostic = labAnalysisFailure({ diagnostic: parsed });
+              break;
+            }
+          } catch { /* not a diagnostic envelope */ }
+        }
+        return end(error);
+      }
       try {
         const report = JSON.parse(output);
         if (report.format !== "talkhint.plab.call-report" || report.mode !== "hint" ||

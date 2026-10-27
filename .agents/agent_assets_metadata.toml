@@ -1181,3 +1181,17 @@ mtime_ms = 1793119592225
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ae0243bc-97ff-4e04-8548-0d1637dfc667/3b1682a1-bee3-4d5e-9144-3fea6281b80d"
 storage_version_token = "1793119727457984"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "h-WLQqXGGs4fagQMOe-8E"
+uri = "file://generated-artifacts/mint-hint-reanalysis/report.html"
+type = "html"
+title = "Mint — полный отчёт с измерениями"
+description = "Контрольный звонок 27 октября. Один повторный CrewAI-разбор: OUTPUT_SCHEMA_INVALID, QA не выполнена. Телеметрия, наблюдения и ограничения сохранены отдельно."
+logical_id = "714380d0-2754-4d6d-8edf-55f717384ebb"
+content_hash = "sha256:fe4f1757f9ff0795f169d9ed68ecded1af7cb44590fd88289118d3bfc724974e"
+size = 14376
+mtime_ms = 1793125826908
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/714380d0-2754-4d6d-8edf-55f717384ebb/5a2b87e8-9891-4f41-bff6-66352fd25d64"
+storage_version_token = "1793125827619829"
+content_type = "text/html"

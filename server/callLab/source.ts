@@ -27,6 +27,7 @@ export function authorizedHintSource(call: any, control: any, environment: strin
     hints: entries.map((e: any, i: number) => ({
       id: String(e.utteranceId ?? `recorded-hint-${i}`), text: e.text,
       outcome: e.outcome, delivered_at: e.deliveredAt ?? null, sent_at: e.sentAt ?? null,
+      stt_final_at: e.sttFinalAt ?? null,
       drop_reason: e.dropReason ?? null,
     })),
     // The persisted recorder is capped and text is bounded; never invent complete history.

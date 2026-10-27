@@ -24,6 +24,46 @@ from crewai import Agent, Crew, LLM, Process, Task
 from pydantic import BaseModel, Field
 
 PIN = "1.15.30"
+CURRENT_STAGE = "source"
+
+
+def failure_diagnostic(exc):
+    """Fixed codes only: never serialize exception text, provider bodies or prompts."""
+    name = type(exc).__name__
+    known = {"UNKNOWN_EVIDENCE_EVENT"}
+    code = str(exc) if isinstance(exc, ValueError) and str(exc) in known else {
+        "ValidationError": "OUTPUT_SCHEMA_INVALID", "JSONDecodeError": "OUTPUT_SCHEMA_INVALID",
+        "TimeoutError": "MODEL_TIMEOUT", "APITimeoutError": "MODEL_TIMEOUT",
+        "RateLimitError": "MODEL_RATE_LIMIT", "AuthenticationError": "MODEL_AUTH",
+        "APIConnectionError": "MODEL_CONNECTION", "APIStatusError": "MODEL_HTTP_ERROR",
+    }.get(name, "MODEL_OR_INPUT_FAILURE")
+    result = {"status": "failed", "code": code, "stage": CURRENT_STAGE,
+              "model": os.environ.get("LAB_MODEL", "gpt-5.2")}
+    schema = getattr(exc, "lab_schema", None)
+    if schema in {"Analysis", "QA", "Letter"}:
+        result["schema"] = schema
+    if callable(getattr(exc, "errors", None)):
+        allowed_fields = {"summary_ru", "findings", "category", "event_id", "evidence", "explanation",
+                          "limitations", "proposals", "verdict", "issues", "quality_ru",
+                          "limitations_ru", "proposals_ru"}
+        details = []
+        for issue in exc.errors(include_input=False, include_url=False)[:5]:
+            location = [part for part in issue.get("loc", ())
+                        if part in allowed_fields or isinstance(part, int)]
+            kind = issue.get("type")
+            if isinstance(kind, str) and kind.replace("_", "").isalpha():
+                details.append({"fields": location, "type": kind[:40]})
+        result["schema_issues"] = details
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and 400 <= status <= 599:
+        result["http_status"] = status
+    return result
+
+
+def stage_pass(stage, agent, description, schema):
+    global CURRENT_STAGE
+    CURRENT_STAGE = stage
+    return single_pass(agent, description, schema)
 
 
 class Finding(BaseModel):
@@ -85,15 +125,19 @@ def single_pass(agent, description, schema):
                 cache=False, verbose=False, tracing=False, share_crew=False, planning=False)
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         result = crew.kickoff()
-    if result.pydantic is not None:
-        parsed = schema.model_validate(result.pydantic.model_dump())
-    elif result.json_dict is not None:
-        parsed = schema.model_validate(result.json_dict)
-    else:
-        raw = result.raw.strip()
-        if raw.startswith("```json\n") and raw.endswith("\n```"):
-            raw = raw[8:-4]
-        parsed = schema.model_validate_json(raw)
+    try:
+        if result.pydantic is not None:
+            parsed = schema.model_validate(result.pydantic.model_dump())
+        elif result.json_dict is not None:
+            parsed = schema.model_validate(result.json_dict)
+        else:
+            raw = result.raw.strip()
+            if raw.startswith("```json\n") and raw.endswith("\n```"):
+                raw = raw[8:-4]
+            parsed = schema.model_validate_json(raw)
+    except Exception as exc:
+        exc.lab_schema = schema.__name__
+        raise
     return parsed, result.token_usage.model_dump() if result.token_usage else {}
 
 
@@ -133,10 +177,12 @@ def validate_findings(analysis, source):
 def make_agent(role, goal, llm):
     return Agent(role=role, goal=goal, backstory=BASE, llm=llm,
                  tools=[], allow_delegation=False, memory=False, cache=False,
-                 verbose=False, max_iter=1, max_retry_limit=0, max_execution_time=120)
+                 verbose=False, max_iter=1, max_retry_limit=0, max_execution_time=240)
 
 
 def run(source, llm=None):
+    global CURRENT_STAGE
+    CURRENT_STAGE = "source"
     validate_source(source)
     if version("crewai") != PIN:
         raise ValueError("CREWAI_VERSION_MISMATCH")
@@ -144,14 +190,14 @@ def run(source, llm=None):
         if not os.environ.get("OPENAI_API_KEY"):
             raise ValueError("MODEL_KEY_MISSING")
         llm = LLM(model="openai/" + os.environ.get("LAB_MODEL", "gpt-5.2"),
-                  api_key=os.environ["OPENAI_API_KEY"], timeout=90, max_retries=0)
+                  api_key=os.environ["OPENAI_API_KEY"], timeout=180, max_retries=0)
     author = make_agent("agent-1 · P.LAB", "Проверяемый разбор и письмо владельцу", llm)
     reviewer = make_agent("agent-2 · P.LG.QA", "Независимо проверить разбор, не принять без доказательств", llm)
     raw = json.dumps(source, ensure_ascii=False)
     usage, returns = [], 0
     qa_status, qa_issues, feedback = "НЕ ПРОВЕРЕНО QA", [], ""
     while True:
-        analysis, tokens = single_pass(author, BASE + "\nВходные данные:\n" + raw +
+        analysis, tokens = stage_pass("analysis", author, BASE + "\nВходные данные:\n" + raw +
                                       "\nВ findings разрешены только эти event_id: " +
                                       json.dumps([e["id"] for e in source.get("hints", [])]) +
                                       ". Ограничения полноты/reference/latency писать только в limitations." +
@@ -161,7 +207,7 @@ def run(source, llm=None):
         # LAB.8 is explicitly NOT RUN. No extra call or replay can be created by this worker.
         replay = {"status": "не выполнен", "reason": "Необязателен в первом пилоте; новых прогонов нет"}
         try:
-            qa, tokens = single_pass(reviewer, BASE + "\nНезависимо проверь исходные данные и разбор."
+            qa, tokens = stage_pass("qa", reviewer, BASE + "\nНезависимо проверь исходные данные и разбор."
                 "\nСнимок:\n" + raw + "\nLAB.8:\n" + json.dumps(replay, ensure_ascii=False) +
                 "\nРазбор:\n" + analysis.model_dump_json(), QA)
             usage.append({"stage": "qa", "tokens": tokens})
@@ -181,7 +227,7 @@ def run(source, llm=None):
             qa_issues = ["QA недоступна либо её ответ не прошёл проверку. Разбор не принят."]
             break
     # Same role prepares the letter; never edits the independent QA decision.
-    letter, tokens = single_pass(author, BASE + "\nПодготовь краткое письмо. Не меняй статус QA."
+    letter, tokens = stage_pass("letter", author, BASE + "\nПодготовь краткое письмо. Не меняй статус QA."
         "\nРазбор:\n" + analysis.model_dump_json() + "\nQA: " + qa_status +
         "\nОграничения QA:\n" + json.dumps(qa_issues, ensure_ascii=False) +
         "\nLAB.8: не выполнен. WER и цена неизвестны.", Letter)
@@ -231,6 +277,5 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         # Do not leak provider exceptions, keys, prompts or personal source data.
-        print(json.dumps({"error": type(e).__name__, "status": "failed",
-                          "reason": "MODEL_OR_INPUT_FAILURE; inspect private diagnostics, no blind retry"}), file=sys.stderr)
+        print(json.dumps(failure_diagnostic(e)), file=sys.stderr)
         sys.exit(1)
