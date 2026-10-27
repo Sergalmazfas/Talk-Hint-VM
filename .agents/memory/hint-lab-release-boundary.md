@@ -52,3 +52,14 @@ into an apparently valid assessment and bypass the intended QA gate.
 **How to apply:** keep strict category validation and separate deterministic
 measurements from rejected AI judgments. Enforce the output contract rather
 than relaxing the rubric; do not label a diagnostic retry as a production fix.
+
+A framework's request for structured output does not guarantee that its final
+artifact actually came from the structured provider response.
+
+**Why:** the pinned framework can catch a failed structured synthesis and silently
+return concatenated free text instead. Validating that text as JSON alone would
+hide the failed structured-output path.
+
+**How to apply:** verify both the wire contract and the final artifact provenance
+with offline framework/SDK tests. Keep a failed native response failed; do not
+introduce hidden model-based conversion or repair calls as a parser fix.

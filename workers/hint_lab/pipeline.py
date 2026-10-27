@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from crewai import Agent, Crew, LLM, Process, Task
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 PIN = "1.15.30"
 CURRENT_STAGE = "source"
@@ -30,7 +30,7 @@ CURRENT_STAGE = "source"
 def failure_diagnostic(exc):
     """Fixed codes only: never serialize exception text, provider bodies or prompts."""
     name = type(exc).__name__
-    known = {"UNKNOWN_EVIDENCE_EVENT"}
+    known = {"UNKNOWN_EVIDENCE_EVENT", "NATIVE_OUTPUT_REQUIRED"}
     code = str(exc) if isinstance(exc, ValueError) and str(exc) in known else {
         "ValidationError": "OUTPUT_SCHEMA_INVALID", "JSONDecodeError": "OUTPUT_SCHEMA_INVALID",
         "TimeoutError": "MODEL_TIMEOUT", "APITimeoutError": "MODEL_TIMEOUT",
@@ -72,26 +72,32 @@ def stage_pass(stage, agent, description, schema):
     return single_pass(agent, description, schema)
 
 
-class Finding(BaseModel):
+class LabOutput(BaseModel):
+    # Also emitted as additionalProperties:false in the provider's strict schema.
+    # Unknown categories are invalid output, never an alias for uncertain evidence.
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class Finding(LabOutput):
     category: Literal["верная", "бесполезная", "ошибочная", "выдумка", "дубль", "пропуск", "неизвестно"]
     event_id: str
     evidence: str
     explanation: str
 
 
-class Analysis(BaseModel):
+class Analysis(LabOutput):
     summary_ru: str
     findings: list[Finding]
     limitations: list[str]
     proposals: list[str]
 
 
-class QA(BaseModel):
+class QA(LabOutput):
     verdict: Literal["accepted", "returned"]
     issues: list[str]
 
 
-class Letter(BaseModel):
+class Letter(LabOutput):
     summary_ru: str
     quality_ru: str
     limitations_ru: list[str]
@@ -125,29 +131,34 @@ def single_pass(agent, description, schema):
                     json.dumps(schema.model_json_schema(), ensure_ascii=False),
         expected_output="Только JSON по заданной схеме, без Markdown и лишних полей.",
         agent=agent,
+        # CrewAI 1.15.30 forwards this to the provider's native response_model.
+        # Do not use output_pydantic/output_json: their conversion fallback can
+        # make an additional model call to repair a malformed response.
+        response_model=schema,
     )
     # Each invocation has a fresh Crew/context; QA never receives the author's conversation memory.
     crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, memory=False,
                 cache=False, verbose=False, tracing=False, share_crew=False, planning=False)
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        result = crew.kickoff()
+    result = None
     try:
-        if result.pydantic is not None:
-            parsed = schema.model_validate(result.pydantic.model_dump())
-        elif result.json_dict is not None:
-            parsed = schema.model_validate(result.json_dict)
-        else:
-            raw = result.raw.strip()
-            if raw.startswith("```json\n") and raw.endswith("\n```"):
-                raw = raw[8:-4]
-            parsed = schema.model_validate_json(raw)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = crew.kickoff()
+        # The pinned executor can swallow a failed native synthesis and return
+        # concatenated free text. Never accept that fallback, even if it is JSON.
+        executor = getattr(agent, "agent_executor", None)
+        answer = getattr(getattr(executor, "state", None), "current_answer", None)
+        native_output = getattr(answer, "output", None)
+        if not isinstance(native_output, schema):
+            raise ValueError("NATIVE_OUTPUT_REQUIRED")
+        parsed = schema.model_validate(native_output.model_dump())
     except Exception as exc:
         exc.lab_schema = schema.__name__
-        raw = result.raw.strip() if isinstance(result.raw, str) else ""
-        exc.lab_output_chars = len(raw)
-        exc.lab_output_shape = ("structured" if result.pydantic is not None or result.json_dict is not None
-            else "empty" if not raw else "markdown_fence" if raw.startswith("```")
-            else "object" if raw.startswith("{") else "array" if raw.startswith("[") else "other_text")
+        if result is not None:
+            raw = result.raw.strip() if isinstance(result.raw, str) else ""
+            exc.lab_output_chars = len(raw)
+            exc.lab_output_shape = ("structured" if result.pydantic is not None or result.json_dict is not None
+                else "empty" if not raw else "markdown_fence" if raw.startswith("```")
+                else "object" if raw.startswith("{") else "array" if raw.startswith("[") else "other_text")
         raise
     return parsed, result.token_usage.model_dump() if result.token_usage else {}
 

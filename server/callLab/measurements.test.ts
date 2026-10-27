@@ -67,5 +67,8 @@ describe("saved Hint measurements survive AI failure", () => {
     const unsafe = labAnalysisFailure({ diagnostic: { output_shape: "PRIVATE", output_chars: -1 } });
     expect(unsafe).not.toHaveProperty("output_shape");
     expect(unsafe).not.toHaveProperty("output_chars");
+    expect(labAnalysisFailure({ diagnostic: {
+      code: "NATIVE_OUTPUT_REQUIRED", stage: "analysis", schema: "Analysis",
+    } })).toEqual({ code: "NATIVE_OUTPUT_REQUIRED", stage: "analysis", schema: "Analysis" });
   });
 });
