@@ -4,6 +4,18 @@ import { inputs, ProductCrewService, writeTools, type ToolName } from "./service
 import type { MarkerStore } from "../chatgpt/security";
 import type { ModelRepository } from "../projectModel/repository";
 const escape = (s: unknown) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+function sendDocument(res: express.Response, text: string, format: unknown) {
+  if (format === "json") {
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); }
+    catch { res.status(422).json({ error: "Документ не является JSON" }); return; }
+    res.setHeader("Content-Disposition", 'attachment; filename="talkhint-product-document.json"');
+    res.type("application/json").send(JSON.stringify(parsed));
+    return;
+  }
+  res.setHeader("Content-Disposition", 'attachment; filename="talkhint-product-document.md"');
+  res.type("text/markdown; charset=utf-8").send(text);
+}
 const instructions = `TalkHint · Управление продуктом. Только модель new-country владельца: roadmap, структура, клиенты результатов, обязанности, ресурсы, входящая информация и документы.
 Это отдельное подключение от Secretary. Нет звонков, сообщений, оплат, публикации, удаления, доступа к секретам или произвольного выполнения кода.
 Сначала get_roadmap/get_team/search_materials: не создавай дубли, сохраняй источники, дату, доказательство и тип утверждения.
@@ -116,13 +128,11 @@ export function registerProductCrew(app: Express, options: {
     const owner = await options.publicDevOwner!();
     if (!await options.authorizedOwner(owner)) { res.sendStatus(403); return; }
     const d = await service.call(owner, "get_document", { documentId: req.params.id });
-    res.setHeader("Content-Disposition", 'attachment; filename="talkhint-product-document.md"');
-    res.type("text/markdown; charset=utf-8").send(d.text);
+    sendDocument(res, d.text, req.query.format);
   }));
   app.get("/api/admin/product-crew/documents/:id/download", options.admin, wrap(async (req, res) => {
     const d = await service.call(req.user!.id, "get_document", { documentId: req.params.id });
-    res.setHeader("Content-Disposition", 'attachment; filename="talkhint-product-document.md"');
-    res.type("text/markdown; charset=utf-8").send(d.text);
+    sendDocument(res, d.text, req.query.format);
   }));
   app.get("/api/admin/product-crew/chapters/:mode/download", options.admin, wrap(async (req, res) => {
     const packet = await service.call(req.user!.id, "get_product_chapter", { mode: req.params.mode });

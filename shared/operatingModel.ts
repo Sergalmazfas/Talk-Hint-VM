@@ -2,7 +2,15 @@
 export const workKinds = ["context", "need", "capability", "process", "action", "result", "client", "role", "department", "crew", "resource", "report"] as const;
 export const workLinks = ["requires", "produces", "handoff", "depends_on", "accountable_to", "acceptance", "return", "escalation", "feedback", "finance_event"] as const;
 export type WorkKind = typeof workKinds[number];
+/** Observations, not permission to execute or invented targets. */
+export interface WorkMetric {
+  id: string; name: string; formula: string; unit: string;
+  plan: number | null; fact: number | null;
+  numerator: number | null; denominator: number | null;
+  scope: string; evidence: string;
+}
 export interface WorkNode {
+  metrics?: WorkMetric[];
   /** Containment is not line management. Manager is a single immediate superior. */
   managerId?: string | null;
   level?: "strategy" | "direction" | "operation";
@@ -36,7 +44,15 @@ export interface WorkNode {
     source: string; proposalReason: string;
   };
 }
-export interface WorkLink { id: string; from: string; to: string; kind: typeof workLinks[number]; reason: string }
+export interface WorkLink {
+  id: string; from: string; to: string; kind: typeof workLinks[number]; reason: string;
+  readiness?: {
+    structure: "unknown" | "passed" | "failed";
+    resources: "unknown" | "passed" | "failed";
+    trial: "unknown" | "passed" | "failed";
+    evidence: string;
+  };
+}
 export interface OperatingData {
   companyStructureVersion?: 1;
   customerPath?: { id: string; name: string; processId: string; b2bProcessId?: string; b2c: string; b2b: string; condition: string }[];

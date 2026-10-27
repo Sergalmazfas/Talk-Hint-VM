@@ -10,6 +10,12 @@ const id = z.string().trim().min(1).max(120);
 const text = z.string().max(12000);
 const ref = id.nullable();
 const node = z.object({
+  metrics: z.array(z.object({
+    id, name: text, formula: text, unit: text,
+    plan: z.number().finite().nullable(), fact: z.number().finite().nullable(),
+    numerator: z.number().finite().nonnegative().nullable(), denominator: z.number().finite().nonnegative().nullable(),
+    scope: text, evidence: text,
+  }).strict()).max(50).optional(),
   managerId: ref.optional(), level: z.enum(["strategy", "direction", "operation"]).optional(),
   detailState: z.enum(["outlined", "described"]).optional(),
   workNature: z.enum(["deterministic", "probabilistic", "mixed", "unspecified"]).optional(), marketEffect: text.optional(),
@@ -49,7 +55,13 @@ export const saveOperatingModelSchema = z.object({
     companyStructureVersion: z.literal(1).optional(),
     customerPath: z.array(z.object({ id, name: text, processId: id, b2bProcessId: id.optional(), b2c: text, b2b: text, condition: text }).strict()).max(100).optional(),
     nodes: z.array(node).max(5000),
-    links: z.array(z.object({ id, from: id, to: id, kind: z.enum(workLinks), reason: text }).strict()).max(20000),
+    links: z.array(z.object({ id, from: id, to: id, kind: z.enum(workLinks), reason: text,
+      readiness: z.object({
+        structure: z.enum(["unknown", "passed", "failed"]),
+        resources: z.enum(["unknown", "passed", "failed"]),
+        trial: z.enum(["unknown", "passed", "failed"]), evidence: text,
+      }).strict().optional(),
+    }).strict()).max(20000),
     stageReports: z.array(z.object({ pass: z.union([z.literal(1), z.literal(2), z.literal(3)]), described: text, boundary: text, dependencies: text, gaps: text, next: text }).strict()).max(100),
   }).strict(),
 }).strict();

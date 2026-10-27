@@ -192,11 +192,15 @@ describe("owner-approved public Dev MCP", () => {
       expect((await call("tools/call", { name: "create_work", arguments: args })).structuredContent.result.replayed).toBe(true);
       const result = (await call("tools/call", { name: "submit_result", arguments: {
         revision: created.revision, requestId: randomUUID(), recordId: created.record.id,
-        title: "Fixture result", text: "Synthetic document", nextStep: "Review" } })).structuredContent.result;
+        title: "Fixture result", text: '{"version":1,"executed":false}', nextStep: "Review" } })).structuredContent.result;
       const docId = result.record.coordination.resultDocumentId;
       const doc = (await call("tools/call", { name: "get_document", arguments: { documentId: docId } })).structuredContent.result;
       expect(doc.downloadPath).toContain("/api/product-crew/documents/");
-      expect(await (await fetch(`${url}${doc.downloadPath}`)).text()).toBe("Synthetic document");
+      expect(await (await fetch(`${url}${doc.downloadPath}`)).text()).toBe('{"version":1,"executed":false}');
+      const jsonDownload = await fetch(`${url}${doc.downloadPath}?format=json`);
+      expect(jsonDownload.headers.get("Content-Type")).toContain("application/json");
+      expect(jsonDownload.headers.get("Content-Disposition")).toContain(".json");
+      expect(await jsonDownload.json()).toEqual({ version: 1, executed: false });
       expect((await fetch(`${url}/api/admin/product-crew/documents/${docId}/download`)).status).toBe(403);
       expect((await call("tools/call", { name: "get_team", arguments: { owner: "other" } })).isError).toBe(true);
       expect(repo.roots.get("other")).toEqual(other);

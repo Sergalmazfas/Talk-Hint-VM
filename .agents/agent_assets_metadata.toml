@@ -1013,3 +1013,17 @@ mtime_ms = 1793059130714
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e2469ef2-b0b1-4a9b-8a8a-fcfa77f3752a/13528a02-d3f2-4d53-8232-a6082c6e042c"
 storage_version_token = "1793059152601864"
 content_type = "text/html"
+
+[[outputs]]
+id = "iPMSANV31sxMZIhqRxTcl"
+uri = "file://generated-artifacts/P-LAB_work_package_v1_rev768.zip"
+type = "unspecified"
+title = "P.LAB — JSON для ручного прохода · v1 · rev768"
+description = "Паспорт, 14 связанных действий, 6 ресурсов, определения KPI, форма письма и незаполненный протокол проверки. CrewAI и отправка почты не включены."
+logical_id = "fdefd318-14db-4e17-98fd-1ed982c50f7e"
+content_hash = "sha256:bcdd894bf8051b4f26a3f0c84884b1e12671fadee5b30cb1691df983cc398775"
+size = 17866
+mtime_ms = 1793061359070
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fdefd318-14db-4e17-98fd-1ed982c50f7e/3f6aa30e-5aa9-4073-b117-de32aacbaa79"
+storage_version_token = "1793061392640757"
+content_type = "application/octet-stream"
