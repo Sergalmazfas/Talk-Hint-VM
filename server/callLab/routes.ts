@@ -4,6 +4,7 @@ import { pool } from "../db";
 import { labConfiguration, abortHintLabProcessing } from "./service";
 import { checkHintLabRuntime } from "./process";
 import { GmailLabMail } from "./mail";
+import { hintWatchdogStatus } from "./watchdog";
 
 export function registerCallLabRoutes(app: Express) {
   // Only an explicit owner action after readiness checks can leave startup pause.
@@ -35,7 +36,7 @@ export function registerCallLabRoutes(app: Express) {
     if (String((req as any).user?.id) !== config.owner) return res.status(403).json({ error: "Owner only" });
     if (!pool) return res.status(503).json({ error: "Database unavailable" });
     try {
-      const control = (await pool.query(`SELECT environment,enabled,activated_at FROM call_lab_controls WHERE key=$1`,
+      const control = (await pool.query(`SELECT environment,enabled,activated_at,watchdog FROM call_lab_controls WHERE key=$1`,
         [`${config.environment}:${config.owner}`])).rows[0] ?? null;
       const jobs = (await pool.query(`SELECT status,coalesce(report->>'synthetic'='true',false) AS synthetic,count(*)::int AS count FROM call_lab_jobs
         WHERE environment=$1 AND owner_id=$2 GROUP BY status,synthetic`, [config.environment, config.owner])).rows;
@@ -52,6 +53,7 @@ export function registerCallLabRoutes(app: Express) {
         ...r, downloadPath: r.has_report ? `/api/admin/call-lab/reports/${r.key}` : null,
       }));
       res.json({ environment: config.environment, configured: config.allowed, control, jobs, outbox,
+        watchdog: hintWatchdogStatus(),
         recent, awaitingConfirmedCallEnd: missingEnd, scope: "Hint / owner / existing text only",
         note: "SENT confirms Gmail submission, not the owner's reading or QA acceptance",
         private: true, publishedByAgent: false });

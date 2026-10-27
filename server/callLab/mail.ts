@@ -58,11 +58,17 @@ export class GmailLabMail {
   }
 
   async send(binding: MailBinding, messageId: string, report: any, canSend?: () => Promise<boolean>): Promise<string> {
+    const letter = renderProcessLetter(report);
+    return this.sendNotice(binding, messageId, letter.subject, letter.body, canSend);
+  }
+
+  async sendNotice(binding: MailBinding, messageId: string, subject: string, body: string,
+    canSend?: () => Promise<boolean>): Promise<string> {
     await this.verify(binding);
     if (canSend && !await canSend()) throw new Error("LAB_MAIL_PAUSED");
     const response = await this.sdk.proxy("google-mail", "/gmail/v1/users/me/messages/send", {
       connectionId: binding.connection_id, method: "POST",
-      body: { raw: encodeLetter(binding.recipient, messageId, report) },
+      body: { raw: encodeTextLetter(binding.recipient, messageId, subject, body) },
     });
     if (!response.ok) throw new Error(`LAB_GMAIL_SEND_${response.status}`);
     const data = await response.json();
@@ -72,13 +78,16 @@ export class GmailLabMail {
 }
 
 export function encodeLetter(recipient: string, messageId: string, report: any) {
+  const rendered = renderProcessLetter(report);
+  return encodeTextLetter(recipient, messageId, rendered.subject, rendered.body);
+}
+
+function encodeTextLetter(recipient: string, messageId: string, title: string, body: string) {
   if (!/^[^\s\r\n<>@]+@[^\s\r\n<>@]+$/.test(recipient) || !/^[a-f0-9]+@talkhint-lab\.invalid$/.test(messageId)) {
     throw new Error("LAB_BAD_MAIL_HEADER");
   }
   const safe = (v: unknown) => String(v || "неизвестно").replace(/[\r\n]/g, " ").slice(0, 220);
-  const rendered = renderProcessLetter(report);
-  const subject = safe(rendered.subject);
-  const body = rendered.body;
+  const subject = safe(title);
   const encodedBody = Buffer.from(body).toString("base64").match(/.{1,76}/g)?.join("\r\n") ?? "";
   // RFC2047 words are folded to remain below header line limits.
   const words = Array.from(subject).reduce((a, c) => {

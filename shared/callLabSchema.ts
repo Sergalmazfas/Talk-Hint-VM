@@ -9,6 +9,7 @@ export const callLabControls = pgTable("call_lab_controls", {
   connectionId: text("connection_id").notNull(),
   enabled: boolean("enabled").notNull().default(false),
   activatedAt: timestamp("activated_at", { withTimezone: true }).notNull().defaultNow(),
+  watchdog: jsonb("watchdog").notNull().default({}),
 });
 export const callLabJobs = pgTable("call_lab_jobs", {
   key: text("key").primaryKey(), // sha256(environment, owner, call, report version)

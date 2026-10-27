@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS call_lab_controls (
  key text PRIMARY KEY, environment text NOT NULL, owner_id text NOT NULL, recipient text NOT NULL,
  connection_id text NOT NULL, enabled boolean NOT NULL DEFAULT false,
- activated_at timestamptz NOT NULL DEFAULT now()
+ activated_at timestamptz NOT NULL DEFAULT now(), watchdog jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE TABLE IF NOT EXISTS call_lab_jobs (
  key text PRIMARY KEY, environment text NOT NULL, owner_id text NOT NULL, call_sid text NOT NULL,

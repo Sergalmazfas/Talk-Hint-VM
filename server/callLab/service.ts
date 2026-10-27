@@ -5,6 +5,7 @@ import { processReport } from "./processReport";
 import { LabStore } from "./store";
 import { runHintLab, checkHintLabRuntime, cleanupLabScratch } from "./process";
 import { authorizedHintSource, registerLabSourceOwner } from "./source";
+import { startHintWatchdog } from "./watchdog";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -12,6 +13,7 @@ let running: Promise<void> | undefined;
 let active: AbortController | undefined;
 let boundOwnerId: string | undefined;
 let stopping = false;
+let stopWatchdog: (() => void) | undefined;
 export const labEnvironment = environment;
 
 export function labConfiguration() {
@@ -200,8 +202,10 @@ export async function startHintLab(pool: Pool) {
   if (!process.env.LAB_GMAIL_CONNECTION_ID) { console.log("[HintLab] Disabled: Gmail not bound"); return; }
   try { await bootstrapLab(pool); } catch {
     console.warn("[HintLab] BLOCKED: private schema, owner binding or Gmail unavailable; calls are unaffected");
+    stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
     return;
   }
+  stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
   const tick = () => {
     if (running) return;
     running = hintLabTick(pool).catch(() => console.warn("[HintLab] BLOCKED: tick failed; see private status"))
@@ -214,6 +218,8 @@ export async function startHintLab(pool: Pool) {
 }
 export function stopHintLab() {
   stopping = true;
+  stopWatchdog?.();
+  stopWatchdog = undefined;
   if (timer) clearInterval(timer);
   timer = undefined;
   active?.abort();

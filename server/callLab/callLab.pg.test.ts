@@ -2,6 +2,7 @@ import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect, vi } 
 import { Pool, type PoolClient } from "pg";
 import { LabStore } from "./store";
 import { hintLabTick, unavailableReport } from "./service";
+import { hintWatchdogTick, hintWatchdogStatus } from "./watchdog";
 
 // Opt-in integration tests: session-local TEMP tables, never fake calls in product history.
 describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL / synthetic transport", () => {
@@ -37,12 +38,65 @@ describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL
       run: vi.fn(async (source: any) => ({ ...unavailableReport({ call_sid: source.call_id }, "fixture-only"),
         synthetic: true, qa_status: "QA: принято", execution: "mocked_synthetic_analysis" })),
       mail: { verify: vi.fn(async () => {}),
+        sendNotice: vi.fn(async () => "fixture-notice-id"),
         sent: vi.fn().mockResolvedValueOnce(null).mockResolvedValue("fixture-gmail-id"),
         send: vi.fn(async () => "fixture-gmail-id") },
     };
   });
   afterEach(() => { vi.unstubAllEnvs(); });
   afterAll(async () => { client.release(); await pool.end(); });
+  const watchConfig = () => ({ environment: env, owner, allowed: true });
+  async function lateCall() {
+    await client.query("UPDATE call_lab_controls SET activated_at=now()-interval '10 minutes'");
+    await client.query("UPDATE calls SET started_at=now()-interval '4 minutes',ended_at=now()-interval '2 minutes'");
+    next.mail.sent.mockReset().mockResolvedValue("fixture-notice-id");
+  }
+  it("watchdog alerts once for missing jobs, persists dedup, and never starts AI", async () => {
+    await lateCall();
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).toHaveBeenCalledTimes(1);
+    expect(next.mail.sendNotice.mock.calls[0][2]).toContain("JOB_MISSING");
+    expect(next.mail.sendNotice.mock.calls[0][3]).not.toContain("Owner: price");
+    expect(next.mail.send).not.toHaveBeenCalled();
+    expect(next.run).not.toHaveBeenCalled();
+    const entries = Object.values((await client.query("SELECT watchdog FROM call_lab_controls")).rows[0].watchdog) as any[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0].delivery).toBe("sent_confirmed");
+    expect(hintWatchdogStatus().state).toBe("attention");
+    await store.enqueue(env, owner, "call-1");
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    const resolved = Object.values((await client.query("SELECT watchdog FROM call_lab_controls")).rows[0].watchdog) as any[];
+    expect(resolved[0].resolvedAt).toBeTruthy();
+    expect(hintWatchdogStatus().state).toBe("checked");
+  });
+  it("watchdog never resends an ambiguous notice, even over subsequent ticks", async () => {
+    await lateCall();
+    next.mail.sent.mockReset().mockResolvedValue(null);
+    next.mail.sendNotice.mockRejectedValue(new Error("response lost"));
+    for (let i = 0; i < 6; i++) await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).toHaveBeenCalledTimes(1);
+    const entry: any = Object.values((await client.query("SELECT watchdog FROM call_lab_controls")).rows[0].watchdog)[0];
+    expect(entry.delivery).toBe("needs_review");
+    expect(hintWatchdogStatus().notificationProblems).toBe(1);
+  });
+  it("watchdog respects the switch, scope and an independent lock during analysis", async () => {
+    await lateCall();
+    await client.query("UPDATE calls SET user_id='another-owner'");
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).not.toHaveBeenCalled();
+    await client.query("UPDATE calls SET user_id=$1", [owner]);
+    await client.query("UPDATE call_lab_controls SET enabled=false");
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).not.toHaveBeenCalled();
+    expect(hintWatchdogStatus().state).toBe("paused");
+    await client.query("UPDATE call_lab_controls SET enabled=true");
+    const lock = `hint-lab:${env}:${owner}`;
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lock]);
+    try { await hintWatchdogTick(facade, watchConfig, next.mail); }
+    finally { await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lock]); }
+    expect(next.mail.sendNotice).toHaveBeenCalledTimes(1);
+  });
   it("deduplicates jobs and atomically prepares one outbox; crash after send never reclaims as prepared", async () => {
     const key = await store.enqueue(env, owner, "call-1");
     await store.enqueue(env, owner, "call-1");
