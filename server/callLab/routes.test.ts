@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const f = vi.hoisted(() => ({
   query: vi.fn(), check: vi.fn(), verify: vi.fn(), admin: vi.fn(),
+  bootstrap: vi.fn(),
   config: { owner: "fixture-owner", environment: "production", allowed: true },
 }));
 vi.mock("../db", () => ({ pool: { query: f.query } }));
 vi.mock("../benchmark/adminGate", () => ({ requireBenchmarkAdmin: f.admin }));
-vi.mock("./service", () => ({ labConfiguration: () => f.config, abortHintLabProcessing: vi.fn() }));
+vi.mock("./service", () => ({ labConfiguration: () => f.config, abortHintLabProcessing: vi.fn(), bootstrapLab: f.bootstrap }));
 vi.mock("./process", () => ({ checkHintLabRuntime: f.check }));
 vi.mock("./mail", () => ({ GmailLabMail: class { verify = f.verify; } }));
 import { registerCallLabRoutes } from "./routes";
@@ -30,6 +31,19 @@ beforeEach(() => {
   f.query.mockResolvedValue({ rows: [{ connection_id: "fixture", recipient: "owner@example.invalid" }] });
 });
 describe("explicit private laboratory activation", () => {
+  it("offers an admin-only phone page and readiness check with explicit owner binding, never activation", async () => {
+    const post = vi.fn(), get = vi.fn();
+    registerCallLabRoutes({ post, get } as any);
+    const page = get.mock.calls.find(c => c[0] === "/api/admin/call-lab")!;
+    expect(page[1]).toBe(f.admin);
+    const [, gate, handler] = post.mock.calls.find(c => c[0].endsWith("/readiness"))!;
+    expect(gate).toBe(f.admin);
+    const res = { ...response(), set: vi.fn() } as any; res.set.mockReturnValue(res);
+    await handler({ user: { id: "fixture-owner" }, body: {} }, res);
+    expect(f.bootstrap).toHaveBeenCalledWith(expect.anything(), { expectedOwnerId: "fixture-owner", startup: false });
+    expect(f.query.mock.calls.every(c => !c[0].includes("UPDATE"))).toBe(true);
+    expect(f.verify).not.toHaveBeenCalled();
+  });
   it("rejects other users without touching controls or resources", async () => {
     const res = response();
     await route()({ user: { id: "other" }, body: { confirm: "hint-owner-only" } }, res);

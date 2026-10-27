@@ -6,6 +6,7 @@ import { LabStore } from "./store";
 import { runHintLab, checkHintLabRuntime, cleanupLabScratch } from "./process";
 import { authorizedHintSource, registerLabSourceOwner } from "./source";
 import { startHintWatchdog } from "./watchdog";
+import { labStartupReady, labStartupStatus, labStartupStep, labStartsPaused, resetLabStartup } from "./startup";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -14,6 +15,7 @@ let active: AbortController | undefined;
 let boundOwnerId: string | undefined;
 let stopping = false;
 let stopWatchdog: (() => void) | undefined;
+let bootstrapping: Promise<void> | undefined;
 export const labEnvironment = environment;
 
 export function labConfiguration() {
@@ -32,27 +34,46 @@ export async function bindLabOwner(pool: Pick<Pool, "query">, ownerId: string, m
   return mail.bindingFor(user.email);
 }
 
-export async function bootstrapLab(pool: Pool) {
-  const connectionId = process.env.LAB_GMAIL_CONNECTION_ID;
-  if (!connectionId) throw new Error("LAB_GMAIL_NOT_PINNED");
-  const mail = new GmailLabMail();
-  const profile = await mail.profile(connectionId);
-  if (!isBenchmarkAdmin(profile)) throw new Error("LAB_OWNER_NOT_ADMIN");
-  const owner = (await pool.query("SELECT id FROM users WHERE lower(email)=$1", [profile])).rows[0];
-  if (!owner || (process.env.LAB_OWNER_ID && owner.id !== process.env.LAB_OWNER_ID)) throw new Error("LAB_OWNER_MISMATCH");
-  boundOwnerId = owner.id; // resolve independently in dev/prod; never assume identical user UUIDs.
-  registerLabSourceOwner(owner.id);
-  const config = labConfiguration();
-  if (config.allowed) await checkHintLabRuntime();
-  const binding = { recipient: profile, connection_id: connectionId };
-  const key = `${config.environment}:${config.owner}`;
-  // A publish may explicitly start paused; a restart must never re-enable it.
-  const startPaused = process.env.LAB_START_PAUSED === "true";
-  await pool.query(`INSERT INTO call_lab_controls(key,environment,owner_id,recipient,connection_id,enabled)
-    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(key) DO UPDATE
-    SET enabled=CASE WHEN $7 THEN false ELSE call_lab_controls.enabled END`,
-  [key, config.environment, config.owner, binding.recipient, binding.connection_id,
-    config.allowed && !startPaused, startPaused]);
+export async function bootstrapLab(pool: Pool, options: { expectedOwnerId?: string; startup?: boolean } = {}) {
+  if (!bootstrapping) {
+    bootstrapping = (async () => {
+      const connectionId = await labStartupStep("configuration", async () => {
+        if (!process.env.LAB_GMAIL_CONNECTION_ID) throw new Error("LAB_GMAIL_NOT_PINNED");
+        return process.env.LAB_GMAIL_CONNECTION_ID;
+      });
+      const profile = await labStartupStep("gmail", () => new GmailLabMail().profile(connectionId));
+      const owner = await labStartupStep("owner", async () => {
+        if (!isBenchmarkAdmin(profile)) throw new Error("LAB_OWNER_NOT_ADMIN");
+        const value = (await pool.query("SELECT id FROM users WHERE lower(email)=$1", [profile])).rows[0];
+        if (!value) throw new Error("LAB_OWNER_NOT_FOUND");
+        if ((process.env.LAB_OWNER_ID && value.id !== process.env.LAB_OWNER_ID) ||
+            (options.expectedOwnerId && value.id !== options.expectedOwnerId))
+          throw new Error("LAB_OWNER_MISMATCH");
+        return value;
+      });
+      // Import/version check only: no model, agents, calls or mail submission.
+      await labStartupStep("worker", async () => {
+        await checkHintLabRuntime();
+        if (!process.env.OPENAI_API_KEY) throw new Error("LAB_MODEL_NOT_CONFIGURED");
+      });
+      const env = environment(), key = `${env}:${owner.id}`;
+      await labStartupStep("control", () => pool.query(`INSERT INTO call_lab_controls
+        (key,environment,owner_id,recipient,connection_id,enabled)
+        VALUES($1,$2,$3,$4,$5,false) ON CONFLICT(key) DO UPDATE
+        SET recipient=EXCLUDED.recipient,connection_id=EXCLUDED.connection_id,
+          enabled=CASE WHEN $6 THEN false ELSE call_lab_controls.enabled END`,
+      [key, env, owner.id, profile, connectionId, options.startup !== false && labStartsPaused()]));
+      boundOwnerId = owner.id;
+      registerLabSourceOwner(owner.id);
+      labStartupReady();
+    })();
+  }
+  const attempt = bootstrapping;
+  try {
+    await attempt;
+    if (options.expectedOwnerId && options.expectedOwnerId !== boundOwnerId)
+      throw new Error("LAB_OWNER_MISMATCH");
+  } finally { if (bootstrapping === attempt) bootstrapping = undefined; }
 }
 
 export function unavailableReport(call: any, reason: string) {
@@ -198,23 +219,36 @@ export async function hintLabTick(pool: Pool, dependencies: {
 export async function startHintLab(pool: Pool) {
   if (timer) return;
   stopping = false;
-  await cleanupLabScratch();
-  if (!process.env.LAB_GMAIL_CONNECTION_ID) { console.log("[HintLab] Disabled: Gmail not bound"); return; }
-  try { await bootstrapLab(pool); } catch {
-    console.warn("[HintLab] BLOCKED: private schema, owner binding or Gmail unavailable; calls are unaffected");
-    stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
-    return;
-  }
-  stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
-  const tick = () => {
-    if (running) return;
-    running = hintLabTick(pool).catch(() => console.warn("[HintLab] BLOCKED: tick failed; see private status"))
+  resetLabStartup();
+  let bootstrapped = false, nextBootstrapAttempt = 0;
+  const tick = async () => {
+    if (running || stopping) return;
+    running = (async () => {
+      if (!bootstrapped && labStartupStatus().status === "ready") bootstrapped = true;
+      if (!bootstrapped) {
+        if (Date.now() < nextBootstrapAttempt) return;
+        try {
+          await labStartupStep("scratch", cleanupLabScratch);
+          await bootstrapLab(pool);
+          bootstrapped = true;
+          console.log("[HintLab] Resources checked; saved owner switch controls new Hint calls");
+        } catch {
+          nextBootstrapAttempt = Date.now() + 30_000;
+          const s = labStartupStatus();
+          console.warn(`[HintLab] BLOCKED stage=${s.stage} code=${s.code}; retry in 30s; calls unaffected`);
+          return;
+        }
+      }
+      if (stopping) return;
+      stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
+      await hintLabTick(pool);
+    })().catch(() => console.warn("[HintLab] BLOCKED: tick failed; see private status"))
       .finally(() => { running = undefined; });
+    await running;
   };
   timer = setInterval(tick, 5_000);
   timer.unref();
-  tick();
-  console.log(`[HintLab] ${labConfiguration().allowed ? "Enabled" : "Paused"}; Hint only; owner-bound; external mail via outbox`);
+  await tick();
 }
 export function stopHintLab() {
   stopping = true;

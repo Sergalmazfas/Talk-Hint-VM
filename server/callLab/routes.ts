@@ -1,12 +1,37 @@
 import type { Express } from "express";
 import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import { pool } from "../db";
-import { labConfiguration, abortHintLabProcessing } from "./service";
+import { labConfiguration, abortHintLabProcessing, bootstrapLab } from "./service";
 import { checkHintLabRuntime } from "./process";
 import { GmailLabMail } from "./mail";
 import { hintWatchdogStatus } from "./watchdog";
+import { labStartupStatus, labStartsPaused, safeLabError } from "./startup";
+import { labControlPage } from "./controlPage";
 
 export function registerCallLabRoutes(app: Express) {
+  const flags = () => ({
+    enabled: process.env.LAB_ENABLED === "true",
+    targetMatches: process.env.LAB_TARGET_ENVIRONMENT === labConfiguration().environment,
+    startsPaused: labStartsPaused(),
+  });
+  app.get("/api/admin/call-lab", requireBenchmarkAdmin, (_req, res) =>
+    res.set("Cache-Control", "no-store").type("html").send(labControlPage));
+  app.post("/api/admin/call-lab/readiness", requireBenchmarkAdmin, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    if (!pool) return res.status(503).json({ error: "Database unavailable", startup: labStartupStatus(), flags: flags() });
+    try {
+      await bootstrapLab(pool, { expectedOwnerId: String((req as any).user?.id), startup: false });
+      const config = labConfiguration();
+      const control = (await pool.query("SELECT enabled,activated_at FROM call_lab_controls WHERE key=$1",
+        [`${config.environment}:${config.owner}`])).rows[0] ?? null;
+      res.json({ configured: config.allowed, startup: labStartupStatus(), flags: flags(), control });
+    } catch (error) {
+      const code = safeLabError(error);
+      res.status(code === "LAB_OWNER_MISMATCH" ? 403 : 503).json({
+        error: code, startup: labStartupStatus(), flags: flags(),
+      });
+    }
+  });
   // Only an explicit owner action after readiness checks can leave startup pause.
   // A new activation excludes calls made before it, including while paused.
   app.post("/api/admin/call-lab/enable", requireBenchmarkAdmin, async (req, res) => {
@@ -25,14 +50,16 @@ export function registerCallLabRoutes(app: Express) {
       await pool.query(`UPDATE call_lab_controls SET enabled=true,activated_at=now()
         WHERE key=$1 AND enabled=false`, [key]);
       res.json({ enabled: true, scope: "Hint / owner / new calls after activation",
-        noHistoricalReplay: true, restartPausesAgain: process.env.LAB_START_PAUSED === "true" });
+        noHistoricalReplay: true, restartPausesAgain: labStartsPaused() });
     } catch {
       res.status(503).json({ error: "Readiness check failed; activation not confirmed" });
     }
   });
   app.get("/api/admin/call-lab/status", requireBenchmarkAdmin, async (req, res) => {
+    res.set("Cache-Control", "no-store");
     const config = labConfiguration();
-    if (!config.owner) return res.status(503).json({ error: "Owner Gmail binding not ready", configured: false });
+    if (!config.owner) return res.status(503).json({ error: "Owner Gmail binding not ready", configured: false,
+      startup: labStartupStatus(), flags: flags() });
     if (String((req as any).user?.id) !== config.owner) return res.status(403).json({ error: "Owner only" });
     if (!pool) return res.status(503).json({ error: "Database unavailable" });
     try {
@@ -53,6 +80,7 @@ export function registerCallLabRoutes(app: Express) {
         ...r, downloadPath: r.has_report ? `/api/admin/call-lab/reports/${r.key}` : null,
       }));
       res.json({ environment: config.environment, configured: config.allowed, control, jobs, outbox,
+        startup: labStartupStatus(), flags: flags(),
         watchdog: hintWatchdogStatus(),
         recent, awaitingConfirmedCallEnd: missingEnd, scope: "Hint / owner / existing text only",
         note: "SENT confirms Gmail submission, not the owner's reading or QA acceptance",
