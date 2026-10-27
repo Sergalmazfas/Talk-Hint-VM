@@ -80,8 +80,12 @@ class FlowTests(unittest.TestCase):
             Analysis.model_validate({"summary_ru": "PRIVATE source"})
         except Exception as error:
             error.lab_schema = "Analysis"
+            error.lab_output_shape = "object"
+            error.lab_output_chars = 10626
             details = failure_diagnostic(error)
         self.assertEqual(details["schema"], "Analysis")
+        self.assertEqual(details["output_shape"], "object")
+        self.assertEqual(details["output_chars"], 10626)
         self.assertIn("findings", str(details["schema_issues"]))
         self.assertNotIn("PRIVATE", json.dumps(details))
 

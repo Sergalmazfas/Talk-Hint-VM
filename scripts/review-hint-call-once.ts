@@ -62,15 +62,42 @@ async function main() {
       !process.argv.includes("--execute-once") && !process.argv.includes("--send-prepared-once"))
     throw new Error("DEV_EXPLICIT_MANUAL_PASS_ONLY");
   if (process.argv.includes("--send-prepared-once")) return sendPreparedOnce();
-  const input = process.argv[process.argv.indexOf("--input") + 1];
-  if (!input || !process.argv.includes("--input") || !pool) throw new Error("MANUAL_INPUT_REQUIRED");
-  const snapshot = JSON.parse(await readFile(input, "utf8"));
+  const diagnostic = process.argv.includes("--diagnostic-pass-2");
+  const binding = await privateDevOwner(); // read-only, never sends
+  let snapshot: any, source: any, previousManualKey: string | undefined;
   stage = "source";
-  const source = authorizedHintSource(snapshot.call, snapshot.control, snapshot.control.environment);
+  if (diagnostic) {
+    previousManualKey = process.argv[process.argv.indexOf("--source-report-key") + 1];
+    if (!process.argv.includes("--source-report-key") || !/^[a-f0-9]{64}$/.test(previousManualKey || ""))
+      throw new Error("MANUAL_INPUT_REQUIRED");
+    const previous = (await pool.query(`SELECT source,report,call_sid FROM call_lab_jobs
+      WHERE key=$1 AND environment='development' AND owner_id=$2 AND status='manual_report_ready'`,
+    [previousManualKey, binding.owner_id])).rows[0];
+    source = previous?.source;
+    if (!previous?.report?.manual_trigger || previous.report.source_environment !== "production" ||
+        !source || source.environment !== "production" || source.mode !== "hint" ||
+        source.owner_verified !== true || source.processing_authorized !== true ||
+        source.call_id !== previous.call_sid)
+      throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
+    snapshot = {
+      previous_report_key: previous.report.previous_report_key,
+      call: { call_sid: source.call_id, ended_at: source.ended_at,
+        started_at: Number.isFinite(source.duration_ms)
+          ? new Date(Date.parse(source.ended_at) - source.duration_ms).toISOString() : undefined },
+    };
+    const expectedParent = createHash("sha256")
+      .update(`owner-requested-reanalysis-v1:${snapshot.previous_report_key}`).digest("hex");
+    if (previousManualKey !== expectedParent) throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
+  } else {
+    const input = process.argv[process.argv.indexOf("--input") + 1];
+    if (!input || !process.argv.includes("--input")) throw new Error("MANUAL_INPUT_REQUIRED");
+    snapshot = JSON.parse(await readFile(input, "utf8"));
+    source = authorizedHintSource(snapshot.call, snapshot.control, snapshot.control.environment);
+  }
   if (!source || !/^[a-f0-9]{64}$/.test(snapshot.previous_report_key))
     throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
-  const binding = await privateDevOwner(); // read-only, never sends
-  const key = createHash("sha256").update(`owner-requested-reanalysis-v1:${snapshot.previous_report_key}`).digest("hex");
+  const key = createHash("sha256")
+    .update(`owner-requested-reanalysis-${diagnostic ? "v2" : "v1"}:${snapshot.previous_report_key}`).digest("hex");
   const inserted = await pool.query(`INSERT INTO call_lab_jobs
     (key,environment,owner_id,call_sid,status,attempts,journal)
     VALUES($1,'development',$2,$3,'manual_running',1,
@@ -91,6 +118,8 @@ async function main() {
     execution: report.execution === "analysis_not_completed" ? report.execution : "owner_requested_crewai_reanalysis",
     manual_trigger: true, automatic_production_execution: false,
     previous_report_key: snapshot.previous_report_key,
+    ...(diagnostic ? { manual_pass: 2, previous_manual_report_key: previousManualKey,
+      diagnostic_authorization: "Owner explicitly approved one additional diagnostic pass; no email submission." } : {}),
     provenance: "One owner-authorized CrewAI pass over the saved production snapshot. Original unchanged.",
   }, source, key);
   stage = "save";
@@ -98,7 +127,8 @@ async function main() {
     report=$3::jsonb,updated_at=now() WHERE key=$1`, [key, JSON.stringify(source), JSON.stringify(report)]);
   if (saved.rowCount !== 1) throw new Error("MANUAL_RESULT_NOT_SAVED");
   // Intentionally no outbox insertion; a saved file is not a sent email.
-  const directory = path.resolve("generated-artifacts/mint-hint-reanalysis");
+  const directory = path.resolve(diagnostic
+    ? "generated-artifacts/mint-hint-reanalysis-diagnostic-2" : "generated-artifacts/mint-hint-reanalysis");
   await mkdir(directory, { recursive: true });
   const letter = renderProcessLetter(report);
   await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2));

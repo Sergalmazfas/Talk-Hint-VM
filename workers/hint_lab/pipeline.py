@@ -42,6 +42,12 @@ def failure_diagnostic(exc):
     schema = getattr(exc, "lab_schema", None)
     if schema in {"Analysis", "QA", "Letter"}:
         result["schema"] = schema
+    shape = getattr(exc, "lab_output_shape", None)
+    if shape in {"empty", "markdown_fence", "object", "array", "other_text", "structured"}:
+        result["output_shape"] = shape
+    length = getattr(exc, "lab_output_chars", None)
+    if isinstance(length, int) and 0 <= length <= 250_000:
+        result["output_chars"] = length
     if callable(getattr(exc, "errors", None)):
         allowed_fields = {"summary_ru", "findings", "category", "event_id", "evidence", "explanation",
                           "limitations", "proposals", "verdict", "issues", "quality_ru",
@@ -137,6 +143,11 @@ def single_pass(agent, description, schema):
             parsed = schema.model_validate_json(raw)
     except Exception as exc:
         exc.lab_schema = schema.__name__
+        raw = result.raw.strip() if isinstance(result.raw, str) else ""
+        exc.lab_output_chars = len(raw)
+        exc.lab_output_shape = ("structured" if result.pydantic is not None or result.json_dict is not None
+            else "empty" if not raw else "markdown_fence" if raw.startswith("```")
+            else "object" if raw.startswith("{") else "array" if raw.startswith("[") else "other_text")
         raise
     return parsed, result.token_usage.model_dump() if result.token_usage else {}
 

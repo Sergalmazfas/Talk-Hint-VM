@@ -54,4 +54,18 @@ describe("saved Hint measurements survive AI failure", () => {
     expect(JSON.stringify(labAnalysisFailure({ diagnostic: { code: "PRIVATE", stage: "PRIVATE" } })))
       .not.toContain("PRIVATE");
   });
+  it("preserves bounded schema diagnostics without echoing invalid category values", () => {
+    const details = labAnalysisFailure({ diagnostic: {
+      code: "OUTPUT_SCHEMA_INVALID", stage: "analysis", schema: "Analysis",
+      output_shape: "object", output_chars: 10626,
+      schema_issues: [{ type: "literal_error", fields: ["findings", 3, "category"], input: "PRIVATE" }],
+    } });
+    expect(details.output_shape).toBe("object");
+    expect(details.output_chars).toBe(10626);
+    expect(details.schema_issues).toEqual([{ type: "literal_error", fields: ["findings", 3, "category"] }]);
+    expect(JSON.stringify(details)).not.toContain("PRIVATE");
+    const unsafe = labAnalysisFailure({ diagnostic: { output_shape: "PRIVATE", output_chars: -1 } });
+    expect(unsafe).not.toHaveProperty("output_shape");
+    expect(unsafe).not.toHaveProperty("output_chars");
+  });
 });

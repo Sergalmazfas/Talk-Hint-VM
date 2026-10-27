@@ -1195,3 +1195,17 @@ mtime_ms = 1793125826908
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/714380d0-2754-4d6d-8edf-55f717384ebb/5a2b87e8-9891-4f41-bff6-66352fd25d64"
 storage_version_token = "1793125827619829"
 content_type = "text/html"
+
+[[outputs]]
+id = "zicZ5liNHgUxVeYNQWUwa"
+uri = "file://generated-artifacts/mint-hint-reanalysis-diagnostic-2/report.html"
+type = "html"
+title = "Mint — результат диагностического прохода №2"
+description = "Конкретные поля ошибки схемы, сохранённые измерения и следующий шаг. QA не выполнялась, письмо не отправлялось."
+logical_id = "2f14468a-6570-49e1-8d0f-3d231986dd95"
+content_hash = "sha256:0f29b05de37dd3ff273dcde7a62860f2ad4607a617e70b8638da0221a27a1e66"
+size = 13819
+mtime_ms = 1793127750905
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2f14468a-6570-49e1-8d0f-3d231986dd95/cd603037-1af3-40ee-8883-be178c519273"
+storage_version_token = "1793127751483559"
+content_type = "text/html"

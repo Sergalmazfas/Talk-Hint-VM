@@ -42,3 +42,13 @@ paid pass.
 claim/recovery, retain the existing diagnostic TTLs, and verify the saved result
 instead of trusting an UPDATE that affected zero rows. Never fabricate a Dev
 phone call to satisfy the cleanup.
+
+Malformed model categories are not the same as uncertain evidence.
+
+**Why:** valid JSON can still violate the assessment rubric. Replacing a
+rejected category with “unknown” would silently turn an invalid model response
+into an apparently valid assessment and bypass the intended QA gate.
+
+**How to apply:** keep strict category validation and separate deterministic
+measurements from rejected AI judgments. Enforce the output contract rather
+than relaxing the rubric; do not label a diagnostic retry as a production fix.

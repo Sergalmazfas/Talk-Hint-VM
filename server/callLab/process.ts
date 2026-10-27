@@ -31,6 +31,10 @@ export function labAnalysisFailure(error: unknown) {
       ? { http_status: value.http_status } : {}),
     ...(typeof value?.model === "string" && /^[a-z0-9./_-]{1,80}$/i.test(value.model) ? { model: value.model } : {}),
     ...(["Analysis", "QA", "Letter"].includes(value?.schema) ? { schema: value.schema } : {}),
+    ...(["empty", "markdown_fence", "object", "array", "other_text", "structured"].includes(value?.output_shape)
+      ? { output_shape: value.output_shape } : {}),
+    ...(Number.isSafeInteger(value?.output_chars) && value.output_chars >= 0 && value.output_chars <= 250_000
+      ? { output_chars: value.output_chars } : {}),
     ...(Array.isArray(value?.schema_issues) ? { schema_issues: value.schema_issues.slice(0, 5).map((issue: any) => ({
       type: typeof issue?.type === "string" && /^[a-z_]{1,40}$/.test(issue.type) ? issue.type : "invalid",
       fields: Array.isArray(issue?.fields) ? issue.fields.filter((part: unknown) =>
