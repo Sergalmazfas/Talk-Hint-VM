@@ -1111,3 +1111,45 @@ mtime_ms = 1793076686382
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2da08e23-039b-4781-b172-3b14b159e84b/737173da-5b48-4799-9f52-7071f0c34dc4"
 storage_version_token = "1793076692725473"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "7TmY-3Bmh-LQDeAbHMDPg"
+uri = "file://generated-artifacts/hint-release-2026-10-27/%D0%9F%D0%B5%D1%80%D0%B5%D0%B4_%D0%BF%D1%83%D0%B1%D0%BB%D0%B8%D0%BA%D0%B0%D1%86%D0%B8%D0%B5%D0%B9_Hint.html"
+type = "html"
+title = "Перед Publish: изменения и порядок проверки"
+description = "Что войдёт в публикацию, выключенная лаборатория, проверки и ссылка на ветку Xcode."
+logical_id = "a978bb2a-0a06-43f3-88a8-bd9ed8f7231d"
+content_hash = "sha256:ce1c60e1b55f0c6e8b257c260115749215c982c9d7c277a6d89046cc1c82e35f"
+size = 26758
+mtime_ms = 1793081393718
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a978bb2a-0a06-43f3-88a8-bd9ed8f7231d/aac06cd2-5ec7-4cdc-84b2-655f88328db3"
+storage_version_token = "1793081449813449"
+content_type = "text/html"
+
+[[outputs]]
+id = "0Ai3-UHVWB1vr0iU3Y8xt"
+uri = "file://generated-artifacts/hint-release-2026-10-27/Mint_%D1%8D%D1%82%D0%B0%D0%BB%D0%BE%D0%BD_%D0%B4%D0%BE_v3.html"
+type = "html"
+title = "Mint — ручной эталон «до», форма v3"
+description = "По сохранённому звонку и скриншотам; письмо отправлено. Не автономный прогон CrewAI и не приёмка владельцем."
+logical_id = "03257dbe-e386-4a26-9b8e-fd0f9eab6969"
+content_hash = "sha256:1ce1d3b6ad0142d3fa25f69cf2059f6b64a101ebb045d3118e23aa4998786634"
+size = 8309
+mtime_ms = 1793081393796
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/03257dbe-e386-4a26-9b8e-fd0f9eab6969/56f06a93-9de5-4da2-8dff-ddf421918331"
+storage_version_token = "1793081450447143"
+content_type = "text/html"
+
+[[outputs]]
+id = "IAX3KZ9ZRQptKuOWseupo"
+uri = "file://generated-artifacts/hint-release-2026-10-27/Hint_%D0%BF%D0%B0%D0%BA%D0%B5%D1%82_%D1%81%D0%B2%D0%B5%D1%80%D0%BA%D0%B8_2026-10-27.zip"
+type = "unspecified"
+title = "Скачать пакет сверки Hint"
+description = "Diff Dev и iOS, перечень файлов публикации и ручной отчёт Mint."
+logical_id = "4dec0213-62e2-4adf-a85a-49dfef149a0c"
+content_hash = "sha256:73b9939b47d9a842f690b522a6bb70ed5d9cec59d657aad1c4261305e5107c6d"
+size = 51824
+mtime_ms = 1793081426843
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4dec0213-62e2-4adf-a85a-49dfef149a0c/9ddff727-e49c-46f5-bce2-ae56849fb281"
+storage_version_token = "1793081451226887"
+content_type = "application/octet-stream"

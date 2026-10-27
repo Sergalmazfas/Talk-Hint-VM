@@ -42,6 +42,19 @@ describe("v3 process plan/fact", () => {
 });
 
 describe("visibility receiver", () => {
+  it("records Prepare separately from generated hints and never calls it spoken", () => {
+    const recorder = new LiveLatencyRecorder();
+    registerLatencyRecorder("opening-fixture", "owner", recorder);
+    const event = { callSid: "opening-fixture", origin: "prepare", kind: "opening",
+      presentationId: "01234567-89ab-cdef-0123-456789abcdef",
+      visibleAt: new Date().toISOString(), build: "fixture" };
+    expect(recordUiVisibility("other", event)).toBe(false);
+    expect(recordUiVisibility("owner", { ...event, presentationId: "invalid" })).toBe(false);
+    expect(recordUiVisibility("owner", event)).toBe(true);
+    expect(recordUiVisibility("owner", event)).toBe(false);
+    expect(uiVisibilitySnapshot(event.callSid)[0].basis).toContain("not proof spoken");
+    unregisterLatencyRecorder(event.callSid);
+  });
   it("is owner/call scoped, deduplicated, bounded and cleaned with the existing recorder", () => {
     const recorder = new LiveLatencyRecorder();
     recorder.start(1, Date.now()); recorder.sent(1);

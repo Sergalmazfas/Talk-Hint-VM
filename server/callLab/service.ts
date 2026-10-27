@@ -44,10 +44,13 @@ export async function bootstrapLab(pool: Pool) {
   if (config.allowed) await checkHintLabRuntime();
   const binding = { recipient: profile, connection_id: connectionId };
   const key = `${config.environment}:${config.owner}`;
-  // INSERT ONLY: restart never re-enables an owner's persisted kill switch.
+  // A publish may explicitly start paused; a restart must never re-enable it.
+  const startPaused = process.env.LAB_START_PAUSED === "true";
   await pool.query(`INSERT INTO call_lab_controls(key,environment,owner_id,recipient,connection_id,enabled)
-    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(key) DO NOTHING`,
-  [key, config.environment, config.owner, binding.recipient, binding.connection_id, config.allowed]);
+    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(key) DO UPDATE
+    SET enabled=CASE WHEN $7 THEN false ELSE call_lab_controls.enabled END`,
+  [key, config.environment, config.owner, binding.recipient, binding.connection_id,
+    config.allowed && !startPaused, startPaused]);
 }
 
 export function unavailableReport(call: any, reason: string) {

@@ -12,6 +12,7 @@ import { setupWebSocket, TALKHINT_GOLDEN_PROMPT, PREP_PROMPT, LANGUAGE_NAMES, se
 import { getAlertChannelStatus, getWriteHealthAlertState } from "./writeHealthAlerter";
 import { HEALTH_STATUS_PAGE_HTML, HEALTH_TOKEN_PROMPT_HTML } from "./healthStatusPage";
 import { LIVE_ANTI_LOOP_RULES, buildLiveChatSystemPrompt } from "@shared/prompts";
+import { withActionResults } from "./hintActionResults";
 import { z } from "zod";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -2048,7 +2049,7 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       // LIVE branch bypasses buildLiveSystemPrompt, so the grounding layer is
       // included via buildLiveChatSystemPrompt (assembled + tested in shared/prompts).
       const systemPrompt = isLiveCall 
-        ? buildLiveChatSystemPrompt({ goal, language })
+        ? withActionResults(buildLiveChatSystemPrompt({ goal, language }))
         : `${PREP_PROMPT}
 
 ${TALKHINT_GOLDEN_PROMPT}

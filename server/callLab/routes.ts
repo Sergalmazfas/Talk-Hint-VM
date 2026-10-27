@@ -2,8 +2,33 @@ import type { Express } from "express";
 import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import { pool } from "../db";
 import { labConfiguration, abortHintLabProcessing } from "./service";
+import { checkHintLabRuntime } from "./process";
+import { GmailLabMail } from "./mail";
 
 export function registerCallLabRoutes(app: Express) {
+  // Only an explicit owner action after readiness checks can leave startup pause.
+  // A new activation excludes calls made before it, including while paused.
+  app.post("/api/admin/call-lab/enable", requireBenchmarkAdmin, async (req, res) => {
+    const config = labConfiguration();
+    if (!config.owner || String((req as any).user?.id) !== config.owner)
+      return res.status(403).json({ error: "Owner only" });
+    if (!pool || !config.allowed) return res.status(503).json({ error: "Lab runtime not configured" });
+    if (req.body?.confirm !== "hint-owner-only")
+      return res.status(400).json({ error: "Explicit Hint-owner-only confirmation required" });
+    try {
+      const key = `${config.environment}:${config.owner}`;
+      const control = (await pool.query("SELECT * FROM call_lab_controls WHERE key=$1", [key])).rows[0];
+      if (!control) return res.status(503).json({ error: "Owner control not ready" });
+      await checkHintLabRuntime(); // imports/version only, never runs agents
+      await new GmailLabMail().verify(control);
+      await pool.query(`UPDATE call_lab_controls SET enabled=true,activated_at=now()
+        WHERE key=$1 AND enabled=false`, [key]);
+      res.json({ enabled: true, scope: "Hint / owner / new calls after activation",
+        noHistoricalReplay: true, restartPausesAgain: process.env.LAB_START_PAUSED === "true" });
+    } catch {
+      res.status(503).json({ error: "Readiness check failed; activation not confirmed" });
+    }
+  });
   app.get("/api/admin/call-lab/status", requireBenchmarkAdmin, async (req, res) => {
     const config = labConfiguration();
     if (!config.owner) return res.status(503).json({ error: "Owner Gmail binding not ready", configured: false });

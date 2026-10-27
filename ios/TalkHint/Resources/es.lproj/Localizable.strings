@@ -1,3 +1,4 @@
+"incall.opening.hide" = "Toca para ocultar la frase inicial.";
 "secretary.personality.origin_changed" = "Este encargo pertenece a otro servidor. Vuelva a la compilación Dev original. No se envió ninguna llamada.";
 "secretary.personality.provider_note" = "Retell + Engine usa Merritt; GPT usa Marin. La personalidad, línea saliente y fichas autorizadas funcionan por ahora en Dev con Retell. Elegir GPT desactiva esta configuración para nuevos encargos sin borrar los ajustes del servidor.";
 "secretary.personality.title" = "Personalidad y número saliente";

@@ -30,7 +30,20 @@ export function registerLatencyRecorder(callSid: string, userId: string, recorde
 export function recordUiVisibility(userId: string | undefined, message: any): boolean {
   if (!userId || typeof message.callSid !== "string") return false;
   const entry = registry.get(message.callSid);
-  if (!entry || entry.userId !== userId || entry.visible.length >= 200 ||
+  if (!entry || entry.userId !== userId || entry.visible.length >= 200) return false;
+  if (message.origin === "prepare") {
+    if (!["opening", "translation_ru"].includes(message.kind) ||
+        typeof message.presentationId !== "string" ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(message.presentationId) ||
+        typeof message.visibleAt !== "string" || !Number.isFinite(Date.parse(message.visibleAt)) ||
+        typeof message.build !== "string" || message.build.length > 40) return false;
+    if (entry.visible.some((e: any) => e.kind === message.kind && e.presentationId === message.presentationId)) return false;
+    entry.visible.push({ kind: message.kind, presentationId: message.presentationId,
+      deviceVisibleAt: message.visibleAt, receivedAt: new Date().toISOString(), build: message.build,
+      basis: "client_reports_local_prepare_visible; not proof spoken/read; device clock unverified" } as any);
+    return true;
+  }
+  if (
       !["opening", "hint", "translation_ru"].includes(message.kind) ||
       !Number.isSafeInteger(message.utteranceId) || message.utteranceId < 0 ||
       !entry.recorder.wasSent(message.utteranceId) ||

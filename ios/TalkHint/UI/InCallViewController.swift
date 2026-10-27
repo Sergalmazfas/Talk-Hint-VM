@@ -22,7 +22,11 @@ final class InCallViewController: UIViewController {
     private let feedStack = UIStackView()
 
     // Pinned suggestion banner — always visible above the controls.
-    private let suggestionBanner = UIView()
+    private let suggestionBanner = HintBannerScrollView()
+    private var openingButton: HintChoiceButton?
+    private let telemetryCallSid: String?
+    private let openingPresentationId = UUID().uuidString
+    private var openingVisibleAt: Date?
     private let suggestionPrimaryLabel = UILabel()
     private let suggestionSecondaryLabel = UILabel()
     /// Vertical stack of tappable pill buttons shown for CHOICE-type hints;
@@ -55,9 +59,10 @@ final class InCallViewController: UIViewController {
     // reconnect would duplicate the "GOAL" card in the conversation history.
     private var lastGoalShownInFeed: String?
 
-    init(callerName: String, hintStream: CallHintStream = CallHintStream()) {
+    init(callerName: String, hintStream: CallHintStream = CallHintStream(), callSid: String? = nil) {
         self.callerName = callerName
         self.stream = hintStream
+        self.telemetryCallSid = callSid
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -80,6 +85,23 @@ final class InCallViewController: UIViewController {
         updateMuteButton()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        reportOpeningPresentation()
+    }
+
+    private func reportOpeningPresentation() {
+        guard presentedViewController == nil,
+              let button = openingButton, let sid = telemetryCallSid,
+              HintVisibility.isVisible(button.englishLabel)
+        else { return }
+        if openingVisibleAt == nil { openingVisibleAt = Date() }
+        let translated = SessionStore.shared.language == "ru" &&
+            HintVisibility.isVisible(button.translationLabel)
+        stream.reportOpeningVisible(callSid: sid, presentationId: openingPresentationId,
+                                    at: openingVisibleAt!, translationVisible: translated)
+    }
+
     /// Called by CallManager when the call ends — closes the stream and dismisses.
     func teardown() {
         // A new call always starts without the previous call's goal — the goal is
@@ -88,6 +110,7 @@ final class InCallViewController: UIViewController {
         // stream, where the server-side end-of-call cleanup never runs).
         stream.setGoal("")
         SessionStore.shared.callGoal = ""
+        openingButton?.superview?.isHidden = true
         stream.disconnect()
         if presentingViewController != nil {
             dismiss(animated: true)
@@ -141,6 +164,29 @@ final class InCallViewController: UIViewController {
         let goalCard = buildGoalCard()
 
         let header = UIStackView(arrangedSubviews: [statusRow, retryButton, goalCard])
+        if let opening = SessionStore.shared.takeHintOpening() {
+            let button = HintChoiceButton(english: opening.english, translation: opening.translation,
+                                          primary: false)
+            button.accessibilityIdentifier = "button-opening-dismiss"
+            button.accessibilityHint = NSLocalizedString("incall.opening.hide", comment: "")
+            button.addTarget(self, action: #selector(dismissOpening), for: .touchUpInside)
+            let openingScroll = HintBannerScrollView()
+            openingScroll.delegate = self
+            openingScroll.accessibilityIdentifier = "scroll-opening"
+            openingScroll.translatesAutoresizingMaskIntoConstraints = false
+            button.translatesAutoresizingMaskIntoConstraints = false
+            openingScroll.addSubview(button)
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.leadingAnchor),
+                button.trailingAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.trailingAnchor),
+                button.topAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.topAnchor),
+                button.bottomAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.bottomAnchor),
+                button.widthAnchor.constraint(equalTo: openingScroll.frameLayoutGuide.widthAnchor),
+                openingScroll.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor, multiplier: 0.22),
+            ])
+            openingButton = button
+            header.addArrangedSubview(openingScroll)
+        }
         header.axis = .vertical
         header.spacing = 4
         header.setCustomSpacing(8, after: retryButton)
@@ -175,6 +221,7 @@ final class InCallViewController: UIViewController {
 
             bottomStack.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
             bottomStack.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
+            bottomStack.topAnchor.constraint(greaterThanOrEqualTo: header.bottomAnchor, constant: 8),
             bottomConstraint,
 
             feedStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 8),
@@ -324,6 +371,11 @@ final class InCallViewController: UIViewController {
             red: 0xC9 / 255.0, green: 0xBC / 255.0, blue: 0xFF / 255.0, alpha: 1).cgColor
         suggestionBanner.isHidden = true
         suggestionBanner.accessibilityIdentifier = "card-suggestion"
+        suggestionBanner.alwaysBounceVertical = false
+        suggestionBanner.delegate = self
+        suggestionBanner.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        suggestionBanner.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor,
+                                                 multiplier: 0.38).isActive = true
 
         let sparkles = UIImageView(image: UIImage(systemName: "sparkles"))
         sparkles.tintColor = Theme.purple
@@ -383,10 +435,11 @@ final class InCallViewController: UIViewController {
         labels.translatesAutoresizingMaskIntoConstraints = false
         suggestionBanner.addSubview(labels)
         NSLayoutConstraint.activate([
-            labels.topAnchor.constraint(equalTo: suggestionBanner.topAnchor, constant: 10),
-            labels.bottomAnchor.constraint(equalTo: suggestionBanner.bottomAnchor, constant: -10),
-            labels.leadingAnchor.constraint(equalTo: suggestionBanner.leadingAnchor, constant: 12),
-            labels.trailingAnchor.constraint(equalTo: suggestionBanner.trailingAnchor, constant: -12),
+            labels.topAnchor.constraint(equalTo: suggestionBanner.contentLayoutGuide.topAnchor, constant: 10),
+            labels.bottomAnchor.constraint(equalTo: suggestionBanner.contentLayoutGuide.bottomAnchor, constant: -10),
+            labels.leadingAnchor.constraint(equalTo: suggestionBanner.contentLayoutGuide.leadingAnchor, constant: 12),
+            labels.trailingAnchor.constraint(equalTo: suggestionBanner.contentLayoutGuide.trailingAnchor, constant: -12),
+            labels.widthAnchor.constraint(equalTo: suggestionBanner.frameLayoutGuide.widthAnchor, constant: -24),
         ])
         return suggestionBanner
     }
@@ -397,85 +450,16 @@ final class InCallViewController: UIViewController {
     /// - `isPrimary`: the first option uses the filled purple style; subsequent
     ///   options use the outlined white-background style.
     private func buildChoiceButton(option: ChoiceOption, isPrimary: Bool) -> UIButton {
-        let btn = UIButton(type: .custom)
-        btn.contentHorizontalAlignment = .leading
-        btn.layer.cornerRadius = 12
-        btn.contentEdgeInsets = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
-        btn.titleLabel?.numberOfLines = 0
-        btn.titleLabel?.lineBreakMode = .byWordWrapping
-
-        // Title: if translation is present show it on line 1 with the en phrase
-        // in quotes on line 2 (matching the mockup); otherwise show en alone.
-        let displayTitle: String
-        let enPhrase = option.en
-        let hasTranslation = !option.translation.isEmpty
-        if hasTranslation {
-            displayTitle = option.translation + "\n" + "\"" + enPhrase + "\""
-        } else {
-            displayTitle = enPhrase
-        }
-
-        if isPrimary {
-            btn.backgroundColor = Theme.purple
-            let para = NSMutableParagraphStyle()
-            para.lineBreakMode = .byWordWrapping
-            let attrTitle = NSMutableAttributedString(
-                string: displayTitle,
-                attributes: [
-                    .font: UIFont.systemFont(ofSize: 14, weight: .semibold),
-                    .foregroundColor: UIColor.white,
-                    .paragraphStyle: para,
-                ]
-            )
-            // Dim the en-phrase part (second line) slightly when translation shown
-            if hasTranslation, let nlRange = displayTitle.range(of: "\n") {
-                let secondStart = displayTitle.distance(from: displayTitle.startIndex,
-                                                        to: nlRange.upperBound)
-                let nsRange = NSRange(location: secondStart,
-                                     length: displayTitle.count - secondStart)
-                attrTitle.addAttribute(.foregroundColor,
-                                       value: UIColor.white.withAlphaComponent(0.8),
-                                       range: nsRange)
-                attrTitle.addAttribute(.font,
-                                       value: UIFont.systemFont(ofSize: 12),
-                                       range: nsRange)
-            }
-            btn.setAttributedTitle(attrTitle, for: .normal)
-        } else {
-            btn.backgroundColor = .white
-            btn.layer.borderWidth = 1
-            btn.layer.borderColor = Theme.line.cgColor
-            let para = NSMutableParagraphStyle()
-            para.lineBreakMode = .byWordWrapping
-            let attrTitle = NSMutableAttributedString(
-                string: displayTitle,
-                attributes: [
-                    .font: UIFont.systemFont(ofSize: 14, weight: .semibold),
-                    .foregroundColor: Theme.ink,
-                    .paragraphStyle: para,
-                ]
-            )
-            if hasTranslation, let nlRange = displayTitle.range(of: "\n") {
-                let secondStart = displayTitle.distance(from: displayTitle.startIndex,
-                                                        to: nlRange.upperBound)
-                let nsRange = NSRange(location: secondStart,
-                                     length: displayTitle.count - secondStart)
-                attrTitle.addAttribute(.foregroundColor,
-                                       value: Theme.sub,
-                                       range: nsRange)
-                attrTitle.addAttribute(.font,
-                                       value: UIFont.systemFont(ofSize: 12),
-                                       range: nsRange)
-            }
-            btn.setAttributedTitle(attrTitle, for: .normal)
-        }
-
-        // Store the en phrase so the tap handler can retrieve it regardless of
-        // which attributed-title configuration is displayed.
-        btn.accessibilityValue = enPhrase
+        let btn = HintChoiceButton(english: option.en, translation: option.translation,
+                                   primary: isPrimary)
         btn.accessibilityIdentifier = isPrimary ? "button-choice-primary" : "button-choice-secondary"
         btn.addTarget(self, action: #selector(choiceOptionTapped(_:)), for: .touchUpInside)
         return btn
+    }
+
+    @objc private func dismissOpening() {
+        // Hiding is a user action, never evidence that the phrase was spoken.
+        openingButton?.superview?.isHidden = true
     }
 
     /// The circular Mute / End / Audio controls per the approved mockup —
@@ -996,38 +980,32 @@ final class InCallViewController: UIViewController {
 
 extension InCallViewController: CallHintStreamDelegate {
     func callHintStream(_ stream: CallHintStream, visibleKindsFor event: CallHintEvent) -> [String] {
-        func visible(_ target: UIView) -> Bool {
-            guard let window = target.window,
-                  window.bounds.intersects(target.convert(target.bounds, to: window)),
-                  !target.bounds.isEmpty else { return false }
-            var ancestor: UIView? = target
-            while let node = ancestor {
-                if node.isHidden || node.alpha < 0.01 { return false }
-                ancestor = node.superview
-            }
-            return true
-        }
+        func visible(_ target: UIView) -> Bool { HintVisibility.isVisible(target) }
         guard isViewLoaded, view.window != nil, presentedViewController == nil,
               UIApplication.shared.applicationState == .active,
               case .suggestion(let en, _, let options) = event, visible(suggestionBanner) else { return [] }
+        var translatedChoiceVisible = false
         if let options = options, options.count >= 2 {
             guard !choiceButtonsStack.isHidden,
                   choiceButtonsStack.arrangedSubviews.compactMap({ ($0 as? UIButton)?.accessibilityValue }) == options.map({ $0.en }) else { return [] }
+            let buttons = choiceButtonsStack.arrangedSubviews.compactMap { $0 as? HintChoiceButton }
+            guard buttons.contains(where: { visible($0.englishLabel) }) else { return [] }
+            translatedChoiceVisible = buttons.contains(where: { visible($0.translationLabel) })
         } else {
             guard visible(suggestionPrimaryLabel), suggestionPrimaryLabel.text == en else { return [] }
         }
         var kinds = ["hint"]
-        if SessionStore.shared.language == "ru", visible(suggestionSecondaryLabel),
-           !suggestionPrimaryLabel.isHidden,
-           !(suggestionSecondaryLabel.text ?? "").isEmpty {
+        if SessionStore.shared.language == "ru",
+           translatedChoiceVisible || (visible(suggestionSecondaryLabel) &&
+           !suggestionPrimaryLabel.isHidden && !(suggestionSecondaryLabel.text ?? "").isEmpty) {
             kinds.append("translation_ru")
         }
-        // prepareOpening is currently ignored on this screen. Do not invent an
-        // opening-visible event or change product behaviour to make it green.
+        // Local Prepare presentation is reported separately, without a fake hint ID.
         return kinds
     }
 
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent) {
+        reportOpeningPresentation()
         switch event {
         case .guestTranscript(let text, let translation, let confidence, let isFinal):
             // Drop obviously garbled finals so noisy STT never hits the CALLER
@@ -1127,6 +1105,7 @@ extension InCallViewController: CallHintStreamDelegate {
     }
 
     func callHintStreamDidConnect(_ stream: CallHintStream) {
+        reportOpeningPresentation()
         needsSignIn = false
         retryButton.setTitle(NSLocalizedString("incall.reconnect", comment: ""), for: .normal)
         // Connected is the normal state — hide the status line entirely so the
@@ -1172,6 +1151,13 @@ extension InCallViewController: CallHintStreamDelegate {
         reconnectSpinner.stopAnimating()
         retryButton.setTitle(NSLocalizedString("incall.sign_in", comment: ""), for: .normal)
         retryButton.isHidden = false
+    }
+}
+
+extension InCallViewController: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        reportOpeningPresentation()
+        stream.reportCurrentHintVisibility()
     }
 }
 

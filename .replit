@@ -8,7 +8,7 @@ channel = "stable-24_05"
 [deployment]
 deploymentTarget = "vm"
 build = ["npm", "run", "build"]
-run = ["env", "LAB_ENABLED=true", "LAB_TARGET_ENVIRONMENT=production", "node", "./dist/index.cjs"]
+run = ["env", "LAB_ENABLED=true", "LAB_START_PAUSED=true", "LAB_TARGET_ENVIRONMENT=production", "HINT_ACTION_RESULTS_ENABLED=true", "node", "./dist/index.cjs"]
 
 [env]
 PORT = "5000"
@@ -67,6 +67,7 @@ LAB_TARGET_ENVIRONMENT = "production"
 
 [userenv.development]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"
+HINT_ACTION_RESULTS_ENABLED = "true"
 
 [userenv.production]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"

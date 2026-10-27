@@ -1,3 +1,4 @@
+"incall.opening.hide" = "Торкніться, щоб приховати першу фразу.";
 "secretary.personality.origin_changed" = "Це доручення збережено для іншого сервера. Поверніться до початкової Dev-збірки. Дзвінок не надіслано.";
 "secretary.personality.provider_note" = "Retell + Engine використовує Merritt; GPT — Marin. Особистість, вихідна лінія й дозволені картки поки доступні в Dev через Retell. Вибір GPT вимикає цю зв’язку для нових доручень, не видаляючи налаштувань сервера.";
 "secretary.personality.title" = "Особистість і вихідний номер";

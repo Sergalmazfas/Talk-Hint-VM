@@ -47,11 +47,16 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
   const subject = `${report.synthetic ? "ТЕСТ · " : ""}Hint · ${duration} · процесс ${p.percent === null ? "?" : `${p.percent}%`} · слабое звено: ${p.weakLink}`;
   const body = [
     report.synthetic ? "СИНТЕТИЧЕСКИЙ ПРИМЕР v3. Реального звонка не было. Числа примера не данные продукта." : "Лаборатория Hint · форма v3",
-    "AI-оценка не является приёмкой владельцем или отзывом участника.",
+    report.execution === "manual_assistant_review"
+      ? "Ручной разбор ассистентом по сохранённым данным и скриншотам. CrewAI и независимый QA не запускались. Не приёмка владельцем."
+      : "AI-оценка не является приёмкой владельцем или отзывом участника.",
     `QA: ${report.qa_status ?? "НЕ ПРОВЕРЕНО QA"}`,
     ...(report.qa_issues ?? []),
     "", "ПЛАН / ФАКТ",
-    ...p.rows.map(r => `${r.name}\nПлан: ${r.plan} | Факт: ${r.fact} · ${r.reason}`),
+    ...p.rows.map(r => `${r.name}\nПлан: ${r.plan} | Факт: ${r.fact} · ${r.reason}${
+      report.execution === "manual_assistant_review" &&
+      typeof report.manual_observations?.[r.id] === "string"
+        ? `\nСохранённое свидетельство: ${report.manual_observations[r.id]}` : ""}`),
     "", `Общий процент: ${p.percent === null ? "?" : `${p.percent}% (${p.numerator}/${p.denominator})`}`,
     `Формула: ${p.formula}. Цель разговора не входит в процент.`,
     "", "ГДЕ СЛОМАЛОСЬ",

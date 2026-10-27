@@ -48,6 +48,7 @@ import {
 } from "./latencyAck";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
 import { resolveWaitState, shouldResetWaitTracking, isQuestionOrActionRequest } from "./waitState";
+import { withActionResults, needsOwnerResultOptions } from "./hintActionResults";
 import { HintCarryover } from "./hintCarryover";
 import { prepareMessage, clearPrepareState, clearOpeningDedup, PrepareUnavailableError } from "./prepare";
 import { authorizeSecretaryConfirmation, handlePrepareConfirmGoal, isSecretaryConfirmationCurrent, releaseSecretaryConfirmation } from "./prepareConfirm";
@@ -335,14 +336,14 @@ async function translateAndSuggest(text: string, goal: string, language: string 
     // translation tokens are spent and the UI shows the original language only.
     // Prompt assembly lives in buildLiveSystemPrompt (shared/prompts.ts) so it
     // can be unit-tested directly against the real string.
-    const systemPrompt = buildLiveSystemPrompt({
+    const systemPrompt = withActionResults(buildLiveSystemPrompt({
       goal,
       language,
       conversationContext,
       contextSections,
       translateEnabled,
       strategyMemory,
-    });
+    }));
 
     const userPrompt = buildLiveUserPrompt(text);
 
@@ -479,7 +480,7 @@ export async function refineHintFromAsk(instruction: string, opts: {
       staticCards: opts.staticCards,
       tutorMemory: opts.tutorMemory,
     });
-    const systemPrompt = buildAskRefinePrompt({
+    const systemPrompt = withActionResults(buildAskRefinePrompt({
       goal: opts.goal,
       language: opts.language,
       conversationContext: opts.conversationContext,
@@ -487,7 +488,7 @@ export async function refineHintFromAsk(instruction: string, opts: {
       contextSections,
       translateEnabled: opts.translateEnabled,
       strategyMemory: opts.strategyMemory,
-    });
+    }));
     const nonGemini = (m?: string) => (m && !m.startsWith("gemini") ? m : undefined);
     const model = nonGemini(opts.modelOverride) ?? nonGemini(currentModel) ?? OPENAI_FALLBACK_MODEL;
     const raw = await generateWithOpenAI(model, systemPrompt, instruction, 150);
@@ -724,7 +725,7 @@ class GPTRealtimeHandler {
     // LIVE_GROUNDING_RULES: the realtime path bypasses buildLiveSystemPrompt,
     // so the grounding layer (never invent user facts / real-world state,
     // state precedence) must be injected here explicitly too.
-    const fullInstructions = `${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${GOAL_PRIORITY_RULES}\n\n${STRATEGY_MEMORY_RULES}\n\n${getRealtimePrompt(this.mode)}`;
+    const fullInstructions = withActionResults(`${TALKHINT_GOLDEN_PROMPT}\n\n${LIVE_GROUNDING_RULES}\n\n${GOAL_PRIORITY_RULES}\n\n${STRATEGY_MEMORY_RULES}\n\n${getRealtimePrompt(this.mode)}`);
     
     this.send({
       type: "session.update",
@@ -1188,7 +1189,7 @@ GOAL FOCUS: The user has set a clear goal: "${goal}"
 - BUT the GOAL PRIORITY RULES above rank higher: the user's latest explicit intent and the current topic always come first — if the user deliberately shifted to another topic, help with THAT topic
 - If user asks for a phrase, give ONE clear phrase that advances the current topic (or the goal, when it is the current topic)` : '';
       
-      const systemPrompt = `${TALKHINT_GOLDEN_PROMPT}
+      const systemPrompt = withActionResults(`${TALKHINT_GOLDEN_PROMPT}
 
 ${LIVE_GROUNDING_RULES}
 
@@ -1203,7 +1204,7 @@ ${goalLockInstructions}
 The user is asking you a question during an active phone call.
 Respond with a SHORT, helpful answer.
 If they need a phrase to say, give them the English phrase AND its translation to ${langName}.
-NEVER output JSON - only plain text with the phrase and translation.`;
+NEVER output JSON - only plain text with the phrase and translation.`);
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
@@ -1929,6 +1930,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       {
         const { waiting: nowWaiting, event: waitEvent } = resolveWaitState(waitingForInfo, text);
         waitingForInfo = nowWaiting;
+        // Guest waiting for the Owner's result is not Guest doing a lookup.
+        if (needsOwnerResultOptions(text)) {
+          waitingForInfo = false;
+          waitAckShown = false;
+          waitingSlot = null;
+        }
         // Live-only side effects: the exit-events → reset mapping lives in
         // shouldResetWaitTracking (server/waitState.ts) so it's unit-tested —
         // waitAckShown/waitingSlot reset ONLY on exit, never on enter/still.
@@ -2070,7 +2077,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
       // direct observation ("Is it working now?", "iPhone or Android?") must
       // NOT be served a pre-authored answer — fall through to the grounded
       // LLM path, which directs the owner to answer instead of asserting.
-      const ownerOnly = isOwnerOnlyQuestion(text);
+      const ownerOnly = isOwnerOnlyQuestion(text) || needsOwnerResultOptions(text);
       if (ownerOnly && wantSuggestion && !carried) {
         log(`[Dialogue] SKIP library for owner-only question utteranceId=${utteranceId}: "${text.substring(0, 50)}"`, "websocket");
       }

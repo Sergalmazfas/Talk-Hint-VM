@@ -38,6 +38,28 @@ enum SecretaryVoiceProviderPreference: String, Codable, CaseIterable {
 final class SessionStore {
     static let shared = SessionStore()
 
+    // One-shot, memory-only Prepare handoff. Never reused for a later goal/call.
+    struct HintOpening {
+        let english: String
+        let translation: String
+        let goal: String
+        let createdAt: Date
+    }
+    private var pendingHintOpening: HintOpening?
+
+    func stageHintOpening(english: String, translation: String?, goal: String) {
+        pendingHintOpening = HintOpening(english: english, translation: translation ?? "",
+                                         goal: goal, createdAt: Date())
+    }
+
+    func takeHintOpening() -> HintOpening? {
+        let opening = pendingHintOpening
+        pendingHintOpening = nil
+        guard let opening = opening, opening.goal == callGoal,
+              Date().timeIntervalSince(opening.createdAt) < 15 * 60 else { return nil }
+        return opening
+    }
+
     private let tokenKey = "talkhint.session.token"
     private let legacyPendingSecretaryCallKey = "talkhint.secretary.pending.call"
     private let userIdKey = "talkhint.user.id"
@@ -299,7 +321,10 @@ final class SessionStore {
     /// no goal is set.
     var callGoal: String {
         get { UserDefaults.standard.string(forKey: callGoalKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: callGoalKey) }
+        set {
+            if newValue != callGoal || newValue.isEmpty { pendingHintOpening = nil }
+            UserDefaults.standard.set(newValue, forKey: callGoalKey)
+        }
     }
 
     /// The user's "My Context" free-text block, persisted on the backend
@@ -331,6 +356,7 @@ final class SessionStore {
     }
 
     func clear() {
+        pendingHintOpening = nil
         Keychain.delete(tokenKey)
         clearPendingSecretaryCall()
         UserDefaults.standard.removeObject(forKey: userIdKey)

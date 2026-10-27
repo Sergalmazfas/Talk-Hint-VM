@@ -1,3 +1,4 @@
+"incall.opening.hide" = "Tap to hide the opening phrase.";
 "secretary.personality.origin_changed" = "This assignment belongs to another server. Return to the original Dev build. No call request was sent.";
 "secretary.personality.provider_note" = "Retell + Engine uses Merritt; GPT uses Marin. Personality, outgoing line and approved cards are currently supported in Dev with Retell. Choosing GPT disables this setup for new assignments without deleting server settings.";
 "secretary.personality.title" = "Personality and outgoing number";

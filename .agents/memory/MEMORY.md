@@ -1,3 +1,4 @@
+- [Hint lab release boundary](hint-lab-release-boundary.md) — direct bounded fixes allowed; publish starts paused; manual baselines and hiding an opening are not automated execution or speech proof.
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.
 - [drizzle-kit push interactive blocker](drizzle-push-interactive-blocker.md) — db:push can hang on a rename prompt (out-of-schema user_sessions); apply DDL via executeSql instead, never accept the rename.
 - [/ui WebSocket per-user routing](ui-ws-per-user-routing.md) — live call transcripts/hints must auth + be scoped to owning user (callOwners map); never global broadcast.

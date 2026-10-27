@@ -745,6 +745,8 @@ extension PrepareViewController: CallHintStreamDelegate {
             addOpeningPhrase(en: phraseEn, translation: translation)
             addAIMessage(NSLocalizedString("prepare.goal_confirmed", comment: ""))
             onGoalConfirmed?(confirmedGoal)
+            SessionStore.shared.stageHintOpening(english: phraseEn, translation: translation,
+                                                 goal: confirmedGoal)
         case .prepareSecretaryConfirmation(let confirmationToken):
             guard mode == .secretary, pendingConfirm != nil else { break }
             completeSecretaryConfirmation(
