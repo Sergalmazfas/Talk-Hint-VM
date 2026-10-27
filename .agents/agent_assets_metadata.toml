@@ -1027,3 +1027,17 @@ mtime_ms = 1793061359070
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fdefd318-14db-4e17-98fd-1ed982c50f7e/3f6aa30e-5aa9-4073-b117-de32aacbaa79"
 storage_version_token = "1793061392640757"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "_pouobV2wEedj7hXnPSIU"
+uri = "file://generated-artifacts/P-LAB_work_package_v2_rev777.zip"
+type = "unspecified"
+title = "P.LAB v2 · rev777 — пакет для сверки"
+description = "Исправленный JSON, точный diff, исходный ручной проход rev768, рубрика, форма письма и технические ответы LAB.METHOD. CrewAI и отправка почты не включены."
+logical_id = "f2a67ca2-a807-44d4-a412-360f882419b0"
+content_hash = "sha256:31d716bf27814a9c7bf4f6daacbe48e2d1e7b2cedeecde3c735f359e2711a519"
+size = 77742
+mtime_ms = 1793069675109
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f2a67ca2-a807-44d4-a412-360f882419b0/2dfff3eb-a905-4077-8992-2a6a2a8079fb"
+storage_version_token = "1793069715962164"
+content_type = "application/octet-stream"
