@@ -1279,3 +1279,17 @@ mtime_ms = 1793140627959
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f68078fe-477a-4413-857c-896f7b1528c2/531ce884-a124-4615-9eca-0ca045c38545"
 storage_version_token = "1793140634019270"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "9Zy85qIaEFV6mXM4Kf4z9"
+uri = "file://generated-artifacts/operating-rules-review/TalkHint_rules_v3_review_rev822.zip"
+type = "unspecified"
+title = "TalkHint — правила v3 · пакет на согласование"
+description = "ZIP: короткий кандидат replit.md, diff, проект журнала, доработка существующего P.OPS, связи и проверки. База rev822. Ничего не применено."
+logical_id = "97542e1d-3c77-4ef1-8d58-a3cd535320a4"
+content_hash = "sha256:b26682915e9311721bcfb5df11793d51957464749aff66f263be4ab3c147bb2a"
+size = 162452
+mtime_ms = 1793144149639
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/97542e1d-3c77-4ef1-8d58-a3cd535320a4/794c5e7c-779c-4e09-867e-f8d0c6bc9572"
+storage_version_token = "1793144182955569"
+content_type = "application/octet-stream"
