@@ -1209,3 +1209,17 @@ mtime_ms = 1793127750905
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2f14468a-6570-49e1-8d0f-3d231986dd95/cd603037-1af3-40ee-8883-be178c519273"
 storage_version_token = "1793127751483559"
 content_type = "text/html"
+
+[[outputs]]
+id = "vSJQ6gPwaWMJeF8S7sfAt"
+uri = "file://generated-artifacts/mint-hint-reanalysis-control-3/report.html"
+type = "html"
+title = "Mint — контроль после исправления"
+description = "Формат прошёл, QA содержание не приняла. Полный результат, замечания, измерения и инженерная сверка. Письмо не отправлялось."
+logical_id = "5ad0ed3c-b16b-4e99-a4f2-311a1c36a5ee"
+content_hash = "sha256:39f8998d710572b88f7d16eace625ffb0db332f5b9bb849a44da24a432328060"
+size = 53841
+mtime_ms = 1793129181541
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ad0ed3c-b16b-4e99-a4f2-311a1c36a5ee/e9211307-2734-4b7a-bd6f-39a537714112"
+storage_version_token = "1793129182397151"
+content_type = "text/html"

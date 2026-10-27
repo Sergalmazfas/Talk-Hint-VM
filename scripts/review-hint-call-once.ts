@@ -63,10 +63,13 @@ async function main() {
     throw new Error("DEV_EXPLICIT_MANUAL_PASS_ONLY");
   if (process.argv.includes("--send-prepared-once")) return sendPreparedOnce();
   const diagnostic = process.argv.includes("--diagnostic-pass-2");
+  const controlPass = process.argv.includes("--control-pass-3");
+  if (diagnostic && controlPass) throw new Error("MANUAL_INPUT_REQUIRED");
+  const followup = diagnostic || controlPass;
   const binding = await privateDevOwner(); // read-only, never sends
   let snapshot: any, source: any, previousManualKey: string | undefined;
   stage = "source";
-  if (diagnostic) {
+  if (followup) {
     previousManualKey = process.argv[process.argv.indexOf("--source-report-key") + 1];
     if (!process.argv.includes("--source-report-key") || !/^[a-f0-9]{64}$/.test(previousManualKey || ""))
       throw new Error("MANUAL_INPUT_REQUIRED");
@@ -86,7 +89,7 @@ async function main() {
           ? new Date(Date.parse(source.ended_at) - source.duration_ms).toISOString() : undefined },
     };
     const expectedParent = createHash("sha256")
-      .update(`owner-requested-reanalysis-v1:${snapshot.previous_report_key}`).digest("hex");
+      .update(`owner-requested-reanalysis-${controlPass ? "v2" : "v1"}:${snapshot.previous_report_key}`).digest("hex");
     if (previousManualKey !== expectedParent) throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
   } else {
     const input = process.argv[process.argv.indexOf("--input") + 1];
@@ -97,7 +100,7 @@ async function main() {
   if (!source || !/^[a-f0-9]{64}$/.test(snapshot.previous_report_key))
     throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
   const key = createHash("sha256")
-    .update(`owner-requested-reanalysis-${diagnostic ? "v2" : "v1"}:${snapshot.previous_report_key}`).digest("hex");
+    .update(`owner-requested-reanalysis-${controlPass ? "v3" : diagnostic ? "v2" : "v1"}:${snapshot.previous_report_key}`).digest("hex");
   const inserted = await pool.query(`INSERT INTO call_lab_jobs
     (key,environment,owner_id,call_sid,status,attempts,journal)
     VALUES($1,'development',$2,$3,'manual_running',1,
@@ -118,8 +121,10 @@ async function main() {
     execution: report.execution === "analysis_not_completed" ? report.execution : "owner_requested_crewai_reanalysis",
     manual_trigger: true, automatic_production_execution: false,
     previous_report_key: snapshot.previous_report_key,
-    ...(diagnostic ? { manual_pass: 2, previous_manual_report_key: previousManualKey,
-      diagnostic_authorization: "Owner explicitly approved one additional diagnostic pass; no email submission." } : {}),
+    ...(followup ? { manual_pass: controlPass ? 3 : 2, previous_manual_report_key: previousManualKey,
+      diagnostic_authorization: controlPass
+        ? "Owner explicitly approved one control pass after the native schema fix; no email submission."
+        : "Owner explicitly approved one additional diagnostic pass; no email submission." } : {}),
     provenance: "One owner-authorized CrewAI pass over the saved production snapshot. Original unchanged.",
   }, source, key);
   stage = "save";
@@ -127,8 +132,8 @@ async function main() {
     report=$3::jsonb,updated_at=now() WHERE key=$1`, [key, JSON.stringify(source), JSON.stringify(report)]);
   if (saved.rowCount !== 1) throw new Error("MANUAL_RESULT_NOT_SAVED");
   // Intentionally no outbox insertion; a saved file is not a sent email.
-  const directory = path.resolve(diagnostic
-    ? "generated-artifacts/mint-hint-reanalysis-diagnostic-2" : "generated-artifacts/mint-hint-reanalysis");
+  const directory = path.resolve(controlPass ? "generated-artifacts/mint-hint-reanalysis-control-3"
+    : diagnostic ? "generated-artifacts/mint-hint-reanalysis-diagnostic-2" : "generated-artifacts/mint-hint-reanalysis");
   await mkdir(directory, { recursive: true });
   const letter = renderProcessLetter(report);
   await writeFile(path.join(directory, "report.json"), JSON.stringify(report, null, 2));

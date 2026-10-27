@@ -63,3 +63,14 @@ hide the failed structured-output path.
 **How to apply:** verify both the wire contract and the final artifact provenance
 with offline framework/SDK tests. Keep a failed native response failed; do not
 introduce hidden model-based conversion or repair calls as a parser fix.
+
+Native schema compliance is not evidence that the reviewer's objections are
+correct.
+
+**Why:** a correctly structured QA response can still invent a category rule
+that contradicts the author's canonical rubric.
+
+**How to apply:** give author and reviewer the same authoritative domain rubric,
+not merely their separate output schemas. Preserve disputed QA feedback and keep
+the result unaccepted; an engineer identifying one false objection does not
+justify silently accepting the other disputed judgments.
