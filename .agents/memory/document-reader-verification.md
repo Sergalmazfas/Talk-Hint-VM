@@ -15,3 +15,14 @@ book unreadable even though its document identity and database history were inta
 corresponding reader and version before committing, preserve prior revisions,
 and verify a supported authenticated document link. Do not invent new query
 parameters as if they were working deep links.
+
+Validate a crew extension against the real domain rules, not only a pure helper
+and TypeScript types. Those checks are not equivalent.
+
+**Why:** a description-only extension passed its helper checks but was rejected
+by the actual organizational model before commit. The transaction correctly
+preserved the earlier state.
+
+**How to apply:** include the actual domain validator in the final verification,
+respect dependencies between newly registered documents and their references,
+and commit the coherent change atomically. Never relax the validator to force an import.

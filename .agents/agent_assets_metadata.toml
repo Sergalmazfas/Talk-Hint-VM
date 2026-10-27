@@ -1251,3 +1251,31 @@ mtime_ms = 1793137676427
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6df4b7bd-d1f9-49c7-a67a-e94e51977623/f64ae60f-18cd-4b65-84b7-72dc3ea31f07"
 storage_version_token = "1793137695045180"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "1mNkO8asF1axykGPW4YC1"
+uri = "file://generated-artifacts/lab-media-roles/TalkHint_crew_video_audio_v1_rev822.zip"
+type = "unspecified"
+title = "Crew — видео и звук · JSON v1 · rev822"
+description = "Две должности по 8 действий, принимающие действия P.LAB, ресурсы, формы отчётов и незаполненные протоколы ручного прохода. Описание сохранено; агенты и Gemini не запущены."
+logical_id = "61d74fa6-1ea6-4a78-9e59-589fb8063199"
+content_hash = "sha256:01d3642464fb0247d6c7c3cb4738847d223905eca4ecef2daeed3a683e52cfff"
+size = 31492
+mtime_ms = 1793140265179
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61d74fa6-1ea6-4a78-9e59-589fb8063199/6c3a5ef6-da4f-4c1a-a9ec-068d16f40f56"
+storage_version_token = "1793140297900629"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "4HpE_4I-XjPCd8KsmN44K"
+uri = "file://generated-artifacts/current-rules-export/TalkHint_current_rules_2026-10-27.zip"
+type = "unspecified"
+title = "TalkHint — текущие правила и память · ZIP"
+description = "replit.md целиком, 77 файлов памяти, профиль, 89 сохранённых планов, техническая заметка и INDEX.md. 169 исходных файлов сохранены побайтово; индекс содержит расположение модели/книги и честный список пробелов."
+logical_id = "f68078fe-477a-4413-857c-896f7b1528c2"
+content_hash = "sha256:5c0b774dd44cb36f1c80955a94c83434a42d9f57e02abbbccfd1dc1c9ee252b0"
+size = 379420
+mtime_ms = 1793140627959
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f68078fe-477a-4413-857c-896f7b1528c2/531ce884-a124-4615-9eca-0ca045c38545"
+storage_version_token = "1793140634019270"
+content_type = "application/octet-stream"
