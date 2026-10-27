@@ -19,11 +19,32 @@ import type { LiveLatencyRecorder } from "./candidatePipeline";
 // ended" race without holding call state open indefinitely.
 export const SUGGESTION_ACK_GRACE_MS = 1500;
 
-const registry = new Map<string, { userId: string; recorder: LiveLatencyRecorder }>();
+const registry = new Map<string, { userId: string; recorder: LiveLatencyRecorder; visible: any[] }>();
 
 /** Exposes a call's latency recorder for suggestion_ack routing. */
 export function registerLatencyRecorder(callSid: string, userId: string, recorder: LiveLatencyRecorder): void {
-  registry.set(callSid, { userId, recorder });
+  registry.set(callSid, { userId, recorder, visible: [] });
+}
+
+/** Diagnostic only: does not change ACK, hint selection, or call behaviour. */
+export function recordUiVisibility(userId: string | undefined, message: any): boolean {
+  if (!userId || typeof message.callSid !== "string") return false;
+  const entry = registry.get(message.callSid);
+  if (!entry || entry.userId !== userId || entry.visible.length >= 200 ||
+      !["opening", "hint", "translation_ru"].includes(message.kind) ||
+      !Number.isSafeInteger(message.utteranceId) || message.utteranceId < 0 ||
+      !entry.recorder.wasSent(message.utteranceId) ||
+      typeof message.visibleAt !== "string" || !Number.isFinite(Date.parse(message.visibleAt)) ||
+      typeof message.build !== "string" || message.build.length > 40) return false;
+  if (entry.visible.some(e => e.kind === message.kind && e.utteranceId === message.utteranceId)) return false;
+  entry.visible.push({ kind: message.kind, utteranceId: message.utteranceId,
+    deviceVisibleAt: message.visibleAt, receivedAt: new Date().toISOString(), build: message.build,
+    basis: "client_reports_view_visible; not proof user read it; device clock unverified" });
+  return true;
+}
+
+export function uiVisibilitySnapshot(callSid: string) {
+  return registry.get(callSid)?.visible.slice() ?? [];
 }
 
 /** Stops routing suggestion_acks to a call (after the post-close ACK grace window). */

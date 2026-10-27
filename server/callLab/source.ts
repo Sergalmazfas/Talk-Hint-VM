@@ -32,6 +32,7 @@ export function authorizedHintSource(call: any, control: any, environment: strin
     // The persisted recorder is capped and text is bounded; never invent complete history.
     full_hint_history: false, reference_verified: false,
     latency_summary: latency?.summary ?? null,
+    ui_visibility: call.metadata?.hintUiVisibility ?? null,
     limitations: ["Сохранённый текст не является проверенным STT reference; WER неизвестен",
       "Показатель speech-match не равен полезности владельцу",
       "До подсказки считается от STT final, не от физического конца речи; измерения с iPhone не подтверждены",

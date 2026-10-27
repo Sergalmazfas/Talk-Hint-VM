@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { isBenchmarkAdmin } from "../benchmark/adminGate";
 import { GmailLabMail } from "./mail";
+import { processReport } from "./processReport";
 import { LabStore } from "./store";
 import { runHintLab, checkHintLabRuntime, cleanupLabScratch } from "./process";
 import { authorizedHintSource, registerLabSourceOwner } from "./source";
@@ -134,6 +135,9 @@ export async function hintLabTick(pool: Pool, dependencies: {
             if (aborter.signal.aborted) {
               await store.fail(job.key, "analysis:canceled");
             } else {
+              report.private_report_path = `/api/admin/call-lab/reports/${job.key}`;
+              report.mail_form_version = 3;
+              report.process_plan_fact = processReport(report);
               await store.finish(job.key, source, report);
               await store.note(job.key, `qa:${report.qa_status === "QA: принято" ? "accepted" : "unverified_or_returned"}`);
             }

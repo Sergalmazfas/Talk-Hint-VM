@@ -995,6 +995,38 @@ final class InCallViewController: UIViewController {
 // MARK: - CallHintStreamDelegate
 
 extension InCallViewController: CallHintStreamDelegate {
+    func callHintStream(_ stream: CallHintStream, visibleKindsFor event: CallHintEvent) -> [String] {
+        func visible(_ target: UIView) -> Bool {
+            guard let window = target.window,
+                  window.bounds.intersects(target.convert(target.bounds, to: window)),
+                  !target.bounds.isEmpty else { return false }
+            var ancestor: UIView? = target
+            while let node = ancestor {
+                if node.isHidden || node.alpha < 0.01 { return false }
+                ancestor = node.superview
+            }
+            return true
+        }
+        guard isViewLoaded, view.window != nil, presentedViewController == nil,
+              UIApplication.shared.applicationState == .active,
+              case .suggestion(let en, _, let options) = event, visible(suggestionBanner) else { return [] }
+        if let options = options, options.count >= 2 {
+            guard !choiceButtonsStack.isHidden,
+                  choiceButtonsStack.arrangedSubviews.compactMap({ ($0 as? UIButton)?.accessibilityValue }) == options.map({ $0.en }) else { return [] }
+        } else {
+            guard visible(suggestionPrimaryLabel), suggestionPrimaryLabel.text == en else { return [] }
+        }
+        var kinds = ["hint"]
+        if SessionStore.shared.language == "ru", visible(suggestionSecondaryLabel),
+           !suggestionPrimaryLabel.isHidden,
+           !(suggestionSecondaryLabel.text ?? "").isEmpty {
+            kinds.append("translation_ru")
+        }
+        // prepareOpening is currently ignored on this screen. Do not invent an
+        // opening-visible event or change product behaviour to make it green.
+        return kinds
+    }
+
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent) {
         switch event {
         case .guestTranscript(let text, let translation, let confidence, let isFinal):

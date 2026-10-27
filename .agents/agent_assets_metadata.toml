@@ -1083,3 +1083,31 @@ mtime_ms = 1793073956760
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/060367ec-c3da-4dc4-b3d5-aff6c4c331d1/a314e594-ddf9-48bb-bae9-ce76b5636d90"
 storage_version_token = "1793074051394975"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "f3g-GKRuGypvESAjvIbGE"
+uri = "file://generated-artifacts/hint-letter-v3/Hint_%D0%BF%D0%B8%D1%81%D1%8C%D0%BC%D0%BE_v3.html"
+type = "html"
+title = "Hint — пример письма v3"
+description = "Синтетический пример план-факта по восьми звеньям. Не реальный звонок и не отправленное письмо."
+logical_id = "1179a04a-ed59-44b1-8742-7d7962bbecc3"
+content_hash = "sha256:d0c9b69e68bfb6467a7e8d1a46ee7a5d8f493d1e4462aa2d1a2dcfddbdc704f9"
+size = 4067
+mtime_ms = 1793076622909
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1179a04a-ed59-44b1-8742-7d7962bbecc3/b23e8afe-ba00-4cc7-9f62-912da278af48"
+storage_version_token = "1793076692060601"
+content_type = "text/html"
+
+[[outputs]]
+id = "ezY8XoH3pCGJvL8XeitHC"
+uri = "file://generated-artifacts/hint-letter-v3/Hint_letter_v3_review_rev793.zip"
+type = "unspecified"
+title = "Пакет сверки v3 · ревизия 793"
+description = "Пример HTML/TXT, исходные синтетические данные, diff телеметрии iOS и перечень проверок и ограничений."
+logical_id = "2da08e23-039b-4781-b172-3b14b159e84b"
+content_hash = "sha256:644e53d5ddf226eca6b5bed9aa405f10346baa60008adb767e642e0ccb9100b4"
+size = 10459
+mtime_ms = 1793076686382
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2da08e23-039b-4781-b172-3b14b159e84b/737173da-5b48-4799-9f52-7071f0c34dc4"
+storage_version_token = "1793076692725473"
+content_type = "application/octet-stream"

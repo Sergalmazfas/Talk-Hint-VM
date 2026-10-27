@@ -1,4 +1,5 @@
 import { ReplitConnectors } from "@replit/connectors-sdk";
+import { renderProcessLetter } from "./processReport";
 
 export interface MailBinding { recipient: string; connection_id: string }
 export class GmailLabMail {
@@ -75,26 +76,9 @@ export function encodeLetter(recipient: string, messageId: string, report: any) 
     throw new Error("LAB_BAD_MAIL_HEADER");
   }
   const safe = (v: unknown) => String(v || "неизвестно").replace(/[\r\n]/g, " ").slice(0, 220);
-  const number = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? String(v) : "неизвестно";
-  const metrics = report.metrics ?? {};
-  const subject = `${report.synthetic ? "ТЕСТ · " : ""}Hint · ${safe(report.ended_at)} · ` +
-    `${safe((report.languages ?? []).join("/"))} · ${number(report.duration_ms)} мс · ` +
-    `ошибок (AI) ${number(metrics.ai_classified_errors)} · пропущено ${number(metrics.confirmed_missed_hints)} · ${safe(report.qa_status)}`;
-  const letter = report.letter ?? {};
-  const body = [
-    report.synthetic ? "СИНТЕТИЧЕСКАЯ ПРОВЕРКА. Реального звонка не было." : "Лаборатория Hint · отчёт по завершённому звонку",
-    "Это AI-оценка, не приёмка владельцем и не отзыв участника.",
-    "", "ИТОГ", letter.summary_ru, "", "КАЧЕСТВО", letter.quality_ru,
-    "", "QA", report.qa_status, ...(report.qa_issues ?? []),
-    "", "СОБЫТИЯ", ...(report.analysis?.findings ?? []).map((f: any) =>
-      `${f.event_id}: ${f.category}\nОснование: ${f.evidence}\n${f.explanation}`),
-    "", "ОГРАНИЧЕНИЯ", ...(report.analysis?.limitations ?? []), ...(letter.limitations_ru ?? []),
-    `WER: ${number(metrics.wer)}`, `Цена минуты: ${number(metrics.minute_price)}`,
-    `Задержки (из сохранённой телеметрии): ${metrics.latency ? JSON.stringify(metrics.latency) : "нет данных"}`,
-    `Replay: ${report.replay?.status ?? "не выполнен"}`,
-    "", "ПРЕДЛОЖЕНИЯ", ...(letter.proposals_ru ?? []),
-    "", "HEAD.07 — последующий выборочный контроль. Outbox не принимает решения QA.",
-  ].map(v => String(v ?? "")).join("\n");
+  const rendered = renderProcessLetter(report);
+  const subject = safe(rendered.subject);
+  const body = rendered.body;
   const encodedBody = Buffer.from(body).toString("base64").match(/.{1,76}/g)?.join("\r\n") ?? "";
   // RFC2047 words are folded to remain below header line limits.
   const words = Array.from(subject).reduce((a, c) => {

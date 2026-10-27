@@ -383,6 +383,10 @@ export class LiveLatencyRecorder {
   private entries: HintLatencyEntry[] = [];
   private byUtterance = new Map<number, HintLatencyEntry>();
 
+  wasSent(utteranceId: number): boolean {
+    return this.byUtterance.get(utteranceId)?.outcome === "sent";
+  }
+
   start(utteranceId: number, sttFinalAt: number): void {
     const e: HintLatencyEntry = { utteranceId, sttFinalAt, outcome: "dropped" };
     this.entries.push(e);

@@ -42,6 +42,8 @@ import {
   registerLatencyRecorder,
   unregisterLatencyRecorder,
   recordSuggestionAck,
+  recordUiVisibility,
+  uiVisibilitySnapshot,
   SUGGESTION_ACK_GRACE_MS,
 } from "./latencyAck";
 import { normalizeText, textSimilarity, matchDialogueLibrary as matchDialogueLibraryPure, isOwnerOnlyQuestion } from "./dialogueMatch";
@@ -1347,6 +1349,8 @@ NEVER output JSON - only plain text with the phrase and translation.`;
             },
             log: (msg) => log(msg, "server"),
           }, secretary ? "secretary" : "hint");
+        } else if (message.type === "ui_visible") {
+          if (hintSourceMarker(userId)) recordUiVisibility(userId, message);
         } else if (message.type === "suggestion_ack") {
           // Device confirmed rendering a suggestion — final stage of the
           // speech→hint latency chain. Silent no-op when stale/unowned.
@@ -3092,6 +3096,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         // use different handlers. This records no audio and does not run a laboratory.
         const flushLabSource = hintSourceMarker(streamUserId);
         setTimeout(() => {
+          const visibility = uiVisibilitySnapshot(flushSid);
           unregisterLatencyRecorder(flushSid);
           if (latencyRecorder.count > 0 || flushGoalText || flushLabSource) {
             const meta: Record<string, unknown> = {
@@ -3104,6 +3109,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               meta.goalType = flushGoalType;
             }
             if (flushLabSource) meta.labHintSource = flushLabSource;
+            if (visibility.length) meta.hintUiVisibility = { version: 1, events: visibility, capped: visibility.length >= 200 };
             void storage
               .mergeCallMetadataByCallSid(flushSid, meta)
               .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));

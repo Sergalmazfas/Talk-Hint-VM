@@ -53,6 +53,8 @@ enum CallHintEvent: Equatable {
 }
 
 protocol CallHintStreamDelegate: AnyObject {
+    /// Called after a main-queue turn. Return only actually visible UI kinds.
+    func callHintStream(_ stream: CallHintStream, visibleKindsFor event: CallHintEvent) -> [String]
     func callHintStream(_ stream: CallHintStream, didReceive event: CallHintEvent)
     func callHintStreamDidConnect(_ stream: CallHintStream)
     /// The socket dropped mid-call and the stream is about to retry. `attempt` is
@@ -76,6 +78,10 @@ protocol CallHintStreamDelegate: AnyObject {
     /// label. This is the silent-failure case the manual-reconnect retry path
     /// would otherwise hit when `openSocket()` returns early with no token.
     func callHintStreamDidRequireSignIn(_ stream: CallHintStream)
+}
+
+extension CallHintStreamDelegate {
+    func callHintStream(_ stream: CallHintStream, visibleKindsFor event: CallHintEvent) -> [String] { [] }
 }
 
 /// Subscribes to the backend `/ui` WebSocket and surfaces live transcripts and
@@ -231,6 +237,19 @@ final class CallHintStream: NSObject {
               let utteranceId = obj["utteranceId"] as? NSNumber,
               let callSid = obj["callSid"] as? String, !callSid.isEmpty else { return nil }
         return ["type": "suggestion_ack", "utteranceId": utteranceId, "callSid": callSid]
+    }
+
+    static func visibilityPayload(forFrame text: String, kind: String, at: Date, build: String) -> [String: Any]? {
+        guard ["opening", "hint", "translation_ru"].contains(kind),
+              let data = text.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              ["suggestion", "prepare_opening"].contains(obj["type"] as? String ?? ""),
+              let id = obj["utteranceId"] as? NSNumber, id.doubleValue >= 0,
+              id.doubleValue.rounded() == id.doubleValue,
+              let sid = obj["callSid"] as? String, !sid.isEmpty else { return nil }
+        return ["type": "ui_visible", "kind": kind, "callSid": sid,
+                "utteranceId": id, "visibleAt": ISO8601DateFormatter().string(from: at),
+                "build": String(build.prefix(40))]
     }
 
     /// Builds the `prepare_message` control message (one PREPARE turn). The
@@ -514,6 +533,17 @@ final class CallHintStream: NSObject {
             // the hint actually reaching the screen — not just socket arrival.
             if let ack = CallHintStream.suggestionAckPayload(forFrame: text) {
                 self.send(ack)
+            }
+            // Diagnostic only, no UI mutation. Missing frame IDs/hidden views
+            // produce no event, never a fabricated successful display.
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+                for kind in self.delegate?.callHintStream(self, visibleKindsFor: event) ?? [] {
+                    if let payload = Self.visibilityPayload(forFrame: text, kind: kind, at: Date(), build: build) {
+                        self.send(payload)
+                    }
+                }
             }
         }
     }
