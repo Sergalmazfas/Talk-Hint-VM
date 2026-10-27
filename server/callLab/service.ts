@@ -154,7 +154,7 @@ export async function hintLabTick(pool: Pool, dependencies: {
       AND status='unknown' AND reconcile_count<3 AND updated_at<now()-interval '30 seconds' LIMIT 10`,
     [config.environment, config.owner]);
     for (const row of unknown.rows) {
-      const found = await deadline(dependencies.mail.sent(control, row.message_id), 30_000);
+      const found = await deadline(dependencies.mail.sent(control, row.message_id, row.gmail_id), 30_000);
       if (found) await store.mailState(row.key, "sent_confirmed", found);
       else await client.query(`UPDATE call_lab_outbox SET reconcile_count=reconcile_count+1,
         status=CASE WHEN reconcile_count>=2 THEN 'needs_review' ELSE 'unknown' END,updated_at=now() WHERE key=$1`, [row.key]);
@@ -171,8 +171,9 @@ export async function hintLabTick(pool: Pool, dependencies: {
           !stopping && labConfiguration().allowed &&
           !!(await client.query("SELECT enabled FROM call_lab_controls WHERE key=$1", [control.key])).rows[0]?.enabled), 60_000);
         await store.mailState(message.key, "gmail_accepted", id);
-        // Gmail acceptance is not inbox delivery. Reconcile by the same Message-ID.
-        const found = await deadline(dependencies.mail.sent(control, message.message_id), 30_000);
+        // Confirm the known Gmail ID; the transport can rewrite RFC Message-ID.
+        // SENT still does not prove inbox delivery or the owner's acceptance.
+        const found = await deadline(dependencies.mail.sent(control, message.message_id, id), 30_000);
         if (found) await store.mailState(message.key, "sent_confirmed", found);
         else await store.mailState(message.key, "unknown", id);
       }

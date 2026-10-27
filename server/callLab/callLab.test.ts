@@ -57,6 +57,27 @@ describe("private Hint source scope", () => {
   });
 });
 describe("Gmail self-mail adapter (mocked, no external writes)", () => {
+  it("confirms known Gmail ID despite rewritten RFC Message-ID, without search or resend", async () => {
+    const sdk = { proxy: vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ emailAddress: binding.recipient })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "gmail-fixture", labelIds: ["SENT", "INBOX"],
+        payload: { headers: [{ name: "To", value: binding.recipient }, { name: "Message-ID", value: "<rewritten@gmail.invalid>" }] } }))) };
+    expect(await new GmailLabMail(sdk as any).sent(binding, messageId, "gmail-fixture")).toBe("gmail-fixture");
+    expect(sdk.proxy).toHaveBeenCalledTimes(2);
+    expect(sdk.proxy.mock.calls.every(c => c[2].method === "GET")).toBe(true);
+    expect(sdk.proxy.mock.calls[1][1]).toContain("/messages/gmail-fixture?");
+  });
+  it("does not confirm a provider ID without SENT or with another recipient", async () => {
+    for (const msg of [
+      { id: "fixture", labelIds: ["INBOX"], payload: { headers: [{ name: "To", value: binding.recipient }] } },
+      { id: "fixture", labelIds: ["SENT"], payload: { headers: [{ name: "To", value: "other@example.invalid" }] } },
+    ]) {
+      const sdk = { proxy: vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ emailAddress: binding.recipient })))
+        .mockResolvedValueOnce(new Response(JSON.stringify(msg))) };
+      expect(await new GmailLabMail(sdk as any).sent(binding, messageId, "fixture")).toBeNull();
+    }
+  });
   it("builds self-only RFC822; subject injection cannot add Cc/Bcc; no invented metrics", () => {
     const report = unavailableReport(call, "No reference");
     report.ended_at = "fixture\r\nBcc: other@example.invalid";

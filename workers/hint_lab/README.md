@@ -46,8 +46,11 @@ bounded; an uncertain Gmail send is **looked up**, never blindly resent.
 HEAD.07 remains selective subsequent control; outbox transports unverified or
 returned results with their real status instead of inventing acceptance.
 
-Gmail only uses profile verification, lookup of its own deterministic Message-ID
-in SENT, and self-send. No general inbox ingestion, per-user Gmail feature or
+Gmail only uses profile verification, metadata of its own acknowledged Gmail ID
+(SENT + self recipient), narrow Message-ID lookup when no provider ID is known,
+and self-send. The tested transport rewrites RFC Message-ID: an uncertain send
+without an acknowledged provider ID may require review, never an automatic resend.
+No general inbox ingestion, per-user Gmail feature or
 access from anonymous Product Crew is added.
 
 Private authenticated endpoints:

@@ -31,9 +31,23 @@ export class GmailLabMail {
     }
   }
 
-  async sent(binding: MailBinding, messageId: string): Promise<string | null> {
+  async sent(binding: MailBinding, messageId: string, providerId?: string | null): Promise<string | null> {
     if (!/^[a-f0-9]+@talkhint-lab\.invalid$/.test(messageId)) throw new Error("LAB_BAD_MESSAGE_ID");
     await this.verify(binding);
+    // The tested Gmail transport rewrote our RFC Message-ID. An acknowledged
+    // Gmail ID is stronger evidence than a search index or a custom header.
+    if (providerId) {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(providerId)) throw new Error("LAB_BAD_PROVIDER_ID");
+      const response = await this.sdk.proxy("google-mail",
+        `/gmail/v1/users/me/messages/${encodeURIComponent(providerId)}?format=metadata&fields=id,labelIds,payload%2Fheaders`,
+        { method: "GET", connectionId: binding.connection_id });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`LAB_GMAIL_LOOKUP_${response.status}`);
+      const value = await response.json();
+      const to = value.payload?.headers?.find((h: any) => String(h.name).toLowerCase() === "to")?.value;
+      return value.id === providerId && value.labelIds?.includes("SENT") &&
+        typeof to === "string" && to.trim().toLowerCase() === binding.recipient.toLowerCase() ? providerId : null;
+    }
     const q = encodeURIComponent(`in:sent rfc822msgid:${messageId}`);
     const response = await this.sdk.proxy("google-mail", `/gmail/v1/users/me/messages?q=${q}&maxResults=2`,
       { method: "GET", connectionId: binding.connection_id });

@@ -8,7 +8,7 @@ channel = "stable-24_05"
 [deployment]
 deploymentTarget = "vm"
 build = ["npm", "run", "build"]
-run = ["node", "./dist/index.cjs"]
+run = ["env", "LAB_ENABLED=true", "LAB_TARGET_ENVIRONMENT=production", "node", "./dist/index.cjs"]
 
 [env]
 PORT = "5000"

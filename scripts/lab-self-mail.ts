@@ -31,7 +31,7 @@ try {
   } else {
     const store = new LabStore(pool);
     const row = (await pool.query("SELECT * FROM call_lab_outbox WHERE key=$1", [key])).rows[0];
-    const found = await mail.sent(binding, messageId);
+    const found = await mail.sent(binding, messageId, row.gmail_id);
     if (found) {
       await store.mailState(key, "sent_confirmed", found);
       console.log(JSON.stringify({ previouslySent: true, confirmedInSent: true, noResend: true }));
@@ -44,7 +44,7 @@ try {
         await store.note(key, "manual-test:owner-confirmed-self-send");
         const gmailId = await mail.send(binding, messageId, report);
         await store.mailState(key, "gmail_accepted", gmailId);
-        const confirmed = await mail.sent(binding, messageId);
+        const confirmed = await mail.sent(binding, messageId, gmailId);
         await store.mailState(key, confirmed ? "sent_confirmed" : "unknown", confirmed ?? gmailId);
         await writeFile("/tmp/hint-lab-private/self-mail-receipt.json",
           JSON.stringify({ key, messageId, gmailId, confirmedInSent: !!confirmed }), { mode: 0o600 });
