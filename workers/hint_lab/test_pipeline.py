@@ -58,6 +58,22 @@ class FlowTests(unittest.TestCase):
             self.assertIn("НЕ отдельная категория", prompt)
             self.assertIn("Допустимая категория не гарантирует правильности оценки", prompt)
 
+    def test_manual_diagnostic_brief_reaches_both_independent_roles(self):
+        from workers.hint_lab import pipeline
+        source = copy.deepcopy(SOURCE)
+        source["manual_diagnostic"] = {"version": 1, "answers": [{"id": "D1", "answer": "неизвестно"}]}
+        source["deterministic"] = {"recorded_attempts": 24}
+        with patch("socket.socket.connect", side_effect=AssertionError("NETWORK_FORBIDDEN")), \
+                patch("workers.hint_lab.pipeline.single_pass", side_effect=[
+                    (ANALYSIS.model_copy(deep=True), {}), (QA(verdict="accepted", issues=[]), {}), (LETTER, {}),
+                ]) as mocked:
+            result = pipeline.run(source, llm=LLM(model="openai/gpt-5.2", api_key="offline-test-not-a-key"))
+        self.assertEqual(result["qa_status"], "QA: принято")
+        self.assertIn("Ответь в summary_ru отдельно на все D1–D5", mocked.call_args_list[0].args[1])
+        self.assertIn("Независимо проверь ответы D1–D5", mocked.call_args_list[1].args[1])
+        self.assertNotIn("Ответь в summary_ru отдельно на все D1–D5", mocked.call_args_list[1].args[1])
+        self.assertNotIn("D1–D5", mocked.call_args_list[2].args[1])
+
     def test_schema_and_rubric_drift_fails_before_any_model_request(self):
         schema = copy.deepcopy(Finding.model_json_schema())
         schema["properties"]["category"]["enum"].append("без полноты")

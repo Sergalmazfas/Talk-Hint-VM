@@ -251,10 +251,21 @@ def run(source, llm=None):
     author = make_agent("agent-1 · P.LAB", "Проверяемый разбор и письмо владельцу", llm)
     reviewer = make_agent("agent-2 · P.LG.QA", "Независимо проверить разбор, не принять без доказательств", llm)
     raw = json.dumps(source, ensure_ascii=False)
+    diagnostic_brief = (
+        "\nЭто заказанный ручной диагностический разбор D1–D5: "
+        "подавление, ACK без UI, задержка, потеря I see, перевод собеседника. "
+        "Сверь manual_diagnostic с исходными hints/ui_visibility/latency_summary и deterministic. "
+        "Это инженерные наблюдения, не готовая приёмка. Различай подтверждённый факт, "
+        "гипотезу и неизвестную причину. Отсутствие отметки не доказывает непоказ; "
+        "нет сравнимой базы — не утверждай рост задержки. Не придумывай тексты подавленных кандидатов."
+        if source.get("manual_diagnostic", {}).get("version") == 1 else ""
+    )
+    author_brief = diagnostic_brief + ("\nОтветь в summary_ru отдельно на все D1–D5." if diagnostic_brief else "")
+    qa_brief = diagnostic_brief + ("\nНезависимо проверь ответы D1–D5 и основания; ошибки перечисли в issues." if diagnostic_brief else "")
     usage, returns = [], 0
     qa_status, qa_issues, feedback = "НЕ ПРОВЕРЕНО QA", [], ""
     while True:
-        analysis, tokens = stage_pass("analysis", author, BASE + "\nВходные данные:\n" + raw +
+        analysis, tokens = stage_pass("analysis", author, BASE + author_brief + "\nВходные данные:\n" + raw +
                                       "\nВ findings разрешены только эти event_id: " +
                                       json.dumps([e["id"] for e in source.get("hints", [])]) +
                                       ". Ограничения полноты/reference/latency писать только в limitations." +
@@ -264,7 +275,7 @@ def run(source, llm=None):
         # LAB.8 is explicitly NOT RUN. No extra call or replay can be created by this worker.
         replay = {"status": "не выполнен", "reason": "Необязателен в первом пилоте; новых прогонов нет"}
         try:
-            qa, tokens = stage_pass("qa", reviewer, BASE + "\nНезависимо проверь исходные данные и разбор."
+            qa, tokens = stage_pass("qa", reviewer, BASE + qa_brief + "\nНезависимо проверь исходные данные и разбор."
                 "\nСнимок:\n" + raw + "\nLAB.8:\n" + json.dumps(replay, ensure_ascii=False) +
                 "\nРазбор:\n" + analysis.model_dump_json(), QA)
             usage.append({"stage": "qa", "tokens": tokens})

@@ -1,9 +1,51 @@
 import { describe, expect, it } from "vitest";
 import { processReport, renderProcessLetter } from "./processReport";
+import { savedMintDiagnostic } from "./manualDiagnostic";
 import { recordUiVisibility, registerLatencyRecorder, unregisterLatencyRecorder, uiVisibilitySnapshot } from "../latencyAck";
 import { LiveLatencyRecorder } from "../candidatePipeline";
 
 describe("v3 process plan/fact", () => {
+  it("preserves the exact saved Mint scope and distinguishes ACK from UI claims", () => {
+    const source = { call_id: "CA0d57ac3746143478fd70c1c624d14412",
+      hints: [
+        { id: "1", outcome: "sent", text: "Thank you.", delivered_at: 100, stt_final_at: 0 },
+        { id: "2", outcome: "sent", text: "Yes.", delivered_at: 200, stt_final_at: 100 },
+        { id: "4", outcome: "dropped", drop_reason: "cooldown" },
+        { id: "16", outcome: "sent", text: 'If found: "the reset menu now."', delivered_at: 300, stt_final_at: 200 },
+      ], ui_visibility: { events: [{ kind: "hint", utteranceId: 2 },
+        { kind: "translation_ru", utteranceId: 2 }] },
+      latency_summary: { brainP50Ms: 2017, brainP95Ms: 3491, deliveryP50Ms: 121, deliveryP95Ms: 129 } };
+    const diagnostic = savedMintDiagnostic(source);
+    expect(diagnostic.acknowledged_without_ui_ids).toEqual(["1", "16"]);
+    expect(diagnostic.answers.map(a => a.id)).toEqual(["D1", "D2", "D3", "D4", "D5"]);
+    expect(diagnostic.answers[2].answer).toContain("Рост не доказан");
+    expect(diagnostic.answers[3].answer).toContain("серверном тексте");
+    expect(diagnostic.answers[4].answer).toContain("причина");
+    expect(() => savedMintDiagnostic({ ...source, call_id: "other" })).toThrow("DIAGNOSTIC_CALL_SCOPE_REQUIRED");
+  });
+  it("renders a short manual-only letter from code numbers and preserves QA refusal", () => {
+    const manual_diagnostic = { version: 1, acknowledged_without_ui_ids: ["1"],
+      answers: [{ id: "D1", question: "Почему?", answer: "Причина по коду; правомерность неизвестна." }] };
+    const mail = renderProcessLetter({
+      manual_trigger: true, manual_diagnostic, environment: "development",
+      qa_status: "QA: расхождения не устранены",
+      qa_issues: ["#16: категория ошибочная не подтверждена контекстом"],
+      analysis: { summary_ru: "Предварительный разбор.", findings: [
+        { category: "ошибочная", event_id: "16" },
+      ] }, deterministic: { recorded_attempts: 24, with_recorded_text: 14,
+        sent: 14, acknowledged: 14, hints_ui_claimed: 11,
+        translations_ui_claimed: 11, dropped: 10, drop_reasons: { cooldown: 3 },
+        stt_final_to_ack_ms: { p50: 2154, p95: 3617, samples: 14 } },
+    });
+    expect(mail.body).toContain("создано с сохранённым текстом 14");
+    expect(mail.body).toContain("ACK 14; отметок показа на iPhone 11");
+    expect(mail.body).toContain("STT final→ACK: p50 2154 / p95 3617");
+    expect(mail.body).toContain("ошибочная: #16");
+    expect(mail.body).toContain("#16: категория ошибочная не подтверждена");
+    expect(mail.body).toContain("Причина по коду; правомерность неизвестна");
+    expect(mail.body).not.toContain("100%");
+    expect(renderProcessLetter({ synthetic: true }).body).not.toContain("ПЯТЬ ВОПРОСОВ");
+  });
   it("has eight stages, no fabricated denominator, and goal outside conversion", () => {
     const p = processReport({ metrics: { assessed_events: 4 }, analysis: { findings: [] } });
     expect(p.version).toBe(3);

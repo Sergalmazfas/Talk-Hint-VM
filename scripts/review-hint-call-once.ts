@@ -15,6 +15,8 @@ import { completeLabReport, renderProcessLetter } from "../server/callLab/proces
 import { GmailLabMail } from "../server/callLab/mail";
 import { safeLabError } from "../server/callLab/startup";
 import { messageIdFor } from "../server/callLab/store";
+import { savedMintDiagnostic } from "../server/callLab/manualDiagnostic";
+import { hintMeasurements } from "../server/callLab/measurements";
 
 let stage = "input";
 async function privateDevOwner() {
@@ -64,8 +66,10 @@ async function main() {
   if (process.argv.includes("--send-prepared-once")) return sendPreparedOnce();
   const diagnostic = process.argv.includes("--diagnostic-pass-2");
   const controlPass = process.argv.includes("--control-pass-3");
-  if (diagnostic && controlPass) throw new Error("MANUAL_INPUT_REQUIRED");
-  const followup = diagnostic || controlPass;
+  const deliveryPass = process.argv.includes("--delivery-pass-4");
+  if ([diagnostic, controlPass, deliveryPass].filter(Boolean).length > 1) throw new Error("MANUAL_INPUT_REQUIRED");
+  const pass = deliveryPass ? 4 : controlPass ? 3 : diagnostic ? 2 : 1;
+  const followup = pass > 1;
   const binding = await privateDevOwner(); // read-only, never sends
   let snapshot: any, source: any, previousManualKey: string | undefined;
   stage = "source";
@@ -89,7 +93,7 @@ async function main() {
           ? new Date(Date.parse(source.ended_at) - source.duration_ms).toISOString() : undefined },
     };
     const expectedParent = createHash("sha256")
-      .update(`owner-requested-reanalysis-${controlPass ? "v2" : "v1"}:${snapshot.previous_report_key}`).digest("hex");
+      .update(`owner-requested-reanalysis-v${pass - 1}:${snapshot.previous_report_key}`).digest("hex");
     if (previousManualKey !== expectedParent) throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
   } else {
     const input = process.argv[process.argv.indexOf("--input") + 1];
@@ -100,7 +104,7 @@ async function main() {
   if (!source || !/^[a-f0-9]{64}$/.test(snapshot.previous_report_key))
     throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
   const key = createHash("sha256")
-    .update(`owner-requested-reanalysis-${controlPass ? "v3" : diagnostic ? "v2" : "v1"}:${snapshot.previous_report_key}`).digest("hex");
+    .update(`owner-requested-reanalysis-v${pass}:${snapshot.previous_report_key}`).digest("hex");
   const inserted = await pool.query(`INSERT INTO call_lab_jobs
     (key,environment,owner_id,call_sid,status,attempts,journal)
     VALUES($1,'development',$2,$3,'manual_running',1,
@@ -109,6 +113,8 @@ async function main() {
   [key, binding.owner_id, snapshot.call.call_sid]);
   if (!inserted.rows.length) throw new Error("MANUAL_PASS_ALREADY_RESERVED_NO_RETRY");
   stage = "analysis";
+  if (deliveryPass) source = { ...source, manual_diagnostic: savedMintDiagnostic(source),
+    deterministic: hintMeasurements(source) };
   let report: any;
   try {
     report = await runHintLab(source);
@@ -121,8 +127,11 @@ async function main() {
     execution: report.execution === "analysis_not_completed" ? report.execution : "owner_requested_crewai_reanalysis",
     manual_trigger: true, automatic_production_execution: false,
     previous_report_key: snapshot.previous_report_key,
-    ...(followup ? { manual_pass: controlPass ? 3 : 2, previous_manual_report_key: previousManualKey,
-      diagnostic_authorization: controlPass
+    ...(deliveryPass ? { manual_diagnostic: source.manual_diagnostic } : {}),
+    ...(followup ? { manual_pass: pass, previous_manual_report_key: previousManualKey,
+      diagnostic_authorization: deliveryPass
+        ? "Owner approved one full saved-call analysis, independent QA and one short self-mail; no new calls or production changes."
+        : controlPass
         ? "Owner explicitly approved one control pass after the native schema fix; no email submission."
         : "Owner explicitly approved one additional diagnostic pass; no email submission." } : {}),
     provenance: "One owner-authorized CrewAI pass over the saved production snapshot. Original unchanged.",
@@ -132,7 +141,8 @@ async function main() {
     report=$3::jsonb,updated_at=now() WHERE key=$1`, [key, JSON.stringify(source), JSON.stringify(report)]);
   if (saved.rowCount !== 1) throw new Error("MANUAL_RESULT_NOT_SAVED");
   // Intentionally no outbox insertion; a saved file is not a sent email.
-  const directory = path.resolve(controlPass ? "generated-artifacts/mint-hint-reanalysis-control-3"
+  const directory = path.resolve(deliveryPass ? "generated-artifacts/mint-hint-delivery-4"
+    : controlPass ? "generated-artifacts/mint-hint-reanalysis-control-3"
     : diagnostic ? "generated-artifacts/mint-hint-reanalysis-diagnostic-2" : "generated-artifacts/mint-hint-reanalysis");
   await mkdir(directory, { recursive: true });
   const letter = renderProcessLetter(report);

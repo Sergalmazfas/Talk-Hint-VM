@@ -1,5 +1,6 @@
 /** Server-owned v3 rendering. Unknown coverage is never a zero or a success. */
 import { hintMeasurements } from "./measurements";
+import { manualDiagnosticLetter } from "./manualDiagnostic";
 
 export function completeLabReport(report: any, source: unknown, key: string) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("LAB_BAD_REPORT_KEY");
@@ -63,6 +64,8 @@ export function processReport(report: any) {
 }
 
 export function renderProcessLetter(report: any): { subject: string; body: string } {
+  if (report.manual_trigger && report.manual_diagnostic?.version === 1)
+    return manualDiagnosticLetter(report, reportOrigin(report.environment));
   const p = processReport(report);
   const duration = Number.isFinite(report.duration_ms) && report.duration_ms >= 0
     ? `${Math.round(report.duration_ms / 6000) / 10} мин` : "? мин";
