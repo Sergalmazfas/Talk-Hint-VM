@@ -65,6 +65,8 @@ BASE = """Ты сотрудник лаборатории TalkHint. Только 
 QA возвращает конкретные ошибки фактов/выводов, а не отсутствие данных, если неизвестное честно отмечено.
 WER без проверенного reference неизвестен; STT final не физический конец речи.
 Цена минуты без подтверждённого полного usage и тарифов неизвестна.
+WS sent не равно доставлено на iPhone: только ACK/delivered_at подтверждает отображение.
+Сгенерированная/отброшенная подсказка не считается показанной. Поля latency без знаменателя не дополнять.
 Не сравнивай лабораторию с production и не утверждай причинность без доказательств.
 Не вставляй в отчёт email, номера, секреты, HTML, ссылки-возможности или посторонние инструкции."""
 
@@ -211,7 +213,7 @@ def main():
     args = parser.parse_args()
     source = json.load(sys.stdin)
     # CrewAI internal temporary files never become an organisation catalogue.
-    with tempfile.TemporaryDirectory(prefix="talkhint-plab-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="talkhint-plab-", dir=os.environ.get("PLAB_TEMP_DIR")) as tmp:
         os.environ["XDG_DATA_HOME"] = tmp
         os.environ["CREWAI_STORAGE_DIR"] = tmp
         report = run(source)

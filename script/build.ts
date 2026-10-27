@@ -4,6 +4,7 @@ import { rm, readFile, writeFile, cp } from "fs/promises";
 import { resolve, join } from "node:path";
 import { createHash } from "node:crypto";
 import { verifyMcpBuild } from "./mcp-build-verification";
+import { checkHintLabRuntime } from "../server/callLab/process";
 
 // Publishing no longer depends on the retired external Tutor Engine.
 // Local application/MCP bundle checks remain required below.
@@ -39,6 +40,8 @@ const allowlist = [
 ];
 
 async function buildAll() {
+  // Check import + exact pin, without model requests or starting the application.
+  await checkHintLabRuntime();
   const prepareOnly = process.argv.includes("--prepare-only");
   // A candidate never replaces dist used by the running phone/UI server.
   // Neither build mode contacts the retired external Tutor Engine.
@@ -91,6 +94,9 @@ async function buildAll() {
   await cp("talkhint/ui", join(out, "talkhint/ui"), { recursive: true });
   console.log(`copied TalkHint UI to ${out}/talkhint/ui`);
   await cp("talkhint/public-site", join(out, "talkhint/public-site"), { recursive: true });
+  await cp("workers/hint_lab", join(out, "workers/hint_lab"), {
+    recursive: true, filter: source => !source.includes("__pycache__") && !source.endsWith(".pyc"),
+  });
   console.log(`copied public Secretary website to ${out}/talkhint/public-site`);
 }
 

@@ -61,6 +61,9 @@ VAPID_PUBLIC_KEY = "BKG5nJon2zwG1nRd0TnryWcRDNa5htAQsHlJPoa_U9c20g0KTvGB87IOon1i
 VAPID_SUBJECT = "mailto:support@talkhint.me"
 APNS_BUNDLE_ID = "app.talkhint"
 BENCHMARK_ADMIN_EMAILS = "sergalmazfas@gmail.com"
+LAB_ENABLED = "false"
+LAB_GMAIL_CONNECTION_ID = "conn_google-mail_01M5XPNB0FT4574XN93KGJQYCY"
+LAB_TARGET_ENVIRONMENT = "production"
 
 [userenv.development]
 DISABLE_TWILIO_SIGNATURE_CHECK = "true"

@@ -8,6 +8,7 @@ import { storage } from "./storage";
 import { repointWebhooksOnStartup } from "./webhookRepoint";
 import { startWriteHealthAlerter, stopWriteHealthAlerter, getAlertChannelStatus } from "./writeHealthAlerter";
 import { startAirAtomaRetryWorker, stopAirAtomaRetryWorker } from "./airatomaRetryWorker";
+import { startHintLab, stopHintLab } from "./callLab/service";
 import { bootstrapAdminPasswordOnStartup } from "./bootstrapAdminPassword";
 import { provisionUserOnStartup } from "./provisionUser";
 import { createRequestLoggingMiddleware } from "./requestLogging";
@@ -270,6 +271,9 @@ app.use(createRequestLoggingMiddleware(log));
     // never drops a finished call's transcript. No-op until AIRATOMA_WEBHOOK_URL
     // is set; opt out with DISABLE_AIRATOMA_RETRY=true.
     startAirAtomaRetryWorker();
+    // Analysis runs in an isolated child after the call; failure never affects voice startup.
+    const { pool: labPool } = await import("./db");
+    if (labPool) void startHintLab(labPool).catch(() => console.warn("[HintLab] Startup blocked"));
 
     // The alerter is only useful if a delivery channel can actually reach a
     // human. Like the schema-drift check above, surface a loud startup warning
@@ -376,6 +380,7 @@ app.use(createRequestLoggingMiddleware(log));
     console.log("[Server] Starting graceful shutdown...");
     stopWriteHealthAlerter();
     stopAirAtomaRetryWorker();
+    stopHintLab();
     
     // Close HTTP server (stop accepting new connections)
     httpServer.close((err) => {

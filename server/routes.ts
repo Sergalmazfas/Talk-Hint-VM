@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
+import { registerCallLabRoutes } from "./callLab/routes";
 import { registerIncomingRoutes } from "./incomingSecretary/routes";
 import { registerPersonalityRoutes } from "./secretary/personalities/routes";
 import { tryIncomingSecretary, stopIncomingCard } from "./incomingSecretary/runtime";
@@ -2367,6 +2368,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
 
   registerIncomingRoutes(app, authMiddleware);
   registerPersonalityRoutes(app);
+  registerCallLabRoutes(app);
   registerCallProfileRoutes(app, authMiddleware, {
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),

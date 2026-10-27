@@ -1046,14 +1046,14 @@ content_type = "application/octet-stream"
 id = "8qf5tihXGVTYHIUOHNgWf"
 uri = "file://generated-artifacts/plab-synthetic/%D0%9F%D1%80%D0%BE%D0%B1%D0%BD%D0%BE%D0%B5_%D0%BF%D0%B8%D1%81%D1%8C%D0%BC%D0%BE_P-LAB.html"
 type = "html"
-title = "P.LAB — открыть пробное письмо"
-description = "Синтетический Hint-звонок: отдельные разбор, QA и письмо. QA принято. На почту не отправлено."
+title = "Посмотреть пробный отчёт Hint"
+description = "Синтетический пример письма. Не реальный звонок; на почту ещё не отправлен."
 logical_id = "b4cb61d5-f1f0-4b5a-a278-6f0fc7bda1ca"
 content_hash = "sha256:e95cf75c1bf22da6cc900426aa5f9993e59c01fe347ed35782974780c79d808d"
 size = 18295
 mtime_ms = 1793071768527
-storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b4cb61d5-f1f0-4b5a-a278-6f0fc7bda1ca/59ff7775-3177-4d54-b158-cd524b509453"
-storage_version_token = "1793071914844751"
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b4cb61d5-f1f0-4b5a-a278-6f0fc7bda1ca/0651936a-7fa6-4337-aa5b-2a201fd33d47"
+storage_version_token = "1793074050754785"
 content_type = "text/html"
 
 [[outputs]]
@@ -1068,4 +1068,18 @@ size = 31326
 mtime_ms = 1793071890540
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/14a97c0d-4466-4a58-9954-eed0aab0809c/f413efe7-5350-4b53-b9e9-3b94fe32c26f"
 storage_version_token = "1793071915445069"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "p_vyy39jT8E2w8kKvTTqn"
+uri = "file://generated-artifacts/P-LAB_Dev_pilot_rev783.zip"
+type = "unspecified"
+title = "P.LAB — Dev-пакет, ревизия 783"
+description = "JSON v2, текущий статус установки/Gmail и файлы синтетического отчёта. Автообработка выключена."
+logical_id = "060367ec-c3da-4dc4-b3d5-aff6c4c331d1"
+content_hash = "sha256:b2ddbead4182c883c8472d709b8ae27d7677143bc7672cb32e59a4ff36628cdd"
+size = 32124
+mtime_ms = 1793073956760
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/060367ec-c3da-4dc4-b3d5-aff6c4c331d1/a314e594-ddf9-48bb-bae9-ce76b5636d90"
+storage_version_token = "1793074051394975"
 content_type = "application/octet-stream"

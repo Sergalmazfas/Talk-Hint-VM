@@ -53,6 +53,7 @@ import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { StrategyMemoryTracker } from "./strategyMemory";
 import { createCopilotStream } from "./copilotStream";
+import { hintSourceMarker } from "./callLab/source";
 import { handleSecretaryTwilioStream } from "./secretary/agent";
 import { secretaryVoiceProvider } from "./secretary/voice";
 import {
@@ -3087,9 +3088,12 @@ NEVER output JSON - only plain text with the phrase and translation.`;
         // Snapshot goal state (already cleared from goalsByUser above).
         const flushGoalText = callGoalText;
         const flushGoalType = callGoalType;
+        // Positive provenance from the Hint handler only. Translator/Copilot/Secretary
+        // use different handlers. This records no audio and does not run a laboratory.
+        const flushLabSource = hintSourceMarker(streamUserId);
         setTimeout(() => {
           unregisterLatencyRecorder(flushSid);
-          if (latencyRecorder.count > 0 || flushGoalText) {
+          if (latencyRecorder.count > 0 || flushGoalText || flushLabSource) {
             const meta: Record<string, unknown> = {
               ...latencyRecorder.toMetadata(flushPipeline, flushSttInfo, flushOwnerTurns),
             };
@@ -3099,6 +3103,7 @@ NEVER output JSON - only plain text with the phrase and translation.`;
               meta.goalText = flushGoalText;
               meta.goalType = flushGoalType;
             }
+            if (flushLabSource) meta.labHintSource = flushLabSource;
             void storage
               .mergeCallMetadataByCallSid(flushSid, meta)
               .catch((err) => log(`[CandidatePipeline] latency flush failed: ${err}`, "websocket"));
