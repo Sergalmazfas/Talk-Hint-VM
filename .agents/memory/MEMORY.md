@@ -72,3 +72,4 @@
 - [Secretary Lab cost boundaries](secretary-lab-cost-boundaries.md) — Agents minutes differ from TTS API prices; provider usage is not an invoice; freeze tariffs, never reprice history.
 - [Prompt facts vs clocks](prompt-validation-clock.md) — anti-hallucination checks must distinguish explicit runtime UTC from business hours.
 - [Gmail лаборатории](lab-mail-boundary.md) — workspace OAuth разрешён для писем владельцу, не для почтового чата или доступа клиентов продукта.
+- [Document reader verification](document-reader-verification.md) — сохранение документа не доказывает, что веб-книга и MCP читают его актуальную версию.

@@ -81,7 +81,7 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
     report.execution === "manual_assistant_review"
       ? "Ручной разбор ассистентом по сохранённым данным и скриншотам. CrewAI и независимый QA не запускались. Не приёмка владельцем."
       : "AI-оценка не является приёмкой владельцем или отзывом участника.",
-    `QA: ${report.qa_status ?? "НЕ ПРОВЕРЕНО QA"}`,
+    String(report.qa_status ?? "НЕ ПРОВЕРЕНО QA"),
     "", "ПЛАН / ФАКТ",
     "План — 100% применимых случаев; цель — отдельно.",
     ...p.rows.map(r => `${labels[r.id]}: ${r.fact}`),
@@ -92,6 +92,11 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
     report.execution === "analysis_not_completed"
       ? `AI-разбор не завершён: ${report.analysis_failure?.code ?? "причина не сохранена старой версией"}. QA не выполнена.`
       : "Слабое звено по проверенной рубрике не установлено; неизвестное не означает дефект.",
+    ...(Array.isArray(report.qa_issues) && report.qa_issues.length && report.execution !== "analysis_not_completed"
+      ? ["ВОЗВРАТ QA — НЕ ПРИЁМКА",
+        ...report.qa_issues.slice(0, 6).map((issue: unknown) =>
+          String(issue).replace(/\s+/g, " ").slice(0, 350)),
+        ...(report.qa_issues.length > 6 ? ["Остальные замечания — в полном разборе."] : [])] : []),
     ...((report.analysis?.findings ?? []).slice(0, 1).map((f: any) =>
       `AI-наблюдение, не приёмка: ${String(f.explanation).slice(0, 160)}`)),
     "ПОЛНЫЙ РАЗБОР",
@@ -109,6 +114,7 @@ function measurementLines(m: any): string[] {
   const value = (v: unknown) => typeof v === "number" ? String(v) : "?";
   const latency = m.stt_final_to_ack_ms;
   return ["ИЗМЕРЕНИЯ СОХРАНЁННОГО ЖУРНАЛА",
+    `Попыток ${value(m.recorded_attempts)} · записей с текстом ${value(m.with_recorded_text)}; полное число генераций неизвестно`,
     `Отправлено ${value(m.sent)} · ACK ${value(m.acknowledged)} · iPhone ${value(m.hints_ui_claimed)}`,
     `Подавлено ${value(m.dropped)}: ${Object.entries(m.drop_reasons ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "причины неизвестны"}`,
     `STT final → ACK: p50 ${value(latency?.p50)} / p95 ${value(latency?.p95)} мс, n=${value(latency?.samples)}`,

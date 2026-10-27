@@ -27,6 +27,9 @@ export function labAnalysisFailure(error: unknown) {
   return {
     code,
     stage: ["analysis", "qa", "letter", "source"].includes(value?.stage) ? value.stage : "worker",
+    ...(Number.isInteger(value?.exit_code) && value.exit_code >= 0 && value.exit_code <= 255
+      ? { exit_code: value.exit_code } : {}),
+    ...(["SIGKILL", "SIGTERM", "SIGABRT", "SIGSEGV"].includes(value?.signal) ? { signal: value.signal } : {}),
     ...(Number.isInteger(value?.http_status) && value.http_status >= 400 && value.http_status <= 599
       ? { http_status: value.http_status } : {}),
     ...(typeof value?.model === "string" && /^[a-z0-9./_-]{1,80}$/i.test(value.model) ? { model: value.model } : {}),
@@ -106,10 +109,16 @@ export function runHintLab(source: unknown, options: { signal?: AbortSignal; tim
     // Never log raw provider output; it can contain personal prompts.
     child.stderr.on("data", chunk => { stderr = (stderr + chunk.toString()).slice(-8192); });
     child.once("error", () => end(new Error("LAB_PYTHON_UNAVAILABLE")));
-    child.once("close", code => {
+    child.once("close", (code, signal) => {
       if (settled) return;
       if (code !== 0) {
         const error = new Error("LAB_ANALYSIS_FAILED") as Error & { diagnostic?: unknown };
+        // A native process crash/import failure may never reach Python's JSON
+        // exception handler. Preserve bounded process facts, not raw stderr,
+        // so it is not falsely reported as a model/schema failure.
+        error.diagnostic = labAnalysisFailure({ diagnostic: {
+          code: "LAB_ANALYSIS_FAILED", stage: "worker", exit_code: code, signal,
+        } });
         // Only the fixed structured envelope is retained, never raw provider text.
         for (const line of stderr.trim().split("\n").reverse()) {
           try {

@@ -39,7 +39,13 @@ describe("owner action result policy", () => {
   });
   it("publication bootstrap can pause without re-enabling a saved switch", () => {
     const source = readFileSync("server/callLab/service.ts", "utf8");
-    expect(source).toContain('process.env.LAB_START_PAUSED === "true"');
-    expect(source).toContain("WHEN $7 THEN false ELSE call_lab_controls.enabled");
+    // Policy moved to startup.ts; production must remain paused even if the
+    // environment asks for automatic activation. Check the current assembly,
+    // not the removed inline expression or an obsolete SQL parameter index.
+    const startup = readFileSync("server/callLab/startup.ts", "utf8");
+    expect(startup).toContain('process.env.NODE_ENV === "production"');
+    expect(startup).toContain('process.env.LAB_START_PAUSED !== "false"');
+    expect(source).toContain("labStartsPaused");
+    expect(source).toContain("WHEN $6 THEN false ELSE call_lab_controls.enabled");
   });
 });

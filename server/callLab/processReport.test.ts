@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { processReport, renderProcessLetter } from "./processReport";
 import { savedMintDiagnostic } from "./manualDiagnostic";
+import { labAnalysisFailure } from "./process";
 import { recordUiVisibility, registerLatencyRecorder, unregisterLatencyRecorder, uiVisibilitySnapshot } from "../latencyAck";
 import { LiveLatencyRecorder } from "../candidatePipeline";
 
@@ -63,6 +64,24 @@ describe("v3 process plan/fact", () => {
       expect(processReport({ process_rubric: { ...process_rubric, ...patch } }).percent).toBeNull();
     }
   });
+  it("keeps the refusal and hint-specific reasons in the short automatic letter", () => {
+    const mail = renderProcessLetter({ qa_status: "QA: расхождения не устранены",
+      qa_issues: ["#5: ошибочная — неподтверждённое списание денег"],
+      deterministic: { recorded_attempts: 17, with_recorded_text: 14, sent: 14,
+        acknowledged: 14, hints_ui_claimed: 11, translations_ui_claimed: 11,
+        dropped: 3, drop_reasons: { cooldown: 1 }, stt_final_to_ack_ms: { p50: 2217, p95: 5136, samples: 14 } } });
+    expect(mail.body).toContain("ВОЗВРАТ QA — НЕ ПРИЁМКА");
+    expect(mail.body).toContain("#5: ошибочная");
+    expect(mail.body).toContain("Попыток 17 · записей с текстом 14");
+    expect(mail.body).not.toContain("QA: QA:");
+  });
+  it("does not call a failed analysis a QA return or invent its missing diagnostics", () => {
+    const mail = renderProcessLetter({ execution: "analysis_not_completed",
+      qa_status: "НЕ ПРОВЕРЕНО QA", qa_issues: ["MODEL_FAILURE: old implementation"] });
+    expect(mail.body).toContain("причина не сохранена старой версией");
+    expect(mail.body).toContain("QA не выполнена");
+    expect(mail.body).not.toContain("ВОЗВРАТ QA");
+  });
   it("renders a compact synthetic warning, eight stages and unknown measurements", () => {
     const mail = renderProcessLetter({ synthetic: true, duration_ms: 120000, qa_status: "НЕ ПРОВЕРЕНО QA" });
     expect(mail.subject).toContain("процесс ?");
@@ -81,6 +100,17 @@ describe("v3 process plan/fact", () => {
     const mail = renderProcessLetter({ environment: "production", private_report_path: "/api/admin/call-lab/reports/abc123" });
     expect(mail.body).toContain("https://talkhint.app/api/admin/call-lab/reports/abc123");
     expect(renderProcessLetter({ private_report_path: "https://evil.invalid" }).body).not.toContain("evil.invalid");
+  });
+});
+
+describe("bounded worker process diagnostics", () => {
+  it("keeps exit facts without guessing a model error or retaining stderr", () => {
+    expect(labAnalysisFailure({ diagnostic: { code: "LAB_ANALYSIS_FAILED",
+      stage: "worker", exit_code: 137, signal: "SIGKILL", stderr: "private" } }))
+      .toEqual({ code: "LAB_ANALYSIS_FAILED", stage: "worker", exit_code: 137, signal: "SIGKILL" });
+    const invalid = labAnalysisFailure({ diagnostic: { exit_code: -1, signal: "private text" } });
+    expect(invalid).not.toHaveProperty("exit_code");
+    expect(invalid).not.toHaveProperty("signal");
   });
 });
 

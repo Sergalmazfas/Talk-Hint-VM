@@ -1223,3 +1223,31 @@ mtime_ms = 1793129181541
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ad0ed3c-b16b-4e99-a4f2-311a1c36a5ee/e9211307-2734-4b7a-bd6f-39a537714112"
 storage_version_token = "1793129182397151"
 content_type = "text/html"
+
+[[outputs]]
+id = "o3zpdR8W4fXSLwin-snp0"
+uri = "file://generated-artifacts/hint-owner-feedback-1/one-page.html"
+type = "html"
+title = "P.PRODUCT — жалоба №1: итог лабораторного этапа"
+description = "Одна страница: факты, результаты стенда, отказ от небезопасного варианта и необходимые решения. Dev rev815."
+logical_id = "32934a06-2cf7-401f-b774-49a90969143f"
+content_hash = "sha256:dcaa686935f5405cc778bd4984fb8e639a5292bc3b823d733195c974d3c504dc"
+size = 4599
+mtime_ms = 1793137676415
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/32934a06-2cf7-401f-b774-49a90969143f/1e7e6dd6-9218-45de-8390-4670bfe29ef4"
+storage_version_token = "1793137694204412"
+content_type = "text/html"
+
+[[outputs]]
+id = "uhJMODvA-lI7Vgs61_fF6"
+uri = "file://generated-artifacts/hint-owner-feedback-1/Hint_feedback_001_rev815.zip"
+type = "unspecified"
+title = "Hint — жалоба №1 · рабочий пакет rev815"
+description = "JSON действий и передач, 18 текстовых проб, инженерный итог, сохранённый сбой диагностики и пример короткого письма. Не приёмка и не новая отправка."
+logical_id = "6df4b7bd-d1f9-49c7-a67a-e94e51977623"
+content_hash = "sha256:38dd181b60fe74bb6fbfbaf348efccb565a0b1d63d591b18a31df26edaa00313"
+size = 18761
+mtime_ms = 1793137676427
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6df4b7bd-d1f9-49c7-a67a-e94e51977623/f64ae60f-18cd-4b65-84b7-72dc3ea31f07"
+storage_version_token = "1793137695045180"
+content_type = "application/octet-stream"
