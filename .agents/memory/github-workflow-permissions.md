@@ -15,3 +15,17 @@ successful dry run.
 approved authorization. Do not pull, force-push, delete CI, or rewrite commits
 to work around this permission error. The YAML job's `permissions` setting
 does not grant the uploading credential permission to modify workflow files.
+
+For an explicitly requested Mac/iOS handoff, reuse the existing Xcode delivery
+baseline and create a separate native-only branch with the reviewed iOS delta
+and instructions. Preserve every unrelated file and the baseline workflow tree.
+This does not synchronize the full development branch or fix its OAuth scope.
+
+**Why:** the owner uses Claude on a Mac to receive isolated native deliveries;
+this established route succeeded while a full development push was rejected.
+
+**How to apply:** locate the previous handoff document and verify the live remote
+baseline first. Compare affected native files against the delta's parent to
+avoid overwriting Mac fixes. Use an additive commit/new branch, no force or
+history rewrite; verify the remote SHA after push. Keep backend, database and
+production operations out of the Mac instructions.
