@@ -7,7 +7,9 @@ import { LabStore } from "./store";
 import { runHintLab, checkHintLabRuntime, cleanupLabScratch, labAnalysisFailure } from "./process";
 import { authorizedHintSource, registerLabSourceOwner } from "./source";
 import { startHintWatchdog } from "./watchdog";
-import { labStartupReady, labStartupStatus, labStartupStep, labStartsPaused, resetLabStartup } from "./startup";
+import { labStartupReady, labStartupStatus, labStartupStep, resetLabStartup } from "./startup";
+import { ownerCallsSql, modeNotice } from "./policy";
+import { attachProductFollowup } from "./productContext";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -27,6 +29,12 @@ export function labConfiguration() {
     allowed: process.env.LAB_ENABLED === "true" && process.env.LAB_TARGET_ENVIRONMENT === env &&
       !!(boundOwnerId ?? process.env.LAB_OWNER_ID),
   };
+}
+
+// Monitoring is independent from LAB_ENABLED and the analysis kill switch.
+export function ownerMonitoringConfiguration() {
+  const c = labConfiguration();
+  return { ...c, allowed: !!c.owner && process.env.LAB_TARGET_ENVIRONMENT === c.environment };
 }
 
 export async function bindLabOwner(pool: Pick<Pool, "query">, ownerId: string, mail = new GmailLabMail()) {
@@ -53,24 +61,35 @@ export async function bootstrapLab(pool: Pool, options: { expectedOwnerId?: stri
           throw new Error("LAB_OWNER_MISMATCH");
         return value;
       });
-      // Import/version check only: no model, agents, calls or mail submission.
+      const env = environment(), key = `${env}:${owner.id}`;
+      const autoResume = options.startup !== false && env === "production" &&
+        process.env.LAB_ENABLED === "true" && process.env.LAB_TARGET_ENVIRONMENT === env;
+      const autoMonitor = env === "production" && process.env.LAB_TARGET_ENVIRONMENT === env;
+      await labStartupStep("control", () => pool.query(`INSERT INTO call_lab_controls
+        (key,environment,owner_id,recipient,connection_id,enabled)
+        VALUES($1,$2,$3,$4,$5,false) ON CONFLICT(key) DO UPDATE
+        SET recipient=EXCLUDED.recipient,connection_id=EXCLUDED.connection_id`,
+      [key, env, owner.id, profile, connectionId]));
+      boundOwnerId = owner.id;
+      registerLabSourceOwner(owner.id);
+      // Establish independent duty coverage before checking the Python worker.
+      for (const prefix of ["owner-ops:", "hint-daily:"]) {
+        await pool.query(`INSERT INTO call_lab_controls
+          (key,environment,owner_id,recipient,connection_id,enabled)
+          VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(key) DO UPDATE
+          SET recipient=EXCLUDED.recipient,connection_id=EXCLUDED.connection_id,
+          enabled=CASE WHEN $6 THEN true ELSE call_lab_controls.enabled END`,
+        [`${prefix}${key}`, env, owner.id, profile, connectionId, autoMonitor]);
+      }
+      stopWatchdog ??= startHintWatchdog(pool, ownerMonitoringConfiguration);
+      stopDaily ??= startHintDaily(pool, ownerMonitoringConfiguration);
       await labStartupStep("worker", async () => {
         await checkHintLabRuntime();
         if (!process.env.OPENAI_API_KEY) throw new Error("LAB_MODEL_NOT_CONFIGURED");
       });
-      const env = environment(), key = `${env}:${owner.id}`;
-      await labStartupStep("control", () => pool.query(`INSERT INTO call_lab_controls
-        (key,environment,owner_id,recipient,connection_id,enabled)
-        VALUES($1,$2,$3,$4,$5,false) ON CONFLICT(key) DO UPDATE
-        SET recipient=EXCLUDED.recipient,connection_id=EXCLUDED.connection_id,
-          enabled=CASE WHEN $6 THEN false ELSE call_lab_controls.enabled END`,
-      [key, env, owner.id, profile, connectionId, options.startup !== false && labStartsPaused()]));
-      boundOwnerId = owner.id;
-      if (options.startup !== false && labStartsPaused()) {
-        await pool.query("UPDATE call_lab_controls SET enabled=false WHERE key=$1",
-          [`hint-daily:${env}:${owner.id}`]);
-      }
-      registerLabSourceOwner(owner.id);
+      // Failed readiness never enables analysis. Successful production readiness
+      // implements the owner's standing authorization without a post-publish click.
+      if (autoResume) await pool.query("UPDATE call_lab_controls SET enabled=true WHERE key=$1", [key]);
       labStartupReady();
     })();
   }
@@ -112,6 +131,7 @@ async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
 
 export async function hintLabTick(pool: Pool, dependencies: {
   run: typeof runHintLab; mail: Pick<GmailLabMail, "verify" | "sent" | "send">;
+  product?: typeof attachProductFollowup;
 } = {
   run: runHintLab, mail: new GmailLabMail(),
 }) {
@@ -124,6 +144,15 @@ export async function hintLabTick(pool: Pool, dependencies: {
     locked = (await client.query("SELECT pg_try_advisory_lock(hashtext($1)) AS ok", [lockName])).rows[0].ok;
     if (!locked) return;
     const store = new LabStore(client);
+    const finishWithProduct = async (key: string, source: any, report: any) => {
+      const result = await (dependencies.product ?? attachProductFollowup)(pool, report, source,
+        { owner: config.owner!, environment: config.environment });
+      await store.finish(key, source, result);
+      // Existing per-call execution journal, not an independent product catalogue.
+      const decisions = result.product_followup.issues.filter((i: any) => i.decision === "awaiting_owner").length;
+      await store.note(key, `product:decision_prepared:${decisions}:${result.product_followup.decisionStatus}`);
+      if (result.product_followup.contextStatus !== "available") await store.note(key, "product:context_unavailable");
+    };
     await store.retention(config.environment, config.owner);
     if (!config.allowed) return;
     const control = (await client.query("SELECT * FROM call_lab_controls WHERE key=$1",
@@ -133,26 +162,27 @@ export async function hintLabTick(pool: Pool, dependencies: {
     await store.recover(config.environment, config.owner);
     // Source reconciliation recovers the gap between source commit and a process crash.
     // No old calls, guessed modes, synthetic production calls or other users.
-    const candidates = await client.query(`SELECT c.call_sid FROM calls c
+    const candidates = await client.query(`SELECT c.call_sid FROM (${ownerCallsSql}) c
       WHERE c.user_id=$1 AND c.started_at>=$2 AND c.ended_at IS NOT NULL
-      AND c.metadata#>>'{labHintSource,mode}'='hint'
-      AND c.metadata#>>'{labHintSource,environment}'=$3
+      AND coalesce(c.metadata#>>'{labHintSource,environment}',$3)=$3
       AND NOT EXISTS(SELECT 1 FROM call_lab_jobs j WHERE j.environment=$3 AND j.owner_id=$1 AND j.call_sid=c.call_sid)
       ORDER BY c.ended_at LIMIT 100`, [config.owner, control.activated_at, config.environment]);
     for (const row of candidates.rows) await store.enqueue(config.environment, config.owner, row.call_sid);
     const job = await store.claim(config.environment, config.owner);
     if (job) {
       await store.note(job.key, "analysis:claimed");
-      const call = (await client.query(`SELECT call_sid,user_id,started_at,ended_at,transcript,metadata
-        FROM calls WHERE call_sid=$1 AND user_id=$2`, [job.call_sid, config.owner])).rows[0];
+      const call = (await client.query(`SELECT * FROM (${ownerCallsSql}) c
+        WHERE call_sid=$1 AND user_id=$2`, [job.call_sid, config.owner])).rows[0];
       // Deleted or re-owned calls never leave an informational email with private content.
-      if (!call || call.metadata?.labHintSource?.environment !== config.environment ||
-          call.metadata?.labHintSource?.mode !== "hint") {
+      if (!call) {
         await store.fail(job.key, "source:scope_rejected");
+      } else if (call.lab_mode !== "hint") {
+        await finishWithProduct(job.key, null, modeNotice(call, config.environment));
+        await store.note(job.key, `mode:${call.lab_mode}:analysis_not_connected`);
       } else {
         const source = authorizedHintSource(call, control, config.environment);
         if (!source) {
-          await store.finish(job.key, null, completeLabReport(
+          await finishWithProduct(job.key, null, completeLabReport(
             unavailableReport(call, "SOURCE_UNAVAILABLE: нет достаточного разрешённого сохранённого текста."),
             null, job.key));
         } else {
@@ -172,7 +202,7 @@ export async function hintLabTick(pool: Pool, dependencies: {
             if (aborter.signal.aborted) {
               await store.fail(job.key, "analysis:canceled");
             } else {
-              await store.finish(job.key, source, completeLabReport(report, source, job.key));
+              await finishWithProduct(job.key, source, completeLabReport(report, source, job.key));
               await store.note(job.key, `qa:${report.qa_status === "QA: принято" ? "accepted" : "unverified_or_returned"}`);
             }
           } catch (error) {
@@ -182,7 +212,7 @@ export async function hintLabTick(pool: Pool, dependencies: {
               console.warn(`[HintLab] Analysis failed stage=${failure.stage} code=${failure.code}`);
               const report = { ...unavailableReport(call, `MODEL_FAILURE: ${failure.code}; этап ${failure.stage}.`),
                 analysis_failure: failure };
-              await store.finish(job.key, source, completeLabReport(report, source, job.key));
+              await finishWithProduct(job.key, source, completeLabReport(report, source, job.key));
               await store.note(job.key, `analysis:failed:${failure.stage}:${failure.code}`);
             }
           } finally {
@@ -255,8 +285,6 @@ export async function startHintLab(pool: Pool) {
         }
       }
       if (stopping) return;
-      stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
-      stopDaily ??= startHintDaily(pool, labConfiguration);
       await hintLabTick(pool);
     })().catch(() => console.warn("[HintLab] BLOCKED: tick failed; see private status"))
       .finally(() => { running = undefined; });

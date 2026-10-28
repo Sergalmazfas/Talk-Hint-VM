@@ -1,11 +1,13 @@
-/** Server-owned v3 rendering. Unknown coverage is never a zero or a success. */
+/** Mail v4 (per-call decisions), funnel v3. Unknown never means zero/success. */
 import { hintMeasurements } from "./measurements";
 import { manualDiagnosticLetter } from "./manualDiagnostic";
+import { labRelease } from "./policy";
+import { productLetterSection } from "./productFollowup";
 
 export function completeLabReport(report: any, source: unknown, key: string) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("LAB_BAD_REPORT_KEY");
-  const result = { ...report, deterministic: hintMeasurements(source),
-    private_report_path: `/api/admin/call-lab/reports/${key}`, mail_form_version: 3 };
+  const result = { ...report, lab_release: report.lab_release ?? labRelease, deterministic: hintMeasurements(source),
+    private_report_path: `/api/admin/call-lab/reports/${key}`, mail_form_version: 4 };
   return { ...result, process_plan_fact: processReport(result) };
 }
 
@@ -64,8 +66,12 @@ export function processReport(report: any) {
 }
 
 export function renderProcessLetter(report: any): { subject: string; body: string } {
-  if (report.manual_trigger && report.manual_diagnostic?.version === 1)
-    return manualDiagnosticLetter(report, reportOrigin(report.environment));
+  if (report.execution === "mode_analysis_not_connected")
+    return { subject: report.letter.subject, body: [report.letter.body, ...productLetterSection(report)].join("\n") };
+  if (report.manual_trigger && report.manual_diagnostic?.version === 1) {
+    const mail = manualDiagnosticLetter(report, reportOrigin(report.environment));
+    return { ...mail, body: [mail.body, ...productLetterSection(report)].join("\n") };
+  }
   const p = processReport(report), m = report.deterministic;
   const value = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? String(v) : "?";
   const duration = Number.isFinite(report.duration_ms) && report.duration_ms >= 0
@@ -89,6 +95,12 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
   const latency = (v: any) => `обычно ${value(v?.p50)} / в 95% случаев до ${value(v?.p95)} мс`;
   const used = report.owner_feedback?.usedHints;
   const body = [
+    `Лаборатория: ${report.lab_release?.version ?? "версия не сохранена"}; ${report.lab_release?.framework ?? "framework неизвестен"}.`,
+    ...(report.engineering_dossier ? [
+      "ИНЖЕНЕРНАЯ ПРОВЕРКА РЕГРЕССИИ (отдельно от AI-приёмки)",
+      ...report.engineering_dossier.answers.map((a: any) => `${a.question}: ${a.answer}`),
+      "Полные основания инженерной сверки сохранены в результате разбора.",
+    ] : []),
     ...(report.manual_trigger ? ["Ручной повторный запуск из Dev по сохранённому звонку. Исходный production-отчёт не изменён."] : []),
     report.synthetic ? "СИНТЕТИЧЕСКИЙ ПРИМЕР. Реального звонка не было. Числа примера не данные продукта." : "Короткий отчёт Hint",
     `Проверка разбора: ${qaAccepted ? "принято" : qaReturned ? "не принято" : "не выполнена"}. Это не приёмка владельцем.`,
@@ -106,6 +118,7 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
     "",
     "ГДЕ СЛОМАЛОСЬ",
     ...problems.slice(0, 3),
+    ...productLetterSection(report),
     "ПОЛНЫЙ РАЗБОР",
     typeof report.private_report_path === "string" && /^\/api\/admin\/call-lab\/reports\/[a-f0-9]+$/.test(report.private_report_path)
       ? `${reportOrigin(report.environment)}${report.private_report_path} (вход владельца обязателен)`
@@ -119,7 +132,8 @@ function dropSummary(reasons: Record<string, number> | undefined) {
   const names: Record<string, string> = {
     superseded: "собеседник уже продолжил", cooldown: "слишком близко к предыдущей",
     no_suggestion: "модель не предложила ответ", stale: "ответ устарел",
-    duplicate: "повтор", echo: "повтор речи", farewell: "завершение разговора",
+    duplicate: "повтор", duplicate_suggestion: "повтор похожей подсказки",
+    echo: "повтор речи", farewell: "завершение разговора",
     goal_achieved: "цель сочтена достигнутой", waiting_for_info: "ожидание информации",
     reaction_only: "короткая реакция", delivery_timeout: "телефон не подтвердил получение",
   };

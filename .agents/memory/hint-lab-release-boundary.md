@@ -50,8 +50,10 @@ missing action-result help while the lab rollout was still incomplete.
 
 **How to apply:** no mandatory crew round-trip for obvious bounded fixes, but do
 not equate a successful build or one control call with independent QA acceptance.
-For this rollout, the owner requires the laboratory to start paused after Publish
-until its readiness is checked. Historical manual baselines must be labelled as
+The earlier post-Publish mandatory pause was superseded by the owner's
+2026-10-28 decision: owner-only processing must resume after readiness without
+a per-Publish button; P.OPS must remain independent from analysis pause.
+Historical manual baselines must be labelled as
 manual, never forged into fresh-call provenance or automatic CrewAI execution.
 Collapsing or hiding the Prepare opening is not evidence it was spoken.
 
@@ -73,6 +75,17 @@ resubmission.
 **How to apply:** use the existing private lab store for the separate result;
 do not overwrite the production baseline or turn the manual result into evidence
 that the production pipeline has been repaired.
+
+Owner-only all-mode call coverage is required: Hint gets full analysis and QA;
+other modes get an explicit “analysis not connected” notice until their own
+analysis is connected. Every result identifies the laboratory version.
+
+**Why:** owner decision 2026-10-28 after a completed call received no report
+because both analysis and its watchdog had been paused after publishing.
+
+**How to apply:** verify actual active production state before saying calls
+are ready. This does not authorize analysis of other users or new recordings,
+and a manual saved-call review does not prove automatic production recovery.
 
 Cross-environment manual reviews need a lifecycle distinct from native calls,
 not just an enabled/disabled switch.

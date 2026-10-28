@@ -10,8 +10,9 @@ export function hintSourceMarker(userId: string | undefined) {
 export function authorizedHintSource(call: any, control: any, environment: string) {
   const marker = call.metadata?.labHintSource;
   if (!control.enabled || call.user_id !== control.owner_id || environment !== control.environment ||
-      marker?.mode !== "hint" || marker?.environment !== environment ||
-      !marker.closedAt || Date.parse(call.started_at) < Date.parse(control.activated_at) ||
+      (marker?.environment != null && marker.environment !== environment) ||
+      (call.lab_mode ? call.lab_mode !== "hint" : marker?.mode !== "hint" || marker?.environment !== environment) ||
+      Date.parse(call.started_at) < Date.parse(control.activated_at) ||
       call.metadata?.diagnosticAudioBlocked === true) return null;
   const transcript = typeof call.transcript === "string" ? call.transcript : "";
   if (!transcript.trim() || !call.ended_at) return null;

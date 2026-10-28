@@ -55,7 +55,10 @@ export function registerCallLabRoutes(app: Express) {
       ) INSERT INTO call_lab_controls(key,environment,owner_id,recipient,connection_id,enabled)
         SELECT 'hint-daily:' || key,environment,owner_id,recipient,connection_id,true FROM activated
         ON CONFLICT(key) DO UPDATE SET enabled=true,recipient=EXCLUDED.recipient,connection_id=EXCLUDED.connection_id`, [key]);
-      res.json({ enabled: true, scope: "Hint / owner / new calls after activation",
+      await pool.query(`INSERT INTO call_lab_controls(key,environment,owner_id,recipient,connection_id,enabled)
+        SELECT 'owner-ops:' || key,environment,owner_id,recipient,connection_id,true
+        FROM call_lab_controls WHERE key=$1 ON CONFLICT(key) DO UPDATE SET enabled=true`, [key]);
+      res.json({ enabled: true, scope: "Owner calls: Hint analysis; other modes notice only",
         noHistoricalReplay: true, hintDaily: hintDailyStatus(), restartPausesAgain: labStartsPaused() });
     } catch {
       res.status(503).json({ error: "Readiness check failed; activation not confirmed" });
@@ -71,6 +74,8 @@ export function registerCallLabRoutes(app: Express) {
     try {
       const control = (await pool.query(`SELECT environment,enabled,activated_at,watchdog FROM call_lab_controls WHERE key=$1`,
         [`${config.environment}:${config.owner}`])).rows[0] ?? null;
+      const dutyControl = (await pool.query(`SELECT enabled,activated_at FROM call_lab_controls WHERE key=$1`,
+        [`owner-ops:${config.environment}:${config.owner}`])).rows[0] ?? null;
       const jobs = (await pool.query(`SELECT status,coalesce(report->>'synthetic'='true',false) AS synthetic,count(*)::int AS count FROM call_lab_jobs
         WHERE environment=$1 AND owner_id=$2 GROUP BY status,synthetic`, [config.environment, config.owner])).rows;
       const outbox = (await pool.query(`SELECT o.status,coalesce(j.report->>'synthetic'='true',false) AS synthetic,count(*)::int AS count
@@ -85,10 +90,14 @@ export function registerCallLabRoutes(app: Express) {
       [config.environment, config.owner])).rows.map(r => ({
         ...r, downloadPath: r.has_report ? `/api/admin/call-lab/reports/${r.key}` : null,
       }));
-      res.json({ environment: config.environment, configured: config.allowed, control, jobs, outbox,
+      const duty = hintWatchdogStatus();
+      const canCall = config.allowed && control?.enabled === true && dutyControl?.enabled === true &&
+        labStartupStatus().status === "ready" && ["checked", "attention"].includes(duty.state) &&
+        !!duty.checkedAt && Date.now() - Date.parse(duty.checkedAt) < 60_000;
+      res.json({ environment: config.environment, configured: config.allowed, control, dutyControl, canCall, jobs, outbox,
         startup: labStartupStatus(), flags: flags(),
         watchdog: hintWatchdogStatus(), hintDaily: hintDailyStatus(),
-        recent, awaitingConfirmedCallEnd: missingEnd, scope: "Hint / owner / existing text only",
+        recent, awaitingConfirmedCallEnd: missingEnd, scope: "All owner calls; Hint analysis, other modes notice only",
         note: "SENT confirms Gmail submission, not the owner's reading or QA acceptance",
         private: true, publishedByAgent: false });
     } catch { res.status(503).json({ error: "Private lab schema is not ready" }); }
@@ -98,10 +107,11 @@ export function registerCallLabRoutes(app: Express) {
     if (String((req as any).user?.id) !== config.owner) return res.status(403).json({ error: "Owner only" });
     if (!pool) return res.status(503).json({ error: "Database unavailable" });
     try {
-      await pool.query("UPDATE call_lab_controls SET enabled=false WHERE key=ANY($1::text[])",
-        [[`${config.environment}:${config.owner}`, `hint-daily:${config.environment}:${config.owner}`]]);
+      await pool.query("UPDATE call_lab_controls SET enabled=false WHERE key=$1",
+        [`${config.environment}:${config.owner}`]);
       abortHintLabProcessing();
-      res.json({ disabled: true, noNewMail: true, note: "Already submitted Gmail requests cannot be recalled" });
+      res.json({ disabled: true, dutyStillActive: true,
+        note: "Analysis stopped. Independent P.OPS and daily report remain active; submitted mail cannot be recalled." });
     } catch { res.status(503).json({ error: "Disable failed; set LAB_ENABLED=false in protected settings" }); }
   });
   app.get("/api/admin/call-lab/reports/:key", requireBenchmarkAdmin, async (req, res) => {

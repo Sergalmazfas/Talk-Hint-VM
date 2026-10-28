@@ -37,15 +37,16 @@ describe("owner action result policy", () => {
     expect(readFileSync("server/routes.ts", "utf8"))
       .toContain("withActionResults(buildLiveChatSystemPrompt(");
   });
-  it("publication bootstrap can pause without re-enabling a saved switch", () => {
+  it("publication bootstrap follows the owner's 28.10 automatic owner-only readiness policy", () => {
     const source = readFileSync("server/callLab/service.ts", "utf8");
-    // Policy moved to startup.ts; production must remain paused even if the
-    // environment asks for automatic activation. Check the current assembly,
-    // not the removed inline expression or an obsolete SQL parameter index.
+    // Supersedes the earlier mandatory production pause. Actual ordering and
+    // kill-switch independence are exercised by callLab startup/PG tests.
     const startup = readFileSync("server/callLab/startup.ts", "utf8");
-    expect(startup).toContain('process.env.NODE_ENV === "production"');
+    expect(startup).toContain('process.env.NODE_ENV !== "production"');
     expect(startup).toContain('process.env.LAB_START_PAUSED !== "false"');
-    expect(source).toContain("labStartsPaused");
-    expect(source).toContain("WHEN $6 THEN false ELSE call_lab_controls.enabled");
+    expect(source).toContain('env === "production"');
+    expect(source).toContain("if (autoResume)");
+    expect(source).toContain("ownerMonitoringConfiguration");
+    expect(source).not.toContain("WHEN $6 THEN false ELSE call_lab_controls.enabled");
   });
 });

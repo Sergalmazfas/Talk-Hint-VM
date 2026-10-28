@@ -17,7 +17,8 @@ describe("Hint daily report — Denver calendar, not UTC or 24-hour subtraction"
       { state: "not_checked", checkedAt: null, attemptedAt: null, activeIncidents: 0, notificationProblems: 0 },
       now, true);
     expect(letter.body).toContain("свежая проверка отсутствует");
-    expect(letter.body).toContain("Остальные системы — не проверено");
+    expect(letter.body).toContain("качество этих режимов не проверено");
+    expect(letter.body).toContain("остальные системы — не проверено");
     expect(letter.body).toContain("не ноль");
   });
 });

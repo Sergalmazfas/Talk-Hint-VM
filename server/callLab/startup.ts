@@ -8,7 +8,9 @@ export function resetLabStartup() {
   state = { status: "not_checked", stage: null, code: null, checkedAt: null };
 }
 export function labStartsPaused() {
-  return process.env.NODE_ENV === "production" || process.env.LAB_START_PAUSED !== "false";
+  // Owner decision 28.10: production owner coverage auto-resumes after readiness.
+  // Dev remains opt-in, and explicit runtime stop is still available.
+  return process.env.NODE_ENV !== "production" && process.env.LAB_START_PAUSED !== "false";
 }
 export function safeLabError(error: unknown): string {
   const message = error instanceof Error ? error.message : "";

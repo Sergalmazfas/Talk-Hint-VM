@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { GmailLabMail } from "./mail";
 import { messageIdFor } from "./store";
+import { ownerCallsSql, labRelease } from "./policy";
 
 // Technical grace periods, not approved business deadlines or quality KPIs.
 export const watchdogPolicy = {
@@ -34,7 +35,7 @@ export const hintWatchdogStatus = () => ({ ...snapshot,
     (snapshot.state === "checked" && older(snapshot.checkedAt, 3 * watchdogPolicy.pollMs, Date.now()))
     ? "stale" : snapshot.state,
   policy: watchdogPolicy,
-  scope: "Hint / owner / calls after activation; last 200 calls within 90 days",
+  scope: "All owner modes / calls after duty activation; last 200 calls within 90 days",
   limitations: "Same-server monitor requires a working server and database. SENT is not proof of reading." });
 
 function older(value: string | Date | null, ms: number, now: number) {
@@ -58,6 +59,11 @@ export function detectHintIncident(row: Row, now = Date.now()): Incident | null 
     return { code: "ANALYSIS_DELAY", lastStep: "Разбор начат",
       expected: "Результат разбора и QA", reason: "Нет сохранённого результата после технического тайм-аута." };
   if (row.job_status !== "report_ready") return null;
+  if (row.execution === "mode_analysis_not_connected")
+    return row.mail_status === "sent_confirmed" ? null :
+      older(row.job_updated, watchdogPolicy.mailMs, now)
+        ? { code: "MODE_NOTICE_MISSING", lastStep: "Режим без разбора зафиксирован",
+          expected: "Короткое письмо владельцу", reason: "Нет подтверждения отправки уведомления о звонке." } : null;
   if (row.execution === "analysis_not_completed") return { code: "ANALYSIS_UNAVAILABLE",
     lastStep: "Материалы приняты", expected: "Завершённый разбор", reason: "Сохранён отчёт о незавершённом разборе, а не успешный результат." };
   if (row.qa_status !== "QA: принято") return { code: "QA_UNACCEPTED", lastStep: "Разбор сохранён",
@@ -78,7 +84,8 @@ export function detectHintIncident(row: Row, now = Date.now()): Incident | null 
 export function renderWatchdogNotice(incident: Incident, reference: string, at: string, env: string) {
   return {
     subject: `TalkHint · Дежурный: ${incident.code}`,
-    body: ["ДЕЖУРНЫЙ КОНТРОЛЬ HINT — событие требует внимания",
+    body: ["ДЕЖУРНЫЙ КОНТРОЛЬ ЗВОНКОВ ВЛАДЕЛЬЦА — событие требует внимания",
+      `Лаборатория: ${labRelease.version} (${labRelease.framework})`,
       `Окружение: ${env}`, `Обнаружено: ${at}`, `Ссылка события: ${reference}`,
       `Последний подтверждённый шаг: ${incident.lastStep}`,
       `Ожидалось: ${incident.expected}`, `Наблюдение: ${incident.reason}`,
@@ -106,7 +113,7 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
   }
   let client: PoolClient | undefined;
   let locked = false;
-  const key = `${config.environment}:${config.owner}`;
+  const key = `owner-ops:${config.environment}:${config.owner}`;
   const lock = `hint-watchdog:${key}`; // independent of the worker's long-running lock
   snapshot = { ...snapshot, state: "checking", attemptedAt: new Date().toISOString() };
   try {
@@ -116,7 +123,7 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
     const control = (await client.query("SELECT * FROM call_lab_controls WHERE key=$1", [key])).rows[0];
     if (!control?.enabled) {
       snapshot = { ...snapshot, state: control ? "paused" : "not_ready", error: undefined };
-      return; // intentional pause is not a failure and sends no mail
+      return; // Separate P.OPS control, never the analysis switch.
     }
     const now = Date.now(), at = new Date(now).toISOString();
     const state: State = control.watchdog ?? {};
@@ -128,12 +135,11 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
       j.key AS job_key,j.status AS job_status,j.created_at AS job_created,j.updated_at AS job_updated,
       j.report->>'execution' AS execution,j.report->>'qa_status' AS qa_status,
       o.status AS mail_status,o.updated_at AS mail_updated
-      FROM calls c
+      FROM (${ownerCallsSql}) c
       LEFT JOIN call_lab_jobs j ON j.call_sid=c.call_sid AND j.owner_id=$1 AND j.environment=$3
       LEFT JOIN call_lab_outbox o ON o.key=j.key
       WHERE c.user_id=$1 AND c.started_at>=$2 AND c.started_at>now()-interval '90 days'
-      AND c.metadata#>>'{labHintSource,mode}'='hint'
-      AND c.metadata#>>'{labHintSource,environment}'=$3
+      AND coalesce(c.metadata#>>'{labHintSource,environment}',$3)=$3
       AND coalesce(j.report->>'synthetic','false')<>'true'
       AND coalesce(j.report->>'execution','')<>'manual_assistant_review'
       ORDER BY c.started_at DESC LIMIT 200`, [config.owner, control.activated_at, config.environment])).rows as Row[];

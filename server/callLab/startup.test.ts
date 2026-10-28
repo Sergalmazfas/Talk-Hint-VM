@@ -27,21 +27,34 @@ beforeEach(() => {
 });
 afterEach(() => { stopHintLab(); vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe("fail-closed recoverable lab initialization", () => {
-  it("checks prerequisites without running agents/mail; production always starts paused", async () => {
+  it("owner production scope auto-resumes only after worker readiness; restart never resets activation window", async () => {
+    vi.stubEnv("LAB_ENABLED", "true");
+    const db = database();
+    await bootstrapLab(db);
+    const enable = db.query.mock.calls.find((c: any) => c[0] === "UPDATE call_lab_controls SET enabled=true WHERE key=$1");
+    expect(enable?.[1]).toEqual(["production:fixture-owner"]);
+    expect(db.query.mock.calls.filter((c: any) => c[0].includes("activated_at="))).toHaveLength(0);
+    expect(db.query.mock.calls.some((c: any) => c[0].includes("SET enabled=false"))).toBe(false);
+    expect(f.runtime.mock.invocationCallOrder[0]).toBeLessThan(
+      db.query.mock.invocationCallOrder[db.query.mock.calls.indexOf(enable!)]);
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it("checks prerequisites without running agents/mail; production no longer forces pause", async () => {
     const db = database(); await bootstrapLab(db);
     expect(labStartupStatus().status).toBe("ready");
     expect(f.runtime).toHaveBeenCalledOnce(); expect(f.run).not.toHaveBeenCalled();
     const insert = db.query.mock.calls.find((c: any) => c[0].startsWith("INSERT"));
     expect(insert[0]).toContain("VALUES($1,$2,$3,$4,$5,false)");
-    expect(insert[1][5]).toBe(true); // even when LAB_START_PAUSED=false
-    expect(labStartsPaused()).toBe(true);
+    expect(insert[1]).toHaveLength(5);
+    expect(labStartsPaused()).toBe(false);
+    expect(db.query.mock.calls.some((c: any) => c[0].includes("SET enabled=false"))).toBe(false);
     expect(f.register).toHaveBeenCalledWith("fixture-owner");
   });
   it("owner-requested readiness never resets an already active switch", async () => {
     const db = database(); await bootstrapLab(db, { expectedOwnerId: "fixture-owner", startup: false });
     const insert = db.query.mock.calls.find((c: any) => c[0].startsWith("INSERT"));
-    expect(insert[1][5]).toBe(false);
-    expect(insert[0]).toContain("ELSE call_lab_controls.enabled");
+    expect(insert[0]).not.toContain("enabled=CASE");
+    expect(db.query.mock.calls.some((c: any) => c[0] === "UPDATE call_lab_controls SET enabled=true WHERE key=$1")).toBe(false);
   });
   it("refuses another Gmail/admin/owner and does not insert a control", async () => {
     const db = database();
@@ -52,11 +65,13 @@ describe("fail-closed recoverable lab initialization", () => {
     f.allowedAdmin.mockReturnValue(false);
     await expect(bootstrapLab(db)).rejects.toThrow("LAB_OWNER_NOT_ADMIN");
   });
-  it("reports worker and SQL failures precisely, without binding source capture", async () => {
+  it("worker failure retains independent duty coverage, but never enables analysis", async () => {
     const db = database();
     f.runtime.mockRejectedValueOnce(new Error("LAB_PYTHON_VERSION_MISMATCH"));
     await expect(bootstrapLab(db)).rejects.toThrow();
     expect(labStartupStatus()).toMatchObject({ stage: "worker", code: "LAB_PYTHON_VERSION_MISMATCH" });
+    expect(f.watchdog).toHaveBeenCalled();
+    expect(db.query.mock.calls.some((c: any) => c[0] === "UPDATE call_lab_controls SET enabled=true WHERE key=$1")).toBe(false);
     db.query.mockImplementation(async (sql: string) => {
       if (sql.startsWith("INSERT")) throw Object.assign(new Error("private database URL"), { code: "42703" });
       return { rows: [{ id: "fixture-owner" }] };
@@ -64,7 +79,7 @@ describe("fail-closed recoverable lab initialization", () => {
     await expect(bootstrapLab(db)).rejects.toThrow();
     expect(labStartupStatus()).toMatchObject({ stage: "control", code: "LAB_DATABASE_42703" });
     expect(JSON.stringify(labStartupStatus())).not.toContain("private database");
-    expect(f.register).not.toHaveBeenCalled();
+    expect(f.register).toHaveBeenCalledWith("fixture-owner");
   });
   it("retries transient startup failure after 30 seconds, without activation or model work", async () => {
     vi.useFakeTimers();
@@ -79,7 +94,7 @@ describe("fail-closed recoverable lab initialization", () => {
     expect(labStartupStatus().status).toBe("ready");
     expect(f.run).not.toHaveBeenCalled();
     const insert = db.query.mock.calls.find((c: any) => c[0].startsWith("INSERT"));
-    expect(insert[1][5]).toBe(true);
+    expect(insert[1]).toHaveLength(5);
   });
   it("does not leak arbitrary SDK text, URLs, or fabricated LAB_ tokens", () => {
     for (const text of ["Bearer secret-value", "https://user:password@example.invalid", "LAB_SECRET_TOKEN"])

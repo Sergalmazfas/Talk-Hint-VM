@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { GmailLabMail } from "./mail";
 import { hintWatchdogStatus } from "./watchdog";
+import { ownerCallsSql, labRelease } from "./policy";
 
 const zone = "America/Denver";
 const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric",
@@ -31,6 +32,7 @@ export function renderHintDaily(day: NonNullable<ReturnType<typeof dueHintDay>>,
   const sent = rows.filter(r => r.mail_status === "sent_confirmed").length;
   const accepted = reports.filter(r => r.report.qa_status === "QA: принято").length;
   const failed = reports.filter(r => r.report.execution === "analysis_not_completed").length;
+  const notices = reports.filter(r => r.report.execution === "mode_analysis_not_connected").length;
   const measured = reports.filter(r => Number.isFinite(r.report.deterministic?.recorded_attempts));
   const sum = (key: string) => measured.reduce((n, r) => n + (r.report.deterministic[key] ?? 0), 0);
   const fresh = monitor.checkedAt && Number.isFinite(Date.parse(monitor.checkedAt)) &&
@@ -38,16 +40,18 @@ export function renderHintDaily(day: NonNullable<ReturnType<typeof dueHintDay>>,
   const status = !enabled ? "лаборатория выключена" : !fresh ? "свежая проверка отсутствует"
     : monitor.state !== "checked" && monitor.state !== "attention" ? "проверка не завершена"
     : monitor.activeIncidents ? `открытых сбоев: ${monitor.activeIncidents}` : "свежая проверка выполнена; это не оценка качества подсказок";
-  return { subject: `Hint · сутки ${day.day} · писем ${sent} из ${rows.length} · дежурный`,
+  return { subject: `Звонки владельца · сутки ${day.day} · писем ${sent} из ${rows.length} · дежурный`,
     body: [`Отчёт P.OPS за ${day.day}, сутки по Денверу. Расписание: 08:00 ${zone}.`,
+      `Лаборатория: ${labRelease.version} (${labRelease.framework}).`,
       `Hint: ${status}.`,
       `Завершённых звонков: ${rows.length}; разборов, принятых проверкой: ${accepted}; писем SENT: ${sent}.`,
       `Разбор не завершён: ${failed}; нет готового разбора: ${rows.length - reports.length}.`,
+      `Режим без подключённого разбора: ${notices} (уведомление, не успешная QA).`,
       `Измерения сохранены для ${measured.length} из ${rows.length} звонков.`,
       measured.length ? `В сохранённых измерениях: попыток ${sum("recorded_attempts")}, отправлено ${sum("sent")}, подтверждено телефоном ${sum("acknowledged")}.`
         : "Подсказки и их показ: неизвестно — нет измерений, не ноль.",
       "Показ на экране, перевод и задержки: подробности в отчёте каждого звонка; отсутствующие измерения не считаются выполнением.",
-      "Остальные системы — не проверено: Катя, Translator, Prepare, History, Copilot.",
+      "Катя, Translator, Prepare, Copilot: контроль факта звонка/уведомления; качество этих режимов не проверено. History и остальные системы — не проверено.",
       "Внешний монитор не подключён. При остановке этого сервера он сам не сможет отправить предупреждение.",
       "https://talkhint.app/api/admin/call-lab — отчёты и состояние, нужен вход владельца.",
       "SENT означает отправку Gmail, не прочтение или приёмку владельцем."].join("\n") };
@@ -61,7 +65,7 @@ const deadline = async <T>(promise: Promise<T>) => {
 type Config = { environment: string; owner?: string; allowed: boolean };
 let snapshot: { state: string; checkedAt: string | null; day?: string; delivery?: string } =
   { state: "not_checked", checkedAt: null };
-export function hintDailyStatus() { return { ...snapshot, schedule: "08:00", timeZone: zone, scope: "Hint only" }; }
+export function hintDailyStatus() { return { ...snapshot, schedule: "08:00", timeZone: zone, scope: "Owner calls; Hint QA, other modes notices only" }; }
 export async function hintDailyTick(pool: Pool, config: Config, now = new Date(), mail = new GmailLabMail()) {
   if (!config.allowed || !config.owner) { snapshot.state = "paused"; return; }
   const day = dueHintDay(now);
@@ -94,11 +98,10 @@ export async function hintDailyTick(pool: Pool, config: Config, now = new Date()
       await save(); return;
     }
     const rows = (await client.query(`SELECT c.call_sid,j.report,o.status AS mail_status
-      FROM calls c LEFT JOIN call_lab_jobs j ON j.call_sid=c.call_sid AND j.owner_id=$1 AND j.environment=$2
+      FROM (${ownerCallsSql}) c LEFT JOIN call_lab_jobs j ON j.call_sid=c.call_sid AND j.owner_id=$1 AND j.environment=$2
       LEFT JOIN call_lab_outbox o ON o.key=j.key
       WHERE c.user_id=$1 AND c.ended_at >= $3 AND c.ended_at < $4
-      AND c.metadata#>>'{labHintSource,mode}'='hint'
-      AND c.metadata#>>'{labHintSource,environment}'=$2`,
+      `,
     [config.owner, config.environment, day.start, day.end])).rows;
     const lab = (await client.query("SELECT enabled FROM call_lab_controls WHERE key=$1",
       [`${config.environment}:${config.owner}`])).rows[0];

@@ -8,7 +8,7 @@ channel = "stable-24_05"
 [deployment]
 deploymentTarget = "vm"
 build = ["npm", "run", "build"]
-run = ["env", "LAB_ENABLED=true", "LAB_START_PAUSED=true", "LAB_TARGET_ENVIRONMENT=production", "HINT_ACTION_RESULTS_ENABLED=true", "node", "./dist/index.cjs"]
+run = ["env", "LAB_ENABLED=true", "LAB_START_PAUSED=false", "LAB_TARGET_ENVIRONMENT=production", "HINT_ACTION_RESULTS_ENABLED=true", "node", "./dist/index.cjs"]
 ignorePorts = false
 
 [env]
@@ -46,12 +46,12 @@ outputType = "webview"
 name = "test"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm test"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm test -- --maxWorkers=1"
 
 [agent]
 mockupState = "FULLSTACK"

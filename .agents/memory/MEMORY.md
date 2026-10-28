@@ -1,4 +1,4 @@
-- [Hint lab release boundary](hint-lab-release-boundary.md) — direct bounded fixes allowed; publish starts paused; manual baselines and hiding an opening are not automated execution or speech proof.
+- [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.
 - [Process on-call](process-on-call.md) — owner expects immediate email on missing/failed transitions; explicit coverage, no false green, no blind mail retries.
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.
 - [drizzle-kit push interactive blocker](drizzle-push-interactive-blocker.md) — db:push can hang on a rename prompt (out-of-schema user_sessions); apply DDL via executeSql instead, never accept the rename.

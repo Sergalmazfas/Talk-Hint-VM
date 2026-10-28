@@ -1559,3 +1559,59 @@ mtime_ms = 1793168706097
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/89385014-43d2-444b-8b91-44d7652f2d51/a2210827-36cf-45af-a0da-5d2e2b6f2de4"
 storage_version_token = "1793168735388292"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "dclObvurGnVZEuT8S3dqL"
+uri = "file://generated-artifacts/owner-call-28oct/TalkHint_owner_calls_v4_Dev.zip"
+type = "unspecified"
+title = "Скачать пакет: diff, проверки и разбор звонка"
+description = "Лаборатория owner-calls-v4; модель rev885. Изменения Dev для публикации владельцем, исходный QA-возврат и подтверждение SENT."
+logical_id = "67c5dd96-fd60-4b8f-85af-f5134a4cb39e"
+content_hash = "sha256:5806d4cab07ce26e713126f4e4f7c915d223cf4f39d6cae42f74f4bd19298b18"
+size = 62336
+mtime_ms = 1793211015726
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/67c5dd96-fd60-4b8f-85af-f5134a4cb39e/4d4240b8-671b-4d46-9775-45bcb5f72d4b"
+storage_version_token = "1793211067522945"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "A6IymdEDihYOj9Am1m64r"
+uri = "file://generated-artifacts/owner-call-28oct/review/report.html"
+type = "html"
+title = "Открыть разбор звонка 5:24"
+description = "P.LAB → независимая QA. QA вернула разбор; оценки не приняты. Инженерные ответы о Terra, ожидании и несовпадении карточки с вопросом."
+logical_id = "7d7eda30-1e0e-46c4-b99d-f11791f3a243"
+content_hash = "sha256:bedd844c1fe8344c8f84a817644a2c1e623bde68160d5c360715ce6df8b98b09"
+size = 55777
+mtime_ms = 1793209880651
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7d7eda30-1e0e-46c4-b99d-f11791f3a243/51f66bdb-336c-4e7e-aba4-347a5317d31a"
+storage_version_token = "1793211068534479"
+content_type = "text/html"
+
+[[outputs]]
+id = "MYWJ7SXWLMi2GlpKffz6n"
+uri = "file://generated-artifacts/per-call-decisions/TalkHint_per_call_decisions_rev890.zip"
+type = "unspecified"
+title = "Скачать обновления P.LAB / P.PRODUCT и diff"
+description = "Ревизия890. JSON ролей, форма письма4, исходный и модельный diff, пример и результаты проверок. Production не изменён."
+logical_id = "66ca0c5f-bef1-43d4-b6bf-179fa65ac425"
+content_hash = "sha256:e2a3f61b119b0f12bcc6b856ee830b3a26e8eeb3e8d4279940d0c1a6e4c195b9"
+size = 103496
+mtime_ms = 1793212906917
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/66ca0c5f-bef1-43d4-b6bf-179fa65ac425/53df17b3-3ee6-475c-a3f6-341dc0a0d5b4"
+storage_version_token = "1793212941091426"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Jf06Z-wR84rzs2Fhiz5xz"
+uri = "file://generated-artifacts/per-call-decisions/LETTER_EXAMPLE.html"
+type = "html"
+title = "Открыть пример письма после звонка"
+description = "Сохранённый звонок5:24: история попыток, сравнение, три строки да/нет. Пример не отправлен; нового AI-разбора не было."
+logical_id = "80bc6402-2815-4db8-9349-d1c734770231"
+content_hash = "sha256:ea8f224e3bf324f9456e45270e317343bd186e66ae7e11b039a4c2208a48cb08"
+size = 12179
+mtime_ms = 1793212906895
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/80bc6402-2815-4db8-9349-d1c734770231/fb5d4e97-89ed-4a6e-a7e2-20bee8af26db"
+storage_version_token = "1793212941899324"
+content_type = "text/html"

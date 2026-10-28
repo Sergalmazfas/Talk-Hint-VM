@@ -56,7 +56,7 @@ button:disabled{opacity:.48;cursor:not-allowed}
   <header>
     <p class="eyebrow">Подготовка без запуска</p>
     <h1>Контроль лаборатории Hint</h1>
-    <p class="intro">Сначала проверьте готовность и доставку отчёта. Проверка не включает обработку звонков и не отправляет письма.</p>
+    <p class="intro">Только личные звонки владельца. После публикации контур включается автоматически после проверки ресурсов. Здесь можно проверить фактическое состояние.</p>
   </header>
   <section class="status-card" aria-labelledby="status-title">
     <div class="status-head"><h2 id="status-title">Текущее состояние</h2><span id="overall-badge" class="badge">Загрузка</span></div>
@@ -72,15 +72,15 @@ button:disabled{opacity:.48;cursor:not-allowed}
   </section>
   <section class="section" aria-labelledby="actions-title">
     <h2 id="actions-title">Действия владельца</h2>
-    <p>Подготовка только выполняет read-only проверки и создаёт или обновляет остановленную привязку. Включение — отдельное явное действие.</p>
+    <p>Проверка ресурсов не запускает разборы и не отправляет письма. Остановка разбора не останавливает независимого дежурного.</p>
     <div class="actions">
       <button id="readiness" class="secondary" type="button">Проверить готовность</button>
       <button id="enable" class="primary" type="button" disabled>Включить Hint: разбор, дежурный, отчёт 08:00</button>
-      <button id="disable" class="stop" type="button" disabled>Остановить контур Hint</button>
+      <button id="disable" class="stop" type="button" disabled>Остановить разбор Hint (дежурный остаётся)</button>
     </div>
     <p id="action-message" class="detail" role="status" aria-live="polite"></p>
   </section>
-  <p class="footnote">После включения обрабатываются только новые звонки TalkHint Hint владельца. Это не относится к Secretary или Translator; старые звонки не переигрываются. Готовность ресурсов и активное состояние — разные вещи. Успешное включение само по себе не подтверждает, что наблюдатель сейчас свежий.</p>
+  <p class="footnote">Hint — полный разбор с QA. Катя, Translator, Copilot и Prepare без подключённого разбора — короткое уведомление. Неизвестный режим обозначается честно. Это не разрешение новых записей аудио и не обработка чужих звонков. Готовность ресурсов не заменяет активное состояние и свежую проверку дежурного.</p>
 </main>
 <script>
 (() => {
@@ -224,7 +224,7 @@ button:disabled{opacity:.48;cursor:not-allowed}
     "/api/admin/call-lab/readiness", {}, "Проверка завершена; состояние перечитано."
   ));
   els.enable.addEventListener("click", () => {
-    if (!window.confirm("Подтверждаете включение только для новых Hint-звонков владельца? Это не Secretary/Translator и не запускает исторические звонки.")) return;
+    if (!window.confirm("Подтверждаете возобновление обработки только личных звонков? Hint — разбор; другие режимы — уведомления. Новых звонков и аудиозаписей не будет.")) return;
     post("/api/admin/call-lab/enable", { confirm: "hint-owner-only" }, "Запрос на включение завершён; состояние перечитано.");
   });
   els.disable.addEventListener("click", () => post(

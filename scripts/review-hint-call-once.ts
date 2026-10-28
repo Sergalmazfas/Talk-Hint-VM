@@ -21,7 +21,7 @@ import { hintMeasurements } from "../server/callLab/measurements";
 let stage = "input";
 async function privateDevOwner() {
   const controls = (await pool!.query(`SELECT owner_id,recipient,connection_id FROM call_lab_controls
-    WHERE environment='development' LIMIT 2`)).rows;
+    WHERE environment='development' AND key='development:' || owner_id LIMIT 2`)).rows;
   stage = "dev_owner";
   if (controls.length !== 1 || controls[0].connection_id !== process.env.LAB_GMAIL_CONNECTION_ID)
     throw new Error("PRIVATE_DEV_OWNER_REQUIRED");
@@ -100,6 +100,7 @@ async function main() {
     if (!input || !process.argv.includes("--input")) throw new Error("MANUAL_INPUT_REQUIRED");
     snapshot = JSON.parse(await readFile(input, "utf8"));
     source = authorizedHintSource(snapshot.call, snapshot.control, snapshot.control.environment);
+    if (source && snapshot.engineering_dossier) source.engineering_dossier = snapshot.engineering_dossier;
   }
   if (!source || !/^[a-f0-9]{64}$/.test(snapshot.previous_report_key))
     throw new Error("AUTHORIZED_EXISTING_SOURCE_REQUIRED");
@@ -127,6 +128,7 @@ async function main() {
     execution: report.execution === "analysis_not_completed" ? report.execution : "owner_requested_crewai_reanalysis",
     manual_trigger: true, automatic_production_execution: false,
     previous_report_key: snapshot.previous_report_key,
+    ...(source.engineering_dossier ? { engineering_dossier: source.engineering_dossier } : {}),
     ...(deliveryPass ? { manual_diagnostic: source.manual_diagnostic } : {}),
     ...(followup ? { manual_pass: pass, previous_manual_report_key: previousManualKey,
       diagnostic_authorization: deliveryPass
@@ -141,7 +143,8 @@ async function main() {
     report=$3::jsonb,updated_at=now() WHERE key=$1`, [key, JSON.stringify(source), JSON.stringify(report)]);
   if (saved.rowCount !== 1) throw new Error("MANUAL_RESULT_NOT_SAVED");
   // Intentionally no outbox insertion; a saved file is not a sent email.
-  const directory = path.resolve(deliveryPass ? "generated-artifacts/mint-hint-delivery-4"
+  const directory = path.resolve(process.argv.includes("--output")
+    ? process.argv[process.argv.indexOf("--output") + 1] : deliveryPass ? "generated-artifacts/mint-hint-delivery-4"
     : controlPass ? "generated-artifacts/mint-hint-reanalysis-control-3"
     : diagnostic ? "generated-artifacts/mint-hint-reanalysis-diagnostic-2" : "generated-artifacts/mint-hint-reanalysis");
   await mkdir(directory, { recursive: true });

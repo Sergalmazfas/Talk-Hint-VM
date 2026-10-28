@@ -22,8 +22,10 @@ not silent failures that require manually checking for a report.
 
 **How to apply:** distinguish deterministic operational monitoring from AI QA and
 owner acceptance. Say which processes actually have instrumentation; do not
-claim company-wide coverage from a Hint-only watcher. Deliberate pause is not an
-incident. A same-server/same-mailbox watcher cannot guarantee notification when
+claim company-wide coverage from a call-only watcher. Under the owner's
+2026-10-28 decision, P.OPS stays active when analysis is stopped: a missing
+owner-call result still requires an alert, including other modes' missing notices.
+A same-server/same-mailbox watcher cannot guarantee notification when
 the server, database or mail channel itself is down. Never mark these unknown
 conditions green or blindly resend ambiguous mail.
 
