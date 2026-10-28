@@ -43,6 +43,7 @@
 - [Tutor / Calls separation](tutor-calls-separation.md) — Tutor tab = learning only (Session Report end screen); ALL call prep lives in Calls flow; Engine stays call-agnostic (MBLEx reuse).
 - [Translator realtime architecture](translator-spike.md) — RU↔EN uses isolated transports; PSTN routing is asymmetric so Owner hears Guest original and monitors both translations.
 - [LIVE prompt evaluation](live-prompt-evaluation.md) — compare both message roles and normalized output; reconstructed requests and single-turn success are not end-to-end proof.
+- [Hint model choice provenance](hint-model-choice-provenance.md) — объяснение владельца о Terra сохранять отдельно от git; offline AI-оценка не равна live-проверке.
 - [Copilot private audio boundary](copilot-private-translator-boundary.md) — Copilot translation is read-first; only a tap on its card may speak verified English with owner's clone to Guest.
 - [Voice Lab rollout approval](voice-lab-rollout.md) — owner approved opt-in Cartesia/ElevenLabs live comparison; ElevenLabs default, Copilot remains tap-only.
 - [Secretary live-call intent](secretary-live-call-intent.md) — one manual call; owner only monitors, Secretary speaks autonomously; Hint is design reference, not a feature target.

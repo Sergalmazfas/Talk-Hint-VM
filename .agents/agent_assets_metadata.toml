@@ -1363,3 +1363,101 @@ mtime_ms = 1793155106521
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dad43033-5487-4b92-8cb8-be94b6df7713/645096cf-b5a9-49c5-8a50-364c4b380c50"
 storage_version_token = "1793155139099468"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ZbUbdBURhaQEaDAW929YY"
+uri = "file://generated-artifacts/coffee-product-decisions/Hint_coffee_results_rev837.html"
+type = "html"
+title = "Hint · результаты стенда · читаемый отчёт"
+description = "Сравнение шести вариантов, пять пар «было → стало», реальные сбои и ограничения проверки качества. Удобно открыть с телефона."
+logical_id = "5ddd474a-e87e-45f3-87c0-7ebaa8998a89"
+content_hash = "sha256:856708b1efff256323b2f8ac918b5c64f77621242dbce79ad2301da994b19956"
+size = 14922
+mtime_ms = 1793157164913
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ddd474a-e87e-45f3-87c0-7ebaa8998a89/959757d3-4436-4327-9c46-c184c4c78111"
+storage_version_token = "1793157219671884"
+content_type = "text/html"
+
+[[outputs]]
+id = "XAg3LTwI3CqYvjlR0B1el"
+uri = "file://generated-artifacts/Hint_coffee_lab_results_rev837.zip"
+type = "unspecified"
+title = "Hint · полный пакет результатов · rev837"
+description = "Исходные ответы и оценки, таблица метрик, пять пар, журнал v7, документ стенда v2, контракты Gmail/недельного блока и новое «Нужно решение». В продукт ничего не перенесено."
+logical_id = "89cf19c6-8829-485b-935a-a1bdbdb1cc50"
+content_hash = "sha256:5aed1078570297d82ddd2e8d10047989c5d219a1aa4bf1c25fbc582d74bb345a"
+size = 70672
+mtime_ms = 1793157164959
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/89cf19c6-8829-485b-935a-a1bdbdb1cc50/b209fe55-17b8-42c4-ad72-836681a2b525"
+storage_version_token = "1793157220373385"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "o98EJNEBkR7Vcl4YpS2Vo"
+uri = "file://generated-artifacts/hint-mini-repeat/Hint_Mini_repeat_rev840.html"
+type = "html"
+title = "Hint · Mini: результаты трёх повторов"
+description = "Отчёт для телефона: сравнение двух вариантов, пять пар «было → стало», ошибки кандидатов и ограничения QA. Только Dev, rev840."
+logical_id = "b4b9cd03-13e6-458c-8394-e8496be52e8a"
+content_hash = "sha256:698b33a43a10fde589ee746324fb604824d539bc3f0dacc2cb02b90dfdae08ce"
+size = 12720
+mtime_ms = 1793158072468
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b4b9cd03-13e6-458c-8394-e8496be52e8a/c2eb555b-8e07-4d1f-86ae-9f3542a5f45e"
+storage_version_token = "1793158100384790"
+content_type = "text/html"
+
+[[outputs]]
+id = "lQuJSZALaFBvJluOFW9m0"
+uri = "file://generated-artifacts/Hint_Mini_repeat_results_rev840.zip"
+type = "unspecified"
+title = "Hint · полный пакет стенда Mini · rev840"
+description = "Все 54 ответа и 9 протоколов судьи, эталон фактов, ручной обзор, таблица, пять пар, сохранённый случай и проверки целостности. Журнал v9, документ стенда v3."
+logical_id = "71837b42-0e37-407f-a153-70d72a1a99d6"
+content_hash = "sha256:67491a6fb1c9a5d9cd96b5a4f3292c7e9e7fcec080e75caead8a4d5a052e4696"
+size = 55405
+mtime_ms = 1793158072518
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/71837b42-0e37-407f-a153-70d72a1a99d6/c41bc5c7-83ab-4209-bd20-7b8a5bc7169c"
+storage_version_token = "1793158101380787"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "xuAWIfKWKeEAkG6SxwLQo"
+uri = "file://generated-artifacts/P-PRODUCT_Hint_v2_1_applied_rev843.zip"
+type = "unspecified"
+title = "P.PRODUCT Hint · v2.1 · применено"
+description = "Исправленный JSON, diff, подтверждение применения и проверки. Внутренние шаги без самоприёмки; передачи принимают получатели. Исходный v2 и прежний PASS сохранены. Исполнитель не включён."
+logical_id = "3fbe9122-e58d-4193-a6c5-59b3666dab11"
+content_hash = "sha256:6c9d1637d859b409abd8b3d9cabc6d71b1f14d64468a991553fcc9a691da35ac"
+size = 632904
+mtime_ms = 1793158654591
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3fbe9122-e58d-4193-a6c5-59b3666dab11/3dc63a62-ca06-413d-864a-6ac15f7a3f54"
+storage_version_token = "1793158675128565"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "zjlSGSts6whPs7JCCW3GH"
+uri = "file://generated-artifacts/hint-model-history/Hint_model_history_rev846.html"
+type = "html"
+title = "Hint — история выбора модели"
+description = "Хронология коммитов, два стендовых прогона 15.08 с метриками и знаменателями, отдельно объяснение владельца и ограничения доказательств. Удобно читать с телефона."
+logical_id = "c1a16504-d6af-426f-a253-d974b15fd536"
+content_hash = "sha256:a1244285bbf1ed908b8deb6ad9ea76d3a1847fbd40f93920931f26be867bd520"
+size = 34519
+mtime_ms = 1793159086003
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c1a16504-d6af-426f-a253-d974b15fd536/97d4788c-8659-440a-8f15-21708984b4b8"
+storage_version_token = "1793159105465031"
+content_type = "text/html"
+
+[[outputs]]
+id = "LVdNcGKmDaC1B2KFlL2dL"
+uri = "file://generated-artifacts/hint-model-history/Hint_model_history_rev846.zip"
+type = "unspecified"
+title = "Архив аудита Hint · rev846"
+description = "Отчёт HTML, JSON исторического случая и подтверждение сохранения в журнале и паспорте. Без исходных расшифровок звонков."
+logical_id = "96dcea59-4a65-48c8-98ba-f75ed44d5825"
+content_hash = "sha256:6351703287ae84ab75f56f0b8a89d0fdd037099427832052baa5b6249dc42a61"
+size = 11774
+mtime_ms = 1793159086011
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/96dcea59-4a65-48c8-98ba-f75ed44d5825/5ccb0d7f-2b3e-4ff4-bc15-f70ecbf42f3a"
+storage_version_token = "1793159106070822"
+content_type = "application/octet-stream"
