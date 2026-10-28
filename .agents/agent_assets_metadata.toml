@@ -1531,3 +1531,17 @@ mtime_ms = 1793164879472
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9ef31194-0c10-4ae0-b54d-7d4158869376/9a46ca3f-1297-4c13-9cc9-24b71d137f89"
 storage_version_token = "1793164927126779"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "dW20OY502ta2mXBh8mmmm"
+uri = "file://generated-artifacts/hint-personal-pilot-v1/Hint_personal_pilot_preparation_v1.zip"
+type = "unspecified"
+title = "Hint — подготовка личного пилота Mini / Terra · v1"
+description = "JSON, порядок сравнения, метрики, условия остановки, формы и подтверждение сохранения. Только подготовка: Mini пока заблокирована существующим селектором, ничего не включено."
+logical_id = "dd461c96-b720-4780-ae4b-1372111ba12c"
+content_hash = "sha256:13de882ccef3b9d33056c1d4cb00ee6276976a2fb4556e314c91e885f4eb1ed0"
+size = 13797
+mtime_ms = 1793165973413
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dd461c96-b720-4780-ae4b-1372111ba12c/ffc092f3-02ab-421a-a1c2-3348a262dbde"
+storage_version_token = "1793166002803721"
+content_type = "application/octet-stream"
