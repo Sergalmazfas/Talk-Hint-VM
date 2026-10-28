@@ -38,3 +38,17 @@ truncating a full journal or creating an independent duplicate would break that.
 **How to apply:** budget serialized size before writing, distinguish cases from
 reference material, and verify both the root and linked appendix through the
 normal reader. Do not expand a general storage limit merely to fit one entry.
+
+Crew prompt proposals should store common instructions, schemas and dated lessons
+once in the canonical model, with role-specific text and references. A downloadable
+review snapshot may expand those references, but expansion must be byte-equivalent
+to the recorded blocks and carry source revision/hash evidence.
+
+**Why:** duplicating the common backstory, lesson block and unchanged action
+records across two proposals exceeded the hypothesis's active-data budget; this
+was not a compute shortage or permission to remove earlier work.
+
+**How to apply:** preflight the actual domain size guard, keep stable action
+references instead of another action catalogue, and verify both stored document
+reads and the fully expanded review export. Do not change active passport links
+or runtime prompts just to register a proposal.

@@ -1643,3 +1643,31 @@ mtime_ms = 1793215161705
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f85ce8a4-3fc2-4240-9454-d04f72c16a74/f45769b9-e21a-451e-b99b-2066735bd96c"
 storage_version_token = "1793215329767841"
 content_type = "text/html"
+
+[[outputs]]
+id = "bZ2Dh523mx21v7QDYcwhi"
+uri = "file://generated-artifacts/lab-agent-passports/P_LAB_P_LG_QA_passports_v1.zip"
+type = "unspecified"
+title = "Скачать ZIP · P.LAB и P.LG.QA · паспорта v1"
+description = "Ручной проход. Исходная модель rev899, предложения сохранены в rev904. Полные промпты, diff, визуальная схема, уроки, ресурсы, пустой протокол. Ничего не включено."
+logical_id = "b846456c-db92-4987-b50e-b1b8ede75b09"
+content_hash = "sha256:7ed6d20c77c90dff00c3c1cedd01ad083fa07c0bf500a0809bffe7bdd6c65f3d"
+size = 147013
+mtime_ms = 1793219336113
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b846456c-db92-4987-b50e-b1b8ede75b09/de3b952c-df22-4adf-a8e1-01ffb8e8b96c"
+storage_version_token = "1793219398578787"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "W8xEKsBlvyxxuGbE65KWo"
+uri = "file://generated-artifacts/lab-agent-passports/READ_FIRST.html"
+type = "html"
+title = "Прочитать паспорта P.LAB и P.LG.QA"
+description = "Документ для телефона: характеры, варианты имён, образы и полные предлагаемые инструкции. Это не новый экран приложения; портреты ещё не создавались."
+logical_id = "5ae54d94-74cb-41dd-b105-7021ab7ee956"
+content_hash = "sha256:d4fdf1021f33d6db220838842e80d6705af31dfd6ad495e5f9a61bf0274c1ec8"
+size = 36095
+mtime_ms = 1793219042565
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ae54d94-74cb-41dd-b105-7021ab7ee956/84ac868d-0aa6-4930-b34c-ef4a307054ea"
+storage_version_token = "1793219399589902"
+content_type = "text/html"
