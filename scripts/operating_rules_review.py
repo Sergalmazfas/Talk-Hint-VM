@@ -55,23 +55,26 @@ def apply_patch(document, operations):
     return result
 
 
-def prepare(state, origin):
-    docs = {d["id"]: d for d in state["documents"]}
-    data = state["operatingModel"]["revisions"][-1]["data"]
+def report_systems():
+    """Canonical candidate system entries; shared with offline schema validation."""
+    systems = []
+    for name in ["Hint", "Катя", "Translator", "Prepare", "History", "Copilot",
+                 "web", "iOS", "лаборатории", "crew"]:
+        systems.append({
+            "system": name, "status": "не проверено",
+            "source": "server/callLab/watchdog.ts" if name == "Hint" else None,
+            "evidenceKind": "код, не наблюдение runtime" if name == "Hint" else None,
+            "scope": "owner Hint, только после активации" if name == "Hint" else "Источник контроля не подтверждён",
+            "sourceConnected": None, "lastObservedAt": None,
+            "supplierRoleId": "head-engineering", "requestToActionId": "engineering-chief-incident",
+        })
+    return systems
+
+
+def report_form_patch(packet, data):
+    """Shared proposal contract for packaging and offline report-consumer tests."""
     nodes = {n["id"]: n for n in data["nodes"]}
     by_code = {n["code"]: n for n in data["nodes"]}
-    packet = json.loads(docs[OPS]["text"])
-    form = json.loads(docs[FORM]["text"])
-    feedback = json.loads(docs[FEEDBACK]["text"])
-    facts = json.loads(docs[FACTS]["text"])
-    diagnostic = json.loads(docs[DIAGNOSTIC]["text"])
-    assert packet["version"] == 2 and form["version"] == 1, "Review baseline changed"
-    assert state["revision"] == 822, "Reconcile rather than silently rebasing"
-    assert by_code["P.OPS"]["id"] == "management-role-operations-specialist"
-
-    def link(id):
-        return f"{origin}/api/product-crew/documents/{id}/download?format=json"
-
     # The only home for report extensions is the existing P.OPS form document.
     coverage = []
     for row in packet["documentationInputs"]:
@@ -84,17 +87,7 @@ def prepare(state, origin):
             "status": "не проверено", "receivedAt": None, "evidence": None,
             "missing": "Нужны фактические входы и выданный доступ, а не описание",
         })
-    systems = []
-    for name in ["Hint", "Катя", "Translator", "Prepare", "History", "Copilot",
-                 "web", "iOS", "лаборатории", "crew"]:
-        systems.append({
-            "system": name, "status": "не проверено",
-            "source": "server/callLab/watchdog.ts" if name == "Hint" else None,
-            "evidenceKind": "код, не наблюдение runtime" if name == "Hint" else None,
-            "scope": "owner Hint, только после активации" if name == "Hint" else "Источник контроля не подтверждён",
-            "sourceConnected": None, "lastObservedAt": None,
-            "supplierRoleId": "head-engineering", "requestToActionId": "engineering-chief-incident",
-        })
+    systems = report_systems()
     period_common = {
         "rowTemplateRef": "#/detailRows", "dailySourceRef": "#/shortReport",
         "fields": ["periodStart", "periodEnd", "timezone", "environment",
@@ -146,22 +139,49 @@ def prepare(state, origin):
             "shortLetter": "Один экран, но сбой AI/QA и ограничения доказательств не скрывать",
         }},
     ]
-    packet_ops = [
+    return form_ops
+
+
+def report_packet_patch(packet, revision, origin):
+    """Keep the proposal's canonical form reference shared with fixture tests."""
+    return [
         {"op": "test", "path": "/version", "value": 2},
         {"op": "replace", "path": "/version", "value": 3},
         {"op": "replace", "path": "/dailyReportForm", "value": {
-            "documentId": FORM, "version": 2, "read": link(FORM),
+            "documentId": FORM, "version": 2,
+            "read": f"{origin}/api/product-crew/documents/{FORM}/download?format=json",
             "sections": ["shortReport", "detailRows", "periodicReports", "coverageMap", "metricDefinitions"],
             "rule": "Канонические формы здесь; встроенная копия убрана из рабочего пакета",
         }},
         {"op": "add", "path": "/reviewBasis", "value": {
-            "baseRevision": state["revision"], "ownerRequestedPassVersion": 2,
+            "baseRevision": revision, "ownerRequestedPassVersion": 2,
             "storedManualPassFound": bool(packet["manualPass"].get("verdict")),
             "externalManualPassSource": None,
             "status": "Проход v2 упомянут владельцем; в сохранённом manualPass результат не внесён",
             "newIndependentReviewPerformed": False,
         }},
     ]
+
+
+def prepare(state, origin):
+    docs = {d["id"]: d for d in state["documents"]}
+    data = state["operatingModel"]["revisions"][-1]["data"]
+    nodes = {n["id"]: n for n in data["nodes"]}
+    by_code = {n["code"]: n for n in data["nodes"]}
+    packet = json.loads(docs[OPS]["text"])
+    form = json.loads(docs[FORM]["text"])
+    feedback = json.loads(docs[FEEDBACK]["text"])
+    facts = json.loads(docs[FACTS]["text"])
+    diagnostic = json.loads(docs[DIAGNOSTIC]["text"])
+    assert packet["version"] == 2 and form["version"] == 1, "Review baseline changed"
+    assert state["revision"] == 822, "Reconcile rather than silently rebasing"
+    assert by_code["P.OPS"]["id"] == "management-role-operations-specialist"
+
+    def link(id):
+        return f"{origin}/api/product-crew/documents/{id}/download?format=json"
+
+    form_ops = report_form_patch(packet, data)
+    packet_ops = report_packet_patch(packet, state["revision"], origin)
     patched_packet = apply_patch(packet, packet_ops)
     patched_form = apply_patch(form, form_ops)
     assert patched_packet["manualPass"] == packet["manualPass"]

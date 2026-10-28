@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import { initialModel } from "./seed";
 import { readHypothesis } from "./hypotheses";
 import { emptyWorkNode } from "../../shared/operatingModelTemplate";
@@ -26,6 +27,19 @@ function fixture() {
   return root;
 }
 describe("canonical P.OPS documentation-only work package", () => {
+  it("checks the offline report consumer against canonical and proposed forms without a live snapshot", () => {
+    const state = readHypothesis(prepareOncallRole(fixture(), at), "new-country");
+    const contract = {
+      packet: JSON.parse(state.documents.find(d => d.id === opsPacketId)!.text),
+      form: JSON.parse(state.documents.find(d => d.id === opsFormId)!.text),
+      data: state.operatingModel!.revisions.at(-1)!.data,
+    };
+    const result = spawnSync("python3", ["scripts/test_ops_report.py"], {
+      input: JSON.stringify(contract), encoding: "utf8", timeout: 20_000,
+    });
+    expect(result.error, result.error?.message).toBeUndefined();
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+  });
   it("reuses the role, preserves old actions, history, passport and business daily chain", () => {
     const root = fixture(), before = readHypothesis(root, "new-country");
     const next = prepareOncallRole(root, at), after = readHypothesis(next, "new-country");
