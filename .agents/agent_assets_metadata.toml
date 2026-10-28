@@ -1615,3 +1615,31 @@ mtime_ms = 1793212906895
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/80bc6402-2815-4db8-9349-d1c734770231/fb5d4e97-89ed-4a6e-a7e2-20bee8af26db"
 storage_version_token = "1793212941899324"
 content_type = "text/html"
+
+[[outputs]]
+id = "1sMNezFSxQXH71V4OyLLu"
+uri = "file://generated-artifacts/hint-tuning-28oct/TalkHint_Hint_fixes_rev899.zip"
+type = "unspecified"
+title = "Скачать исправления Hint — ревизия 899"
+description = "Отдельные diff D1, D2, D3 и формы письма; полный список изменений, JSON модели и результаты тестов."
+logical_id = "349f6840-b683-4405-89dd-84227290149e"
+content_hash = "sha256:42b62c4da85b7ee530e5344d0f27b2c5a2e65ec2e58bcd0cefe59b51c64e6332"
+size = 391859
+mtime_ms = 1793215297933
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/349f6840-b683-4405-89dd-84227290149e/2a5469b2-ee31-443d-b07e-62fea8cfd4e2"
+storage_version_token = "1793215328953295"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Ptw6d38xCFemTFnPaPF4l"
+uri = "file://generated-artifacts/hint-tuning-28oct/LETTER_EXAMPLE.html"
+type = "html"
+title = "Открыть короткое письмо v4 после доработки"
+description = "Пример на звонке5:24: четыре блока; решения1–3 уже одобрены, подготовлены в Dev. Письмо не отправлялось."
+logical_id = "f85ce8a4-3fc2-4240-9454-d04f72c16a74"
+content_hash = "sha256:f2080ed47f51e01eb6fdd3420d4ec7c1a52dc50d62676a837ff4b5f7122422e5"
+size = 6730
+mtime_ms = 1793215161705
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f85ce8a4-3fc2-4240-9454-d04f72c16a74/f45769b9-e21a-451e-b99b-2066735bd96c"
+storage_version_token = "1793215329767841"
+content_type = "text/html"

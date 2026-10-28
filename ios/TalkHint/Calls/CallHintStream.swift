@@ -551,20 +551,17 @@ final class CallHintStream: NSObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.delegate?.callHintStream(self, didReceive: event)
-            // Delivery ack: sent AFTER the delegate has rendered the suggestion
-            // on the main queue, so the server-side "delivered" stage measures
-            // the hint actually reaching the screen — not just socket arrival.
+            // ACK means delegate update completed, not proof of physical display.
             if let ack = CallHintStream.suggestionAckPayload(forFrame: text) {
                 self.send(ack)
             }
             // Diagnostic only, no UI mutation. Missing frame IDs/hidden views
             // produce no event, never a fabricated successful display.
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                if case .suggestion = event {
-                    self.lastVisibilityFrame = (text, event)
-                    self.reportCurrentHintVisibility()
-                }
+            // Bind visibility to this render on the SAME main-queue turn.
+            // A queued callback could otherwise inspect a newer card instead.
+            if case .suggestion = event {
+                self.lastVisibilityFrame = (text, event)
+                self.reportCurrentHintVisibility()
             }
         }
     }

@@ -187,7 +187,7 @@ describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL
     expect((await client.query("SELECT call_sid FROM call_lab_jobs ORDER BY call_sid")).rows.map(r => r.call_sid)).toEqual(["call-1", "translator"]);
     const notice = (await client.query("SELECT report FROM call_lab_jobs WHERE call_sid='translator'")).rows[0].report;
     expect(notice.execution).toBe("mode_analysis_not_connected");
-    expect(notice.lab_release.version).toBe("owner-calls-v5");
+    expect(notice.lab_release.version).toBe("owner-calls-v6");
     expect(next.run).toHaveBeenCalledTimes(1);
   });
   it("kill switch prevents analysis and mail but retention still runs", async () => {

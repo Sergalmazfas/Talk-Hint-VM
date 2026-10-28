@@ -2112,6 +2112,12 @@ NEVER output JSON - only plain text with the phrase and translation.`);
       // suggestion may only come from farewell detection of actual speech.
       
       // Check 2: 1 hint = 1 utterance (same utterance already got a hint).
+      // Translation/context awaits can let a newer question overtake this turn.
+      // Guard static wait ACKs as well as the generated-model path below.
+      if (utteranceId !== latestGuestUtteranceId) {
+        dropHint("stale", "- newer guest question before hint selection", false);
+        return;
+      }
       // A question merged into hintText was NOT part of that earlier hint, so
       // preserve it for the next turn.
       if (utteranceId === lastHintUtteranceId) {

@@ -1,6 +1,6 @@
 /** Owner decision 2026-10-28. Never authorizes other users or new recordings. */
 export const labRelease = {
-  version: "owner-calls-v5",
+  version: "owner-calls-v6",
   decision: "2026-10-28",
   framework: "crewai@1.15.30",
 };

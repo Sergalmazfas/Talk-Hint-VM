@@ -38,12 +38,12 @@ describe("v3 process plan/fact", () => {
         translations_ui_claimed: 11, dropped: 10, drop_reasons: { cooldown: 3 },
         stt_final_to_ack_ms: { p50: 2154, p95: 3617, samples: 14 } },
     });
-    expect(mail.body).toContain("создано с сохранённым текстом 14");
-    expect(mail.body).toContain("ACK 14; отметок показа на iPhone 11");
-    expect(mail.body).toContain("STT final→ACK: p50 2154 / p95 3617");
-    expect(mail.body).toContain("ошибочная: #16");
-    expect(mail.body).toContain("#16: категория ошибочная не подтверждена");
-    expect(mail.body).toContain("Причина по коду; правомерность неизвестна");
+    expect(mail.body).toContain("Попыток 24 → отправлено 14 → показано 11");
+    expect(mail.body).toContain("подтверждено: 14");
+    expect(mail.body).toContain("обычно 2154 / в 95% случаев до 3617 мс");
+    expect(mail.body).toContain("Проверка вернула разбор");
+    expect(mail.body).not.toContain("#16");
+    expect(mail.body).not.toContain("Причина по коду");
     expect(mail.body).not.toContain("100%");
     expect(renderProcessLetter({ synthetic: true }).body).not.toContain("ПЯТЬ ВОПРОСОВ");
   });
@@ -64,17 +64,29 @@ describe("v3 process plan/fact", () => {
       expect(processReport({ process_rubric: { ...process_rubric, ...patch } }).percent).toBeNull();
     }
   });
-  it("keeps the refusal and hint-specific reasons in the short automatic letter", () => {
+  it("keeps a short refusal but leaves hint-specific QA reasons in the full report", () => {
     const mail = renderProcessLetter({ qa_status: "QA: расхождения не устранены",
       qa_issues: ["#5: ошибочная — неподтверждённое списание денег"],
       deterministic: { recorded_attempts: 17, with_recorded_text: 14, sent: 14,
         acknowledged: 14, hints_ui_claimed: 11, translations_ui_claimed: 11,
         dropped: 3, drop_reasons: { cooldown: 1 }, stt_final_to_ack_ms: { p50: 2217, p95: 5136, samples: 14 } } });
     expect(mail.body).toContain("Проверка вернула разбор");
-    expect(mail.body).toContain("#5: ошибочная");
+    expect(mail.body).not.toContain("#5: ошибочная");
     expect(mail.body).toContain("Попыток 17 → отправлено 14 → показано 11");
     expect(mail.subject).toContain("до экрана дошло 11 из 14");
     expect(mail.body).not.toContain("QA: QA:");
+  });
+  it("contains only four sections, leaving versions and engineering evidence in the report", () => {
+    const report = { lab_release: { version: "owner-calls-v5" },
+      engineering_dossier: { answers: [{ question: "internal", answer: "secret technical finding" }] },
+      qa_issues: ["event_id #777"], qa_status: "QA: расхождения не устранены" };
+    const body = renderProcessLetter(report).body;
+    const headings = body.split("\n").filter(s => /^[А-ЯЁ][А-ЯЁ —]+$/.test(s));
+    expect(headings).toEqual(["ВОРОНКА — ЦИФРЫ ПРОГРАММЫ", "ГДЕ СЛОМАЛОСЬ", "ЧТО УЖЕ ПРОБОВАЛИ", "НУЖНО РЕШЕНИЕ"]);
+    expect(body).not.toContain("owner-calls-v5");
+    expect(body).not.toContain("secret technical finding");
+    expect(body).not.toContain("event_id");
+    expect(report.qa_issues[0]).toContain("#777");
   });
   it("does not call a failed analysis a QA return or invent its missing diagnostics", () => {
     const mail = renderProcessLetter({ execution: "analysis_not_completed",

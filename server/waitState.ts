@@ -14,6 +14,8 @@
 // Deliberately conservative: it must NOT match pure hold phrases like
 // "Thank you. I'll wait." or "Let me check on that for you."
 const QUESTION_PATTERNS: RegExp[] = [
+  // A progress check asks the OWNER to answer; it is not the guest going on hold.
+  /\b(checking in|check(?:ing)? to see|let me know)\b/i,
   // Explicit question mark anywhere (STT adds them for rising intonation).
   /\?/,
   // Confirmation openers: "Just to confirm, you're trying to..." / "So you're saying..."
@@ -44,7 +46,7 @@ export function isQuestionOrActionRequest(text: string): boolean {
 // and TRAINING (training.ts) modes so the two can never drift apart.
 // Union of the patterns both modes historically used.
 export const WAIT_PATTERNS =
-  /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|checking|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up|one minute|just a minute)\b/i;
+  /\b(let me check|one moment|hold on|just a (second|moment|sec)|give me a (second|moment|sec|minute)|looking into|(?:i(?:'m| am)|we(?:'re| are)|still) checking|checking (?:the|your|our|availability|on)|i'?ll look|let me see|let me look|please hold|bear with me|i need to check|i'?ll find out|let me find|looking it up|one minute|just a minute)\b/i;
 
 export const EXIT_WAIT_PATTERNS =
   /\b(found it|here'?s|the answer|i found|that would be|it'?s|costs?|price is|\$\d|percent|per hour|starting at|minimum|maximum|we have|we offer|we can|available|not available|unfortunately|actually|yes,? we|no,? we|the (only|next|first|earliest|available)|i can offer|we can offer|how about|at \d|am|pm|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;

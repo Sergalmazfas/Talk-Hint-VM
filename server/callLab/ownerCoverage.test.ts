@@ -25,14 +25,15 @@ describe("owner standing authorization 2026-10-28", () => {
     const report = modeNotice({ call_sid: "fixture", lab_mode: mode, ended_at: "2026-10-28T06:00:00Z" }, "development");
     const letter = renderProcessLetter(report);
     expect(letter.subject).toContain("разбор не подключён");
-    expect(letter.body).toContain(labRelease.version);
+    expect(report.lab_release.version).toBe(labRelease.version);
+    expect(letter.body).not.toContain(labRelease.version);
     expect(report.analysis).toBeNull();
     expect(report.qa_status).not.toBe("QA: принято");
   });
   it("versions full analyses, including unavailable AI outcomes", () => {
     const report = completeLabReport({ execution: "analysis_not_completed" }, null, "a".repeat(64));
     expect(report.lab_release).toEqual(labRelease);
-    expect(renderProcessLetter(report).body).toContain(labRelease.version);
+    expect(renderProcessLetter(report).body).not.toContain(labRelease.version);
   });
   it("duty checks a missing non-Hint notice without requiring inapplicable QA", () => {
     const row: any = { ended_at: new Date(0), job_key: "fixture", job_status: "report_ready",

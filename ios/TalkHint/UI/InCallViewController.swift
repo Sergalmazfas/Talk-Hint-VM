@@ -962,6 +962,11 @@ final class InCallViewController: UIViewController {
             choiceButtonsStack.isHidden = true
         }
         suggestionBanner.isHidden = false
+        // A new hint starts at its first line, never at the previous CHOICE's
+        // scroll position. Stop any old scrolling animation before replacement.
+        suggestionBanner.setContentOffset(.zero, animated: false)
+        view.layoutIfNeeded()
+        suggestionBanner.setContentOffset(.zero, animated: false)
     }
 
     /// Copies the tapped CHOICE option's English phrase into the question field

@@ -27,12 +27,13 @@ describe("per-call P.PRODUCT decision handoff", () => {
     expect(f.issues.at(-1)?.decision).toBe("internal_role_step");
     expect(f.executionStarted).toBe(false);
   });
-  it("compares saved counters without claiming causal effect", () => {
+  it("keeps comparisons in the full report, not an extra short-letter section", () => {
     const f = buildProductFollowup(report, source, context);
     const text = productLetterSection({ product_followup: f }).join("\n");
-    expect(text).toContain("11/14 → 10/15");
-    expect(text).toContain("2154/3617 → 1835/4063");
-    expect(text).toContain("не доказывают причинный эффект");
+    expect(f.previous[0].shown).toBe(11);
+    expect(f.current.shown).toBe(10);
+    expect(f.comparison).toContain("не доказывают причинный эффект");
+    expect(text).not.toContain("ПРОШЛЫЕ ЗВОНКИ");
     expect(f.policy.allowedChanges).not.toContain("model");
     expect(text).toContain("ID строки — да/нет");
   });
@@ -41,7 +42,7 @@ describe("per-call P.PRODUCT decision handoff", () => {
     expect(f.issues.every(i => i.tried.length === 0)).toBe(true);
     expect(f.sourceRevision).toBeNull();
     expect(f.issues[0].historyStatus).toBe("журнал недоступен");
-    expect(productLetterSection({ product_followup: f }).join("\n")).toContain("эффект неизвестен");
+    expect(productLetterSection({ product_followup: f }).join("\n")).toContain("журнал недоступен");
     expect(productLetterSection({}).join("\n")).toContain("История не приложена");
   });
   it("keeps the same handoff in failed, normal and manual-report letter paths", () => {
@@ -57,5 +58,39 @@ describe("per-call P.PRODUCT decision handoff", () => {
   it("does not treat an unsupported-mode notice as rejected QA", () => {
     const f = buildProductFollowup({ execution: "mode_analysis_not_connected" }, null, context);
     expect(f.issues).toEqual([]);
+  });
+  it("uses history of this problem only, not the entire broad coffee incident", () => {
+    const f = buildProductFollowup(report, source, { status: "available", previous: [], cases: [
+      { caseId: "broad", label: "wait_state и показ и перевод", history: [
+        { note: "Исправили перевод собеседника" }, { note: "Исправили wait_state: checking" },
+        { stage: "verified", note: "Результаты см. в общем отчёте", verification: { hint: "показ iPhone", tests: "passed" } },
+      ] },
+      { caseId: "current-question", problemKey: "filter", history: [
+        { stage: "implemented_dev", note: "Исправили текущий вопрос перед показом карточки" },
+      ] },
+    ] });
+    expect(f.issues[0].tried).toEqual([]);
+    expect(f.issues[0].historyStatus).toContain("раньше не пробовали");
+    expect(f.issues[1].tried[0].attempts).toHaveLength(1);
+    expect(f.issues[1].tried[0].attempts[0].action).toContain("wait_state");
+    const text = productLetterSection({ product_followup: f }).join("\n");
+    expect(text).not.toContain("Исправили перевод");
+    for (const issue of f.issues.filter(i => i.decision === "awaiting_owner")) {
+      expect(issue.proposal).toContain("→");
+      expect(issue.proposal).toContain("Варианты:");
+      expect(issue.proposal).toContain("рекомендуем");
+    }
+  });
+  it("does not claim a proposed change was tried or a broad incident rating proves this fix", () => {
+    const f = buildProductFollowup(report, source, { status: "available", previous: [], cases: [
+      { ownerEvaluationOfImplementedChange: "отлично", history: [
+        { stage: "proposed", note: "Предложили wait_state" },
+        { stage: "implemented_dev", note: "Исправили показ", decisionId: "saved-call:D1", ownerDecision: "yes" },
+      ] },
+    ] });
+    expect(f.issues[0].tried[0].effect).toBe("помогло ли — не подтверждено");
+    expect(f.issues[0].decision).toBe("approved_dev");
+    expect(f.issues[1].tried).toEqual([]);
+    expect(productLetterSection({ product_followup: f }).join("\n")).toContain("да; подготовлено в Dev");
   });
 });

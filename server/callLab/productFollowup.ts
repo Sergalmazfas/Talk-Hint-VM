@@ -23,21 +23,39 @@ export function buildProductFollowup(report: any, source: any, context: ProductC
     verdict: p.qa_status ?? "неизвестно",
   }));
   const add = (kind: string, problem: string, evidence: string, proposal: string, criterion: string, match: RegExp) => {
-    const history = context.cases.filter(c => match.test(JSON.stringify(c))).slice(0, 3).map(c => ({
+    // Match individual attempts, never an unrelated paragraph elsewhere in a
+    // broad incident. A case label alone is not a previous attempted fix.
+    const history = context.cases.map(c => ({ ...c,
+      history: (c.history ?? []).filter((h: any) =>
+        (!c.problemKey || c.problemKey === kind) &&
+        match.test(`${h.problemKey ?? ""} ${h.note ?? h.action ?? ""}`) &&
+        (/^(implemented|verified|tested)/.test(h.stage ?? "") ||
+          (!h.stage && /исправил|проверил|прогнал|внедрил|изменил/i.test(h.note ?? "")))),
+    })).filter(c => c.history.length).slice(0, 3).map(c => ({
       caseId: c.caseId, label: c.label ?? c.caseId,
       attempts: (c.history ?? []).slice(-2).map((h: any) => ({
         at: h.at ?? null, action: compact(h.note ?? h.stage ?? h.source),
         evidence: compact(h.evidence ?? h.verification ?? "не приложено"),
       })),
-      effect: c.ownerEvaluationOfImplementedChange == null
-        ? "помогло ли — не подтверждено" : compact(c.ownerEvaluationOfImplementedChange),
+      // A rating of a broad incident is not a rating of this particular fix.
+      effect: c.history.at(-1)?.ownerEvaluationOfImplementedChange == null
+        ? "помогло ли — не подтверждено" : compact(c.history.at(-1).ownerEvaluationOfImplementedChange),
     }));
     issues.push({ id: `${report.call_id ?? "call"}:D${issues.length + 1}`, kind, problem, evidence,
       tried: history, historyStatus: context.status === "unavailable" ? "журнал недоступен"
-        : history.length ? "найдены связанные записи; это не доказательство результата" : "связанная запись не найдена, не доказательство отсутствия попыток",
+        : history.length ? "найдены попытки именно по этой проблеме; эффект отдельно" : "раньше не пробовали (по доступному журналу)",
       proposal, executor: "HEAD.07", acceptor: "владелец: да/нет; затем технические проверки",
       criterion, decision: kind === "diagnostics" ? "internal_role_step" : "awaiting_owner",
       implemented: false, nextCall: "сверить тот же признак; эффект неизвестен до проверки" });
+    const issue = issues.at(-1)!;
+    const approved = context.cases.flatMap(c => c.history ?? []).filter((h: any) =>
+      h.decisionId === issue.id && h.ownerDecision === "yes" &&
+      ["implemented_dev", "verified_dev"].includes(h.stage)).at(-1);
+    if (approved && kind !== "diagnostics") {
+      issue.decision = "approved_dev";
+      issue.implemented = true;
+      issue.acceptor = "владелец: да; эффект ещё не принят, Publish владельцем";
+    }
   };
   const hints = source?.hints ?? [];
   const events = source?.ui_visibility?.events ?? [];
@@ -54,25 +72,25 @@ export function buildProductFollowup(report: any, source: any, context: ProductC
     add("ios_display", "Не совпали подтверждения получения и отметки показа",
       `ACK ${m?.acknowledged ?? "?"}; отметок показа ${m?.hints_ui_claimed ?? "?"}.` +
       (maxGap ? ` #${maxGap.id}: разрыв серверных отметок ${maxGap.ms} мс; не доказательство задержки физического показа.` : ""),
-      "Проверить обновление карточки и отметки показа iOS; отделить время события на устройстве от времени получения сервером. Исправлять найденный дефект, не менять модель.",
+      "Заменять старые варианты сразу, сбрасывать прокрутку новой карточки и отправлять отметку в том же обновлении экрана → начало новой подсказки не скрывается. Варианты: замена сразу / сохранение позиции; рекомендуем замену сразу. Сверить время устройства и получения отметки: разрыв 24 с сам по себе не доказывает задержку экрана.",
       "Для каждой карточки сопоставлены ID, ACK, время устройства и получение отметки; неизвестное не объявлено задержкой экрана.",
-      /экран|телеметр|показ|карточ/i);
+      /телеметр|показ|карточ|scroll|visibility|ios_display/i);
   if (hints.some((h: any) => /sure[,.]?\s+i['’]?ll wait/i.test(h.text ?? "")) ||
       /Sure, I'll wait/.test(JSON.stringify(report.engineering_dossier ?? {})))
     add("trigger", "Проверить уместность «Sure, I'll wait»",
       "В сохранённом материале есть эта фраза. Наличие фразы не доказывает ошибку во всех ситуациях; контекст проверяется отдельно.",
-      "Уточнить триггер wait_state: отличать реальное ожидание от вопроса собеседника о результате действий владельца. Сначала offline-примеры.",
+      "Убрать срабатывание ожидания от одиночного checking; вопрос о ваших действиях выпускает обычную подсказку → вместо «подожду» помощь с ответом. Варианты: явные фразы ожидания / полностью убрать короткое подтверждение; рекомендуем явные фразы, сохранив полезное ожидание.",
       "Вопрос о результате не вызывает «я подожду»; реальное ожидание сохраняется; неизвестное состояние владельца не выдумывается.",
-      /wait_state|ожидан|подожд|быстр.*разговор/i);
+      /wait_state|ожидан|подожд|checking/i);
   const mismatch = (report.engineering_dossier?.answers ?? []).some((a: any) => /не на тот|текущ.*вопрос|несовпад/i.test(a.question ?? ""));
   const disputed = (report.analysis?.findings ?? []).filter((f: any) => f.category === "ошибочная");
   if (mismatch || disputed.length)
     add("filter", "Проверить соответствие подсказки текущему вопросу",
       mismatch ? "В инженерной сверке зарегистрировано несовпадение; точный этап потери соответствия не установлен."
         : `Сигнал разбора: ${disputed.map((f: any) => `#${f.event_id}`).join(", ")}; QA: ${report.qa_status ?? "неизвестно"}. Это не подтверждённая причина.`,
-      "Проверить привязку к реплике и актуальность карточки; на сохранённом тексте проверить фильтр устаревших ответов и правило неизвестного состояния владельца.",
+      "Новый явный вопрос заменяет старый в переносе; устаревший ответ отсекать до любой подсказки, включая «подожду» → ответ относится к текущему вопросу. Варианты: приоритет нового вопроса / отключить перенос совсем; рекомендуем приоритет нового, сохранив перенос при продолжении речи. Затем сверить соответствие на сохранённых примерах.",
       "Ответ привязан к проверяемому вопросу, устаревшая карточка не выдаётся за текущую; сравнение с исходником без новых фактов.",
-      /вопрос|цель|устар|кофейн|состояни/i);
+      /перенос|carryover|устар|текущ.*вопрос|не на тот вопрос|состояни/i);
   if (report.execution !== "mode_analysis_not_connected" &&
       (report.execution === "analysis_not_completed" || report.qa_status !== "QA: принято"))
     add("diagnostics", "Разбор не получил независимого принятия",
@@ -96,21 +114,17 @@ export function productLetterSection(report: any): string[] {
   const f = report.product_followup;
   if (!f) return ["", "ЧТО УЖЕ ПРОБОВАЛИ", "История не приложена; P.PRODUCT должен прочитать журнал. «Не найдено» не значит «не пробовали».",
     "НУЖНО РЕШЕНИЕ", "Нет подготовленных доказательных строк. Сначала адресная сверка P.PRODUCT; новая модель не предлагается."];
-  const rows = f.issues.filter((x: any) => x.decision === "awaiting_owner")
-    .map((x: any, i: number) => `${i + 1} [${x.id}] | ${x.proposal} | ${x.executor} | да / нет`);
+  const rows = f.issues.filter((x: any) => ["awaiting_owner", "approved_dev"].includes(x.decision))
+    .map((x: any, i: number) => `${i + 1} [${x.id}] | ${x.proposal} | ${x.executor} | ${x.decision === "approved_dev" ? "да; подготовлено в Dev, ждёт публикации" : "да / нет"}`);
   return ["", "ЧТО УЖЕ ПРОБОВАЛИ",
-    ...f.issues.flatMap((x: any) => [
-      `${x.problem}. ${x.evidence}`,
+    ...f.issues.filter((x: any) => x.kind !== "diagnostics").flatMap((x: any) => [
+      `${x.problem}:`,
       ...x.tried.slice(0, 2).map((c: any) => `${c.caseId}: ${c.attempts.slice(-1).map((a: any) => `${a.at ?? "дата ?"} — ${a.action.slice(0, 160)}`).join("; ")}. ${c.effect}.`),
       ...(!x.tried.length ? [x.historyStatus] : []),
     ]),
-    ...(f.previous.length ? ["ПРОШЛЫЕ ЗВОНКИ → ТЕКУЩИЙ",
-      ...f.previous.map((p: any) => `${p.at ?? "дата ?"} (${p.callId}; ${p.laboratory}): показ ${p.shown ?? "?"}/${p.sent ?? "?"} → ${f.current.shown ?? "?"}/${f.current.sent ?? "?"}; p50/p95 ${p.p50 ?? "?"}/${p.p95 ?? "?"} → ${f.current.p50 ?? "?"}/${f.current.p95 ?? "?"} мс.`)]
-      : ["Сопоставимые предыдущие отчёты не приложены; эффект неизвестен."]),
-    f.comparison,
-    ...f.issues.filter((x: any) => x.decision === "internal_role_step")
-      .map((x: any) => `Внутренняя работа роли, не запрос владельцу: ${x.executor} — ${x.proposal}`),
     "НУЖНО РЕШЕНИЕ", "№ / ID | Предложение | Кто делает | Ваш ответ",
     ...(rows.length ? rows : ["Подтверждённых оснований для изменения не найдено. Это не оценка «всё хорошо»."]),
-    perCallPolicy.reply, perCallPolicy.next, perCallPolicy.escalation];
+    f.issues.some((x: any) => x.decision === "approved_dev") && !f.issues.some((x: any) => x.decision === "awaiting_owner")
+      ? "По этим строкам решение уже получено. Следующий шаг — публикация владельцем и проверка эффекта."
+      : perCallPolicy.reply, perCallPolicy.next];
 }

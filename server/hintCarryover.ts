@@ -94,7 +94,10 @@ export class HintCarryover {
    */
   buildHintText(turn: GuestTurn, isLatest: boolean): { hintText: string; carried: PendingQuestion | null } {
     if (!isLatest) return { hintText: turn.text, carried: null };
-    const carried = this.consume();
+    const pending = this.consume();
+    // A new explicit question wins. An older unanswered question remains in
+    // dialogue context, but must not be presented as part of this question.
+    const carried = this.isQuestion(turn.text) ? null : pending;
     const hintText = carried ? combineWithCarryover(carried.text, turn.text) : turn.text;
     turn.text = hintText; // if THIS turn is later superseded, the merged text is what gets carried
     return { hintText, carried };
