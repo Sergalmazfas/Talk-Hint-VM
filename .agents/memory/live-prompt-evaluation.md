@@ -20,3 +20,16 @@ and format completeness alone do not establish semantic QA correctness.
 
 **How to apply:** keep raw verdicts unchanged, reject wrong-speaker citations
 explicitly, and report source-audit disagreements separately from model scores.
+
+Calibrate a judge on proposed speech versus asserted completed facts before bulk
+evaluation. A normal acknowledgment or compatible future action is not inherently
+a fabricated Owner fact. Keep JSON examples type-correct (actual null, not a
+string naming null). A strict citation filter can itself reject sound verdicts.
+
+**Why:** independent judging of saved replies produced false penalties for
+ordinary acknowledgments and future actions; mechanically valid citations did
+not make those scores trustworthy.
+
+**How to apply:** preserve raw judgments, use contrastive known-fact/unknown-state/
+conditional-option checks, and do not rank quality from sparse, uncalibrated
+survivors. Keep judge failures unknown rather than zero.

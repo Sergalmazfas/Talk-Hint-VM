@@ -1461,3 +1461,31 @@ mtime_ms = 1793159086011
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/96dcea59-4a65-48c8-98ba-f75ed44d5825/5ccb0d7f-2b3e-4ff4-bc15-f70ecbf42f3a"
 storage_version_token = "1793159106070822"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Yfkp44Zjl79-bV57TA7Li"
+uri = "file://generated-artifacts/hint-unified-preflight/REPORT.html"
+type = "html"
+title = "Hint — сравнение пяти моделей: частичный результат"
+description = "Одна таблица, три примера различий, ограничения оценки качества и «Нужно решение»."
+logical_id = "938cb7aa-90f2-44ba-8bd3-fce506b39580"
+content_hash = "sha256:ec24e4d2dd341cc03d1d7cad3201426ad5179e58f80b1466da43940b3d39a30d"
+size = 40247
+mtime_ms = 1793161340201
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/938cb7aa-90f2-44ba-8bd3-fce506b39580/97f2d391-6072-499d-bdeb-b7764620a4e7"
+storage_version_token = "1793161417915485"
+content_type = "text/html"
+
+[[outputs]]
+id = "8EBJw3EAFGTMmhQNk1zNF"
+uri = "file://generated-artifacts/hint-unified-preflight/TalkHint_unified_models_partial_v1.zip"
+type = "unspecified"
+title = "Скачать полный пакет перепрогона Hint"
+description = "Ответы моделей, исходные оценки судьи, эталон фактов, расходы, отчёт и проверенные контрольные суммы. Продукт не изменён."
+logical_id = "8a5c9206-0654-4465-9c5e-75f51bfb4368"
+content_hash = "sha256:636af6e2aca3d82136380a76400bb2a3b87b50710829b537e7b46b915bac7bb8"
+size = 446409
+mtime_ms = 1793161340495
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8a5c9206-0654-4465-9c5e-75f51bfb4368/88412aa3-7c6f-47f7-8cb2-eb6ce85f73f4"
+storage_version_token = "1793161418622946"
+content_type = "application/octet-stream"
