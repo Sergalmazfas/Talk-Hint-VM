@@ -1489,3 +1489,17 @@ mtime_ms = 1793161340495
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8a5c9206-0654-4465-9c5e-75f51bfb4368/88412aa3-7c6f-47f7-8cb2-eb6ce85f73f4"
 storage_version_token = "1793161418622946"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "NlsjLYx5YrMTdcBneiMy4"
+uri = "file://generated-artifacts/hint-unified-rescore/Hint_rescore_preflight_v1.zip"
+type = "unspecified"
+title = "Hint — калибровка и досверка: расчёт до запуска"
+description = "20 контрастных примеров, очередь сохранённых ответов, расчёт стоимости, решения владельца и read-only проверка production. Новых платных вызовов нет."
+logical_id = "8ca3fe7a-474e-49f8-ada1-b76daf73ba39"
+content_hash = "sha256:a995fa218b6979695a3248ca206e7385aa01e82c800378ad533189e8c510cfb4"
+size = 240827
+mtime_ms = 1793163066064
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8ca3fe7a-474e-49f8-ada1-b76daf73ba39/ebcb2e5b-4203-4614-a30b-d8361820be84"
+storage_version_token = "1793163118443477"
+content_type = "application/octet-stream"
