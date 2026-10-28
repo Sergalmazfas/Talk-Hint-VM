@@ -33,3 +33,15 @@ not make those scores trustworthy.
 **How to apply:** preserve raw judgments, use contrastive known-fact/unknown-state/
 conditional-option checks, and do not rank quality from sparse, uncalibrated
 survivors. Keep judge failures unknown rather than zero.
+
+A failed contrastive calibration can expose an error or ambiguous boundary in the
+oracle, not just an error by the judge. Separate unsupported third-party facts
+from unknown Owner state and material decisions made for the Owner.
+
+**Why:** an oracle expected no Owner overreach for an unsolicited refund demand,
+although the written criterion explicitly included material financial decisions.
+
+**How to apply:** preserve the original labels, verdicts and failed gate. Diagnose
+oracle disagreements separately; do not relabel observed answers into a passing
+calibration. Clarify the definitions and use fresh contrastive controls before
+bulk grading.

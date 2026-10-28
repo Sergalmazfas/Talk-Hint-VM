@@ -1503,3 +1503,17 @@ mtime_ms = 1793163066064
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8ca3fe7a-474e-49f8-ada1-b76daf73ba39/ebcb2e5b-4203-4614-a30b-d8361820be84"
 storage_version_token = "1793163118443477"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3DqcYiQ2L3MKjRU6F-eOn"
+uri = "file://generated-artifacts/hint-unified-rescore/Hint_judge_calibration_result_v1.zip"
+type = "unspecified"
+title = "Hint — результат калибровки: 18/20, досверка остановлена"
+description = "Все 20 исходных вердиктов, неизменённый эталон, разбор двух расхождений, стоимость и подтверждение сохранения в модели. Повторных генераций подсказок нет."
+logical_id = "a1990d05-847c-4588-8bc4-ca14d0832373"
+content_hash = "sha256:074bd3811328a51f1bffd9487a09c6644d5cd82858297632e6b61660652d771b"
+size = 26488
+mtime_ms = 1793163563166
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a1990d05-847c-4588-8bc4-ca14d0832373/44a90c48-42f9-4611-a7ff-00f74fb774e8"
+storage_version_token = "1793163619866274"
+content_type = "application/octet-stream"
