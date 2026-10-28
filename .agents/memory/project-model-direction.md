@@ -3,6 +3,22 @@ name: TalkHint internal project model
 description: Owner's scope and domain boundaries for the internal project-model workspace.
 ---
 
+## Действующий общий стандарт и история
+
+Общие правила сборки должности, JSON/приёмки, передачи между ролями, единого
+журнала и событийной/периодической отчётности перенесены в `replit.md` v3,
+§2–7. Предметные решения ниже сохраняются с историей, не являются вторым
+редактируемым текстом регламента. Прежнее ограничение «не устанавливать/не
+запускать CrewAI» относится к этапу описания до отдельно разрешённого
+ограниченного Hint-пилота; оно не доказывает запуск всей crew.
+
+**Why:** владелец согласовал единый короткий регламент и сохранение прежних
+формулировок вместо удаления истории.
+
+**How to apply:** текущие полномочия, роль владельца и независимого Claude
+проверять по `replit.md` §2. P.OPS и его формы сейчас отдельно перерабатываются
+по проходу владельца; согласование общего регламента не означает приёмку P.OPS.
+
 The owner wants an internal model of TalkHint, not a universal builder or an
 end-user business questionnaire. Business thinking starts at the startup layer
 and descends into capabilities, processes, actions, responsibilities, rules,

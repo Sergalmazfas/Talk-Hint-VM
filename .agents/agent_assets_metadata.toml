@@ -1293,3 +1293,17 @@ mtime_ms = 1793144149639
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/97542e1d-3c77-4ef1-8d58-a3cd535320a4/794c5e7c-779c-4e09-867e-f8d0c6bc9572"
 storage_version_token = "1793144182955569"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3NPp-DisOH5BxfNjwHYDc"
+uri = "file://generated-artifacts/operating-rules-applied/TalkHint_rules_v3_applied_rev828.zip"
+type = "unspecified"
+title = "TalkHint — правила v3 применены · rev828"
+description = "Действующий replit.md, журнал v2, diff памяти, итог проверок и ссылки. Книга v14, roadmap v25. Изменения P.OPS исключены."
+logical_id = "cb68f257-d4c1-400f-acfb-3d184fd43038"
+content_hash = "sha256:b9909488c62bf885f3ab6f0028bb72d8c0502e252bb2fd4ac7779b7a3ec0a582"
+size = 32609
+mtime_ms = 1793147646619
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/cb68f257-d4c1-400f-acfb-3d184fd43038/bfcee7ea-8703-464a-83a2-bd0e6e1f4630"
+storage_version_token = "1793147693543964"
+content_type = "application/octet-stream"

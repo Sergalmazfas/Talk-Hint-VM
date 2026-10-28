@@ -1,105 +1,58 @@
-# TalkHint v2 - Real-time Voice Ass
-istant
+# TalkHint
 
-## Overview
-TalkHint is an AI-powered real-time voice assistant designed for phone calls. It offers live transcription, translation hints, and GPT-powered suggestions during conversations. The system integrates Twilio for call handling, Deepgram for speech-to-text, and OpenAI's Realtime API for AI assistance. TalkHint v2 introduces subscription-based plans with Stripe, focusing on a simplified Basic plan. The project aims to provide an advanced conversational AI experience, enhancing communication efficiency and effectiveness for users during phone interactions.
+## Операционные правила v3
 
-## User Preferences
-Preferred communication style: Simple, everyday language.
-Key phrase: "не запрещаем, предупреждаем" - warn users when changing prompts on work numbers, don't block.
+### 1. Начало работы
+Прочитай этот раздел, `.agents/memory/MEMORY.md`, затем память по теме и актуальные документы `new-country`: книгу, главу режима, пакет роли, связанный случай журнала. Перед записью перечитай ревизию. Недоступный документ назови; не заявляй, что прочитал его. Расхождения правил, памяти, кода и фактической работы не разрешай молча.
 
-## System Architecture
+Первая строка каждого ответа по задаче: **«Правила v3 прочитаны · роль: … · дорога: быстрая/полная»**. Это отметка чтения, не доказательство соблюдения. В результате укажи действие модели, прочитанные версии, доказательства и передачу.
 
-### Frontend
-The main client application is built with React and TypeScript using Vite, providing a modern and responsive user interface. A separate, standalone HTML/JS UI is served at `/app` for the core voice assistant interface. Design is based on `shadcn/ui` with Radix UI primitives and styled using TailwindCSS. React Query manages server state, and Wouter handles client-side routing.
+### 2. Роли и полномочия
+Сергей участвует только: **(а) на контрольных точках** — общий отчёт компании; решения по деньгам, подпискам, выпуску (Publish/TestFlight), провайдерам; «да/нет» по рекомендациям; **(б) в неделегируемом** — звонки, регистрации и оплата, ключи в Secrets, подписки у конкурентов, скриншоты и видео, объяснение продукта, проверка на iPhone, оценка изменений. Всё остальное — роли; не неси владельцу то, что может сделать роль.
 
-### Backend
-The backend runs on Express.js with TypeScript, facilitating real-time audio streaming via WebSockets. It handles Twilio media streams, browser microphone audio ("Honor stream"), and broadcasts transcripts to UI clients. An audio processing pipeline converts μ-law to PCM16 and upsamples to 24kHz for OpenAI compatibility, utilizing FFmpeg for conversions.
+Replit — технический исполнитель HEAD.07 и временный исполнитель других существующих ролей по поручению; обозначай переключение. Роль не равна подключённому сотруднику. **Claude — независимый проверяющий:** ручные проходы JSON и сверка писем. Собственное переименование в другую роль независимой QA не является; фиксируй реально полученный вердикт, не ожидаемый.
 
-### Data Storage
-PostgreSQL serves as the primary database, managed with Drizzle ORM. The schema includes a `calls` table for tracking call details, transcripts, and metadata. In production, `connect-pg-simple` is used for session storage in PostgreSQL.
+CrewAI — официальный open source на своём сервере, существующий ключ проекта, без облачной платформы. Новое подключение исполнителя — только после отдельного разрешения.
 
-### Real-time Communication
-Multiple WebSocket endpoints (`/twilio-stream`, `/honor-stream`, `/ui`) manage real-time audio and data flow. A mode system (universal, massage, dispatcher) applies context-specific prompts. The system employs an Utterance Gate to prevent interruptions by waiting for complete speaker turns before GPT processing, and Hint Throttling to limit suggestion frequency. A Fast Conversation Layer provides immediate, short phrases to fill pauses while GPT processes, using a predefined `fastPhrases.json` database.
+За пределами выданных полномочий нельзя удалять, публиковать, выпускать TestFlight, покупать, оформлять подписки/регистрации, подключать провайдеров, запускать внешние звонки/SMS или расширять доступ к чужим данным. Уже разрешённые действия ролей не требуют повторного одобрения. Секреты — только через защищённые настройки, не в документах. Copilot и его стенды сохраняются. Запись звонков не менять и не включать в рамках этого регламента. Изменение промпта рабочего номера — предупреждение, не запрет.
 
-### Speech-to-Text (Deepgram Flux v2)
-Transcription uses Deepgram **Flux** (`flux-general-en`) over the v2 streaming endpoint (`wss://api.deepgram.com/v2/listen`). Flux does conversational, model-native turn detection, so the old Nova-3 signals (`is_final` / `speech_final` / VAD `SpeechStarted` / `UtteranceEnd`) are gone. Instead it emits `TurnInfo` events: `StartOfTurn` (log only), `Update` (interim text → broadcast to UI as non-final), and `EndOfTurn` (turn complete → committed to the pipeline + broadcast as final). Audio is sent as Twilio-native μ-law @ 8kHz with no transcoding. Tuning params: `eot_threshold=0.7`, `eot_timeout_ms=3000`; eager mode is **off** (no `eager_eot_threshold`). No manual `KeepAlive` is sent — Flux has a server-side watchdog. The Utterance Gate is reduced to a thin finalizer (`commitTurn`) doing min-length filtering, consecutive-duplicate suppression, and per-speaker turn counting; cross-track echo dedup stays in the websocket layer.
+### 3. Общая структура
+Истина — существующая модель `new-country`, стабильные ID и её история; не второй каталог. Должность выводится из действий, ресурсов и связей. У действия: вход/поставщик, результат/клиент, исполнитель, ресурс с доступностью, принимающий/контролёр, критерии приёмки/возврата, триггер и метрика. Сформировать и принять — разные действия. Молчание не приёмка. Независимые функции не соединяй искусственно через `nextAction`.
 
-### Hint model & timing
-The live hint generator (`translateAndSuggest`) defaults to `gpt-4.1-mini`. The active model is a server-side global (`currentModel`) that the user picks from the **AI Model** selector in the `/app` sidebar — the UI sends a `set_model` WebSocket message, validated against an allowlist (`ALLOWED_HINT_MODELS`: gpt-4.1-mini, gpt-4.1-nano, gpt-4o-mini, gpt-4o, gemini-2.5-flash-lite, gemini-2.5-flash) and persisted in `localStorage`. Provider routing is by model name: `gemini-*` models go to Google Gemini (`generateContent` REST, `thinkingBudget=0`, key from `GEMINI_API_KEY` with fallback to the misspelled `GEMINI_API_KAY` secret); everything else goes to OpenAI. Both providers share the same prompt and JSON-parsing path. If a Gemini call fails or returns empty/unparseable output, hint generation automatically falls back to OpenAI (`OPENAI_FALLBACK_MODEL` = `gpt-4.1-mini`) so live calls never lose hints. Fallback frequency is tracked (`getHintFallbackStats()`): each fallback logs a running rate (`[fallbacks N/total = X%]`) and the cumulative counters (`geminiAttempts`, `geminiFallbacks`, `fallbackRatePct`) are exposed under `hintFallback` on `GET /api/health` to spot Gemini degradation. The startup default can still be overridden with the `HINT_MODEL` env var. Like `currentMode`/`currentLanguage`, the model is process-global (effectively single-user), not per-user. **Split translation/suggestion (latency).** The guest caption and the reply suggestion are two independent model calls fired in **parallel** per guest turn, so the translated caption no longer waits for the (slower) suggestion. The caption comes from a small, translation-only call (`translateGuestText` — a minimal inline `{"translation":"…"}` prompt, NOT the hint/objection prompt) and is broadcast as soon as it resolves. The suggestion still comes from the unchanged combined `translateAndSuggest` (full JSON) and passes through **all** existing guards (goal-achieved hard-stop, hint_shown, cooldown/throttle, reaction-only, farewell, wait-state ACK, anti-loop repeat-intent, duplicate filter, post-generation goal recheck) before broadcast. The suggestion call is **skipped** for turns that can never emit one (`reactionOnly`/`isFarewell`/`goalJustAchieved`/`goalAchievedFlag`/`waitingForInfo`) instead of generating-then-discarding. UI payloads (`guest_transcript`, `suggestion`) are unchanged. No token streaming yet (planned as the final step). **OpenAI token budget:** the shared `generateWithOpenAI` helper defaults to `max_tokens=80`, but the combined `translateAndSuggest` call passes `250` (via a closure at its `routeGenerate` site, matching Gemini's `maxOutputTokens`) — 80 is too small for the full translation+suggestion+sentiment JSON and silently truncates the reply mid-JSON, dropping the suggestion (the "one hint then nothing" bug after OpenAI became primary). The translation-only (`translateGuestText`) and sentiment calls keep the small default. `max_tokens` is a cap, not spend, so this doesn't raise cost on short turns. The guest-utterance pipeline emits `[TIMING]` logs per turn: `reaction end_of_turn->caption=<ms>` with `translation_latency_ms` + `provider_used`, `reaction end_of_turn->suggestion=<ms>` with `suggestion_latency_ms`, and a consolidated `[HINT] provider_used=… translation_latency_ms=… suggestion_latency_ms=… total_hint_latency_ms=…` line (all measured from `handleGuestUtteranceComplete` entry ≈ Deepgram EndOfTurn). Duplicate-suggestion blocking uses `DUPLICATE_SIMILARITY = 0.8` (Jaccard).
+JSON роли — версионированный снимок модели: ручной проход → разрывы → исправления → явная приёмка → отдельное разрешение подключить исполнителя. «Описано / реализовано / проверено / принято / в плане» различай; код и стенд не доказывают доступную работающую функцию.
 
-### AI and Conversation Flow
-The system incorporates a Goal State Engine, a state machine that tracks conversation objectives (e.g., booking, pricing). It uses regex-based slot extractors for key information (date, time, phone, etc.) and determines when a goal is achieved. In "Training Mode," the system simulates phone calls using two distinct prompts: one for the simulated conversational partner (GST_SYSTEM_PROMPT_TEMPLATE) and another for the TalkHint assistant (HINT_SYSTEM_PROMPT_TEMPLATE), supporting voice input via Deepgram STT and goal-first guidance.
+### 4. Две дороги
+Быстрая — прямо порученное, ограниченное обратимое исправление в Dev с diff и проверками. Полная — изменение процессов, моделей, провайдеров, стендов или ресурсов: профильные роли → лаборатория → сводка продукта → решение владельца. Исследования могут идти параллельно. Быстрее, но с потерей цели, выдуманным фактом или сменой говорящего — не основание выпуска.
 
-### Build and Deployment
-Vite is used for frontend bundling, while esbuild handles server bundling with selective dependency inclusion for optimized cold starts. Graceful shutdowns are managed with SIGTERM/SIGINT handlers. For production voice calls, Reserved VM Deployment is recommended to ensure consistent uptime for WebSocket connections, avoiding issues with autoscaling.
+### 5. Журнал и переход роли
+Один случай на проблему/предложение; внутри история: источник → факты → решение → действие/версия → проверка «до/после» → оценка владельца. Привязывай к существующим действиям, книге и roadmap. Сохраняй прежнее состояние и источник согласования.
 
-On every production startup (i.e. after each Publish), the server automatically repoints all Twilio pool numbers' voice/status webhooks at the live production URL via `repointWebhooksOnStartup` in `server/index.ts`. The URL is resolved from `PRODUCTION_URL` → `REPLIT_DEPLOYMENT_URL` → first host in `REPLIT_DOMAINS` → fallback. This is idempotent and logs which numbers were updated. Set `DISABLE_AUTO_WEBHOOK_REPOINT=true` to opt out. `scripts/configure-twilio-webhooks.ts` remains as a manual fallback.
+При переходе роли передавай ID случая, входную версию, результат и вопрос. Нехватка входа — адресный запрос поставщику. Ответ и приёмку не сочиняй. Отзыв владельца «хуже / так же / лучше / отлично» сохраняй; без него пользовательское улучшение не принято. Положительный отзыв не заменяет обязательные технические проверки.
 
-### Save-health status page access
-The on-call DB save-health endpoints are `GET /api/health` (JSON data source) and `GET /health` (a self-contained HTML page that fetches `/api/health` client-side and renders it). They expose operational internals (table names, save-failure counts, schema-drift errors) but no secrets or user data. Access is **secure by default in production** (`healthAccessAllowed` in `server/routes.ts`): in production, access is **denied** unless the requester proves they belong, via either (1) a valid shared on-call token (`HEALTH_STATUS_TOKEN`), supplied as `?token=`, an `x-health-token` header, or a `Bearer` header (constant-time compared), or (2) a valid authenticated app session (the same `Bearer` session token the `/app` UI uses, resolved via `getSessionUserId`). Outside production both endpoints stay fully open (frictionless dev). When denied, `/api/health` returns `401 {error:"Unauthorized"}` (no internals) and `/health` returns a token-prompt page (`HEALTH_TOKEN_PROMPT_HTML`) instead of the dashboard. The `/health` page forwards its `?token=` to its `/api/health` fetch, so opening `/health?token=…` unlocks the live data. The `/app` sidebar "System status" link is a plain navigation (no token/header), so in production it lands on the token prompt — operators bookmark `/health?token=…`. Because protection is mandatory in production, set `HEALTH_STATUS_TOKEN` (or rely on an authenticated session) to reach the page once deployed. On production startup, if `HEALTH_STATUS_TOKEN` is unset the server logs a loud `[Health]` warning (in `server/index.ts`, beside the schema-drift / write-health-alert startup warnings) noting the page is then reachable only via an authenticated app session (the shared-token bookmark / uptime-monitor path is disabled). The warning is silent in dev and when the token is set.
+### 6. События, дежурство, отчётность
+После события работай без искусственного ожидания двух дней. Дневной/недельный/месячный отчёт — агрегация, не отсрочка реакции. Реальные внешние сроки сохраняются. Дневной отчёт P.OPS — **08:00 America/Denver**, сутки по Денверу (00:00–00:00, с учётом смены UTC-смещения), не фиксированные UTC-сутки. Пороги зависания указывай отдельно; не придумывай нормативы. P.OPS ведёт покрытие, источники, ожидаемые события и передачи; где контроля нет — «не проверено», не зелёный.
 
-### Stripe Integration (Manual)
-Stripe runs in **manual mode** — no Replit Stripe connector / `stripe-replit-sync` package. The backend uses only `STRIPE_SECRET_KEY` (server) and `STRIPE_PUBLISHABLE_KEY` (client). Webhook signature is verified manually via `stripe.webhooks.constructEvent` using `STRIPE_WEBHOOK_SECRET`. The webhook endpoint must be registered manually in the Stripe Dashboard (`/api/stripe/webhook`) for events `checkout.session.completed` and `customer.subscription.created/updated/deleted`. Product/subscription data is fetched directly from the Stripe API on demand (no DB sync schema).
+Подтверждённый сбой — немедленный сигнал в разрешённый канал и ответственному. Контроль на том же сервере/в той же почте не гарантирует оповещение при их отказе. Не повторяй неопределённую отправку вслепую.
 
-### AirAtoma CRM Integration (outbound webhook)
-After every call ends, TalkHint POSTs the finished transcript to the AirAtoma CRM webhook (`POST /api/talkhint/webhook` on the AirAtoma side), which runs its own Claude analysis (summary, key points, agreements, next steps, sentiment), auto-matches the call to a project, creates Decisions/Tasks, sends a Telegram notification, and shows it in a Calls tab. **That receiving side lives in the AirAtoma project, not here.** TalkHint only builds and sends the payload, implemented in `server/airatomaWebhook.ts` and fired from the Twilio-stream WebSocket `close` handler in `server/websocket.ts`, right beside the contact-memory summarization. The body matches the agreed contract: `{ callId, transcript, callerName, durationSecs, recordingUrl? }` where `callId` = Twilio CallSid (AirAtoma dedupes on it, so re-sends are safe), `transcript` = full speaker-labeled text (uncapped), `callerName` = the contact's saved name falling back to their phone number, `durationSecs` = whole-second call length, and `recordingUrl` is omitted (TalkHint does not record calls). Sending is **fire-and-forget with a ~5s AbortController timeout** so a slow/unresponsive AirAtoma can never block call teardown or leak hanging fetches. **Delivery is strictly per-user**: the destination is the call owner's personal URL stored in `users.airatomaWebhookUrl` (set on `/dashboard`, SSRF-guarded by `validateUserWebhookUrl` in `POST /api/settings/airatoma`). There is **no server-wide env fallback** in the live path — a user who hasn't set their own URL simply doesn't deliver, so one user's transcripts can never leak to another's CRM. Auth to the receiving side is the per-account token embedded in that URL path (e.g. `…/api/talkhint/webhook/<token>`); the shared `TALKHINT_WEBHOOK_SECRET` / `x-talkhint-secret` header is **never** sent to a user-supplied URL. (The legacy `AIRATOMA_WEBHOOK_URL` env var + `sendCallToAirAtoma` remain only behind their unit tests and are not on the routing path.)
+### 7. Лаборатория и письма
+Пилот Hint ограничен звонками владельца и разрешённым чтением: P.LAB → независимая QA → письмо → T07. Сохраняй неуспешный исходник. Недоступную QA/неустранённые расхождения обозначай прямо. **Решение владельца от 27.10.2026: до 3 диагностических повторов на звонок, только его звонки, по сохранённому снимку, с записью каждого повтора в журнал.** Это не разрешение новых звонков, бесконечных повторов или слепой повторной отправки письма.
 
-**Durable retry queue.** So a brief AirAtoma outage (timeout, 5xx, network blip) never loses a call, every delivery is persisted to the `airatoma_deliveries` Postgres table *before* the first send attempt. The single POST (`attemptAirAtomaPost`) and the pure retry policy (`airAtomaBackoffMs`, `decideAirAtomaOutcome`, `MAX_AIRATOMA_ATTEMPTS`) live in `server/airatomaWebhook.ts`; the storage-aware orchestration lives in `server/airatomaRetryWorker.ts`. `deliverCallToAirAtoma` (the call-end entry point used by `server/websocket.ts`) upserts the payload keyed on `callId` — re-arming the row as `pending`, capturing the owner's personal `target_url` on the row — then attempts an immediate send and records the outcome. Each row carries its own `target_url`, reused on every retry; there is no env fallback, so a row with a missing URL is skipped (not failed) until a valid URL is restored. A failed/timed-out attempt is left `pending` with `nextAttemptAt` set by exponential backoff (30s → 60s → … capped at 30min); after `MAX_AIRATOMA_ATTEMPTS` (8) the row is marked `failed`. A background poller (`startAirAtomaRetryWorker`, started in `server/index.ts` beside the write-health alerter, opt out with `DISABLE_AIRATOMA_RETRY=true`) scans due `pending` rows every 60s and retries them. Re-sends stay safe because AirAtoma dedupes on `callId`. Operators see `airatomaDeliveries: { pending, delivered, failed, total }` on `GET /api/health`. The `airatoma_deliveries` table is included in the schema-drift check (`APP_TABLES`), so a missing/under-migrated table is surfaced on startup and `/api/health` — the table must exist in each environment (apply via the Publish flow in production).
+Счётчики, ACK, показ iPhone и задержки считает код; AI оценивает отдельно. Лаборатория не угадывает причину в коде — запрашивает технику. Короткое письмо: главный результат, план-факт, до трёх проблем, ссылка на подробности. Критические ограничения остаются видимыми. Неизвестное ≠ 0; оценка маркируется с методом; SENT ≠ прочитано ≠ принято.
 
-## Pre-Publish Checklist
+### 8. Завершение
+Сообщи: что сделано и с каким статусом; версии/доказательства; запись случая; что и кому передано; что заблокировано. «Запрос владельцу»: что нужно, зачем, шаги, последствия/стоимость, куда вернуть результат. «Нужно решение»: варианты, эффект, риск и ответ по строкам. Ссылки нажимаемые, язык простой русский. Перед Publish — полный перечень изменений и отдельное «можно публиковать»; сам не публикуй.
 
-The external Tutor Engine connection is retired at the owner's request. It is distinct from the internal TalkHint Secretary Engine, which stays active. Existing local Tutor screens/history are preserved; remote status/catalog report disabled and session/smoke/end requests return an explicit unavailable response. Existing credentials cannot re-enable it. `npm run build` no longer contacts or gates publishing on that external service; local compilation and MCP bundle verification remain required. The legacy `test:tutor-engine-contract` command exits without network traffic and reports that it is retired; it is not a validation pass. Historical adapter contract tests use offline fixtures only. Run `npm test` and `npm run build` before publishing. Restoring the external integration requires a separate explicit decision and contract verification.
+## Краткий технический обзор
 
-## External Dependencies
-
-### Voice & Telephony
-- **Twilio Voice SDK**: For browser-based calling.
-- **Twilio Node SDK**: For server-side call management.
-- **Twilio**: Used for telephony services, including call routing and webhooks.
-
-### AI Services
-- **OpenAI Realtime API**: Provides real-time GPT-4o assistance for voice-to-voice interactions.
-- **OpenAI Chat Completions**: Default provider for live hint generation (`translateAndSuggest`).
-- **Google Gemini** (`generateContent` REST): Optional hint provider (`gemini-2.5-flash-lite`, `gemini-2.5-flash`), selectable from the AI Model picker. Key: `GEMINI_API_KEY` (fallback `GEMINI_API_KAY`).
-- **Deepgram SDK**: Used for live speech-to-text transcription.
-
-### Database
-- **PostgreSQL**: Primary database.
-- **Drizzle ORM**: Used for database interactions and migrations.
-
-### Payments
-- **Stripe** (manual): `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`. No Replit Stripe connector.
-
-### Utilities
-- **FFmpeg**: System dependency for audio format conversions.
-
-## Hint Control Systems
-
-### Hint Throttling (LIVE mode)
-Prevents spam of suggestions - 1 hint = 1 GST utterance:
-- **Constants:** `HINT_COOLDOWN_MS = 1500`, `END_SILENCE_MS = 1000`
-- **Variables:** `lastHintTs`, `lastHintUtteranceId`, `goalAchievedFlag`
-- **Blocks:** cooldown, duplicate utterance, goal achieved
-- **Logging:** `[BLOCKED] reason=cooldown/hint_shown/goal_achieved`
-
-### Anti-Loop Guards (LIVE mode)
-Prevents cycling on same emotions/suggestions:
-- **Reaction-only filter:** Blocks short emotional phrases ("That's good", "Amazing") from triggering suggestions. Translation still shown.
-- **Repeat intent guard:** Blocks consecutive enthusiasm suggestions (enthusiasm → enthusiasm loop).
-- **Duplicate suggestion filter:** Blocks suggestions with >80% Jaccard similarity.
-- **Prompt rules:** "After agreement → next step" - forces GPT to ask concrete questions instead of looping on excitement.
-- **Logging:** `[BLOCKED] reason=reaction_only/repeat_intent/duplicate_suggestion`
-
-### Wait State (LIVE mode)
-Prevents spam when GST says "let me check":
-- **Trigger patterns:** "let me check", "one moment", "hold on", "just a second", "looking into", etc.
-- **Exit patterns:** "found it", "here's", "the answer", "it's", "costs", "we have", etc.
-- **Behavior:** When triggered, shows 1 ACK ("Sure, I'll wait"), then blocks all STEER suggestions until exit pattern detected.
-- **Variables:** `waitingForInfo`, `waitAckShown`, `waitingSlot`
-- **Logging:** `[WAIT_STATE] Entered/Exited`, `[BLOCKED] reason=wait_state`
-
-### Goal Persistence
-- Goal is passed in EVERY GPT request (system + user message)
-- Goal is in both `translateAndSuggest()` and hint generation
-- User message includes explicit reminder: "Your suggestion must ADVANCE the goal"
+- Клиенты: нативный Swift iOS (`ios/TalkHint`), React/Vite (`client`), HTML/JS live UI (`talkhint`). Наличие исходников не доказывает актуальную установленную сборку.
+- Сервер: Express/TypeScript, Twilio Voice/WebSocket, PostgreSQL/Drizzle. `/ui` требует авторизации и пользовательской маршрутизации: [память](.agents/memory/ui-ws-per-user-routing.md).
+- Hint: Flux v2 и альтернативные экспериментальные тракты; детали — [STT](.agents/memory/deepgram-flux-stt.md), [эксперимент](.agents/memory/candidate-pipeline.md). В коде стартовый `HINT_MODEL` — `gpt-5.6-terra`; окружение и выбор UI могут его менять. Это не подтверждение runtime-модели конкретного звонка.
+- Достигнутая цель не останавливает подсказки: [ограничения Hint](.agents/memory/hint-pipeline-gotchas.md). Prepare/goal: [подготовка](.agents/memory/prepare-stage.md), [жизненный цикл](.agents/memory/call-goal-lifecycle.md).
+- Звук iOS, Translator/Copilot: [аудиограницы](.agents/memory/native-audio-boundaries.md), [Translator](.agents/memory/translator-spike.md), [Copilot](.agents/memory/copilot-private-translator-boundary.md). Не переносить телефонный тракт одного режима на другой.
+- Катя и лаборатории: [Secretary](.agents/memory/secretary-lab-boundary.md), [пилот Hint](.agents/memory/hint-lab-release-boundary.md). Наличие watchdog Hint не доказывает общесистемное дежурство.
+- Запись: есть диагностический код с проверками оснований/согласий; не общее «никогда не записывает» и не разрешение включить: [границы](.agents/memory/diagnostic-recording-scope.md).
+- AirAtoma: пользовательская доставка и сохранение/повторы — [доставка](.agents/memory/airatoma-delivery-durability.md), [безопасность](.agents/memory/airatoma-per-user-webhook-security.md). Приёмная CRM — отдельный проект.
+- Stripe: ручная серверная интеграция и проверка подписи webhook; присутствие кода не подтверждает тарифы, согласованную цену или платёжную готовность.
+- Внешний Tutor Engine отключён, локальная история сохраняется; внутренний Secretary Engine — другой сервис. [Исторические уроки](.agents/memory/tutor-engine-contract-testing.md).
+- Выпуск/БД: [стратегия](.agents/memory/prod-rollout-strategy.md), [безопасная локальная проверка](.agents/memory/prod-boot-local-testing.md), [предпубликационные проверки](.agents/memory/publish-gating.md). Не стартовать production-сборку локально с автоматическим переназначением Twilio.
+- Книга: `DOC-TALKHINT-PRODUCT-PASSPORT`; глава Hint: `DOC-TALKHINT-CHAPTER-HINT`; техника: `DOC-TALKHINT-TECHNICAL-PASSPORT`; звук: `DOC-TALKHINT-AUDIO-PASSPORT`; P.OPS: `DOC-POPS-WORK-PACKAGE`, `DOC-POPS-DAILY-REPORT`. Штатное чтение — `get_document(documentId)`, внутри существующей модели.

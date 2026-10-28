@@ -3,6 +3,17 @@ name: Process on-call notifications
 description: Owner expects immediate email on broken or missing process transitions; coverage must be explicit.
 ---
 
+Общее правило перенесено в `replit.md` v3 §6; границы и причины ниже сохранены.
+Дневной отчёт P.OPS согласован на **08:00 America/Denver**, сутки по Денверу,
+с календарными границами местного дня, а не фиксированным UTC-смещением.
+
+**Why:** прямое решение владельца; время больше не открытый вопрос.
+
+**How to apply:** использовать это решение при отдельной доработке P.OPS.
+Оно не означает включённое расписание. Текущий пакет/формы P.OPS не менять
+до сверки с проходом владельца: ENG.REG.7, три потока контроля, конкретные
+входы; внешний сторож оформляется как «Запрос владельцу», не как выданный ресурс.
+
 When a required process event/action fails or does not happen, the owner wants
 the process on-call to notify him immediately by email.
 

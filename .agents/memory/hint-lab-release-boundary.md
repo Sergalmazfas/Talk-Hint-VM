@@ -29,6 +29,18 @@ name: Hint lab release and baseline
 description: Owner-approved separation of direct Dev fixes, historical baselines and live laboratory activation.
 ---
 
+Общее правило перенесено в `replit.md` v3 §4 и §7; история ниже сохранена.
+Прежнее разрешение одного диагностического повтора ниже — историческое.
+Решение владельца от 27.10.2026: **до 3 диагностических повторов на звонок,
+только его звонки, по сохранённому снимку, с записью каждого в журнал**.
+
+**Why:** владелец явно расширил разрешение при согласовании правил v3.
+
+**How to apply:** не смешивать разрешение с фактическим исполнением. Эта
+документальная правка не меняет счётчики/ограничения runtime и не запускает
+разборы. Исходник и каждый повтор сохраняются раздельно; слепая повторная
+отправка письма и новые звонки этим решением не разрешены.
+
 Small, reversible Hint fixes may be prepared directly by the engineer without
 waiting for CrewAI acceptance. Keep diffs and verification; owner still publishes
 the server and builds/releases iOS.
