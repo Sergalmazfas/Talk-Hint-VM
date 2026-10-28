@@ -75,3 +75,4 @@
 - [Gmail лаборатории](lab-mail-boundary.md) — workspace OAuth разрешён для писем владельцу, не для почтового чата или доступа клиентов продукта.
 - [Document reader verification](document-reader-verification.md) — сохранение документа не доказывает, что веб-книга и MCP читают его актуальную версию.
 - [P.PRODUCT review boundaries](product-review-boundaries.md) — следующий шаг принимает вход; HEAD.06 контролирует после факта; решение владельцу — короткая таблица.
+- [Target data infrastructure](data-platform-direction.md) — нормализованный PG, pgvector и App Storage; этапы с приёмкой, стабильные ID, архив без удаления, Hint без остановки.

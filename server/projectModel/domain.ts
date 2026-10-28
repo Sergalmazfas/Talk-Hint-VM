@@ -11,6 +11,7 @@ import { applyStrategyCommand, collectStrategyImpacts, captureStrategyMap } from
 import { latestImpactOutcome, type StrategyCommand } from "../../shared/projectStrategy";
 import { ModelError } from "./modelError";
 import { activeModelSize, modelSizeBudget } from "./sizeBudget";
+import { documentTextLimit } from "./documentVolumes";
 import { crewCoordinationSchema } from "../../shared/productCrew";
  import { saveAnalystPreparationSchema, saveAnalystPreparation } from "./analystPreparation";
 import { saveOperatingModelSchema, saveOperatingModel } from "./operatingModel";
@@ -29,7 +30,7 @@ export const elementSchema = z.object({
   details: z.object(detailShape).strict(),
 }).strict();
 const commandSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("createDocument"), id, title: nonempty(240), text: str(50000), url: str(2000), elementIds: ids }).strict(),
+  z.object({ type: z.literal("createDocument"), id, title: nonempty(240), text: str(documentTextLimit), url: str(2000), elementIds: ids }).strict(),
   saveOperatingModelSchema,
    saveAnalystPreparationSchema,
   ...strategyCommandSchemas,
@@ -45,7 +46,7 @@ const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("clarifyProposal"), id, note: nonempty(12000) }).strict(),
   z.object({ type: z.literal("saveRelation"), id: id.optional(), from: id, to: id, label: nonempty(500) }).strict(),
   z.object({ type: z.literal("removeRelation"), id }).strict(),
-  z.object({ type: z.literal("saveDocument"), id: id.optional(), title: nonempty(240), text: str(50000),
+  z.object({ type: z.literal("saveDocument"), id: id.optional(), title: nonempty(240), text: str(documentTextLimit),
     url: str(2000).refine(s => !s || /^https?:\/\/[^\s]+$/.test(s) || /^\/admin(?:\/[^\s]*)?$/.test(s), "Unsafe document URL"), elementIds: ids }).strict(),
   z.object({ type: z.literal("reviewElement"), id, reason: nonempty(12000) }).strict(),
   z.object({ type: z.literal("prepareTask"), title: nonempty(240), elementIds: ids.min(1), acceptance: nonempty(20000) }).strict(),

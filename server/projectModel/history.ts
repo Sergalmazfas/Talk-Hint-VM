@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { ProjectModelState } from "../../shared/projectModel";
 import { ModelError } from "./modelError";
+import { documentVolumeLength, splitDocumentText, textDigest } from "./documentVolumes";
 
 type Json = any;
 type Queryable = Pick<Pool | PoolClient, "query">;
@@ -34,7 +35,20 @@ export function packModel(state: ProjectModelState) {
     const result: Json = {}, archives: Json = {};
     for (const [key, child] of Object.entries(value)) {
       if (key === marker) throw new ModelError(503, "Модель должна быть прочитана вместе с архивом перед записью.");
-      if (Array.isArray(child) && historical(value, key) && child.length > 1) {
+      if (key === "text" && typeof child === "string" && child.length > documentVolumeLength &&
+          typeof value.id === "string" && typeof value.title === "string" && Array.isArray(value.elementIds)) {
+        const items = splitDocumentText(child);
+        let previous: string | null = null;
+        for (const part of items) {
+          const payload = canonical({ previous, items: [part], refs: [] });
+          const hash = digest(payload);
+          chunks.set(hash, payload);
+          previous = hash;
+        }
+        archives[key] = { kind: "document-text", head: previous, count: items.length,
+          length: child.length, digest: textDigest(child) };
+        result[key] = "";
+      } else if (Array.isArray(child) && historical(value, key) && child.length > 1) {
         // Stable boundaries deduplicate earlier chunks on subsequent writes.
         const prefix = child.slice(0, -1);
         let previous: string | null = null;
@@ -101,6 +115,16 @@ export async function unpackModel(db: Queryable, owner: string, packed: ProjectM
         seen.add(head); batches.push(chunk.items); head = chunk.previous;
       }
       const prefix = batches.reverse().flat();
+      if (ref.kind === "document-text") {
+        if (key !== "text" || result[key] !== "" || prefix.length !== ref.count ||
+            !prefix.every(item => typeof item === "string" && item.length <= documentVolumeLength))
+          throw new ModelError(503, "Неполные тома документа; запись остановлена.");
+        const text = prefix.join("");
+        if (text.length !== ref.length || textDigest(text) !== ref.digest)
+          throw new ModelError(503, "Контрольная сумма документа не совпала; запись остановлена.");
+        result[key] = text;
+        continue;
+      }
       if (prefix.length !== ref.count || !Array.isArray(result[key]))
         throw new ModelError(503, "Неполная история модели; запись остановлена.");
       result[key] = [...prefix.map(walk), ...result[key]];

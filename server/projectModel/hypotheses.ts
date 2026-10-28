@@ -46,9 +46,12 @@ export function applyHypothesisCommand(root: ProjectModelState, id: string,
   const next = structuredClone(root);
   const alternative = next.alternatives![index];
   const selected = alternative.model;
-  const updated = applyCommand(selected, command, actor);
-  if (updated === selected) return root;
-  alternative.model = updated;
+  // Carry the selected budget through every domain guard, but do not persist view metadata.
+  const scoped = readHypothesis(root, id);
+  const updated = applyCommand(scoped, command, actor);
+  if (updated === scoped) return root;
+  const { hypothesisContext: _context, ...stored } = updated;
+  alternative.model = stored;
   next.revision++;
   if (activeModelSize(next) > modelSizeBudget(next))
     throw new ModelError(413, "Актуальные данные модели превысили лимит размера; история сохранена. Это не лимит CPU/RAM.");

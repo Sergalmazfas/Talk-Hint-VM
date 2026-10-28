@@ -1741,3 +1741,31 @@ mtime_ms = 1793224238520
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dfdd168a-0567-4597-af24-048509eb5c9e/fc4cd05f-facb-4514-9ced-01d2f2048793"
 storage_version_token = "1793224284132635"
 content_type = "text/plain"
+
+[[outputs]]
+id = "mHgLHKMHXnISAkbNx0jW7"
+uri = "file://generated-artifacts/data-platform-stage0/TalkHint_data_platform_stage0_rev912.zip"
+type = "unspecified"
+title = "Платформа данных · этап 0 · rev912"
+description = "Diff, план схемы и этапов, стоимость, результаты тестов, сверка ID и SHA-256. Перенос данных и публикация не выполнялись."
+logical_id = "3f9571ca-069d-4c6d-a473-a827ad970b5a"
+content_hash = "sha256:aacab9059220d1be8acdcdb66ef14df6bd3a76d84a375e2401db4abbaa065b66"
+size = 75667
+mtime_ms = 1793226907814
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3f9571ca-069d-4c6d-a473-a827ad970b5a/e0977d3c-bab8-40e8-897e-700c4dbf0f40"
+storage_version_token = "1793226926733406"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "QFwEpXFm7MUCah44T1iht"
+uri = "file://generated-artifacts/data-platform-stage0/READ_FIRST.html"
+type = "html"
+title = "План перехода — читать с телефона"
+description = "Что подготовлено, целевая схема, сроки, месячная цена, ограничения и полный diff этапа 0."
+logical_id = "a61e6570-72bc-4939-9858-d47507f60a7f"
+content_hash = "sha256:8dc45cc87593094a394193f07732c576fe9be844b7f0020e48c5a3205bd990de"
+size = 134531
+mtime_ms = 1793226907778
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a61e6570-72bc-4939-9858-d47507f60a7f/001d111f-52ae-4ae6-8e86-51c59caccc43"
+storage_version_token = "1793226927665085"
+content_type = "text/html"
