@@ -1335,3 +1335,17 @@ mtime_ms = 1793151244279
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/03a6354a-0d9d-4726-941f-4583ae136a34/b52539ff-f277-4ee6-b7d7-c9f99454479b"
 storage_version_token = "1793151254048769"
 content_type = "text/html"
+
+[[outputs]]
+id = "04ktU_T1QDq-DV5GrNI_1"
+uri = "file://generated-artifacts/P-PRODUCT_Hint_v1_rev833.zip"
+type = "unspecified"
+title = "P.PRODUCT · Hint · JSON-пакет v1 · rev833"
+description = "ZIP для ручного прохода: 12 процедур на существующих ID, все 27 исходных действий, документы и три реальных случая, ресурсы, формы, KPI и пустой trialProtocol. Ничего не включено."
+logical_id = "bc8d2ce0-97cf-4df0-ae7a-da7006ab805d"
+content_hash = "sha256:583d79acb2df07f32c4f75432d023eea6dabb91d079df339d43e9dbca426fb51"
+size = 190382
+mtime_ms = 1793152706770
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bc8d2ce0-97cf-4df0-ae7a-da7006ab805d/d758f42d-d75b-407f-8338-6249c176c3e2"
+storage_version_token = "1793152736471250"
+content_type = "application/octet-stream"
