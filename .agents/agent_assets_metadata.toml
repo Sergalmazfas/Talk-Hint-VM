@@ -1307,3 +1307,17 @@ mtime_ms = 1793147646619
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/cb68f257-d4c1-400f-acfb-3d184fd43038/bfcee7ea-8703-464a-83a2-bd0e6e1f4630"
 storage_version_token = "1793147693543964"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "eD1BHpILO79wRhs0huhLd"
+uri = "file://generated-artifacts/P-OPS_review_v3_base_rev828.zip"
+type = "unspecified"
+title = "P.OPS v3 — исправления после прохода rev800"
+description = "Кандидат пакета дежурного и формы v2, точный diff, исходный проход, запрос внешнего контроля и результаты проверок. База rev828. К модели не применено."
+logical_id = "c4760bc9-f034-448b-b8a4-2a0858756975"
+content_hash = "sha256:7aa95728ebfe697131b4dd4eb222291b0c0638705ebdb5e577fd0cc2ea53d2a5"
+size = 107986
+mtime_ms = 1793148727687
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c4760bc9-f034-448b-b8a4-2a0858756975/dc2a2835-9a9a-40dd-bb64-e567020e9d37"
+storage_version_token = "1793148772303387"
+content_type = "application/octet-stream"
