@@ -1349,3 +1349,17 @@ mtime_ms = 1793152706770
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bc8d2ce0-97cf-4df0-ae7a-da7006ab805d/d758f42d-d75b-407f-8338-6249c176c3e2"
 storage_version_token = "1793152736471250"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "WboAuj8W2Hfm6caj3DfW4"
+uri = "file://generated-artifacts/P-PRODUCT_Hint_v2_rev834.zip"
+type = "unspecified"
+title = "P.PRODUCT Hint v2 · исправления и diff · rev834"
+description = "Исправлены пункты 1–2, 4, 7. Внутри полный diff, краткое сравнение, исходный ручной PASS, пустой протокол v2, пять строк решения по кофейне и вопросы 5–6. Роль не включена."
+logical_id = "dad43033-5487-4b92-8cb8-be94b6df7713"
+content_hash = "sha256:8d0ae439cb35669071af0d4887bd9424c7b874092b1d7f211929e79e58ccb0ae"
+size = 429668
+mtime_ms = 1793155106521
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dad43033-5487-4b92-8cb8-be94b6df7713/645096cf-b5a9-49c5-8a50-364c4b380c50"
+storage_version_token = "1793155139099468"
+content_type = "application/octet-stream"
