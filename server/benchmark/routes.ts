@@ -17,7 +17,8 @@ import { db } from "../db";
 import { benchmarkFixtures, calls } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 import { storage } from "../storage";
-import { CANDIDATE_STT_IDS, CANDIDATE_BRAIN_MODELS, isCandidateStt, isCandidateBrainModel, classifyPipelineCall } from "../candidatePipeline";
+import { classifyPipelineCall } from "../candidatePipeline";
+import { registerPersonalPipelineRoutes } from "./personalPipelineRoutes";
 import { ensureBenchmarkTables } from "./ensureTables";
 import { registerRecordedCallRoutes, downloadRecordingWav, lookupRecordingSidByCallSid } from "./recordedCalls";
 
@@ -475,34 +476,7 @@ export function registerBenchmarkRoutes(app: Express) {
   // hint-latency metadata flushed at call end.
   // ---------------------------------------------------------------------------
 
-  app.get(`${base}/candidate-pipeline`, requireBenchmarkAdmin, async (req, res) => {
-    try {
-      const userId = (req as any).user?.id as string;
-      const cfg = await storage.getCandidatePipeline(userId);
-      res.json({ ...cfg, allowedStt: CANDIDATE_STT_IDS, allowedBrainModels: CANDIDATE_BRAIN_MODELS });
-    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
-  });
-
-  app.put(`${base}/candidate-pipeline`, requireBenchmarkAdmin, async (req, res) => {
-    try {
-      const userId = (req as any).user?.id as string;
-      const { enabled, stt, brainModel } = req.body ?? {};
-      if (typeof enabled !== "boolean") return res.status(400).json({ error: "enabled must be boolean" });
-      const sttVal = stt ?? null;
-      const brainVal = brainModel ?? null;
-      if (sttVal !== null && !isCandidateStt(sttVal)) {
-        return res.status(400).json({ error: `unknown candidate stt "${sttVal}" — allowed: ${CANDIDATE_STT_IDS.join(", ")}` });
-      }
-      if (brainVal !== null && !isCandidateBrainModel(brainVal)) {
-        return res.status(400).json({ error: `unknown candidate brain model "${brainVal}" — allowed: ${CANDIDATE_BRAIN_MODELS.join(", ")}` });
-      }
-      if (enabled && sttVal === null && brainVal === null) {
-        return res.status(400).json({ error: "enabled pipeline must select at least a candidate STT or a candidate Brain model" });
-      }
-      const saved = await storage.setCandidatePipeline(userId, { enabled, stt: sttVal, brainModel: brainVal });
-      res.json(saved);
-    } catch (e: any) { res.status(500).json({ error: String(e?.message ?? e) }); }
-  });
+  registerPersonalPipelineRoutes(app, base, requireBenchmarkAdmin, storage);
 
   // Latency verdict: the admin's recent calls that carry hint-latency metadata,
   // split into candidate vs baseline, each with its per-call summary. No

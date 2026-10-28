@@ -27,6 +27,15 @@ incident. A same-server/same-mailbox watcher cannot guarantee notification when
 the server, database or mail channel itself is down. Never mark these unknown
 conditions green or blindly resend ambiguous mail.
 
+Неопределённая доставка уведомления секретаря не должна автоматически повторяться
+и не должна повторно запускать само телефонное поручение.
+
+**Why:** при недоступном обычном APNs канал доставки может бесконечно повторять
+старые уведомления; повтор телефонного задания вместо уведомления создаст новый звонок.
+
+**How to apply:** сохранять результат поручения и честный неопределённый исход доставки.
+После восстановления канала отдельно согласовывать повтор уведомления, не перезапускать звонок.
+
 The owner wants the duty role documented in the common structure before further
 automation: all checking documentation must reach it, it controls system-wide
 execution and sends a short daily report. Produce the role JSON for the owner's

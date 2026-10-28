@@ -2257,6 +2257,7 @@ interface PipelineConfig {
   brainModel: string | null;
   allowedStt?: string[];
   allowedBrainModels?: string[];
+  ownerMiniPilot?: boolean;
 }
 
 interface VerdictCall {
@@ -2342,11 +2343,15 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
   }, [cfgQ.data, loadedFor]);
 
   const saveM = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (rollbackToTerra?: boolean) => {
       const res = await fetch(`${BASE}/candidate-pipeline`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
+        body: JSON.stringify(rollbackToTerra ? {
+          enabled: true,
+          stt: cfgQ.data?.stt ?? null,
+          brainModel: "gpt-5.6-terra",
+        } : {
           enabled,
           stt: stt === PROD_SENTINEL ? null : stt,
           brainModel: brain === PROD_SENTINEL ? null : brain,
@@ -2355,7 +2360,8 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, rollbackToTerra) => {
+      if (rollbackToTerra) { setBrain("gpt-5.6-terra"); setEnabled(true); }
       toast({ title: "Сохранено", description: "Настройки candidate pipeline применяются к следующему звонку." });
       qc.invalidateQueries({ queryKey: [BASE, "candidate-pipeline"] });
     },
@@ -2408,12 +2414,18 @@ function CandidatePipelineTab({ active }: { active: boolean }) {
             </div>
           </div>
           <Button
-            onClick={() => saveM.mutate()}
+            onClick={() => saveM.mutate(false)}
             disabled={saveM.isPending || (enabled && stt === PROD_SENTINEL && brain === PROD_SENTINEL)}
             data-testid="button-pipeline-save"
           >
             {saveM.isPending ? "Сохраняю..." : "Сохранить"}
           </Button>
+          {cfgQ.data?.ownerMiniPilot && (
+            <Button variant="outline" onClick={() => saveM.mutate(true)}
+              disabled={saveM.isPending} data-testid="button-pipeline-return-terra">
+              Вернуть Terra
+            </Button>
+          )}
           {enabled && stt === PROD_SENTINEL && brain === PROD_SENTINEL && (
             <p className="text-xs text-amber-400">Выберите хотя бы одного кандидата (STT или Brain), иначе включать нечего.</p>
           )}

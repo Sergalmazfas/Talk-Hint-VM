@@ -71,8 +71,8 @@ export async function notifySecretaryResult(userId: string, taskId: string, inco
       { type: "secretary_result", taskId, url: `/app?secretaryTask=${encodeURIComponent(taskId)}` },
   });
   // The report is already persisted and remains visible in the app. A missing
-  // standard APNs setup is surfaced to the worker as a retryable failure rather
-  // than reporting a push as delivered when no device was reached.
+  // standard APNs setup is surfaced as a delivery failure, never fake success.
+  // The worker retains an unknown outcome without automatic replay.
   if (sent + webSent === 0) {
     throw new Error(errors.length ? errors.join("; ") : "No registered alert device or web subscription for this owner");
   }

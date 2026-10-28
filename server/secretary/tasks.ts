@@ -1,3 +1,4 @@
+import { deliverSecretaryNotificationOnce } from "./notificationAttempt";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db, isDatabaseAvailable } from "../db";
@@ -1130,6 +1131,12 @@ async function settleReadySecretaryReports(logger: (message: string) => void): P
 }
 
 async function notifyTerminalTasks(deps: SecretaryWorkerDependencies, logger: (message: string) => void): Promise<number> {
+  // A crashed sender may already have delivered. Never blindly replay it.
+  await db.execute(sql`
+    UPDATE secretary_tasks SET notification_status = 'unknown', notification_claimed_at = NULL
+    WHERE notification_status = 'sending'
+      AND notification_claimed_at < now() - interval '2 minutes'
+  `);
   const pendingTaskIds = pendingSecretarySubtitleTaskIds();
   const pendingSubtitlesFilter = pendingTaskIds.length
     ? sql`AND id NOT IN (${sql.join(pendingTaskIds.map((id) => sql`${id}`), sql`, `)})`
@@ -1139,10 +1146,7 @@ async function notifyTerminalTasks(deps: SecretaryWorkerDependencies, logger: (m
       SELECT id FROM secretary_tasks
       WHERE status IN ('completed', 'no_answer', 'busy', 'failed', 'unknown', 'cancelled')
         ${pendingSubtitlesFilter}
-        AND (
-          notification_status = 'pending'
-          OR (notification_status = 'sending' AND notification_claimed_at < now() - interval '2 minutes')
-        )
+        AND notification_status = 'pending'
       ORDER BY updated_at ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 20
@@ -1156,21 +1160,22 @@ async function notifyTerminalTasks(deps: SecretaryWorkerDependencies, logger: (m
   const rows = (claim as unknown as { rows?: SecretaryTask[] }).rows ?? [];
   let sent = 0;
   for (const task of rows) {
-    try {
-      await deps.notify(toSecretaryTaskReport(task));
-      await db.update(secretaryTasks).set({
+    const delivered = await deliverSecretaryNotificationOnce(
+      () => deps.notify(toSecretaryTaskReport(task)),
+      async () => { await db.update(secretaryTasks).set({
         notificationStatus: "sent",
         notifiedAt: new Date(),
         notificationClaimedAt: null,
-      }).where(and(eq(secretaryTasks.id, task.id), eq(secretaryTasks.notificationStatus, "sending")));
-      sent++;
-    } catch (error: any) {
-      logger(`[Secretary] Report notification failed for ${task.id}: ${error?.message ?? error}`);
-      await db.update(secretaryTasks).set({
-        notificationStatus: "pending",
+      }).where(and(eq(secretaryTasks.id, task.id), eq(secretaryTasks.notificationStatus, "sending"))); },
+      async () => { await db.update(secretaryTasks).set({
+        // Delivery is not proven either way (including transport/DB failure).
+        // Keep the report; stop automatic retries, never claim it was sent.
+        notificationStatus: "unknown",
         notificationClaimedAt: null,
-      }).where(and(eq(secretaryTasks.id, task.id), eq(secretaryTasks.notificationStatus, "sending")));
-    }
+      }).where(and(eq(secretaryTasks.id, task.id), eq(secretaryTasks.notificationStatus, "sending"))); },
+      (error: any) => logger(`[Secretary] Report notification stopped for ${task.id}; delivery unknown, no automatic retry: ${error?.message ?? error}`),
+    );
+    if (delivered) sent++;
   }
   return sent;
 }

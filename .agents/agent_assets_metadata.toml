@@ -1545,3 +1545,17 @@ mtime_ms = 1793165973413
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dd461c96-b720-4780-ae4b-1372111ba12c/ffc092f3-02ab-421a-a1c2-3348a262dbde"
 storage_version_token = "1793166002803721"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "oGDtYdKESUpIQKXBZUfLR"
+uri = "file://generated-artifacts/hint-unknown-owner-rule-v1/Hint_Mini_Secretary_Dev_release_v1.zip"
+type = "unspecified"
+title = "Hint Mini + Катя — Dev diff и результаты стенда"
+description = "Ревизия 876: полный Dev diff, личный протокол v2 (выключен), проверки, 83 исходных момента и парное сравнение на 82. Production не изменён."
+logical_id = "89385014-43d2-444b-8b91-44d7652f2d51"
+content_hash = "sha256:559447e8fc98fbad884c5b0a8665fdac3f6cdda94fae16ba318dc4017d0c8e4e"
+size = 400230
+mtime_ms = 1793168706097
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/89385014-43d2-444b-8b91-44d7652f2d51/a2210827-36cf-45af-a0da-5d2e2b6f2de4"
+storage_version_token = "1793168735388292"
+content_type = "application/octet-stream"

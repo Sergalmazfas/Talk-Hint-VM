@@ -39,6 +39,19 @@ export function isCandidateBrainModel(m: unknown): m is string {
   return typeof m === "string" && (CANDIDATE_BRAIN_MODELS as readonly string[]).includes(m);
 }
 
+// Explicit account binding, not the admin/email allowlist. No activation here.
+// This is the same server-confirmed owner account used by Secretary identity.
+export function isHintMiniPilotOwner(userId: unknown): boolean {
+  return userId === "47704265";
+}
+export function candidateBrainModelsForUser(userId: unknown): readonly string[] {
+  return isHintMiniPilotOwner(userId)
+    ? [...CANDIDATE_BRAIN_MODELS, "gpt-4.1-mini"] : CANDIDATE_BRAIN_MODELS;
+}
+export function isCandidateBrainModelForUser(m: unknown, userId: unknown): m is string {
+  return isCandidateBrainModel(m) || (m === "gpt-4.1-mini" && isHintMiniPilotOwner(userId));
+}
+
 export interface CandidatePipelineConfig {
   enabled: boolean;
   stt: string | null; // CandidateSttId or null (= keep production Flux)

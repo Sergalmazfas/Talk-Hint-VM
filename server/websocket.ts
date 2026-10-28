@@ -35,6 +35,7 @@ import { resolveSpeakerRole, streamRidesCallerLeg } from "./speakerRoles";
 import {
   DISABLED_PIPELINE,
   isCandidateStt,
+  isCandidateBrainModelForUser,
   createOpenAiRealtimeStt,
   LiveLatencyRecorder,
   type CandidatePipelineConfig,
@@ -2916,8 +2917,15 @@ NEVER output JSON - only plain text with the phrase and translation.`);
               const pipelineReady = ownerContextReady
                 .then(async () => {
                   if (!streamUserId || streamClosed) return;
-                  const cfg = await storage.getCandidatePipeline(streamUserId);
+                  let cfg = await storage.getCandidatePipeline(streamUserId);
                   if (!cfg.enabled || streamClosed) return;
+                  // Defense in depth: even a forged/stale database setting may
+                  // not activate the owner's Mini pilot for another account.
+                  if (cfg.brainModel && !isCandidateBrainModelForUser(cfg.brainModel, streamUserId)) {
+                    log("[CandidatePipeline] Unauthorized Brain override ignored", "twilio");
+                    cfg = { ...cfg, brainModel: null, enabled: !!cfg.stt };
+                  }
+                  if (!cfg.enabled) return;
                   candidatePipeline = cfg;
                   brainModelOverride = cfg.brainModel || undefined;
                   log(`[CandidatePipeline] ENABLED for ${streamUserId}: stt=${cfg.stt ?? "production"} brain=${cfg.brainModel ?? "production"}`, "twilio");
