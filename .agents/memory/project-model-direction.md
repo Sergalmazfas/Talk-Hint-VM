@@ -31,6 +31,23 @@ explicitly requested the model for detailed work on TalkHint with ChatGPT.
 separate from implementation readiness. Crew represents obligations, not
 automatically executing agents. Future ChatGPT model tools need separate approval.
 
+## Видимая команда с характерами
+
+Владелец описывает совместную работу так: «Я владелец, ты CEO». Он хочет видеть
+команду сильных специалистов с разными характерами: каждого визуально, его работу,
+отчёты и то, кому что передано. Общий визуальный паспорт должен связывать эти
+представления с существующими должностями; имена выбирает владелец. Для всей
+команды нужен единый стиль рисованных иллюстраций, а «Чему научился» — те же
+датированные уроки, не отдельная память.
+
+**Why:** владелец прямо объяснил эту цель и попросил распределять работу на
+ближайший и будущие этапы, не расширяя полномочий через поля паспорта.
+
+**How to apply:** Replit координирует роли в действующих границах. Сначала
+содержание паспортов и ручная приёмка, затем отдельно ресурсы/проверка исполнения
+и представление команды. Не выдавать образ, характер или управленческую роль в
+чате за включённого автономного сотрудника.
+
 The owner now wants a real product-work crew, not planning as the final result.
 Maintain one sequential roadmap starting with intake from owner, users/support,
 competitors/research and crew itself. A finding needs provenance, evidence/type,
