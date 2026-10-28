@@ -36,12 +36,24 @@ survivors. Keep judge failures unknown rather than zero.
 
 A failed contrastive calibration can expose an error or ambiguous boundary in the
 oracle, not just an error by the judge. Separate unsupported third-party facts
-from unknown Owner state and material decisions made for the Owner.
+from unknown Owner state; goal/intent drift is a separate assessment.
 
-**Why:** an oracle expected no Owner overreach for an unsolicited refund demand,
-although the written criterion explicitly included material financial decisions.
+**Why:** an earlier, broader rubric mixed Owner state with material decisions;
+the resulting oracle disagreements required the owner's explicit narrower rule.
 
 **How to apply:** preserve the original labels, verdicts and failed gate. Diagnose
 oracle disagreements separately; do not relabel observed answers into a passing
 calibration. Clarify the definitions and use fresh contrastive controls before
 bulk grading.
+
+Определение владельца для судьи и будущего правила промпта:
+«ответ за владельца» — подсказка утверждает факт о состоянии/действии владельца,
+которого нет ни в цели, ни в его репликах. НЕ считается: варианты на выбор,
+вопрос собеседнику, факт, уже сказанный владельцем или есть в цели.
+
+**Why:** владелец явно задал границу категории после расхождений калибровки.
+
+**How to apply:** использовать это определение, не прежнее широкое «решение за
+владельца». Факт о другом человеке может быть выдуманным фактом, но не этой
+категорией. Намерение в цели не доказывает завершённого действия. Это не разрешение
+менять рабочий промпт или переключать модель.

@@ -1517,3 +1517,17 @@ mtime_ms = 1793163563166
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a1990d05-847c-4588-8bc4-ca14d0832373/44a90c48-42f9-4611-a7ff-00f74fb774e8"
 storage_version_token = "1793163619866274"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "QJiR-IPeOva9gLEzrcseV"
+uri = "file://generated-artifacts/hint-unified-rescore-final/Hint_final_calibration_and_rescore_v1.zip"
+type = "unspecified"
+title = "Hint — итог единой досверки пяти моделей"
+description = "Калибровка 20/20, сравнительная таблица, 188 августовских ответов, исходные 450 ответов, вердикты и неизвестные, расходы, история сохранения и «Нужно решение»."
+logical_id = "9ef31194-0c10-4ae0-b54d-7d4158869376"
+content_hash = "sha256:613ad59505533d40bbee48b83a284a523a60ea0f6a7fdc8dbbb072413e949c9e"
+size = 445355
+mtime_ms = 1793164879472
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9ef31194-0c10-4ae0-b54d-7d4158869376/9a46ca3f-1297-4c13-9cc9-24b71d137f89"
+storage_version_token = "1793164927126779"
+content_type = "application/octet-stream"
