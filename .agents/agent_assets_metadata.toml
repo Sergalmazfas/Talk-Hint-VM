@@ -1769,3 +1769,17 @@ mtime_ms = 1793226907778
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a61e6570-72bc-4939-9858-d47507f60a7f/001d111f-52ae-4ae6-8e86-51c59caccc43"
 storage_version_token = "1793226927665085"
 content_type = "text/html"
+
+[[outputs]]
+id = "B7u0m2rKR24ptoxV-oBSl"
+uri = "file://generated-artifacts/data-platform-A/TalkHint_data_platform_A_schema_v1_rev912.zip"
+type = "unspecified"
+title = "Пакет A · схема данных v1 · rev912"
+description = "Один ZIP: README, DDL 36 таблиц, полный инвентарь полей и документов, хеши истории, механизм production-переноса, план сверки и результаты статических проверок. Ничего не применено."
+logical_id = "2c636d45-669a-4007-ab0b-48f71b8bc74c"
+content_hash = "sha256:cd2808bac3c2caba71f166564342712e3f4ca95a6b7ceb6289d6f5d3c7423cd0"
+size = 217239
+mtime_ms = 1793228977282
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2c636d45-669a-4007-ab0b-48f71b8bc74c/9ae6d783-d356-45e4-8e03-9a464c0ab55b"
+storage_version_token = "1793228986234555"
+content_type = "application/octet-stream"
