@@ -1671,3 +1671,31 @@ mtime_ms = 1793219042565
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5ae54d94-74cb-41dd-b105-7021ab7ee956/84ac868d-0aa6-4930-b34c-ef4a307054ea"
 storage_version_token = "1793219399589902"
 content_type = "text/html"
+
+[[outputs]]
+id = "6ZBvKgEZFlsm5H53cTtoq"
+uri = "file://generated-artifacts/lab-agent-passports-v2/P_LAB_P_LG_QA_prompts_v2.zip"
+type = "unspecified"
+title = "Скачать ZIP · промпты P.LAB / P.LG.QA v2 · rev908"
+description = "Исправления R1–R3 и R5, точные diff, решения R2/R4, исходный проход и история v1. Предложение: ничего не включено."
+logical_id = "2149143f-cb01-42c7-8fde-c99883edd5c7"
+content_hash = "sha256:3ae0fa7d043dd61f50c32e127289a44a8ba5097104f9948d106acc044ebcd656"
+size = 313249
+mtime_ms = 1793221201922
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2149143f-cb01-42c7-8fde-c99883edd5c7/9f46c330-6199-44eb-8017-7c8596b9fefc"
+storage_version_token = "1793221303236877"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "-OmAuo8Kvr0qNMgJPmiqK"
+uri = "file://generated-artifacts/lab-agent-passports-v2/DIFF_AND_DECISIONS.html"
+type = "html"
+title = "Открыть diff и «Нужно решение»"
+description = "Версия для чтения с телефона: исправления v1 → v2, полные инструкции и две строки решения. Имена ещё не выбраны."
+logical_id = "ab4b5b45-64fc-47aa-be25-26657e1ee987"
+content_hash = "sha256:ab6550cfdfea0d88f6b4557ae421daab3986af88c3b854f0f0ed226670afb786"
+size = 103170
+mtime_ms = 1793221201386
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ab4b5b45-64fc-47aa-be25-26657e1ee987/3dd858aa-6c6c-4a09-9521-a41b3f385ee2"
+storage_version_token = "1793221304016344"
+content_type = "text/html"

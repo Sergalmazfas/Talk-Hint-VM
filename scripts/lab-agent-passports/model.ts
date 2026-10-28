@@ -8,7 +8,9 @@ import { persistModelUpdate } from "../../server/projectModel/materialImport";
 import { ProductCrewService } from "../../server/productCrew/service";
 import { activeModelSize, modelSizeBudget } from "../../server/projectModel/sizeBudget";
 
-const dir = "generated-artifacts/lab-agent-passports";
+const dirArg = process.argv.indexOf("--dir");
+const dir = dirArg < 0 ? "generated-artifacts/lab-agent-passports" : process.argv[dirArg + 1];
+assert(dir?.startsWith("generated-artifacts/") && !dir.includes(".."), "Generated output directory required");
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 try {
   assert.equal(new URL(process.env.DATABASE_URL!).hostname, "helium", "Dev model only");
@@ -21,6 +23,73 @@ try {
   if (process.argv.includes("--budget")) {
     console.log(JSON.stringify({ revision: before.revision, size: activeModelSize(before),
       budget: modelSizeBudget(before), available: modelSizeBudget(before) - activeModelSize(before) }));
+  } else if (process.argv.includes("--revise")) {
+    const candidate = JSON.parse(await readFile(`${dir}/REVISION.json`, "utf8"));
+    assert.equal(before.revision, candidate.sourceRevision, "Concurrent model change; re-read first");
+    assert.equal(candidate.runtimeActivation, false);
+    const allowed = new Set(["DOC-HINT-LAB-AGENT-PROMPT-PACKAGE",
+      "DOC-PLAB-PROMPT-PROPOSAL", "DOC-PLG-QA-PROMPT-PROPOSAL"]);
+    assert.equal(candidate.documents.length, allowed.size);
+    const originals = new Map(before.documents.map(d => [d.id, d]));
+    for (const d of candidate.documents) {
+      assert(allowed.delete(d.id) && originals.has(d.id), "Only existing proposal IDs");
+      assert.equal(JSON.parse(d.text).version, 2);
+      assert.equal(JSON.parse(d.text).runtimeActivation, false);
+      assert(d.text.length <= 50_000);
+    }
+    assert.equal(allowed.size, 0);
+    const journal = originals.get("DOC-TALKHINT-IMPROVEMENT-JOURNAL")!;
+    const j = JSON.parse(journal.text);
+    const c = j.cases.find((v: any) => v.caseId === "HINT-LAB-AGENT-PASSPORTS");
+    assert(c, "Extend existing case only");
+    assert(!c.history.some((h: any) => h.reviewSha256 === candidate.reviewSha256), "Review already recorded");
+    c.history.push({ at: candidate.createdAt, role: "HEAD.07", stage: "manual_pass_corrections",
+      reviewSha256: candidate.reviewSha256, reviewVerdict: "принять с исправлениями",
+      proposalVersion: 2, sourceRevision: before.revision, runtimeActivation: false,
+      openDecisions: ["R2", "R4"], namesSelected: false });
+    j.version++;
+    j.history.push({ at: candidate.createdAt, role: "HEAD.07", sourceRevision: before.revision,
+      marker: "lab-agent-prompts-review-v2", caseId: c.caseId });
+    assert(JSON.stringify(j).length <= 50_000, "Never truncate journal");
+    const transform = (root: any) => {
+      assert.equal(readHypothesis(root, "new-country").revision, before.revision);
+      let next = root;
+      for (const d of candidate.documents) {
+        const old = originals.get(d.id)!;
+        next = applyHypothesisCommand(next, "new-country", { type: "saveDocument",
+          id: d.id, title: d.title, text: d.text, url: old.url, elementIds: old.elementIds },
+          "Manual review corrections; draft only");
+      }
+      return applyHypothesisCommand(next, "new-country", { type: "saveDocument",
+        id: journal.id, title: journal.title, text: JSON.stringify(j), url: journal.url,
+        elementIds: journal.elementIds }, "Extend existing review case; no activation");
+    };
+    const preview = readHypothesis(transform({
+      ...await unpackModel(pool, row.owner_key, row.state),
+    }), "new-country");
+    console.log(JSON.stringify({ preflight: true, revision: before.revision,
+      remaining: modelSizeBudget(preview) - activeModelSize(preview) }));
+    const result = await persistModelUpdate(pool, row.owner_key, transform, true);
+    const after = readHypothesis(result, "new-country");
+    assert.deepEqual(after.operatingModel, before.operatingModel);
+    const changedIds = new Set([...candidate.documents.map((d: any) => d.id), journal.id]);
+    for (const [id, d] of originals)
+      if (!changedIds.has(id)) assert.deepEqual(after.documents.find(v => v.id === id), d);
+    const afterJournal = JSON.parse(after.documents.find(v => v.id === journal.id)!.text);
+    for (const old of JSON.parse(journal.text).cases) {
+      const saved = afterJournal.cases.find((v: any) => v.caseId === old.caseId);
+      if (old.caseId !== c.caseId) assert.deepEqual(saved, old);
+      else assert.deepEqual(saved.history.slice(0, old.history.length), old.history);
+    }
+    const reader = new ProductCrewService({ read: async () => after, update: async () => { throw Error("read only"); } });
+    for (const d of candidate.documents)
+      assert.equal((await reader.call(row.owner_key, "get_document", { documentId: d.id })).text, d.text);
+    await writeFile(`${dir}/REGISTERED.json`, JSON.stringify({
+      sourceRevision: before.revision, revision: after.revision, version: 2, readerVerified: true,
+      operatingModelUnchanged: true, activePassportsUnchanged: true, oldCasesPreserved: true,
+      runtimeActivation: false, remainingCapacity: modelSizeBudget(after) - activeModelSize(after),
+    }, null, 2));
+    console.log(JSON.stringify({ revision: after.revision, runtimeActivation: false }));
   } else if (!process.argv.includes("--register")) {
     const reader = new ProductCrewService({ read: async () => before, update: async () => { throw Error("read only"); } });
     const ids = before.documents.filter(d =>
