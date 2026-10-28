@@ -43,10 +43,14 @@ try {
     const c = j.cases.find((v: any) => v.caseId === "HINT-LAB-AGENT-PASSPORTS");
     assert(c, "Extend existing case only");
     assert(!c.history.some((h: any) => h.reviewSha256 === candidate.reviewSha256), "Review already recorded");
-    c.history.push({ at: candidate.createdAt, role: "HEAD.07", stage: "manual_pass_corrections",
-      reviewSha256: candidate.reviewSha256, reviewVerdict: "принять с исправлениями",
+    c.history.push({ at: candidate.createdAt, role: "HEAD.07",
+      stage: candidate.preparationDecision ? "owner_preparation_approved" : "manual_pass_corrections",
+      reviewSha256: candidate.reviewSha256,
+      ...(candidate.preparationDecision ? { decision: candidate.preparationDecision }
+        : { reviewVerdict: "принять с исправлениями" }),
       proposalVersion: 2, sourceRevision: before.revision, runtimeActivation: false,
-      openDecisions: ["R2", "R4"], namesSelected: false });
+      openDecisions: candidate.preparationDecision ? [] : ["R2", "R4"],
+      namesSelected: !!candidate.preparationDecision });
     j.version++;
     j.history.push({ at: candidate.createdAt, role: "HEAD.07", sourceRevision: before.revision,
       marker: "lab-agent-prompts-review-v2", caseId: c.caseId });

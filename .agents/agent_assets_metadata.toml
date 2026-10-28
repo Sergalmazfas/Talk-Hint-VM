@@ -1699,3 +1699,45 @@ mtime_ms = 1793221201386
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ab4b5b45-64fc-47aa-be25-26657e1ee987/3dd858aa-6c6c-4a09-9521-a41b3f385ee2"
 storage_version_token = "1793221304016344"
 content_type = "text/html"
+
+[[outputs]]
+id = "q8nKJgT1TgJBFWHyzP1O1"
+uri = "file://generated-artifacts/lab-agent-preparation/P_LAB_QA_preparation_v2_1.zip"
+type = "unspecified"
+title = "P.LAB / P.LG.QA — подготовка v2.1 · rev912"
+description = "Замир и Фома: JSON, Dev diff, проверки, история предыдущего пакета. Без включения и вызовов моделей."
+logical_id = "16e783ef-710d-43a4-ba74-0f461cc62f9e"
+content_hash = "sha256:0d81a29a2daaa8beb27441d7d985ed18aab2d5225db9c503d7c9cbdc573e9cbe"
+size = 402138
+mtime_ms = 1793223588873
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/16e783ef-710d-43a4-ba74-0f461cc62f9e/7cfbb627-e376-48ae-8811-472f20fedb49"
+storage_version_token = "1793223639383985"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "xdchJFOV-Ixbr1TgHqUlO"
+uri = "file://generated-artifacts/lab-agent-preparation/READ_FIRST.html"
+type = "html"
+title = "Что подготовлено — читать с телефона"
+description = "Имена, изменения R2/R4, полный diff и ограничения перед включением."
+logical_id = "37bc8acf-2c5b-4438-868d-07311993ee2b"
+content_hash = "sha256:bcc221986888ce95c4f5c8a3acb10357a32c2577f6ef65fae3e4cd06689b2c82"
+size = 29464
+mtime_ms = 1793223588620
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/37bc8acf-2c5b-4438-868d-07311993ee2b/12aeac03-1f13-4455-8dd8-c5c83e16767f"
+storage_version_token = "1793223640140057"
+content_type = "text/html"
+
+[[outputs]]
+id = "GUF_iBry1L7G0mM3x55Rl"
+uri = "file://generated-artifacts/model-capacity/CAPACITY_REPORT.txt"
+type = "text"
+title = "Риск ёмкости модели · rev912 · Нужно решение"
+description = "Фактический состав, рост, ограничения документов, сравнение вариантов и предложение контроля P.OPS. Ничего не применено."
+logical_id = "dfdd168a-0567-4597-af24-048509eb5c9e"
+content_hash = "sha256:6fb4168182a660482c699c0c9b457368d667e35780a27abb32b187904c47d180"
+size = 12480
+mtime_ms = 1793224238520
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dfdd168a-0567-4597-af24-048509eb5c9e/fc4cd05f-facb-4514-9ced-01d2f2048793"
+storage_version_token = "1793224284132635"
+content_type = "text/plain"

@@ -237,7 +237,7 @@ def make_agent(role, goal, llm):
                  verbose=False, max_iter=1, max_retry_limit=0, max_execution_time=240)
 
 
-def run(source, llm=None):
+def run(source, llm=None, *, qa_llm=None):
     global CURRENT_STAGE
     CURRENT_STAGE = "source"
     validate_source(source)
@@ -248,8 +248,25 @@ def run(source, llm=None):
             raise ValueError("MODEL_KEY_MISSING")
         llm = LLM(model="openai/" + os.environ.get("LAB_MODEL", "gpt-5.2"),
                   api_key=os.environ["OPENAI_API_KEY"], timeout=180, max_retries=0)
+    qa_model = os.environ.get("PLAB_QA_MODEL_OVERRIDE")
+    if qa_model:
+        if qa_model != "gpt-5.4-2026-03-05" or qa_model == os.environ.get("LAB_MODEL", "gpt-5.2"):
+            raise ValueError("QA_MODEL_INVALID")
+        if qa_llm is None:
+            qa_llm = LLM(model="openai/" + qa_model, api_key=os.environ["OPENAI_API_KEY"],
+                         timeout=180, max_retries=0)
+    if qa_llm is llm:
+        raise ValueError("QA_LLM_MUST_DIFFER")
+    if qa_llm is not None:
+        author_id = str(getattr(llm, "model", "") or "").removeprefix("openai/")
+        reviewer_id = str(getattr(qa_llm, "model", "") or "").removeprefix("openai/")
+        if not author_id or not reviewer_id:
+            raise ValueError("QA_MODEL_IDENTITY_REQUIRED")
+        if author_id == reviewer_id:
+            raise ValueError("QA_MODEL_MUST_DIFFER")
     author = make_agent("agent-1 · P.LAB", "Проверяемый разбор и письмо владельцу", llm)
-    reviewer = make_agent("agent-2 · P.LG.QA", "Независимо проверить разбор, не принять без доказательств", llm)
+    reviewer = make_agent("agent-2 · P.LG.QA", "Независимо проверить разбор, не принять без доказательств",
+                          qa_llm if qa_llm is not None else llm)
     raw = json.dumps(source, ensure_ascii=False)
     diagnostic_brief = (
         "\nЭто заказанный ручной диагностический разбор D1–D5: "
@@ -303,7 +320,7 @@ def run(source, llm=None):
     errors = sum(f.category in ("ошибочная", "выдумка") for f in analysis.findings)
     # These are AI classifications of assessed events, not all errors in a call.
     missed = sum(f.category == "пропуск" for f in analysis.findings) if source.get("full_hint_history") else None
-    return {
+    result = {
         "format": "talkhint.plab.call-report", "version": 1, "mode": "hint",
         "call_id": source["call_id"], "synthetic": bool(source.get("synthetic")),
         "environment": source.get("environment"), "ended_at": source["ended_at"],
@@ -321,6 +338,10 @@ def run(source, llm=None):
                     "latency": source.get("latency_summary"), "usage": usage},
         "mail_status": "file_only", "delivery_confirmed": False, "rubric_version": "plab-rubric-v1",
     }
+    if qa_model or qa_llm is not None:
+        result["qa_model"] = qa_model or "injected_separate_llm"
+        result["qa_model_provenance"] = "configured; provider model identity not verified"
+    return result
 
 
 def main():

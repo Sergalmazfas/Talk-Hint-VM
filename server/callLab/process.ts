@@ -71,7 +71,9 @@ export function checkHintLabRuntime(): Promise<{ framework: string; version: str
       });
   });
 }
-export function runHintLab(source: unknown, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<any> {
+export function runHintLab(source: unknown, options: {
+  signal?: AbortSignal; timeoutMs?: number; qaModel?: "gpt-5.4-2026-03-05";
+} = {}): Promise<any> {
   const snapshot = source as any;
   if (!snapshot || snapshot.mode !== "hint" || snapshot.owner_verified !== true || snapshot.processing_authorized !== true) {
     return Promise.reject(new Error("LAB_SOURCE_SCOPE_REJECTED"));
@@ -81,6 +83,12 @@ export function runHintLab(source: unknown, options: { signal?: AbortSignal; tim
   if (!process.env.OPENAI_API_KEY) return Promise.reject(new Error("LAB_MODEL_KEY_MISSING"));
   if (options.signal?.aborted) return Promise.reject(new Error("LAB_DISABLED"));
   const env = workerEnv();
+  // Not read from project settings; ONLY an explicit prepared-run option can supply it.
+  if (options.qaModel) {
+    if (options.qaModel !== "gpt-5.4-2026-03-05" || options.qaModel === env.LAB_MODEL)
+      return Promise.reject(new Error("LAB_QA_MODEL_INVALID"));
+    env.PLAB_QA_MODEL_OVERRIDE = options.qaModel;
+  }
   const scratch = mkdtempSync(path.join(os.tmpdir(), "talkhint-plab-run-"));
   env.XDG_DATA_HOME = scratch;
   env.CREWAI_STORAGE_DIR = scratch;
