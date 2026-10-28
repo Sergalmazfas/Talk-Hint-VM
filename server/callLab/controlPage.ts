@@ -75,8 +75,8 @@ button:disabled{opacity:.48;cursor:not-allowed}
     <p>Подготовка только выполняет read-only проверки и создаёт или обновляет остановленную привязку. Включение — отдельное явное действие.</p>
     <div class="actions">
       <button id="readiness" class="secondary" type="button">Проверить готовность</button>
-      <button id="enable" class="primary" type="button" disabled>Включить новые Hint-звонки</button>
-      <button id="disable" class="stop" type="button" disabled>Остановить лабораторию</button>
+      <button id="enable" class="primary" type="button" disabled>Включить Hint: разбор, дежурный, отчёт 08:00</button>
+      <button id="disable" class="stop" type="button" disabled>Остановить контур Hint</button>
     </div>
     <p id="action-message" class="detail" role="status" aria-live="polite"></p>
   </section>

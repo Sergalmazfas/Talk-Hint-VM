@@ -64,8 +64,9 @@ describe("explicit private laboratory activation", () => {
     await route()({ user: { id: "fixture-owner" }, body: { confirm: "hint-owner-only" } }, res);
     expect(f.check).toHaveBeenCalledOnce();
     expect(f.verify).toHaveBeenCalledOnce();
-    expect(f.query.mock.calls[1][0]).toContain("activated_at=now()");
-    expect(f.query.mock.calls[1][0]).toContain("enabled=false");
+    expect(f.query.mock.calls[1][0]).toContain("activated_at=CASE WHEN enabled THEN activated_at ELSE now() END");
+    expect(f.query.mock.calls[1][0]).toContain("'hint-daily:' || key");
+    expect(f.query.mock.calls[1][0]).toContain("ON CONFLICT(key) DO UPDATE SET enabled=true");
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ noHistoricalReplay: true }));
   });
   it("does not activate when worker readiness fails", async () => {

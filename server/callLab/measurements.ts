@@ -40,6 +40,11 @@ export function hintMeasurements(source: any) {
     } : null,
     stt_final_to_ack_ms: { samples: latency.length, p50: percentile(.5), p95: percentile(.95),
       method: "nearest_rank; saved sent events with both timestamps; not screen or speech-end latency" },
+    brain_ms: {
+      p50: Number.isFinite(source?.latency_summary?.brainP50Ms) ? source.latency_summary.brainP50Ms : null,
+      p95: Number.isFinite(source?.latency_summary?.brainP95Ms) ? source.latency_summary.brainP95Ms : null,
+      basis: "saved_code_summary; not independently measured speech-end or screen latency",
+    },
     guest_translation_count: null,
     before_owner_reply_count: null,
     limitations: ["UI events are client claims, not reading, speaking or independent screen verification.",

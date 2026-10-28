@@ -5,6 +5,7 @@ import { labConfiguration, abortHintLabProcessing, bootstrapLab } from "./servic
 import { checkHintLabRuntime } from "./process";
 import { GmailLabMail } from "./mail";
 import { hintWatchdogStatus } from "./watchdog";
+import { hintDailyStatus } from "./dailyReport";
 import { labStartupStatus, labStartsPaused, safeLabError } from "./startup";
 import { labControlPage } from "./controlPage";
 
@@ -47,10 +48,15 @@ export function registerCallLabRoutes(app: Express) {
       if (!control) return res.status(503).json({ error: "Owner control not ready" });
       await checkHintLabRuntime(); // imports/version only, never runs agents
       await new GmailLabMail().verify(control);
-      await pool.query(`UPDATE call_lab_controls SET enabled=true,activated_at=now()
-        WHERE key=$1 AND enabled=false`, [key]);
+      await pool.query(`WITH activated AS (
+        UPDATE call_lab_controls SET enabled=true,
+          activated_at=CASE WHEN enabled THEN activated_at ELSE now() END
+        WHERE key=$1 RETURNING *
+      ) INSERT INTO call_lab_controls(key,environment,owner_id,recipient,connection_id,enabled)
+        SELECT 'hint-daily:' || key,environment,owner_id,recipient,connection_id,true FROM activated
+        ON CONFLICT(key) DO UPDATE SET enabled=true,recipient=EXCLUDED.recipient,connection_id=EXCLUDED.connection_id`, [key]);
       res.json({ enabled: true, scope: "Hint / owner / new calls after activation",
-        noHistoricalReplay: true, restartPausesAgain: labStartsPaused() });
+        noHistoricalReplay: true, hintDaily: hintDailyStatus(), restartPausesAgain: labStartsPaused() });
     } catch {
       res.status(503).json({ error: "Readiness check failed; activation not confirmed" });
     }
@@ -81,7 +87,7 @@ export function registerCallLabRoutes(app: Express) {
       }));
       res.json({ environment: config.environment, configured: config.allowed, control, jobs, outbox,
         startup: labStartupStatus(), flags: flags(),
-        watchdog: hintWatchdogStatus(),
+        watchdog: hintWatchdogStatus(), hintDaily: hintDailyStatus(),
         recent, awaitingConfirmedCallEnd: missingEnd, scope: "Hint / owner / existing text only",
         note: "SENT confirms Gmail submission, not the owner's reading or QA acceptance",
         private: true, publishedByAgent: false });
@@ -92,7 +98,8 @@ export function registerCallLabRoutes(app: Express) {
     if (String((req as any).user?.id) !== config.owner) return res.status(403).json({ error: "Owner only" });
     if (!pool) return res.status(503).json({ error: "Database unavailable" });
     try {
-      await pool.query("UPDATE call_lab_controls SET enabled=false WHERE key=$1", [`${config.environment}:${config.owner}`]);
+      await pool.query("UPDATE call_lab_controls SET enabled=false WHERE key=ANY($1::text[])",
+        [[`${config.environment}:${config.owner}`, `hint-daily:${config.environment}:${config.owner}`]]);
       abortHintLabProcessing();
       res.json({ disabled: true, noNewMail: true, note: "Already submitted Gmail requests cannot be recalled" });
     } catch { res.status(503).json({ error: "Disable failed; set LAB_ENABLED=false in protected settings" }); }

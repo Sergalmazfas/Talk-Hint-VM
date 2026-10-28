@@ -58,6 +58,8 @@ final class InCallViewController: UIViewController {
     // (re)connect (persisted selections are re-sent), so without this a mid-call
     // reconnect would duplicate the "GOAL" card in the conversation history.
     private var lastGoalShownInFeed: String?
+    private var openingCollapsed = false
+    private var firstOwnerTurnSeen = false
 
     init(callerName: String, hintStream: CallHintStream = CallHintStream(), callSid: String? = nil) {
         self.callerName = callerName
@@ -458,8 +460,18 @@ final class InCallViewController: UIViewController {
     }
 
     @objc private func dismissOpening() {
-        // Hiding is a user action, never evidence that the phrase was spoken.
-        openingButton?.superview?.isHidden = true
+        // This is only a presentation preference, never evidence of using a hint.
+        setOpeningCollapsed(!openingCollapsed)
+    }
+
+    private func setOpeningCollapsed(_ collapsed: Bool) {
+        openingCollapsed = collapsed
+        openingButton?.englishLabel.numberOfLines = collapsed ? 1 : 0
+        openingButton?.englishLabel.lineBreakMode = collapsed ? .byTruncatingTail : .byWordWrapping
+        openingButton?.translationLabel.isHidden = collapsed
+        openingButton?.invalidateIntrinsicContentSize()
+        openingButton?.superview?.invalidateIntrinsicContentSize()
+        view.setNeedsLayout()
     }
 
     /// The circular Mute / End / Audio controls per the approved mockup —
@@ -1024,6 +1036,10 @@ extension InCallViewController: CallHintStreamDelegate {
             // updates in place.
             if isFinal && isGarbageSTT(text, confidence: confidence) {
                 return
+            }
+            if isFinal && !firstOwnerTurnSeen && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                firstOwnerTurnSeen = true
+                setOpeningCollapsed(true)
             }
             upsertTranscript(card: &currentYouCard,
                              title: NSLocalizedString("incall.card.you", comment: ""), titleColor: Theme.sub,

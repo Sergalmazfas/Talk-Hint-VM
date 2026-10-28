@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile, open } from "node:fs/promises";
 import { runHintLab, labAnalysisFailure } from "../server/callLab/process";
 import { hintMeasurements } from "../server/callLab/measurements";
+import { createHash } from "node:crypto";
 import { completeLabReport, renderProcessLetter } from "../server/callLab/processReport";
 
 const dir = "generated-artifacts/hint-owner-feedback-1";
@@ -40,9 +41,11 @@ await reservation.close();
 await writeFile(`${dir}/coffee-diagnostic-source.json`, JSON.stringify(source, null, 2));
 try {
   const raw = await runHintLab(source);
+  await writeFile(`${dir}/coffee-worker-result.json`, JSON.stringify(raw, null, 2));
   const report = completeLabReport({ ...raw, manual_trigger: true, execution_environment: "development",
     source_environment: "production", owner_feedback: { usedHints: 0, basis: "direct owner report" },
-    deterministic: hintMeasurements(source) }, source, "");
+    deterministic: hintMeasurements(source) }, source,
+    createHash("sha256").update(`manual-coffee:${call.callSid}`).digest("hex"));
   await writeFile(`${dir}/coffee-diagnostic-report.json`, JSON.stringify(report, null, 2));
   const letter = renderProcessLetter(report);
   await writeFile(`${dir}/coffee-diagnostic-letter.txt`, `${letter.subject}\n\n${letter.body}`);

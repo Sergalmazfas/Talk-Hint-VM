@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { isBenchmarkAdmin } from "../benchmark/adminGate";
 import { GmailLabMail } from "./mail";
+import { startHintDaily } from "./dailyReport";
 import { completeLabReport } from "./processReport";
 import { LabStore } from "./store";
 import { runHintLab, checkHintLabRuntime, cleanupLabScratch, labAnalysisFailure } from "./process";
@@ -15,6 +16,7 @@ let active: AbortController | undefined;
 let boundOwnerId: string | undefined;
 let stopping = false;
 let stopWatchdog: (() => void) | undefined;
+let stopDaily: (() => void) | undefined;
 let bootstrapping: Promise<void> | undefined;
 export const labEnvironment = environment;
 
@@ -64,6 +66,10 @@ export async function bootstrapLab(pool: Pool, options: { expectedOwnerId?: stri
           enabled=CASE WHEN $6 THEN false ELSE call_lab_controls.enabled END`,
       [key, env, owner.id, profile, connectionId, options.startup !== false && labStartsPaused()]));
       boundOwnerId = owner.id;
+      if (options.startup !== false && labStartsPaused()) {
+        await pool.query("UPDATE call_lab_controls SET enabled=false WHERE key=$1",
+          [`hint-daily:${env}:${owner.id}`]);
+      }
       registerLabSourceOwner(owner.id);
       labStartupReady();
     })();
@@ -250,6 +256,7 @@ export async function startHintLab(pool: Pool) {
       }
       if (stopping) return;
       stopWatchdog ??= startHintWatchdog(pool, labConfiguration);
+      stopDaily ??= startHintDaily(pool, labConfiguration);
       await hintLabTick(pool);
     })().catch(() => console.warn("[HintLab] BLOCKED: tick failed; see private status"))
       .finally(() => { running = undefined; });
@@ -263,6 +270,8 @@ export function stopHintLab() {
   stopping = true;
   stopWatchdog?.();
   stopWatchdog = undefined;
+  stopDaily?.();
+  stopDaily = undefined;
   if (timer) clearInterval(timer);
   timer = undefined;
   active?.abort();

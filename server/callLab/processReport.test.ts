@@ -70,25 +70,26 @@ describe("v3 process plan/fact", () => {
       deterministic: { recorded_attempts: 17, with_recorded_text: 14, sent: 14,
         acknowledged: 14, hints_ui_claimed: 11, translations_ui_claimed: 11,
         dropped: 3, drop_reasons: { cooldown: 1 }, stt_final_to_ack_ms: { p50: 2217, p95: 5136, samples: 14 } } });
-    expect(mail.body).toContain("ВОЗВРАТ QA — НЕ ПРИЁМКА");
+    expect(mail.body).toContain("Проверка вернула разбор");
     expect(mail.body).toContain("#5: ошибочная");
-    expect(mail.body).toContain("Попыток 17 · записей с текстом 14");
+    expect(mail.body).toContain("Попыток 17 → отправлено 14 → показано 11");
+    expect(mail.subject).toContain("до экрана дошло 11 из 14");
     expect(mail.body).not.toContain("QA: QA:");
   });
   it("does not call a failed analysis a QA return or invent its missing diagnostics", () => {
     const mail = renderProcessLetter({ execution: "analysis_not_completed",
       qa_status: "НЕ ПРОВЕРЕНО QA", qa_issues: ["MODEL_FAILURE: old implementation"] });
-    expect(mail.body).toContain("причина не сохранена старой версией");
-    expect(mail.body).toContain("QA не выполнена");
+    expect(mail.body).toContain("Разбор не завершён, независимая проверка не выполнена");
+    expect(mail.body).not.toContain("MODEL_FAILURE");
     expect(mail.body).not.toContain("ВОЗВРАТ QA");
   });
-  it("renders a compact synthetic warning, eight stages and unknown measurements", () => {
+  it("renders a compact synthetic warning and unknown funnel measurements", () => {
     const mail = renderProcessLetter({ synthetic: true, duration_ms: 120000, qa_status: "НЕ ПРОВЕРЕНО QA" });
-    expect(mail.subject).toContain("процесс ?");
-    expect(mail.body).toContain("СИНТЕТИЧЕСКИЙ ПРИМЕР v3");
-    expect(mail.body).toContain("План — 100% применимых случаев");
-    expect(mail.body).toContain("Первая фраза: ?");
-    expect(mail.body).toContain("Измерения: нет сохранённого снимка");
+    expect(mail.subject).toContain("до экрана дошло ? из ?");
+    expect(mail.body).toContain("СИНТЕТИЧЕСКИЙ ПРИМЕР");
+    expect(mail.body).toContain("Попыток ? → отправлено ? → показано ?");
+    expect(mail.body).toContain("Использовано: не установлено");
+    expect(mail.body).toContain("«?» — неизвестно");
     expect(mail.body).not.toContain("94%");
   });
   it("does not turn telemetry receipt into timely visibility or a successful goal", () => {

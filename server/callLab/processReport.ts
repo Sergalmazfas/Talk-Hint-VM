@@ -66,59 +66,64 @@ export function processReport(report: any) {
 export function renderProcessLetter(report: any): { subject: string; body: string } {
   if (report.manual_trigger && report.manual_diagnostic?.version === 1)
     return manualDiagnosticLetter(report, reportOrigin(report.environment));
-  const p = processReport(report);
+  const p = processReport(report), m = report.deterministic;
+  const value = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? String(v) : "?";
   const duration = Number.isFinite(report.duration_ms) && report.duration_ms >= 0
     ? `${Math.round(report.duration_ms / 6000) / 10} мин` : "? мин";
-  const subject = `${report.synthetic ? "ТЕСТ · " : report.manual_trigger ? "ПОВТОР · " : ""}Hint · ${duration} · процесс ${p.percent === null ? "?" : `${p.percent}%`} · слабое звено: ${p.weakLink}`;
-  const labels: Record<string, string> = {
-    prepare_goal: "Цель Prepare", opening_visible: "Первая фраза", speech_recognized: "Распознавание",
-    hint_created: "Создание подсказок", hint_before_reply: "Показ до ответа",
-    translation_visible: "Перевод подсказки", hint_used: "Использование", goal_achieved: "Цель разговора",
-  };
+  const failed = report.execution === "analysis_not_completed";
+  const qaAccepted = !failed && report.qa_status === "QA: принято";
+  const qaReturned = !failed && report.qa_status === "QA: расхождения не устранены";
+  const uiGap = typeof m?.acknowledged === "number" && typeof m?.hints_ui_claimed === "number"
+    && m.acknowledged > m.hints_ui_claimed;
+  const weak = uiGap ? "показ не подтверждён" : failed ? "разбор не завершён"
+    : qaReturned ? "разбор не принят проверкой" : !qaAccepted ? "проверка не выполнена" : "не установлено";
+  const subject = `${report.synthetic ? "ТЕСТ · " : report.manual_trigger ? "ПОВТОР · " : ""}Hint · ${duration} · до экрана дошло ${value(m?.hints_ui_claimed)} из ${value(m?.sent)} · слабое звено: ${weak}`;
+  const problems: string[] = [];
+  if (failed) problems.push("Разбор не завершён, независимая проверка не выполнена. Исправляет инженер лаборатории.");
+  else if (qaReturned) problems.push("Проверка вернула разбор на доработку. Отвечают аналитик лаборатории и проверяющий.");
+  else if (!qaAccepted) problems.push("Независимая проверка не завершилась. Разбор не принят. Отвечает инженер лаборатории.");
+  if (uiGap) problems.push("Телефон подтвердил получение, но для части подсказок не сообщил показ. Проверяет инженер приложения; это ещё не доказательство, что их не было на экране.");
+  if (Array.isArray(report.qa_issues) && report.qa_issues.length && !failed)
+    problems.push(`Замечания проверки: ${report.qa_issues.slice(0, 2).map((s: unknown) => String(s).replace(/\s+/g, " ").slice(0, 180)).join("; ")}. Подробности — по ссылке.`);
+  if (!problems.length) problems.push("Подтверждённое слабое звено не установлено. Это не означает, что разговор прошёл хорошо.");
+  const latency = (v: any) => `обычно ${value(v?.p50)} / в 95% случаев до ${value(v?.p95)} мс`;
+  const used = report.owner_feedback?.usedHints;
   const body = [
     ...(report.manual_trigger ? ["Ручной повторный запуск из Dev по сохранённому звонку. Исходный production-отчёт не изменён."] : []),
-    report.synthetic ? "СИНТЕТИЧЕСКИЙ ПРИМЕР v3. Реального звонка не было. Числа примера не данные продукта." : "Лаборатория Hint · форма v3",
-    report.execution === "manual_assistant_review"
-      ? "Ручной разбор ассистентом по сохранённым данным и скриншотам. CrewAI и независимый QA не запускались. Не приёмка владельцем."
-      : "AI-оценка не является приёмкой владельцем или отзывом участника.",
-    String(report.qa_status ?? "НЕ ПРОВЕРЕНО QA"),
-    "", "ПЛАН / ФАКТ",
-    "План — 100% применимых случаев; цель — отдельно.",
-    ...p.rows.map(r => `${labels[r.id]}: ${r.fact}`),
-    "", `Общий процент: ${p.percent === null ? "?" : `${p.percent}% (${p.numerator}/${p.denominator})`}`,
-    "Использовано / нужно по рубрике. Цель разговора не входит в процент.",
-    ...measurementLines(report.deterministic),
+    report.synthetic ? "СИНТЕТИЧЕСКИЙ ПРИМЕР. Реального звонка не было. Числа примера не данные продукта." : "Короткий отчёт Hint",
+    `Проверка разбора: ${qaAccepted ? "принято" : qaReturned ? "не принято" : "не выполнена"}. Это не приёмка владельцем.`,
+    "", "ВОРОНКА — ЦИФРЫ ПРОГРАММЫ",
+    `Попыток ${value(m?.recorded_attempts)} → отправлено ${value(m?.sent)} → показано ${value(m?.hints_ui_claimed)}.`,
+    `Получение телефоном подтверждено: ${value(m?.acknowledged)}.`,
+    `Подавлено: ${value(m?.dropped)}. Причины: ${dropSummary(m?.drop_reasons)}.`,
+    `Перевод у подсказок: ${value(m?.translations_ui_claimed)} из ${value(m?.hints_ui_claimed)} показанных.`,
+    `Перевод собеседника: ${value(m?.guest_translation_count)} — нет сохранённого измерения, не ноль.`,
+    `Время до подсказки: ${latency(m?.stt_final_to_ack_ms)}; из них подготовка текста: ${latency(m?.brain_ms)}.`,
+    "Время считается от завершения распознавания до подтверждения телефоном, не до чтения на экране.",
+    `Использовано: ${Number.isSafeInteger(used) && used >= 0 ? `${used} — со слов владельца` : "не установлено"}.`,
+    `Общий процент: ${p.percent === null ? "?" : `${p.percent}% (${p.numerator}/${p.denominator})`}. Использовано / нужно по рубрике.`,
+    "Цель разговора: отдельно, достижение не подтверждено.",
+    "",
     "ГДЕ СЛОМАЛОСЬ",
-    report.execution === "analysis_not_completed"
-      ? `AI-разбор не завершён: ${report.analysis_failure?.code ?? "причина не сохранена старой версией"}. QA не выполнена.`
-      : "Слабое звено по проверенной рубрике не установлено; неизвестное не означает дефект.",
-    ...(Array.isArray(report.qa_issues) && report.qa_issues.length && report.execution !== "analysis_not_completed"
-      ? ["ВОЗВРАТ QA — НЕ ПРИЁМКА",
-        ...report.qa_issues.slice(0, 6).map((issue: unknown) =>
-          String(issue).replace(/\s+/g, " ").slice(0, 350)),
-        ...(report.qa_issues.length > 6 ? ["Остальные замечания — в полном разборе."] : [])] : []),
-    ...((report.analysis?.findings ?? []).slice(0, 1).map((f: any) =>
-      `AI-наблюдение, не приёмка: ${String(f.explanation).slice(0, 160)}`)),
+    ...problems.slice(0, 3),
     "ПОЛНЫЙ РАЗБОР",
     typeof report.private_report_path === "string" && /^\/api\/admin\/call-lab\/reports\/[a-f0-9]+$/.test(report.private_report_path)
       ? `${reportOrigin(report.environment)}${report.private_report_path} (вход владельца обязателен)`
       : "Приватный раздел лаборатории /api/admin/call-lab/status; доступ владельца. Ссылка конкретного отчёта не сформирована.",
-    `WER: ${typeof report.metrics?.wer === "number" ? report.metrics.wer : "неизвестно"}`,
-    "Отметки iPhone не доказывают чтение/произнесение. Ограничения и основания — в полном разборе.",
+    "Журнал может быть неполным. Отметки iPhone не доказывают чтение/произнесение. «?» — неизвестно.",
   ].join("\n");
   return { subject, body };
 }
 
-function measurementLines(m: any): string[] {
-  if (!m || m.recorded_attempts === null) return ["Измерения: нет сохранённого снимка."];
-  const value = (v: unknown) => typeof v === "number" ? String(v) : "?";
-  const latency = m.stt_final_to_ack_ms;
-  return ["ИЗМЕРЕНИЯ СОХРАНЁННОГО ЖУРНАЛА",
-    `Попыток ${value(m.recorded_attempts)} · записей с текстом ${value(m.with_recorded_text)}; полное число генераций неизвестно`,
-    `Отправлено ${value(m.sent)} · ACK ${value(m.acknowledged)} · iPhone ${value(m.hints_ui_claimed)}`,
-    `Подавлено ${value(m.dropped)}: ${Object.entries(m.drop_reasons ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "причины неизвестны"}`,
-    `STT final → ACK: p50 ${value(latency?.p50)} / p95 ${value(latency?.p95)} мс, n=${value(latency?.samples)}`,
-    `Перевод: ${value(m.translations_ui_claimed)}/${value(m.hints_ui_claimed)} среди отметок показа; реплики собеседника — ?`];
+function dropSummary(reasons: Record<string, number> | undefined) {
+  const names: Record<string, string> = {
+    superseded: "собеседник уже продолжил", cooldown: "слишком близко к предыдущей",
+    no_suggestion: "модель не предложила ответ", stale: "ответ устарел",
+    duplicate: "повтор", echo: "повтор речи", farewell: "завершение разговора",
+    goal_achieved: "цель сочтена достигнутой", waiting_for_info: "ожидание информации",
+    reaction_only: "короткая реакция", delivery_timeout: "телефон не подтвердил получение",
+  };
+  return Object.entries(reasons ?? {}).map(([key, n]) => `${names[key] ?? "другая причина (подробнее в разборе)"} — ${n}`).join("; ") || "не сохранены";
 }
 
 function reportOrigin(environment: unknown) {

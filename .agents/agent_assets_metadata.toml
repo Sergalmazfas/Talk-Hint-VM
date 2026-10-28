@@ -1321,3 +1321,17 @@ mtime_ms = 1793148727687
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c4760bc9-f034-448b-b8a4-2a0858756975/dc2a2835-9a9a-40dd-bb64-e567020e9d37"
 storage_version_token = "1793148772303387"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "F6zj3lylpO5W0r9oZJQ1z"
+uri = "file://generated-artifacts/Hint_release_ready_rev833.html"
+type = "html"
+title = "Hint · отчёт перед публикацией · rev833"
+description = "Состав выпуска, проверки, ограничения, порядок включения и короткое письмо диагностического прохода кофейни. Production не изменён."
+logical_id = "03a6354a-0d9d-4726-941f-4583ae136a34"
+content_hash = "sha256:defb5e9307d756a24fe46052fb73d2afd41ebcaec8352c2a0e111cbfdd1b852d"
+size = 19887
+mtime_ms = 1793151244279
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/03a6354a-0d9d-4726-941f-4583ae136a34/b52539ff-f277-4ee6-b7d7-c9f99454479b"
+storage_version_token = "1793151254048769"
+content_type = "text/html"

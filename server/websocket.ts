@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { stripHintWrapper, parseGuestTranslation, guestTranslationTokenLimit } from "./hintText";
 import { upgradeElevenAudio } from "./secretaryLab/elevenAudioUpgrade";
 import type { Server } from "http";
 import { log } from "./index";
@@ -188,19 +189,8 @@ Score: 1.0 = very strong emotion, 0.0 = neutral. Be concise.`
 }
 
 // Translate guest speech and generate suggestion
-const PREAMBLE_PATTERNS = [
-  /^(i understand|i see|i hear you|i get it|that makes sense)[,.]?\s*/i,
-  /^(of course|certainly|absolutely|sure)[,.]?\s*/i,
-  /^(great|perfect|wonderful|excellent|awesome)[,!.]?\s*/i,
-  /^(let me|allow me|let's)[^.!?]*[,.]?\s*/i,
-  /^(okay|ok|alright)[,.]?\s*/i,
-];
 function stripPreamble(text: string): string {
-  let result = text.trim();
-  for (const pattern of PREAMBLE_PATTERNS) {
-    result = result.replace(pattern, '');
-  }
-  return result.trim();
+  return stripHintWrapper(text);
 }
 
 // Model used for live hint generation (translation + suggestion).
@@ -524,15 +514,11 @@ async function translateGuestText(text: string, language: string, modelOverride?
       model: activeModel,
       fallbackModel: OPENAI_FALLBACK_MODEL,
       withGemini: generateWithGemini,
-      withOpenAI: generateWithOpenAI,
+      withOpenAI: (model, sp, up) => generateWithOpenAI(model, sp, up, guestTranslationTokenLimit),
       onFallback: () => { fellBack = true; },
     });
-    let translation = "";
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) {
-      try { translation = String(JSON.parse(m[0]).translation ?? "").trim(); } catch { translation = ""; }
-    }
-    if (!translation) translation = raw.trim(); // tolerate a plain-text reply
+    const translation = parseGuestTranslation(raw);
+    if (!translation) throw new Error("GUEST_TRANSLATION_EMPTY_OR_TRUNCATED");
     const providerUsed = fellBack
       ? `openai:${OPENAI_FALLBACK_MODEL} (fallback from ${activeModel})`
       : isGemini

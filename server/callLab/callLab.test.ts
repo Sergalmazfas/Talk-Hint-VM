@@ -86,8 +86,8 @@ describe("Gmail self-mail adapter (mocked, no external writes)", () => {
     expect(raw).toContain(`Message-ID: <${messageId}>`);
     expect(raw).not.toMatch(/\r\nBcc:|\r\nCc:/);
     const text = Buffer.from(raw.split("\r\n\r\n")[1].replace(/\s/g, ""), "base64").toString();
-    expect(text).toContain("WER: неизвестно");
-    expect(text).toContain("НЕ ПРОВЕРЕНО QA");
+    expect(text).toContain("«?» — неизвестно");
+    expect(text).toContain("Проверка разбора: не выполнена");
     expect(() => encodeLetter("owner@example.invalid\r\nCc: x@y.com", messageId, report)).toThrow("LAB_BAD_MAIL_HEADER");
   });
   it("verifies the account, sends only via me, and searches only matching SENT Message-ID", async () => {

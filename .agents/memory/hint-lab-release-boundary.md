@@ -53,7 +53,13 @@ not equate a successful build or one control call with independent QA acceptance
 For this rollout, the owner requires the laboratory to start paused after Publish
 until its readiness is checked. Historical manual baselines must be labelled as
 manual, never forged into fresh-call provenance or automatic CrewAI execution.
-Hiding the Prepare opening manually is not evidence it was spoken.
+Collapsing or hiding the Prepare opening is not evidence it was spoken.
+
+Владелец согласовал сворачивание первой фразы в одну строку после первой
+надёжно распознанной реплики владельца; касание разворачивает её обратно.
+Это заменяет прежний вариант только ручного скрытия.
+**Why:** владелец хочет освободить экран разговора, а не считать подсказку использованной по косвенному событию.
+**How to apply:** автоматическое сворачивание — только состояние интерфейса; не засчитывать произнесение opening, использование или достижение цели.
 
 An owner-authorized repeat of a saved live call is a separately versioned manual
 trigger, even when it actually executes CrewAI. Preserve the failed original,

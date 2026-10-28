@@ -33,8 +33,10 @@ describe("saved Hint measurements survive AI failure", () => {
     expect(p.rows.find(r => r.id === "opening_visible")?.fact).toContain("1 отметка");
     expect(p.rows.find(r => r.id === "hint_before_reply")?.fact).toBe("?");
     const letter = renderProcessLetter(report);
-    expect(letter.body).toContain("Отправлено 2 · ACK 2 · iPhone 1");
-    expect(letter.body).toContain("MODEL_TIMEOUT");
+    expect(letter.body).toContain("отправлено 2 → показано 1");
+    expect(letter.body).toContain("Получение телефоном подтверждено: 2");
+    expect(report.analysis_failure.code).toBe("MODEL_TIMEOUT");
+    expect(letter.body).toContain("Разбор не завершён");
     expect(letter.body).toContain(`https://talkhint.app/api/admin/call-lab/reports/${"a".repeat(64)}`);
   });
   it("does not convert absent data to zero or timestamps to verified timely display", () => {
