@@ -1993,3 +1993,17 @@ mtime_ms = 1793287357370
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1fd6fa03-dd06-4e89-ae0a-2ebd85417fab/a3f2f450-4eac-41de-a84d-18ba0080765e"
 storage_version_token = "1793287364396553"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "8vwfwaUfVaIAdF_5YoY4e"
+uri = "file://generated-artifacts/product-structure-review/TalkHint_product_structure_plan_Claude.zip"
+type = "unspecified"
+title = "Структура продукта · план для Claude"
+description = "Короткая сверка r912 / operatingModel v41, существующие ID, расхождения и план после включения базы. Катя на паузе. Модель и production не менялись; приёмка ожидается."
+logical_id = "b4bdc924-8a21-46a1-bcfd-1fd3abd625eb"
+content_hash = "sha256:6b4f63057db48d8ad9b6152fbb83d48cf601e6db9b4656173e9666b333260645"
+size = 13452
+mtime_ms = 1793290080147
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b4bdc924-8a21-46a1-bcfd-1fd3abd625eb/faa9c1aa-bc71-45db-a49f-182c9e3f9a20"
+storage_version_token = "1793290104510645"
+content_type = "application/octet-stream"
