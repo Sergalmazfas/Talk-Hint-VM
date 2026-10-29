@@ -17,7 +17,12 @@ export async function startCutoverWorker(operation: string, observe: (d: Cutover
   await new Promise<void>((done, reject) => {
     const launch = limitedWorker("import", process.execPath, args);
     let child: ReturnType<typeof spawn>;
-    try { child = spawn(launch.executable, launch.args, { stdio: ["pipe", "ignore", "pipe"] }); }
+    // Production bundling defines NODE_ENV in the parent, not in its OS environment.
+    // Forward that effective mode explicitly; an unbundled Dev parent stays Dev.
+    try { child = spawn(launch.executable, launch.args, {
+      stdio: ["pipe", "ignore", "pipe"],
+      env: { ...process.env, NODE_ENV: process.env.NODE_ENV },
+    }); }
     catch (e) { reject(e); return; }
     let queue = Promise.resolve(), buffer = "", tail: string[] = [], inputError: unknown, diagnosticError: unknown;
     const record = (d: CutoverDiagnostic) => {
