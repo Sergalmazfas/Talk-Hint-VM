@@ -1,6 +1,6 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile, writeFile, cp } from "fs/promises";
+import { rm, readFile, writeFile, cp, access } from "fs/promises";
 import { resolve, join } from "node:path";
 import { createHash } from "node:crypto";
 import { verifyMcpBuild } from "./mcp-build-verification";
@@ -45,11 +45,20 @@ async function buildAll() {
   const prepareOnly = process.argv.includes("--prepare-only");
   // A candidate never replaces dist used by the running phone/UI server.
   // Neither build mode contacts the retired external Tutor Engine.
-  const out = prepareOnly ? "generated-artifacts/talkhint-release-candidate/dist" : "dist";
+  const reviewOutput = process.argv.find(arg => arg.startsWith("--review-output="))?.slice("--review-output=".length);
+  if (reviewOutput && (!prepareOnly || !/^generated-artifacts\/[a-zA-Z0-9/_.-]+$/.test(reviewOutput) ||
+      reviewOutput.split("/").some(part => part === ".." || part === ".")))
+    throw new Error("Review output must be a new generated-artifacts directory in prepare-only mode");
+  const out = reviewOutput ?? (prepareOnly ? "generated-artifacts/talkhint-release-candidate/dist" : "dist");
   if (prepareOnly) console.log("OFFLINE PREPARATION ONLY: no app boot, live Tutor probe or publication.");
   else console.log("External Tutor Engine disconnected; building TalkHint locally.");
 
-  await rm(out, { recursive: true, force: true });
+  if (reviewOutput) {
+    try {
+      await access(out);
+      throw new Error("Refuse replacing an existing review build");
+    } catch (error: any) { if (error.code !== "ENOENT") throw error; }
+  } else await rm(out, { recursive: true, force: true });
 
   console.log("building client...");
   await viteBuild({ build: { outDir: resolve(out, "public") } });
@@ -81,6 +90,15 @@ async function buildAll() {
   });
 
   const bundle = await readFile(join(out, "index.js"), "utf8");
+  // Compile only. Never execute/import data or register an approved grant here.
+  await esbuild({
+    entryPoints: ["server/companyData/v3/importWorker.ts"],
+    platform: "node", bundle: true, format: "esm",
+    outfile: join(out, "company-import-worker.js"),
+    define: { "process.env.NODE_ENV": '"production"' },
+    external: externals, minify: true, logLevel: "info",
+    banner: { js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url);` },
+  });
   const mcp = verifyMcpBuild(compiled.metafile!, bundle);
   await writeFile(join(out, "mcp-build-receipt.json"), JSON.stringify({
     ...mcp, preparedAt: new Date().toISOString(), prepareOnly,

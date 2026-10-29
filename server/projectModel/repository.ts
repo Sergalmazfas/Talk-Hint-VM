@@ -5,6 +5,7 @@ import { applyHypothesisCommand, readHypothesis } from "./hypotheses";
 import { initialModel } from "./seed";
 import { archiveModel, ensureModelHistory, unpackModel } from "./history";
 import { activeCompanyRepository, hasNormalizedCompanySource } from "../companyData/active";
+import { blocksLegacySeed } from "../companyData/v3/importApproval";
 
 export interface ModelRepository {
   read(owner: string, hypothesis?: string): Promise<ProjectModelState>;
@@ -31,6 +32,8 @@ export class PgModelRepository implements ModelRepository {
     return pool;
   }
   private async ensure(pool: Pool, owner: string) {
+    if (blocksLegacySeed(owner, process.env.NODE_ENV === "production" ? "production" : "development"))
+      throw new ModelError(423, "Книга ожидает согласованного переноса new-country. Создание начальной модели отключено.");
     // Same transaction-scoped lock as candidate import. Serializes only this
     // owner's bootstrap, not Hint workers or other owners' ordinary writes.
     await pool.query(`WITH owner_lock AS MATERIALIZED (

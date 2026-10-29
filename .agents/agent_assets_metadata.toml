@@ -1853,3 +1853,17 @@ mtime_ms = 1793246155320
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4c7f5ef7-378d-4ab4-9b33-5eafc264a26a/0d512090-4bf5-4e84-8add-f7c41a2bd6dc"
 storage_version_token = "1793246168916336"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "XeZJz593WWVkROuMG0uAh"
+uri = "file://generated-artifacts/data-platform-publish2/TalkHint_Publish2_review_full.zip"
+type = "unspecified"
+title = "TalkHint — полный пакет для сверки Publish №2"
+description = "ZIP 20.9 МиБ. Полные 129 952 записи, 84 документа, 242 архива, код, diff и проверки. Payload сжат ZIP-LZMA без потерь; инструкция в README. Импорт и Publish не выполнялись."
+logical_id = "195e7978-f421-4e69-b3fb-7d16fce9b509"
+content_hash = "sha256:dfc2a02c231fa6658e7b32ccaab7989d067ca4814f69d8228d3491f969ab7be6"
+size = 21942471
+mtime_ms = 1793248713324
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/195e7978-f421-4e69-b3fb-7d16fce9b509/2fc6ace7-e151-4506-a2bd-a139dec64e37"
+storage_version_token = "1793248735048488"
+content_type = "application/octet-stream"

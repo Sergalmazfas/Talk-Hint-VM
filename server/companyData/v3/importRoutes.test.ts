@@ -1,100 +1,122 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import request from "supertest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../benchmark/adminGate", () => ({
-  requireBenchmarkAdmin: (req: any, res: any, next: any) =>
-    req.get("x-admin") === "yes" ? next() : res.sendStatus(403),
+  requireBenchmarkAdmin: (req: any, res: any, next: any) => req.get("x-admin") === "yes" ? next() : res.sendStatus(403),
 }));
 import { importLines, registerCompanyImport } from "./importRoutes";
+import { reviewedAccountBinding as binding, type ImportApproval } from "./importApproval";
 import { semanticHash, textHash } from "../valueTree";
 import { ddlV3 } from "./schema";
-import type { ImportApproval } from "./importApproval";
+import type { ReviewedPackage } from "./reviewedPackage";
 
-const manifest = { schemaVersion: 3, schemaDigest: textHash(ddlV3()), sourceOwner: "dev-owner",
-  sourceEnvironment: "development", sourceWorkspace: "accepted-shadow-B", revision: 912,
+const manifest = { schemaVersion: 3 as const, schemaDigest: textHash(ddlV3()), sourceOwner: binding.sourceOwner,
+  sourceEnvironment: "development", sourceWorkspace: "fresh-encoder-not-B2", revision: 912,
+  sourceBWorkspace: binding.sourceBWorkspace, scope: "new-country" as const,
   rootHash: "a".repeat(64), semanticHash: "b".repeat(64), recordCount: 1, recordsDigest: "c".repeat(64) };
-const approval: ImportApproval = { confirmed: true, importApproved: true, targetOwner: "owner",
-  targetEnvironment: "development", sourceOwner: "dev-owner", sourceEnvironment: "development",
-  sourceWorkspace: manifest.sourceWorkspace, revision: 912, manifestHash: semanticHash(manifest) };
+const pin: ReviewedPackage = {manifest, manifestHash: semanticHash(manifest),
+  objectName: "private/fixed.ndjson", fileSha256: "f".repeat(64), ndjsonBytes: 1000,
+  maximumLineBytes: 1000, documentCount: 84, archiveCount: 242};
+const approval: ImportApproval = {confirmed: true, importApproved: true, targetOwner: binding.targetOwner,
+  targetEnvironment: "production", sourceOwner: binding.sourceOwner, sourceEnvironment: "development",
+  sourceWorkspace: manifest.sourceWorkspace, revision: 912, manifestHash: pin.manifestHash};
 const csrfToken = "d".repeat(64), base = "/api/admin/company-import";
-describe("candidate import HTTP security (synthetic only)", () => {
+describe("one-button import HTTP security (synthetic services only)", () => {
   let app: express.Express;
-  const grant = vi.fn(), consume = vi.fn(), getPool = vi.fn();
-  function setup(policy: ImportApproval | null = approval, env: "development" | "production" = "development") {
+  const grant = vi.fn(), consume = vi.fn(), status = vi.fn(), getPool = vi.fn(), openRecords = vi.fn();
+  function setup(policy: ImportApproval | null = approval, env: "development" | "production" = "production",
+    packagePin: ReviewedPackage | null = pin) {
     app = express(); app.use(express.json());
     app.use((req: any, _res, next) => {
-      req.user = req.get("x-user") ? { id: req.get("x-user") } : undefined;
+      req.user = req.get("x-user") ? {id: req.get("x-user")} : undefined;
       req.isAuthenticated = () => !!req.user && req.get("x-session") === "yes";
-      req.session = req.get("x-session") === "yes" ? { companyImportCsrf: csrfToken } : undefined;
+      req.session = req.get("x-session") === "yes" ? {companyImportCsrf: csrfToken} : undefined;
       next();
     });
-    registerCompanyImport(app, getPool, { approval: policy, environment: env,
-      service: { grant, consume } as any });
+    registerCompanyImport(app, getPool, {approval: policy, environment: env, package: packagePin,
+      service: {grant, consume, status} as any, openRecords});
   }
-  const post = (path: string, user = "owner", csrf = csrfToken, session = true) =>
-    request(app).post(`${base}/${path}`).set("x-admin", "yes").set("x-user", user)
-      .set("x-session", session ? "yes" : "no").set("x-company-csrf", csrf)
-      .set("Origin", "http://127.0.0.1").set("Host", "127.0.0.1");
+  const headers = (r: any, owner = binding.targetOwner, session = true) =>
+    r.set("x-admin", "yes").set("x-user", owner).set("x-session", session ? "yes" : "no")
+      .set("x-company-csrf", csrfToken).set("Origin", "http://127.0.0.1").set("Host", "127.0.0.1");
+  const post = (owner = binding.targetOwner) => headers(request(app).post(`${base}/start`), owner);
+  const body = () => ({confirm: true, manifestHash: pin.manifestHash});
   beforeEach(() => {
-    vi.clearAllMocks(); setup();
+    vi.resetAllMocks(); setup();
+    status.mockResolvedValue({state: "empty", activated: false});
     grant.mockResolvedValue("e".repeat(64));
+    openRecords.mockImplementation(async function* () { yield {table: "company_v3_frames", row: {}}; });
     consume.mockImplementation(async (_auth, _token, _m, records, active) => {
-      const rows = []; for await (const row of records) rows.push(row);
-      return { imported: rows.length, activated: active };
+      for await (const _ of records) { /* drain private stream */ }
+      status.mockResolvedValue({state: "imported_shadow", activated: false});
+      return {activated: active};
     });
   });
-  it("defaults to locked; Publish alone never authorizes an import", async () => {
+  it("Publish remains locked even with a confirmed pair and pinned source", async () => {
     setup(null);
-    expect((await post("grant").send({ manifest })).status).toBe(423);
+    const r = await headers(request(app).get(`${base}/status`));
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({bindingConfirmed: true, scope: "new-country",
+      importApproved: false, readiness: "awaiting_owner_approval", activated: false});
+    expect((await post().send(body())).status).toBe(423);
+    expect(status).not.toHaveBeenCalled(); expect(getPool).not.toHaveBeenCalled();
+    expect(grant).not.toHaveBeenCalled(); expect(openRecords).not.toHaveBeenCalled();
+  });
+  it("rejects non-admin, wrong owner, bearer-only session and wrong environment", async () => {
+    expect((await request(app).post(`${base}/start`).send(body())).status).toBe(403);
+    expect((await post("other").send(body())).status).toBe(403);
+    expect((await headers(request(app).post(`${base}/start`), binding.targetOwner, false)
+      .set("Authorization", "Bearer ignored").send(body())).status).toBe(401);
+    setup(approval, "development");
+    expect((await post().send(body())).status).toBe(403);
     expect(grant).not.toHaveBeenCalled();
   });
-  it("rejects non-admin, wrong session owner, bearer-only and wrong environment", async () => {
-    expect((await request(app).post(`${base}/grant`).send({ manifest })).status).toBe(403);
-    expect((await post("grant", "other").send({ manifest })).status).toBe(403);
-    expect((await post("grant", "owner", csrfToken, false).set("Authorization", "Bearer ignored")
-      .send({ manifest })).status).toBe(401);
-    setup(approval, "production");
-    expect((await post("grant").send({ manifest })).status).toBe(403);
-  });
-  it("requires both same-origin and session CSRF; rejects spoofed owner and activation", async () => {
-    expect((await post("grant", "owner", "bad").send({ manifest })).status).toBe(403);
-    expect((await post("grant").set("Origin", "https://evil.test").send({ manifest })).status).toBe(403);
-    expect((await post("grant").send({ manifest, owner: "owner" })).status).toBe(409);
-    expect((await post("grant").send({ manifest, activate: true })).status).toBe(409);
+  it("requires CSRF, same-origin and literal confirmation of the exact pinned manifest", async () => {
+    expect((await post().set("x-company-csrf", "bad").send(body())).status).toBe(403);
+    expect((await post().set("Origin", "https://evil.test").send(body())).status).toBe(403);
+    for (const patch of [{confirm: false}, {manifestHash: "0".repeat(64)},
+      {owner: "other"}, {activate: true}, {objectName: "other.ndjson"}, {url: "https://evil.test"}])
+      expect((await post().send({...body(), ...patch})).status).toBe(409);
     expect(grant).not.toHaveBeenCalled();
   });
-  it("binds the exact fresh manifest, not a B2 test, changed revision or swapped package", async () => {
-    for (const patch of [{ revision: 913 }, { sourceWorkspace: "B2-test" },
-      { sourceEnvironment: "production" }, { semanticHash: "f".repeat(64) },
-      { sourceOwner: "other" }]) {
-      expect((await post("grant").send({ manifest: { ...manifest, ...patch } })).status).toBe(409);
-    }
-    expect(grant).not.toHaveBeenCalled();
+  it("has no upload/grant/consume HTTP routes", async () => {
+    for (const path of ["grant", "consume", "activate"])
+      expect((await headers(request(app).post(`${base}/${path}`)).send({manifest})).status).toBe(404);
+    expect(openRecords).not.toHaveBeenCalled();
   });
-  it("grants at most ten minutes for the authenticated target; never body fields", async () => {
-    expect((await post("grant").send({ manifest })).status).toBe(201);
-    expect(grant).toHaveBeenCalledWith({ ownerKey: "owner", isOwner: true, csrfVerified: true },
-      manifest, "owner", 600_000);
-    expect(getPool).not.toHaveBeenCalled();
+  it("refuses absent or unreviewed packages without DB/storage access", async () => {
+    setup(approval, "production", {...pin, manifest: {...manifest, revision: 913}});
+    expect((await post().send(body())).status).toBe(423);
+    setup(approval, "production", null);
+    expect((await post().send(body())).status).toBe(423);
+    expect(getPool).not.toHaveBeenCalled(); expect(openRecords).not.toHaveBeenCalled();
   });
-  it("streams records and hardcodes no activation, without full-buffer parsing", async () => {
-    const body = JSON.stringify({ manifest }) + "\n" +
-      JSON.stringify({ table: "company_v3_frames", row: { workspace_id: manifest.sourceWorkspace } }) + "\n";
-    const r = await post("consume").set("Content-Type", "application/x-ndjson")
-      .set("x-company-import-grant", "e".repeat(64)).send(body);
-    expect(r.status).toBe(200); expect(r.body).toEqual({ imported: 1, activated: false });
-    expect(consume).toHaveBeenCalledTimes(1);
+  it("one confirmation obtains a private ten-minute grant and consumes only server-fetched records", async () => {
+    const r = await post().send(body());
+    expect(r.status).toBe(202);
+    expect(r.body).toEqual({state: "running", activated: false});
+    expect(JSON.stringify(r.body)).not.toContain("e".repeat(64));
+    expect(grant).toHaveBeenCalledWith({ownerKey: binding.targetOwner, isOwner: true, csrfVerified: true},
+      manifest, binding.targetOwner, 600_000);
+    expect(openRecords).toHaveBeenCalledWith(pin);
+    expect(consume).toHaveBeenCalledWith(expect.anything(), "e".repeat(64), manifest, expect.anything(), false);
+    expect((await headers(request(app).get(`${base}/status`))).body.readiness).toBe("imported_shadow");
+    expect((await post().send(body())).status).toBe(409); // no replay
   });
-  it("does not expose storage errors, credentials or request contents", async () => {
-    grant.mockRejectedValueOnce(new Error("PRIVATE_TOKEN_SQL"));
-    const r = await post("grant").send({ manifest });
-    expect(r.status).toBe(409); expect(JSON.stringify(r.body)).not.toContain("PRIVATE_TOKEN");
+  it("does not retry an uncertain durable result, disclose errors or open storage", async () => {
+    status.mockResolvedValue({state: "uncertain", activated: false});
+    expect((await post().send(body())).status).toBe(409);
+    expect(grant).not.toHaveBeenCalled(); expect(openRecords).not.toHaveBeenCalled();
+    expect((await headers(request(app).get(`${base}/status`))).body.readiness).toBe("uncertain");
+    status.mockRejectedValue(new Error("PRIVATE_SQL_TOKEN"));
+    const r = await headers(request(app).get(`${base}/status`));
+    expect(r.status).toBe(409); expect(JSON.stringify(r.body)).not.toContain("PRIVATE_SQL_TOKEN");
   });
-  it("parser preserves split UTF8, rejects malformed/truncated and oversized lines", async () => {
+  it("parser preserves split UTF8, rejects malformed and oversized lines", async () => {
     async function* chunks(b: Buffer) { for (let i = 0; i < b.length; i++) yield b.subarray(i, i + 1); }
     const rows = [];
     for await (const row of importLines(chunks(Buffer.from('{"text":"😀"}\n')))) rows.push(row);
-    expect(rows).toEqual([{ text: "😀" }]);
+    expect(rows).toEqual([{text: "😀"}]);
     async function drain(input: AsyncIterable<Buffer>) { for await (const _ of importLines(input)) { /* consume */ } }
     await expect(drain(chunks(Buffer.from('{"bad":')))).rejects.toThrow();
     async function* big() { yield Buffer.alloc(20 * 1024 * 1024 + 1, 32); }

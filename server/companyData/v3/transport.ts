@@ -19,6 +19,8 @@ export interface TransferManifest {
   schemaVersion: 3; schemaDigest: string; sourceOwner: string; sourceEnvironment: string;
   sourceWorkspace: string; revision: number; rootHash: string; semanticHash: string;
   recordCount: number; recordsDigest: string;
+  sourceBWorkspace?: string;
+  scope?: "new-country";
 }
 export const transferDigest = (records: TransferRecord[]) => {
   const h = createHash("sha256");
@@ -38,6 +40,26 @@ export class OwnerImportService {
     authenticate(auth);
     if (this.environment === "production" && !this.allowProductionImport)
       throw new Error("Production import not enabled; owner release/binding approval required");
+  }
+  /** Read-only reconciliation. Never create a grant, retry, or activate. */
+  async status(auth: OwnerAuthentication, manifest: TransferManifest) {
+    if (!auth.isOwner || !auth.ownerKey) throw new Error("Owner session required");
+    const w = await this.pool.query(`SELECT generation,root_hash,current_revision
+      FROM company_v3_workspaces WHERE owner_key=$1 AND environment=$2`,
+    [auth.ownerKey, this.environment]);
+    const grants = await this.pool.query(`SELECT consumed_at,expires_at>now() AS fresh
+      FROM company_v3_import_grants WHERE target_owner=$1 AND target_environment=$2
+        AND package_hash=$3 ORDER BY expires_at DESC LIMIT 1`,
+    [auth.ownerKey, this.environment, semanticHash(manifest)]);
+    if (w.rowCount === 1 && w.rows[0].generation === "shadow" &&
+        w.rows[0].root_hash === manifest.rootHash &&
+        Number(w.rows[0].current_revision) === manifest.revision && grants.rows[0]?.consumed_at)
+      return { state: "imported_shadow" as const, activated: false };
+    const occupied = await this.pool.query(`SELECT 1 FROM talkhint_project_models WHERE owner_key=$1
+      UNION ALL SELECT 1 FROM company_workspaces WHERE owner_key=$1 AND environment=$2`,
+    [auth.ownerKey, this.environment]);
+    return { state: !w.rowCount && !grants.rowCount && !occupied.rowCount ? "empty" as const : "uncertain" as const,
+      activated: false };
   }
   async grant(auth: OwnerAuthentication, manifest: TransferManifest, targetOwner: string, expiresInMs = 600_000) {
     this.guard(auth);
