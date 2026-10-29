@@ -2077,3 +2077,17 @@ mtime_ms = 1793305743117
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7df44b64-ba9e-44b8-9510-f20c3ec9b700/275fc6ea-dd0d-441c-84d2-4a1fb154f9f2"
 storage_version_token = "1793305751487082"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "muHn3PEUMOpIwGx-VqFBl"
+uri = "file://generated-artifacts/cutover-failure-readonly/TalkHint_Cutover_failure_readonly_Claude.zip"
+type = "unspecified"
+title = "Неудачное включение — факты и безопасный план"
+description = "Для Claude: точная ошибка операции, неизменность shadow/r912 и 84 документов, логи, пределы диагностики и предложение возврата к новой попытке. Production не менялся."
+logical_id = "6be1f103-c863-4dc2-b276-624241086baa"
+content_hash = "sha256:f4f8f8c979dc88097e1d0c8edba3d0f1e16a0e9ec1b19e33ee00f8493bb3387b"
+size = 18961
+mtime_ms = 1793307232742
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6be1f103-c863-4dc2-b276-624241086baa/4d4c6260-1592-4f40-a89e-885b273d1977"
+storage_version_token = "1793307238113014"
+content_type = "application/octet-stream"
