@@ -1909,3 +1909,17 @@ mtime_ms = 1793255268438
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b0f9c340-3098-4d01-a392-475b343aeee4/9697c483-60b6-498b-9b2a-e19f957db323"
 storage_version_token = "1793255275077129"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "BCLLTWPrlf-fnMHRTARkF"
+uri = "file://generated-artifacts/postpublish2-check/TalkHint_PostPublish2_readonly_Claude_review.zip"
+type = "unspecified"
+title = "После Publish №2 — read-only отчёт для Claude"
+description = "Build/конфигурация, восстановление worker, 8 jobs и 8 подтверждённых отправок, 85 пустых таблиц, схема без новых отличий. Неизмеренная память, закрытый live status и неподтверждённое дневное письмо отмечены отдельно. Без импорта и изменений production."
+logical_id = "87b2670f-35c0-40dd-a736-356e3685c0f4"
+content_hash = "sha256:cfe95effc1747db6d0a43d9173bd4acb3560a1c9b91ae63828264982fbf9f275"
+size = 32415
+mtime_ms = 1793256809518
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/87b2670f-35c0-40dd-a736-356e3685c0f4/bb51ae0e-1251-4a6e-b7bd-b0d662c04b8d"
+storage_version_token = "1793256830715478"
+content_type = "application/octet-stream"
