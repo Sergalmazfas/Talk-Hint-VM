@@ -83,4 +83,25 @@ describe("cutover browser boundaries", () => {
     for (const p of ["resume", "upload", "seed"])
       expect((await headers(request(app).post(base + "/" + p)).send(body())).status).toBe(404);
   });
+  it("reconciliation is an explicit owner POST with its own grant, never a GET or automatic retry", async () => {
+    const reconcile = { ...body(), action: "reconcile" };
+    expect((await headers(request(app).get(base + "/execute"))).status).toBe(405);
+    expect((await headers(request(app).post(base + "/grant")).set("x-session", "no").send(reconcile)).status).toBe(401);
+    expect((await headers(request(app).post(base + "/grant")).set("x-user", "other").send(reconcile)).status).toBe(403);
+    expect((await headers(request(app).post(base + "/grant")).set("Origin", "https://evil.test").send(reconcile)).status).toBe(403);
+    expect((await headers(request(app).post(base + "/grant")).set("x-company-csrf", "bad").send(reconcile)).status).toBe(403);
+    expect((await headers(request(app).post(base + "/grant")).set("Authorization", "Bearer example").send(reconcile)).status).toBe(403);
+    expect((await headers(request(app).post(base + "/grant")).send(reconcile)).status).toBe(200);
+    expect(service.enqueue).not.toHaveBeenCalled();
+    expect((await headers(request(app).post(base + "/execute")).send({ ...reconcile, grant: "e".repeat(64) })).status).toBe(202);
+    expect(service.enqueue).toHaveBeenCalledWith(cutoverCandidate.owner, "reconcile", source, "e".repeat(64));
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+  it("a launcher error is handed to durable diagnostics, without automatic retry", async () => {
+    const error = new Error("CUTOVER_MEMORY_RESERVE_UNAVAILABLE");
+    launch.mockRejectedValue(error);
+    expect((await headers(request(app).post(base + "/execute")).send({ ...body(), grant: "e".repeat(64) })).status).toBe(202);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(service.fail).toHaveBeenCalledWith("op", error); expect(launch).toHaveBeenCalledTimes(1);
+  });
 });

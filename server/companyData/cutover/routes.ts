@@ -56,8 +56,8 @@ export function registerCompanyCutover(app: Express, getPool: () => Promise<Pool
         throw new ModelError(400, "Нужно одноразовое разрешение.");
       const operation = await service.enqueue(owner, action, body.expected, body.grant);
       // Child gets only durable operation ID. It must independently claim it once.
-      void (options.launch ? options.launch(operation) : startCutoverWorker(operation))
-        .catch(() => service.fail(operation).catch(() => undefined));
+      void (options.launch ? options.launch(operation) : startCutoverWorker(operation, d => service.diagnostic(operation, d)))
+        .catch(error => service.fail(operation, error).catch(() => undefined));
       return res.status(202).json({ operation, state: "queued" });
     } catch (e) {
       const status = e instanceof ModelError ? e.status : 409;

@@ -1,8 +1,8 @@
 import { reviewedAccountBinding } from "../v3/importApproval";
 import { reviewedPackage } from "../v3/reviewedPackage";
 
-export type CutoverAction = "activate" | "probe" | "open_writes" | "rollback" | "reactivate";
-export const cutoverActions: CutoverAction[] = ["activate", "probe", "open_writes", "rollback", "reactivate"];
+export type CutoverAction = "activate" | "probe" | "open_writes" | "rollback" | "reactivate" | "reconcile";
+export const cutoverActions: CutoverAction[] = ["activate", "probe", "open_writes", "rollback", "reactivate", "reconcile"];
 export interface CutoverPolicy {
   owner: string; environment: "development" | "production"; workspace: string;
   revision: number; rootHash: string; semanticHash: string; manifestHash: string;

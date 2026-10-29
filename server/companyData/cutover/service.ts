@@ -7,12 +7,14 @@ import { archiveModel, unpackModel } from "../../projectModel/history";
 import { ModelError } from "../../projectModel/modelError";
 import { cutoverControl, cutoverLock, technicalCompanyWrite } from "./guard";
 import type { CutoverAction, CutoverPolicy } from "./policy";
+import { assertNoOtherCutoverProcess, cleanDiagnostic, emitDiagnostic, exceptionCode,
+  workerLock, type CutoverDiagnostic } from "./diagnostics";
 
 export type SourcePin = { workspace: string; revision: number; rootHash: string; manifestHash: string };
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 const allowed: Record<CutoverAction, string[]> = {
   activate: ["shadow"], probe: ["verifying"], open_writes: ["verifying"],
-  rollback: ["verifying", "active"], reactivate: ["checkpoint"],
+  rollback: ["verifying", "active"], reactivate: ["checkpoint"], reconcile: ["shadow"],
 };
 /** Sole cutover controller; ordinary readers never create its rows or grants. */
 export class CompanyCutover {
@@ -93,15 +95,18 @@ export class CompanyCutover {
           technical_token_hash=NULL,current_operation_id=NULL WHERE owner_key=$1 AND environment=$2`,
         [owner, this.environment]);
       }
-      const last = (await db.query(`SELECT state FROM company_cutover_operations
+      const last = (await db.query(`SELECT operation_id,action,state FROM company_cutover_operations
         WHERE owner_key=$1 AND environment=$2 ORDER BY created_at DESC LIMIT 1`, [owner, this.environment])).rows[0];
-      if (last?.state === "failed" && action !== "rollback" && action !== "reactivate")
+      if (action === "reconcile" && (last?.state !== "failed" || !["activate", "reconcile"].includes(last.action)))
+        throw new ModelError(423, "Сверка доступна только после неуспешного включения.");
+      if (last?.state === "failed" && !["rollback", "reactivate", "reconcile"].includes(action))
         throw new ModelError(423, "Неуспешная операция требует сверки; повтор запрещён.");
       const token = randomBytes(32).toString("hex");
       await db.query(`INSERT INTO company_cutover_grants
         (token_hash,owner_key,environment,action,expected,expires_at)
         VALUES($1,$2,$3,$4,$5,now()+interval '5 minutes')`,
-      [digest(token), owner, this.environment, action, expected]);
+      [digest(token), owner, this.environment, action,
+        action === "reconcile" ? { ...expected, reconciliationOf: last.operation_id } : expected]);
       await db.query("COMMIT");
       return token;
     } catch (e) { await db.query("ROLLBACK"); throw e; } finally { db.release(); }
@@ -119,27 +124,42 @@ export class CompanyCutover {
       const pending = await db.query(`SELECT 1 FROM company_cutover_operations WHERE owner_key=$1
         AND environment=$2 AND state IN ('queued','running')`, [owner, this.environment]);
       if (pending.rowCount) throw new ModelError(409, "Операция уже выполняется.");
-      const last = (await db.query(`SELECT state FROM company_cutover_operations
+      const last = (await db.query(`SELECT operation_id,action,state FROM company_cutover_operations
         WHERE owner_key=$1 AND environment=$2 ORDER BY created_at DESC LIMIT 1`, [owner, this.environment])).rows[0];
-      if (last?.state === "failed" && action !== "rollback" && action !== "reactivate")
+      if (action === "reconcile" && (last?.state !== "failed" || !["activate", "reconcile"].includes(last.action)))
+        throw new ModelError(423, "Неуспешная операция для сверки изменилась.");
+      if (last?.state === "failed" && !["rollback", "reactivate", "reconcile"].includes(action))
         throw new ModelError(423, "Неуспешная операция требует сверки; старое разрешение не возобновляет её.");
       const used = await db.query(`UPDATE company_cutover_grants SET consumed_at=now()
         WHERE token_hash=$1 AND owner_key=$2 AND environment=$3 AND action=$4 AND expected=$5::jsonb
           AND consumed_at IS NULL AND expires_at>now() RETURNING token_hash`,
-      [digest(token), owner, this.environment, action, JSON.stringify(expected)]);
+      [digest(token), owner, this.environment, action, JSON.stringify(
+        action === "reconcile" ? { ...expected, reconciliationOf: last.operation_id } : expected)]);
       if (used.rowCount !== 1) throw new ModelError(409, "Разрешение истекло или уже использовано.");
       const operation = randomUUID();
       await db.query(`INSERT INTO company_cutover_operations
-        (operation_id,owner_key,environment,action,expected,state) VALUES($1,$2,$3,$4,$5,'queued')`,
-      [operation, owner, this.environment, action, expected]);
+        (operation_id,owner_key,environment,action,expected,state,result) VALUES($1,$2,$3,$4,$5,'queued',$6)`,
+      [operation, owner, this.environment, action, expected,
+        action === "reconcile" ? { reconciliationOf: last.operation_id } : {}]);
       await db.query(`UPDATE company_cutover_controls SET writes_open=false,current_operation_id=$3,updated_at=now()
         WHERE owner_key=$1 AND environment=$2`, [owner, this.environment, operation]);
       await db.query("COMMIT");
       return operation;
     } catch (e) { await db.query("ROLLBACK"); throw e; } finally { db.release(); }
   }
-  async fail(operation: string) {
-    // Error details stay in private diagnostics, never send SQL/contents to the browser.
+  async diagnostic(operation: string, value: CutoverDiagnostic) {
+    const d = cleanDiagnostic({ ...value, operation });
+    if (!d) return;
+    emitDiagnostic(d);
+    await this.pool.query(`UPDATE company_cutover_operations
+      SET result=coalesce(result,'{}'::jsonb) || jsonb_build_object('lastStage',$4::text,
+        'diagnostics',coalesce(result->'diagnostics','[]'::jsonb) || $5::jsonb)
+      WHERE operation_id=$1 AND owner_key=$2 AND environment=$3
+        AND jsonb_array_length(coalesce(result->'diagnostics','[]'::jsonb))<64`,
+    [operation, this.candidate.owner, this.environment, d.stage, JSON.stringify([d])]);
+  }
+  async fail(operation: string, error?: unknown) {
+    await this.diagnostic(operation, { stage: "failure", exceptionCode: exceptionCode(error) });
     await this.pool.query(`UPDATE company_cutover_operations SET state='failed',
       error_code='CUTOVER_RECONCILE_REQUIRED',updated_at=now()
       WHERE operation_id=$1 AND owner_key=$2 AND environment=$3 AND state IN ('queued','running')`,
@@ -150,20 +170,91 @@ export class CompanyCutover {
   }
   async perform(owner: string, operation: string) {
     this.authorize(owner);
+    const lease = await this.pool.connect();
+    let locked = false;
+    try {
+      locked = !!(await lease.query("SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked",
+        [workerLock(owner, this.environment)])).rows[0]?.locked;
+      if (!locked) throw new Error("CUTOVER_WORKER_LEASE_BUSY");
+      await this.diagnostic(operation, { stage: "worker_lease_acquired" });
     const claimed = await this.pool.query(`UPDATE company_cutover_operations SET state='running',updated_at=now()
       WHERE operation_id=$1 AND owner_key=$2 AND environment=$3 AND state='queued' RETURNING *`,
     [operation, owner, this.environment]);
     if (claimed.rowCount !== 1) throw new ModelError(409, "Повтор выполнения запрещён.");
     const op = claimed.rows[0], start = performance.now();
     try {
-      const result = op.action === "probe" ? await this.probe(owner, op.expected, operation) :
+      await this.diagnostic(operation, { stage: "operation_claimed" });
+      const result = op.action === "reconcile" ? await this.reconcile(owner, op.expected, operation, op.result?.reconciliationOf) :
+        op.action === "probe" ? await this.probe(owner, op.expected, operation) :
         await this.switchSource(owner, op.action, op.expected, operation);
-      await this.pool.query(`UPDATE company_cutover_operations SET state='succeeded',result=$2,updated_at=now()
+      await this.pool.query(`UPDATE company_cutover_operations SET state='succeeded',
+        result=coalesce(result,'{}'::jsonb) || $2::jsonb,updated_at=now()
         WHERE operation_id=$1 AND state='running'`, [operation, { ...result, ms: performance.now() - start }]);
       return result;
-    } catch (e) { await this.fail(operation); throw e; }
+    } catch (e) { await this.fail(operation, e); throw e; }
+    } finally {
+      try {
+        if (locked) await lease.query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [workerLock(owner, this.environment)]);
+      } finally { lease.release(); }
+    }
   }
-  private async root(db: PoolClient, w: any) {
+  private async reconcile(owner: string, expected: SourcePin, operation: string, failedOperation: string) {
+    await assertNoOtherCutoverProcess();
+    await this.diagnostic(operation, { stage: "process_scan_clear" });
+    const db = await this.pool.connect();
+    try {
+      await db.query("BEGIN");
+      // Fences legacy workers too: an old worker already in switchSource holds
+      // this lock; one not yet inside sees the replaced current_operation_id.
+      const lock = await db.query("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
+        [cutoverLock(owner, this.environment)]);
+      if (!lock.rows[0]?.locked) throw new Error("CUTOVER_WRITE_LEASE_BUSY");
+      const w = await this.exact(db, owner, expected);
+      const c = await cutoverControl(db, owner, this.environment);
+      const failure = (await db.query(`SELECT action,state FROM company_cutover_operations
+        WHERE operation_id=$1 AND owner_key=$2 AND environment=$3`, [failedOperation, owner, this.environment])).rows[0];
+      if (!failure || failure.state !== "failed" || !["activate", "reconcile"].includes(failure.action) ||
+          !c || c.phase !== "shadow" || c.writes_open || c.current_operation_id !== operation ||
+          c.workspace_id !== expected.workspace || c.manifest_hash !== expected.manifestHash ||
+          w.generation !== "shadow" || Number(w.current_revision) !== this.candidate.revision ||
+          w.root_hash !== this.candidate.rootHash)
+        throw new Error("CUTOVER_RECONCILE_STATE_CHANGED");
+      const busy = await db.query(`SELECT 1 FROM company_cutover_operations WHERE owner_key=$1
+        AND environment=$2 AND operation_id<>$3 AND state IN ('queued','running')`, [owner, this.environment, operation]);
+      if (busy.rowCount) throw new Error("CUTOVER_OTHER_OPERATION_BUSY");
+      await this.diagnostic(operation, { stage: "reconcile_pin_verified" });
+      const root = await this.root(db, w, async (root: any, store: any) => {
+        const { decode } = await import("../v3/codec");
+        const heads = await db.query(`SELECT hypothesis_id,document_id,frame_hash FROM company_v3_document_heads
+          WHERE workspace_id=$1 AND valid_from<=$2 ORDER BY hypothesis_id,document_id`, [w.workspace_id, this.candidate.revision]);
+        const hypotheses = [{ id: "original", model: root }, ...(root.alternatives ?? [])];
+        const hashes: string[][] = [];
+        for (const h of heads.rows) {
+          const document = await decode(h.frame_hash, store);
+          const expectedDocument = hypotheses.find((v: any) => v.id === h.hypothesis_id)?.model?.documents
+            ?.find((d: any) => d.id === h.document_id);
+          if (!expectedDocument || semanticHash(document) !== semanticHash(expectedDocument))
+            throw new Error("CUTOVER_DOCUMENT_BASELINE_MISMATCH");
+          hashes.push([h.hypothesis_id, h.document_id, digest(document.text)]);
+        }
+        // Pin derived from the independently reviewed 84-document inventory.
+        // Read actual indexed frames, NOT every historical payload version.
+        if (hashes.length !== 84 || digest(JSON.stringify(hashes)) !==
+            "5bbd3bb0bdbc342080819936cdbb22d5d2b31f956ff749d98bab010a48e42288")
+          throw new Error("CUTOVER_DOCUMENT_BASELINE_MISMATCH");
+      });
+      if (semanticHash(root) !== this.candidate.semanticHash) throw new Error("CUTOVER_BASELINE_SHA_MISMATCH");
+      await this.diagnostic(operation, { stage: "reconcile_sha_verified" });
+      await this.diagnostic(operation, { stage: "reconcile_documents_verified" });
+      await db.query(`UPDATE company_cutover_controls SET writes_open=false,technical_token_hash=NULL,
+        updated_at=now() WHERE owner_key=$1 AND environment=$2 AND current_operation_id=$3`,
+      [owner, this.environment, operation]);
+      await db.query("COMMIT");
+      return { reconciliationOf: failedOperation, documents: 84, semanticHash: this.candidate.semanticHash,
+        sourceUnchanged: true, writesOpen: false, newActivationRequiresNewGrant: true };
+    } catch (e) { await db.query("ROLLBACK"); throw e; } finally { db.release(); }
+  }
+  private async root(db: PoolClient, w: any, verify?: (root: any, store: any) => Promise<void>) {
     // Run only in the bounded child worker, never the Hint/web event loop.
     const { SqlFrameStore } = await import("../v3/store");
     const { readBusinessContract } = await import("../v3/businessContract");
@@ -172,6 +263,7 @@ export class CompanyCutover {
     await store.preload();
     const root = await decode(w.root_hash, store);
     if (Number(root.revision) !== Number(w.current_revision)) throw new Error("Root revision mismatch");
+    if (verify) await verify(root, store);
     return root;
   }
   private async switchSource(owner: string, action: CutoverAction, expected: SourcePin, operation: string) {
@@ -180,6 +272,7 @@ export class CompanyCutover {
       await db.query("BEGIN");
       await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [cutoverLock(owner, this.environment)]);
       const w = await this.exact(db, owner, expected);
+      await this.diagnostic(operation, { stage: "pin_verified" });
       const c = await cutoverControl(db, owner, this.environment);
       if (!c || c.current_operation_id !== operation || !allowed[action]?.includes(c.phase))
         throw new ModelError(409, "Фаза или операция изменилась.");
@@ -195,11 +288,14 @@ export class CompanyCutover {
       } else {
         if (w.generation !== (action === "rollback" ? "normalized" : "shadow"))
           throw new ModelError(409, "Source generation mismatch");
+        await this.diagnostic(operation, { stage: "decode_started" });
         const root = await this.root(db, w);
+        await this.diagnostic(operation, { stage: "decode_completed" });
         const sha = semanticHash(root);
         if (action === "activate" && (expected.revision !== this.candidate.revision ||
             expected.rootHash !== this.candidate.rootHash || sha !== this.candidate.semanticHash))
           throw new ModelError(409, "Baseline SHA mismatch");
+        await this.diagnostic(operation, { stage: "sha_verified" });
         if (action === "rollback") {
           const cp = randomUUID(), archiveOwner = `company-checkpoint:${cp}`;
           // Separate archive parent: never overwrite imported technical archive or live legacy row.

@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-type CutoverAction = "activate" | "probe" | "open_writes" | "rollback" | "reactivate";
+type CutoverAction = "activate" | "probe" | "open_writes" | "rollback" | "reactivate" | "reconcile";
 type Phase = "shadow" | "verifying" | "active" | "checkpoint" | "unprepared";
 
 interface CutoverStatus {
@@ -67,6 +67,7 @@ const phaseCopy: Record<Phase, { label: string; detail: string; tone: string }> 
 };
 
 const actions: Array<{ action: CutoverAction; label: string; description: string }> = [
+  { action: "reconcile", label: "Сверено — разрешить повтор", description: "Проверить исходный теневой пакет и отсутствие другого процесса. Не включает базу: повторное включение потребует отдельного нажатия и нового разрешения." },
   { action: "activate", label: "Активировать источник", description: "Переключить подсказки на закреплённую книгу из теневого режима." },
   { action: "probe", label: "Проверить источник", description: "Выполнить проверочную операцию без открытия записи." },
   { action: "open_writes", label: "Открыть запись", description: "Разрешить запись только после успешной проверки источника." },
@@ -168,8 +169,10 @@ export default function CompanyCutover() {
 
   const actionAvailable = (action: CutoverAction) => {
     if (!status || !status.approved || (operationRunning && action !== "rollback") || submitting || !status.csrfToken) return false;
-    if (latestOperation?.state === "failed" && action !== "rollback" && action !== "reactivate") return false;
+    if (latestOperation?.state === "failed" && !["rollback", "reactivate", "reconcile"].includes(action)) return false;
     switch (action) {
+      case "reconcile": return status.phase === "shadow" && !status.writesOpen &&
+        latestOperation?.state === "failed" && ["activate", "reconcile"].includes(latestOperation.action);
       case "activate": return status.phase === "shadow";
       case "probe": return status.phase === "verifying";
       case "open_writes": return status.phase === "verifying" && probeSucceeded && !status.writesOpen;
