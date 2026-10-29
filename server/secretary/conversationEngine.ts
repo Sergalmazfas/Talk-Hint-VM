@@ -9,6 +9,7 @@ import { applyPersonality, outgoingFactsPrompt, type PersonalityBinding } from "
 import type { OutgoingContext } from "./personalities/outgoing";
 import type { LabPersonalitySummary } from "../../shared/secretaryLabPersonality";
 import { secretaryEndTool, parseSecretaryEndRequest, type SecretaryEndRequest } from "./callEnding";
+import { IVR_INSTRUCTIONS } from "./ivr";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -28,9 +29,24 @@ export const secretaryTestTools = [
     startsAt: { type: "string" }, note: { type: "string", maxLength: 1000 },
   }, ["startsAt", "note"]),
 ];
-// Telephone has no browser TEST/business tools. This only prepares the end of
-// the current conversation; Retell must finish playback and discard on barge-in.
-export const secretaryPhoneTools = [{ ...secretaryEndTool, type: "function" as const, strict: false }];
+// Telephone has no browser TEST/business tools. IVR tools navigate only the
+// existing call; the end tool still requires completed playback.
+export const secretaryPhoneTools = [
+  { ...secretaryEndTool, type: "function" as const, strict: false },
+  schema("press_digits", "Navigate the current complete, non-sensitive IVR menu only.", {
+    digits: { type: "string", pattern: "^[0-9*#]{1,5}$" },
+    heard_menu: { type: "string", maxLength: 4000 }, menu_complete: { type: "boolean" },
+  }, ["digits", "heard_menu", "menu_complete"]),
+  schema("request_menu_help", "Notify the owner of the current menu and wait without hanging up.", {}, []),
+  schema("confirm_menu_reached", "Record the observed live department answer and remember this menu route.", {
+    heard: { type: "string", maxLength: 4000 },
+  }, ["heard"]),
+];
+export type TelephoneTools = {
+  beforeTurn: (turns: SpokenTurn[]) => Promise<string>;
+  execute: (name: string, args: string, signal: AbortSignal) => Promise<any>;
+  blocksEnd: () => boolean;
+};
 /** The voice provider receives text; our OpenAI account does all model generation. No Retell LLM. */
 export async function* streamSecretaryResponse(request: EngineRequest,
   options: { reasoning?: "medium" | "low"; tools?: typeof secretaryTestTools } = {}): AsyncGenerator<EngineChunk> {
@@ -73,14 +89,19 @@ export class SecretaryConversationEngine {
   readonly instructions: string;
   private ledger = new Map<string, any>();
   constructor(owner: string, assignment: string, private stream: EngineStream = streamSecretaryResponse,
-    private telephone = false, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
+    private telephone = false, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = [],
+    private telephoneTools?: TelephoneTools) {
     this.report.personality = personality ? { id: personality.personalityId, name: personality.snapshot.name,
       version: personality.version, mode: personality.mode } : null;
     const characterName = process.env.NODE_ENV === "development" ? personality?.snapshot.name : undefined;
     if (telephone) {
       this.report.testOnly = false;
       this.report.context = { id: "authorized-telephone-assignment", permissions: ["conversation", "prepare_call_end"],
-        restrictions: ["No calendar writes", "No notifications", "No business action tools"] };
+        restrictions: ["No calendar writes", "No business action tools",
+          telephoneTools ? "Owner IVR-help notifications only" : "No notifications"] };
+      if (telephoneTools) this.report.context.permissions = [
+        "conversation", "prepare_call_end", "press_digits", "request_menu_help", "confirm_menu_reached",
+      ];
       this.instructions = applyPersonality(buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner), characterName) +
         outgoingFactsPrompt(facts) +
         "\nThis is the owner's authorized telephone call, not a test or a fictional business. " +
@@ -90,6 +111,7 @@ export class SecretaryConversationEngine {
         "Do not hang up for silence, hold music or transfer. Summarize the actual outcome and next step; do not invent agreement. " +
         "Only after the other party accepts the summary/next step or explicitly declines, you may use prepare_call_end. " +
         "After a successful preparation say exactly the supplied farewell, and nothing else. New speech cancels the prepared end. " +
+        (telephoneTools ? IVR_INSTRUCTIONS : "") +
         "Current time: " + new Date().toISOString(), personality);
       return;
     }
@@ -136,6 +158,11 @@ export class SecretaryConversationEngine {
   async respond(turns: SpokenTurn[], signal: AbortSignal, emit: (text: string) => void, reminder = false) {
     let preparedEnd: SecretaryEndRequest | undefined;
     const input: any[] = turns.map(t => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content }));
+    if (this.telephoneTools) {
+      const state = await this.telephoneTools.beforeTurn(turns);
+      if (signal.aborted) return;
+      input.push({ role: "developer", content: state });
+    }
     if (!this.telephone)
       input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
     if (reminder) input.push({ role: "developer", content: "Briefly check if the caller is still there; do not invent a request or end for silence." });
@@ -173,10 +200,14 @@ export class SecretaryConversationEngine {
         let result: any;
         try {
           if (this.telephone && tool.name === "prepare_call_end") {
+            if (this.telephoneTools?.blocksEnd()) throw Error("Cannot end during IVR/owner wait");
             const value = parseSecretaryEndRequest(JSON.parse(tool.arguments));
             if (!value) throw Error("Invalid farewell");
             preparedEnd = value;
             result = { prepared: true, instruction: "Say exactly the supplied farewell now, with no additions. Do not claim the call has ended." };
+          } else if (this.telephone && this.telephoneTools) {
+            result = await this.telephoneTools.execute(tool.name, tool.arguments, signal);
+            if (result?.silent) return;
           } else result = this.execute(tool.name, tool.arguments, signal);
         }
         catch { result = { ok: false, ...(!this.telephone ? { testOnly: true } : {}),

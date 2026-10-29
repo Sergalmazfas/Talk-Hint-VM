@@ -24,15 +24,20 @@ export function handleRetellPhoneMonitor(ws: WebSocket, deps = {
   let starting = false, stopped = false;
   const timer = setTimeout(() => ws.close(1008, "Start required"), 8000);
   timer.unref();
-  const cleanup = () => {
+  const cleanup = (reason: string) => {
+    if (stopped) return;
     stopped = true; clearTimeout(timer);
     if (identity && sources.get(identity.taskId) === source) {
+      // No audio, phone numbers, stream capability or provider error payload in logs.
+      console.info("[Secretary monitor]", JSON.stringify({ taskId: identity.taskId,
+        streamSid: identity.streamSid, event: reason, guestReceived: source?.guestReceived ?? false,
+        secretaryReceived: source?.secretaryReceived ?? false }));
       sources.delete(identity.taskId);
       deps.publish(identity.taskId, { type: "monitor_state", ...retellPhoneMonitoring(identity.taskId) });
     }
     identity = undefined;
   };
-  ws.on("close", cleanup); ws.on("error", cleanup);
+  ws.on("close", () => cleanup("socket_closed")); ws.on("error", () => cleanup("socket_error"));
   ws.on("message", async (raw, binary) => {
     if (stopped) return;
     let f: any;
@@ -60,7 +65,7 @@ export function handleRetellPhoneMonitor(ws: WebSocket, deps = {
       } catch { ws.close(1008, "Monitor task denied"); }
       return;
     }
-    if (f.event === "stop") { cleanup(); ws.close(1000); return; }
+    if (f.event === "stop") { cleanup("twilio_stop"); ws.close(1000); return; }
     if (f.event !== "media" || !identity || f.streamSid !== identity.streamSid) return;
     if (sources.get(identity.taskId) !== source) return; // Superseded source cannot duplicate/mix playback.
     const { track, payload } = f.media ?? {};

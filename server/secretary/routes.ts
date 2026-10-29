@@ -28,6 +28,7 @@ import { hangupSecretaryCall, secretaryCallbackOrigin } from "./dialer";
 import { publishSecretaryFeedEvent } from "./feed";
 import { prepareOutgoingContext, assertOutgoingRetryLine } from "./personalities/outgoing";
 import { outgoingDefault } from "./personalities/defaults";
+import { registerSecretaryIvrRoutes } from "./ivrRoutes";
 
 function ownerId(req: Request): string | undefined {
   return (req as any).user?.id as string | undefined;
@@ -53,6 +54,7 @@ function sendError(res: Response, error: unknown, fallback: string): void {
 
 /** Mount authenticated owner-scoped APIs and start the bounded persistent worker. */
 export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDependencies): void {
+  registerSecretaryIvrRoutes(app);
   app.get("/api/secretary/tasks", authMiddleware, async (req, res) => {
     const userId = ownerId(req);
     if (!userId) return res.status(401).json({ error: "Unauthorized" });

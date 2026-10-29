@@ -2,7 +2,7 @@ import { randomBytes, createHash } from "node:crypto";
 import type WebSocket from "ws";
 import { RetellApi, RetellApiError, RETELL_LAB_MODEL, RETELL_LAB_VOICE } from "./retellApi";
 import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
-import { SecretaryConversationEngine, type EngineStream, type SpokenTurn } from "../secretary/conversationEngine";
+import { SecretaryConversationEngine, type EngineStream, type SpokenTurn, type TelephoneTools } from "../secretary/conversationEngine";
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
 import type { PersonalityBinding } from "../secretary/personalities/types";
 import type { OutgoingContext } from "../secretary/personalities/outgoing";
@@ -52,6 +52,7 @@ type Entry = {
   socket?: WebSocket; abort?: AbortController; responseId: number; epoch: number;
   handled: Set<number>; introduced: boolean; closed: boolean; expiresAt: number;
   pending?: number;
+  commandCompleted?: number; interruptSequence?: number;
 };
 /** Per-session high-entropy capability, not an owner bearer token or permanent Retell key.
  * Retell's Custom LLM socket has no signature/auth header. Never log these URL paths. */
@@ -64,10 +65,12 @@ export class RetellEngineRegistry {
     phone?: boolean;
     onTranscript?: (id: string, turns: SpokenTurn[]) => Promise<void>;
     onFailure?: (id: string) => void;
+    telephoneTools?: (id: string) => TelephoneTools;
   } = {}) {}
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     const ticket = randomBytes(32).toString("hex");
-    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts),
+    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts,
+      this.options.phone ? this.options.telephoneTools?.(id) : undefined),
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false, expiresAt: Date.now() + 300_000 };
     this.entries.set(id, entry); this.tickets.set(ticket, entry);
     if (this.options.phone) {
@@ -82,6 +85,23 @@ export class RetellEngineRegistry {
     return { ticket, engine: entry.engine.report, promptHash: createHash("sha256").update(entry.engine.instructions).digest("hex") };
   }
   registered(id: string, callId: string) { const entry = this.entries.get(id); if (entry) entry.callId = callId; }
+  /** Native Retell DTMF on the EXISTING SIP bridge; never redirect Twilio or restart media. */
+  pressDigits(id: string, digits: string, signal?: AbortSignal) {
+    const entry = this.entries.get(id), ws = entry?.socket;
+    if (!this.options.phone || !entry || entry.closed || !ws || ws.readyState !== 1 ||
+      signal?.aborted || !/^[0-9*#]{1,5}$/.test(digits) || ws.bufferedAmount > 256 * 1024)
+      throw Error("Current telephone transport unavailable");
+    if (entry.pending !== undefined && signal === entry.abort?.signal) {
+      ws.send(JSON.stringify({ response_type: "response", response_id: entry.pending, content: "",
+        content_complete: true, digit_to_press: digits }));
+      entry.commandCompleted = entry.pending;
+    } else {
+      entry.abort?.abort(); entry.epoch++; entry.pending = undefined;
+      entry.interruptSequence = (entry.interruptSequence ?? 0) + 1;
+      ws.send(JSON.stringify({ response_type: "agent_interrupt", interrupt_id: entry.interruptSequence,
+        content: "", content_complete: true, digit_to_press: digits }));
+    }
+  }
   ended(id: string) {
     const entry = this.entries.get(id); if (!entry) return;
     entry.closed = true; entry.abort?.abort(); entry.engine.report.connected = false;
@@ -175,7 +195,7 @@ export class RetellEngineRegistry {
       }).finally(() => {
         clearTimeout(timeout);
         // Interrupted/old responses never resume; a timeout still closes the CURRENT response.
-        if (current()) { entry.pending = undefined; send({ response_type: "response", response_id: id, content: "", content_complete: true,
+        if (current()) { entry.pending = undefined; if (entry.commandCompleted !== id) send({ response_type: "response", response_id: id, content: "", content_complete: true,
           ...(endCall ? { end_call: true } : {}) }); entry.engine.record("response_complete"); }
       });
     };

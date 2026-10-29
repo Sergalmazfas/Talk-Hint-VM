@@ -10,6 +10,7 @@ import { publishSecretaryFeedEvent } from "./feed";
 import { createHash } from "node:crypto";
 import { resolveOutgoingPersonality } from "./personalities/store";
 import { validateOutgoingSnapshot } from "./personalities/outgoing";
+import { resolvedPhoneIvrTools, endPhoneIvr, observePhoneIvr } from "./ivrPhone";
 
 export const RETELL_PHONE_AGENT = "TalkHint Secretary — Telephone + Engine";
 export const retellPhoneApi = new RetellApi();
@@ -82,20 +83,23 @@ export async function requireRetellPhone(origin: string): Promise<string> {
 
 /** Replace snapshots, never append partial ASR as repeated "final" turns. */
 async function saveTranscript(taskId: string, turns: SpokenTurn[]) {
+  await observePhoneIvr(taskId, turns);
   const previous = writes.get(taskId) ?? Promise.resolve();
   const next = previous.then(async () => {
-    const snapshot = turns.map((turn, index) => ({
+    let snapshot = turns.map((turn, index) => ({
       id: `retell:${index}`, role: turn.role === "agent" ? "secretary" as const : "guest" as const,
       text: turn.content.trim().slice(0, 4000),
     })).filter(t => t.text);
-    const transcript = snapshot.map(t => `${t.role === "secretary" ? "Secretary" : "Other party"}: ${t.text.replace(/[\r\n]+/g, " ")}`).join("\n");
     await db.transaction(async tx => {
       const [task] = await tx.select().from(secretaryTasks).where(eq(secretaryTasks.id, taskId)).for("update");
       if (!task || task.voiceProvider !== "retell" || !task.callSid || !active.includes(task.status as any))
         throw new Error("Retell transcript no longer belongs to an active call");
-      await tx.update(secretaryTasks).set({ transcript, transcriptTurns: snapshot, updatedAt: new Date() })
+      const ivr = ((task.transcriptTurns ?? []) as typeof snapshot).filter(t => t.id.startsWith("ivr:"));
+      snapshot = [...snapshot, ...ivr];
+      const mergedTranscript = snapshot.map(t => `${t.role === "secretary" ? "Secretary" : "Other party"}: ${t.text.replace(/[\r\n]+/g, " ")}`).join("\n");
+      await tx.update(secretaryTasks).set({ transcript: mergedTranscript, transcriptTurns: snapshot, updatedAt: new Date() })
         .where(eq(secretaryTasks.id, taskId));
-      await tx.update(calls).set({ transcript }).where(and(eq(calls.callSid, task.callSid), eq(calls.userId, task.userId)));
+      await tx.update(calls).set({ transcript: mergedTranscript }).where(and(eq(calls.callSid, task.callSid), eq(calls.userId, task.userId)));
     });
     for (const t of snapshot) publishSecretaryFeedEvent(taskId, { type: "turn", turnId: t.id, role: t.role, text: t.text });
   });
@@ -105,6 +109,7 @@ async function saveTranscript(taskId: string, turns: SpokenTurn[]) {
 export const retellPhoneRegistry = new RetellEngineRegistry(
   request => streamSecretaryResponse(request, { tools: secretaryPhoneTools, reasoning: "medium" }), {
     phone: true,
+    telephoneTools: resolvedPhoneIvrTools,
     onTranscript: saveTranscript,
     onFailure: id => { void failPhone(id).catch(() => console.error("[Secretary Retell] Failure cleanup could not complete")); },
   });
@@ -179,5 +184,6 @@ export async function endRetellPhone(taskId: string) {
   } finally {
     retellPhoneRegistry.ended(taskId);
     admissions.delete(taskId); registered.delete(taskId); writes.delete(taskId);
+    endPhoneIvr(taskId);
   }
 }

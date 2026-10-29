@@ -1937,3 +1937,31 @@ mtime_ms = 1793259144333
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6716b67b-5d30-4463-9630-61d6d9b00a7d/91ff96e3-ad59-49b1-8c8c-443e1842685e"
 storage_version_token = "1793259150828876"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "7rZIUPeKisSl5BUSPrAvt"
+uri = "file://generated-artifacts/post-import-review/TalkHint_PostImport_readonly_Claude_review.zip"
+type = "unspecified"
+title = "Проверка после импорта — пакет для Claude"
+description = "Read-only: 129 952 записи, 84 документа, 242 архива, доказательство semantic SHA, журнал, отсутствие активации. Найден блокирующий legacy fallback P.PRODUCT; ограничения проверки Hint указаны."
+logical_id = "83022b95-5e78-47de-8a0f-ddf57b50bb16"
+content_hash = "sha256:01b8e6a2078cef68ceb04ed314f91657dec687b9350269eeed4e27df68184c6b"
+size = 91691
+mtime_ms = 1793262442620
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/83022b95-5e78-47de-8a0f-ddf57b50bb16/66b93893-7730-460f-8b09-6ff88c7d2a93"
+storage_version_token = "1793262447648848"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "agTQC8PZrBqgksCQ3pLlR"
+uri = "file://generated-artifacts/secretary-ivr-review/TalkHint_Secretary_IVR_Dev_Claude_review.zip"
+type = "unspecified"
+title = "Катя · IVR — Dev-пакет для Claude"
+description = "Diff, исходники, локальный стенд, 362 успешных теста, диагностика мониторинга и открытые ограничения. Без Publish, реальных звонков и изменений iOS."
+logical_id = "66171ca6-1298-4eb6-a069-e3cab4e07d48"
+content_hash = "sha256:ff6d105ce35159727b7616e8741583271066a4117212d0a3275e74fd32dcb688"
+size = 107987
+mtime_ms = 1793264063250
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/66171ca6-1298-4eb6-a069-e3cab4e07d48/351be028-9fdc-4c4e-afda-2f29679a7b3a"
+storage_version_token = "1793264076148603"
+content_type = "application/octet-stream"
