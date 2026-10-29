@@ -13,7 +13,17 @@ export interface ImportApproval {
   revision: number;
   manifestHash: string;
 }
-export const reviewedImportApproval: ImportApproval | null = null;
+export const reviewedImportApproval: ImportApproval | null = {
+  confirmed: true,
+  importApproved: true,
+  targetOwner: "47704265",
+  targetEnvironment: "production",
+  sourceOwner: "47704265",
+  sourceEnvironment: "development",
+  sourceWorkspace: "company-transfer-fresh-B-1c41902a-84c6-42e6-b00f-0afa355ff558",
+  revision: 912,
+  manifestHash: "98b397692f447e412f7039247c810ffb5500a73481b7c465ce503b730b7f0eca",
+};
 
 /** Account pair confirmed by owner after Claude review. NOT import/cutover consent.
  * Only new-country is approved; original is retained as a technical archive.

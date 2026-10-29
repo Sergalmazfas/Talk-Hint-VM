@@ -5,6 +5,7 @@ import os from "node:os";
 import { mkdtempSync } from "node:fs";
 import { readdir, lstat, rm } from "node:fs/promises";
 import { limitedWorker } from "../limitedWorker";
+import { LabPythonUnavailableError } from "./pythonDiagnostics";
 
 export async function cleanupLabScratch() {
   const root = os.tmpdir(), cutoff = Date.now() - 7 * 86_400_000;
@@ -64,8 +65,8 @@ export function checkHintLabRuntime(): Promise<{ framework: string; version: str
   return new Promise((resolve, reject) => {
     const launch = limitedWorker("lab", "python", ["-c", "import json; from crewai import Agent,Crew; from importlib.metadata import version; print(json.dumps({'framework':'crewai','version':version('crewai')}))"]);
     execFile(launch.executable, launch.args,
-      { env: workerEnv(), timeout: 30_000 }, (error, stdout) => {
-        if (error) return reject(new Error("LAB_PYTHON_UNAVAILABLE"));
+      { env: workerEnv(), timeout: 30_000, maxBuffer: 250_000 }, (error, stdout, stderr) => {
+        if (error) return reject(new LabPythonUnavailableError(error, stderr));
         try {
           const p = JSON.parse(stdout);
           if (p.version !== "1.15.30") throw new Error();

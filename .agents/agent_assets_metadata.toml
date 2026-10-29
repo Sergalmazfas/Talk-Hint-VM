@@ -1895,3 +1895,17 @@ mtime_ms = 1793254414403
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3999d702-8a56-4193-8a41-8d1cb00dd9e9/eab88377-0de4-453e-825b-29785d4e5d60"
 storage_version_token = "1793254451807248"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "jvFLhgFNFn8xlzo87XQpq"
+uri = "file://generated-artifacts/publish2-approval/TalkHint_Publish2_approval_Claude_review.zip"
+type = "unspecified"
+title = "Publish №2 — approval и диагностика для Claude"
+description = "Условие рабочей Dev-модели подтверждено: 912 и полный SHA. Отдельные diff разрешения и диагностики, разложение всех 124 ERROR, полный прогон 2545/0/30, typecheck/build. Без Publish, импорта и включения."
+logical_id = "b0f9c340-3098-4d01-a392-475b343aeee4"
+content_hash = "sha256:09b66a3d206665b590425a6c74929c189300bee6f78139cdc530516a67d0520d"
+size = 189379
+mtime_ms = 1793255268438
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b0f9c340-3098-4d01-a392-475b343aeee4/9697c483-60b6-498b-9b2a-e19f957db323"
+storage_version_token = "1793255275077129"
+content_type = "application/octet-stream"

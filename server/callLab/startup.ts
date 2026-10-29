@@ -1,7 +1,9 @@
 /** Safe diagnostics: never retain arbitrary SDK errors, profiles or credentials. */
+import { LabPythonUnavailableError } from "./pythonDiagnostics";
 export type LabStartupStage = "configuration" | "scratch" | "gmail" | "owner" | "worker" | "control";
 let state: { status: "not_checked" | "checking" | "blocked" | "ready";
-  stage: LabStartupStage | null; code: string | null; checkedAt: string | null } =
+  stage: LabStartupStage | null; code: string | null; checkedAt: string | null;
+  runtimeDiagnostic?: LabPythonUnavailableError["runtimeDiagnostic"] } =
   { status: "not_checked", stage: null, code: null, checkedAt: null };
 export function labStartupStatus() { return { ...state }; }
 export function resetLabStartup() {
@@ -29,6 +31,8 @@ export async function labStartupStep<T>(stage: LabStartupStage, work: () => Prom
   state = { status: "checking", stage, code: null, checkedAt: new Date().toISOString() };
   try { return await work(); } catch (error) {
     state = { status: "blocked", stage, code: safeLabError(error), checkedAt: new Date().toISOString() };
+    if (stage === "worker" && error instanceof LabPythonUnavailableError)
+      state.runtimeDiagnostic = error.runtimeDiagnostic;
     throw error;
   }
 }

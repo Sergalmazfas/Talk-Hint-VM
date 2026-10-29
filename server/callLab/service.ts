@@ -281,6 +281,8 @@ export async function startHintLab(pool: Pool) {
           nextBootstrapAttempt = Date.now() + 30_000;
           const s = labStartupStatus();
           console.warn(`[HintLab] BLOCKED stage=${s.stage} code=${s.code}; retry in 30s; calls unaffected`);
+          if (s.runtimeDiagnostic)
+            console.warn(`[HintLab] Python runtime diagnostic ${JSON.stringify(s.runtimeDiagnostic)}`);
           return;
         }
       }
