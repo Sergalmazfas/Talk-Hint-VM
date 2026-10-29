@@ -5,6 +5,7 @@ import { dbReady, pool } from "../db";
 import { ModelError, requestSchema } from "./domain";
 import { PgModelRepository, type ModelRepository } from "./repository";
 import { registerCompanyImport } from "../companyData/v3/importRoutes";
+import { registerCompanyCutover } from "../companyData/cutover/routes";
 
 const repository = new PgModelRepository(async () => {
   await dbReady;
@@ -13,6 +14,11 @@ const repository = new PgModelRepository(async () => {
 });
 
 export function registerProjectModel(app: Express, repo: ModelRepository = repository) {
+  registerCompanyCutover(app, async () => {
+    await dbReady;
+    if (!pool) throw new Error("Database unavailable");
+    return pool;
+  });
   registerCompanyImport(app, async () => {
     await dbReady;
     if (!pool) throw new Error("Database unavailable");

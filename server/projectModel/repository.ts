@@ -7,6 +7,7 @@ import { archiveModel, ensureModelHistory, unpackModel } from "./history";
 import { activeCompanyRepository, hasNormalizedCompanySource } from "../companyData/active";
 import { blocksLegacySeed } from "../companyData/v3/importApproval";
 import { assertModelWriteAllowed, modelWritesFrozen } from "../companyData/migrationFreeze";
+import { checkpointRoot, checkpointDocument, cutoverControl, lockCompanyWrite } from "../companyData/cutover/guard";
 
 export interface ModelRepository {
   read(owner: string, hypothesis?: string): Promise<ProjectModelState>;
@@ -37,17 +38,29 @@ export class PgModelRepository implements ModelRepository {
       throw new ModelError(423, "Книга ожидает согласованного переноса new-country. Создание начальной модели отключено.");
     // Same transaction-scoped lock as candidate import. Serializes only this
     // owner's bootstrap, not Hint workers or other owners' ordinary writes.
-    await pool.query(`WITH owner_lock AS MATERIALIZED (
+    const db = await pool.connect();
+    try {
+      await db.query("BEGIN");
+      await lockCompanyWrite(db, owner, process.env.NODE_ENV === "production" ? "production" : "development");
+      await db.query(`WITH owner_lock AS MATERIALIZED (
       SELECT pg_advisory_xact_lock(hashtextextended($3,0))
     ) INSERT INTO talkhint_project_models(owner_key,revision,state)
       SELECT $1,0,$2::jsonb FROM owner_lock ON CONFLICT(owner_key) DO NOTHING`,
     [owner, JSON.stringify(initialModel()),
       `company-import:${process.env.NODE_ENV === "production" ? "production" : "development"}:${owner}`]);
+      await db.query("COMMIT");
+    } catch (e) { await db.query("ROLLBACK"); throw e; }
+    finally { db.release(); }
   }
   async read(owner: string, hypothesis = "original") {
     const pool = await this.database();
     const active = await activeCompanyRepository(pool, owner);
     if (active) return active.read(owner, hypothesis);
+    const environment = process.env.NODE_ENV === "production" ? "production" : "development";
+    const checkpoint = await checkpointRoot(pool, owner, environment);
+    if (checkpoint) return readHypothesis(checkpoint, hypothesis);
+    if (await cutoverControl(pool, owner, environment))
+      throw new ModelError(423, "Источник ожидает подтверждённого включения; seed запрещён.");
     if (!modelWritesFrozen(owner, process.env.NODE_ENV === "production" ? "production" : "development"))
       await this.ensure(pool, owner);
     const r = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
@@ -60,6 +73,12 @@ export class PgModelRepository implements ModelRepository {
     const pool = await this.database();
     const active = await activeCompanyRepository(pool, owner);
     if (active) return active.readRevision(owner, revision, hypothesis);
+    const checkpoint = await checkpointRoot(pool, owner,
+      process.env.NODE_ENV === "production" ? "production" : "development");
+    if (checkpoint) {
+      if (checkpoint.revision !== revision) throw new ModelError(404, "Снимок отката доступен только на закреплённой ревизии.");
+      return readHypothesis(checkpoint, hypothesis);
+    }
     const r = await pool.query("SELECT payload FROM talkhint_project_model_history WHERE owner_key=$1 AND key=$2", [owner, `r:${revision}`]);
     if (!r.rows.length) {
       const current = await pool.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1", [owner]);
@@ -83,6 +102,8 @@ export class PgModelRepository implements ModelRepository {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await lockCompanyWrite(client, owner,
+        process.env.NODE_ENV === "production" ? "production" : "development");
       const r = await client.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
       if (await hasNormalizedCompanySource(client, owner))
         throw new ModelError(409, "Источник переключился на платформу данных; перечитайте актуальную модель.");
@@ -99,10 +120,15 @@ export class PgModelRepository implements ModelRepository {
     finally { client.release(); }
   }
   async hasActiveCompanySource(owner: string) {
-    return !!await activeCompanyRepository(await this.database(), owner);
+    const pool = await this.database();
+    return !!await activeCompanyRepository(pool, owner) ||
+      (await cutoverControl(pool, owner, process.env.NODE_ENV === "production" ? "production" : "development"))?.phase === "checkpoint";
   }
   async readDocumentSnapshot(owner: string, hypothesis: string, documentId: string) {
-    const active = await activeCompanyRepository(await this.database(), owner);
-    return active ? active.readDocumentSnapshot(owner, hypothesis, documentId) : undefined;
+    const pool = await this.database();
+    const active = await activeCompanyRepository(pool, owner);
+    if (active) return active.readDocumentSnapshot(owner, hypothesis, documentId);
+    return (await checkpointDocument(pool, owner,
+      process.env.NODE_ENV === "production" ? "production" : "development", hypothesis, documentId)) ?? undefined;
   }
 }

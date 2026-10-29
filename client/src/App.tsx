@@ -9,6 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "./lib/queryClient";
 import AdminDiagnostics from "@/pages/admin-diagnostics";
 import CompanyImport from "@/pages/company-import";
+import CompanyCutover from "@/pages/company-cutover";
 import CallProfiles from "@/pages/call-profiles";
 import Dashboard from "@/pages/dashboard";
 import IncomingSecretary from "@/pages/incoming-secretary";
@@ -97,6 +98,7 @@ function AdminRoutes() {
         <Route path="/incoming-secretary-preview" component={IncomingSecretary} />
         <Route path="/diagnostics" component={AdminDiagnostics} />
         <Route path="/company-import" component={CompanyImport} />
+        <Route path="/company-cutover" component={CompanyCutover} />
         <Route path="/project-model" component={ProjectModel} />
         {import.meta.env.DEV && <Route path="/company-preview" component={CompanyPreview} />}
         <Route path="/voice-lab" component={VoiceLab} />

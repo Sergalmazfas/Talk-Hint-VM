@@ -36,6 +36,7 @@ describe("strategy persistence and HTTP boundaries", () => {
     let pending: Map<string, ProjectModelState> | null = null;
     let archives = new Map<string, any>(), pendingArchives: Map<string, any> | null = null;
     const query = vi.fn(async (sql: string, args: any[] = []) => {
+      if (sql.startsWith("SELECT pg_advisory_xact_lock_shared")) return { rows: [] };
       if (sql.startsWith("SELECT to_regclass"))
         return { rows: [{ company_table: null }], rowCount: 1 };
       if (sql.startsWith("INSERT INTO talkhint_project_model_history")) {

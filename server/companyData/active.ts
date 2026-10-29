@@ -4,6 +4,7 @@ import { CompanyModelRepository, type CompanyEnvironment } from "./repository";
 import { textHash } from "./valueTree";
 import { IncrementalCompanyRepository } from "./v3/repository";
 import { CommandCompanyRepository } from "./v3/commands";
+import { checkpointDocument } from "./cutover/guard";
 export const companyEnvironment = (): CompanyEnvironment =>
   process.env.NODE_ENV === "production" ? "production" : "development";
 
@@ -36,7 +37,12 @@ export async function activeCompanyRepository(pool: Pool, owner: string) {
 export async function activeCompanyDocument(pool: Pick<Pool, "query">, owner: string,
   environment: string, documentId: string) {
   const present = await pool.query(`SELECT to_regclass('public.company_workspaces') AS company_table,
-    to_regclass('public.company_v3_workspaces') AS company_v3_table`);
+    to_regclass('public.company_v3_workspaces') AS company_v3_table,
+    to_regclass('public.company_cutover_controls') AS cutover_table`);
+  if (present.rows[0]?.cutover_table) {
+    const checkpoint = await checkpointDocument(pool, owner, environment, "new-country", documentId);
+    if (checkpoint) return { text: checkpoint.document.text as string, revision: checkpoint.revision };
+  }
   if (present.rows[0]?.company_v3_table) {
     const candidate = await pool.query(`SELECT 1 FROM company_v3_workspaces
       WHERE owner_key=$1 AND environment=$2 AND generation='normalized' AND schema_version=3`, [owner, environment]);

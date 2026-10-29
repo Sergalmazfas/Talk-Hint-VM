@@ -68,6 +68,9 @@ describe("competitor directory HTTP protections", () => {
     const archives = new Map<string, any>();
     const query = vi.fn(async (sql: string, values?: unknown[]): Promise<any> => {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.startsWith("SELECT pg_advisory_xact_lock_shared")) return { rows: [] };
+      if (sql.startsWith("SELECT to_regclass"))
+        return { rows: [{ company_table: null, company_v3_table: null, present: null }], rowCount: 1 };
       if (sql.startsWith("CREATE TABLE")) return { rows: [] };
       const owner = String(values![0]);
       if (sql.startsWith("INSERT INTO talkhint_project_model_history")) {

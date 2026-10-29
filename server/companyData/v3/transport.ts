@@ -9,6 +9,7 @@ import { ddlV3, payloadTables, physicalTable } from "./schema";
 import { readBusinessContract } from "./businessContract";
 import { SqlFrameStore } from "./store";
 import { decode } from "./codec";
+import { cutoverControl, cutoverLock } from "../cutover/guard";
 
 export interface OwnerAuthentication {
   /** Obtain on the server from verified owner session + CSRF; never from body fields. */
@@ -92,6 +93,9 @@ export class OwnerImportService {
           grant.package_hash !== semanticHash(manifest)) throw new Error("Import owner/environment/package binding mismatch");
       if (manifest.schemaVersion !== 3 || manifest.schemaDigest !== textHash(ddlV3())) throw new Error("Import schema mismatch");
       // Recheck emptiness in the SAME transaction, after serializing concurrent imports.
+      await db.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", [cutoverLock(auth.ownerKey, this.environment)]);
+      if (await cutoverControl(db, auth.ownerKey, this.environment))
+        throw new Error("Cutover-controlled target cannot be re-imported");
       await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`company-import:${this.environment}:${auth.ownerKey}`]);
       const occupied = await db.query(`SELECT 1 FROM company_v3_workspaces WHERE owner_key=$1 AND environment=$2
         UNION ALL SELECT 1 FROM company_workspaces WHERE owner_key=$1 AND environment=$2

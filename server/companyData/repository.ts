@@ -7,6 +7,7 @@ import { ModelError } from "../projectModel/modelError";
 import { inspectSchema, project, readRootFromSql, insertProjection } from "./relational";
 import { textHash, semanticHash } from "./valueTree";
 import { assertModelWriteAllowed } from "./migrationFreeze";
+import { lockCompanyWrite } from "./cutover/guard";
 
 export type CompanyEnvironment = "development" | "production";
 /** Always bound by server authentication, never an owner key taken from input JSON. */
@@ -94,6 +95,7 @@ export class CompanyModelRepository implements ModelRepository {
     const db = await (await this.getPool()).connect();
     try {
       await db.query("BEGIN");
+      await lockCompanyWrite(db, owner, this.environment);
       await db.query("SET LOCAL lock_timeout='2s'");
       await db.query("SET CONSTRAINTS ALL DEFERRED");
       const w = await this.scope(db, owner, true);

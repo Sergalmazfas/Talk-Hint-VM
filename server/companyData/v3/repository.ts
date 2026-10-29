@@ -9,6 +9,7 @@ import { semanticHash } from "../valueTree";
 import { at, arrayInsert, decode, encode, replace, type Frame } from "./codec";
 import { SqlFrameStore } from "./store";
 import { assertModelWriteAllowed } from "../migrationFreeze";
+import { lockCompanyWrite } from "../cutover/guard";
 
 export interface DeltaEdit {
   path: string[];
@@ -47,6 +48,7 @@ export class IncrementalCompanyRepository {
     const db = await this.pool.connect(), started = performance.now();
     try {
       await db.query("BEGIN");
+      await lockCompanyWrite(db, owner, this.environment);
       const w = await this.workspace(db, owner, true);
       if (Number(w.current_revision) !== expectedRevision) throw new ModelError(409, "Stale company revision");
       const schema = await readBusinessContract(db), store = new SqlFrameStore(db, w.workspace_id, schema);

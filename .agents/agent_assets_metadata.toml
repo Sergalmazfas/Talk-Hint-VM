@@ -2021,3 +2021,17 @@ mtime_ms = 1793291589743
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f60db1b1-3716-4d70-8205-f3cc3985b324/43a70672-062c-47e6-96be-4b3bb3655c93"
 storage_version_token = "1793291629270226"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "WWM7LujdR1jJy21HgYS8Z"
+uri = "file://generated-artifacts/company-cutover-secure/TalkHint_cutover_secure_Claude.zip"
+type = "unspecified"
+title = "Cutover — Dev-пакет на сверку Claude"
+description = "Diff и исходники, защищённая репетиция, замеры, DDL и проверки. Полный набор: 2597 passed / 0 failed / 30 skipped. Production не изменён, approval = null."
+logical_id = "0b544ec8-e6a9-49bf-952a-a4879798a8e1"
+content_hash = "sha256:cb56199c81063bd451b2fffe17d6c8992c935ba3968e06df71e5e292de14d88e"
+size = 615322
+mtime_ms = 1793294451219
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0b544ec8-e6a9-49bf-952a-a4879798a8e1/75ae88af-6ee2-4ba9-8ee3-67587123a112"
+storage_version_token = "1793294458129912"
+content_type = "application/octet-stream"

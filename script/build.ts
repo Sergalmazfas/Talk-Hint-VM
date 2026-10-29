@@ -99,6 +99,12 @@ async function buildAll() {
     external: externals, minify: true, logLevel: "info",
     banner: { js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url);` },
   });
+
+  await esbuild({
+    entryPoints: ["server/companyData/cutover/worker.ts"],
+    platform: "node", bundle: true, format: "esm", packages: "external",
+    outfile: join(out, "company-cutover-worker.js"),
+  });
   const mcp = verifyMcpBuild(compiled.metafile!, bundle);
   await writeFile(join(out, "mcp-build-receipt.json"), JSON.stringify({
     ...mcp, preparedAt: new Date().toISOString(), prepareOnly,

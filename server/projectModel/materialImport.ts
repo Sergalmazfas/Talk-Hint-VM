@@ -4,6 +4,9 @@ import { archiveModel, ensureModelHistory, unpackModel } from "./history";
  * No provider, telephone, calendar or notification transports.
  */
 import type { Pool } from "pg";
+import { assertModelWriteAllowed } from "../companyData/migrationFreeze";
+import { lockCompanyWrite } from "../companyData/cutover/guard";
+import { hasNormalizedCompanySource } from "../companyData/active";
 import { isDeepStrictEqual } from "node:util";
 import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
 import { applyCommand } from "./domain";
@@ -86,10 +89,15 @@ export async function persistApprovedMaterial(pool: Pool, owner: string) {
 
 /** Reuse the same locked JSONB transaction for narrow, explicitly approved updates. */
 export async function persistModelUpdate(pool: Pool, owner: string, transform: (state: ProjectModelState) => ProjectModelState, existingOnly = false) {
+  const environment = process.env.NODE_ENV === "production" ? "production" : "development";
+  assertModelWriteAllowed(owner, environment);
   const client = await pool.connect();
   let next: ProjectModelState;
   try {
     await client.query("BEGIN");
+    await lockCompanyWrite(client, owner, environment);
+    if (await hasNormalizedCompanySource(client, owner))
+      throw new Error("Legacy CLI cannot write the active normalized source; use production MCP.");
     if (!existingOnly)
       await client.query("INSERT INTO talkhint_project_models(owner_key,revision,state) VALUES($1,0,$2::jsonb) ON CONFLICT(owner_key) DO NOTHING", [owner, JSON.stringify(initialModel())]);
     const row = await client.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { dbReady, isDevDatabase, pool } from "../db";
 import { splitProductHypotheses } from "./hypotheses";
 import { archiveModel, ensureModelHistory, unpackModel } from "./history";
+import { assertModelWriteAllowed } from "../companyData/migrationFreeze";
+import { lockCompanyWrite } from "../companyData/cutover/guard";
+import { hasNormalizedCompanySource } from "../companyData/active";
 
 async function main() {
   assert.equal(process.env.NODE_ENV, "development", "Explicit Dev environment required");
@@ -13,6 +16,9 @@ async function main() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    assertModelWriteAllowed(owner, "development");
+    await lockCompanyWrite(client, owner, "development");
+    if (await hasNormalizedCompanySource(client, owner)) throw new Error("Use normalized writer, not legacy CLI.");
     const result = await client.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
     assert.equal(result.rowCount, 1, "Existing workspace required; no model invented");
     const before = await unpackModel(client, owner, result.rows[0].state);
