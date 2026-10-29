@@ -1867,3 +1867,17 @@ mtime_ms = 1793248713324
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/195e7978-f421-4e69-b3fb-7d16fce9b509/2fc6ace7-e151-4506-a2bd-a139dec64e37"
 storage_version_token = "1793248735048488"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Tvnpk8Rh7DlDQbHUKzpFH"
+uri = "file://generated-artifacts/data-platform-claude-review/TalkHint_Claude_Publish2_review.zip"
+type = "unspecified"
+title = "TalkHint — единый ZIP для сверки Claude"
+description = "Полный пакет 21.0 МиБ: манифест, разложение +434 по таблицам, обратная сборка из App Storage в Dev, STORAGE_READINESS, код Publish №2, diff, тесты и план. Импорт и публикация не выполнялись."
+logical_id = "317946cf-4e1f-4866-ac7f-615a90da4ea9"
+content_hash = "sha256:272d7895b79c52c1a535bf63e78cef7b2713be273f3e3103781a3dfe23cf2cf5"
+size = 21993140
+mtime_ms = 1793250434495
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/317946cf-4e1f-4866-ac7f-615a90da4ea9/4700762e-bf89-4ffd-8983-f1fb945a3276"
+storage_version_token = "1793250461889765"
+content_type = "application/octet-stream"
