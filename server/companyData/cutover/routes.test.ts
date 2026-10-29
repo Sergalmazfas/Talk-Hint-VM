@@ -34,8 +34,17 @@ describe("cutover browser boundaries", () => {
     service.grant.mockResolvedValue("e".repeat(64)); service.enqueue.mockResolvedValue("op");
     launch.mockResolvedValue(undefined); service.fail.mockResolvedValue(undefined);
   });
-  it("ships with NO production approval; GET is read-only and action GET is 405", async () => {
-    expect(reviewedCutoverApproval).toBeNull(); setup(false);
+  it("matches the approved production pin; explicit null denies, GET is read-only and action GET is 405", async () => {
+    expect(reviewedCutoverApproval).toEqual({
+      owner: "47704265", environment: "production",
+      workspace: "company-import-7cf8767b-fbeb-4e97-939f-cc2c3767cf3a",
+      revision: 912,
+      rootHash: "0ff928175de87490aa7718c455ba207682659efe9581244266eaa31ec6cd88e7",
+      semanticHash: "f1c11386e2dd5808baf88d7e0bfb679817992a76812bdcf43b0bba703b9069c8",
+      manifestHash: "98b397692f447e412f7039247c810ffb5500a73481b7c465ce503b730b7f0eca",
+      probeDocumentId: "DOC-43ae2ce8-382c-4588-a481-58cd213ba404",
+    });
+    setup(false);
     expect((await headers(request(app).get(base + "/status"))).status).toBe(200);
     expect((await headers(request(app).get(base + "/grant"))).status).toBe(405);
     expect((await headers(request(app).post(base + "/grant")).send(body())).status).toBe(423);
