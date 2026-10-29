@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+vi.mock("../companyData/active", () => ({ activeCompanyDocument: vi.fn(async () => null) }));
 vi.mock("../projectModel/history", () => ({ unpackModel: vi.fn(async (_p, _o, state) => state) }));
 vi.mock("../projectModel/hypotheses", () => ({ readHypothesis: vi.fn(state => state) }));
 import { prepareOwnerHintInput, preparedQaModel } from "./preparedAnalysis";

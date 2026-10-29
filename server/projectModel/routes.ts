@@ -20,7 +20,8 @@ export function registerProjectModel(app: Express, repo: ModelRepository = repos
       const hypothesis = req.query.hypothesis ?? "original";
       if (typeof hypothesis !== "string" || !/^[a-z][a-z0-9-]{0,79}$/.test(hypothesis))
         return res.status(400).json({ error: "Некорректная гипотеза." });
-      if (hypothesis !== "original" && process.env.NODE_ENV !== "development")
+      if (hypothesis !== "original" && process.env.NODE_ENV !== "development" &&
+          !(await repo.hasActiveCompanySource?.(owner)))
         return res.status(404).json({ error: "Сравнение гипотез пока доступно только в Dev." });
       if (req.method === "GET") {
         if (req.query.revision !== undefined) {

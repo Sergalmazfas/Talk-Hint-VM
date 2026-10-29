@@ -1,4 +1,4 @@
-"""Structural checks of checkpoint A. No SQL is sent to a database."""
+"""Structural checks of A plus owner-approved B additions. No SQL is sent to a database."""
 import json
 from pathlib import Path
 import re
@@ -45,7 +45,7 @@ for statement in STATEMENTS:
 
 class CheckpointA(unittest.TestCase):
     def test_schema_is_review_only_and_non_destructive(self):
-        self.assertEqual(len(TABLES), 36)
+        self.assertEqual(len(TABLES), 40)
         self.assertTrue(all(name.startswith("company_") for name in TABLES))
         self.assertNotRegex(CLEAN, r"\b(DROP|DELETE|TRUNCATE|CREATE\s+EXTENSION)\b")
         self.assertNotRegex(CLEAN, r"\bjsonb\b")

@@ -1,7 +1,8 @@
--- CHECKPOINT A — REVIEW ONLY. Do not execute before the owner's explicit approval.
+-- Schema v2: checkpoint A accepted with additions; Dev B authorized by owner.
+-- Production schema only via the owner's Publish. No startup DDL.
 -- PostgreSQL 16. Stage B schema (stages 1+2). No extensions, existing-table changes,
 -- DROP, DELETE, TRUNCATE, startup DDL, runtime scheduling or Hint queue migration.
--- Logical table names and columns below are the proposed final contract v1.
+-- Logical table names and columns below are contract v2 with the owner's additions.
 BEGIN;
 
 CREATE TABLE company_workspaces (
@@ -12,7 +13,7 @@ CREATE TABLE company_workspaces (
   storage_generation text NOT NULL DEFAULT 'legacy'
     CHECK (storage_generation IN ('legacy','shadow','normalized')),
   primary_hypothesis_id text,
-  schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version = 1),
+  schema_version integer NOT NULL DEFAULT 2 CHECK (schema_version = 2),
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(owner_key, environment),
   UNIQUE(workspace_id, owner_key)
@@ -77,9 +78,49 @@ CREATE TABLE company_entities (
 CREATE TABLE company_roles (
   workspace_id text NOT NULL, hypothesis_id text NOT NULL, operating_version integer NOT NULL,
   entity_id text NOT NULL,
+  mode text CHECK (mode IN ('hint','secretary','translator','copilot','company')),
+  mode_source text,
   PRIMARY KEY(workspace_id,hypothesis_id,operating_version,entity_id),
   FOREIGN KEY(workspace_id,hypothesis_id,operating_version,entity_id)
     REFERENCES company_entities(workspace_id,hypothesis_id,operating_version,entity_id)
+);
+-- No inference from role names. NULL mode means not yet assigned by an explicit source.
+CREATE TABLE company_employee_profiles (
+  workspace_id text NOT NULL, hypothesis_id text NOT NULL,
+  operating_version integer NOT NULL, entity_id text NOT NULL,
+  profile_version integer NOT NULL CHECK (profile_version > 0),
+  display_name text, trait_1 text, trait_2 text, trait_3 text, motto text,
+  portrait_description text, portrait_file_url text, portrait_style text, role_color text,
+  owner_selection_status text NOT NULL
+    CHECK (owner_selection_status IN ('proposed','accepted','not_selected','unknown')),
+  source_document_id text, source_pointer text NOT NULL,
+  source_at text, accepted_by text, accepted_at text,
+  PRIMARY KEY(workspace_id,hypothesis_id,operating_version,entity_id,profile_version),
+  FOREIGN KEY(workspace_id,hypothesis_id,operating_version,entity_id)
+    REFERENCES company_roles(workspace_id,hypothesis_id,operating_version,entity_id),
+  CHECK ((trait_1 IS NULL AND trait_2 IS NULL AND trait_3 IS NULL) OR
+         (trait_1 IS NOT NULL AND trait_2 IS NOT NULL AND trait_3 IS NOT NULL))
+);
+CREATE TABLE company_employee_name_options (
+  workspace_id text NOT NULL, hypothesis_id text NOT NULL,
+  operating_version integer NOT NULL, entity_id text NOT NULL, profile_version integer NOT NULL,
+  ordinal integer NOT NULL CHECK (ordinal >= 0), name_text text NOT NULL,
+  PRIMARY KEY(workspace_id,hypothesis_id,operating_version,entity_id,profile_version,ordinal),
+  FOREIGN KEY(workspace_id,hypothesis_id,operating_version,entity_id,profile_version)
+    REFERENCES company_employee_profiles(workspace_id,hypothesis_id,operating_version,entity_id,profile_version)
+);
+CREATE TABLE company_role_prompt_versions (
+  workspace_id text NOT NULL, hypothesis_id text NOT NULL,
+  operating_version integer NOT NULL, entity_id text NOT NULL,
+  prompt_version text NOT NULL, text_body text NOT NULL, source_at text NOT NULL,
+  status text NOT NULL CHECK (status IN ('proposed','accepted','enabled')),
+  accepted_by text, accepted_at text,
+  source_document_id text, source_pointer text NOT NULL,
+  utf8_sha256 text NOT NULL CHECK (utf8_sha256 ~ '^[a-f0-9]{64}$'),
+  PRIMARY KEY(workspace_id,hypothesis_id,operating_version,entity_id,prompt_version),
+  FOREIGN KEY(workspace_id,hypothesis_id,operating_version,entity_id)
+    REFERENCES company_roles(workspace_id,hypothesis_id,operating_version,entity_id),
+  CHECK (status='proposed' OR (accepted_by IS NOT NULL AND accepted_at IS NOT NULL))
 );
 CREATE TABLE company_actions (
   workspace_id text NOT NULL, hypothesis_id text NOT NULL, operating_version integer NOT NULL,
@@ -382,4 +423,18 @@ CREATE TABLE company_import_checks (
   PRIMARY KEY(workspace_id,run_id,check_id),
   FOREIGN KEY(workspace_id,run_id) REFERENCES company_import_runs(workspace_id,run_id)
 );
+-- Reversible placement of explicit relational records into the unchanged JSON contract.
+-- Contains column names/keys, never a serialized model or document.
+CREATE TABLE company_record_locations (
+  workspace_id text NOT NULL, revision integer NOT NULL,
+  source_pointer text NOT NULL, target_table text NOT NULL,
+  key_names text[] NOT NULL, key_values text[] NOT NULL,
+  source_fields text[] NOT NULL, target_columns text[] NOT NULL,
+  PRIMARY KEY(workspace_id,revision,source_pointer,target_table),
+  FOREIGN KEY(workspace_id,revision) REFERENCES company_model_revisions(workspace_id,revision),
+  CHECK (cardinality(key_names)=cardinality(key_values)),
+  CHECK (cardinality(source_fields)=cardinality(target_columns))
+);
+CREATE INDEX company_record_locations_lookup_idx
+  ON company_record_locations(workspace_id,revision,target_table);
 COMMIT;

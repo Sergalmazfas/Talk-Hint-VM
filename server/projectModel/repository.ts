@@ -1,15 +1,19 @@
 import type { Pool } from "pg";
-import type { ModelCommand, ProjectModelState } from "../../shared/projectModel";
+import type { ModelCommand, ProjectModelState, ModelDocument } from "../../shared/projectModel";
 import { ModelError } from "./domain";
 import { applyHypothesisCommand, readHypothesis } from "./hypotheses";
 import { initialModel } from "./seed";
 import { archiveModel, ensureModelHistory, unpackModel } from "./history";
+import { activeCompanyRepository, hasNormalizedCompanySource } from "../companyData/active";
 
 export interface ModelRepository {
   read(owner: string, hypothesis?: string): Promise<ProjectModelState>;
   update(owner: string, revision: number, command: ModelCommand, hypothesis?: string): Promise<ProjectModelState>;
   updateMany?(owner: string, revision: number, commands: ModelCommand[], hypothesis?: string): Promise<ProjectModelState>;
   readRevision?(owner: string, revision: number, hypothesis?: string): Promise<ProjectModelState>;
+  hasActiveCompanySource?(owner: string): Promise<boolean>;
+  readDocumentSnapshot?(owner: string, hypothesis: string, documentId: string):
+    Promise<{ revision: number; document: ModelDocument } | undefined>;
 }
 /** Additive table, owner-keyed; durable history and state commit atomically. */
 export class PgModelRepository implements ModelRepository {
@@ -32,6 +36,8 @@ export class PgModelRepository implements ModelRepository {
   }
   async read(owner: string, hypothesis = "original") {
     const pool = await this.database();
+    const active = await activeCompanyRepository(pool, owner);
+    if (active) return active.read(owner, hypothesis);
     await this.ensure(pool, owner);
     const r = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
     return readHypothesis(await unpackModel(pool, owner, r.rows[0].state), hypothesis);
@@ -40,6 +46,8 @@ export class PgModelRepository implements ModelRepository {
   async readRevision(owner: string, revision: number, hypothesis = "original") {
     if (!Number.isSafeInteger(revision) || revision < 0) throw new ModelError(400, "Некорректная ревизия.");
     const pool = await this.database();
+    const active = await activeCompanyRepository(pool, owner);
+    if (active) return active.readRevision(owner, revision, hypothesis);
     const r = await pool.query("SELECT payload FROM talkhint_project_model_history WHERE owner_key=$1 AND key=$2", [owner, `r:${revision}`]);
     if (!r.rows.length) {
       const current = await pool.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1", [owner]);
@@ -56,11 +64,15 @@ export class PgModelRepository implements ModelRepository {
   async updateMany(owner: string, revision: number, commands: ModelCommand[], hypothesis = "original") {
     if (!commands.length || commands.length > 3) throw new ModelError(400, "Invalid transaction size");
     const pool = await this.database();
+    const active = await activeCompanyRepository(pool, owner);
+    if (active) return active.updateMany(owner, revision, commands, hypothesis);
     await this.ensure(pool, owner);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       const r = await client.query("SELECT state,revision FROM talkhint_project_models WHERE owner_key=$1 FOR UPDATE", [owner]);
+      if (await hasNormalizedCompanySource(client, owner))
+        throw new ModelError(409, "Источник переключился на платформу данных; перечитайте актуальную модель.");
       if (r.rows[0].revision !== revision) throw new ModelError(409, "Модель изменена в другой вкладке. Обновите данные и сравните правки.");
       const before = await unpackModel(client, owner, r.rows[0].state);
       const next = commands.reduce((state, command) => applyHypothesisCommand(state, hypothesis, command, owner), before);
@@ -72,5 +84,12 @@ export class PgModelRepository implements ModelRepository {
       return readHypothesis(next, hypothesis);
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); }
+  }
+  async hasActiveCompanySource(owner: string) {
+    return !!await activeCompanyRepository(await this.database(), owner);
+  }
+  async readDocumentSnapshot(owner: string, hypothesis: string, documentId: string) {
+    const active = await activeCompanyRepository(await this.database(), owner);
+    return active ? active.readDocumentSnapshot(owner, hypothesis, documentId) : undefined;
   }
 }

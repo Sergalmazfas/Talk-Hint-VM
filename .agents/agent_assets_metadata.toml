@@ -1783,3 +1783,17 @@ mtime_ms = 1793228977282
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2c636d45-669a-4007-ab0b-48f71b8bc74c/9ae6d783-d356-45e4-8e03-9a464c0ab55b"
 storage_version_token = "1793228986234555"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "j217BPKz8bm35r8AR_C12"
+uri = "file://generated-artifacts/data-platform-B/TalkHint_data_platform_B_v1_rev912.zip"
+type = "unspecified"
+title = "TalkHint — пакет B: перенос в Dev"
+description = "Схема v2, diff, результаты импорта и тестов, сверка 84 документов и 242 архивных записей, отчёт по остаточным полям. Только теневой Dev; без Publish и включения."
+logical_id = "5c5e3a60-1d04-46a6-b83c-514474469589"
+content_hash = "sha256:31a333bfec3036ae22c9b360a149934f912336ea4e73bacb153dff50c1a63919"
+size = 220371
+mtime_ms = 1793232230940
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5c5e3a60-1d04-46a6-b83c-514474469589/1afe4836-2be6-4be1-8221-82fdbfabd2b3"
+storage_version_token = "1793232236248779"
+content_type = "application/octet-stream"

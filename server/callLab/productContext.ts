@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import { unpackModel } from "../projectModel/history";
 import { readHypothesis } from "../projectModel/hypotheses";
 import { buildProductFollowup, type ProductContext } from "./productFollowup";
+import { activeCompanyDocument } from "../companyData/active";
 
 /** Internal only: caller is the existing owner-scoped lab, never an HTTP input. */
 export async function attachProductFollowup(pool: Pool, report: any, source: any, scope: {owner: string; environment: string}) {
@@ -18,6 +19,13 @@ export async function attachProductFollowup(pool: Pool, report: any, source: any
     context.previous = previous.rows.map(r => r.report);
   } catch { context.reason = "Предыдущие отчёты недоступны; не считаются нулём"; }
   try {
+    const active = await activeCompanyDocument(pool, scope.owner, scope.environment, "DOC-TALKHINT-IMPROVEMENT-JOURNAL");
+    if (active) {
+      context.cases = JSON.parse(active.text).cases;
+      if (!Array.isArray(context.cases)) throw Error("journal invalid");
+      context.revision = active.revision; context.status = "available"; delete context.reason;
+      return { ...report, product_followup: buildProductFollowup(report, source, context) };
+    }
     const q = await pool.query(`SELECT owner_key,state FROM talkhint_project_models WHERE EXISTS
       (SELECT 1 FROM jsonb_array_elements(coalesce(state->'alternatives','[]'::jsonb)) h WHERE h->>'id'='new-country')`);
     if (q.rowCount !== 1) throw Error("ambiguous model");

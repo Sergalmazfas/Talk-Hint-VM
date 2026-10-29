@@ -2,6 +2,7 @@
 import type { Pool } from "pg";
 import { unpackModel } from "../projectModel/history";
 import { readHypothesis } from "../projectModel/hypotheses";
+import { activeCompanyDocument } from "../companyData/active";
 import { hintMeasurements } from "./measurements";
 import { buildProductFollowup } from "./productFollowup";
 
@@ -39,8 +40,10 @@ export async function prepareOwnerHintInput(
     problems: [], previous: [], limitations: [], truncated: false,
   };
   try {
+    const active = await activeCompanyDocument(pool, scope.modelOwnerKey, scope.environment, history.journal);
     const [models, previous] = await Promise.all([
-      pool.query("SELECT owner_key,state FROM talkhint_project_models WHERE owner_key=$1", [scope.modelOwnerKey]),
+      active ? Promise.resolve(null) :
+        pool.query("SELECT owner_key,state FROM talkhint_project_models WHERE owner_key=$1", [scope.modelOwnerKey]),
       pool.query(`SELECT report FROM (SELECT DISTINCT ON (call_sid) report,call_sid
         FROM call_lab_jobs WHERE owner_id=$1 AND environment=$2 AND call_sid<>$3
         AND report->>'mode'='hint' AND report IS NOT NULL
@@ -50,15 +53,15 @@ export async function prepareOwnerHintInput(
         ORDER BY (report->>'ended_at')::timestamptz DESC LIMIT 3`,
       [scope.ownerId, scope.environment, source.call_id, source.ended_at]),
     ]);
-    if (models.rowCount !== 1 || models.rows[0].owner_key !== scope.modelOwnerKey)
+    if (!active && (!models || models.rowCount !== 1 || models.rows[0].owner_key !== scope.modelOwnerKey))
       throw new Error("missing model");
-    const model = readHypothesis(await unpackModel(pool as Pool, scope.modelOwnerKey, models.rows[0].state), "new-country");
-    const journal = JSON.parse(model.documents.find(d => d.id === history.journal)!.text);
+    const model = active ? null : readHypothesis(await unpackModel(pool as Pool, scope.modelOwnerKey, models!.rows[0].state), "new-country");
+    const journal = JSON.parse(active ? active.text : model!.documents.find(d => d.id === history.journal)!.text);
     if (!Array.isArray(journal.cases)) throw new Error("bad journal");
     const report = { call_id: source.call_id, ended_at: source.ended_at, deterministic: hintMeasurements(source) };
     const kinds = buildProductFollowup(report, source, { status: "available", cases: [], previous: [] })
       .issues.map(i => i.kind).filter(kind => kind in matches);
-    history.source_revision = model.revision;
+    history.source_revision = active ? active.revision : model!.revision;
     history.status = "partial";
     let excluded = 0;
     for (const kind of Array.from(new Set<string>(kinds))) {

@@ -36,6 +36,8 @@ describe("strategy persistence and HTTP boundaries", () => {
     let pending: Map<string, ProjectModelState> | null = null;
     let archives = new Map<string, any>(), pendingArchives: Map<string, any> | null = null;
     const query = vi.fn(async (sql: string, args: any[] = []) => {
+      if (sql.startsWith("SELECT to_regclass"))
+        return { rows: [{ company_table: null }], rowCount: 1 };
       if (sql.startsWith("INSERT INTO talkhint_project_model_history")) {
         const target = pendingArchives ?? archives;
         for (const row of JSON.parse(args[1])) if (!target.has(`${args[0]}:${row.key}`)) target.set(`${args[0]}:${row.key}`, row);
