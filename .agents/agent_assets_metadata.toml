@@ -1825,3 +1825,17 @@ mtime_ms = 1793238448767
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e7ade4a6-8f9b-4094-afc5-06efc636701a/13bf84b4-f692-43f2-8105-c27e189e784d"
 storage_version_token = "1793238458535108"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "CHCs80nbv4VTeB1fTsJ8s"
+uri = "file://generated-artifacts/data-platform-publish-1/TalkHint_Publish_1_review_v1.zip"
+type = "unspecified"
+title = "Publish №1 — таблицы, DDL и предложение привязки"
+description = "85 таблиц: 40 пустых архивных структур B + 45 v3. Фактический diff, полный список таблиц, read-only сверка аккаунтов, шаги подтверждения и границы готовности. Без Publish, импорта и переключения."
+logical_id = "83ff3666-5747-43a7-a790-eaf862c56b94"
+content_hash = "sha256:252153905ddb1f1e1d4401b8c1d5d265e6de887d6eb5f8974d66734a3b17ae98"
+size = 19587
+mtime_ms = 1793239119511
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/83ff3666-5747-43a7-a790-eaf862c56b94/5503c804-9886-4d0b-b0c3-80e8f36f5803"
+storage_version_token = "1793239154184378"
+content_type = "application/octet-stream"
