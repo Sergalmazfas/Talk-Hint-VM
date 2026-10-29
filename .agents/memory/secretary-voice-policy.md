@@ -28,3 +28,11 @@ The owner superseded the earlier five-minute choice on 2026-10-29: telephone Sec
 **Why:** The owner explicitly approved “предел звонка Кати — 10 минут вместо 5” after Claude's IVR review.
 
 **How to apply:** Do not promise indefinite IVR waiting. Explain the ten-minute boundary; a longer call limit needs a new owner decision. Browser-only benches keep their independent limits. Server-only menu assistance must not be described as a native iOS text-input action or as verified push delivery without testing those paths.
+
+## Provider evidence boundaries
+
+Retell call history with `basic_attributes_only` may expose only call metadata, not a transcript, word timings or a model/tool trace. `user_hangup` on a SIP phone call is not proof that the owner pressed End or that a remote IVR timed out.
+
+**Why:** Read-only investigation returned metadata-only histories and that ambiguous end reason; neither could supply the requested per-turn timing or identify the terminating actor.
+
+**How to apply:** Correlate local owner-scoped events, provider end metadata and HTTP hangup logs. Mark missing timings/actor as unknown; never enable audio retention or claim an exact late-DTMF diagnosis merely to fill the gaps.
