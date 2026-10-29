@@ -2035,3 +2035,17 @@ mtime_ms = 1793294451219
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0b544ec8-e6a9-49bf-952a-a4879798a8e1/75ae88af-6ee2-4ba9-8ee3-67587123a112"
 storage_version_token = "1793294458129912"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "W6RoTF_C0ookV_J27lSmV"
+uri = "file://generated-artifacts/company-cutover-approval/TalkHint_cutover_approval_only_Claude.zip"
+type = "unspecified"
+title = "Только approval — маленький diff для Claude"
+description = "Изменён только policy.ts. Точный согласованный pin, название документа-пробы, проверка типов и честный результат тестов: 10 passed / 1 устаревшее ожидание null."
+logical_id = "f27f914f-64d9-4e9f-afdd-f511d9dbdd13"
+content_hash = "sha256:8bb517418aab3cc97534f013d7455faee6be4f5e623201760a60d8049eaa8494"
+size = 5111
+mtime_ms = 1793296215575
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f27f914f-64d9-4e9f-afdd-f511d9dbdd13/4a281a9b-0da6-4bbe-9d5e-02171daa6944"
+storage_version_token = "1793296221094072"
+content_type = "application/octet-stream"
