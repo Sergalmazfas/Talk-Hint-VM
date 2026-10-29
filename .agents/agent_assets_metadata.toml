@@ -1923,3 +1923,17 @@ mtime_ms = 1793256809518
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/87b2670f-35c0-40dd-a736-356e3685c0f4/bb51ae0e-1251-4a6e-b7bd-b0d662c04b8d"
 storage_version_token = "1793256830715478"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "1daAWB2xva6F-jVznpXUB"
+uri = "file://generated-artifacts/postpublish2-check/TalkHint_PostPublish2_Claude_review_with_owner_status.zip"
+type = "unspecified"
+title = "Publish №2 — пакет для Claude с подтверждением владельца"
+description = "Обновлённая сверка: готовность пакета, статус лаборатории и дежурного, расписание 08:00 Denver. Импорт не запускался; оставшиеся ограничения перечислены."
+logical_id = "6716b67b-5d30-4463-9630-61d6d9b00a7d"
+content_hash = "sha256:e38e5c777e36114a04a0f1fa72a33f62689ce3a418665458126ebe20972cd79a"
+size = 35753
+mtime_ms = 1793259144333
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6716b67b-5d30-4463-9630-61d6d9b00a7d/91ff96e3-ad59-49b1-8c8c-443e1842685e"
+storage_version_token = "1793259150828876"
+content_type = "application/octet-stream"
