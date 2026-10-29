@@ -2119,3 +2119,17 @@ mtime_ms = 1793311235386
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/02eb5264-3af1-46bd-8903-4d94a1d164ab/0fa07950-c41c-4ccc-9ae6-77cce6297caf"
 storage_version_token = "1793311254434462"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "qsFZC1rlGGod93BmV469H"
+uri = "file://generated-artifacts/post-probe-readonly/TalkHint_PostProbe_r914_readonly_Claude.zip"
+type = "unspecified"
+title = "Проверка пробы r914 — для Claude"
+description = "Read-only: ревизии, побайтовая сверка всех 84 документов, источник, журнал, очереди и диагностика. Отдельно отмечены непроверенные авторизованные HTTP/MCP-пути. Запись не открывалась."
+logical_id = "30677848-f947-464c-8cac-9ffb18071087"
+content_hash = "sha256:56c649d9e62e22b2d87077f44efb8ed0715bf5349a1c2848ece7fec0b46d26e3"
+size = 12478
+mtime_ms = 1793314180396
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/30677848-f947-464c-8cac-9ffb18071087/7c86b7fe-5aae-409c-bd3e-ea9e176613a4"
+storage_version_token = "1793314193232076"
+content_type = "application/octet-stream"
