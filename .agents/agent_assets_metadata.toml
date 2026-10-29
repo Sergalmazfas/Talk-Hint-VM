@@ -1965,3 +1965,17 @@ mtime_ms = 1793264063250
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/66171ca6-1298-4eb6-a069-e3cab4e07d48/351be028-9fdc-4c4e-afda-2f29679a7b3a"
 storage_version_token = "1793264076148603"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "5OmcYMDUe6qJD4tPsJltu"
+uri = "file://generated-artifacts/secretary-ivr-ten-minute-review/TalkHint_Katya_10min_owner_context_Claude.zip"
+type = "unspecified"
+title = "Катя · 10 минут и изоляция журнала · сверка Claude"
+description = "Два Dev-diff, исходники, полный прогон по 272 файлам: 2586 passed / 0 failed / 30 skipped. Первая неуспешная попытка и успешный повтор сохранены. Publish и production без изменений; approval=null."
+logical_id = "6394a4fe-908f-49d4-8fdb-fb49dc751d64"
+content_hash = "sha256:ae278515366996bc70e37d9457594285fd3426cd66a6450a1c4776b416f3271e"
+size = 312211
+mtime_ms = 1793284308480
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6394a4fe-908f-49d4-8fdb-fb49dc751d64/fd5ac66b-4f3f-4e17-9129-d046cd00f0b7"
+storage_version_token = "1793284314773940"
+content_type = "application/octet-stream"

@@ -165,6 +165,12 @@ describe.skipIf(!DB_UP)("Secretary live owner lock (real Postgres; no phone call
       status, dialStartedAt: new Date(Date.now() - 9 * 60_000),
     }).where(eq(secretaryTasks.id, attempt.task.id));
     await expect(tasks.createLiveSecretaryTask(userId, intent())).rejects.toMatchObject({ status: 409 });
+    // The old eight-minute watchdog must not expire a still-valid ten-minute call.
+    expect(await tasks.expireStaleSecretaryCalls(userId)).toBe(0);
+    expect((await tasks.getSecretaryTaskById(attempt.task.id))?.status).toBe(status);
+    await db.update(secretaryTasks).set({
+      dialStartedAt: new Date(Date.now() - 14 * 60_000),
+    }).where(eq(secretaryTasks.id, attempt.task.id));
     expect(await tasks.expireStaleSecretaryCalls(userId)).toBe(1);
     expect((await tasks.getSecretaryTaskById(attempt.task.id))?.status).toBe("unknown");
     const next = await tasks.createLiveSecretaryTask(userId, intent());

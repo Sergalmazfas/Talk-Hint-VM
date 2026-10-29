@@ -1,3 +1,4 @@
+import { SECRETARY_CALL_LIMIT_MS } from "./limits";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { calls, secretaryTasks } from "@shared/schema";
 import { db } from "../db";
@@ -29,8 +30,8 @@ export function retellPhoneConfiguration(origin: string) {
       "/retell-phone-engine/{{talkhint_phone_ticket}}" },
     voice_id: "retell-Merritt", language: ["en-US", "ru-RU", "es-ES"],
     interruption_sensitivity: 0.9, responsiveness: 1, enable_backchannel: false,
-    data_storage_setting: "basic_attributes_only", max_call_duration_ms: 300_000,
-    end_call_after_silence_ms: 300_000, webhook_events: [], fallback_voice_ids: [],
+    data_storage_setting: "basic_attributes_only", max_call_duration_ms: SECRETARY_CALL_LIMIT_MS,
+    end_call_after_silence_ms: SECRETARY_CALL_LIMIT_MS, webhook_events: [], fallback_voice_ids: [],
     contact_memory_config: { enable_read: false, enable_update: false },
   };
 }
@@ -42,8 +43,8 @@ export function verifyRetellPhoneAgent(agent: any, origin: string) {
     agent?.voice_id !== expected.voice_id ||
     JSON.stringify(agent?.language) !== JSON.stringify(expected.language) ||
     agent?.interruption_sensitivity !== 0.9 || agent?.responsiveness !== 1 ||
-    agent?.enable_backchannel !== false || agent?.max_call_duration_ms !== 300_000 ||
-    agent?.end_call_after_silence_ms !== 300_000 ||
+    agent?.enable_backchannel !== false || agent?.max_call_duration_ms !== SECRETARY_CALL_LIMIT_MS ||
+    agent?.end_call_after_silence_ms !== SECRETARY_CALL_LIMIT_MS ||
     agent?.data_storage_setting !== "basic_attributes_only" ||
     agent?.contact_memory_config?.enable_read !== false ||
     agent?.contact_memory_config?.enable_update !== false ||
@@ -55,6 +56,21 @@ export function verifyRetellPhoneAgent(agent: any, origin: string) {
     throw new Error("Retell telephone configuration was not verified; no fallback");
   }
   return agent.agent_id as string;
+}
+/** Upgrade only the reviewed five-minute telephone config, never other drift.
+ * Runs on the existing pre-dial readiness path, not on deploy/startup. */
+export async function ensureRetellPhoneDuration(agent: any, origin: string,
+  api: Pick<RetellApi, "request"> = retellPhoneApi) {
+  if (agent?.max_call_duration_ms === 300_000 && agent?.end_call_after_silence_ms === 300_000) {
+    const id = verifyRetellPhoneAgent({ ...agent, max_call_duration_ms: SECRETARY_CALL_LIMIT_MS,
+      end_call_after_silence_ms: SECRETARY_CALL_LIMIT_MS }, origin);
+    await api.request(`/update-agent/${encodeURIComponent(id)}`, {
+      max_call_duration_ms: SECRETARY_CALL_LIMIT_MS, end_call_after_silence_ms: SECRETARY_CALL_LIMIT_MS,
+    }, "PATCH");
+    agent = await api.request(`/get-agent/${encodeURIComponent(id)}`);
+  }
+  verifyRetellPhoneAgent(agent, origin);
+  return agent;
 }
 /** Does not register, dial or redirect any call. Must complete before Twilio create. */
 export async function requireRetellPhone(origin: string): Promise<string> {
@@ -72,7 +88,8 @@ export async function requireRetellPhone(origin: string): Promise<string> {
     const matches = (await retellPhoneApi.listAgents()).filter((a: any) => a.agent_name === retellPhoneConfiguration(origin).agent_name);
     if (matches.length > 1) throw new Error("Duplicate Retell telephone agents; no call placed");
     const created = matches[0] ?? await retellPhoneApi.request("/create-agent", retellPhoneConfiguration(origin));
-    const agent = await retellPhoneApi.request(`/get-agent/${encodeURIComponent(created.agent_id)}`);
+    const agent = await ensureRetellPhoneDuration(
+      await retellPhoneApi.request(`/get-agent/${encodeURIComponent(created.agent_id)}`), origin);
     const id = verifyRetellPhoneAgent(agent, origin);
     if (!Number.isInteger(agent.version) || agent.version < 0) throw new Error("Retell agent version not verified; no call placed");
     verified = { origin, id, version: agent.version, until: Date.now() + 60_000 };

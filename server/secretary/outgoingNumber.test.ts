@@ -27,7 +27,9 @@ const job = { id: "task", userId: "owner", phoneNumber: "+19990000003", voicePro
 it("dials the explicit owned work line, not the legacy personal default", async () => {
   f.validate.mockResolvedValue({ numberId: "work" });
   await dialSecretaryTask({ ...job, outgoingContext: { version: 1 } });
-  expect(f.create).toHaveBeenCalledWith(expect.objectContaining({ from: "+19990000002", to: job.phoneNumber }));
+  expect(f.create).toHaveBeenCalledWith(expect.objectContaining({
+    from: "+19990000002", to: job.phoneNumber, timeLimit: 600, record: false,
+  }));
   expect(f.save).toHaveBeenCalledWith(expect.objectContaining({ fromNumber: "+19990000002" }));
 });
 it("does not fall back to another line when the selected number is unavailable", async () => {
@@ -38,5 +40,7 @@ it("does not fall back to another line when the selected number is unavailable",
 it("keeps the legacy calling line for older tasks without the new context", async () => {
   await dialSecretaryTask(job);
   expect(f.validate).not.toHaveBeenCalled();
-  expect(f.create).toHaveBeenCalledWith(expect.objectContaining({ from: "+19990000001" }));
+  expect(f.create).toHaveBeenCalledWith(expect.objectContaining({
+    from: "+19990000001", timeLimit: 600, record: false,
+  }));
 });

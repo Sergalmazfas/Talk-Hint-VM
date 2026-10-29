@@ -1,3 +1,4 @@
+import { SECRETARY_CALL_LIMIT_MS } from "../secretary/limits";
 import { randomBytes, createHash } from "node:crypto";
 import type WebSocket from "ws";
 import { RetellApi, RetellApiError, RETELL_LAB_MODEL, RETELL_LAB_VOICE } from "./retellApi";
@@ -71,7 +72,8 @@ export class RetellEngineRegistry {
     const ticket = randomBytes(32).toString("hex");
     const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts,
       this.options.phone ? this.options.telephoneTools?.(id) : undefined),
-      responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false, expiresAt: Date.now() + 300_000 };
+      responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false,
+      expiresAt: Date.now() + (this.options.phone ? SECRETARY_CALL_LIMIT_MS : 300_000) };
     this.entries.set(id, entry); this.tickets.set(ticket, entry);
     if (this.options.phone) {
       const expiry = setTimeout(() => {
@@ -79,7 +81,7 @@ export class RetellEngineRegistry {
           this.options.onFailure?.(id);
           this.ended(id);
         }
-      }, 300_000);
+      }, SECRETARY_CALL_LIMIT_MS);
       expiry.unref();
     }
     return { ticket, engine: entry.engine.report, promptHash: createHash("sha256").update(entry.engine.instructions).digest("hex") };

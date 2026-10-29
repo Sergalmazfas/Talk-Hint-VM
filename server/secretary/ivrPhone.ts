@@ -63,7 +63,7 @@ async function context(id: string) {
         notify: async menu => {
           await activeTask(id);
           await notifySecretaryResult(task.userId, id, false, {
-            body: `Застряла в меню: ${menu.slice(0, 600)}. Ответьте цифрой на защищённой странице меню. Лимит звонка — 5 минут.`,
+            body: `Застряла в меню: ${menu.slice(0, 600)}. Ответьте цифрой на защищённой странице меню. Лимит звонка — 10 минут.`,
             url: "/api/secretary/ivr",
           });
         },

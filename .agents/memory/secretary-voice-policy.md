@@ -23,8 +23,8 @@ The owner wants the standard introduction to say “secretary”, not “assista
 
 ## IVR pilot duration and owner assistance
 
-The owner explicitly chose to retain the five-minute Secretary call limit when offered longer limits during the IVR work on 2026-10-29. Waiting for an owner's menu choice does not authorize extending that limit.
+The owner superseded the earlier five-minute choice on 2026-10-29: telephone Secretary calls now have a ten-minute limit. Waiting for an owner's menu choice does not authorize extending that limit.
 
-**Why:** The owner selected “Оставить 5 минут”.
+**Why:** The owner explicitly approved “предел звонка Кати — 10 минут вместо 5” after Claude's IVR review.
 
-**How to apply:** Do not promise indefinite IVR waiting. Explain the five-minute boundary; a longer call limit needs a new owner decision. Server-only menu assistance must not be described as a native iOS text-input action or as verified push delivery without testing those paths.
+**How to apply:** Do not promise indefinite IVR waiting. Explain the ten-minute boundary; a longer call limit needs a new owner decision. Browser-only benches keep their independent limits. Server-only menu assistance must not be described as a native iOS text-input action or as verified push delivery without testing those paths.

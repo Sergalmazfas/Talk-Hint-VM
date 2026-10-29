@@ -1,3 +1,4 @@
+import { SECRETARY_CALL_LIMIT_SECONDS } from "./limits";
 import twilio from "twilio";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
@@ -72,7 +73,7 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     statusCallbackMethod: "POST",
     statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
     timeout: 30,
-    timeLimit: 300,
+    timeLimit: SECRETARY_CALL_LIMIT_SECONDS,
     record: false,
   });
   // The REST create response is the authoritative SID for this task. If the

@@ -1,3 +1,4 @@
+import { SECRETARY_CALL_LIMIT_MS } from "./limits";
 import WebSocket from "ws";
 import { SecretaryCallEnding, type SecretaryEndRequest } from "./callEnding";
 import {
@@ -11,7 +12,7 @@ import { secretaryIntroductionPolicy, type ConfirmedSecretaryOwnerName } from ".
 import { SecretaryNativePlayback } from "./nativePlayback";
 
 const OPENAI_MODEL = process.env.SECRETARY_REALTIME_MODEL || "gpt-realtime";
-const CALL_LIMIT_MS = 5 * 60_000;
+const CALL_LIMIT_MS = SECRETARY_CALL_LIMIT_MS;
 const CONNECT_TIMEOUT_MS = 12_000;
 const MAX_EARLY_AUDIO_FRAMES = 150; // 3 seconds at 20ms per Twilio frame
 const MAX_EARLY_AUDIO_BYTES = 512 * 1024;
@@ -721,7 +722,7 @@ export function handleSecretaryTwilioStream(
     }
     if (finalized || !initialized || ws.readyState !== WebSocket.OPEN) return;
     callTimer = setTimeout(() => {
-      void finish("Secretary call reached the five-minute safety limit");
+      void finish("Secretary call reached the ten-minute safety limit");
     }, CALL_LIMIT_MS);
     callTimer.unref?.();
   };

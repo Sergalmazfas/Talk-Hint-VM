@@ -1,3 +1,4 @@
+import { SECRETARY_CALL_LIMIT_SECONDS } from "./secretary/limits";
 import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
 import { registerCallLabRoutes } from "./callLab/routes";
@@ -359,7 +360,7 @@ export async function registerRoutes(
         });
         monitor.parameter({ name: "taskId", value: task.id });
         monitor.parameter({ name: "streamAuth", value: signSecretaryStream(task.id, callSid) });
-        twiml.dial({ timeLimit: 300, timeout: 30 }).sip(sip);
+        twiml.dial({ timeLimit: SECRETARY_CALL_LIMIT_SECONDS, timeout: 30 }).sip(sip);
         twiml.hangup();
         return res.type("text/xml").send(twiml.toString());
       }

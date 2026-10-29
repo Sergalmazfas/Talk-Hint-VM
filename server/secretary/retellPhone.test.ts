@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { RetellEngineRegistry } from "../secretaryLab/retellEngine";
 import { SecretaryConversationEngine, streamSecretaryResponse, type EngineStream } from "./conversationEngine";
-import { retellPhoneConfiguration, verifyRetellPhoneAgent, registerRetellPhone, endRetellPhone, retellPhoneApi } from "./retellPhone";
+import { retellPhoneConfiguration, verifyRetellPhoneAgent, ensureRetellPhoneDuration, registerRetellPhone, endRetellPhone, retellPhoneApi } from "./retellPhone";
 const f = vi.hoisted(() => ({ update: vi.fn(), lookup: vi.fn(), call: vi.fn() }));
 vi.mock("../db", () => ({ db: { update: f.update } }));
 vi.mock("./tasks", () => ({ getSecretaryTaskForCall: f.lookup }));
@@ -17,7 +17,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const registries: RetellEngineRegistry[] = [];
 afterEach(() => {
   for (const registry of registries.splice(0)) registry.dispose();
-  vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs();
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers();
 });
 describe("Telephone Retell + the same TalkHint text Engine", () => {
   it("isolates phone configuration from the Dev bench and another backend origin", () => {
@@ -25,12 +25,66 @@ describe("Telephone Retell + the same TalkHint text Engine", () => {
     expect(config.voice_id).toBe("retell-Merritt");
     expect(config.interruption_sensitivity).toBe(0.9);
     expect(config.responsiveness).toBe(1);
+    expect(config.max_call_duration_ms).toBe(600_000);
+    expect(config.end_call_after_silence_ms).toBe(600_000);
     expect(config.response_engine.type).toBe("custom-llm");
     const agent = { ...config, agent_id: "agent_test" };
     expect(verifyRetellPhoneAgent(agent, origin)).toBe("agent_test");
     expect(() => verifyRetellPhoneAgent(agent, "https://prod.example.com")).toThrow();
     expect(() => verifyRetellPhoneAgent({ ...agent, voice_id: "other" }, origin)).toThrow();
     expect(() => verifyRetellPhoneAgent({ ...agent, pre_session_tools: [{}] }, origin)).toThrow();
+    expect(() => verifyRetellPhoneAgent({ ...agent, max_call_duration_ms: 300_000 }, origin)).toThrow();
+  });
+  it("keeps the phone transport alive beyond five minutes and closes at ten, even in IVR", async () => {
+    vi.useFakeTimers();
+    const onFailure = vi.fn();
+    const registry = new RetellEngineRegistry(undefined, {
+      phone: true, onFailure, telephoneTools: () => ({
+        beforeTurn: async () => "IVR waiting for owner",
+        execute: async () => ({ silent: true }), blocksEnd: () => true,
+      }),
+    });
+    registries.push(registry);
+    const r = registry.reserve("owner", "Reach tires", "task-duration");
+    registry.registered("task-duration", "call-duration");
+    const ws = new Socket(), path = `/retell-phone-engine/${r.ticket}/call-duration`;
+    registry.attach(ws as any, path);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(ws.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(299_999);
+    expect(ws.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("task-duration");
+    expect(ws.close).toHaveBeenCalledOnce();
+    expect(registry.permits(path)).toBe(false);
+  });
+  it("upgrades only the two duration fields of the existing reviewed phone agent before a future call", async () => {
+    const origin = "https://dev.example.com";
+    const current = { ...retellPhoneConfiguration(origin), agent_id: "agent_duration", version: 2 };
+    const old = { ...current, max_call_duration_ms: 300_000, end_call_after_silence_ms: 300_000 };
+    const request = vi.fn().mockResolvedValueOnce(current).mockResolvedValueOnce(current);
+    expect(await ensureRetellPhoneDuration(old, origin, { request })).toEqual(current);
+    expect(request.mock.calls).toEqual([
+      ["/update-agent/agent_duration", { max_call_duration_ms: 600_000, end_call_after_silence_ms: 600_000 }, "PATCH"],
+      ["/get-agent/agent_duration"],
+    ]);
+    request.mockClear();
+    await ensureRetellPhoneDuration(current, origin, { request });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("does not repair unrelated provider drift or continue after an unverified duration update", async () => {
+    const origin = "https://dev.example.com";
+    const old = { ...retellPhoneConfiguration(origin), agent_id: "agent_duration",
+      max_call_duration_ms: 300_000, end_call_after_silence_ms: 300_000 };
+    const request = vi.fn();
+    await expect(ensureRetellPhoneDuration({ ...old, voice_id: "other" }, origin, { request })).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+    request.mockResolvedValueOnce(old).mockResolvedValueOnce(old);
+    await expect(ensureRetellPhoneDuration(old, origin, { request })).rejects.toThrow();
+    request.mockReset().mockRejectedValue(Error("update failed"));
+    await expect(ensureRetellPhoneDuration(old, origin, { request })).rejects.toThrow("update failed");
+    expect(request).toHaveBeenCalledTimes(1);
   });
   it("does not inject the fictional fixture or permit TEST/business tools into real phone calls", async () => {
     const requests: any[] = [];

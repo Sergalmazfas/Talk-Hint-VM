@@ -1,3 +1,4 @@
+import { SECRETARY_CALL_LIMIT_MS } from "./limits";
 import { deliverSecretaryNotificationOnce } from "./notificationAttempt";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -13,8 +14,8 @@ export const SECRETARY_LIVE_COOLDOWN_MS = 3_000;
 export const SECRETARY_MAX_INSTRUCTION_CHARS = 2_000;
 export const SECRETARY_MAX_TRANSCRIPT_CHARS = 40_000;
 const TASK_START_TIMEOUT_MS = 2 * 60_000;
-// Twilio's dialer sets timeLimit: 300 seconds. Allow two more minutes for callbacks.
-const STALE_CALL_TIMEOUT_MS = 8 * 60_000;
+// Keep the existing three-minute callback/reconciliation margin beyond the call limit.
+const STALE_CALL_TIMEOUT_MS = SECRETARY_CALL_LIMIT_MS + 3 * 60_000;
 const REPORT_SETTLEMENT_GRACE_MS = 15_000;
 // Repeated report failures must not hold the per-owner active index forever.
 const REPORT_SETTLEMENT_TIMEOUT_MS = 4 * 60_000;

@@ -7,6 +7,11 @@ import { activeCompanyDocument } from "../companyData/active";
 /** Internal only: caller is the existing owner-scoped lab, never an HTTP input. */
 export async function attachProductFollowup(pool: Pool, report: any, source: any, scope: {owner: string; environment: string}) {
   const context: ProductContext = { status: "unavailable", cases: [], previous: [], reason: "История не прочитана" };
+  // A technical archive is not an authenticated owner, even when explicitly passed.
+  if (!scope.owner || scope.owner.startsWith("company-archive:")) {
+    context.reason = "Журнал владельца недоступен; технический архив не является рабочим источником";
+    return { ...report, product_followup: buildProductFollowup(report, source, context) };
+  }
   try {
     const previous = await pool.query(`SELECT report FROM (SELECT DISTINCT ON (call_sid) report,call_sid
       FROM call_lab_jobs WHERE owner_id=$1 AND environment=$2
@@ -26,9 +31,12 @@ export async function attachProductFollowup(pool: Pool, report: any, source: any
       context.revision = active.revision; context.status = "available"; delete context.reason;
       return { ...report, product_followup: buildProductFollowup(report, source, context) };
     }
-    const q = await pool.query(`SELECT owner_key,state FROM talkhint_project_models WHERE EXISTS
-      (SELECT 1 FROM jsonb_array_elements(coalesce(state->'alternatives','[]'::jsonb)) h WHERE h->>'id'='new-country')`);
+    const q = await pool.query(`SELECT owner_key,state FROM talkhint_project_models
+      WHERE owner_key=$1 AND owner_key NOT LIKE 'company-archive:%' AND EXISTS
+      (SELECT 1 FROM jsonb_array_elements(coalesce(state->'alternatives','[]'::jsonb)) h WHERE h->>'id'='new-country')`,
+    [scope.owner]);
     if (q.rowCount !== 1) throw Error("ambiguous model");
+    if (q.rows[0].owner_key !== scope.owner) throw Error("owner mismatch");
     const s = readHypothesis(await unpackModel(pool, q.rows[0].owner_key, q.rows[0].state), "new-country");
     const document = s.documents.find(d => d.id === "DOC-TALKHINT-IMPROVEMENT-JOURNAL");
     if (!document) throw Error("journal missing");
