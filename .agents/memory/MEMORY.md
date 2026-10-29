@@ -1,3 +1,4 @@
+- [Target product teams](product-teams-target.md) — 29.10 owner hierarchy is plan-only until new DB activation; Katya paused, future teams empty, chat-entry undecided.
 - [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.
 - [Process on-call](process-on-call.md) — owner expects immediate email on missing/failed transitions; explicit coverage, no false green, no blind mail retries.
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.
