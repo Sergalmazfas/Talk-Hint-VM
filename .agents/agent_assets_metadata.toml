@@ -2063,3 +2063,17 @@ mtime_ms = 1793297384863
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1e929895-e262-466d-a466-3844bbb6444c/aacba292-ddcd-4f58-aae0-d429c42d2665"
 storage_version_token = "1793297397008011"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "CfA8IgubbNqk6Jghvqjql"
+uri = "file://generated-artifacts/postpublish3-check/TalkHint_PostPublish3_readonly_Claude.zip"
+type = "unspecified"
+title = "Проверка после Publish №3 — для Claude"
+description = "Read-only: 129 952 записи, 84 UTF-8 SHA, 242 архива, схема, очереди и логи новой сборки. Готовность к включению не подтверждена; ограничения и сбои перечислены в README."
+logical_id = "7df44b64-ba9e-44b8-9510-f20c3ec9b700"
+content_hash = "sha256:0bdc21d5f64583b8d110f974c57cc8925c2f0ea93c8ae671156c0794cf81d44d"
+size = 56258
+mtime_ms = 1793305743117
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7df44b64-ba9e-44b8-9510-f20c3ec9b700/275fc6ea-dd0d-441c-84d2-4a1fb154f9f2"
+storage_version_token = "1793305751487082"
+content_type = "application/octet-stream"
