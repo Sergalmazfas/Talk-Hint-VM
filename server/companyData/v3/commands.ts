@@ -8,6 +8,7 @@ import { entityArrayEdits } from "./entityArrays";
 import { projectFragment } from "./projection";
 import { IncrementalCompanyRepository, type DeltaEdit } from "./repository";
 import type { SqlFrameStore } from "./store";
+import { cachedResponse, rememberResponse, mergeWriteResponse } from "./responseCache";
 
 const empty = (revision: number): ProjectModelState => ({
   schema: 1, revision, elements: [], relations: [], documents: [], decisions: [], proposals: [], taskDrafts: [],
@@ -76,13 +77,24 @@ function scopedColumns(all: Map<string, Frame>, prefix: string) {
 export class CommandCompanyRepository {
   lastReceipt: Awaited<ReturnType<IncrementalCompanyRepository["commitDelta"]>> | undefined;
   constructor(readonly data: IncrementalCompanyRepository) {}
-  read = (owner: string, hypothesis = "original") => this.data.read(owner, hypothesis);
+  private async responseKey(owner: string, hypothesis: string, revision: number) {
+    const q = await this.data.pool.query(`SELECT root_hash,current_revision FROM company_v3_workspaces
+      WHERE owner_key=$1 AND environment=$2`, [owner, this.data.environment]);
+    if (q.rowCount !== 1 || Number(q.rows[0].current_revision) !== revision)
+      throw new ModelError(409, "Stale company response");
+    return JSON.stringify([this.data.environment, owner, hypothesis, q.rows[0].root_hash]);
+  }
+  read = async (owner: string, hypothesis = "original") => {
+    const state = await this.data.read(owner, hypothesis);
+    return rememberResponse(this.data.pool, await this.responseKey(owner, hypothesis, state.revision), state);
+  };
   readRevision = (owner: string, revision: number, hypothesis = "original") => this.data.readRevision(owner, revision, hypothesis);
   readDocumentSnapshot = (owner: string, hypothesis: string, id: string) => this.data.readDocumentSnapshot(owner, hypothesis, id);
   update(owner: string, expected: number, command: ModelCommand, hypothesis = "original") {
     return this.updateMany(owner, expected, [command], hypothesis);
   }
-  async writeMany(owner: string, expected: number, commands: ModelCommand[], hypothesis = "original") {
+  async writeMany(owner: string, expected: number, commands: ModelCommand[], hypothesis = "original",
+    prepared?: (after: ProjectModelState) => void) {
     if (!commands.length || commands.length > 3) throw new ModelError(400, "Expected one to three company commands");
     this.lastReceipt = await this.data.commitDelta(owner, expected, async store => {
       const { rows } = await store.db.query("SELECT root_hash FROM company_v3_workspaces WHERE workspace_id=$1", [store.workspace]);
@@ -99,6 +111,7 @@ export class CommandCompanyRepository {
       const { alternatives: _alternatives, ...originalAfter } = scopedRoot;
       const after = hypothesis === "original" ? originalAfter :
         scopedRoot.alternatives.find(a => a.id === hypothesis)!.model;
+      prepared?.(after);
       const fragment = empty(scopedRoot.revision), selected = empty(scopedRoot.revision);
       for (const key of arrays) (selected as any)[key] = (after[key] as any[]).filter(
         row => !before[key].some((old: any) => old.id === row.id && semanticHash(old) === semanticHash(row)));
@@ -167,8 +180,22 @@ export class CommandCompanyRepository {
     return this.lastReceipt;
   }
   async updateMany(owner: string, expected: number, commands: ModelCommand[], hypothesis = "original") {
-    await this.writeMany(owner, expected, commands, hypothesis);
-    // Old API promises the complete selected model; export cost is not writer verification.
-    return this.read(owner, hypothesis);
+    const key = await this.responseKey(owner, hypothesis, expected);
+    // Cold clients pay the existing read BEFORE the transaction, not a second
+    // full read after commit. GET/MCP-read clients reuse their exact base.
+    const base = cachedResponse(this.data.pool, key, expected) ?? await this.read(owner, hypothesis);
+    if (base.revision !== expected) throw new ModelError(409, "Stale company revision");
+    let after: ProjectModelState | undefined;
+    const receipt = await this.writeMany(owner, expected, commands, hypothesis, value => { after = value; });
+    const next = after ? mergeWriteResponse(base, after, receipt.revision) : base;
+    // A concurrent next writer must not poison this response's cache address.
+    // Query only the immutable revision head, never the complete model.
+    const q = await this.data.pool.query(`SELECT h.root_hash FROM company_v3_revision_heads h
+      JOIN company_v3_workspaces w ON w.workspace_id=h.workspace_id
+      WHERE w.owner_key=$1 AND w.environment=$2 AND h.revision=$3`,
+    [owner, this.data.environment, next.revision]);
+    if (q.rowCount === 1)
+      rememberResponse(this.data.pool, JSON.stringify([this.data.environment, owner, hypothesis, q.rows[0].root_hash]), next);
+    return next;
   }
 }

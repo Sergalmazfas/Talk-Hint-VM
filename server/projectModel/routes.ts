@@ -4,6 +4,7 @@ import { adminActionOrigin } from "../adminWeb";
 import { dbReady, pool } from "../db";
 import { ModelError, requestSchema } from "./domain";
 import { PgModelRepository, type ModelRepository } from "./repository";
+import { registerCompanyImport } from "../companyData/v3/importRoutes";
 
 const repository = new PgModelRepository(async () => {
   await dbReady;
@@ -12,6 +13,11 @@ const repository = new PgModelRepository(async () => {
 });
 
 export function registerProjectModel(app: Express, repo: ModelRepository = repository) {
+  registerCompanyImport(app, async () => {
+    await dbReady;
+    if (!pool) throw new Error("Database unavailable");
+    return pool;
+  });
   // Defense in depth: safe even when mounted without the outer /api/admin gate.
   app.all("/api/admin/project-model", requireBenchmarkAdmin, adminActionOrigin, async (req, res) => {
     res.set("Cache-Control", "no-store");

@@ -80,7 +80,9 @@ try {
   workspaces.push(good.workspace);
   assert.equal(good.semanticHash, semanticHash(root)); assert.equal(good.activated, false); assert.equal(good.generation, "shadow");
   checks.successfulSyntheticImportNotActivated = true;
-  const archive = await pool.query("SELECT payload FROM talkhint_project_model_history WHERE owner_key=$1 AND key='r:8'", [a]);
+  owners.push(good.archiveOwner);
+  assert.equal((await pool.query("SELECT 1 FROM talkhint_project_models WHERE owner_key=$1", [a])).rowCount, 0);
+  const archive = await pool.query("SELECT payload FROM talkhint_project_model_history WHERE owner_key=$1 AND key='r:8'", [good.archiveOwner]);
   assert.equal(semanticHash(archive.rows[0].payload), semanticHash(old));
   checks.archiveOwnerRemapAndExactPayload = true;
   checks.longTextSnapshotAndDirectDocumentIndex = true;
@@ -111,7 +113,9 @@ try {
   const b = target(), tokens = [await service.grant(auth(b), manifest, b), await service.grant(auth(b), manifest, b)];
   const race = await Promise.allSettled(tokens.map(t => service.consume(auth(b), t, manifest, stream(records))));
   assert.equal(race.filter(r => r.status === "fulfilled").length, 1);
-  for (const r of race) if (r.status === "fulfilled") workspaces.push(r.value.workspace);
+  for (const r of race) if (r.status === "fulfilled") {
+    workspaces.push(r.value.workspace); owners.push(r.value.archiveOwner);
+  }
   const candidate = await pool.query("SELECT workspace_id FROM company_v3_workspaces WHERE owner_key=$1", [b]);
   assert.equal(candidate.rowCount, 1);
   checks.concurrentTargetEmptinessRecheckOneWinner = true;

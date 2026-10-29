@@ -1,5 +1,5 @@
 /**
- * Prepared owner-authenticated import service. No HTTP route/startup registration.
+ * Owner-authenticated candidate import. HTTP registration is fail-closed.
  * Production execution is disabled by default and was NOT run for B2.
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -57,6 +57,7 @@ export class OwnerImportService {
     records: AsyncIterable<TransferRecord>, activateAfterVerification = false) {
     this.guard(auth);
     if (typeof activateAfterVerification !== "boolean") throw new Error("Explicit boolean activation required");
+    if (activateAfterVerification) throw new Error("Activation is a separate owner-approved operation, never part of import");
     const db = await this.pool.connect();
     try {
       await db.query("BEGIN");
@@ -75,6 +76,9 @@ export class OwnerImportService {
         UNION ALL SELECT 1 FROM talkhint_project_models WHERE owner_key=$1`, [auth.ownerKey, this.environment]);
       if (occupied.rowCount) throw new Error("Target is not empty; import refused without overwrite");
       const workspace = `company-import-${randomUUID()}`;
+      // Archive FKs need a legacy parent, but it MUST NOT be the live owner's row:
+      // PgModelRepository otherwise serves that JSON before an explicit cutover.
+      const archiveOwner = `company-archive:${workspace}`;
       await db.query(`INSERT INTO company_v3_workspaces
         (workspace_id,owner_key,environment,label,generation,current_revision,root_hash)
         VALUES($1,$2,$3,'Owner-authenticated imported candidate','shadow',$4,'pending')`,
@@ -94,14 +98,14 @@ export class OwnerImportService {
             throw new Error("Imported contract digest mismatch");
         } else if (["talkhint_project_models", "talkhint_project_model_history"].includes(record.table)) {
           if (row.owner_key !== manifest.sourceOwner) throw new Error("Archive source owner mismatch");
-          row.owner_key = auth.ownerKey;
+          row.owner_key = archiveOwner;
           if (record.table === "talkhint_project_models") legacyRootImported = true;
         } else {
           if (row.workspace_id !== manifest.sourceWorkspace) throw new Error("Source workspace mismatch");
           row.workspace_id = workspace;
           if (record.table === "company_v3_archive_refs") {
             if (row.source_owner_key !== manifest.sourceOwner) throw new Error("Source archive binding mismatch");
-            row.source_owner_key = auth.ownerKey;
+            row.source_owner_key = archiveOwner;
           }
         }
         const names = Object.keys(row);
@@ -134,18 +138,17 @@ export class OwnerImportService {
         if (semanticHash(a.payload) !== a.semantic_sha256) throw new Error("Imported archive digest mismatch");
       }
       await db.query("CLOSE company_import_archives");
-      if (!legacyRootImported) {
-        const raced = await db.query("SELECT 1 FROM talkhint_project_models WHERE owner_key=$1", [auth.ownerKey]);
-        if (raced.rowCount) throw new Error("Legacy target changed during import");
-      }
-      // Only the authenticated owner can request this explicitly AFTER release approval.
-      // Default is a read-only candidate; B2 tests never activate any source.
+      const raced = await db.query("SELECT 1 FROM talkhint_project_models WHERE owner_key=$1", [auth.ownerKey]);
+      if (raced.rowCount) throw new Error("Legacy target changed during import");
+      if (!legacyRootImported && (await db.query("SELECT 1 FROM company_v3_archive_refs WHERE workspace_id=$1",
+        [workspace])).rowCount) throw new Error("Archive parent missing");
+      // Import never activates. There is deliberately no HTTP cutover endpoint.
       await db.query("UPDATE company_v3_workspaces SET root_hash=$2,generation=$3 WHERE workspace_id=$1",
-        [workspace, manifest.rootHash, activateAfterVerification ? "normalized" : "shadow"]);
+        [workspace, manifest.rootHash, "shadow"]);
       await db.query("UPDATE company_v3_import_grants SET consumed_at=now() WHERE grant_hash=$1", [textHash(token)]);
       await db.query("COMMIT");
-      return { workspace, imported: count, generation: activateAfterVerification ? "normalized" : "shadow",
-        activated: activateAfterVerification, semanticHash: manifest.semanticHash };
+      return { workspace, archiveOwner, imported: count, generation: "shadow",
+        activated: false, semanticHash: manifest.semanticHash };
     } catch (error) { await db.query("ROLLBACK"); throw error; }
     finally { db.release(); }
   }

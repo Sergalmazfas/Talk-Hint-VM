@@ -1839,3 +1839,17 @@ mtime_ms = 1793239119511
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/83ff3666-5747-43a7-a790-eaf862c56b94/5503c804-9886-4d0b-b0c3-80e8f36f5803"
 storage_version_token = "1793239154184378"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "4ahOq-WTqizhG0gPy7z_5"
+uri = "file://generated-artifacts/data-platform-postpublish1/TalkHint_post_Publish_1_review_v1.zip"
+type = "unspecified"
+title = "После Publish №1 — пакет для сверки Claude"
+description = "Проверка production только чтением, 11 отличий ограничений B, защищённый импорт в Dev, diff, тесты, замеры ответа записи и план отмены. Импорт и включение не выполнялись."
+logical_id = "4c7f5ef7-378d-4ab4-9b33-5eafc264a26a"
+content_hash = "sha256:52d4e580a3d4c2e77188772fa423be29a177279a9f4eee009aed881d2b0d5465"
+size = 102116
+mtime_ms = 1793246155320
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4c7f5ef7-378d-4ab4-9b33-5eafc264a26a/0d512090-4bf5-4e84-8add-f7c41a2bd6dc"
+storage_version_token = "1793246168916336"
+content_type = "application/octet-stream"

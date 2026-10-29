@@ -31,8 +31,14 @@ export class PgModelRepository implements ModelRepository {
     return pool;
   }
   private async ensure(pool: Pool, owner: string) {
-    await pool.query("INSERT INTO talkhint_project_models(owner_key, revision, state) VALUES($1,0,$2::jsonb) ON CONFLICT(owner_key) DO NOTHING",
-      [owner, JSON.stringify(initialModel())]);
+    // Same transaction-scoped lock as candidate import. Serializes only this
+    // owner's bootstrap, not Hint workers or other owners' ordinary writes.
+    await pool.query(`WITH owner_lock AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(hashtextextended($3,0))
+    ) INSERT INTO talkhint_project_models(owner_key,revision,state)
+      SELECT $1,0,$2::jsonb FROM owner_lock ON CONFLICT(owner_key) DO NOTHING`,
+    [owner, JSON.stringify(initialModel()),
+      `company-import:${process.env.NODE_ENV === "production" ? "production" : "development"}:${owner}`]);
   }
   async read(owner: string, hypothesis = "original") {
     const pool = await this.database();

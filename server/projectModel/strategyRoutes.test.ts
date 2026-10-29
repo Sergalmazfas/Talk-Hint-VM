@@ -59,6 +59,12 @@ describe("strategy persistence and HTTP boundaries", () => {
       if (sql.startsWith("UPDATE")) {
         const state = JSON.parse(args[1]); expect(state.revision).toBe(args[2]); pending!.set(args[0], state); return { rows: [] };
       }
+      if (sql.startsWith("WITH owner_lock AS MATERIALIZED")) {
+        expect(sql).toContain("pg_advisory_xact_lock");
+        expect(sql).toContain("ON CONFLICT(owner_key) DO NOTHING");
+        if (!rows.has(args[0])) rows.set(args[0], JSON.parse(args[1]));
+        return { rows: [], rowCount: 0 };
+      }
       throw new Error("Unexpected SQL in persistence test");
     });
     pool = { query, connect: async () => ({ query, release: vi.fn() }) } as unknown as Pool;
