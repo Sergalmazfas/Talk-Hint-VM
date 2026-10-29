@@ -1797,3 +1797,31 @@ mtime_ms = 1793232230940
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5c5e3a60-1d04-46a6-b83c-514474469589/1afe4836-2be6-4be1-8221-82fdbfabd2b3"
 storage_version_token = "1793232236248779"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Jj50bCLsATUyzyVqHyJeg"
+uri = "file://generated-artifacts/data-platform-B2/TalkHint_data_platform_B2_v1.zip"
+type = "unspecified"
+title = "B2 — ZIP для ручной сверки"
+description = "Diff, DDL, 20 правок на сохранённой полной копии, объём до/после, контрольные суммы и результаты проверок. Без Publish и переключения источника."
+logical_id = "97ffaa8f-ea1e-483c-abc6-70b4e5df5fb3"
+content_hash = "sha256:096f998e292ffa9b8934f39b62da1eef8be9eb970a1672838f98c92c16f3142c"
+size = 148284
+mtime_ms = 1793236991775
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/97ffaa8f-ea1e-483c-abc6-70b4e5df5fb3/9c947c39-94b4-473f-9f9d-2071bbc5f194"
+storage_version_token = "1793237009445258"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "jkVz6DUT3X1E0bUt7K2DH"
+uri = "file://generated-artifacts/data-platform-B2/TalkHint_data_platform_B2_v2.zip"
+type = "unspecified"
+title = "B2 v2 — исправленный пакет для ручной сверки"
+description = "Заменяет первый ZIP. Исправлены смешанные команды и индекс нового документа. Финальные 20 правок повторены на новой полной копии; обе копии сохранены. Diff, DDL, байты, строки и SHA. Без Publish и активации."
+logical_id = "e7ade4a6-8f9b-4094-afc5-06efc636701a"
+content_hash = "sha256:35b0fde6abd18369e8df68b42f352a8599d5aea47e51a29daf30d1529eb45ae1"
+size = 187966
+mtime_ms = 1793238448767
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e7ade4a6-8f9b-4094-afc5-06efc636701a/13bf84b4-f692-43f2-8105-c27e189e784d"
+storage_version_token = "1793238458535108"
+content_type = "application/octet-stream"

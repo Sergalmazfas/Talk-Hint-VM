@@ -2,25 +2,52 @@
 import type { Pool } from "pg";
 import { CompanyModelRepository, type CompanyEnvironment } from "./repository";
 import { textHash } from "./valueTree";
+import { IncrementalCompanyRepository } from "./v3/repository";
+import { CommandCompanyRepository } from "./v3/commands";
 export const companyEnvironment = (): CompanyEnvironment =>
   process.env.NODE_ENV === "production" ? "production" : "development";
 
+async function sourceVersion(pool: Pick<Pool, "query">, owner: string, env: string) {
+  const present = await pool.query(`SELECT to_regclass('public.company_workspaces') AS company_table,
+    to_regclass('public.company_v3_workspaces') AS company_v3_table`);
+  let v3 = false, v2 = false;
+  if (present.rows[0]?.company_v3_table) {
+    const q = await pool.query(`SELECT 1 FROM company_v3_workspaces
+      WHERE owner_key=$1 AND environment=$2 AND generation='normalized' AND schema_version=3`, [owner, env]);
+    v3 = !!q.rowCount;
+  }
+  if (present.rows[0]?.company_table) {
+    const q = await pool.query(`SELECT 1 FROM company_workspaces
+      WHERE owner_key=$1 AND environment=$2 AND storage_generation='normalized'`, [owner, env]);
+    v2 = !!q.rowCount;
+  }
+  if (v2 && v3) throw new Error("Two active company sources; refuse ambiguous routing");
+  return v3 ? 3 : v2 ? 2 : null;
+}
 export async function hasNormalizedCompanySource(pool: Pick<Pool, "query">, owner: string) {
-  const present = await pool.query("SELECT to_regclass('public.company_workspaces') AS company_table");
-  if (!present.rows[0]?.company_table) return null; // Schema not published yet.
-  const env = companyEnvironment();
-  const active = await pool.query(`SELECT 1 FROM company_workspaces
-    WHERE owner_key=$1 AND environment=$2 AND storage_generation='normalized'`, [owner, env]);
-  return !!active.rowCount;
+  return !!await sourceVersion(pool, owner, companyEnvironment());
 }
 export async function activeCompanyRepository(pool: Pool, owner: string) {
-  return await hasNormalizedCompanySource(pool, owner) ?
-    new CompanyModelRepository(async () => pool, companyEnvironment()) : null;
+  const version = await sourceVersion(pool, owner, companyEnvironment());
+  return version === 3 ? new CommandCompanyRepository(new IncrementalCompanyRepository(pool, companyEnvironment())) :
+    version === 2 ? new CompanyModelRepository(async () => pool, companyEnvironment()) : null;
 }
 /** Fast owner-bound journal read: no reconstruction of all graph/history for one lab input. */
 export async function activeCompanyDocument(pool: Pick<Pool, "query">, owner: string,
   environment: string, documentId: string) {
-  const present = await pool.query("SELECT to_regclass('public.company_workspaces') AS company_table");
+  const present = await pool.query(`SELECT to_regclass('public.company_workspaces') AS company_table,
+    to_regclass('public.company_v3_workspaces') AS company_v3_table`);
+  if (present.rows[0]?.company_v3_table) {
+    const candidate = await pool.query(`SELECT 1 FROM company_v3_workspaces
+      WHERE owner_key=$1 AND environment=$2 AND generation='normalized' AND schema_version=3`, [owner, environment]);
+    if (candidate.rowCount) {
+      if (await sourceVersion(pool, owner, environment) !== 3) throw new Error("Ambiguous active company document source");
+      if (!["development", "production"].includes(environment)) throw new Error("Unknown company environment");
+      const v3 = new IncrementalCompanyRepository(pool as Pool, environment as CompanyEnvironment);
+      const result = await v3.readDocumentSnapshot(owner, "new-country", documentId);
+      return { text: result.document.text as string, revision: result.revision };
+    }
+  }
   if (!present.rows[0]?.company_table) return null;
   const workspaces = await pool.query(`SELECT workspace_id,current_revision FROM company_workspaces
     WHERE owner_key=$1 AND environment=$2 AND storage_generation='normalized'`, [owner, environment]);

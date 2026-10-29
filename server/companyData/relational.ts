@@ -51,7 +51,8 @@ export async function inspectSchema(db: Pick<PoolClient, "query">): Promise<Sche
   return schema;
 }
 export function project(root: ProjectModelState, workspace: string, schema: Schema,
-  options: { operatingOrigins?: Map<string, number>; actor?: string; domainWrite?: boolean } = {}): Projection {
+  options: { operatingOrigins?: Map<string, number>; actor?: string; domainWrite?: boolean;
+    externalNamespaces?: Map<string, string> } = {}): Projection {
   const tables = new Map<string, Row[]>(businessTables.map(t => [t, []]));
   const dedup = new Map<string, string>(), mapped = new Set<string>();
   const revision = root.revision;
@@ -188,9 +189,10 @@ export function project(root: ProjectModelState, workspace: string, schema: Sche
         n.referenceIds.forEach((target, ordinal) => {
           const row = emit("company_node_material_refs", {}, null, ns, {
           ordinal, target_id: target, target_namespace: nodeSet.has(target) ? "node" :
-            elements.has(target) ? "element" : docs.has(target) ? "document" :
+            options.externalNamespaces?.get(target) ??
+            (elements.has(target) ? "element" : docs.has(target) ? "document" :
             h.model.competitorDirectory?.records.some(c => c.id === target) ? "competitor" :
-            target === "analyst-preparation" ? "analyst_preparation" : "strategy_entry",
+            target === "analyst-preparation" ? "analyst_preparation" : "strategy_entry"),
           });
           scalarLocation("company_node_material_refs", row, `${np}/referenceIds/${ordinal}`, "target_id");
         });
