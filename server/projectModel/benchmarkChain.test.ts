@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { initialModel } from "./seed";
 import { applyCommand } from "./domain";
 import { defaultOperatingModel, emptyWorkNode } from "../../shared/operatingModelTemplate";
@@ -41,7 +41,7 @@ function fixture() {
     prepareLandingGearCase(defineMkt1Result(refineT01(root, "owner"), "owner"), "owner"), "owner"), "owner"), "owner"), "owner", "2026-10-26");
 }
 describe("new owner allocation reuses roles, competitor identity and paired handoffs", () => {
-  const before = () => {
+  const buildBefore = () => {
     let root = prepareProductPassport(prepareBenchmarkReadiness(prepareCompanyRegister(prepareLegalChain(
       prepareBenchmarkForms(prepareBenchmarkChain(fixture(), "owner"), "owner"), "owner"), "owner"), "owner"), "owner");
     const alternative = root.alternatives!.find(a=>a.id==="new-country")!;
@@ -57,6 +57,11 @@ describe("new owner allocation reuses roles, competitor identity and paired hand
     root=applyHypothesisCommand(root,"new-country",{type:"saveCompetitor",baseVersion:0,reason:"Fixture initial sources",snapshot:lingvanexSnapshot()},"owner");
     return root;
   };
+  // This multi-stage historical fixture is setup, not the operation under test.
+  // Build it once outside the 5s test timer; every test still gets an isolated clone.
+  let prepared: ReturnType<typeof buildBefore>;
+  beforeAll(() => { prepared = buildBefore(); });
+  const before = () => structuredClone(prepared);
   it("updates existing responsibilities with preserved histories, not autonomous execution", () => {
     const root=before(), copy=structuredClone(root), next=prepareBenchmarkOwnership(root,"owner");
     expect(root).toEqual(copy);

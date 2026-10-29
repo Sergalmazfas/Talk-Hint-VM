@@ -8,6 +8,7 @@ import { readBusinessContract } from "./businessContract";
 import { semanticHash } from "../valueTree";
 import { at, arrayInsert, decode, encode, replace, type Frame } from "./codec";
 import { SqlFrameStore } from "./store";
+import { assertModelWriteAllowed } from "../migrationFreeze";
 
 export interface DeltaEdit {
   path: string[];
@@ -42,6 +43,7 @@ export class IncrementalCompanyRepository {
     return w;
   }
   async commitDelta(owner: string, expectedRevision: number, prepare: PrepareDelta, actor: string) {
+    assertModelWriteAllowed(owner, this.environment);
     const db = await this.pool.connect(), started = performance.now();
     try {
       await db.query("BEGIN");

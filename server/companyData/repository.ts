@@ -6,6 +6,7 @@ import { unpackModel } from "../projectModel/history";
 import { ModelError } from "../projectModel/modelError";
 import { inspectSchema, project, readRootFromSql, insertProjection } from "./relational";
 import { textHash, semanticHash } from "./valueTree";
+import { assertModelWriteAllowed } from "./migrationFreeze";
 
 export type CompanyEnvironment = "development" | "production";
 /** Always bound by server authentication, never an owner key taken from input JSON. */
@@ -87,6 +88,7 @@ export class CompanyModelRepository implements ModelRepository {
     return this.updateMany(owner, revision, [command], hypothesis);
   }
   async updateMany(owner: string, revision: number, commands: ModelCommand[], hypothesis = "original") {
+    assertModelWriteAllowed(owner, this.environment);
     if (this.shadowVerification) throw new ModelError(403, "Теневой reader не принимает записи.");
     if (!commands.length || commands.length > 3) throw new ModelError(400, "Invalid transaction size");
     const db = await (await this.getPool()).connect();

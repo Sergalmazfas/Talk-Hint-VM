@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { mkdtempSync } from "node:fs";
 import { readdir, lstat, rm } from "node:fs/promises";
+import { limitedWorker } from "../limitedWorker";
 
 export async function cleanupLabScratch() {
   const root = os.tmpdir(), cutoff = Date.now() - 7 * 86_400_000;
@@ -54,13 +55,15 @@ function workerEnv(): NodeJS.ProcessEnv {
     PYTHONPATH: [process.env.PYTHONPATH, path.resolve(".pythonlibs/lib/python3.11/site-packages"), process.cwd()]
       .filter(Boolean).join(path.delimiter),
     PYTHONUNBUFFERED: "1", OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENBLAS_NUM_THREADS: "1", OMP_NUM_THREADS: "1", MKL_NUM_THREADS: "1",
     LAB_MODEL: process.env.LAB_MODEL || "gpt-5.2",
     OTEL_SDK_DISABLED: "true", CREWAI_TRACING_ENABLED: "false", CREWAI_TELEMETRY_DISABLED: "true",
   };
 }
 export function checkHintLabRuntime(): Promise<{ framework: string; version: string }> {
   return new Promise((resolve, reject) => {
-    execFile("python", ["-c", "import json; from crewai import Agent,Crew; from importlib.metadata import version; print(json.dumps({'framework':'crewai','version':version('crewai')}))"],
+    const launch = limitedWorker("lab", "python", ["-c", "import json; from crewai import Agent,Crew; from importlib.metadata import version; print(json.dumps({'framework':'crewai','version':version('crewai')}))"]);
+    execFile(launch.executable, launch.args,
       { env: workerEnv(), timeout: 30_000 }, (error, stdout) => {
         if (error) return reject(new Error("LAB_PYTHON_UNAVAILABLE"));
         try {
@@ -95,7 +98,8 @@ export function runHintLab(source: unknown, options: {
   env.PLAB_TEMP_DIR = scratch;
   const script = process.env.NODE_ENV === "production" ? "dist/workers/hint_lab/pipeline.py" : "workers/hint_lab/pipeline.py";
   return new Promise((resolve, reject) => {
-    const child = spawn("python", [path.resolve(script)], { env, stdio: ["pipe", "pipe", "pipe"] });
+    const launch = limitedWorker("lab", "python", [path.resolve(script)]);
+    const child = spawn(launch.executable, launch.args, { env, stdio: ["pipe", "pipe", "pipe"] });
     let output = "", stderr = "", settled = false;
     const end = (error?: Error, value?: any) => {
       if (settled) return;

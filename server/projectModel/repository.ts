@@ -6,6 +6,7 @@ import { initialModel } from "./seed";
 import { archiveModel, ensureModelHistory, unpackModel } from "./history";
 import { activeCompanyRepository, hasNormalizedCompanySource } from "../companyData/active";
 import { blocksLegacySeed } from "../companyData/v3/importApproval";
+import { assertModelWriteAllowed, modelWritesFrozen } from "../companyData/migrationFreeze";
 
 export interface ModelRepository {
   read(owner: string, hypothesis?: string): Promise<ProjectModelState>;
@@ -47,8 +48,10 @@ export class PgModelRepository implements ModelRepository {
     const pool = await this.database();
     const active = await activeCompanyRepository(pool, owner);
     if (active) return active.read(owner, hypothesis);
-    await this.ensure(pool, owner);
+    if (!modelWritesFrozen(owner, process.env.NODE_ENV === "production" ? "production" : "development"))
+      await this.ensure(pool, owner);
     const r = await pool.query("SELECT state FROM talkhint_project_models WHERE owner_key=$1", [owner]);
+    if (!r.rows[0]) throw new ModelError(423, "Модель недоступна; начальная модель при заморозке не создаётся.");
     return readHypothesis(await unpackModel(pool, owner, r.rows[0].state), hypothesis);
   }
   /** Historical snapshots are read-only and never masquerade as current CAS state. */
@@ -71,6 +74,7 @@ export class PgModelRepository implements ModelRepository {
   }
   /** A result document and its work status must commit or roll back together. */
   async updateMany(owner: string, revision: number, commands: ModelCommand[], hypothesis = "original") {
+    assertModelWriteAllowed(owner, process.env.NODE_ENV === "production" ? "production" : "development");
     if (!commands.length || commands.length > 3) throw new ModelError(400, "Invalid transaction size");
     const pool = await this.database();
     const active = await activeCompanyRepository(pool, owner);

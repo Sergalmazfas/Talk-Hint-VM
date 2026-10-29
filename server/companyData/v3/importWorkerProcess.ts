@@ -4,6 +4,7 @@ import { freemem, totalmem } from "node:os";
 import { readFile } from "node:fs/promises";
 import type { ReviewedPackage } from "./reviewedPackage";
 import type { OwnerAuthentication } from "./transport";
+import { limitedWorker } from "../../limitedWorker";
 
 /** Bound the child heap and require room for the existing phone/web process.
  * Never run an unbounded full snapshot decode on the Hint event loop.
@@ -19,7 +20,7 @@ export async function importWorkerCapacity() {
     used = Number(current);
   } catch { /* On a non-cgroup VM use the OS's actual memory, not a guessed tier. */ }
   return limit >= 4 * 1024 ** 3 &&
-    Math.min(freemem(), limit - used) >= 2.75 * 1024 ** 3;
+    Math.min(freemem(), limit - used) >= 3.75 * 1024 ** 3;
 }
 export async function runImportWorker(pin: ReviewedPackage, auth: OwnerAuthentication,
   token: string, environment: "development" | "production") {
@@ -29,7 +30,8 @@ export async function runImportWorker(pin: ReviewedPackage, auth: OwnerAuthentic
       ["--import", "tsx", resolve("server/companyData/v3/importWorker.ts")]),
     "--approved-owner-import"];
   await new Promise<void>((resolveResult, reject) => {
-    const child = spawn(process.execPath, args, {stdio: ["pipe", "ignore", "pipe"]});
+    const launch = limitedWorker("import", process.execPath, args);
+    const child = spawn(launch.executable, launch.args, {stdio: ["pipe", "ignore", "pipe"]});
     // Grant is a short-lived capability: pipe only, never argv/env/log/storage.
     child.stdin.on("error", () => reject(new Error("Import worker input unavailable")));
     child.stdin.end(JSON.stringify({pin, auth, token, environment}));
