@@ -2007,3 +2007,17 @@ mtime_ms = 1793290080147
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b4bdc924-8a21-46a1-bcfd-1fd3abd625eb/faa9c1aa-bc71-45db-a49f-182c9e3f9a20"
 storage_version_token = "1793290104510645"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "1AkFdDu9-WE-p4hqpQ4sp"
+uri = "file://generated-artifacts/company-cutover/TalkHint_cutover_preparation_Claude.zip"
+type = "unspecified"
+title = "Cutover новой базы · подготовка для Claude"
+description = "Порядок перехода и отката, очередь отдельных diff, Dev-репетиция без потери правок, замеры документа/роли, тесты и ограничения production. Включение не разрешено; production не менялся."
+logical_id = "f60db1b1-3716-4d70-8205-f3cc3985b324"
+content_hash = "sha256:e893e7f909b35845e0bf780927dfada3ac0c822e48962e78d51ac10ff972cd3c"
+size = 47196
+mtime_ms = 1793291589743
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f60db1b1-3716-4d70-8205-f3cc3985b324/43a70672-062c-47e6-96be-4b3bb3655c93"
+storage_version_token = "1793291629270226"
+content_type = "application/octet-stream"
