@@ -5,6 +5,30 @@ import { integrationStore } from "../chatgpt/store";
 import { dbReady, pool, isDevDatabase } from "../db";
 import { isBenchmarkAdmin, requireBenchmarkAdmin } from "../benchmark/adminGate";
 import { storage } from "../storage";
+import { productionProductRepository } from "./production";
+import { TEAM_OWNER } from "../team/plan";
+
+// Verified published canonical origin; separate issuer from Secretary OAuth.
+export const PRODUCT_CREW_PRODUCTION_ORIGIN = "https://talkhint.app";
+export function registerProductionProductCrew(app: Express) {
+  if (process.env.NODE_ENV !== "production" || isDevDatabase) return;
+  registerProductCrew(app, {
+    origin: PRODUCT_CREW_PRODUCTION_ORIGIN,
+    key: () => process.env.SESSION_SECRET ?? "",
+    store: integrationStore, admin: requireBenchmarkAdmin, production: true,
+    repo: productionProductRepository(async () => {
+      await dbReady;
+      if (!pool || isDevDatabase) throw Error("Production database unavailable");
+      return pool;
+    }),
+    authorizedOwner: async id => {
+      if (id !== TEAM_OWNER) return false;
+      const user = await storage.getUser(id);
+      return !!user && isBenchmarkAdmin(user.email);
+    },
+  });
+}
+
 export function registerDevProductCrew(app: Express) {
   // No publication, production endpoints, phone client or Secretary OAuth changes.
   if (process.env.NODE_ENV !== "development" || !isDevDatabase || !process.env.REPLIT_DEV_DOMAIN) return;

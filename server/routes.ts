@@ -50,7 +50,7 @@ import { registerSecretaryRoutes } from "./secretary/routes";
 import { registerMobileSecretary } from "./mobileSecretary/routes";
 import { registerLegacyTestCallRoute } from "./secretary/legacyRoute";
 import { registerChatGPTIntegration } from "./chatgpt/routes";
-import { registerDevProductCrew } from "./productCrew/bootstrap";
+import { registerDevProductCrew, registerProductionProductCrew } from "./productCrew/bootstrap";
 import { mcpReleaseConfiguration } from "./chatgpt/releaseConfig";
 import { integrationStore } from "./chatgpt/store";
 import { secretaryBackend } from "./chatgpt/secretary";
@@ -301,6 +301,7 @@ export async function registerRoutes(
   registerAdminWebBoundary(app);
   registerProjectModel(app);
   registerDevProductCrew(app);
+  registerProductionProductCrew(app);
   registerMobileSecretary(app);
   setupWebSocket(httpServer);
   registerChatGPTIntegration(app, mcpReleaseConfiguration(

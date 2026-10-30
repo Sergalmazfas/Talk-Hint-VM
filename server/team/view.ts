@@ -69,7 +69,7 @@ export function teamView(c: TeamContext, environment: string): TeamView {
       relations.push({ kind, id, name: byId.get(id)!.name }); };
     add("Подчиняется", n.managerId ?? null);
     for (const a of duties) {
-      add("Проверяет работу", a.acceptorId);
+      add("Кто проверяет меня", a.acceptorId);
       add("Передаёт работу", a.recipientId);
       for (const input of a.inputs) add("Получает от", input.sourceId);
     }

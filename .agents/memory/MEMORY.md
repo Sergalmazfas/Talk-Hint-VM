@@ -1,4 +1,4 @@
-- [Target product teams](product-teams-target.md) — production-only writes; Dev frozen; Мария над продуктом, Паша только Hint; Тихон — дежурный Hint; будущие команды пусты.
+- [Target product teams](product-teams-target.md) — Мария → владелец; Паша → Замир/Фома в Hint; Тихон — дежурный компании под HEAD.07; Dev frozen.
 - [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.
 - [Process on-call](process-on-call.md) — action reports; one email per call; decisions/outages immediate, ordinary failures in morning; no false green or blind retries.
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.

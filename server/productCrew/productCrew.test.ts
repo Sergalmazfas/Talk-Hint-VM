@@ -41,9 +41,23 @@ class Repository implements ModelRepository {
     this.roots.set(owner, next); return readHypothesis(next, h);
   }
 }
+/** Current Hint role IDs, in memory only; the legacy seed does not contain them. */
+function hintRepository() {
+  const repo = new Repository();
+  const model = repo.roots.get("owner")!.alternatives.find(a => a.id === "new-country")!.model;
+  const data = model.operatingModel!.revisions.at(-1)!.data;
+  const template = data.nodes.find(n => n.kind === "role")!;
+  for (const [id, code, name, managerId] of [
+    ["product-manager-specialist", "P.PRODUCT", "Паша", "head-product"],
+    ["lg-qa-role", "P.LG.QA", "Фома", "head-engineering"],
+    ["laboratory-engineer-role", "P.LAB", "Замир", "head-engineering"],
+  ]) data.nodes.push({ ...structuredClone(template), id, code, name, managerId, executorId: null });
+  return repo;
+}
 const verifier = "a".repeat(50);
-async function login(auth: ProductCrewOAuth, owner = "owner", scope = "product:read product:write offline_access") {
-  const client = auth.register({ redirect_uris: ["https://chatgpt.com/connector_platform/oauth/callback"] });
+async function login(auth: ProductCrewOAuth, owner = "owner", scope = "product:read product:write offline_access",
+  callback = "https://chatgpt.com/connector_platform/oauth/callback") {
+  const client = auth.register({ redirect_uris: [callback] });
   const uri = client.redirect_uris[0];
   const consent = await auth.prepare({ client_id: client.client_id, response_type: "code", redirect_uri: uri,
     code_challenge_method: "S256", code_challenge: sha(verifier), state: "unchanged-owner-state", scope }, owner);
@@ -52,6 +66,18 @@ async function login(auth: ProductCrewOAuth, owner = "owner", scope = "product:r
   return { client, uri, code: redirect.searchParams.get("code")! };
 }
 describe("product-only OAuth", () => {
+  it("accepts the exact Replit callback with PKCE, rejects lookalikes, extra paths, query, ports and fragments", async () => {
+    const auth = new ProductCrewOAuth(origin, key, new Store());
+    const callback = "https://replit.com/connectors/oauth/callback";
+    const l = await login(auth, "owner", "product:read product:write offline_access", callback);
+    const token = await auth.exchange({ grant_type: "authorization_code", client_id: l.client.client_id,
+      redirect_uri: callback, code: l.code, code_verifier: verifier });
+    expect(await auth.authenticate(token.access_token, true)).toBe("owner");
+    for (const uri of [callback + "?x=1", callback + "#x", callback + "/extra",
+      "https://replit.com:444/connectors/oauth/callback", "https://replit.com.attacker.test/connectors/oauth/callback",
+      "https://replit.com/other", "http://replit.com/connectors/oauth/callback"])
+      expect(() => auth.register({ redirect_uris: [uri] })).toThrow();
+  });
   it("enforces exact official callbacks, PKCE, owner consent, one-use code and scope", async () => {
     const auth = new ProductCrewOAuth(origin, key, new Store());
     expect(() => auth.register({ redirect_uris: ["https://chatgpt.com.attacker.test/callback"] })).toThrow();
@@ -82,6 +108,124 @@ describe("product-only OAuth", () => {
     await expect(auth.authenticate(`${next.access_token}x`)).rejects.toThrow();
     await auth.revoke(next.access_token);
     await expect(auth.authenticate(next.access_token)).rejects.toThrow("revoked");
+  });
+});
+
+describe("bounded production model tools", () => {
+  it("changes one manager atomically, archives the prior operating revision, replays receipts and rejects stale/conflicting requests", async () => {
+    const repo = hintRepository(), service = new ProductCrewService(repo, { production: true });
+    const before = await repo.read("owner", "new-country");
+    const data = before.operatingModel!.revisions.at(-1)!.data;
+    const qa = data.nodes.find(n => n.code === "P.LG.QA")!;
+    const product = data.nodes.find(n => n.code === "P.PRODUCT")!;
+    const args = { revision: before.revision, requestId: randomUUID(), nodeId: qa.id, managerId: product.id,
+      reason: "Проверяющий Hint под руководителем Hint", ownerDecisionRef: "Решение владельца — тест" };
+    const saved = await service.call("owner", "update_structure", args);
+    expect(saved.record.coordination.origin).toBe("owner_mcp");
+    const after = await repo.read("owner", "new-country");
+    expect(after.operatingModel!.revisions.at(-1)!.data.nodes.find(n => n.id === qa.id)!.managerId).toBe(product.id);
+    expect(after.operatingModel!.revisions).toHaveLength(before.operatingModel!.revisions.length + 1);
+    expect(before.operatingModel!.revisions.at(-1)!.data.nodes.find(n => n.id === qa.id)!.managerId).toBe(qa.managerId);
+    expect((await service.call("owner", "update_structure", args)).replayed).toBe(true);
+    await expect(service.call("owner", "update_structure", { ...args, reason: "Другое" })).rejects.toMatchObject({ status: 409 });
+    await expect(service.call("owner", "update_structure", { ...args, requestId: randomUUID() })).rejects.toMatchObject({ status: 409 });
+    await expect(service.call("owner", "update_structure", { ...args, revision: after.revision, requestId: randomUUID(),
+      nodeId: product.id, managerId: qa.id })).rejects.toMatchObject({ status: 409 });
+  });
+  it("denies self-acceptance, empty/unknown/permission edits and every structural write in the legacy Dev service", async () => {
+    const repo = new Repository(), service = new ProductCrewService(repo, { production: true });
+    const before = await repo.read("owner", "new-country"), data = before.operatingModel!.revisions.at(-1)!.data;
+    const action = data.nodes.find(n => n.kind === "action" && n.roleId)!;
+    const base = { revision: before.revision, requestId: randomUUID(), nodeId: action.id,
+      reason: "Тест", ownerDecisionRef: "Решение владельца — тест" };
+    await expect(service.call("owner", "update_structure", { ...base, acceptorId: action.roleId })).rejects.toMatchObject({ status: 409 });
+    await expect(service.call("owner", "update_structure", base)).rejects.toMatchObject({ status: 400 });
+    await expect(service.call("owner", "update_structure", { ...base, acceptorId: "unknown" })).rejects.toMatchObject({ status: 400 });
+    await expect(service.call("owner", "update_structure", { ...base, executorId: "attacker" })).rejects.toMatchObject({ status: 400 });
+    await expect(new ProductCrewService(repo).call("owner", "update_structure", base)).rejects.toMatchObject({ status: 403 });
+    expect((await repo.read("owner", "new-country")).revision).toBe(before.revision);
+  });
+  it("updates one task's customer and acceptor, but refuses two roles played by the same executor", async () => {
+    const repo = new Repository(), service = new ProductCrewService(repo, { production: true });
+    const before = await repo.read("owner", "new-country"), data = before.operatingModel!.revisions.at(-1)!.data;
+    const action = data.nodes.find(n => n.kind === "action" && n.roleId)!;
+    const recipient = data.nodes.find(n => n.kind === "role" && n.id !== action.roleId)!;
+    const args = { revision: before.revision, requestId: randomUUID(), nodeId: action.id,
+      clientId: recipient.id, acceptorId: recipient.id, reason: "Тест передачи",
+      ownerDecisionRef: "Решение владельца — тест" };
+    await service.call("owner", "update_structure", args);
+    const after = await repo.read("owner", "new-country");
+    const saved = after.operatingModel!.revisions.at(-1)!.data.nodes.find(n => n.id === action.id)!;
+    expect(saved.clientId).toBe(recipient.id); expect(saved.acceptorId).toBe(recipient.id);
+    const actual = repo.roots.get("owner")!.alternatives.find(a => a.id === "new-country")!.model.operatingModel!.revisions.at(-1)!.data;
+    actual.nodes.find(n => n.id === action.roleId)!.executorId = "shared-executor";
+    actual.nodes.find(n => n.id === recipient.id)!.executorId = "shared-executor";
+    await expect(service.call("owner", "update_structure", { ...args, revision: after.revision,
+      requestId: randomUUID() })).rejects.toMatchObject({ status: 409 });
+  });
+  it("changes exactly character fields, preserving name, prompt and activation state; missing profiles are not invented", async () => {
+    const repo = hintRepository(), service = new ProductCrewService(repo, { production: true });
+    const first = await repo.read("owner", "new-country");
+    const role = first.operatingModel!.revisions.at(-1)!.data.nodes.find(n => n.code === "P.PRODUCT")!;
+    const args = { revision: first.revision, requestId: randomUUID(), roleId: role.id,
+      traits: ["Фокус", "Задачи", "Результат"], motto: "Каждый звонок лучше прошлого",
+      reason: "Тест", ownerDecisionRef: "Решение владельца — тест" };
+    await expect(service.call("owner", "update_team_character", args)).rejects.toMatchObject({ status: 409 });
+    const original = { version: 1, status: "proposed_not_active",
+      visualPassport: { roleId: role.id, selectedName: "Паша", ownerSelectionStatus: "accepted", character: { traits: [null, null, null], motto: null } },
+      prompt: { system: "Не изменять", enabled: false } };
+    const root = applyHypothesisCommand(repo.roots.get("owner")!, "new-country", { type: "createDocument",
+      id: "DOC-TEAM-TEST", title: "Анкета", text: JSON.stringify(original), url: "", elementIds: [] }, "owner");
+    repo.roots.set("owner", root);
+    const current = await repo.read("owner", "new-country");
+    const updatedArgs = { ...args, revision: current.revision };
+    await service.call("owner", "update_team_character", updatedArgs);
+    const saved = JSON.parse((await service.call("owner", "get_document", { documentId: "DOC-TEAM-TEST" })).text);
+    expect(saved.visualPassport.character.traits).toEqual(args.traits);
+    expect(saved.visualPassport.selectedName).toBe("Паша"); expect(saved.prompt).toEqual(original.prompt);
+    expect(saved.status).toBe(original.status); expect(saved.version).toBe(2);
+    expect((await service.call("owner", "update_team_character", updatedArgs)).replayed).toBe(true);
+    await expect(service.call("owner", "update_team_character", { ...updatedArgs, prompt: "Включить" })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("production MCP protocol boundary", () => {
+  let server: Server, url: string, token: string, readToken: string, otherToken: string;
+  beforeAll(async () => {
+    const store = new Store(), repo = new Repository(), auth = new ProductCrewOAuth(origin, key, store), app = express();
+    registerProductCrew(app, { origin, key, store, repo, production: true,
+      admin: (_req, res) => { res.sendStatus(403); }, authorizedOwner: async owner => owner === "owner" });
+    server = app.listen(0); await new Promise<void>(r => server.once("listening", r));
+    url = `http://127.0.0.1:${(server.address() as any).port}`;
+    for (const [owner, scope] of [["owner", "product:read product:write"], ["owner", "product:read"], ["other", "product:read product:write"]]) {
+      const l = await login(auth, owner, scope, "https://replit.com/connectors/oauth/callback");
+      const t = await auth.exchange({ grant_type: "authorization_code", client_id: l.client.client_id,
+        redirect_uri: l.uri, code: l.code, code_verifier: verifier });
+      if (owner === "other") otherToken = t.access_token; else if (scope.includes("write")) token = t.access_token; else readToken = t.access_token;
+    }
+  });
+  afterAll(async () => { await new Promise<void>(r => server.close(() => r())); });
+  const request = (credential: string, method: string, params?: unknown, reqOrigin = "https://replit.com") =>
+    fetch(`${url}/api/product-crew/mcp`, { method: "POST", headers: { "Content-Type": "application/json",
+      Authorization: `Bearer ${credential}`, Origin: reqOrigin },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  it("requires OAuth, owner binding and write scope; rejects hostile origins", async () => {
+    expect((await request("", "tools/list")).status).toBe(401);
+    expect((await request(otherToken, "tools/list")).status).toBe(403);
+    expect((await request(readToken, "tools/call", { name: "update_structure", arguments: {} })).status).toBe(403);
+    expect((await request(token, "tools/list", undefined, "https://replit.com.attacker.test")).status).toBe(403);
+  });
+  it("advertises bounded writes but never owner review; forged owner-review calls fail before reading the model", async () => {
+    const initialized = await (await request(token, "initialize")).json() as any;
+    expect(initialized.result.instructions).toContain("активную production-модель");
+    expect(initialized.result.instructions).not.toContain("Расходы, production, публикация");
+    const list = await (await request(token, "tools/list")).json() as any;
+    const names = list.result.tools.map((t: any) => t.name);
+    expect(names).toHaveLength(14); expect(names).toContain("update_structure"); expect(names).not.toContain("review_result");
+    const character = list.result.tools.find((t: any) => t.name === "update_team_character");
+    expect(character.inputSchema.properties.traits).toMatchObject({ minItems: 3, maxItems: 3 });
+    const denied = await (await request(token, "tools/call", { name: "review_result", arguments: {} })).json() as any;
+    expect(denied.result.isError).toBe(true); expect(JSON.parse(denied.result.content[0].text).status).toBe(403);
   });
 });
 const fixtureProcess = buildCompanyStructure(defaultOperatingModel()).nodes.find(n => n.kind === "process")!.id;

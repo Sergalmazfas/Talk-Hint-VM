@@ -8,8 +8,8 @@ export const crewCoordinationSchema = z.object({
   relatedIds: z.array(z.string().max(120)).max(40),
   nextStep: z.string().max(3000),
   resultDocumentId: z.string().max(120).optional(),
-  /** Claims submitted through ChatGPT are not autonomous executor evidence. */
-  origin: z.literal("owner_chatgpt"),
+  /** An authorized client is not proof of personal owner input or autonomy. */
+  origin: z.enum(["owner_chatgpt", "owner_mcp"]),
   operations: z.array(z.object({
     id: z.string().uuid(), fingerprint: z.string().max(64), at: z.string().datetime(),
   }).strict()).min(1),

@@ -2259,3 +2259,17 @@ mtime_ms = 1793373411981
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5e6aab5c-1044-401b-869b-58976b8607ba/d22ef5cf-5c95-49d9-abd0-2be629671318"
 storage_version_token = "1793373444766038"
 content_type = "text/html"
+
+[[outputs]]
+id = "zr-ev1OXM9AU7Z_rXcl5-"
+uri = "file://generated-artifacts/Production_MCP_Replit_Review.zip"
+type = "unspecified"
+title = "Production MCP — пакет на сверку Claude"
+description = "Код и diff, 2746 прошедших тестов, инструкция OAuth, утверждённая схема Hint и 21 исходная анкета r919. Без Publish и без записей в production."
+logical_id = "0c764906-1f46-4922-b9ce-1ac18322d2f6"
+content_hash = "sha256:f06cd24cb16ec2bc0192b4eee2b7da2902c9a3ad0d82216aada2c61cdda50b02"
+size = 606128
+mtime_ms = 1793377301171
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0c764906-1f46-4922-b9ce-1ac18322d2f6/4818128f-e112-49c4-9b52-512582ce040d"
+storage_version_token = "1793377353600679"
+content_type = "application/octet-stream"

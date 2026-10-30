@@ -18,7 +18,9 @@ const marker = (token: string) => `productcrew:token:${sha(token)}`;
 const redirect = (value: unknown) => {
   if (typeof value !== "string" || value.length > 2000) return error(400, "Invalid redirect URI");
   let u: URL; try { u = new URL(value); } catch { return error(400, "Invalid redirect URI"); }
-  if (u.protocol !== "https:" || !["chatgpt.com", "chat.openai.com"].includes(u.hostname) || u.username || u.password || u.hash || u.port) return error(400, "Redirect must be an official ChatGPT callback");
+  const replit = value === "https://replit.com/connectors/oauth/callback";
+  if (u.protocol !== "https:" || (!replit && !["chatgpt.com", "chat.openai.com"].includes(u.hostname)) || u.username || u.password || u.hash || u.port)
+    return error(400, "Redirect must be an official ChatGPT or exact Replit OAuth callback");
   return value;
 };
 export class ProductCrewOAuth {

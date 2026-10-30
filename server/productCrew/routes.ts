@@ -30,9 +30,16 @@ export function registerProductCrew(app: Express, options: {
   authorizedOwner: (owner: string) => Promise<boolean>;
   /** Explicit owner-approved public Dev connection; never enabled in production. */
   publicDevOwner?: () => Promise<string>;
+  /** Authenticated production model access; never an anonymous/public mode. */
+  production?: boolean;
 }) {
+  const production = options.production ?? process.env.NODE_ENV === "production";
   const publicAccess = !!options.publicDevOwner && process.env.NODE_ENV !== "production";
-  const auth = new ProductCrewOAuth(options.origin, options.key, options.store), service = new ProductCrewService(options.repo);
+  if (options.production && options.publicDevOwner) throw Error("Public production MCP is forbidden");
+  const auth = new ProductCrewOAuth(options.origin, options.key, options.store),
+    service = new ProductCrewService(options.repo, { production });
+  const advertisedTools = Object.keys(inputs).filter(n => production ? n !== "review_result" :
+    !["update_structure", "update_team_character"].includes(n));
   const path = "/api/product-crew";
   const attempts = new Map<string, { until: number; count: number }>();
   const limited: RequestHandler = (req, res, next) => {
@@ -83,7 +90,7 @@ export function registerProductCrew(app: Express, options: {
   }));
   app.get(`${path}/mcp`, (_req, res) => { res.setHeader("Allow", "POST"); res.status(405).end(); });
   app.post(`${path}/mcp`, express.json({ limit: "100kb" }), wrap(async (req, res) => {
-    if (req.get("origin") && ![options.origin, "https://chatgpt.com", "https://chat.openai.com"].includes(req.get("origin")!)) { res.status(403).json({ error: "Cross-origin browser request denied" }); return; }
+    if (req.get("origin") && ![options.origin, "https://chatgpt.com", "https://chat.openai.com", "https://replit.com"].includes(req.get("origin")!)) { res.status(403).json({ error: "Cross-origin browser request denied" }); return; }
     const b = req.body;
     const name = b?.params?.name as ToolName;
     let owner: string;
@@ -101,9 +108,15 @@ export function registerProductCrew(app: Express, options: {
     let result: unknown;
     if (b.method === "initialize") result = { protocolVersion: "2025-06-18", capabilities: { tools: {} },
       serverInfo: { name: "talkhint-product-crew", title: "TalkHint · Управление продуктом", version: "1.0.0" },
-      instructions: instructions + (publicAccess ? "\nДоступ к этому Dev MCP публичный по явному решению владельца: OAuth не требуется. Вызов не доказывает личность Сергея; не представляй записи как подтверждённые им лично." : "") };
+      instructions: (production
+        ? instructions.replace("Результат через submit_result помечен как представленный через ChatGPT/владельца",
+            "Результат через submit_result помечен как представленный через авторизованный MCP-клиент")
+          .replace("Расходы, production, публикация, удаление, внешние действия не входят в права этого плагина.",
+            "Разрешены обычные записи в активную production-модель new-country. Нет доступа к Dev, звонкам, деньгам, публикации, удалению или секретам. Массовая перестройка — только после отдельной сверки. Приёмка за владельца через MCP запрещена.")
+          + "\nupdate_structure меняет только руководителя одной существующей роли или заказчика/принимающего одной задачи; update_team_character — только три черты и девиз существующего профиля. Нужна ссылка на решение владельца. Нет создания/удаления ролей, изменения промптов, прав или запуска. Поручение не является личным подтверждением владельца."
+        : instructions) + (publicAccess ? "\nДоступ к этому Dev MCP публичный по явному решению владельца: OAuth не требуется. Вызов не доказывает личность Сергея; не представляй записи как подтверждённые им лично." : "") };
     else if (b.method === "ping") result = {};
-    else if (b.method === "tools/list") result = { tools: Object.keys(inputs).map(n => {
+    else if (b.method === "tools/list") result = { tools: advertisedTools.map(n => {
       const tool = n as ToolName;
       return { name: n, description: toolDescription[tool], inputSchema: toJsonSchema(inputs[tool]),
         annotations: { readOnlyHint: !writeTools.has(tool), destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -151,7 +164,8 @@ function toJsonSchema(schema: any): any {
       required: Object.keys(shape).filter(k => shape[k]._def.typeName !== "ZodOptional"), additionalProperties: false };
   }
   if (type === "ZodEnum") return { type: "string", enum: def.values };
-  if (type === "ZodArray") return { type: "array", items: toJsonSchema(def.type), maxItems: def.maxLength?.value ?? 40 };
+  if (type === "ZodArray") return { type: "array", items: toJsonSchema(def.type), maxItems: def.maxLength?.value ?? 40,
+    ...(def.minLength ? { minItems: def.minLength.value } : {}) };
   if (type === "ZodNumber") return { type: "integer", minimum: 0 };
   if (type === "ZodString") return { type: "string",
     ...Object.fromEntries(def.checks.filter((c: any) => ["min", "max"].includes(c.kind)).map((c: any) => [c.kind === "min" ? "minLength" : "maxLength", c.value])),
@@ -159,6 +173,8 @@ function toJsonSchema(schema: any): any {
   throw Error(`Unsupported product tool input schema: ${type}`);
 }
 const toolDescription: Record<ToolName, string> = {
+  update_structure: "Production: изменить руководителя одной существующей роли либо заказчика/принимающего одной задачи. Без самоприёмки и циклов; revision/requestId и ссылка на решение обязательны. Не запускает сотрудников.",
+  update_team_character: "Production: записать три черты и девиз в единственный существующий профиль. Не меняет имя, промпт, права или статус запуска; revision/requestId и ссылка на решение обязательны.",
   get_roadmap: "Где находится единый roadmap: этапы, сохранённые работы, блокеры и следующий шаг. Ничего не запускает.",
   get_team: "Общая структура: роли, подчинение, действия, клиенты результатов, ресурсы и состояние подключения.",
   search_materials: "Поиск связанных материалов и кандидатов дублей в существующей модели владельца.",
