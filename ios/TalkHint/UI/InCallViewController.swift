@@ -170,6 +170,9 @@ final class InCallViewController: UIViewController {
         let goalCard = buildGoalCard()
 
         let header = UIStackView(arrangedSubviews: [statusRow, retryButton, goalCard])
+        // Constraints against the view's safe area are activated below, once the
+        // views share the view hierarchy (activating earlier throws NSGenericException).
+        var openingScrollView: UIScrollView?
         if let opening = SessionStore.shared.takeHintOpening() {
             let button = HintChoiceButton(english: opening.english, translation: opening.translation,
                                           primary: false)
@@ -188,8 +191,8 @@ final class InCallViewController: UIViewController {
                 button.topAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.topAnchor),
                 button.bottomAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.bottomAnchor),
                 button.widthAnchor.constraint(equalTo: openingScroll.frameLayoutGuide.widthAnchor),
-                openingScroll.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor, multiplier: 0.22),
             ])
+            openingScrollView = openingScroll
             openingButton = button
             header.addArrangedSubview(openingScroll)
         }
@@ -234,7 +237,10 @@ final class InCallViewController: UIViewController {
             feedStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -8),
             feedStack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 16),
             feedStack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -16),
+
+            suggestionBanner.heightAnchor.constraint(lessThanOrEqualTo: guide.heightAnchor, multiplier: 0.38),
         ])
+        openingScrollView?.heightAnchor.constraint(lessThanOrEqualTo: guide.heightAnchor, multiplier: 0.22).isActive = true
 
         observeKeyboard()
         observeAudioRoute()
@@ -380,8 +386,6 @@ final class InCallViewController: UIViewController {
         suggestionBanner.alwaysBounceVertical = false
         suggestionBanner.delegate = self
         suggestionBanner.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        suggestionBanner.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor,
-                                                 multiplier: 0.38).isActive = true
 
         let sparkles = UIImageView(image: UIImage(systemName: "sparkles"))
         sparkles.tintColor = Theme.purple

@@ -782,6 +782,31 @@ final class InCallCaptionTests: XCTestCase {
     /// secondary (translation) label must both be non-zero height in an SE layout.
     /// This is the layout-level regression check: if VCRP is wrong, at least one
     /// label collapses to height 0 under constraint pressure.
+    /// Regression: the Prepare opening's height cap used to be activated before the
+    /// scroll view joined the hierarchy, throwing NSGenericException on screen load.
+    func testPrepareOpeningShowsOnSmallScreenAndOneTapHidesIt() throws {
+        let store = SessionStore.shared
+        let oldGoal = store.callGoal
+        defer { store.callGoal = oldGoal; _ = store.takeHintOpening() }
+        store.callGoal = "fixture-opening-goal"
+        store.stageHintOpening(
+            english: "Hi, I'm calling about the activation of my new SIM card, which still has no mobile data.",
+            translation: "Здравствуйте, я звоню по поводу активации новой SIM-карты: мобильный интернет всё ещё не работает.",
+            goal: "fixture-opening-goal")
+        let vc = makeLoadedViewControllerWithSize(CGSize(width: 320, height: 568))
+        let scroll = try XCTUnwrap(view(withIdentifier: "scroll-opening", in: vc.view) as? UIScrollView)
+        let button = try XCTUnwrap(view(withIdentifier: "button-opening-dismiss", in: vc.view) as? HintChoiceButton)
+        XCTAssertFalse(scroll.isHidden)
+        XCTAssertGreaterThan(scroll.bounds.height, 0)
+        XCTAssertLessThanOrEqual(scroll.bounds.height, vc.view.safeAreaLayoutGuide.layoutFrame.height * 0.22 + 0.5)
+        XCTAssertLessThan(button.englishLabel.frame.minY, button.translationLabel.frame.minY)
+        button.sendActions(for: .touchUpInside)
+        XCTAssertTrue(scroll.isHidden)
+        // Single use: a later call screen for the same goal does not bring it back.
+        let next = makeLoadedViewControllerWithSize(CGSize(width: 320, height: 568))
+        XCTAssertNil(view(withIdentifier: "scroll-opening", in: next.view))
+    }
+
     func testSuggestionLabelsHavePositiveHeightOnSELayout() {
         let vc = makeLoadedViewControllerWithSize(CGSize(width: 375, height: 667))
         let stream = CallHintStream()
