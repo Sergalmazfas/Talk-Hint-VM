@@ -1,4 +1,4 @@
-- [Target product teams](product-teams-target.md) — production-only writes; Dev frozen; separate reviewed diffs; Maria Sobol HEAD.06, Pasha P.PRODUCT; future teams empty.
+- [Target product teams](product-teams-target.md) — production-only writes; Dev frozen; Мария над продуктом, Паша только Hint; Тихон — дежурный Hint; будущие команды пусты.
 - [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.
 - [Process on-call](process-on-call.md) — action reports; one email per call; decisions/outages immediate, ordinary failures in morning; no false green or blind retries.
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.

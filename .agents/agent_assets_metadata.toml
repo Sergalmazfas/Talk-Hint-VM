@@ -2231,3 +2231,31 @@ mtime_ms = 1793337256217
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9a68514b-b4ae-4156-86f6-d3c9c6cfe5c8/7af6765e-33fe-4226-b4a7-4744bd46851f"
 storage_version_token = "1793337274509905"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "EvDXD8jzs1TtBy2YGeVSS"
+uri = "file://generated-artifacts/Hint_Team_Audit_r919.zip"
+type = "unspecified"
+title = "ZIP для Claude — команда Hint · r919"
+description = "Анкеты, текущие и предлагаемые связи, пробелы, источники и 68 проверок целостности. Только read-only аудит; ничего не применено."
+logical_id = "d1d829ce-93e5-4f9e-97f1-877379c119ee"
+content_hash = "sha256:f5094ea8b05dd7b13d4d9882fce0c219b209fb4b7a1c4fa57171ef43ad0c1ed2"
+size = 1710834
+mtime_ms = 1793373413009
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d1d829ce-93e5-4f9e-97f1-877379c119ee/fb3e8275-05fa-400c-95a7-78789828408c"
+storage_version_token = "1793373443813094"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "bISvZPu-8ygZ0IhlFBe2O"
+uri = "file://generated-artifacts/hint-team-audit/acceptance/02_READ_ON_PHONE.html"
+type = "html"
+title = "Читать разбор команды Hint"
+description = "Тот же отчёт отдельно — удобно открыть на телефоне без распаковки ZIP."
+logical_id = "5e6aab5c-1044-401b-869b-58976b8607ba"
+content_hash = "sha256:6228913935e363205a067cc4bc7e9ddde7ad5d27b3456b94d1120e01d151b836"
+size = 70895
+mtime_ms = 1793373411981
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5e6aab5c-1044-401b-869b-58976b8607ba/d22ef5cf-5c95-49d9-abd0-2be629671318"
+storage_version_token = "1793373444766038"
+content_type = "text/html"
