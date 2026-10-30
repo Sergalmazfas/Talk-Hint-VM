@@ -410,6 +410,9 @@
 "incall.live" = "тікелей";
 "incall.end" = "Аяқтау";
 "incall.route.audio" = "Аудио";
+"incall.keypad.title" = "Пернетақта";
+"incall.keypad.close" = "Пернетақтаны жабу";
+"incall.keypad.unavailable" = "Қоңырау қосылмаған. Цифрлар жіберілмеді.";
 "incall.route.speaker" = "Динамик";
 "incall.route.iphone" = "iPhone";
 "incall.route.headphones" = "Құлаққап";

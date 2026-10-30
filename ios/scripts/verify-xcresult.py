@@ -5,6 +5,13 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "HintDtmfTests": (
+        "testAllTwelveKeysDispatchExactlyOnce",
+        "testInvalidAndDisconnectedDigitsNeverDispatch",
+        "testReconnectDoesNotReplayEarlierKeyPresses",
+        "testKeypadButtonsDispatchAndCompactScreenCanScroll",
+        "testFailedDispatchShowsErrorWithoutDisplayingUnsentDigits",
+    ),
     "SecretaryPersonalityTests": (
         "testSettingsFixtureProvidesBothValidCallProfiles",
         "testSecretaryIDsKeepHyphensAndUUIDsWithoutDoubleEncoding",

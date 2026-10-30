@@ -292,6 +292,16 @@ final class CallManager: NSObject {
         setMuted(!isMuted)
     }
 
+    /// Outbound Hint uses a direct Dial bridge. Incoming Hint and the other
+    /// modes use conference/private-audio paths, not a verified DTMF relay.
+    private func sendHintDigits(_ digits: String, for uuid: UUID) -> Bool {
+        guard let session = sessions[uuid], session.mode == .hint, session.isOutgoing,
+              let call = session.twilioCall else { return false }
+        return HintDtmf.send(digits, connected: call.state == .connected) {
+            call.sendDigits($0)
+        }
+    }
+
     /// Routes the active CallKit call through the built-in speaker or receiver.
     /// This deliberately belongs here rather than a translator-specific audio
     /// engine: Twilio/CallKit remains the only owner of phone-call audio.
@@ -327,7 +337,10 @@ final class CallManager: NSObject {
             return
         }
         let screen = InCallViewController(callerName: session.remoteLabel,
-                                          callSid: session.callSid ?? twilioCallSid)
+                                          callSid: session.callSid ?? twilioCallSid,
+                                          dtmfSender: session.isOutgoing ? { [weak self] digits in
+                                              self?.sendHintDigits(digits, for: uuid) ?? false
+                                          } : nil)
         inCallScreen = screen
         top.present(screen, animated: true)
     }
@@ -398,6 +411,9 @@ extension CallManager: CXProviderDelegate {
             action.fail()
             return
         }
+        let update = CXCallUpdate()
+        update.supportsDTMF = session.mode == .hint
+        provider.reportCall(with: action.callUUID, updated: update)
 
         // CallKit will activate the audio session; keep it disabled until then.
         audioRouter.setEnabled(false)
@@ -517,6 +533,15 @@ extension CallManager: CXProviderDelegate {
         action.fulfill()
         inCallScreen?.refreshMuteButton()
         translatorScreen?.refreshMuteButton()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) {
+        guard action.type == .singleTone,
+              sendHintDigits(action.digits, for: action.callUUID) else {
+            action.fail()
+            return
+        }
+        action.fulfill()
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {

@@ -410,6 +410,9 @@
 "incall.live" = "наживо";
 "incall.end" = "Завершити";
 "incall.route.audio" = "Аудіо";
+"incall.keypad.title" = "Клавіатура";
+"incall.keypad.close" = "Закрити клавіатуру";
+"incall.keypad.unavailable" = "Виклик не підключено. Цифри не надіслано.";
 "incall.route.speaker" = "Динамік";
 "incall.route.iphone" = "iPhone";
 "incall.route.headphones" = "Навушники";
