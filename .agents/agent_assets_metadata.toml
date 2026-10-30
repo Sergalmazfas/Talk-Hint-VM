@@ -2133,3 +2133,17 @@ mtime_ms = 1793314180396
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/30677848-f947-464c-8cac-9ffb18071087/7c86b7fe-5aae-409c-bd3e-ea9e176613a4"
 storage_version_token = "1793314193232076"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "g6ExEZxnqJB6KJtn2fHes"
+uri = "file://generated-artifacts/active-r914-review/TalkHint_active_r914_first_diffs_and_morning_Claude.zip"
+type = "unspecified"
+title = "Production r914 · первые diff и утренний отчёт"
+description = "Для сверки Claude: read-only статус, первый diff FK B, последовательные черновики Кати, спецификация структуры, блокер MCP/OAuth, исправление рассылки и полный прогон: 2640 passed / 0 failed / 30 skipped. Ничего в production не записано."
+logical_id = "2c135901-37db-4e3f-8d23-1dbf286bf241"
+content_hash = "sha256:c6e58702c30ab4538074b08db9ebab680dce0b3553769ddaffa39997b9df92c8"
+size = 102154
+mtime_ms = 1793320233780
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2c135901-37db-4e3f-8d23-1dbf286bf241/b7e676a3-05be-445d-9485-c859d11d299e"
+storage_version_token = "1793320241687307"
+content_type = "application/octet-stream"

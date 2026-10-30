@@ -1,9 +1,16 @@
 import type { Pool } from "pg";
+import { createHash } from "node:crypto";
 import { GmailLabMail } from "./mail";
 import { hintWatchdogStatus } from "./watchdog";
 import { ownerCallsSql, labRelease } from "./policy";
+import { messageIdFor } from "./store";
 
 const zone = "America/Denver";
+const supportedMessageId = /^[a-f0-9]+@talkhint-lab\.invalid$/;
+export function dailyMessageId(environment: string, owner: string, day: string) {
+  const digest = createHash("sha256").update(JSON.stringify(["hint-daily", environment, owner, day])).digest("hex");
+  return messageIdFor(digest);
+}
 const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric",
   month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
 const parts = (d: Date) => Object.fromEntries(formatter.formatToParts(d)
@@ -91,6 +98,13 @@ export async function hintDailyTick(pool: Pool, config: Config, now = new Date()
     }
     // A crash after sending must only be reconciled. It never grants a resend.
     if (entry && ["sending", "unknown"].includes(entry.status)) {
+      // Historical daily IDs were rejected by both encoder and SENT lookup.
+      // Preserve the evidence, stop the silent failing loop, never resend.
+      if (typeof entry.messageId !== "string" || !supportedMessageId.test(entry.messageId)) {
+        entry.status = "needs_review";
+        entry.errorCode = "LAB_BAD_MESSAGE_ID";
+        await save(); return;
+      }
       const found = await deadline(mail.sent(control, entry.messageId, entry.gmailId));
       entry.status = found ? "sent_confirmed" : (entry.checks ?? 0) >= 2 ? "needs_review" : "unknown";
       entry.checks = (entry.checks ?? 0) + 1;
@@ -107,7 +121,7 @@ export async function hintDailyTick(pool: Pool, config: Config, now = new Date()
       [`${config.environment}:${config.owner}`])).rows[0];
     const letter = renderHintDaily(day, rows, hintWatchdogStatus(), now, lab?.enabled === true);
     entry = state.reports[day.day] = { status: "sending", at: now.toISOString(),
-      messageId: `<hint-daily-${config.environment}-${day.day}-${config.owner.replace(/[^a-z0-9]/gi, "").slice(0, 100)}@talkhint.app>`,
+      messageId: dailyMessageId(config.environment, config.owner, day.day),
       subject: letter.subject, body: letter.body, checks: 0 };
     await save(); // Durable intent before the non-idempotent Gmail request.
     const canSend = async () => (await pool.query("SELECT enabled FROM call_lab_controls WHERE key=$1", [key])).rows[0]?.enabled === true;

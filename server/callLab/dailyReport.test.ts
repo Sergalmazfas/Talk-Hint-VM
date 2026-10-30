@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dueHintDay, renderHintDaily, hintDailyTick } from "./dailyReport";
+import { dueHintDay, renderHintDaily, hintDailyTick, dailyMessageId } from "./dailyReport";
+import { GmailLabMail } from "./mail";
 describe("Hint daily report — Denver calendar, not UTC or 24-hour subtraction", () => {
   it("waits until 08:00", () => {
     expect(dueHintDay(new Date("2026-10-28T13:59:59Z"))).toBeNull();
@@ -71,5 +72,72 @@ describe("daily durable self-mail", () => {
     const fixture = fakeDaily();
     await hintDailyTick(fixture.pool, { ...config, allowed: false }, now, fixture.mail);
     expect(fixture.sends()).toBe(0);
+  });
+  it("isolates deterministic IDs by environment, owner and calendar day", () => {
+    const id = dailyMessageId("production", "owner", "2026-10-28");
+    expect(id).toMatch(/^[a-f0-9]{64}@talkhint-lab\.invalid$/);
+    expect(dailyMessageId("production", "owner", "2026-10-28")).toBe(id);
+    expect(new Set([id, dailyMessageId("development", "owner", "2026-10-28"),
+      dailyMessageId("production", "other", "2026-10-28"),
+      dailyMessageId("production", "owner", "2026-10-29")]).size).toBe(4);
+  });
+  it.each(["sending", "unknown"])("quarantines legacy %s without sending or lookup", async status => {
+    const fixture = fakeDaily();
+    const messageId = "<hint-daily-production-2026-10-27-fixture@talkhint.app>";
+    fixture.saved.reports["2026-10-27"] = { status, messageId, checks: 0, body: "retained" };
+    fixture.mail.sent = async () => { throw Error("Must not query an unsupported ID"); };
+    for (let i = 0; i < 3; i++) await hintDailyTick(fixture.pool, config, now, fixture.mail);
+    expect(fixture.sends()).toBe(0);
+    expect(fixture.saved.reports["2026-10-27"]).toEqual({
+      status: "needs_review", messageId, checks: 0, body: "retained", errorCode: "LAB_BAD_MESSAGE_ID",
+    });
+  });
+  it("uses the actual Gmail encoder and SENT verifier, with network only stubbed", async () => {
+    const fixture = fakeDaily();
+    let sends = 0;
+    let rawMessage = "";
+    const sdk: any = {
+      proxy: async (_connector: string, path: string, options: any) => {
+        if (path.endsWith("/profile")) return Response.json({ emailAddress: "owner@example.test" });
+        if (path.endsWith("/messages/send")) {
+          sends++;
+          rawMessage = Buffer.from(options.body.raw, "base64url").toString("utf8");
+          return Response.json({ id: "gmail-fixture-id" });
+        }
+        if (path.includes("/messages/gmail-fixture-id?")) return Response.json({
+          id: "gmail-fixture-id", labelIds: ["SENT"],
+          payload: { headers: [{ name: "To", value: "owner@example.test" }] },
+        });
+        throw Error(`Unexpected fixture request: ${path}`);
+      },
+    };
+    const mail = new GmailLabMail(sdk);
+    await hintDailyTick(fixture.pool, config, now, mail);
+    await hintDailyTick(fixture.pool, config, now, mail);
+    expect(sends).toBe(1);
+    expect(rawMessage).toContain(`Message-ID: <${dailyMessageId(config.environment, config.owner, "2026-10-27")}>`);
+    expect(fixture.saved.reports["2026-10-27"].status).toBe("sent_confirmed");
+    expect(fixture.saved.reports["2026-10-27"].gmailId).toBe("gmail-fixture-id");
+  });
+  it("reconciles a valid unknown delivery by provider ID without sending again", async () => {
+    const fixture = fakeDaily();
+    fixture.saved.reports["2026-10-27"] = {
+      status: "unknown", messageId: dailyMessageId(config.environment, config.owner, "2026-10-27"),
+      gmailId: "gmail-fixture-id", checks: 0,
+    };
+    const sdk: any = {
+      proxy: async (_connector: string, path: string) => {
+        if (path.endsWith("/profile")) return Response.json({ emailAddress: "owner@example.test" });
+        if (path.includes("/messages/gmail-fixture-id?")) return Response.json({
+          id: "gmail-fixture-id", labelIds: ["SENT"],
+          payload: { headers: [{ name: "To", value: "owner@example.test" }] },
+        });
+        throw Error(`Must not send: ${path}`);
+      },
+    };
+    await hintDailyTick(fixture.pool, config, now, new GmailLabMail(sdk));
+    expect(fixture.sends()).toBe(0);
+    expect(fixture.saved.reports["2026-10-27"].status).toBe("sent_confirmed");
+    expect(fixture.saved.reports["2026-10-27"].checks).toBe(1);
   });
 });
