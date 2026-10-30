@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { TeamEvent, TeamMember, TeamPin, TeamStatus, TeamView } from "@shared/team";
+import { partitionTeamMembers } from "@/lib/teamPresentation";
 import {
   Activity, AlertCircle, ArrowLeft, ArrowRight, BriefcaseBusiness, Check, ChevronDown,
   CircleHelp, Clock3, Eye, EyeOff, Fingerprint, LockKeyhole, Network, RefreshCw, X,
@@ -342,20 +343,20 @@ export function TeamContent({
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
   const [showAllRoles, setShowAllRoles] = useState(false);
-  const selected = view.members.find((member) => member.id === selectedId) ?? null;
+  const { staff, external: externalMembers, plans } = useMemo(
+    () => partitionTeamMembers(view.members),
+    [view.members],
+  );
+  const displayMembers = useMemo(
+    () => [...staff, ...externalMembers, ...plans],
+    [staff, externalMembers, plans],
+  );
+  const selected = displayMembers.find((member) => member.id === selectedId) ?? null;
   const focusCodes = useMemo(() => new Set(["HEAD.06", "P.PRODUCT", "P.LAB", "P.LG.QA", "P.OPS", "P.COORD", "HEAD.07"]), []);
-  const externalMembers = useMemo(
-    () => view.members.filter((member) => member.kind === "external" || member.status === "owner_chat" || member.status === "contractor"),
-    [view.members],
-  );
-  const hierarchyMembers = useMemo(
-    () => view.members.filter((member) => member.kind !== "external" && member.status !== "owner_chat" && member.status !== "contractor"),
-    [view.members],
-  );
   const visibleMembers = useMemo(
     () => showAllRoles
-      ? hierarchyMembers
-      : hierarchyMembers.filter((member) => {
+      ? staff
+      : staff.filter((member) => {
         const code = member.code.trim().toUpperCase();
         const id = member.id.trim().toUpperCase();
         const isStudioHat = code === "REPLIT-HAT" || id === "REPLIT-HAT" || member.status === "replit";
@@ -365,7 +366,7 @@ export function TeamContent({
           || member.kind === "employee"
           || isStudioHat;
       }),
-    [focusCodes, hierarchyMembers, showAllRoles],
+    [focusCodes, staff, showAllRoles],
   );
   const departments = useMemo(() => {
     const preferred = ["Продукт", "Инженерия", "Работают на клиентов"];
@@ -381,14 +382,17 @@ export function TeamContent({
       .filter((event) => activityFilter === "all" || (activityFilter !== "reports" && event.source === activityFilter))
       .map((event) => ({ kind: "event", event }));
     const reports: TeamFeedItem[] = activityFilter === "reports" || activityFilter === "all"
-      ? view.members.flatMap((member) => (member.actionReports ?? []).map((report) => ({ kind: "report" as const, report, member })))
+      ? view.members.flatMap((member) => {
+        const displayMember = displayMembers.find((candidate) => candidate.id === member.id) ?? member;
+        return (member.actionReports ?? []).map((report) => ({ kind: "report" as const, report, member: displayMember }));
+      })
       : [];
     return [...events, ...reports].sort((left, right) => {
       const leftAt = left.kind === "event" ? left.event.at : left.report.at;
       const rightAt = right.kind === "event" ? right.event.at : right.report.at;
       return new Date(rightAt).getTime() - new Date(leftAt).getTime();
     });
-  }, [view.feed, view.members, activityFilter]);
+  }, [displayMembers, view.feed, view.members, activityFilter]);
   const departmentGroups = (selectedDepartment ? [selectedDepartment] : departments)
     .map((department) => ({ department, members: visibleMembers.filter((member) => member.department === department) }))
     .filter((group) => group.members.length > 0);
@@ -493,12 +497,33 @@ export function TeamContent({
           <div className="max-h-[690px] overflow-y-auto px-5 py-2 sm:px-6">
             {activities.length ? <ol className="divide-y divide-[#edf0e9]">
               {activities.map((item) => item.kind === "event"
-                ? <ActivityRow key={`event-${item.event.id}`} event={item.event} members={view.members} onSelect={selectMember} />
+                ? <ActivityRow key={`event-${item.event.id}`} event={item.event} members={displayMembers} onSelect={selectMember} />
                 : <ReportActivityRow key={`report-${item.report.id}`} report={item.report} member={item.member} onSelect={selectMember} />)}
             </ol> : <EmptyState icon={<Activity className="h-5 w-5" />} title="Записей нет" detail="В выбранном источнике сейчас нет событий или рапортов." />}
           </div>
         </section>
       </section>
+
+      {plans.length > 0 && <section className="team-panel mt-6 overflow-hidden" aria-labelledby="plans-heading">
+        <div className="border-b border-[#e4eae3] px-5 py-5 sm:px-7">
+          <p className="team-eyebrow"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> Будущее команды</p>
+          <h2 id="plans-heading" className="mt-2 text-2xl font-semibold tracking-[-0.055em] text-[#294437]">Планы</h2>
+          <p className="mt-2 max-w-2xl text-xs leading-5 text-[#7d8b81]">
+            Будущая лаборатория секретаря ещё не создана. Здесь показаны планы, а не вымышленные сотрудники.
+          </p>
+        </div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-7">
+          {plans.map((member, index) => <MemberCard
+            key={member.id}
+            member={member}
+            selected={member.id === selectedId}
+            index={index}
+            onSelect={() => selectMember(member.id)}
+            showPortrait={false}
+            fullName
+          />)}
+        </div>
+      </section>}
 
       {externalMembers.length > 0 && <section className="team-panel mt-6 overflow-hidden" aria-labelledby="external-team-heading">
         <div className="border-b border-[#e4eae3] px-5 py-5 sm:px-7">
@@ -535,7 +560,7 @@ export function TeamContent({
         <span>Только владелец · состояние получено с сервера</span>
         <span className="font-mono">Источник: {view.source.environment} · {view.source.workspace} · r{view.source.revision}</span>
       </footer>
-      {selected && <ProfileDrawer member={selected} members={view.members} onSelect={selectMember} onClose={closeProfile} />}
+      {selected && <ProfileDrawer member={selected} members={displayMembers} onSelect={selectMember} onClose={closeProfile} />}
     </div>
   );
 }
@@ -554,16 +579,23 @@ function TeamHeader() {
   );
 }
 
-function MemberCard({ member, selected, index, onSelect }: { member: TeamMember; selected: boolean; index: number; onSelect: () => void }) {
+function MemberCard({ member, selected, index, onSelect, showPortrait = true, fullName = false }: {
+  member: TeamMember;
+  selected: boolean;
+  index: number;
+  onSelect: () => void;
+  showPortrait?: boolean;
+  fullName?: boolean;
+}) {
   const colorClass = member.color === "indigo" ? "team-member-indigo" : member.color === "orange" ? "team-member-orange" : "";
   const isExternal = member.kind === "external" || member.status === "owner_chat" || member.status === "contractor";
   return (
     <button type="button" onClick={onSelect} aria-pressed={selected} className={`team-member-card text-left ${colorClass} ${selected ? "team-member-selected" : ""}`} style={{ animationDelay: `${Math.min(index, 7) * 45}ms` }}>
       <div className="flex items-start gap-3">
-        <Portrait member={member} size="large" />
+        {showPortrait && <Portrait member={member} size="large" />}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="truncate text-[17px] font-semibold tracking-[-0.045em] text-[#2b4538]">{missing(member.name)}</h3>
+            <h3 className={`${fullName ? "break-words" : "truncate"} text-[17px] font-semibold tracking-[-0.045em] text-[#2b4538]`}>{missing(member.name)}</h3>
             <span className="min-w-0 max-w-full break-all font-mono text-[9px] text-[#9aa398]">{missing(member.code)} · {member.id}</span>
           </div>
           <p className="mt-1 text-xs leading-5 text-[#77867b]">{missing(member.title)}</p>
@@ -997,12 +1029,32 @@ function ReportActivityRow({ report, member, onSelect }: { report: TeamActionRep
 }
 
 function Portrait({ member, size }: { member: TeamMember; size: "large" | "hero" }) {
-  const [failed, setFailed] = useState(false);
+  const portraitSrc = member.portrait || null;
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const classes = size === "hero" ? "h-24 w-24 rounded-[24px] text-2xl sm:h-28 sm:w-28" : "h-14 w-14 rounded-[17px] text-sm";
   const colorClass = member.color === "indigo" ? "team-portrait-indigo" : member.color === "orange" ? "team-portrait-orange" : "";
-  return member.portrait && !failed
-    ? <img src={member.portrait} alt={`Портрет ${member.name}`} onError={() => setFailed(true)} className={`${classes} shrink-0 border border-[#e1e8df] object-cover`} />
-    : <span aria-label={`Инициалы: ${member.name}`} className={`${classes} ${colorClass} grid shrink-0 place-items-center border border-[#dbe7d9] bg-[linear-gradient(145deg,#e5eee1,#dce8df)] font-display font-semibold tracking-[-0.06em] text-[#4d7055]`}>{initials(member.name)}</span>;
+  const showImage = !!portraitSrc && failedSrc !== portraitSrc;
+  const imageLoaded = !!portraitSrc && loadedSrc === portraitSrc;
+  return (
+    <span
+      role="img"
+      aria-label={`Портрет ${member.name}; инициалы ${initials(member.name)}`}
+      className={`${classes} ${colorClass} relative grid shrink-0 place-items-center overflow-hidden border border-[#dbe7d9] bg-[linear-gradient(145deg,#e5eee1,#dce8df)] font-display font-semibold tracking-[-0.06em] text-[#4d7055]`}
+    >
+      <span aria-hidden="true">{initials(member.name)}</span>
+      {showImage && (
+        <img
+          key={portraitSrc}
+          src={portraitSrc}
+          alt=""
+          onLoad={() => setLoadedSrc(portraitSrc)}
+          onError={() => setFailedSrc(portraitSrc)}
+          className={`${classes} absolute inset-0 border border-[#e1e8df] object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+        />
+      )}
+    </span>
+  );
 }
 
 function StatusBadge({ status }: { status: TeamStatus }) {

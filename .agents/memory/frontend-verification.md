@@ -20,3 +20,9 @@ Imports into an existing editable document must also pass an ordinary editor sav
 **Why:** A compact imported book could be read correctly while the editor regenerated duplicated Markdown and exceeded its document-size limit on the next small edit. Readability alone did not preserve editability.
 
 **How to apply:** Test a near-limit existing document through the shared editor serializer and save command, retaining every canonical field and history. Compress duplicated presentation, never silently trim source content.
+
+Small display-only fixes may go to the owner for Publish after tests, without Claude review.
+
+**Why:** The owner explicitly changed this rule to shorten minor visual corrections; this does not authorize production/model writes or agent-initiated publishing.
+
+**How to apply:** Keep the exception limited to display-only changes. Future empty teams belong in a separate «Планы» block; the future secretary team must not borrow the living Katya's portrait.
