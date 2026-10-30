@@ -2217,3 +2217,17 @@ mtime_ms = 1793334931343
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/02818eb5-e55f-4447-aa97-ae912c81a2f1/dba20e24-bfe7-42d5-a99a-719b5e0565e0"
 storage_version_token = "1793334977934151"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "fzkfj3cmdQxxifvVT5Nvs"
+uri = "file://generated-artifacts/team-reader-fix/TalkHint_Team_Read_SQL_Fix_Claude.zip"
+type = "unspecified"
+title = "Команда · SQL-фикс загрузки · на сверку Claude"
+description = "Узкий diff одного файла приложения, 9 новых регрессионных случаев, полный прогон 285 файлов, настоящий PG read-only путь без test:true и подтверждение неизменности pin."
+logical_id = "9a68514b-b4ae-4156-86f6-d3c9c6cfe5c8"
+content_hash = "sha256:3a67f95f46eea1dd97be151933ec3b833d942edc0dcb0001f51e7ba911b3c0ac"
+size = 191665
+mtime_ms = 1793337256217
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9a68514b-b4ae-4156-86f6-d3c9c6cfe5c8/7af6765e-33fe-4226-b4a7-4744bd46851f"
+storage_version_token = "1793337274509905"
+content_type = "application/octet-stream"

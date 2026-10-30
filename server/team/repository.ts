@@ -25,6 +25,14 @@ export interface TeamContext {
   secretaryDefault?: string | null;
   secretaryOwnerName?: string;
 }
+function directoryOwnerName(documents: ModelDocument[]): string {
+  const directory = documents.find(document => document.id === DIRECTORY);
+  if (!directory) return "";
+  // Read the accepted company directory; users has no first/last-name columns.
+  // An absent name stays absent. A corrupt document must not be concealed.
+  const name = JSON.parse(directory.text)?.owner?.name;
+  return typeof name === "string" ? name.trim() : "";
+}
 /** Only bounded active subtrees. Never preload/export the historical model. */
 export async function readContext(db: PoolClient, owner: string, environment: string,
   options: { test?: boolean; store?: SqlFrameStore } = {}): Promise<TeamContext> {
@@ -84,8 +92,7 @@ export async function readContext(db: PoolClient, owner: string, environment: st
       WHERE t.user_id=$1 ORDER BY t.updated_at DESC LIMIT 20`, [owner])).rows,
     secretaryDefault: test ? null : (await db.query(
       "SELECT provider FROM secretary_outgoing_defaults WHERE user_id=$1", [owner])).rows[0]?.provider ?? null,
-    secretaryOwnerName: test ? "" : (await db.query(
-      "SELECT concat_ws(' ',first_name,last_name) AS name FROM users WHERE id=$1", [owner])).rows[0]?.name ?? "",
+    secretaryOwnerName: directoryOwnerName(documents),
     actor: w.actor };
 }
 export function completedSteps(c: TeamContext) {
