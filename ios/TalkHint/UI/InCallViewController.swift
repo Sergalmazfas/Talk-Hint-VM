@@ -41,6 +41,7 @@ final class InCallViewController: UIViewController {
     private let muteButton = UIButton(type: .system)
     private let routeCaption = UILabel()
     private let muteCaption = UILabel()
+    private let dtmfSender: ((String) -> Bool)?
 
     // Live (non-finalized) transcript card per speaker, kept independently —
     // like `interimMessages['guest']` / `interimMessages['you']` in the web.
@@ -61,10 +62,12 @@ final class InCallViewController: UIViewController {
     private var openingCollapsed = false
     private var firstOwnerTurnSeen = false
 
-    init(callerName: String, hintStream: CallHintStream = CallHintStream(), callSid: String? = nil) {
+    init(callerName: String, hintStream: CallHintStream = CallHintStream(), callSid: String? = nil,
+         dtmfSender: ((String) -> Bool)? = nil) {
         self.callerName = callerName
         self.stream = hintStream
         self.telemetryCallSid = callSid
+        self.dtmfSender = dtmfSender
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -114,8 +117,9 @@ final class InCallViewController: UIViewController {
         SessionStore.shared.callGoal = ""
         openingButton?.superview?.isHidden = true
         stream.disconnect()
-        if presentingViewController != nil {
-            dismiss(animated: true)
+        if let presenter = presentingViewController {
+            // Dismiss the whole call stack, including an open keypad sheet.
+            presenter.dismiss(animated: true)
         }
     }
 
@@ -476,8 +480,7 @@ final class InCallViewController: UIViewController {
 
     /// The circular Mute / End / Audio controls per the approved mockup —
     /// round buttons with small captions beneath. The mockup's third slot shows
-    /// "Keypad", but DTMF isn't supported in-call; the existing audio-route
-    /// control keeps that slot so no functionality is lost.
+    /// "Keypad". Keep Audio separately; DTMF never changes audio routing.
     private func buildControlsRow() -> UIView {
         // Compact controls (44/52pt, 10pt captions): the chat + hint branches
         // are the point of this screen — the buttons only need to stay tappable.
@@ -519,7 +522,22 @@ final class InCallViewController: UIViewController {
         let end = circleControl(button: endButton, caption: endCaption)
         let route = circleControl(button: routeButton, caption: routeCaption)
 
-        let row = UIStackView(arrangedSubviews: [mute, end, route])
+        var controls = [mute, end, route]
+        if dtmfSender != nil {
+            let keypad = UIButton(type: .system)
+            configureCircleButton(keypad, diameter: 44)
+            keypad.setImage(UIImage(systemName: "circle.grid.3x3.fill"), for: .normal)
+            keypad.accessibilityIdentifier = "button-incall-keypad"
+            keypad.addTarget(self, action: #selector(keypadTapped), for: .touchUpInside)
+            let caption = UILabel()
+            caption.text = NSLocalizedString("incall.keypad.title", comment: "")
+            caption.font = .systemFont(ofSize: 10)
+            caption.textColor = Theme.sub
+            caption.textAlignment = .center
+            keypad.accessibilityLabel = caption.text
+            controls.insert(circleControl(button: keypad, caption: caption), at: 1)
+        }
+        let row = UIStackView(arrangedSubviews: controls)
         row.axis = .horizontal
         row.spacing = 12
         row.distribution = .fillEqually
@@ -536,6 +554,12 @@ final class InCallViewController: UIViewController {
         button.tintColor = Theme.ink
         button.widthAnchor.constraint(equalToConstant: diameter).isActive = true
         button.heightAnchor.constraint(equalToConstant: diameter).isActive = true
+    }
+
+    @objc private func keypadTapped() {
+        guard let dtmfSender, presentedViewController == nil else { return }
+        view.endEditing(true)
+        present(InCallKeypadViewController(sendDigits: dtmfSender), animated: true)
     }
 
     /// A circular control with its caption beneath, centered as one unit.

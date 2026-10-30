@@ -2273,3 +2273,17 @@ mtime_ms = 1793377301171
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0c764906-1f46-4922-b9ce-1ac18322d2f6/4818128f-e112-49c4-9b52-512582ce040d"
 storage_version_token = "1793377353600679"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "YqvAeNuJZxaWEEL33P7gI"
+uri = "file://generated-artifacts/katya-oct30/incident.txt"
+type = "text"
+title = "Катя — факты обрыва и точечное исправление"
+description = "Время, Twilio/Retell IDs, push_failed, границы установленного и предложение без изменения поведения. Отдельно — готовность DTMF и непройденная пока проверка Xcode."
+logical_id = "9138dce0-c63d-4c61-8b14-89bbe864d943"
+content_hash = "sha256:57a835754512ad25e2da3ddcd591a016b373ca411fb0b51b55acdb28c39e798d"
+size = 8109
+mtime_ms = 1793379119774
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9138dce0-c63d-4c61-8b14-89bbe864d943/fc5fd6c3-4d3f-4584-8835-bc57fb5a3c41"
+storage_version_token = "1793379179690936"
+content_type = "text/plain"

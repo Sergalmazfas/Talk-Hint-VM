@@ -410,6 +410,9 @@
 "incall.live" = "live";
 "incall.end" = "End";
 "incall.route.audio" = "Audio";
+"incall.keypad.title" = "Keypad";
+"incall.keypad.close" = "Close keypad";
+"incall.keypad.unavailable" = "Call not connected. Digits were not sent.";
 "incall.route.speaker" = "Speaker";
 "incall.route.iphone" = "iPhone";
 "incall.route.headphones" = "Headphones";
