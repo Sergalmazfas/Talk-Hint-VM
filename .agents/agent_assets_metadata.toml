@@ -2175,3 +2175,17 @@ mtime_ms = 1793326314111
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ff1caed5-d5d3-4c01-9ceb-4393b7611499/90632dfc-54f2-477c-8392-de4b96cc20d6"
 storage_version_token = "1793326351189540"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "bdd3ZaMNYnF9rGS0hpMlZ"
+uri = "file://generated-artifacts/team-confirm-scroll/TalkHint_Confirmation_Scroll_Claude.zip"
+type = "unspecified"
+title = "Исправление окна подтверждения — на сверку Claude"
+description = "Минимальный diff, результаты 47 тестов, typecheck и снимок узкого экрана с увеличенным текстом. Production не менялся."
+logical_id = "3a30c2e9-0892-49d2-abfe-d21155ebf0de"
+content_hash = "sha256:24417597a9239ad8e732a44bb47d43666c8092fa16d70b475cef9207c75a968e"
+size = 28544
+mtime_ms = 1793328578233
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3a30c2e9-0892-49d2-abfe-d21155ebf0de/b6b9db81-e9d2-4638-b31d-956246fac5b8"
+storage_version_token = "1793328583284797"
+content_type = "application/octet-stream"

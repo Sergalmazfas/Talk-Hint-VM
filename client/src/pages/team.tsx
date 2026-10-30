@@ -212,6 +212,7 @@ export default function TeamPage() {
       {confirmApply && view && (
         <div className="team-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmApply(false); }}>
           <section className="team-modal" role="dialog" aria-modal="true" aria-labelledby="apply-title">
+            <div className="team-modal-body">
             <div className="flex items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e4efe8] text-[#28634f]"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
               <div>
@@ -222,7 +223,8 @@ export default function TeamPage() {
             <div className="mt-5 rounded-xl border border-[#e0e9e2] bg-[#f3f7f3] p-4 text-sm leading-6 text-[#53685e]">
               Применение нельзя автоматически повторить. Если ответ любого шага будет неоднозначным, последовательность остановится; обновите статус вручную и проверьте состояние перед новым подтверждением.
             </div>
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            </div>
+            <div className="team-modal-actions mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button type="button" onClick={() => setConfirmApply(false)} className="team-button-secondary">Отмена</button>
               <button type="button" onClick={() => void applyAll()} className="team-button-primary">Подтвердить последовательность</button>
             </div>

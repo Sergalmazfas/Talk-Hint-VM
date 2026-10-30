@@ -388,7 +388,9 @@
 .team-page .team-button-primary:disabled, .team-page .team-button-secondary:disabled, .team-page .team-refresh:disabled { cursor: not-allowed; opacity: .52; }
 .team-page .team-apply-panel { border: 1px solid #dce5d9; background: linear-gradient(110deg, #e9f0e6, #f4f5ec); }
 .team-page .team-modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(28, 45, 35, .42); padding: 1rem; backdrop-filter: blur(4px); }
-.team-page .team-modal { width: min(100%, 560px); border: 1px solid #dbe4d9; border-radius: 20px; background: #fafbf7; padding: 22px; box-shadow: 0 24px 80px rgba(27, 45, 33, .23); animation: team-page-enter .2s both; }
+.team-page .team-modal { width: min(100%, 560px); max-height: calc(100vh - 2rem); max-height: calc(100dvh - 2rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #dbe4d9; border-radius: 20px; background: #fafbf7; padding: 22px; box-shadow: 0 24px 80px rgba(27, 45, 33, .23); animation: team-page-enter .2s both; }
+.team-page .team-modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.team-page .team-modal-actions { flex-shrink: 0; }
 .team-page .team-drawer-backdrop {
   position: fixed;
   inset: 0;
