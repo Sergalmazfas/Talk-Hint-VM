@@ -11,8 +11,16 @@ export const portraitManifest = Object.fromEntries(files.map(([name, sha256, byt
   object: `team/${name}/${sha256}.png`, sha256, bytes,
   url: `/api/admin/team/portraits/${name}/${sha256}`,
 }]));
+// Separate from the immutable first-package manifest/recipe.
+export const teamPortraitManifest = { ...portraitManifest, ...Object.fromEntries([
+  ["klavdiy", "63b929857883e0e1c15019c63d6ad3c4839ad699cc8b127114570302d7d9b52e", 3065723],
+  ["efim", "505502d0cb76bea5c4ac232438902cc1986cf8806a0b4fb4155030d8c0e90a15", 2279197],
+].map(([name, sha256, bytes]) => [String(name), {
+  object: `team/${name}/${sha256}.png`, sha256: String(sha256), bytes: Number(bytes),
+  url: `/api/admin/team/portraits/${name}/${sha256}`,
+}])) };
 export async function verifiedPortrait(name: string, digest: string, client = new Client()) {
-  const pin = portraitManifest[name];
+  const pin = teamPortraitManifest[name];
   if (!pin || pin.sha256 !== digest) throw Error("Unknown portrait");
   const result = await client.downloadAsBytes(pin.object);
   if (!result.ok) throw Error("Portrait unavailable");

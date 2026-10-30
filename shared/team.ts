@@ -1,4 +1,4 @@
-export type TeamStatus = "autonomous" | "replit" | "disconnected" | "planned" | "unresolved";
+export type TeamStatus = "autonomous" | "replit" | "disconnected" | "planned" | "unresolved" | "owner_chat" | "contractor";
 export interface TeamMember {
   id: string; name: string; title: string; code: string; department: string;
   mode: string | null; status: TeamStatus; statusEvidence: string;
@@ -12,6 +12,16 @@ export interface TeamMember {
   metrics: { plan: string | null; fact: string | null };
   lastWork: string | null; lessons: string[];
   history: { at: string; text: string }[];
+  lastActionAt?: string | null;
+  runtimeSource?: string | null;
+  kind?: "role" | "employee" | "external";
+  color?: "indigo" | "orange";
+  hats?: { id: string; title: string; status: string; history?: { at: string; text: string }[] }[];
+  actionReports?: {
+    id: string; at: string; role: string; assigned: string;
+    outcome: "completed" | "partial" | "not_completed";
+    succeeded: string[]; failed: string[]; needsOwner: string[]; source: string;
+  }[];
 }
 export interface TeamEvent {
   id: string; at: string; source: "journal" | "call_lab" | "oncall";

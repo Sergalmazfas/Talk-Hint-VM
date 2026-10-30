@@ -2189,3 +2189,17 @@ mtime_ms = 1793328578233
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3a30c2e9-0892-49d2-abfe-d21155ebf0de/b6b9db81-e9d2-4638-b31d-956246fac5b8"
 storage_version_token = "1793328583284797"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "pNSwf022DZ1Vj5hl3YJur"
+uri = "file://generated-artifacts/team-package-two/TalkHint_Package2_Claude.zip"
+type = "unspecified"
+title = "Пакет 2 — на сверку Claude"
+description = "Diff кода и отдельный предлагаемый документ модели, read-only подтверждение r918 / 4 из 4, полный прогон по файлам, SHA и стендовые снимки. Production не изменён."
+logical_id = "0b953cf0-488b-43f4-8d1a-d32c2575450f"
+content_hash = "sha256:ece0dfb86e69b7fe87a07c51bca75a093bdf6f362aef63263011bcf6bd64240a"
+size = 512907
+mtime_ms = 1793333413959
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0b953cf0-488b-43f4-8d1a-d32c2575450f/f4f1dfa1-483c-4b0e-8510-f23fdf196ff3"
+storage_version_token = "1793333424396249"
+content_type = "application/octet-stream"

@@ -2,6 +2,7 @@
 import { hintMeasurements } from "./measurements";
 import { labRelease } from "./policy";
 import { productLetterSection } from "./productFollowup";
+import { actionReportText } from "../team/actionReports";
 
 export function completeLabReport(report: any, source: unknown, key: string) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("LAB_BAD_REPORT_KEY");
@@ -65,6 +66,21 @@ export function processReport(report: any) {
 }
 
 export function renderProcessLetter(report: any): { subject: string; body: string } {
+  const reports = Array.isArray(report.action_reports) ? report.action_reports : [];
+  if (reports.length) {
+    const section = reports.map(actionReportText).join("\n\n");
+    if (report.mode === "secretary") return {
+      subject: "Катя · рапорт по фактам звонка",
+      body: ["РАПОРТ ПО ЗВОНКУ", section,
+        "AI-оценка качества не выполнялась; техническое соединение не доказывает выполнение задачи.",
+        ...productLetterSection(report)].join("\n\n"),
+    };
+    const legacy = renderLegacyProcessLetter(report);
+    return { ...legacy, body: `${legacy.body}\n\nРАПОРТЫ УЧАСТНИКОВ\n${section}` };
+  }
+  return renderLegacyProcessLetter(report);
+}
+function renderLegacyProcessLetter(report: any): { subject: string; body: string } {
   if (report.execution === "mode_analysis_not_connected")
     return { subject: report.letter.subject, body: [
       "ВОРОНКА", `Ваш звонок в ${report.mode ?? "неопределённом режиме"} зафиксирован; измерения не подключены.`,

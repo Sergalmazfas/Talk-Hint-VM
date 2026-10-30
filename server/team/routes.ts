@@ -5,10 +5,15 @@ import { requireBenchmarkAdmin } from "../benchmark/adminGate";
 import { ModelError } from "../projectModel/modelError";
 import { TeamRepository } from "./repository";
 import { teamView } from "./view";
-import { portraitManifest, verifiedPortrait } from "./portraits";
+import { portraitManifest, teamPortraitManifest, verifiedPortrait } from "./portraits";
 import { TEAM_OWNER, TEAM_PLAN_HASH } from "./plan";
 import { semanticHash } from "../companyData/valueTree";
 import type { TeamPin } from "../../shared/team";
+import { withTeamRuntime } from "./runtime";
+import { EXTERNAL_PARTNERS_DOCUMENT, withExternalPartners } from "./external";
+import { teamRuntimeChecks } from "./runtimeChecks";
+import type { TeamContext } from "./repository";
+import type { RuntimeChecks } from "./runtime";
 
 const equal = (a: unknown, b: unknown) => typeof a === "string" && typeof b === "string" &&
   /^[a-f0-9]{64}$/.test(a) && /^[a-f0-9]{64}$/.test(b) &&
@@ -22,13 +27,14 @@ export function validPin(v: any): v is TeamPin {
 export function registerTeamRoutes(app: Express, getPool: () => Promise<Pool>, options: {
   environment?: string; repository?: TeamRepository; guard?: RequestHandler;
   portrait?: typeof verifiedPortrait;
+  runtime?: (context: TeamContext) => Promise<RuntimeChecks>;
 } = {}) {
   const environment = options.environment ?? (process.env.NODE_ENV === "production" ? "production" : "development");
   const base = "/api/admin/team";
   let repository: TeamRepository | undefined = options.repository;
   const images = new Map<string, Promise<Buffer>>();
   const portrait = (name: string, digest: string) => {
-    const pin = portraitManifest[name];
+    const pin = teamPortraitManifest[name];
     if (!pin || digest !== pin.sha256) return Promise.reject(Error("Unknown portrait"));
     const key = `${name}:${digest}`;
     if (!images.has(key)) images.set(key, (options.portrait ?? verifiedPortrait)(name, digest)
@@ -46,13 +52,21 @@ export function registerTeamRoutes(app: Express, getPool: () => Promise<Pool>, o
       session.teamCsrf ??= randomBytes(32).toString("hex");
       if (req.path.startsWith(`${base}/portraits/`) && req.method === "GET") {
         const parts = req.path.slice(`${base}/portraits/`.length).split("/");
-        if (parts.length !== 2 || !portraitManifest[parts[0]] || portraitManifest[parts[0]].sha256 !== parts[1])
+        if (parts.length !== 2 || !teamPortraitManifest[parts[0]] || teamPortraitManifest[parts[0]].sha256 !== parts[1])
           return res.status(404).json({ error: "Портрет не найден." });
         return res.type("png").send(await portrait(parts[0], parts[1]));
       }
       repository ??= new TeamRepository(await getPool(), environment);
       const status = async () => {
-        const view = teamView(await repository!.read(TEAM_OWNER), environment);
+        const context = await repository!.read(TEAM_OWNER);
+        let view = teamView(context, environment);
+        // First-package application/recipe and historical fixtures remain exact.
+        if (view.apply.completed === 4) {
+          const checks = options.runtime ? await options.runtime(context) :
+            options.repository ? {} : await teamRuntimeChecks(context);
+          view = withExternalPartners(withTeamRuntime(view, context, checks),
+            context.documents.find(d => d.id === EXTERNAL_PARTNERS_DOCUMENT)?.text);
+        }
         view.apply.csrfToken = session.teamCsrf; return view;
       };
       if (req.path === base && req.method === "GET") return res.json(await status());

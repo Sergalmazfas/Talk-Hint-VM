@@ -15,6 +15,7 @@ type Row = {
   job_key: string | null; job_status: string | null; job_created: string | Date | null;
   job_updated: string | Date | null; execution: string | null; qa_status: string | null;
   mail_status: string | null; mail_updated: string | Date | null;
+  action_delivery?: string | null;
 };
 export type Incident = {
   code: string; lastStep: string; expected: string; reason: string;
@@ -59,6 +60,13 @@ export function detectHintIncident(row: Row, now = Date.now()): Incident | null 
     return { code: "ANALYSIS_DELAY", lastStep: "Разбор начат",
       expected: "Результат разбора и QA", reason: "Нет сохранённого результата после технического тайм-аута." };
   if (row.job_status !== "report_ready") return null;
+  // Persisted ordinary failures are intentionally routed to the daily report.
+  // Technical queue/analysis timeouts above remain urgent.
+  if (row.action_delivery === "daily") return null;
+  // The consolidated per-call outbox sends an urgent report immediately.
+  // Give that existing attempt its normal delivery grace, not a second mail.
+  if (row.action_delivery === "immediate" && row.mail_status !== "sent_confirmed" &&
+      !older(row.job_updated, watchdogPolicy.mailMs, now)) return null;
   if (row.execution === "mode_analysis_not_connected")
     return row.mail_status === "sent_confirmed" ? null :
       older(row.job_updated, watchdogPolicy.mailMs, now)
@@ -134,6 +142,7 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
       c.metadata#>>'{labHintSource,closedAt}' AS closed_at,
       j.key AS job_key,j.status AS job_status,j.created_at AS job_created,j.updated_at AS job_updated,
       j.report->>'execution' AS execution,j.report->>'qa_status' AS qa_status,
+      j.report->>'action_delivery' AS action_delivery,
       o.status AS mail_status,o.updated_at AS mail_updated
       FROM (${ownerCallsSql}) c
       LEFT JOIN call_lab_jobs j ON j.call_sid=c.call_sid AND j.owner_id=$1 AND j.environment=$3
@@ -155,6 +164,8 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
       state[id] ??= { ...issue, callRef, detectedAt: at, lastSeenAt: at, delivery: "prepared" };
       state[id].lastSeenAt = at;
       delete state[id].resolvedAt;
+      if (row.action_delivery === "immediate" && row.mail_status === "sent_confirmed")
+        state[id].delivery = "sent_confirmed"; // issue stays active; existing consolidated mail already notified owner
     }
     for (const [id, entry] of Object.entries(state))
       if (scanned.has(entry.callRef) && !active.has(id) && !entry.resolvedAt) entry.resolvedAt = at;

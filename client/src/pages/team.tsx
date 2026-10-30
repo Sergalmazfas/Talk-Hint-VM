@@ -11,13 +11,19 @@ const TEAM_URL = "/api/admin/team";
 const GRANT_URL = "/api/admin/team/grant";
 const APPLY_URL = "/api/admin/team/apply";
 
-const statusCopy: Record<TeamStatus, { label: string; note: string; tone: string }> = {
-  autonomous: { label: "Работает автономно", note: "Есть подтверждённое автономное выполнение.", tone: "green" },
-  replit: { label: "Роль играет Replit", note: "Работу этой роли сейчас выполняет Replit.", tone: "teal" },
-  disconnected: { label: "Описан, но не подключён", note: "Профиль описан; подключённого исполнителя нет.", tone: "amber" },
-  planned: { label: "Запланирован", note: "Роль присутствует в плане, но ещё не активирована.", tone: "slate" },
-  unresolved: { label: "Требует уточнения", note: "По текущему источнику статус не установлен.", tone: "rose" },
+const statusCopy: Record<TeamStatus, { label: string; tone: string }> = {
+  autonomous: { label: "Работает сам", tone: "green" },
+  replit: { label: "Роль играет Replit", tone: "teal" },
+  disconnected: { label: "Описан, но не подключён", tone: "amber" },
+  planned: { label: "Запланирован", tone: "slate" },
+  unresolved: { label: "Требует уточнения", tone: "rose" },
+  owner_chat: { label: "Работает с владельцем в чате", tone: "indigo" },
+  contractor: { label: "Внешний подрядчик", tone: "orange" },
 };
+
+type TeamActionReport = NonNullable<TeamMember["actionReports"]>[number];
+type ActivityFilter = "all" | "reports" | TeamEvent["source"];
+type TeamFeedItem = { kind: "event"; event: TeamEvent } | { kind: "report"; report: TeamActionReport; member: TeamMember };
 
 const eventSourceLabel: Record<TeamEvent["source"], string> = {
   journal: "Журнал",
@@ -251,16 +257,33 @@ export function TeamContent({
   initialSelectedId?: string | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
-  const [activityFilter, setActivityFilter] = useState<"all" | TeamEvent["source"]>("all");
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
   const [showAllRoles, setShowAllRoles] = useState(false);
   const selected = view.members.find((member) => member.id === selectedId) ?? null;
   const focusCodes = useMemo(() => new Set(["HEAD.06", "P.PRODUCT", "P.LAB", "P.LG.QA", "P.OPS", "P.COORD", "HEAD.07"]), []);
+  const externalMembers = useMemo(
+    () => view.members.filter((member) => member.kind === "external" || member.status === "owner_chat" || member.status === "contractor"),
+    [view.members],
+  );
+  const hierarchyMembers = useMemo(
+    () => view.members.filter((member) => member.kind !== "external" && member.status !== "owner_chat" && member.status !== "contractor"),
+    [view.members],
+  );
   const visibleMembers = useMemo(
     () => showAllRoles
-      ? view.members
-      : view.members.filter((member) => focusCodes.has(member.code.trim().toUpperCase()) || member.status === "planned" || member.status === "unresolved"),
-    [focusCodes, showAllRoles, view.members],
+      ? hierarchyMembers
+      : hierarchyMembers.filter((member) => {
+        const code = member.code.trim().toUpperCase();
+        const id = member.id.trim().toUpperCase();
+        const isStudioHat = code === "REPLIT-HAT" || id === "REPLIT-HAT" || member.status === "replit";
+        return focusCodes.has(code)
+          || member.status === "planned"
+          || member.status === "unresolved"
+          || member.kind === "employee"
+          || isStudioHat;
+      }),
+    [focusCodes, hierarchyMembers, showAllRoles],
   );
   const departments = useMemo(() => {
     const preferred = ["Продукт", "Инженерия", "Работают на клиентов"];
@@ -270,11 +293,20 @@ export function TeamContent({
       return (leftRank < 0 ? preferred.length : leftRank) - (rightRank < 0 ? preferred.length : rightRank) || left.localeCompare(right, "ru");
     });
   }, [visibleMembers]);
-  const events = useMemo(
-    () => [...view.feed].filter((event) => activityFilter === "all" || event.source === activityFilter)
-      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
-    [view.feed, activityFilter],
-  );
+  const activities = useMemo(() => {
+    const events: TeamFeedItem[] = view.feed
+      .filter((event) => activityFilter !== "all" || !event.id.startsWith("action:"))
+      .filter((event) => activityFilter === "all" || (activityFilter !== "reports" && event.source === activityFilter))
+      .map((event) => ({ kind: "event", event }));
+    const reports: TeamFeedItem[] = activityFilter === "reports" || activityFilter === "all"
+      ? view.members.flatMap((member) => (member.actionReports ?? []).map((report) => ({ kind: "report" as const, report, member })))
+      : [];
+    return [...events, ...reports].sort((left, right) => {
+      const leftAt = left.kind === "event" ? left.event.at : left.report.at;
+      const rightAt = right.kind === "event" ? right.event.at : right.report.at;
+      return new Date(rightAt).getTime() - new Date(leftAt).getTime();
+    });
+  }, [view.feed, view.members, activityFilter]);
   const departmentGroups = (selectedDepartment ? [selectedDepartment] : departments)
     .map((department) => ({ department, members: visibleMembers.filter((member) => member.department === department) }))
     .filter((group) => group.members.length > 0);
@@ -365,24 +397,37 @@ export function TeamContent({
         <section className="team-panel" aria-labelledby="activity-heading">
           <div className="border-b border-[#e4eae3] px-5 py-5 sm:px-6">
             <div className="flex items-start justify-between gap-3">
-              <div><p className="team-eyebrow"><Activity className="h-3.5 w-3.5" aria-hidden="true" /> Из источника</p><h2 id="activity-heading" className="mt-2 text-2xl font-semibold tracking-[-0.055em] text-[#294437]">Последняя активность</h2></div>
+              <div><p className="team-eyebrow"><Activity className="h-3.5 w-3.5" aria-hidden="true" /> Журнал фактов</p><h2 id="activity-heading" className="mt-2 text-2xl font-semibold tracking-[-0.055em] text-[#294437]">Что происходит</h2></div>
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#eaf1e8] text-[#4e7156]"><Clock3 className="h-4 w-4" aria-hidden="true" /></span>
             </div>
             <label className="mt-4 flex items-center gap-2 text-xs font-medium text-[#748278]">Источник
               <span className="relative flex-1">
-                <select aria-label="Фильтр активности по источнику" value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as "all" | TeamEvent["source"])} className="team-select w-full">
-                  <option value="all">Все события</option><option value="journal">Журнал</option><option value="call_lab">Лаборатория звонков</option><option value="oncall">Дежурство</option>
+                <select aria-label="Фильтр активности по источнику" value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as ActivityFilter)} className="team-select w-full">
+                  <option value="all">Все записи</option><option value="reports">Рапорты действий</option><option value="journal">Журнал</option><option value="call_lab">Лаборатория звонков</option><option value="oncall">Дежурство</option>
                 </select><ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#6f8276]" aria-hidden="true" />
               </span>
             </label>
           </div>
           <div className="max-h-[690px] overflow-y-auto px-5 py-2 sm:px-6">
-            {events.length ? <ol className="divide-y divide-[#edf0e9]">
-              {events.map((event) => <ActivityRow key={event.id} event={event} members={view.members} onSelect={selectMember} />)}
-            </ol> : <EmptyState icon={<Activity className="h-5 w-5" />} title="Событий нет" detail="В выбранном источнике сейчас нет записей." />}
+            {activities.length ? <ol className="divide-y divide-[#edf0e9]">
+              {activities.map((item) => item.kind === "event"
+                ? <ActivityRow key={`event-${item.event.id}`} event={item.event} members={view.members} onSelect={selectMember} />
+                : <ReportActivityRow key={`report-${item.report.id}`} report={item.report} member={item.member} onSelect={selectMember} />)}
+            </ol> : <EmptyState icon={<Activity className="h-5 w-5" />} title="Записей нет" detail="В выбранном источнике сейчас нет событий или рапортов." />}
           </div>
         </section>
       </section>
+
+      {externalMembers.length > 0 && <section className="team-panel mt-6 overflow-hidden" aria-labelledby="external-team-heading">
+        <div className="border-b border-[#e4eae3] px-5 py-5 sm:px-7">
+          <p className="team-eyebrow"><Users className="h-3.5 w-3.5" aria-hidden="true" /> Вне иерархии</p>
+          <h2 id="external-team-heading" className="mt-2 text-2xl font-semibold tracking-[-0.055em] text-[#294437]">Рядом с командой</h2>
+          <p className="mt-2 max-w-2xl text-xs leading-5 text-[#7d8b81]">Внешние участники работают напрямую с владельцем. Это отдельные карточки, не должности в оргструктуре.</p>
+        </div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-7">
+          {externalMembers.map((member, index) => <MemberCard key={member.id} member={member} selected={member.id === selectedId} index={index} onSelect={() => selectMember(member.id)} />)}
+        </div>
+      </section>}
 
       <ApplyPanel view={view} applying={Boolean(applying)} progress={progress ?? null} applyError={applyError ?? ""} applyNotice={applyNotice ?? ""} blocked={Boolean(applyBlocked)} onApply={onApply} />
 
@@ -410,9 +455,10 @@ function TeamHeader() {
 }
 
 function MemberCard({ member, selected, index, onSelect }: { member: TeamMember; selected: boolean; index: number; onSelect: () => void }) {
-  const status = statusCopy[member.status] ?? statusCopy.unresolved;
+  const colorClass = member.color === "indigo" ? "team-member-indigo" : member.color === "orange" ? "team-member-orange" : "";
+  const isExternal = member.kind === "external" || member.status === "owner_chat" || member.status === "contractor";
   return (
-    <button type="button" onClick={onSelect} aria-pressed={selected} className={`team-member-card text-left ${selected ? "team-member-selected" : ""}`} style={{ animationDelay: `${Math.min(index, 7) * 45}ms` }}>
+    <button type="button" onClick={onSelect} aria-pressed={selected} className={`team-member-card text-left ${colorClass} ${selected ? "team-member-selected" : ""}`} style={{ animationDelay: `${Math.min(index, 7) * 45}ms` }}>
       <div className="flex items-start gap-3">
         <Portrait member={member} size="large" />
         <div className="min-w-0 flex-1">
@@ -428,17 +474,18 @@ function MemberCard({ member, selected, index, onSelect }: { member: TeamMember;
         <StatusBadge status={member.status} />
         <span className="rounded-full bg-[#f2f4ee] px-2.5 py-1 text-[10px] font-medium text-[#77857b]">{missing(member.department)}</span>
       </div>
-      <p className="mt-3 line-clamp-2 min-h-9 text-xs leading-[1.55] text-[#738178]">{member.statusEvidence || status.note}</p>
-      <div className="mt-3 flex items-center justify-between border-t border-[#edf0e9] pt-3 text-[10px] text-[#87938a]">
-        <span>{member.duties.length} обязанностей</span><span>Роль: {missing(member.mode)}</span>
+      <p className="mt-3 line-clamp-2 min-h-9 text-xs leading-[1.55] text-[#738178]">{missing(member.statusEvidence)}</p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-[#edf0e9] pt-3 text-[10px] text-[#87938a]">
+        <span>{member.duties.length} обязанностей</span><span>{isExternal ? "Вне иерархии" : `Роль: ${missing(member.mode)}`}</span>
       </div>
+      <p className="mt-2 text-[10px] leading-4 text-[#8b968c]">Последнее действие: {member.lastActionAt ? dateLabel(member.lastActionAt) : "Не заполнено"}</p>
     </button>
   );
 }
 
 function Profile({ member, members, onSelect }: { member: TeamMember; members: TeamMember[]; onSelect: (id: string) => void }) {
   const [promptVisible, setPromptVisible] = useState(false);
-  const status = statusCopy[member.status] ?? statusCopy.unresolved;
+  const [activeTab, setActiveTab] = useState<"overview" | "hats">("overview");
   const nameAccepted = member.nameStatus?.toLowerCase() === "accepted";
   return (
     <div className="p-5 sm:p-7">
@@ -459,20 +506,31 @@ function Profile({ member, members, onSelect }: { member: TeamMember; members: T
             <div className="flex flex-wrap items-center justify-between gap-3">
               <StatusBadge status={member.status} /><span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#879489]">Исполнение: {missing(member.mode)}</span>
             </div>
-            <p className="mt-3 text-sm leading-6 text-[#556a5e]">{member.statusEvidence || status.note}</p>
+            <p className="mt-3 text-sm leading-6 text-[#556a5e]">{missing(member.statusEvidence)}</p>
           </div>
 
+          <div className="mt-5 flex gap-2 border-b border-[#e2e9df]" role="tablist" aria-label="Разделы профиля">
+            <button type="button" role="tab" aria-selected={activeTab === "overview"} onClick={() => setActiveTab("overview")} className="team-profile-tab">Обзор</button>
+            <button type="button" role="tab" aria-selected={activeTab === "hats"} onClick={() => setActiveTab("hats")} className="team-profile-tab">Шляпы</button>
+          </div>
+
+          {activeTab === "hats" ? <HatsTab member={member} /> : <>
           <div className="mt-6 grid gap-x-7 gap-y-6 sm:grid-cols-2">
             <Field label="Характерные черты"><TraitList values={member.traits} /></Field>
             <Field label="Девиз"><p className="text-sm leading-6 text-[#52685b]">{missing(member.motto)}</p></Field>
             <Field label="План"><p className="text-sm leading-6 text-[#52685b]">{missing(member.metrics.plan)}</p></Field>
             <Field label="Факт"><p className="text-sm leading-6 text-[#52685b]">{missing(member.metrics.fact)}</p></Field>
             <Field label="Модель"><p className="text-sm leading-6 text-[#52685b]">{missing(member.model)}</p></Field>
-            <Field label="Последняя работа"><p className="text-sm leading-6 text-[#52685b]">{missing(member.lastWork)}</p></Field>
+            <Field label="Последнее действие">
+              <p className="text-sm leading-6 text-[#52685b]">{member.lastActionAt ? dateLabel(member.lastActionAt) : "Не заполнено"}</p>
+              <p className="mt-1 text-[10px] leading-4 text-[#89958b]">Дата не оценивает качество или результат работы.</p>
+            </Field>
+            <Field label="Источник исполнения"><p className="text-sm leading-6 text-[#52685b]">{missing(member.runtimeSource)}</p></Field>
           </div>
+          </>}
         </div>
 
-        <aside className="space-y-5">
+        <aside className={activeTab === "hats" ? "hidden" : "space-y-5"}>
           <div className="rounded-2xl border border-[#e1e8df] bg-[#fafbf7] p-4 sm:p-5">
             <h4 className="team-eyebrow"><BriefcaseBusiness className="h-3.5 w-3.5" aria-hidden="true" /> Обязанности</h4>
             {member.duties.length ? <ol className="mt-4 space-y-3">
@@ -499,20 +557,20 @@ function Profile({ member, members, onSelect }: { member: TeamMember; members: T
         </aside>
       </div>
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,.8fr)]">
+      <div className={`mt-6 grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,.8fr)] ${activeTab === "hats" ? "hidden" : ""}`}>
         <section className="rounded-2xl border border-[#e1e8df] bg-[#fafbf7] p-4 sm:p-5" aria-labelledby="prompt-heading">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h4 id="prompt-heading" className="team-eyebrow"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> Промпт</h4>
               <p className="mt-2 text-[11px] leading-5 text-[#89958b]">Принятое имя не является подтверждением включённого промпта.</p></div>
             <button type="button" onClick={() => setPromptVisible((visible) => !visible)} className="team-button-secondary !min-h-9 !px-3 !text-xs" aria-expanded={promptVisible} disabled={!member.prompt.text}>
-              {promptVisible ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}{promptVisible ? "Скрыть текст" : "Показать текст"}
+              {promptVisible ? <EyeOff className="h-3.5 w-3.5" aria-hidden="true" /> : <Eye className="h-3.5 w-3.5" aria-hidden="true" />}{promptVisible ? "Скрыть промпт" : "Показать промпт"}
             </button>
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <Meta label="Версия" value={member.prompt.version} /><Meta label="Статус" value={member.prompt.status} /><Meta label="Принят" value={member.prompt.acceptedBy} />
+            <Meta label="Версия" value={member.prompt.version} /><Meta label="Статус в источнике" value={member.prompt.status} /><Meta label="Принят" value={member.prompt.acceptedBy} />
           </div>
           <div className={`mt-3 rounded-xl border border-[#e5eae2] bg-[#f2f5ef] p-4 text-xs leading-6 text-[#53675b] ${promptVisible ? "whitespace-pre-wrap" : "line-clamp-3"}`}>
-            {member.prompt.text ? (promptVisible ? member.prompt.text : "Текст промпта скрыт. Нажмите «Показать текст», чтобы раскрыть.") : "Не заполнено"}
+            {member.prompt.text ? (promptVisible ? member.prompt.text : "Текст промпта скрыт. Нажмите «Показать промпт», чтобы раскрыть.") : "Не заполнено"}
           </div>
         </section>
         <section className="rounded-2xl border border-[#e1e8df] bg-[#fafbf7] p-4 sm:p-5">
@@ -523,8 +581,82 @@ function Profile({ member, members, onSelect }: { member: TeamMember; members: T
           </div>
         </section>
       </div>
+      {activeTab === "overview" && <ActionReportsSection member={member} />}
     </div>
   );
+}
+
+function HatsTab({ member }: { member: TeamMember }) {
+  const hats = member.hats ?? [];
+  return <section className="mt-6" aria-labelledby="hats-heading">
+    <div className="mb-4">
+      <p className="team-eyebrow"><BriefcaseBusiness className="h-3.5 w-3.5" aria-hidden="true" /> Роли, закрываемые источником</p>
+      <h4 id="hats-heading" className="mt-2 text-lg font-semibold tracking-[-0.04em] text-[#365341]">Шляпы</h4>
+      <p className="mt-1 text-xs leading-5 text-[#819087]">Текущий статус и история отображаются только по данным источника.</p>
+    </div>
+    {hats.length ? <ol className="space-y-3">
+      {hats.map((hat) => <li key={hat.id} className="rounded-xl border border-[#e1e8df] bg-[#fafbf7] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div><h5 className="text-sm font-semibold text-[#405d4b]">{missing(hat.title)}</h5><p className="mt-1 font-mono text-[9px] text-[#9aa398]">ID {hat.id}</p></div>
+          <span className="rounded-full bg-[#edf2e9] px-2.5 py-1 text-[10px] font-semibold text-[#647a68]">{missing(hat.status)}</span>
+        </div>
+        {hat.history?.length ? <ol className="mt-3 space-y-2 border-l border-[#dbe5d9] pl-3">
+          {hat.history.map((entry, index) => <li key={`${entry.at}-${index}`}>
+            <p className="text-[10px] font-medium text-[#8c988e]">{dateLabel(entry.at)}</p>
+            <p className="mt-0.5 text-xs leading-5 text-[#63776a]">{missing(entry.text)}</p>
+          </li>)}
+        </ol> : <p className="mt-3 text-xs text-[#879389]">История: Не заполнено</p>}
+      </li>)}
+    </ol> : <EmptyState icon={<BriefcaseBusiness className="h-5 w-5" />} title="Шляпы не указаны" detail="Источник не передал список должностей, которые закрывает эта роль." />}
+  </section>;
+}
+
+function ActionReportsSection({ member }: { member: TeamMember }) {
+  const reports = [...(member.actionReports ?? [])].sort((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime());
+  return <section className="mt-6 rounded-2xl border border-[#dfe7dc] bg-[#f8faf5] p-4 sm:p-5" aria-labelledby="action-reports-heading">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="team-eyebrow"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" /> Рапорты действий</p>
+        <h4 id="action-reports-heading" className="mt-2 text-lg font-semibold tracking-[-0.04em] text-[#365341]">Последняя работа</h4></div>
+      <span className="font-mono text-[10px] text-[#89958b]">{reports.length} {reports.length === 1 ? "рапорт" : "рапортов"}</span>
+    </div>
+    {reports.length ? <ol className="mt-4 space-y-3">
+      {reports.map((report) => <li key={report.id}><ActionReportCard report={report} /></li>)}
+    </ol> : <p className="mt-3 text-sm leading-6 text-[#718177]">{missing(member.lastWork)}</p>}
+  </section>;
+}
+
+function ActionReportCard({ report }: { report: TeamActionReport }) {
+  const outcome: Record<TeamActionReport["outcome"], string> = {
+    completed: "Выполнено",
+    partial: "Частично",
+    not_completed: "Не выполнено",
+  };
+  return <article className="rounded-xl border border-[#e2e9df] bg-[#fbfcf8] p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <span className="rounded-full bg-[#e9f0e8] px-2.5 py-1 text-[10px] font-semibold text-[#4d7055]">{outcome[report.outcome] ?? "Не заполнено"}</span>
+      <time className="text-[10px] text-[#89958b]">{report.at ? dateLabel(report.at) : "Не заполнено"}</time>
+    </div>
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <ReportField label="Что поручено" value={report.assigned} />
+      <ReportField label="Роль" value={report.role} />
+      <ReportListField label="Что получилось" values={report.succeeded} />
+      <ReportListField label="Что не получилось" values={report.failed} />
+      <ReportListField label="Что нужно от владельца" values={report.needsOwner} />
+      <ReportField label="Источник" value={report.source} />
+    </div>
+    <p className="mt-3 border-t border-[#edf0e9] pt-2 font-mono text-[9px] text-[#9aa398]">ID рапорта: {report.id}</p>
+  </article>;
+}
+
+function ReportField({ label, value }: { label: string; value: string | null | undefined }) {
+  return <div><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-[#89958b]">{label}</p><p className="mt-1 text-xs leading-5 text-[#586f61]">{missing(value)}</p></div>;
+}
+
+function ReportListField({ label, values }: { label: string; values: string[] | null | undefined }) {
+  const entries = (values ?? []).filter((value) => Boolean(value?.trim()));
+  return <div><p className="text-[9px] font-bold uppercase tracking-[0.1em] text-[#89958b]">{label}</p>
+    {entries.length ? <ul className="mt-1 space-y-1">{entries.map((value, index) => <li key={`${index}-${value}`} className="text-xs leading-5 text-[#586f61]">{value}</li>)}</ul> : <p className="mt-1 text-xs leading-5 text-[#586f61]">Не заполнено</p>}
+  </div>;
 }
 
 function ProfileDrawer({ member, members, onSelect, onClose }: {
@@ -578,7 +710,7 @@ function ProfileDrawer({ member, members, onSelect, onClose }: {
       <section ref={drawerRef} className="team-profile-drawer" role="dialog" aria-modal="true" aria-labelledby="team-profile-title" tabIndex={-1}>
         <header className="team-profile-drawer-header">
           <div className="min-w-0">
-            <p className="team-eyebrow"><UserRound className="h-3.5 w-3.5" aria-hidden="true" /> Карточка сотрудника</p>
+            <p className="team-eyebrow"><UserRound className="h-3.5 w-3.5" aria-hidden="true" /> Карточка участника</p>
             <p className="mt-1 break-words text-xs text-[#77867b]">{member.name} · {member.code}</p>
           </div>
           <button ref={closeButtonRef} type="button" onClick={onClose} className="team-button-secondary h-10 w-10 shrink-0 !p-0" aria-label="Закрыть профиль">
@@ -643,12 +775,40 @@ function ActivityRow({ event, members, onSelect }: { event: TeamEvent; members: 
   </li>;
 }
 
+function ReportActivityRow({ report, member, onSelect }: { report: TeamActionReport; member: TeamMember; onSelect: (id: string) => void }) {
+  const outcome: Record<TeamActionReport["outcome"], string> = {
+    completed: "Выполнено",
+    partial: "Частично",
+    not_completed: "Не выполнено",
+  };
+  return <li className="relative py-4 pl-7 before:absolute before:left-[7px] before:top-0 before:h-full before:w-px before:bg-[#e4ebe1] first:before:top-5 last:before:h-5">
+    <span className="absolute left-0 top-[21px] h-[15px] w-[15px] rounded-full border-[4px] border-[#fafbf7] bg-[#7773a9] ring-1 ring-[#deddee]" />
+    <div className="flex flex-wrap items-center justify-between gap-2"><span className="rounded-md bg-[#efeff8] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-[#66628f]">Рапорт действия</span><time className="text-[10px] text-[#929d93]">{report.at ? dateLabel(report.at) : "Не заполнено"}</time></div>
+    <h3 className="mt-2 text-sm font-semibold leading-5 text-[#3b5545]">
+      <button type="button" onClick={() => onSelect(member.id)} className="text-left underline decoration-[#c0d4c1] underline-offset-2">{member.name}</button>
+    </h3>
+    <p className="mt-1 text-xs leading-5 text-[#7a887e]">{missing(report.assigned)}</p>
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[#78877c]">
+      <span>Итог: <strong className="font-semibold text-[#5a7161]">{outcome[report.outcome] ?? "Не заполнено"}</strong></span>
+      <span>Роль: {missing(report.role)}</span>
+      <span>Источник: {missing(report.source)}</span>
+    </div>
+    <div className="mt-2 grid gap-2 rounded-lg bg-[#f6f7f2] p-3 sm:grid-cols-2">
+      <ReportListField label="Получилось" values={report.succeeded} />
+      <ReportListField label="Не получилось" values={report.failed} />
+      <ReportListField label="Нужно от владельца" values={report.needsOwner} />
+    </div>
+    <p className="mt-2 font-mono text-[9px] text-[#a0a99f]">ID рапорта: {report.id}</p>
+  </li>;
+}
+
 function Portrait({ member, size }: { member: TeamMember; size: "large" | "hero" }) {
   const [failed, setFailed] = useState(false);
   const classes = size === "hero" ? "h-24 w-24 rounded-[24px] text-2xl sm:h-28 sm:w-28" : "h-14 w-14 rounded-[17px] text-sm";
+  const colorClass = member.color === "indigo" ? "team-portrait-indigo" : member.color === "orange" ? "team-portrait-orange" : "";
   return member.portrait && !failed
     ? <img src={member.portrait} alt={`Портрет ${member.name}`} onError={() => setFailed(true)} className={`${classes} shrink-0 border border-[#e1e8df] object-cover`} />
-    : <span aria-label={`Инициалы: ${member.name}`} className={`${classes} grid shrink-0 place-items-center border border-[#dbe7d9] bg-[linear-gradient(145deg,#e5eee1,#dce8df)] font-display font-semibold tracking-[-0.06em] text-[#4d7055]`}>{initials(member.name)}</span>;
+    : <span aria-label={`Инициалы: ${member.name}`} className={`${classes} ${colorClass} grid shrink-0 place-items-center border border-[#dbe7d9] bg-[linear-gradient(145deg,#e5eee1,#dce8df)] font-display font-semibold tracking-[-0.06em] text-[#4d7055]`}>{initials(member.name)}</span>;
 }
 
 function StatusBadge({ status }: { status: TeamStatus }) {
@@ -659,6 +819,8 @@ function StatusBadge({ status }: { status: TeamStatus }) {
     amber: "bg-[#f7f0df] text-[#8a6a35] ring-[#eee2c6]",
     slate: "bg-[#edf0eb] text-[#6d7b70] ring-[#e2e7df]",
     rose: "bg-[#f7e9e5] text-[#995b4e] ring-[#eed6cf]",
+    indigo: "bg-[#eeedf8] text-[#625e8b] ring-[#dddbed]",
+    orange: "bg-[#fbefe3] text-[#9a6335] ring-[#f0ddc8]",
   };
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1 ring-inset ${colors[item.tone]}`}>
     <span className="h-1.5 w-1.5 rounded-full bg-current" />{item.label}

@@ -10,6 +10,7 @@ import { startHintWatchdog } from "./watchdog";
 import { labStartupReady, labStartupStatus, labStartupStep, resetLabStartup } from "./startup";
 import { ownerCallsSql, modeNotice } from "./policy";
 import { attachProductFollowup } from "./productContext";
+import { labActionReports, secretaryActionReport, reportDelivery } from "../team/actionReports";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -147,6 +148,12 @@ export async function hintLabTick(pool: Pool, dependencies: {
     const finishWithProduct = async (key: string, source: any, report: any) => {
       const result = await (dependencies.product ?? attachProductFollowup)(pool, report, source,
         { owner: config.owner!, environment: config.environment });
+      result.action_reports ??= labActionReports(result, new Date().toISOString());
+      const needsDecision = result.product_followup.issues.some((i: any) => i.decision === "awaiting_owner");
+      if (needsDecision) for (const r of result.action_reports)
+        r.needsOwner = ["Есть предложения, ожидающие решения владельца; см. раздел решений этого отчёта."];
+      result.action_delivery = result.action_reports.length ?
+        reportDelivery(result.action_reports, result.execution === "analysis_not_completed") : "per_call";
       await store.finish(key, source, result);
       // Existing per-call execution journal, not an independent product catalogue.
       const decisions = result.product_followup.issues.filter((i: any) => i.decision === "awaiting_owner").length;
@@ -177,7 +184,14 @@ export async function hintLabTick(pool: Pool, dependencies: {
       if (!call) {
         await store.fail(job.key, "source:scope_rejected");
       } else if (call.lab_mode !== "hint") {
-        await finishWithProduct(job.key, null, modeNotice(call, config.environment));
+        const notice: any = modeNotice(call, config.environment);
+        if (call.lab_mode === "secretary") {
+          const task = (await client.query(`SELECT * FROM secretary_tasks
+            WHERE user_id=$1 AND call_sid=$2`, [config.owner, call.call_sid])).rows[0];
+          const r = secretaryActionReport(call, task);
+          notice.action_reports = r ? [r] : [];
+        }
+        await finishWithProduct(job.key, null, notice);
         await store.note(job.key, `mode:${call.lab_mode}:analysis_not_connected`);
       } else {
         const source = authorizedHintSource(call, control, config.environment);

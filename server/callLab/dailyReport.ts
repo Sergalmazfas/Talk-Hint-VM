@@ -33,7 +33,19 @@ export function dueHintDay(now: Date) {
   return { day: previous.toISOString().slice(0, 10), zone,
     start: midnight(y, m, d).toISOString(), end: midnight(p.year, p.month, p.day).toISOString() };
 }
-export function renderHintDaily(day: NonNullable<ReturnType<typeof dueHintDay>>, rows: any[],
+export function renderHintDaily(...args: Parameters<typeof renderLegacyHintDaily>) {
+  const letter = renderLegacyHintDaily(...args);
+  const reports = args[1].filter(row => row.report?.action_delivery === "daily")
+    .flatMap(row => row.report.action_reports ?? []);
+  const lines = reports.map((r: any) => [
+    `${r.role}: ${r.assigned}`, `Итог: ${r.outcome === "completed" ? "выполнено" : r.outcome === "partial" ? "частично" : "не выполнено"}`,
+    `Получилось: ${r.succeeded.join(" ") || "не подтверждено"}`,
+    `Не получилось: ${r.failed.join(" ") || "не зафиксировано"}`,
+    `От владельца: ${r.needsOwner.join(" ") || "решение не запрошено"}`,
+  ].join("\n"));
+  return { ...letter, body: letter.body + (lines.length ? "\n\nРАПОРТЫ БЕЗ СРОЧНОГО РЕШЕНИЯ\n" + lines.join("\n\n") : "") };
+}
+function renderLegacyHintDaily(day: NonNullable<ReturnType<typeof dueHintDay>>, rows: any[],
   monitor: ReturnType<typeof hintWatchdogStatus>, now: Date, enabled: boolean) {
   const reports = rows.filter(r => r.report);
   const sent = rows.filter(r => r.mail_status === "sent_confirmed").length;

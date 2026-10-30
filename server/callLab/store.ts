@@ -26,11 +26,14 @@ export class LabStore {
   async finish(key: string, source: unknown, report: unknown) {
     // Report + durable outbox are one atomic statement. There is no "sent" state here.
     await this.db.query(`WITH saved AS (UPDATE call_lab_jobs SET status='report_ready',source=$2::jsonb,
-      report=$3::jsonb,updated_at=now() WHERE key=$1 AND status='running'
+      report=$3::jsonb,updated_at=now(),
+      journal=journal || jsonb_build_array(jsonb_build_object('phase','action_reports:saved',
+        'at',now(),'reports',COALESCE($3::jsonb->'action_reports','[]'::jsonb)))
+      WHERE key=$1 AND status='running'
       RETURNING key,environment,owner_id)
       INSERT INTO call_lab_outbox(key,environment,owner_id,message_id)
-      SELECT key,environment,owner_id,$4 FROM saved ON CONFLICT(key) DO NOTHING`,
-    [key, JSON.stringify(source), JSON.stringify(report), messageIdFor(key)]);
+      SELECT key,environment,owner_id,$4 FROM saved WHERE NOT $5::boolean ON CONFLICT(key) DO NOTHING`,
+    [key, JSON.stringify(source), JSON.stringify(report), messageIdFor(key), (report as any)?.action_delivery === "daily"]);
   }
   async fail(key: string, code: string) {
     await this.db.query("UPDATE call_lab_jobs SET status='failed',updated_at=now() WHERE key=$1 AND status='running'", [key]);

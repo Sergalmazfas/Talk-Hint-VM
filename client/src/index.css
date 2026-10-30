@@ -368,6 +368,17 @@
 .team-page .team-member-card:hover { transform: translateY(-2px); border-color: #bfd2be; background: #fff; box-shadow: 0 10px 22px rgba(49, 83, 57, .07); }
 .team-page .team-member-card:focus-visible { outline: 2px solid #628b6c; outline-offset: 3px; }
 .team-page .team-member-selected { border-color: #85a988; background: #f5f9f2; box-shadow: 0 0 0 2px rgba(115, 156, 117, .12); }
+.team-page .team-member-indigo { border-color: #d8d9eb; background: linear-gradient(145deg, #faf9ff, #f3f2fb); }
+.team-page .team-member-indigo:hover, .team-page .team-member-indigo.team-member-selected { border-color: #aaa9d0; background: #f1f0fb; }
+.team-page .team-member-orange { border-color: #ecd9c7; background: linear-gradient(145deg, #fffaf5, #fbf2e9); }
+.team-page .team-member-orange:hover, .team-page .team-member-orange.team-member-selected { border-color: #d9ae86; background: #fbf1e6; }
+.team-page .team-member-indigo:focus-visible { outline-color: #7773a9; }
+.team-page .team-member-orange:focus-visible { outline-color: #bd7842; }
+.team-page .team-portrait-indigo { border-color: #d8d9eb; background: linear-gradient(145deg, #e7e6f5, #d9d8ed); color: #625e8b; }
+.team-page .team-portrait-orange { border-color: #ecd9c7; background: linear-gradient(145deg, #f8e7d6, #f1d8bf); color: #9a6335; }
+.team-page .team-profile-tab { min-height: 38px; border-bottom: 2px solid transparent; padding: 0 12px; color: #819087; font-size: 12px; font-weight: 600; }
+.team-page .team-profile-tab[aria-selected="true"] { border-color: #4f7f61; color: #365b43; }
+.team-page .team-profile-tab:focus-visible { outline: 2px solid #6a9875; outline-offset: 2px; }
 .team-page .team-refresh, .team-page .team-button-secondary, .team-page .team-button-primary {
   display: inline-flex;
   min-height: 42px;

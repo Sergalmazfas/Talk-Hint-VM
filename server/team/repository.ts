@@ -19,6 +19,9 @@ export interface TeamContext {
   documents: ModelDocument[]; elements: any[]; hypothesisRevision: number;
   profiles: any[]; roles: any[]; prompts: any[]; jobs: any[]; controls: any[]; revisions: any[];
   actor: string;
+  secretaryTasks?: any[];
+  secretaryDefault?: string | null;
+  secretaryOwnerName?: string;
 }
 /** Only bounded active subtrees. Never preload/export the historical model. */
 export async function readContext(db: PoolClient, owner: string, environment: string,
@@ -67,12 +70,20 @@ export async function readContext(db: PoolClient, owner: string, environment: st
       LEFT JOIN company_v3_text_snapshots s ON s.workspace_id=r.workspace_id AND s.snapshot_hash=r.snapshot_hash
       WHERE p.workspace_id=$1 AND p.hypothesis_id='new-country'`,
       [w.workspace_id])).rows,
-    jobs: (await db.query("SELECT key,call_sid,status,updated_at,report FROM call_lab_jobs WHERE owner_id=$1 AND environment=$2 ORDER BY updated_at DESC LIMIT 20",
+    jobs: (await db.query("SELECT key,call_sid,status,updated_at,report,journal FROM call_lab_jobs WHERE owner_id=$1 AND environment=$2 ORDER BY updated_at DESC LIMIT 20",
       [owner, environment])).rows,
     controls: (await db.query("SELECT key,enabled,watchdog FROM call_lab_controls WHERE owner_id=$1 AND environment=$2",
       [owner, environment])).rows,
     revisions: (await db.query("SELECT revision,actor,created_at FROM company_v3_revision_heads WHERE workspace_id=$1 ORDER BY revision DESC LIMIT 20",
       [w.workspace_id])).rows,
+    secretaryTasks: test ? [] : (await db.query(`SELECT t.*,
+      c.metadata AS call_metadata,c.ended_at AS call_ended_at
+      FROM secretary_tasks t LEFT JOIN calls c ON c.call_sid=t.call_sid AND c.user_id=t.user_id
+      WHERE t.user_id=$1 ORDER BY t.updated_at DESC LIMIT 20`, [owner])).rows,
+    secretaryDefault: test ? null : (await db.query(
+      "SELECT provider FROM secretary_outgoing_defaults WHERE user_id=$1", [owner])).rows[0]?.provider ?? null,
+    secretaryOwnerName: test ? "" : (await db.query(
+      "SELECT concat_ws(' ',first_name,last_name) AS name FROM users WHERE id=$1", [owner])).rows[0]?.name ?? "",
     actor: w.actor };
 }
 export function completedSteps(c: TeamContext) {
