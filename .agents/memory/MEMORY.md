@@ -78,3 +78,4 @@
 - [P.PRODUCT review boundaries](product-review-boundaries.md) — следующий шаг принимает вход; HEAD.06 контролирует после факта; решение владельцу — короткая таблица.
 - [Target data infrastructure](data-platform-direction.md) — нормализованный PG, pgvector и App Storage; этапы с приёмкой, стабильные ID, архив без удаления, Hint без остановки.
 - [Large model verification](data-platform-verification.md) — полный снимок проверять порционно; маленький fixture скрывает OOM и плохие планы join после импорта.
+- [Правила v3: проверка этапов](stage-review-policy.md) — один ZIP в конце этапа; рискованные изменения всегда до Publish; Dev не копировать, модель только в production, самоприёмки нет.
