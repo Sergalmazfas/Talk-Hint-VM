@@ -30,19 +30,14 @@ this as a missing repository or repeatedly attach the connector. Never promise
 that an unavailable reconnect card will fix it. A blocked workflow upload means
 no native check ran, even if the isolated candidate branch was created.
 
-For an explicitly requested Mac/iOS handoff, reuse the existing Xcode delivery
-baseline and create a separate native-only branch with the reviewed iOS delta
-and instructions. Preserve every unrelated file and the baseline workflow tree.
-This does not synchronize the full development branch or fix its OAuth scope.
+The owner's standing native delivery procedure is maintained in `replit.md`,
+section «iOS: передача сборки на Mac»; consult it before any iOS delivery.
 
-**Why:** the owner uses Claude on a Mac to receive isolated native deliveries;
-this established route succeeded while a full development push was rejected.
-The owner reiterated that this is the established process and asked to repeat
-it instead of sending them through GitHub workflow setup.
+Preserve unrelated changes from the existing Mac baseline when transferring a
+native delta; do not synchronize the full development tree.
 
-**How to apply:** locate the previous handoff document and verify the live remote
-baseline first. Compare affected native files against the delta's parent to
-avoid overwriting Mac fixes. Use an additive commit/new branch, no force or
-history rewrite; verify the remote SHA after push. Keep backend, database and
-production operations out of the Mac instructions. Default to this manual
-Claude-on-Mac handoff; GitHub Actions is not a prerequisite for it.
+**Why:** an earlier local baseline lacked a Mac-side asynchronous UI-test fix.
+Copying the entire local native tree would have overwritten that unrelated fix.
+
+**How to apply:** verify the live remote baseline and compare affected files
+against the delta's parent before preparing an additive delivery.
