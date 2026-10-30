@@ -9,6 +9,12 @@ Prefer the application's normal module-resolution pipeline for isolated frontend
 
 **How to apply:** Keep private UI authorization intact. When testing components outside the authenticated page, use canonical fixture builders and clearly distinguish isolated UI verification from verification of the signed-in application.
 
+An isolated PostgreSQL rehearsal does not verify production-only read queries skipped by its test mode.
+
+**Why:** A green rehearsal and full mocked test suite missed a company-page SQL query against nonexistent production columns because that read was disabled for the retained test copy. The page then returned a sanitized 503.
+
+**How to apply:** Audit the skipped production branches against the real schema with read-only queries before claiming readiness. Exercise their SQL contract in regression tests, and do not treat a generic owner-only error footer as evidence of an authentication failure.
+
 Imports into an existing editable document must also pass an ordinary editor save round-trip, not only storage readback or MCP retrieval.
 
 **Why:** A compact imported book could be read correctly while the editor regenerated duplicated Markdown and exceeded its document-size limit on the next small edit. Readability alone did not preserve editability.
