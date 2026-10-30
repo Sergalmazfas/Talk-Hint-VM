@@ -2161,3 +2161,17 @@ mtime_ms = 1793323775851
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b34c5441-3249-474b-9224-cc0d45647d2b/a5c4cb18-843d-4dc7-a061-6a5a4158a319"
 storage_version_token = "1793323791370737"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "jHWfmk6GnQzG2yr6vDQ-I"
+uri = "file://generated-artifacts/team-package-two-assets/PORTRAITS_VERIFIED.json"
+type = "unspecified"
+title = "Портреты Клавдия и Ефима — квитанция проверки"
+description = "Приватное App Storage: два неизменяемых ключа с SHA. Повторное скачивание подтвердило размеры, SHA-256 и побайтное совпадение с оригиналами."
+logical_id = "ff1caed5-d5d3-4c01-9ceb-4393b7611499"
+content_hash = "sha256:d2aa9a99625e16a86890178be85fd91e225d0f76a68716cf77dc6b3fd67b4d72"
+size = 1152
+mtime_ms = 1793326314111
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ff1caed5-d5d3-4c01-9ceb-4393b7611499/90632dfc-54f2-477c-8392-de4b96cc20d6"
+storage_version_token = "1793326351189540"
+content_type = "application/octet-stream"

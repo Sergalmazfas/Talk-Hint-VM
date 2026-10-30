@@ -1,0 +1,29 @@
+{
+  "package": "team-package-two",
+  "storage": "project-default-private-app-storage",
+  "portraits": [
+    {
+      "name": "klavdiy",
+      "displayName": "Клавдий Сверкин",
+      "source": "attached_assets/8168E690-E22D-4E02-95E7-70587B5D2800_1793326152428.png",
+      "object": "team/klavdiy/63b929857883e0e1c15019c63d6ad3c4839ad699cc8b127114570302d7d9b52e.png",
+      "sha256": "63b929857883e0e1c15019c63d6ad3c4839ad699cc8b127114570302d7d9b52e",
+      "bytes": 3065723,
+      "width": 1254,
+      "height": 1254,
+      "fallback": "КС"
+    },
+    {
+      "name": "efim",
+      "displayName": "Ефим Реплитов",
+      "nameStatus": "accepted",
+      "source": "attached_assets/497258E9-630F-4334-9E3A-44549FA2F044_1793326152428.png",
+      "object": "team/efim/505502d0cb76bea5c4ac232438902cc1986cf8806a0b4fb4155030d8c0e90a15.png",
+      "sha256": "505502d0cb76bea5c4ac232438902cc1986cf8806a0b4fb4155030d8c0e90a15",
+      "bytes": 2279197,
+      "width": 1254,
+      "height": 1254,
+      "fallback": "ЕР"
+    }
+  ]
+}
