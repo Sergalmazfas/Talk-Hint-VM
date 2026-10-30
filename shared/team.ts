@@ -30,10 +30,15 @@ export interface TeamEvent {
 export interface TeamPin {
   workspace: string; revision: number; rootHash: string; planHash: string; step: number;
 }
+export interface TeamPartnersPin {
+  workspace: string; revision: number; rootHash: string; documentHash: string;
+}
 export interface TeamView {
   source: { environment: string; workspace: string; revision: number; rootHash: string; phase: string };
   owner: { name: string; code: string };
   members: TeamMember[]; feed: TeamEvent[];
   apply: { available: boolean; reason: string | null; completed: number; total: number;
     pin: TeamPin | null; csrfToken?: string };
+  partners?: { available: boolean; completed: boolean; reason: string | null;
+    pin: TeamPartnersPin | null; documentHash: string };
 }

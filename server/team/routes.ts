@@ -14,6 +14,7 @@ import { EXTERNAL_PARTNERS_DOCUMENT, withExternalPartners } from "./external";
 import { teamRuntimeChecks } from "./runtimeChecks";
 import type { TeamContext } from "./repository";
 import type { RuntimeChecks } from "./runtime";
+import { partnersState, validPartnersPin } from "./partnersApproval";
 
 const equal = (a: unknown, b: unknown) => typeof a === "string" && typeof b === "string" &&
   /^[a-f0-9]{64}$/.test(a) && /^[a-f0-9]{64}$/.test(b) &&
@@ -67,15 +68,39 @@ export function registerTeamRoutes(app: Express, getPool: () => Promise<Pool>, o
           view = withExternalPartners(withTeamRuntime(view, context, checks),
             context.documents.find(d => d.id === EXTERNAL_PARTNERS_DOCUMENT)?.text);
         }
+        view.partners = partnersState(context);
         view.apply.csrfToken = session.teamCsrf; return view;
       };
       if (req.path === base && req.method === "GET") return res.json(await status());
-      if (!["/grant", "/apply"].includes(req.path.slice(base.length))) return res.sendStatus(404);
+      const action = req.path.slice(base.length);
+      if (!["/grant", "/apply", "/partners/grant", "/partners/apply"].includes(action)) return res.sendStatus(404);
       if (req.method !== "POST") return res.sendStatus(405);
       if (req.get("origin") !== `${req.protocol}://${req.get("host")}` ||
           req.get("sec-fetch-site") === "cross-site" || !equal(req.get("x-team-csrf"), session.teamCsrf))
         return res.status(403).json({ error: "Origin/CSRF подтверждение не совпало." });
       const body = req.body ?? {};
+      if (action.startsWith("/partners/")) {
+        if (body.confirm !== true || !validPartnersPin(body.expected) ||
+            Object.keys(body).some(k => !["expected", "confirm", ...(action.endsWith("/apply") ? ["grant"] : [])].includes(k)))
+          return res.status(400).json({ error: "Требуется точный согласованный pin документа." });
+        const state = partnersState(await repository.read(TEAM_OWNER));
+        if (!state.available || semanticHash(state.pin) !== semanticHash(body.expected))
+          return res.status(409).json({ error: "Pin r918 изменился или запись недоступна. Стоп: новый diff, без повторения." });
+        if (action.endsWith("/grant")) {
+          await Promise.all(["klavdiy", "efim"].map(name => portrait(name, teamPortraitManifest[name].sha256)));
+          const token = randomBytes(32).toString("hex");
+          session.teamPartnersGrant = { token, pin: semanticHash(body.expected), expires: Date.now() + 120_000 };
+          await new Promise<void>((resolve, reject) => req.session!.save(e => e ? reject(e) : resolve()));
+          return res.json({ grant: token });
+        }
+        const grant = session.teamPartnersGrant;
+        if (!grant || !equal(grant.token, body.grant) || grant.pin !== semanticHash(body.expected) || grant.expires < Date.now())
+          return res.status(403).json({ error: "Разовое разрешение документа недействительно." });
+        delete session.teamPartnersGrant;
+        await new Promise<void>((resolve, reject) => req.session!.save(e => e ? reject(e) : resolve()));
+        await repository.applyPartners(TEAM_OWNER, body.expected);
+        return res.json(await status());
+      }
       if (body.confirm !== true || !validPin(body.expected) ||
           Object.keys(body).some(k => !["expected", "confirm", ...(req.path.endsWith("/apply") ? ["grant"] : [])].includes(k)))
         return res.status(400).json({ error: "Требуется точный pin пакета." });

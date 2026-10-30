@@ -10,6 +10,8 @@ import {
 const TEAM_URL = "/api/admin/team";
 const GRANT_URL = "/api/admin/team/grant";
 const APPLY_URL = "/api/admin/team/apply";
+const PARTNERS_GRANT_URL = "/api/admin/team/partners/grant";
+const PARTNERS_APPLY_URL = "/api/admin/team/partners/apply";
 
 const statusCopy: Record<TeamStatus, { label: string; tone: string }> = {
   autonomous: { label: "Работает сам", tone: "green" },
@@ -22,6 +24,7 @@ const statusCopy: Record<TeamStatus, { label: string; tone: string }> = {
 };
 
 type TeamActionReport = NonNullable<TeamMember["actionReports"]>[number];
+type TeamPartners = NonNullable<TeamView["partners"]>;
 type ActivityFilter = "all" | "reports" | TeamEvent["source"];
 type TeamFeedItem = { kind: "event"; event: TeamEvent } | { kind: "report"; report: TeamActionReport; member: TeamMember };
 
@@ -82,13 +85,17 @@ export default function TeamPage() {
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [confirmApply, setConfirmApply] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [partnersApplying, setPartnersApplying] = useState(false);
+  const [partnersApplyError, setPartnersApplyError] = useState("");
+  const [partnersApplyNotice, setPartnersApplyNotice] = useState("");
+  const [partnersNeedsRefresh, setPartnersNeedsRefresh] = useState(false);
   const [progress, setProgress] = useState<{ step: number; total: number } | null>(null);
   const mounted = useRef(true);
   const requestLock = useRef(false);
   const viewRef = useRef<TeamView | null>(null);
   const applyingRef = useRef(false);
   viewRef.current = view;
-  applyingRef.current = applying;
+  applyingRef.current = applying || partnersApplying;
 
   const refresh = useCallback(async () => {
     if (requestLock.current || applyingRef.current) return;
@@ -108,6 +115,9 @@ export default function TeamPage() {
         setApplyError("");
         setApplyNotice("");
         setNeedsRefresh(false);
+        setPartnersApplyError("");
+        setPartnersApplyNotice("");
+        setPartnersNeedsRefresh(false);
       }
     } catch (error) {
       if (mounted.current) setLoadError(error instanceof Error ? error.message : "Не удалось загрузить состав команды.");
@@ -192,6 +202,63 @@ export default function TeamPage() {
     }
   };
 
+  const applyPartners = async () => {
+    const partners = view?.partners;
+    if (!partners?.available || !partners.pin || !view?.apply.csrfToken || applying || partnersApplying || applyingRef.current || requestLock.current || partnersNeedsRefresh) return;
+
+    const expected = partners.pin;
+    const csrf = view.apply.csrfToken;
+    applyingRef.current = true;
+    setPartnersApplying(true);
+    setPartnersApplyError("");
+    setPartnersApplyNotice("");
+    try {
+      const grantResponse = await fetch(PARTNERS_GRANT_URL, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "x-team-csrf": csrf },
+        body: JSON.stringify({ expected, confirm: true }),
+      });
+      if (!grantResponse.ok) throw new Error(`Не удалось получить разрешение на документ партнёров. ${await responseError(grantResponse)}`);
+      const grantBody = await grantResponse.json() as { grant?: unknown };
+      if (typeof grantBody?.grant !== "string" || !grantBody.grant) {
+        throw new Error("Сервер не вернул одноразовое разрешение. Результат требует сверки.");
+      }
+
+      const applyResponse = await fetch(PARTNERS_APPLY_URL, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "x-team-csrf": csrf },
+        body: JSON.stringify({ expected, confirm: true, grant: grantBody.grant }),
+      });
+      const updated = await readTeam(applyResponse);
+      if (mounted.current) setView(updated);
+
+      if (!updated.partners?.completed) {
+        const currentPin = updated.partners?.pin;
+        const pinChanged = !currentPin
+          || currentPin.workspace !== expected.workspace
+          || currentPin.revision !== expected.revision
+          || currentPin.rootHash !== expected.rootHash
+          || currentPin.documentHash !== expected.documentHash;
+        throw new Error(pinChanged
+          ? "Закрепление документа изменилось. Применение остановлено; обновите состояние и сверьте новую ревизию."
+          : updated.partners?.reason || "Источник не подтвердил завершение применения документа.");
+      }
+      if (mounted.current) setPartnersApplyNotice(`Сервер подтвердил применение документа партнёров · r${updated.source.revision}.`);
+    } catch (error) {
+      if (mounted.current) {
+        setPartnersApplyError(`Применение остановлено. Не отправляйте запрос повторно: результат может быть неоднозначным. Обновите состояние и сверьте его с владельцем. ${error instanceof Error ? error.message : "Неизвестная ошибка."}`);
+        setPartnersNeedsRefresh(true);
+      }
+    } finally {
+      applyingRef.current = false;
+      if (mounted.current) setPartnersApplying(false);
+    }
+  };
+
   return (
     <main className="team-page min-h-[100dvh] px-4 pb-16 text-[#263a35] sm:px-7">
       <TeamHeader />
@@ -211,6 +278,11 @@ export default function TeamPage() {
               applyNotice={applyNotice}
               applyBlocked={needsRefresh}
               onApply={() => setConfirmApply(true)}
+              partnersApplying={partnersApplying}
+              partnersApplyError={partnersApplyError}
+              partnersApplyNotice={partnersApplyNotice}
+              partnersApplyBlocked={partnersNeedsRefresh}
+              onPartnersApply={() => void applyPartners()}
             />
           </>
         ) : null}
@@ -242,7 +314,9 @@ export default function TeamPage() {
 }
 
 export function TeamContent({
-  view, refreshing, onRefresh, applying, progress, applyError, applyNotice, applyBlocked, onApply, initialSelectedId = null,
+  view, refreshing, onRefresh, applying, progress, applyError, applyNotice, applyBlocked, onApply,
+  partnersApplying = false, partnersApplyError = "", partnersApplyNotice = "", partnersApplyBlocked = false,
+  onPartnersApply, initialSelectedId = null, initialConfirmPartners = false,
 }: {
   view: TeamView;
   refreshing?: boolean;
@@ -253,10 +327,18 @@ export function TeamContent({
   applyNotice?: string;
   applyBlocked?: boolean;
   onApply?: () => void;
+  partnersApplying?: boolean;
+  partnersApplyError?: string;
+  partnersApplyNotice?: string;
+  partnersApplyBlocked?: boolean;
+  onPartnersApply?: () => void;
   /** Standalone visual tests/deep-link hosts may select a profile; no auth bypass. */
   initialSelectedId?: string | null;
+  /** Standalone confirmation rendering only; does not bypass owner authentication. */
+  initialConfirmPartners?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
+  const [confirmPartners, setConfirmPartners] = useState(initialConfirmPartners);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
   const [showAllRoles, setShowAllRoles] = useState(false);
@@ -345,7 +427,7 @@ export function TeamContent({
               <MiniStat label="Профили" value={String(view.members.length)} />
               <MiniStat label="Шаги пакета" value={`${view.apply.completed}/${view.apply.total}`} />
             </div>
-            <button type="button" onClick={onRefresh} disabled={!onRefresh || refreshing || applying} className="team-refresh mt-3 w-full">
+            <button type="button" onClick={onRefresh} disabled={!onRefresh || refreshing || applying || partnersApplying} className="team-refresh mt-3 w-full">
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} aria-hidden="true" /> Обновить данные
             </button>
           </div>
@@ -429,7 +511,25 @@ export function TeamContent({
         </div>
       </section>}
 
-      <ApplyPanel view={view} applying={Boolean(applying)} progress={progress ?? null} applyError={applyError ?? ""} applyNotice={applyNotice ?? ""} blocked={Boolean(applyBlocked)} onApply={onApply} />
+      <ApplyPanel view={view} applying={Boolean(applying)} progress={progress ?? null} applyError={applyError ?? ""} applyNotice={applyNotice ?? ""} blocked={Boolean(applyBlocked)} onApply={partnersApplying ? undefined : onApply} />
+      {view.partners && <PartnersApplyPanel
+        partners={view.partners}
+        csrfAvailable={Boolean(view.apply.csrfToken)}
+        applying={partnersApplying}
+        blocked={Boolean(partnersApplyBlocked)}
+        applyError={partnersApplyError}
+        applyNotice={partnersApplyNotice}
+        onConfirm={() => setConfirmPartners(true)}
+        actionAvailable={Boolean(onPartnersApply)}
+        firstPackageApplying={Boolean(applying)}
+      />}
+      {confirmPartners && view.partners && <PartnersConfirmationModal
+        partners={view.partners}
+        applying={partnersApplying}
+        canApply={Boolean(onPartnersApply && view.partners.available && !view.partners.completed && view.partners.pin && view.apply.csrfToken && !partnersApplyBlocked && !applying)}
+        onCancel={() => setConfirmPartners(false)}
+        onConfirm={() => { setConfirmPartners(false); onPartnersApply?.(); }}
+      />}
 
       <footer className="mt-7 flex flex-col gap-2 border-t border-[#dce4dc] pt-4 text-[11px] text-[#829087] sm:flex-row sm:items-center sm:justify-between">
         <span>Только владелец · состояние получено с сервера</span>
@@ -723,6 +823,100 @@ function ProfileDrawer({ member, members, onSelect, onClose }: {
       </section>
     </div>
   );
+}
+
+function PartnersApplyPanel({
+  partners, csrfAvailable, applying, blocked, applyError, applyNotice, onConfirm, actionAvailable, firstPackageApplying,
+}: {
+  partners: TeamPartners;
+  csrfAvailable: boolean;
+  applying: boolean;
+  blocked: boolean;
+  applyError: string;
+  applyNotice: string;
+  onConfirm: () => void;
+  actionAvailable: boolean;
+  firstPackageApplying: boolean;
+}) {
+  const available = partners.available && !partners.completed && Boolean(partners.pin) && csrfAvailable && !blocked;
+  const disabled = !available || applying || firstPackageApplying || !actionAvailable;
+  return <section className="team-panel mt-6 overflow-hidden" aria-labelledby="partners-apply-heading">
+    <div className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-center">
+      <div>
+        <p className="team-eyebrow"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" /> Отдельный документ · одно применение</p>
+        <h2 id="partners-apply-heading" className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-[#2a493a]">Внешние партнёры и шляпы</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-[#687a70]">
+          Отдельный уже рассмотренный документ для Клавдия, Ефима и шляп. Применяется ровно один закреплённый документ; состав команды и пакет ролей остаются отдельными.
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+          <Meta label="Рабочая область" value={partners.pin?.workspace} />
+          <Meta label="Ревизия документа" value={partners.pin ? `r${partners.pin.revision}` : null} />
+          <Meta label="Корневой хеш" value={partners.pin?.rootHash} mono />
+          <Meta label="Хеш документа" value={partners.pin?.documentHash ?? partners.documentHash} mono />
+        </div>
+        <p className={`mt-3 text-xs leading-5 ${partners.completed ? "text-[#477252]" : "text-[#7b8171]"}`}>
+          {partners.completed
+            ? "Документ отмечен сервером как применённый."
+            : blocked
+              ? "Заблокировано до обновления: результат предыдущего запроса требует сверки."
+              : partners.available
+                ? "Доступно одно отдельное подтверждение владельца."
+                : `Заблокировано: ${missing(partners.reason)}`}
+        </p>
+      </div>
+      <div className="rounded-xl border border-[#dde7dd] bg-[#f9faf5] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div><p className="text-xs font-semibold text-[#586f61]">Состояние документа</p>
+            <p className="mt-1 text-[11px] leading-5 text-[#859187]">{partners.completed ? "Применение завершено" : partners.available ? "Ожидает подтверждения владельца" : missing(partners.reason)}</p></div>
+          <span className="font-mono text-xs text-[#789082]">{partners.completed ? "готово" : partners.available ? `r${partners.pin?.revision ?? "—"}` : "заблокировано"}</span>
+        </div>
+        {applyNotice && <p className="mt-3 flex gap-2 text-xs leading-5 text-[#477252]" role="status"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{applyNotice}</p>}
+        {applyError && <p className="mt-3 flex gap-2 text-xs leading-5 text-[#8d5145]" role="alert"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{applyError}</p>}
+        <button type="button" onClick={onConfirm} disabled={disabled} className="team-button-primary mt-4 w-full disabled:cursor-not-allowed disabled:opacity-45">
+          {applying ? <><RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />Применение…</> : "Применить Клавдия, Ефима и шляпы"}
+        </button>
+      </div>
+    </div>
+  </section>;
+}
+
+function PartnersConfirmationModal({
+  partners, applying, canApply, onCancel, onConfirm,
+}: {
+  partners: TeamPartners;
+  applying: boolean;
+  canApply: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return <div className="team-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !applying) onCancel(); }}>
+    <section className="team-modal" role="dialog" aria-modal="true" aria-labelledby="partners-confirm-title">
+      <div className="team-modal-body">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e4efe8] text-[#28634f]"><ShieldCheck className="h-5 w-5" aria-hidden="true" /></span>
+          <div>
+            <h2 id="partners-confirm-title" className="text-xl font-semibold tracking-[-0.035em] text-[#263c34]">Применить документ партнёров?</h2>
+            <p className="mt-2 text-sm leading-6 text-[#687b72]">Это одно применение одного уже рассмотренного документа для Клавдия, Ефима и шляп. Не выполняется цикл и не выбирается автоматически новая ревизия.</p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <Meta label="Рабочая область" value={partners.pin?.workspace} />
+          <Meta label="Закреплённая ревизия" value={partners.pin ? `r${partners.pin.revision}` : null} />
+          <Meta label="Корневой хеш" value={partners.pin?.rootHash} mono />
+          <Meta label="Хеш документа" value={partners.pin?.documentHash ?? partners.documentHash} mono />
+        </div>
+        <div className="mt-5 rounded-xl border border-[#e0e9e2] bg-[#f3f7f3] p-4 text-sm leading-6 text-[#53685e]">
+          Если закрепление не совпадает с актуальной ревизией, сервер остановит применение. При любой неоднозначной ошибке не повторяйте запрос: сначала обновите состояние и сверьте его. Это не запускает агентов и не совершает звонки.
+        </div>
+      </div>
+      <div className="team-modal-actions mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <button type="button" onClick={onCancel} disabled={applying} className="team-button-secondary">Отмена</button>
+        <button type="button" onClick={onConfirm} disabled={!canApply || applying} className="team-button-primary disabled:cursor-not-allowed disabled:opacity-45">
+          {applying ? "Применение…" : "Подтвердить одно применение"}
+        </button>
+      </div>
+    </section>
+  </div>;
 }
 
 function ApplyPanel({ view, applying, progress, applyError, applyNotice, blocked, onApply }: { view: TeamView; applying: boolean; progress: { step: number; total: number } | null; applyError: string; applyNotice: string; blocked: boolean; onApply?: () => void }) {

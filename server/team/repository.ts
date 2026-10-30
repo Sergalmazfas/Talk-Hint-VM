@@ -11,6 +11,8 @@ import { semanticHash, textHash } from "../companyData/valueTree";
 import { ModelError } from "../projectModel/modelError";
 import { DIRECTORY, JOURNAL, JOURNAL_SHA, proposedStep, TEAM_BASE, TEAM_PLAN_HASH, TEAM_ROOTS, TEAM_STEPS } from "./plan";
 import { portraitManifest } from "./portraits";
+import type { TeamPartnersPin } from "../../shared/team";
+import { PARTNERS_BASE, PARTNERS_NEXT_ROOT, PARTNERS_DOCUMENT_HASH, partnersDocument } from "./partnersApproval";
 
 export interface TeamContext {
   workspace: string; owner: string; revision: number; rootHash: string;
@@ -162,5 +164,58 @@ export class TeamRepository {
       }
       return { edits, expectedRootHash: this.discoverTestPins ? undefined : TEAM_ROOTS[completed + 1] };
     }, `team-package:${TEAM_PLAN_HASH}:${expected.step}`);
+  }
+  async applyPartners(owner: string, expected: TeamPartnersPin) {
+    if (expected.documentHash !== PARTNERS_DOCUMENT_HASH || expected.revision !== 918 ||
+        expected.rootHash !== PARTNERS_BASE.rootHash ||
+        (!this.test && (expected.workspace !== PARTNERS_BASE.workspace || this.environment !== "production")))
+      throw new ModelError(409, "Закреплённый pin изменился");
+    const repo = new IncrementalCompanyRepository(this.pool, this.environment as any, this.test);
+    return repo.commitDelta(owner, expected.revision, async store => {
+      const c = await readContext(store.db, owner, this.environment, { test: this.test, store });
+      const document = partnersDocument();
+      if (c.workspace !== expected.workspace || c.rootHash !== expected.rootHash || !c.writesOpen ||
+          (!this.test && c.phase !== "active") || c.documents.some(d => d.id === document.id) ||
+          c.elements.some(e => e.id === document.id))
+        throw new ModelError(409, "Источник изменился; автоматическое повторение запрещено");
+      const fragment: ProjectModelState = { schema: 1, revision: c.revision + 1,
+        elements: [], relations: [], documents: [], proposals: [], decisions: [], taskDrafts: [],
+        alternatives: [{ id: "new-country", title: "Новая страна", model: {
+          schema: 1, revision: c.hypothesisRevision + 1, elements: [], relations: [], proposals: [],
+          decisions: [], taskDrafts: [], documents: [document],
+        } }] };
+      const namespace = new Map<string, string>([
+        ...c.elements.map(e => [e.id, "element"] as [string, string]),
+        ...[...c.documents, document].map(d => [d.id, "document"] as [string, string]),
+      ]);
+      const columns = await projectFragment(fragment, store, store.schema, namespace);
+      const edits: DeltaEdit[] = await entityArrayEdits({
+        old: c.documents, next: [...c.documents, document],
+        oldArray: await at(c.rootHash, [...c.prefix, "documents"], store),
+        path: [...c.prefix, "documents"], store, documentHypothesis: "new-country",
+        columnsFor: () => {
+          const scoped = new Map();
+          const prefix = "/alternatives/0/model/documents/0";
+          for (const [key, value] of Array.from(columns))
+            if (key === prefix || key.startsWith(prefix + "/")) scoped.set(key.slice(prefix.length), value);
+          return scoped;
+        },
+      });
+      edits.push({ path: [...c.prefix, "revision"], value: c.hypothesisRevision + 1 });
+      const delta = JSON.stringify([...c.documents, document]).length - JSON.stringify(c.documents).length;
+      const sizes = await store.db.query(`SELECT hypothesis_id,active_utf16 FROM company_v3_size_budgets
+        WHERE workspace_id=$1 AND hypothesis_id IN ('new-country','$root') FOR UPDATE`, [c.workspace]);
+      if (sizes.rows.length !== 2) throw Error("Size inventory missing");
+      for (const row of sizes.rows) {
+        const size = Number(row.active_utf16) + delta +
+          String(c.hypothesisRevision + 1).length - String(c.hypothesisRevision).length +
+          (row.hypothesis_id === "$root" ? String(c.revision + 1).length - String(c.revision).length : 0);
+        if (size > (row.hypothesis_id === "$root" ? 8_000_000 : 6_500_000))
+          throw new ModelError(413, "Лимит активной модели");
+        await store.db.query("UPDATE company_v3_size_budgets SET active_utf16=$3 WHERE workspace_id=$1 AND hypothesis_id=$2",
+          [c.workspace, row.hypothesis_id, size]);
+      }
+      return { edits, expectedRootHash: this.discoverTestPins ? undefined : PARTNERS_NEXT_ROOT };
+    }, `team-external-partners:${PARTNERS_DOCUMENT_HASH}`);
   }
 }

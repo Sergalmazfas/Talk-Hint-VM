@@ -2203,3 +2203,17 @@ mtime_ms = 1793333413959
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0b953cf0-488b-43f4-8d1a-d32c2575450f/f4f1dfa1-483c-4b0e-8510-f23fdf196ff3"
 storage_version_token = "1793333424396249"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "IrRIUzC3rwGM77RYY6Dn-"
+uri = "file://generated-artifacts/team-partners-button/TalkHint_Package2_ProtectedApply_Claude.zip"
+type = "unspecified"
+title = "Пакет 2 · защищённое применение · на сверку Claude"
+description = "Отдельный diff, точные pin r918→r919, полный прогон 284 файлов, PostgreSQL-репетиция с откатом, браузерные проверки и мобильный экран подтверждения."
+logical_id = "02818eb5-e55f-4447-aa97-ae912c81a2f1"
+content_hash = "sha256:c16598379a2a06c26a1708eebe459eea902bcc7101a52b0e6778007fe0257e49"
+size = 418896
+mtime_ms = 1793334931343
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/02818eb5-e55f-4447-aa97-ae912c81a2f1/dba20e24-bfe7-42d5-a99a-719b5e0565e0"
+storage_version_token = "1793334977934151"
+content_type = "application/octet-stream"
