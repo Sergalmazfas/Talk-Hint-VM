@@ -1,6 +1,6 @@
 - [Target product teams](product-teams-target.md) — production-only writes; Dev frozen; separate reviewed diffs; Maria Sobol HEAD.06, Pasha P.PRODUCT; future teams empty.
 - [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.
-- [Process on-call](process-on-call.md) — owner expects immediate email on missing/failed transitions; explicit coverage, no false green, no blind mail retries.
+- [Process on-call](process-on-call.md) — action reports; one email per call; decisions/outages immediate, ordinary failures in morning; no false green or blind retries.
 - [iOS push / APNs architecture](ios-push-architecture.md) — direct VoIP APNs for calls; Secretary reports use separate ordinary alert tokens and credentials, never VoIP push.
 - [drizzle-kit push interactive blocker](drizzle-push-interactive-blocker.md) — db:push can hang on a rename prompt (out-of-schema user_sessions); apply DDL via executeSql instead, never accept the rename.
 - [/ui WebSocket per-user routing](ui-ws-per-user-routing.md) — live call transcripts/hints must auth + be scoped to owning user (callOwners map); never global broadcast.

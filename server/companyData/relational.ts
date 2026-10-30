@@ -241,7 +241,7 @@ export function project(root: ProjectModelState, workspace: string, schema: Sche
           });
         });
       }
-      if (lastOp && j.visualPassport && j.prompt) {
+      if (lastOp && j.visualPassport) {
         const v = j.visualPassport, roleId = v.roleId;
         const role = tables.get("company_roles")!.find(r => r.hypothesis_id === h.id &&
           r.operating_version === lastOp.version && r.entity_id === roleId);
@@ -249,6 +249,9 @@ export function project(root: ProjectModelState, workspace: string, schema: Sche
         // These two documents are explicitly the Hint lab pair; no assignments guessed for other roles.
         if (["DOC-PLAB-PROMPT-PROPOSAL", "DOC-PLG-QA-PROMPT-PROPOSAL"].includes(d.id)) {
           role.mode = "hint"; role.mode_source = `owner:2026-10-28:${d.id}`;
+        }
+        if (["company", "hint", "secretary", "translator", "copilot"].includes(j.mode)) {
+          role.mode = j.mode; role.mode_source = `document:${d.id}`;
         }
         const ps = { workspace_id: workspace, hypothesis_id: h.id,
           operating_version: lastOp.version, entity_id: roleId, profile_version: Number(j.version) };
@@ -260,10 +263,10 @@ export function project(root: ProjectModelState, workspace: string, schema: Sche
           portrait_style: v.portrait?.styleId ?? null, role_color: v.roleColor?.value ?? null,
           owner_selection_status: v.selectedName ? "accepted" : "not_selected",
           source_document_id: d.id, source_pointer: "/visualPassport", source_at: j.revisedAt ?? d.updatedAt,
-          accepted_by: v.selectedName ? "owner" : null, accepted_at: null });
+          accepted_by: v.selectedName ? "owner" : null, accepted_at: j.nameAcceptedAt ?? null });
         (v.nameOptions ?? []).forEach((name: string, ordinal: number) =>
           emit("company_employee_name_options", {}, null, ps, { ordinal, name_text: name }));
-        emit("company_role_prompt_versions", {}, null, {
+        if (j.prompt && Object.keys(j.prompt).length) emit("company_role_prompt_versions", {}, null, {
           workspace_id: workspace, hypothesis_id: h.id, operating_version: lastOp.version, entity_id: roleId,
         }, { prompt_version: `${d.id}:v${j.version}`, text_body: JSON.stringify(j.prompt),
           source_at: j.revisedAt ?? d.updatedAt, status: "proposed", accepted_by: null, accepted_at: null,

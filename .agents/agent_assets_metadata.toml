@@ -2147,3 +2147,17 @@ mtime_ms = 1793320233780
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2c135901-37db-4e3f-8d23-1dbf286bf241/b7e676a3-05be-445d-9485-c859d11d299e"
 storage_version_token = "1793320241687307"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "2Z_d6EoSRAU_2YMhCZtHE"
+uri = "file://generated-artifacts/team-owner-review/TalkHint_Team_MorningReport_Claude.zip"
+type = "unspecified"
+title = "TalkHint — команда и утренний отчёт · сверка Claude"
+description = "ZIP 789 КБ: код, четыре отдельных diff модели, репетиция, портретный манифест, снимки и полный итог тестов. Production не изменён."
+logical_id = "b34c5441-3249-474b-9224-cc0d45647d2b"
+content_hash = "sha256:5aade282015599f64f66366071a3f27be0a87a992002968c33a3cfbb3d3a3942"
+size = 789399
+mtime_ms = 1793323775851
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b34c5441-3249-474b-9224-cc0d45647d2b/a5c4cb18-843d-4dc7-a061-6a5a4158a319"
+storage_version_token = "1793323791370737"
+content_type = "application/octet-stream"

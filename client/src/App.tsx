@@ -17,6 +17,7 @@ import NotFound from "@/pages/not-found";
 import Onboarding from "@/pages/onboarding";
 import ProjectModel from "@/pages/project-model";
 import CompanyPreview from "@/pages/company-preview";
+import TeamPage from "@/pages/team";
 import SecretaryLab from "@/pages/secretary-lab";
 import VoiceLab from "@/pages/voice-lab";
 
@@ -99,6 +100,7 @@ function AdminRoutes() {
         <Route path="/diagnostics" component={AdminDiagnostics} />
         <Route path="/company-import" component={CompanyImport} />
         <Route path="/company-cutover" component={CompanyCutover} />
+        <Route path="/team" component={TeamPage} />
         <Route path="/project-model" component={ProjectModel} />
         {import.meta.env.DEV && <Route path="/company-preview" component={CompanyPreview} />}
         <Route path="/voice-lab" component={VoiceLab} />

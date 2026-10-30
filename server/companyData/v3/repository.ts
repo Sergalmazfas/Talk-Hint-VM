@@ -22,7 +22,7 @@ export interface DeltaEdit {
   document?: { hypothesis: string; id: string };
 }
 export type PrepareDelta = (store: SqlFrameStore) => Promise<{
-  edits: DeltaEdit[]; columns?: Map<string, Frame>; revisionAdvance?: number;
+  edits: DeltaEdit[]; columns?: Map<string, Frame>; revisionAdvance?: number; expectedRootHash?: string;
 }>;
 
 /**
@@ -52,7 +52,7 @@ export class IncrementalCompanyRepository {
       const w = await this.workspace(db, owner, true);
       if (Number(w.current_revision) !== expectedRevision) throw new ModelError(409, "Stale company revision");
       const schema = await readBusinessContract(db), store = new SqlFrameStore(db, w.workspace_id, schema);
-      const { edits, columns = new Map(), revisionAdvance = 1 } = await prepare(store);
+      const { edits, columns = new Map(), revisionAdvance = 1, expectedRootHash } = await prepare(store);
       if (!edits.length && revisionAdvance === 0) {
         await db.query("ROLLBACK");
         return { revision: expectedRevision, rootHash: w.root_hash as string,
@@ -77,6 +77,8 @@ export class IncrementalCompanyRepository {
       const nextRevision = expectedRevision + revisionAdvance;
       root = await replace(root, ["revision"], await encode(nextRevision, store), store);
       const beforeVerification = performance.now();
+      if (expectedRootHash && root !== expectedRootHash)
+        throw new ModelError(409, "Prepared company delta does not match reviewed output pin");
       await store.flush();
       const verificationMs = performance.now() - beforeVerification;
       await db.query(`INSERT INTO company_v3_revision_heads(workspace_id,revision,root_hash,actor)
