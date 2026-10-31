@@ -9,6 +9,12 @@ Prefer the application's normal module-resolution pipeline for isolated frontend
 
 **How to apply:** Keep private UI authorization intact. When testing components outside the authenticated page, use canonical fixture builders and clearly distinguish isolated UI verification from verification of the signed-in application.
 
+The documented browser-testing subagent kind may be unavailable in this environment.
+
+**Why:** The runtime rejected the testing kind despite its skill being present. An isolated browser check was still possible with the preinstalled Chromium, without installing project dependencies.
+
+**How to apply:** Treat runtime capability errors as environment limits, not application failures. Keep any fallback browser test isolated from production and report its engine; Chromium success is not Safari/iPhone or actual provider-callback verification.
+
 An isolated PostgreSQL rehearsal does not verify production-only read queries skipped by its test mode.
 
 **Why:** A green rehearsal and full mocked test suite missed a company-page SQL query against nonexistent production columns because that read was disabled for the retained test copy. The page then returned a sanitized 503.

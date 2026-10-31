@@ -2301,3 +2301,17 @@ mtime_ms = 1793407079159
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fceeb993-1390-4d56-a0a6-a6813d97c6e0/d0ef3471-b24b-4a31-8f14-4057f309b03b"
 storage_version_token = "1793407083700587"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "j_OCHbYCz9dJ4Vss12O37"
+uri = "file://generated-artifacts/product-crew-consent-browser/report.html"
+type = "html"
+title = "Результат браузерной проверки OAuth"
+description = "Chromium: один POST → 303 → тестовый callback GET. Production и реальное подключение не затрагивались; Safari не проверен."
+logical_id = "f0a1f9f9-40cc-4000-a52c-38c6dd4e540b"
+content_hash = "sha256:e97f9a456cedf832b756204cc98756077aea6f9da7d7226e4b3f9ae8c8aa9c77"
+size = 3323
+mtime_ms = 1793411633840
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f0a1f9f9-40cc-4000-a52c-38c6dd4e540b/3c1fc68d-500e-4a26-b3f5-a6049eddf5aa"
+storage_version_token = "1793411638944122"
+content_type = "text/html"
