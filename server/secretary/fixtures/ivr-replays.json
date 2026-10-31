@@ -1,0 +1,22 @@
+[
+  {
+    "name": "TA Barstow 2026-10-31",
+    "source": "Production transcript, menu quotations only; no audio replay or real call",
+    "goal": "Узнать о бронировании парковки для тягача",
+    "menus": [
+      "Thank you for calling Travel Centers of America in Barstow, California. If you know the extension you want, you may dial it at any time. To page a guest, press two. For the fuel desk, press three. For the store or gas station, press four. For truck maintenance and repair, press five. For the restaurant or fast food, press six. For a manager, press eight. Or for Wireless, press nine.",
+      "For the fuel manager, press one. For the store manager, press two. For the truck service manager, press three. For the restaurant manager, press four. For the fast food manager, press five. For the general manager, press seven."
+    ],
+    "expected": ["8", "7"]
+  },
+  {
+    "name": "Love's 2026-10-29",
+    "source": "Production transcript, menu quotations only; ASR spelling retained; no audio replay or real call",
+    "goal": "Speak with a truck tire service advisor about in shop service",
+    "menus": [
+      "travel starts. The home of clean places and friendly faces. Press one if you are a professional driver who needs roadside assistance or wishes to speak with a service advisor. Press two. For all other calls, press pound to repeat the menu.",
+      "Press assistance, please select an option. For emergency roadside dispatch, press one. If you have questions about in shop service or would like to speak with a service advisor, press two. To repeat the menu, press pound. To return to the main menu, press star."
+    ],
+    "expected": ["1", "2"]
+  }
+]

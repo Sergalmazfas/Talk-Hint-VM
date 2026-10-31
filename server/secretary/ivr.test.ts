@@ -73,16 +73,17 @@ describe("Secretary IVR safety and navigation (no network)", () => {
     await ivr.observe([user(text), agent("representative"), user(text)]);
     await expect(press(ivr, "0", text)).rejects.toThrow(/limit/);
   });
-  it("pushes once, waits without ending, and accepts one owner response for this exact menu", async () => {
+  it("pushes once without blocking safe autonomous navigation or ending the call", async () => {
     const { io, ivr } = fixture(); await ivr.observe([user(menu)]);
     await ivr.tool("request_menu_help", "{}", signal());
     await ivr.tool("request_menu_help", "{}", signal());
     expect(io.notify).toHaveBeenCalledTimes(1);
     expect(ivr.blocksEnd()).toBe(true);
-    await expect(press(ivr)).rejects.toThrow(/Waiting/);
+    await expect(press(ivr)).rejects.toThrow();
     await expect(ivr.press("2", "stale", signal(), true)).rejects.toThrow();
     const hash = ivr.status().menuHash;
-    await expect(ivr.press("2", hash, signal(), true)).resolves.toMatchObject({ sent: true });
+    expect(io.send).toHaveBeenCalledExactlyOnceWith("8", expect.any(AbortSignal));
+    expect(ivr.status()).toMatchObject({ waiting: false, helpDelivery: "provider_accepted" });
     await expect(ivr.press("2", hash, signal(), true)).rejects.toThrow();
   });
   it("does not hide missing push delivery, does not hang up and never blindly retries mail/APNs", async () => {
@@ -91,16 +92,18 @@ describe("Secretary IVR safety and navigation (no network)", () => {
     await ivr.tool("request_menu_help", "{}", signal());
     await ivr.tool("request_menu_help", "{}", signal());
     expect(io.notify).toHaveBeenCalledTimes(1);
-    expect(ivr.status()).toMatchObject({ waiting: true, helpDelivery: "unavailable" });
+    expect(ivr.status()).toMatchObject({ waiting: false, helpDelivery: "unavailable" });
+    expect(io.send).toHaveBeenCalledExactlyOnceWith("8", expect.any(AbortSignal));
     expect(ivr.blocksEnd()).toBe(true);
   });
   it("saves a route only after an evidenced live answer, then offers it for the exact menu", async () => {
     const { io, ivr } = fixture(); await ivr.observe([user(menu)]); await press(ivr);
+    const dispatchedMenuHash = ivr.status().menuHash;
     await expect(ivr.tool("confirm_menu_reached", JSON.stringify({ heard: "Hello, tire department speaking." }), signal())).rejects.toThrow();
     const heard = "Hello, tire department speaking.";
     await ivr.observe([user(menu), agent(""), user(heard)]);
     await ivr.tool("confirm_menu_reached", JSON.stringify({ heard }), signal());
-    expect(io.remember).toHaveBeenCalledWith([{ menuHash: ivr.status().menuHash, digits: "2" }]);
+    expect(io.remember).toHaveBeenCalledWith([{ menuHash: dispatchedMenuHash, digits: "2" }]);
     expect(ivr.blocksEnd()).toBe(false);
     const next = new SecretaryIvr(io, io.remember.mock.calls[0][0]);
     await next.observe([user(menu)]); expect(next.context()).toContain('"rememberedChoiceForThisExactMenu":"2"');

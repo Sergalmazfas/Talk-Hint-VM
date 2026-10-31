@@ -2343,3 +2343,17 @@ mtime_ms = 1793468110262
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/865b2c93-7bf5-4d3f-a0bd-730452f51146/dcdccd4c-c409-4612-803a-5c2002562ca7"
 storage_version_token = "1793468120879848"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "SB_Mh8ADVCQUVhXgS1qs8"
+uri = "file://generated-artifacts/katya-multilevel-ivr-claude-review.zip"
+type = "unspecified"
+title = "Катя: два уровня меню — пакет для Claude"
+description = "Короткий diff, исходники, replay TA 8→7 и Love’s 1→2, тесты и ограничения. 51 целевой тест и финальная сборка прошли. Общий прогон: 2792 passed, 1 failed, 34 skipped; отдельный повтор проблемного файла: 22 passed. Publish не выполнен."
+logical_id = "c09c443f-01d0-4822-8a82-8eb9b4a6adb9"
+content_hash = "sha256:2aa9be3bca841ce0132ade3a0520efd2642f26141697052ca7dfadc9f412cc44"
+size = 63879
+mtime_ms = 1793469523429
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c09c443f-01d0-4822-8a82-8eb9b4a6adb9/6b275c82-8954-4e01-b6cb-8f38b869e468"
+storage_version_token = "1793469529080074"
+content_type = "application/octet-stream"

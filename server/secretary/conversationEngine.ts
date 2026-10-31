@@ -35,15 +35,17 @@ export const secretaryPhoneTools = [
   { ...secretaryEndTool, type: "function" as const, strict: false },
   schema("press_digits", "Navigate the current complete, non-sensitive IVR menu only.", {
     digits: { type: "string", pattern: "^[0-9*#]{1,5}$" },
+    reason: { type: "string", maxLength: 300 },
     heard_menu: { type: "string", maxLength: 4000 }, menu_complete: { type: "boolean" },
   }, ["digits", "heard_menu", "menu_complete"]),
-  schema("request_menu_help", "Notify the owner of the current menu and wait without hanging up.", {}, []),
+  schema("request_menu_help", "Request advisory owner help; independently choose a heard safe option or repeat, without a silent wait.", {}, []),
   schema("confirm_menu_reached", "Record the observed live department answer and remember this menu route.", {
     heard: { type: "string", maxLength: 4000 },
   }, ["heard"]),
 ];
 export type TelephoneTools = {
   beforeTurn: (turns: SpokenTurn[]) => Promise<string>;
+  navigate?: (signal: AbortSignal) => Promise<boolean>;
   execute: (name: string, args: string, signal: AbortSignal) => Promise<any>;
   blocksEnd: () => boolean;
 };
@@ -161,6 +163,7 @@ export class SecretaryConversationEngine {
     if (this.telephoneTools) {
       const state = await this.telephoneTools.beforeTurn(turns);
       if (signal.aborted) return;
+      if (await this.telephoneTools.navigate?.(signal)) return;
       input.push({ role: "developer", content: state });
     }
     if (!this.telephone)
@@ -207,7 +210,10 @@ export class SecretaryConversationEngine {
             result = { prepared: true, instruction: "Say exactly the supplied farewell now, with no additions. Do not claim the call has ended." };
           } else if (this.telephone && this.telephoneTools) {
             result = await this.telephoneTools.execute(tool.name, tool.arguments, signal);
-            if (result?.silent) return;
+            if (result?.silent) {
+              if (result.spokenFallback && !signal.aborted) emit(result.spokenFallback);
+              return;
+            }
           } else result = this.execute(tool.name, tool.arguments, signal);
         }
         catch { result = { ok: false, ...(!this.telephone ? { testOnly: true } : {}),

@@ -6,6 +6,7 @@ import { SecretaryIvr, type IvrEvent, type MenuStep } from "./ivr";
 import { publishSecretaryFeedEvent } from "./feed";
 import { notifySecretaryResult } from "./notifications";
 import type { TelephoneTools } from "./conversationEngine";
+import { mergeIvrTranscript } from "./ivrSelection";
 
 const contexts = new Map<string, Promise<{ owner: string; controller: SecretaryIvr }>>();
 async function activeTask(id: string) {
@@ -30,8 +31,11 @@ async function record(id: string, event: IvrEvent, path?: MenuStep[]) {
       ...previous, events: events.slice(-200), ...(path ? { learnedPath: path, confirmedAt: event.at } : {}),
     } } }).where(eq(calls.id, call.id));
     if (event.kind === "press" && event.result === "command_sent_destination_acceptance_unknown") {
-      const turn = { id: event.id, role: "secretary", text: `Катя нажала ${event.digits} (команда отправлена; принятие меню пока неизвестно).` };
-      const turns = [...((current.transcriptTurns ?? []) as any[]).filter(t => t.id !== turn.id), turn];
+      const turn = { id: event.id, role: "secretary", afterTurn: event.afterTurn, at: event.sentAt ?? event.at,
+        text: `Катя нажала ${event.digits} (команда отправлена; принятие меню пока неизвестно).` };
+      const existing = ((current.transcriptTurns ?? []) as any[]).filter(t => t.id !== turn.id);
+      const turns = mergeIvrTranscript(existing.filter(t => !t.id.startsWith("ivr:")),
+        [...existing.filter(t => t.id.startsWith("ivr:")), turn]);
       const transcript = turns.map(t => `${t.role === "guest" ? "Other party" : "Secretary"}: ${t.text}`).join("\n");
       await tx.update(secretaryTasks).set({ transcriptTurns: turns, transcript, updatedAt: new Date() }).where(eq(secretaryTasks.id, id));
       await tx.update(calls).set({ transcript }).where(eq(calls.id, call.id));
@@ -69,7 +73,7 @@ async function context(id: string) {
         },
         remember: steps => record(id, { id: "ivr:learned-route", at: new Date().toISOString(),
           kind: "reached", heard: "", result: "route_saved_for_owner_and_number" }, steps),
-      }, path);
+      }, path, task.instruction);
       return { owner: task.userId, controller };
     })();
     contexts.set(id, existing);
@@ -81,6 +85,7 @@ export function resolvedPhoneIvrTools(id: string): TelephoneTools {
   let resolved: SecretaryIvr | undefined;
   return {
     beforeTurn: async turns => { resolved = (await context(id)).controller; await resolved.observe(turns); return resolved.context(); },
+    navigate: signal => resolved!.navigate(signal),
     execute: async (name, args, signal) => {
       resolved = (await context(id)).controller; return resolved.tool(name, args, signal);
     },

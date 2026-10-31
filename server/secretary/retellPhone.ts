@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { resolveOutgoingPersonality } from "./personalities/store";
 import { validateOutgoingSnapshot } from "./personalities/outgoing";
 import { resolvedPhoneIvrTools, endPhoneIvr, observePhoneIvr } from "./ivrPhone";
+import { mergeIvrTranscript } from "./ivrSelection";
 
 export const RETELL_PHONE_AGENT = "TalkHint Secretary — Telephone + Engine";
 export const retellPhoneApi = new RetellApi();
@@ -103,7 +104,7 @@ async function saveTranscript(taskId: string, turns: SpokenTurn[]) {
   await observePhoneIvr(taskId, turns);
   const previous = writes.get(taskId) ?? Promise.resolve();
   const next = previous.then(async () => {
-    let snapshot = turns.map((turn, index) => ({
+    let snapshot: (import("./ivrSelection").IvrTranscriptTurn & { role: "secretary" | "guest" })[] = turns.map((turn, index) => ({
       id: `retell:${index}`, role: turn.role === "agent" ? "secretary" as const : "guest" as const,
       text: turn.content.trim().slice(0, 4000),
     })).filter(t => t.text);
@@ -112,7 +113,7 @@ async function saveTranscript(taskId: string, turns: SpokenTurn[]) {
       if (!task || task.voiceProvider !== "retell" || !task.callSid || !active.includes(task.status as any))
         throw new Error("Retell transcript no longer belongs to an active call");
       const ivr = ((task.transcriptTurns ?? []) as typeof snapshot).filter(t => t.id.startsWith("ivr:"));
-      snapshot = [...snapshot, ...ivr];
+      snapshot = mergeIvrTranscript(snapshot, ivr);
       const mergedTranscript = snapshot.map(t => `${t.role === "secretary" ? "Secretary" : "Other party"}: ${t.text.replace(/[\r\n]+/g, " ")}`).join("\n");
       await tx.update(secretaryTasks).set({ transcript: mergedTranscript, transcriptTurns: snapshot, updatedAt: new Date() })
         .where(eq(secretaryTasks.id, taskId));
