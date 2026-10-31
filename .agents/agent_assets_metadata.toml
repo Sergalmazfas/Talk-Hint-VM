@@ -2357,3 +2357,17 @@ mtime_ms = 1793469523429
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c09c443f-01d0-4822-8a82-8eb9b4a6adb9/6b275c82-8954-4e01-b6cb-8f38b869e468"
 storage_version_token = "1793469529080074"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "uKh3Gk4dbEsfwB8NrUcdG"
+uri = "file://generated-artifacts/Hint_Crew_HR_acceptance.zip"
+type = "unspecified"
+title = "Команда Hint и отдел кадров — приёмка r970"
+description = "Анкеты отдельными JSON, структура и связи, четыре книжки знаний, слои промптов, Нина v2, R1–R5, Otter, тесты и квитанции. Явно отмечено внесённое и заблокированное; не самоприёмка."
+logical_id = "c64b215a-719d-421c-9c95-b0481bc17e29"
+content_hash = "sha256:743ab5b39e8d396131788a1c060e7a13f2b5c249121845d114d44ca3cc27876d"
+size = 488210
+mtime_ms = 1793484879368
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c64b215a-719d-421c-9c95-b0481bc17e29/2cc62513-9aa5-424b-adc7-1550b670a705"
+storage_version_token = "1793484907901927"
+content_type = "application/octet-stream"

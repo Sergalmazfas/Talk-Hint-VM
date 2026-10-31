@@ -44,7 +44,7 @@ describe("Dev to production MCP client safety", () => {
       expect(spy).toHaveBeenCalledOnce();
     }
   });
-  it("aborts a stalled request after 15 seconds without retry", async () => {
+  it("allows slow snapshot reads but aborts after 60 seconds without retry", async () => {
     vi.useFakeTimers();
     const fetcher = vi.fn((_url, init) => new Promise((_resolve, reject) => {
       init.signal.addEventListener("abort", () => reject(Error(`unsafe timeout ${key}`)));
@@ -52,7 +52,33 @@ describe("Dev to production MCP client safety", () => {
     const pending = callProductionMcp("tools/list", undefined, { env, fetcher });
     const rejection = expect(pending).rejects.toThrow("Production MCP request failed");
     await vi.advanceTimersByTimeAsync(15000);
+    expect(fetcher.mock.calls[0][1].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(45000);
     await rejection;
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it("accepts a roadmap response arriving after the old 15 second limit", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(async (_url, init) => {
+      await new Promise(resolve => setTimeout(resolve, 18000));
+      expect(init.signal.aborted).toBe(false);
+      return Response.json({ jsonrpc: "2.0", id: JSON.parse(init.body).id,
+        result: { structuredContent: { result: { revision: 919 } } } });
+    });
+    const pending = callProductionMcp("tools/call", { name: "get_roadmap", arguments: {} }, { env, fetcher });
+    await vi.advanceTimersByTimeAsync(18000);
+    expect(await pending).toMatchObject({ structuredContent: { result: { revision: 919 } } });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it("does not retransmit an ambiguous write at the longer snapshot deadline", async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn((_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(Error("ambiguous")));
+    }));
+    const pending = callProductionMcp("tools/call", { name: "update_structure", arguments: {} }, { env, fetcher });
+    const rejected = expect(pending).rejects.toThrow("No automatic retry");
+    await vi.advanceTimersByTimeAsync(60000);
+    await rejected;
     expect(fetcher).toHaveBeenCalledOnce();
   });
   it("post-publish probe only reads tools, team and roadmap and verifies a consistent revision", async () => {

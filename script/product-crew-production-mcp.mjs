@@ -10,7 +10,9 @@ export async function callProductionMcp(method, params, { env = process.env, fet
   if (typeof key !== "string" || !/^[A-Za-z0-9_-]{43,512}$/.test(key))
     throw Error("PRODUCT_CREW_KEY is missing or invalid in project Secrets.");
   const id = randomUUID();
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+  // Every model operation reads a production snapshot, which can take >15s.
+  // Keep a bounded wait, including response parsing, and never retry writes.
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 60000);
   try {
     const response = await fetcher(endpoint, {
       method: "POST", redirect: "error", cache: "no-store", signal: controller.signal,
