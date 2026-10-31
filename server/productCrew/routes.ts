@@ -1,5 +1,7 @@
 import express, { type Express, type RequestHandler } from "express";
+import { randomBytes } from "node:crypto";
 import { ProductCrewOAuth } from "./oauth";
+import { consentPolicy, consentSubmitScript } from "./consentForm";
 import { inputs, ProductCrewService, writeTools, type ToolName } from "./service";
 import type { MarkerStore } from "../chatgpt/security";
 import type { ModelRepository } from "../projectModel/repository";
@@ -78,11 +80,16 @@ export function registerProductCrew(app: Express, options: {
     res.type("html").send(`<!doctype html><meta name="viewport" content="width=device-width"><h1>TalkHint · Управление продуктом</h1><p>Войдите в существующее рабочее пространство владельца, затем вернитесь и продолжите подключение. Телефонное подключение не меняется.</p><p><a href="/api/login" target="_blank" rel="noopener">Войти в TalkHint</a></p><a href="${escape(req.originalUrl)}">Продолжить после входа</a>`);
   }, options.admin, wrap(async (req, res) => {
     const c = await auth.prepare(req.query, req.user!.id);
-    res.type("html").send(`<!doctype html><html lang="ru"><meta name="viewport" content="width=device-width"><style>body{font:18px system-ui;max-width:650px;margin:30px auto;padding:20px}button{padding:18px;font:inherit}</style><h1>TalkHint · Управление продуктом</h1><p>Клиент: ${escape(c.clientName)}</p><p>Отдельное подключение для roadmap, структуры crew, входящей информации, поручений и документов вашего проекта.</p><p>Права: ${escape(c.scopes.join(", "))}</p><p>Без звонков, SMS, платежей, публикации, удаления и серверных ключей. Crew и фоновый Replit пока не запускаются.</p><form method="post"><input type="hidden" name="consent" value="${escape(c.token)}"><button>Подключить управление продуктом</button></form></html>`);
+    const nonce = randomBytes(18).toString("base64");
+    res.setHeader("Content-Security-Policy", consentPolicy(nonce));
+    res.type("html").send(`<!doctype html><html lang="ru"><meta name="viewport" content="width=device-width"><style>body{font:18px system-ui;max-width:650px;margin:30px auto;padding:20px}button{padding:18px;font:inherit}button:disabled{opacity:.65}</style><h1>TalkHint · Управление продуктом</h1><p>Клиент: ${escape(c.clientName)}</p><p>Отдельное подключение для roadmap, структуры crew, входящей информации, поручений и документов вашего проекта.</p><p>Права: ${escape(c.scopes.join(", "))}</p><p>Без звонков, SMS, платежей, публикации, удаления и серверных ключей. Crew и фоновый Replit пока не запускаются.</p><form id="product-consent" method="post" action="${path}/authorize"><input type="hidden" name="consent" value="${escape(c.token)}"><button id="product-consent-submit" type="submit">Подключить управление продуктом</button><p id="product-consent-status" role="status" aria-live="polite"></p></form><script nonce="${nonce}">${consentSubmitScript}</script></html>`);
   }));
   app.post(`${path}/authorize`, express.urlencoded({ extended: false, limit: "20kb" }), options.admin, wrap(async (req, res) => {
     if (req.get("origin") !== options.origin) { res.status(403).json({ error: "Invalid consent origin" }); return; }
-    res.redirect(await auth.approve(String(req.body.consent ?? ""), req.user!.id));
+    // Explicit Post/Redirect/Get: the callback must receive GET, never this POST.
+    const destination = await auth.approve(String(req.body.consent ?? ""), req.user!.id);
+    res.setHeader("Content-Security-Policy", consentPolicy(randomBytes(18).toString("base64")));
+    res.redirect(303, destination);
   }));
   app.post(`${path}/token`, express.urlencoded({ extended: false, limit: "32kb" }), wrap(async (req, res) => { res.json(await auth.exchange(req.body)); }));
   app.post(`${path}/revoke`, express.urlencoded({ extended: false, limit: "32kb" }), wrap(async (req, res) => {

@@ -375,6 +375,11 @@ describe("HTTP plugin contract", () => {
   beforeAll(async () => {
     const app = express();
     // Fixture-only session and admin gate. Not imported by the application.
+    app.use((req, _res, next) => {
+      if (req.get("x-test-owner") === "owner")
+        req.user = { id: "owner", email: "fixture@example.test", language: "ru", plan: null };
+      next();
+    });
     const admin: express.RequestHandler = (req, res, next) => { if (req.get("x-test-owner") !== "owner") { res.sendStatus(403); return; } req.user = { id: "owner", email: "fixture@example.test", language: "ru", plan: null }; next(); };
     registerProductCrew(app, { origin, key, store, repo, admin, authorizedOwner: async id => id === "owner" });
     await new Promise<void>(resolve => { server = app.listen(0, "127.0.0.1", resolve); });
@@ -387,6 +392,73 @@ describe("HTTP plugin contract", () => {
     }
   });
   afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())); });
+  it("renders a nonce-protected single-submit form; redirects once via 303, preserving PKCE/state and rejecting replay", async () => {
+    const callback = "https://replit.com/connectors/oauth/callback";
+    const registered = await fetch(`${baseURL}/api/product-crew/register`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ redirect_uris: [callback], client_name: "<script>bad()</script>" }),
+    });
+    const client = await registered.json() as any;
+    const query = new URLSearchParams({
+      client_id: client.client_id, response_type: "code", redirect_uri: callback,
+      code_challenge_method: "S256", code_challenge: sha(verifier),
+      state: "exact-owner-state", scope: "product:read product:write offline_access",
+    });
+    const page = await fetch(`${baseURL}/api/product-crew/authorize?${query}`, {
+      headers: { "x-test-owner": "owner" },
+    });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    const html = await page.text();
+    const nonce = html.match(/<script nonce="([^"]+)">/)![1];
+    const policy = page.headers.get("content-security-policy")!;
+    expect(policy).toContain(`script-src 'nonce-${nonce}'`);
+    expect(policy).not.toContain("script-src 'unsafe-inline'");
+    expect(policy).toContain("form-action 'self' https://replit.com/connectors/oauth/callback https://chatgpt.com https://chat.openai.com;");
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(policy).toContain("base-uri 'none'");
+    expect(html).toContain('method="post" action="/api/product-crew/authorize"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain("&lt;script&gt;bad()&lt;/script&gt;");
+    const secondPage = await fetch(`${baseURL}/api/product-crew/authorize?${query}`, {
+      headers: { "x-test-owner": "owner" },
+    });
+    expect(await secondPage.text()).not.toContain(`nonce="${nonce}"`);
+    const consent = html.match(/name="consent" value="([^"]+)"/)![1];
+    const submit = (owner = "owner", requestOrigin = origin) => fetch(`${baseURL}/api/product-crew/authorize`, {
+      method: "POST", redirect: "manual",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "x-test-owner": owner, Origin: requestOrigin },
+      body: new URLSearchParams({ consent }),
+    });
+    // Failed owner/origin checks must not consume consent.
+    expect((await submit("other")).status).toBe(403);
+    expect((await submit("owner", "https://attacker.test")).status).toBe(403);
+    const attempts = await Promise.all([submit(), submit()]);
+    expect(attempts.map(r => r.status).sort()).toEqual([303, 401]);
+    const approved = attempts.find(r => r.status === 303)!;
+    expect(approved.headers.get("cache-control")).toBe("no-store");
+    expect(approved.headers.get("content-security-policy")).toContain("https://replit.com/connectors/oauth/callback");
+    const redirect = new URL(approved.headers.get("location")!);
+    expect(`${redirect.origin}${redirect.pathname}`).toBe(callback);
+    expect(redirect.searchParams.get("state")).toBe("exact-owner-state");
+    const code = redirect.searchParams.get("code")!;
+    const exchange = (codeVerifier: string) => fetch(`${baseURL}/api/product-crew/token`, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code", client_id: client.client_id,
+        redirect_uri: callback, code, code_verifier: codeVerifier,
+      }),
+    });
+    expect((await exchange("b".repeat(50))).status).toBe(400);
+    const token = await exchange(verifier);
+    expect(token.status).toBe(200);
+    expect((await token.json() as any).scope).toBe("product:read product:write offline_access");
+    expect((await exchange(verifier)).status).toBe(401);
+    const replay = await submit();
+    expect(replay.status).toBe(401);
+    expect(replay.headers.get("location")).toBeNull();
+    expect(await replay.json()).toEqual({ error: "Consent expired or already used" });
+  });
   it("serves independent discovery and validates advertised tool schemas; anonymous and read-only writes denied", async () => {
     const discovery = await (await fetch(`${baseURL}/.well-known/oauth-protected-resource/api/product-crew/mcp`)).json() as any;
     expect(discovery.resource).toBe(`${origin}/api/product-crew/mcp`);

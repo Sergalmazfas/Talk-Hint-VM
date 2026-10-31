@@ -2287,3 +2287,17 @@ mtime_ms = 1793379119774
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9138dce0-c63d-4c61-8b14-89bbe864d943/fc5fd6c3-4d3f-4584-8835-bc57fb5a3c41"
 storage_version_token = "1793379179690936"
 content_type = "text/plain"
+
+[[outputs]]
+id = "XiNzisxQQDkwOoqYmTfJG"
+uri = "file://generated-artifacts/product-crew-oauth-review.zip"
+type = "unspecified"
+title = "OAuth: diff и тесты для сверки Claude"
+description = "Четыре файла, полный diff, результаты 27 тестов и границы проверки. Сверка до Publish; production не изменён."
+logical_id = "fceeb993-1390-4d56-a0a6-a6813d97c6e0"
+content_hash = "sha256:b0ef4dc0f19f2abb54975dbaf137688bc0f5c81b688717d2b4f8055813f2eb52"
+size = 25516
+mtime_ms = 1793407079159
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fceeb993-1390-4d56-a0a6-a6813d97c6e0/d0ef3471-b24b-4a31-8f14-4057f309b03b"
+storage_version_token = "1793407083700587"
+content_type = "application/octet-stream"
