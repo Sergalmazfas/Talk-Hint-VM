@@ -2,6 +2,7 @@ import type { TeamView, TeamMember } from "../../shared/team";
 import type { TeamContext } from "./repository";
 import { labActionReports, secretaryActionReport } from "./actionReports";
 import { portraitManifest } from "./portraits";
+import { projectionManagers } from "../productCrew/teamChanges";
 import type { TeamActionReport } from "../../shared/teamActionReport";
 
 export interface RuntimeChecks {
@@ -78,6 +79,9 @@ export function withTeamRuntime(view: TeamView, c: TeamContext, checks: RuntimeC
   });
   const currentTask = tasks.find(t => t.voice_provider === "retell" && t.call_sid && t.dial_started_at);
   if (currentTask) {
+    const managerId = projectionManagers(c.documents).find(a => a.projectionId === "employee-katya")?.managerId ?? "owner";
+    const manager = c.operating.data.nodes.find(n => n.id === managerId);
+    if (!manager) throw Error("Secretary projection manager missing; no fallback");
     const base = members.find(m => m.mode === "secretary" && m.status === "planned");
     const p = checks.secretaryPrompt;
     const reports = sortReports(secretaryReports);
@@ -93,7 +97,7 @@ export function withTeamRuntime(view: TeamView, c: TeamContext, checks: RuntimeC
       traits: p?.traits ?? [null, null, null], motto: p?.motto ?? null,
       duties: [{ id: "secretary-phone", title: "Вести разрешённый владельцем телефонный разговор",
         detail: "Лимит 10 минут; press_digits — только навигация по услышанному меню, не личные данные. Не больше 5 цифр без нового меню." }],
-      relations: [{ kind: "Подчиняется", id: "owner", name: view.owner.name }],
+      relations: [{ kind: "Подчиняется", id: manager.id, name: manager.name }],
       tools: ["Retell + TalkHint Engine", "press_digits", "request_menu_help", "confirm_menu_reached", "prepare_call_end"],
       prohibitions: ["Платежи, номера карт, PIN, пароли и обязательства запрещены.",
         "Нельзя объявлять цель достигнутой или меню принявшим цифры без подтверждения."],

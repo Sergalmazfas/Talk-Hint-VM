@@ -10,12 +10,27 @@ const at = "2026-10-30T03:24:53.058Z";
 const member = (code: string) => ({ ...emptyMember(code), code, name: code, id: code });
 const view = (): any => ({ source: { revision: 918 }, owner: { name: "Сергей", code: "C-01" },
   members: [member("P.LAB"), member("P.LG.QA"), member("P.OPS")], feed: [], apply: { completed: 4 } });
-const context = (): any => ({ owner: "owner", jobs: [], secretaryTasks: [], controls: [] });
+const context = (): any => ({ owner: "owner", jobs: [], secretaryTasks: [], controls: [],
+  documents: [], operating: { data: { nodes: [{ id: "owner", name: "Сергей" }] } } });
 const call = { call_sid: "call", user_id: "owner", ended_at: at, metadata: {} };
 const task = { id: "task", call_sid: "call", user_id: "owner", instruction: "Ремонт шины",
   dial_started_at: at, updated_at: at, voice_provider: "retell" };
 
 describe("package two factual team runtime", () => {
+  it("uses the saved project manager for the single live Katya and fails closed if it disappeared", () => {
+    const c = context();
+    c.secretaryDefault = "retell"; c.secretaryTasks = [task];
+    c.operating.data.nodes.push({ id: "secretary-lead", name: "Руководитель Секретаря" });
+    c.documents.push({ id: "DOC-TEAM-PROJECTION-MANAGERS", text: JSON.stringify({
+      format: "talkhint.team.projection-managers", version: 1,
+      assignments: [{ projectionId: "employee-katya", managerId: "secretary-lead" }] }) });
+    const before = withTeamRuntime(view(), c);
+    const katyas = before.members.filter(m => m.id === "employee-katya");
+    expect(katyas).toHaveLength(1);
+    expect(katyas[0].relations).toEqual([{ kind: "Подчиняется", id: "secretary-lead", name: "Руководитель Секретаря" }]);
+    c.operating.data.nodes.pop();
+    expect(() => withTeamRuntime(view(), c)).toThrow("Secretary projection manager missing");
+  });
   it("does not turn enabled controls or report_ready mode notices into autonomous staff", () => {
     const c = context();
     c.controls = [{ enabled: true }];

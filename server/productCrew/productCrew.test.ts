@@ -221,11 +221,21 @@ describe("production MCP protocol boundary", () => {
     expect(initialized.result.instructions).not.toContain("Расходы, production, публикация");
     const list = await (await request(token, "tools/list")).json() as any;
     const names = list.result.tools.map((t: any) => t.name);
-    expect(names).toHaveLength(14); expect(names).toContain("update_structure"); expect(names).not.toContain("review_result");
+    expect(names).toHaveLength(19); expect(names).toContain("update_structure"); expect(names).not.toContain("review_result");
+    for (const name of ["create_planned_role", "update_role_title", "set_projection_manager", "replace_employee_profile", "add_competitor"])
+      expect(names).toContain(name);
     const character = list.result.tools.find((t: any) => t.name === "update_team_character");
     expect(character.inputSchema.properties.traits).toMatchObject({ minItems: 3, maxItems: 3 });
     const denied = await (await request(token, "tools/call", { name: "review_result", arguments: {} })).json() as any;
     expect(denied.result.isError).toBe(true); expect(JSON.parse(denied.result.content[0].text).status).toBe(403);
+  });
+  it("denies each new write tool to anonymous, read-only and non-owner credentials", async () => {
+    for (const name of ["create_planned_role", "update_role_title", "set_projection_manager", "replace_employee_profile", "add_competitor"]) {
+      const params = { name, arguments: {} };
+      expect((await request("", "tools/call", params)).status).toBe(401);
+      expect((await request(readToken, "tools/call", params)).status).toBe(403);
+      expect((await request(otherToken, "tools/call", params)).status).toBe(403);
+    }
   });
 });
 const fixtureProcess = buildCompanyStructure(defaultOperatingModel()).nodes.find(n => n.kind === "process")!.id;

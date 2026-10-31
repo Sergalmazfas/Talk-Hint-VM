@@ -79,7 +79,8 @@ export function teamView(c: TeamContext, environment: string): TeamView {
       if (link.kind === "handoff" && link.to === n.id) add("Получает от", link.from);
     }
     const executor = n.executorId ? byId.get(n.executorId) : null;
-    const status = n.executorId === "replit-current-dev-session" ? "replit" : "disconnected";
+    const status = profile?.plannedRole === true && !n.executorId ? "planned" :
+      n.executorId === "replit-current-dev-session" ? "replit" : "disconnected";
     const events = feed.filter(e => e.role === n.code || e.role === n.id);
     const metrics = [...(n.metrics ?? []), ...duties.flatMap(a => a.metrics ?? [])];
     const metricText = (key: "plan" | "fact") => metrics.filter(m => m[key] !== null)
@@ -113,7 +114,11 @@ export function teamView(c: TeamContext, environment: string): TeamView {
       ],
     };
   });
-  for (const team of directory?.teams ?? []) members.push({
+  // Once the future project has a graph role, do not show its old placeholder twice.
+  const plannedModes = new Set(profileDocuments.filter(p => p.profile.plannedRole === true).map(p => p.profile.mode));
+  for (const team of directory?.teams ?? []) {
+    if (team.status === "planned" && plannedModes.has(team.mode)) continue;
+    members.push({
     id: team.id, name: team.name, title: team.status === "unresolved" ? "Граница продукта не разобрана" : "Команда запланирована",
     code: "—", department: "Работают на клиентов", mode: team.mode, status: team.status,
     statusEvidence: "Пустая карточка. Нет сотрудников, исполнителей, заданий, расписаний и новых расходов.",
@@ -121,7 +126,8 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     traits: [null, null, null], motto: null, duties: [], relations: [], tools: [], prohibitions: [],
     model: null, prompt: { text: null, version: null, status: null, acceptedBy: null },
     metrics: { plan: null, fact: null }, lastWork: null, lessons: [], history: [],
-  });
+    });
+  }
   const completed = completedSteps(c);
   const available = environment === "production" && c.workspace === TEAM_BASE.workspace &&
     c.phase === "active" && c.writesOpen && completed >= 0 && completed < TEAM_STEPS;

@@ -7,8 +7,10 @@ import { assessmentsSchema, supportResearchSchema } from "./assessmentSchema";
 const text = z.string().max(12000);
 const required = z.string().trim().min(1).max(1000);
 const url = z.string().max(2000).url().refine(value => {
-  const parsed = new URL(value);
-  return parsed.protocol === "https:" && !parsed.username && !parsed.password;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password;
+  } catch { return false; }
 }, "Требуется HTTPS URL источника без учётных данных");
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const parsed = new Date(`${value}T00:00:00Z`);

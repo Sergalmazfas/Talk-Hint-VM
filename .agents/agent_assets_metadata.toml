@@ -2371,3 +2371,17 @@ mtime_ms = 1793484879368
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c64b215a-719d-421c-9c95-b0481bc17e29/2cc62513-9aa5-424b-adc7-1550b670a705"
 storage_version_token = "1793484907901927"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "_x9oP0kxxpsRdClltkinu"
+uri = "file://generated-artifacts/Crew_MCP_narrow_tools_review.zip"
+type = "unspecified"
+title = "Пять инструментов MCP — сверка Claude перед Publish"
+description = "Короткий diff, исходники, тесты: 2807 passed, 0 failed, 34 skipped. Production не менялась. Ограничение получения действующего промпта Кати описано отдельно."
+logical_id = "f4245c8f-5495-44bd-b955-7fddf8d79a75"
+content_hash = "sha256:6d72cfe2bfca6756c91ed555d854c5dfe08dadac80327da31f7c2708549ca774"
+size = 85627
+mtime_ms = 1793487064346
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f4245c8f-5495-44bd-b955-7fddf8d79a75/2b041a11-6294-4698-be5e-b3ddb1676b72"
+storage_version_token = "1793487069574930"
+content_type = "application/octet-stream"

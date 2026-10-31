@@ -9,12 +9,14 @@ import { actionDirection, actionOutputs, effortMinutes } from "../../shared/acti
 import { actionChainGaps, inputSupplier } from "../../shared/actionChainCoverage";
 import { getPassportChapterPacket } from "../../shared/passportChapter";
 import { documentVolumeLength, documentVolumeManifest } from "../projectModel/documentVolumes";
+import { teamChangeInputs, buildTeamChange, projectionManagers } from "./teamChanges";
 const text = (n = 3000) => z.string().trim().min(1).max(n);
 const key = text(120), ids = z.array(key).max(40);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid() };
 const record = { title: text(240), description: text(12000), client: text(), need: text(),
   roleId: key, processId: key, relatedIds: ids, nextStep: text() };
 export const inputs = {
+  ...teamChangeInputs,
   get_roadmap: z.object({}).strict(),
   get_team: z.object({ roleId: key.optional() }).strict(),
   search_materials: z.object({ query: text(200) }).strict(),
@@ -38,7 +40,8 @@ export const inputs = {
     motto: text(500), reason: text(), ownerDecisionRef: text(1000) }).strict(),
 };
 export type ToolName = keyof typeof inputs;
-export const writeTools = new Set<ToolName>(["record_information", "create_work", "update_work", "submit_result", "review_result", "update_role_passport", "update_structure", "update_team_character"]);
+export const productionTeamTools = new Set<string>(["update_structure", "update_team_character", ...Object.keys(teamChangeInputs)]);
+export const writeTools = new Set<ToolName>(["record_information", "create_work", "update_work", "submit_result", "review_result", "update_role_passport", "update_structure", "update_team_character", ...Object.keys(teamChangeInputs) as (keyof typeof teamChangeInputs)[]]);
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 const fail = (s: number, m: string): never => { throw new ModelError(s, m); };
 const summary = (e: ModelElement) => ({ id: e.id, title: e.title, version: e.version, description: e.description, coordination: e.coordination, details: e.details });
@@ -48,7 +51,7 @@ export class ProductCrewService {
     if (!Object.prototype.hasOwnProperty.call(inputs, name)) return fail(404, "Неизвестный инструмент");
     if (this.options.production && name === "review_result")
       return fail(403, "MCP-клиент не принимает работу за владельца. Нужна отдельная приёмка.");
-    if (!this.options.production && ["update_structure", "update_team_character"].includes(name))
+    if (!this.options.production && productionTeamTools.has(name))
       return fail(403, "Изменения команды доступны только через production MCP.");
     const parsed = inputs[name].safeParse(raw);
     if (!parsed.success) return fail(400, "Аргументы не соответствуют схеме инструмента");
@@ -71,6 +74,7 @@ export class ProductCrewService {
     if (name === "get_roadmap") return {
       revision: state.revision, operatingVersion: state.operatingModel!.revisions.at(-1)!.version,
       roadmap: data.nodes.filter(n => n.id === "crew-product-roadmap" || /^crew-roadmap-phase-/.test(n.id)),
+      competitorDirectory: state.competitorDirectory ?? null,
       works: state.elements.filter(e => e.coordination).map(summary),
       existingFindings: state.elements.filter(e => /^INFO-LG-/.test(e.id)).map(summary),
       workers: { autonomous: false, replit: "Техническая работа в текущем сеансе Replit; запуск из плагина не подключён" },
@@ -93,8 +97,15 @@ export class ProductCrewService {
       })(),
     };
     if (name === "get_team") return { revision: state.revision,
+      projectionManagers: projectionManagers(state.documents),
       roles: data.nodes.filter(n => n.kind === "role" && (!a.roleId || n.id === a.roleId)).map(n => ({
-        ...n, resources: data.nodes.filter(r => n.resourceIds.includes(r.id)),
+        ...n, employeeProfiles: state.documents.flatMap(d => {
+          try {
+            const p = JSON.parse(d.text);
+            return p.visualPassport?.roleId === n.id ? [{ documentId: d.id,
+              version: p.version, mode: p.mode ?? null, planned: p.plannedRole === true }] : [];
+          } catch { return []; }
+        }), resources: data.nodes.filter(r => n.resourceIds.includes(r.id)),
         passport: state.elements.find(e => e.coordination?.kind === "role_passport" && e.coordination.roleId === n.id) ?? null,
         linkedWork: data.nodes.filter(w => w.roleId === n.id).map(w => ({ id: w.id, code: w.code, name: w.name,
           schedule: w.schedule, register: w.register ?? null, estimatedMinutes: effortMinutes(w) })),
@@ -129,7 +140,19 @@ export class ProductCrewService {
     const operation = { id: a.requestId, fingerprint, at: new Date().toISOString() };
     const commands: ModelCommand[] = [];
     let id: string, element: ElementInput;
-    if (name === "update_structure" || name === "update_team_character") {
+    if (Object.prototype.hasOwnProperty.call(teamChangeInputs, name)) {
+      const change = buildTeamChange(state, name as keyof typeof teamChangeInputs, a);
+      commands.push(...change.commands);
+      id = `PC-CHANGE-${a.requestId.toUpperCase()}`;
+      element = { title: `${name}: ${a.reason}`.slice(0, 240),
+        description: "Одна ограниченная запись модели; не запуск и не приёмка.",
+        section: modelSections[0], scope: "talkhint", kind: "procedure",
+        contentStatus: "proposal", implementationStatus: "planned",
+        details: { source: a.ownerDecisionRef, evidence: a.reason, proofStatus: "Сохранена запись; приёмка отдельно" },
+        coordination: { kind: "decision", state: "received", roleId: change.roleId,
+          processId: change.targetId, relatedIds: [change.targetId],
+          nextStep: "Повторное чтение и независимая сверка", origin: "owner_mcp", operations: [operation] } };
+    } else if (name === "update_structure" || name === "update_team_character") {
       const selected = data.nodes.find(n => n.id === (a.nodeId ?? a.roleId)) ?? fail(404, "Узел не найден.");
       const selectedRole = selected.kind === "role" ? selected : role(selected.roleId ?? selected.executorId ?? "");
       id = `PC-CHANGE-${a.requestId.toUpperCase()}`;

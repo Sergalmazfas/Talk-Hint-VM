@@ -2,7 +2,7 @@ import express, { type Express, type RequestHandler } from "express";
 import { randomBytes } from "node:crypto";
 import { ProductCrewOAuth } from "./oauth";
 import { consentPolicy, consentSubmitScript } from "./consentForm";
-import { inputs, ProductCrewService, writeTools, type ToolName } from "./service";
+import { inputs, ProductCrewService, writeTools, productionTeamTools, type ToolName } from "./service";
 import type { MarkerStore } from "../chatgpt/security";
 import type { ModelRepository } from "../projectModel/repository";
 import type { ProductCrewOwnerKey } from "./ownerKey";
@@ -49,7 +49,7 @@ export function registerProductCrew(app: Express, options: {
   const auth = new ProductCrewOAuth(options.origin, options.key, options.store),
     service = new ProductCrewService(options.repo, { production });
   const advertisedTools = Object.keys(inputs).filter(n => production ? n !== "review_result" :
-    !["update_structure", "update_team_character"].includes(n));
+    !productionTeamTools.has(n));
   const path = "/api/product-crew";
   const attempts = new Map<string, { until: number; count: number }>();
   const limited: RequestHandler = (req, res, next) => {
@@ -140,7 +140,7 @@ export function registerProductCrew(app: Express, options: {
             "Результат через submit_result помечен как представленный через авторизованный MCP-клиент")
           .replace("Расходы, production, публикация, удаление, внешние действия не входят в права этого плагина.",
             "Разрешены обычные записи в активную production-модель new-country. Нет доступа к Dev, звонкам, деньгам, публикации, удалению или секретам. Массовая перестройка — только после отдельной сверки. Приёмка за владельца через MCP запрещена.")
-          + "\nupdate_structure меняет только руководителя одной существующей роли или заказчика/принимающего одной задачи; update_team_character — только три черты и девиз существующего профиля. Нужна ссылка на решение владельца. Нет создания/удаления ролей, изменения промптов, прав или запуска. Поручение не является личным подтверждением владельца."
+          + "\nКомандные инструменты изменяют только описания: пустые должности без исполнителей, название/режим одной роли, руководителя живой проекции Кати, анкету Нины v2 из сохранённого источника, одну новую карточку конкурента. Нужны revision/requestId и ссылка на решение владельца. Нет удаления, изменения рабочих промптов, прав или запуска. Поручение не является личным подтверждением владельца."
         : instructions) + (publicAccess ? "\nДоступ к этому Dev MCP публичный по явному решению владельца: OAuth не требуется. Вызов не доказывает личность Сергея; не представляй записи как подтверждённые им лично." : "") };
     else if (b.method === "ping") result = {};
     else if (b.method === "tools/list") result = { tools: advertisedTools.map(n => {
@@ -198,10 +198,16 @@ function toJsonSchema(schema: any): any {
   if (type === "ZodNumber") return { type: "integer", minimum: 0 };
   if (type === "ZodString") return { type: "string",
     ...Object.fromEntries(def.checks.filter((c: any) => ["min", "max"].includes(c.kind)).map((c: any) => [c.kind === "min" ? "minLength" : "maxLength", c.value])),
-    ...(def.checks.some((c: any) => c.kind === "uuid") ? { format: "uuid" } : {}) };
+    ...(def.checks.some((c: any) => c.kind === "uuid") ? { format: "uuid" } : {}),
+    ...(def.checks.find((c: any) => c.kind === "regex") ? { pattern: def.checks.find((c: any) => c.kind === "regex").regex.source } : {}) };
   throw Error(`Unsupported product tool input schema: ${type}`);
 }
 const toolDescription: Record<ToolName, string> = {
+  create_planned_role: "Production: одна пустая будущая должность под Марией, без сотрудника, задач, ресурсов и расписания. Дубли запрещены.",
+  update_role_title: "Production: название и режим одной существующей роли и её анкеты, без изменения личности, промпта, прав или исполнителя.",
+  set_projection_manager: "Production: руководитель единственной живой проекции employee-katya. Не создаёт вторую Катю и не меняет её поведение.",
+  replace_employee_profile: "Production: Нина v2 из сохранённого документа в существующую P.ORG. SHA-256 источника и старой анкеты обязательны. Без подключения и runtime-промпта.",
+  add_competitor: "Production: одна новая карточка competitorDirectory из snapshotJson по схеме каталога, verification=provided. Дубли, удаление и live_verified запрещены.",
   update_structure: "Production: изменить руководителя одной существующей роли либо заказчика/принимающего одной задачи. Без самоприёмки и циклов; revision/requestId и ссылка на решение обязательны. Не запускает сотрудников.",
   update_team_character: "Production: записать три черты и девиз в единственный существующий профиль. Не меняет имя, промпт, права или статус запуска; revision/requestId и ссылка на решение обязательны.",
   get_roadmap: "Где находится единый roadmap: этапы, сохранённые работы, блокеры и следующий шаг. Ничего не запускает.",
