@@ -1,3 +1,4 @@
+import type { SecretaryDepartmentStructure } from "./secretaryDepartment";
 export type TeamStatus = "autonomous" | "replit" | "disconnected" | "planned" | "unresolved" | "owner_chat" | "contractor";
 export interface TeamMember {
   id: string; name: string; title: string; code: string; department: string;
@@ -34,6 +35,7 @@ export interface TeamPartnersPin {
   workspace: string; revision: number; rootHash: string; documentHash: string;
 }
 export interface TeamView {
+  secretaryDepartment?: SecretaryDepartmentStructure | null;
   source: { environment: string; workspace: string; revision: number; rootHash: string; phase: string };
   owner: { name: string; code: string };
   members: TeamMember[]; feed: TeamEvent[];

@@ -3,12 +3,15 @@ import { characters, DIRECTORY, JOURNAL, TEAM_BASE, TEAM_PLAN_HASH, TEAM_STEPS }
 import { completedSteps, type TeamContext } from "./repository";
 import { semanticHash, textHash } from "../companyData/valueTree";
 import { mariaResponsibilitiesSchema } from "../productCrew/mariaPassport";
+import { secretaryDepartment } from "../productCrew/secretaryDepartment";
 
 const string = (v: unknown): string | null => typeof v === "string" && v.trim() ? v : null;
 const json = (v: unknown) => { try { return JSON.parse(String(v)); } catch { return null; } };
 export function teamView(c: TeamContext, environment: string): TeamView {
   const nodes = c.operating.data.nodes;
   const byId = new Map(nodes.map(n => [n.id, n]));
+  const secretary = secretaryDepartment(c.documents, nodes);
+  const secretaryRoleIds = new Set<string>(secretary ? Object.values(secretary.roles) : []);
   const directory = json(c.documents.find(d => d.id === DIRECTORY)?.text);
   const journal = json(c.documents.find(d => d.id === JOURNAL)?.text);
   const profileDocuments = c.documents.filter(d => d.text.includes('"visualPassport"'))
@@ -49,6 +52,7 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     const found = profileDocuments.find(p => p.profile.visualPassport.roleId === n.id &&
       (!character || p.doc.id === character.document));
     const doc = found?.doc, profile = found?.profile, v = profile?.visualPassport;
+    const proposedName = v?.nameProposal?.status === "proposed" ? string(v.nameProposal.value) : null;
     const product = n.id === "head-product" && profile?.productResponsibilities
       ? mariaResponsibilitiesSchema.parse(profile.productResponsibilities) : null;
     // Read only the projection corresponding to the exact current document,
@@ -94,14 +98,16 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     const metricText = (key: "plan" | "fact") => metrics.filter(m => m[key] !== null)
       .map(m => `${m.name}: ${m[key]} ${m.unit} (${m.scope}; ${m.evidence || "источник не заполнен"})`).join("\n") || null;
     return { id: n.id, code: n.code, title: string(v?.position) ?? n.name,
-      name: physical?.display_name ?? n.name,
-      department: n.parentId === "dir-product" ? "Продукт" : n.parentId === "dir-engineering" ? "Инженерия" :
+      name: physical?.display_name ?? proposedName ?? n.name,
+      department: secretaryRoleIds.has(n.id) ? "Секретарь" :
+        n.parentId === "dir-product" ? "Продукт" : n.parentId === "dir-engineering" ? "Инженерия" :
         string(n.parentId ? byId.get(n.parentId)?.name : null) ?? "Отдел не заполнен",
       mode: string(mode),
-      status, statusEvidence: status === "replit" ? "В модели указан текущий исполнитель Replit." :
+      status, statusEvidence: status === "planned" ? "Пустая должность: исполнитель, задачи, расписания и расходы не назначены. Имя, если предложено, ещё не принято." :
+        status === "replit" ? "В модели указан текущий исполнитель Replit." :
           "Нет подтверждённого подключённого исполнителя. Работа автоматизации Call Lab/дежурного не доказывает включение этого именного агента.",
       portrait: physical?.portrait_file_url ?? null,
-      nameStatus: physical?.owner_selection_status ?? null,
+      nameStatus: physical?.display_name ? physical.owner_selection_status : proposedName ? "proposed" : physical?.owner_selection_status ?? null,
       traits: physical ? [physical.trait_1, physical.trait_2, physical.trait_3] : [null, null, null],
       motto: physical?.motto ?? null,
       duties: product ? product.duties.map(a => ({ id: `${n.id}:${a.code}`,
@@ -140,12 +146,23 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     metrics: { plan: null, fact: null }, lastWork: null, lessons: [], history: [],
     });
   }
+  for (const slot of secretary?.catalog.vacancies ?? []) {
+    const manager = members.find(m => m.id === secretary!.managerId);
+    members.push({ id: slot.id, name: slot.label, title: "Пустой слот каталога секретарей",
+      code: "—", department: "Каталог секретарей", mode: "secretary", status: "planned",
+      statusEvidence: "Незанятое место, не новый персонаж и не назначение на номер. Нет исполнителя, задач, расписания и расходов.",
+      portrait: null, nameStatus: null, traits: [null, null, null], motto: null, duties: [],
+      relations: manager ? [{ kind: "Каталог под руководством", id: manager.id, name: manager.name }] : [],
+      tools: [], prohibitions: [], model: null,
+      prompt: { text: null, version: null, status: null, acceptedBy: null },
+      metrics: { plan: null, fact: null }, lastWork: null, lessons: [], history: [] });
+  }
   const completed = completedSteps(c);
   const available = environment === "production" && c.workspace === TEAM_BASE.workspace &&
     c.phase === "active" && c.writesOpen && completed >= 0 && completed < TEAM_STEPS;
   return { source: { environment, workspace: c.workspace, revision: c.revision, rootHash: c.rootHash, phase: c.phase },
     owner: { name: directory?.owner?.name ?? "Сергей", code: byId.get("owner")?.code ?? "не заполнено" },
-    members, feed: feed.slice(0, 60),
+    members, secretaryDepartment: secretary, feed: feed.slice(0, 60),
     apply: { available, completed: Math.max(0, completed), total: TEAM_STEPS,
       reason: available ? null : completed === TEAM_STEPS ? "Пакет уже применён." :
         environment !== "production" ? "Dev заморожен. Применение только в production." : "Источник изменён или запись закрыта; требуется новая сверка.",

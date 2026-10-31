@@ -2483,3 +2483,17 @@ mtime_ms = 1793488295001
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/abbf9296-d859-44de-9442-b926e3adc13e/fb7fa2f1-99ad-4d0e-9e62-9b813ab08fc4"
 storage_version_token = "1793488319759556"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "bfNTWchGe-jjcaHsxKZ0P"
+uri = "file://generated-artifacts/Crew_MCP_with_Secretary_department_review.zip"
+type = "unspecified"
+title = "Отдел «Секретарь»: MCP-инструмент — на сверку Claude"
+description = "Diff, исходники, тесты, JSON-примеры трёх пустых ролей, каталог и карта связей. 2822 passed, 34 skipped. Production не изменён; Publish не выполнен."
+logical_id = "fa4da633-ada2-42cd-b88e-3dd4d22ed780"
+content_hash = "sha256:6758e7a40403b0041092d3972917129036953aff281eda8a74fcc3b10da95d43"
+size = 140888
+mtime_ms = 1793489670048
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fa4da633-ada2-42cd-b88e-3dd4d22ed780/0ef1b264-cd98-43c7-a957-05142801a859"
+storage_version_token = "1793489710722792"
+content_type = "application/octet-stream"

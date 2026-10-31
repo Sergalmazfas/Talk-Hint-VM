@@ -10,6 +10,7 @@ import { actionChainGaps, inputSupplier } from "../../shared/actionChainCoverage
 import { getPassportChapterPacket } from "../../shared/passportChapter";
 import { documentVolumeLength, documentVolumeManifest } from "../projectModel/documentVolumes";
 import { teamChangeInputs, buildTeamChange, projectionManagers } from "./teamChanges";
+import { secretaryDepartment } from "./secretaryDepartment";
 const text = (n = 3000) => z.string().trim().min(1).max(n);
 const key = text(120), ids = z.array(key).max(40);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid() };
@@ -98,12 +99,16 @@ export class ProductCrewService {
     };
     if (name === "get_team") return { revision: state.revision,
       projectionManagers: projectionManagers(state.documents),
+      secretaryDepartment: secretaryDepartment(state.documents, data.nodes),
       roles: data.nodes.filter(n => n.kind === "role" && (!a.roleId || n.id === a.roleId)).map(n => ({
         ...n, employeeProfiles: state.documents.flatMap(d => {
           try {
             const p = JSON.parse(d.text);
             return p.visualPassport?.roleId === n.id ? [{ documentId: d.id,
-              version: p.version, mode: p.mode ?? null, planned: p.plannedRole === true }] : [];
+              version: p.version, mode: p.mode ?? null, planned: p.plannedRole === true,
+              nameProposal: p.visualPassport.nameProposal ?? null,
+              knowledgeBookDocumentId: p.knowledgeBookDocumentId ?? null,
+              promptDocumentId: p.promptDocumentId ?? null }] : [];
           } catch { return []; }
         }), resources: data.nodes.filter(r => n.resourceIds.includes(r.id)),
         passport: state.elements.find(e => e.coordination?.kind === "role_passport" && e.coordination.roleId === n.id) ?? null,
