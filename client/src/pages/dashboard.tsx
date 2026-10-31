@@ -220,6 +220,7 @@ export default function Dashboard() {
             <Button variant="outline" size="sm" onClick={() => setLocation("/secretary-lab")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Secretary Lab</Button>
             <Button variant="outline" size="sm" onClick={() => setLocation("/project-model")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Модель проекта</Button>
             <Button variant="outline" size="sm" onClick={() => setLocation("/team")} className="border-emerald-800 text-emerald-200 hover:bg-emerald-950/40">Команда</Button>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/product-crew-key")} className="border-amber-800 text-amber-200 hover:bg-amber-950/40">Ключ MCP</Button>
             <Button variant="outline" size="sm" onClick={() => setLocation("/incoming-secretary")} className="border-cyan-800 text-cyan-200 hover:bg-cyan-950/40">Incoming dev</Button>
             <a href="/admin/translator-spike" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Translator stand</a>
             <a href="/admin/health" className="inline-flex min-h-9 items-center rounded-md border border-gray-700 px-3 text-sm text-gray-300 hover:bg-gray-800">Health</a>

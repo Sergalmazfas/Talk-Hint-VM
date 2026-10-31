@@ -1,5 +1,6 @@
 - [Custom MCP на телефоне](custom-mcp-mobile-navigation.md) — документированный prefill-переход открывает форму добавления; не искать свой сервер в общем каталоге.
 - [OAuth: повтор согласия](product-crew-consent-replay.md) — успешный redirect может предшествовать ошибке одноразовости; не путать с истечением срока и не просить слепых повторов.
+- [MCP: ключ владельца](product-crew-owner-key-boundary.md) — резервный header-вход без расширения прав; ключ только у владельца, сверка Claude до Publish, затем реальное чтение.
 - [Отдел кадров — ручной цикл](hr-manual-first.md) — Нина P.ORG сначала описана, не подключена; знания по источникам, слои без смены смысла, предложения не включать.
 - [Target product teams](product-teams-target.md) — Мария → владелец; Паша → Замир/Фома в Hint; Тихон — дежурный компании под HEAD.07; Dev frozen.
 - [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.

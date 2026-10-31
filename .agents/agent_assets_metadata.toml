@@ -2315,3 +2315,17 @@ mtime_ms = 1793411633840
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f0a1f9f9-40cc-4000-a52c-38c6dd4e540b/3c1fc68d-500e-4a26-b3f5-a6049eddf5aa"
 storage_version_token = "1793411638944122"
 content_type = "text/html"
+
+[[outputs]]
+id = "uKe0LgULPcPTTf38HkZcb"
+uri = "file://generated-artifacts/product-crew-owner-key-security-review.zip"
+type = "unspecified"
+title = "MCP по ключу — ZIP для сверки Claude"
+description = "Diff, исходники, контекст защиты, 46 тестов, проверки PostgreSQL и браузера, ограничения и пошаговое подключение. Сверка безопасности до Publish."
+logical_id = "07ab2206-7be4-4906-9152-4849dcaf8260"
+content_hash = "sha256:c9108d59df89fbfbadcb21c9bcc18fd60f7e1ffe6d40dc34c755f9d31b94bc94"
+size = 215782
+mtime_ms = 1793465087514
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/07ab2206-7be4-4906-9152-4849dcaf8260/96bccad7-3f23-466c-9ade-95a405129047"
+storage_version_token = "1793465094241683"
+content_type = "application/octet-stream"

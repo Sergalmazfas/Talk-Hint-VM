@@ -20,6 +20,7 @@ import CompanyPreview from "@/pages/company-preview";
 import TeamPage from "@/pages/team";
 import SecretaryLab from "@/pages/secretary-lab";
 import VoiceLab from "@/pages/voice-lab";
+import ProductCrewKey from "@/pages/product-crew-key";
 
 function PublicHome() {
   return (
@@ -102,6 +103,7 @@ function AdminRoutes() {
         <Route path="/company-cutover" component={CompanyCutover} />
         <Route path="/team" component={TeamPage} />
         <Route path="/project-model" component={ProjectModel} />
+        <Route path="/product-crew-key" component={ProductCrewKey} />
         {import.meta.env.DEV && <Route path="/company-preview" component={CompanyPreview} />}
         <Route path="/voice-lab" component={VoiceLab} />
         <Route path="/secretary-lab" component={SecretaryLab} />

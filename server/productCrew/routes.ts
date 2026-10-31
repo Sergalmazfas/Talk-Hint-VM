@@ -5,6 +5,7 @@ import { consentPolicy, consentSubmitScript } from "./consentForm";
 import { inputs, ProductCrewService, writeTools, type ToolName } from "./service";
 import type { MarkerStore } from "../chatgpt/security";
 import type { ModelRepository } from "../projectModel/repository";
+import type { ProductCrewOwnerKey } from "./ownerKey";
 const escape = (s: unknown) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 function sendDocument(res: express.Response, text: string, format: unknown) {
   if (format === "json") {
@@ -34,10 +35,13 @@ export function registerProductCrew(app: Express, options: {
   publicDevOwner?: () => Promise<string>;
   /** Authenticated production model access; never an anonymous/public mode. */
   production?: boolean;
+  /** Only the fixed production owner may use the alternative header credential. */
+  ownerKey?: { owner: string; keys: ProductCrewOwnerKey };
 }) {
   const production = options.production ?? process.env.NODE_ENV === "production";
   const publicAccess = !!options.publicDevOwner && process.env.NODE_ENV !== "production";
   if (options.production && options.publicDevOwner) throw Error("Public production MCP is forbidden");
+  if (options.ownerKey && (!production || publicAccess)) throw Error("Owner keys require private production MCP");
   const auth = new ProductCrewOAuth(options.origin, options.key, options.store),
     service = new ProductCrewService(options.repo, { production });
   const advertisedTools = Object.keys(inputs).filter(n => production ? n !== "review_result" :
@@ -102,9 +106,19 @@ export function registerProductCrew(app: Express, options: {
     const name = b?.params?.name as ToolName;
     let owner: string;
     try {
-      owner = publicAccess
-        ? await options.publicDevOwner!()
-        : await auth.authenticate(req.get("authorization")?.replace(/^Bearer /, "") ?? "", b?.method === "tools/call" && writeTools.has(name));
+      const headerKey = req.get("x-api-key");
+      if (headerKey !== undefined && req.get("authorization")) {
+        throw Object.assign(Error("Use exactly one product credential"), { status: 401 });
+      }
+      if (headerKey !== undefined) {
+        if (!options.ownerKey || !await options.authorizedOwner(options.ownerKey.owner))
+          throw Object.assign(Error("Product key access unavailable"), { status: 401 });
+        owner = await options.ownerKey.keys.authenticate(headerKey);
+      } else {
+        owner = publicAccess
+          ? await options.publicDevOwner!()
+          : await auth.authenticate(req.get("authorization")?.replace(/^Bearer /, "") ?? "", b?.method === "tools/call" && writeTools.has(name));
+      }
       if (!await options.authorizedOwner(owner)) throw Object.assign(Error("Owner access withdrawn"), { status: 403 });
     } catch (e) {
       res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${options.origin}/.well-known/oauth-protected-resource/api/product-crew/mcp"`);
@@ -127,7 +141,9 @@ export function registerProductCrew(app: Express, options: {
       const tool = n as ToolName;
       return { name: n, description: toolDescription[tool], inputSchema: toJsonSchema(inputs[tool]),
         annotations: { readOnlyHint: !writeTools.has(tool), destructiveHint: false, idempotentHint: true, openWorldHint: false },
-        securitySchemes: publicAccess ? [{ type: "noauth" }] : [{ type: "oauth2", scopes: [writeTools.has(tool) ? "product:write" : "product:read"] }] };
+         securitySchemes: publicAccess ? [{ type: "noauth" }] : req.get("x-api-key")
+           ? [{ type: "apiKey", in: "header", name: "X-API-Key" }]
+           : [{ type: "oauth2", scopes: [writeTools.has(tool) ? "product:write" : "product:read"] }] };
     }) };
     else if (b.method === "tools/call") {
       try {

@@ -7,25 +7,34 @@ import { isBenchmarkAdmin, requireBenchmarkAdmin } from "../benchmark/adminGate"
 import { storage } from "../storage";
 import { productionProductRepository } from "./production";
 import { TEAM_OWNER } from "../team/plan";
+import { pgOwnerKeyStore, ProductCrewOwnerKey } from "./ownerKey";
+import { registerOwnerKeyRoutes } from "./ownerKeyRoutes";
 
 // Verified published canonical origin; separate issuer from Secretary OAuth.
 export const PRODUCT_CREW_PRODUCTION_ORIGIN = "https://talkhint.app";
 export function registerProductionProductCrew(app: Express) {
   if (process.env.NODE_ENV !== "production" || isDevDatabase) return;
+  const getPool = async () => {
+    await dbReady;
+    if (!pool || isDevDatabase) throw Error("Production database unavailable");
+    return pool;
+  };
+  const authorizedOwner = async (id: string) => {
+    if (id !== TEAM_OWNER) return false;
+    const user = await storage.getUser(id);
+    return !!user && isBenchmarkAdmin(user.email);
+  };
+  const keys = new ProductCrewOwnerKey(pgOwnerKeyStore(getPool), TEAM_OWNER);
+  registerOwnerKeyRoutes(app, {
+    origin: PRODUCT_CREW_PRODUCTION_ORIGIN, owner: TEAM_OWNER,
+    admin: requireBenchmarkAdmin, keys, authorizedOwner, csrfStore: integrationStore,
+  });
   registerProductCrew(app, {
     origin: PRODUCT_CREW_PRODUCTION_ORIGIN,
     key: () => process.env.SESSION_SECRET ?? "",
     store: integrationStore, admin: requireBenchmarkAdmin, production: true,
-    repo: productionProductRepository(async () => {
-      await dbReady;
-      if (!pool || isDevDatabase) throw Error("Production database unavailable");
-      return pool;
-    }),
-    authorizedOwner: async id => {
-      if (id !== TEAM_OWNER) return false;
-      const user = await storage.getUser(id);
-      return !!user && isBenchmarkAdmin(user.email);
-    },
+    repo: productionProductRepository(getPool),
+    authorizedOwner, ownerKey: { owner: TEAM_OWNER, keys },
   });
 }
 
