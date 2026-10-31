@@ -2385,3 +2385,101 @@ mtime_ms = 1793487064346
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f4245c8f-5495-44bd-b955-7fddf8d79a75/2b041a11-6294-4698-be5e-b3ddb1676b72"
 storage_version_token = "1793487069574930"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ERBuNtlqAosqus9X_rZGb"
+uri = "file://generated-artifacts/maria-passport/Maria_Sobol_HEAD06.json"
+type = "unspecified"
+title = "Мария Соболь · HEAD.06 — анкета r971"
+description = "Должностной паспорт, подтверждённый повторным чтением production. Основная visual-карточка ещё не обновлена."
+logical_id = "e78ec89d-5648-4237-aaa4-d532c327be03"
+content_hash = "sha256:2fbb231ede9cae8eea1e9e397f3449bc11b4a19a31ecb05ac8107900bb159579"
+size = 27791
+mtime_ms = 1793487861473
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e78ec89d-5648-4237-aaa4-d532c327be03/2a53c7ed-50fa-4236-a6d0-71e3013df236"
+storage_version_token = "1793487892887979"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "8VY7xmcsXgsKy253wzDRQ"
+uri = "file://generated-artifacts/maria-passport/P_BENCH_Maria_Project_leads.json"
+type = "unspecified"
+title = "P-BENCH → Мария → руководители проектов"
+description = "Карта входов и результатов, срочные копии; отдельно 24 текущие линии приёмки, пока не изменённые."
+logical_id = "a7e68cf8-69e4-492d-896d-44a187e26058"
+content_hash = "sha256:28fa900837ac5b6fc88463d0f3f6231643f9cae1c2deb23bf0355baf958f40df"
+size = 18522
+mtime_ms = 1793487861481
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a7e68cf8-69e4-492d-896d-44a187e26058/8150fb85-acb6-4e5d-b902-0e7e24b9a32d"
+storage_version_token = "1793487893511665"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "0dKTWd5PKU5UvCg5adoRF"
+uri = "file://generated-artifacts/Crew_MCP_with_Maria_review.zip"
+type = "unspecified"
+title = "Мария HEAD.06 + расширение MCP — пакет для Claude"
+description = "Анкета production r971, карта связей, квитанция повторного чтения, общий diff и Maria_only.diff. 2813 тестов прошли, 0 упали, 34 пропущены. Главная карточка и 24 линии приёмки пока не изменены; Publish не выполнялся."
+logical_id = "8608b4d7-7448-4193-b366-ba296a5dea01"
+content_hash = "sha256:a96e2caabe65b113f59e772f462df16311ec3d5bdcc084a6f4011a7c71b8a4e7"
+size = 131431
+mtime_ms = 1793487905409
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8608b4d7-7448-4193-b366-ba296a5dea01/655e7bcd-6af6-4ec0-8f8c-33a6f9d1eff4"
+storage_version_token = "1793487930846567"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "TRvX4_3Jg35i-JNB9ZGoq"
+uri = "file://generated-artifacts/secretary-structure/review/Secretary_stage1_review.html"
+type = "html"
+title = "Отдел «Секретарь»: карта, стенд и вопросы"
+description = "Удобный отчёт для телефона: целевая структура, что найдено в коде и модели, 18 вопросов этапа 2. Структура ещё не применена."
+logical_id = "84fdc492-be1c-4553-bd73-1497e3e80f2a"
+content_hash = "sha256:4d11026e9b5605f2ea55d44139361df076dcf1ac4f36168ca991a183b0eedd86"
+size = 10836
+mtime_ms = 1793488294909
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/84fdc492-be1c-4553-bd73-1497e3e80f2a/42d8acce-0f82-44d0-b998-6b7bc9b78ff2"
+storage_version_token = "1793488317576411"
+content_type = "text/html"
+
+[[outputs]]
+id = "xVo92rum4250tegSJy6tQ"
+uri = "file://generated-artifacts/secretary-structure/review/Secretary_empty_cards.json"
+type = "unspecified"
+title = "JSON пустых карточек: Сева, Лёва, Тома и два слота"
+description = "Имена proposed. Исполнителей, действий, задач, расписаний и расходов нет. Это проект, не запись production."
+logical_id = "e124ead8-cf75-4297-b29f-400415a5aa79"
+content_hash = "sha256:c4c80d6f5b2c0ea3809dba1347c3666372ca3c3c919c4e1d160acb980aa13318"
+size = 7595
+mtime_ms = 1793488294889
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e124ead8-cf75-4297-b29f-400415a5aa79/02ac9f08-c0c4-40de-a6cd-d9876c5f5e10"
+storage_version_token = "1793488318229834"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3qQTFYnQAQ6Axwr-br3KK"
+uri = "file://generated-artifacts/secretary-structure/review/Secretary_department_map.json"
+type = "unspecified"
+title = "Карта отдела «Секретарь» — JSON"
+description = "Мария → Сева → Лёва, Тома, каталог; существующая Катя без дубля; инженер, Тихон и Нина — общие. Все новые связи applied=false."
+logical_id = "41bb7f75-8b7d-4ee9-a471-4676a790f60f"
+content_hash = "sha256:5512a8bca543ffa9b3ab69785a4d1c6ae58c6f43624e30ca96567152777a2131"
+size = 4366
+mtime_ms = 1793488294893
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/41bb7f75-8b7d-4ee9-a471-4676a790f60f/a192c6da-3683-42e5-b55d-32a5da750413"
+storage_version_token = "1793488319015101"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "UPZ3ReQiqrKlgb8-c83ec"
+uri = "file://generated-artifacts/Secretary_department_stage1_review.zip"
+type = "unspecified"
+title = "Отдел «Секретарь» · этап 1 — полный пакет"
+description = "Три пустые должности, два слота, карта, ссылка на существующий каталог, инвентаризация стенда, вопросы и спецификация недостающего MCP-инструмента. Чтение r971; записей 0."
+logical_id = "abbf9296-d859-44de-9442-b926e3adc13e"
+content_hash = "sha256:8e1fe2da3270848be18294f6fc9b8ac954a269350eb312443d1e7dc1afe40ef8"
+size = 22539
+mtime_ms = 1793488295001
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/abbf9296-d859-44de-9442-b926e3adc13e/fb7fa2f1-99ad-4d0e-9e62-9b813ab08fc4"
+storage_version_token = "1793488319759556"
+content_type = "application/octet-stream"

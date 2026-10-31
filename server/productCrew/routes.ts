@@ -203,6 +203,7 @@ function toJsonSchema(schema: any): any {
   throw Error(`Unsupported product tool input schema: ${type}`);
 }
 const toolDescription: Record<ToolName, string> = {
+  update_maria_profile: "Production: перенести сохранённый полный должностной паспорт Марии HEAD.06 в DOC-TEAM-HEAD06. Пять обязанностей, клиенты и входы; источник version и hash анкеты обязательны. Без смены личности, промпта, графа или приёмки.",
   create_planned_role: "Production: одна пустая будущая должность под Марией, без сотрудника, задач, ресурсов и расписания. Дубли запрещены.",
   update_role_title: "Production: название и режим одной существующей роли и её анкеты, без изменения личности, промпта, прав или исполнителя.",
   set_projection_manager: "Production: руководитель единственной живой проекции employee-katya. Не создаёт вторую Катю и не меняет её поведение.",

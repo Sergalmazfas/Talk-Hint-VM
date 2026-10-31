@@ -2,6 +2,7 @@ import type { TeamEvent, TeamMember, TeamView } from "../../shared/team";
 import { characters, DIRECTORY, JOURNAL, TEAM_BASE, TEAM_PLAN_HASH, TEAM_STEPS } from "./plan";
 import { completedSteps, type TeamContext } from "./repository";
 import { semanticHash, textHash } from "../companyData/valueTree";
+import { mariaResponsibilitiesSchema } from "../productCrew/mariaPassport";
 
 const string = (v: unknown): string | null => typeof v === "string" && v.trim() ? v : null;
 const json = (v: unknown) => { try { return JSON.parse(String(v)); } catch { return null; } };
@@ -48,6 +49,8 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     const found = profileDocuments.find(p => p.profile.visualPassport.roleId === n.id &&
       (!character || p.doc.id === character.document));
     const doc = found?.doc, profile = found?.profile, v = profile?.visualPassport;
+    const product = n.id === "head-product" && profile?.productResponsibilities
+      ? mariaResponsibilitiesSchema.parse(profile.productResponsibilities) : null;
     // Read only the projection corresponding to the exact current document,
     // not a "latest row" from unrelated historical payload versions.
     const physical = v ? c.profiles.find(p => p.entity_id === n.id &&
@@ -68,7 +71,12 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     const add = (kind: string, id: string | null) => { if (id && byId.has(id))
       relations.push({ kind, id, name: byId.get(id)!.name }); };
     add("Подчиняется", n.managerId ?? null);
-    for (const a of duties) {
+    if (product) {
+      for (const input of product.inputs) add("Получает от", input.roleId);
+      for (const client of product.clients) add("Передаёт работу", client.roleId);
+      add("Кто проверяет меня", "owner");
+    }
+    for (const a of product ? [] : duties) {
       add("Кто проверяет меня", a.acceptorId);
       add("Передаёт работу", a.recipientId);
       for (const input of a.inputs) add("Получает от", input.sourceId);
@@ -96,14 +104,18 @@ export function teamView(c: TeamContext, environment: string): TeamView {
       nameStatus: physical?.owner_selection_status ?? null,
       traits: physical ? [physical.trait_1, physical.trait_2, physical.trait_3] : [null, null, null],
       motto: physical?.motto ?? null,
-      duties: duties.map(a => ({ id: a.id, title: a.name, detail: string(a.procedure || a.description || a.purpose) })),
+      duties: product ? product.duties.map(a => ({ id: `${n.id}:${a.code}`,
+        title: `${a.code} — ${a.title}`,
+        detail: `${a.does}\nТриггер: ${a.trigger}\nРезультат: ${a.result}\nЗаказчик: владелец. Принимающий: владелец.` }))
+        : duties.map(a => ({ id: a.id, title: a.name, detail: string(a.procedure || a.description || a.purpose) })),
       relations: Array.from(new Map(relations.map(r => [`${r.kind}:${r.id}`, r])).values()),
       tools: Array.from(new Set([...n.resourceIds, ...duties.flatMap(a => a.resourceIds)].map(id => byId.get(id)?.name).filter(Boolean))) as string[],
-      prohibitions: Array.from(new Set([n.constraints, ...duties.map(a => a.constraints)].filter(Boolean))),
+      prohibitions: Array.from(new Set([...(product?.prohibitions ?? []), n.constraints, ...duties.map(a => a.constraints)].filter(Boolean))),
       model: string(profile?.prompt?.model),
       prompt: { text: prompt?.text_body ?? null, version: prompt?.prompt_version ?? null,
         status: prompt?.status ?? null, acceptedBy: prompt?.accepted_by ?? null },
-      metrics: { plan: metricText("plan"), fact: metricText("fact") },
+      metrics: product ? { plan: product.metrics.planStatus, fact: product.metrics.factStatus }
+        : { plan: metricText("plan"), fact: metricText("fact") },
       lastWork: events[0] ? `${events[0].title}: ${events[0].detail ?? "нет подробностей"}` : null,
       lessons: (journal?.cases ?? []).flatMap((item: any) => (item.history ?? [])
         .filter((e: any) => e.role === n.code || e.role === n.id)
