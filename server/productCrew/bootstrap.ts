@@ -9,6 +9,7 @@ import { productionProductRepository } from "./production";
 import { TEAM_OWNER } from "../team/plan";
 import { pgOwnerKeyStore, ProductCrewOwnerKey } from "./ownerKey";
 import { registerOwnerKeyRoutes } from "./ownerKeyRoutes";
+import { pgSecretKeyStore, ProductCrewSecretKey } from "./secretKey";
 
 // Verified published canonical origin; separate issuer from Secretary OAuth.
 export const PRODUCT_CREW_PRODUCTION_ORIGIN = "https://talkhint.app";
@@ -25,16 +26,18 @@ export function registerProductionProductCrew(app: Express) {
     return !!user && isBenchmarkAdmin(user.email);
   };
   const keys = new ProductCrewOwnerKey(pgOwnerKeyStore(getPool), TEAM_OWNER);
+  const secretKey = new ProductCrewSecretKey(pgSecretKeyStore(getPool), TEAM_OWNER,
+    () => process.env.PRODUCT_CREW_KEY);
   registerOwnerKeyRoutes(app, {
     origin: PRODUCT_CREW_PRODUCTION_ORIGIN, owner: TEAM_OWNER,
-    admin: requireBenchmarkAdmin, keys, authorizedOwner, csrfStore: integrationStore,
+    admin: requireBenchmarkAdmin, keys, secretKey, authorizedOwner, csrfStore: integrationStore,
   });
   registerProductCrew(app, {
     origin: PRODUCT_CREW_PRODUCTION_ORIGIN,
     key: () => process.env.SESSION_SECRET ?? "",
     store: integrationStore, admin: requireBenchmarkAdmin, production: true,
     repo: productionProductRepository(getPool),
-    authorizedOwner, ownerKey: { owner: TEAM_OWNER, keys },
+    authorizedOwner, ownerKey: { owner: TEAM_OWNER, keys }, secretKey,
   });
 }
 

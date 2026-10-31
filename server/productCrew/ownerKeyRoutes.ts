@@ -2,6 +2,7 @@ import express, { type Express, type RequestHandler } from "express";
 import { createHash, randomBytes } from "node:crypto";
 import { equalCsrf, ProductCrewOwnerKey } from "./ownerKey";
 import type { MarkerStore } from "../chatgpt/security";
+import type { ProductCrewSecretKey } from "./secretKey";
 
 /** Browser-session only: a key/OAuth bearer can never issue another key. */
 export function registerOwnerKeyRoutes(app: Express, options: {
@@ -9,6 +10,7 @@ export function registerOwnerKeyRoutes(app: Express, options: {
   owner: string;
   admin: RequestHandler;
   keys: ProductCrewOwnerKey;
+  secretKey?: ProductCrewSecretKey;
   csrfStore: MarkerStore;
   authorizedOwner: (owner: string) => Promise<boolean>;
 }) {
@@ -39,7 +41,8 @@ export function registerOwnerKeyRoutes(app: Express, options: {
     await options.csrfStore.put({ id: marker(session.productCrewKeyCsrf),
       userId: options.owner, expiresAt: new Date(Date.now() + 600000) });
     await new Promise<void>((resolve, reject) => req.session!.save(e => e ? reject(e) : resolve()));
-    res.json({ status: await options.keys.status(), csrfToken: session.productCrewKeyCsrf,
+    res.json({ status: await options.keys.status(), secretStatus: options.secretKey ? await options.secretKey.status() : undefined,
+      csrfToken: session.productCrewKeyCsrf,
       header: "X-API-Key", environment: "production", model: "new-country", lifetimeDays: 90 });
   }));
   const mutation: RequestHandler = (req, res, next) => {
@@ -69,5 +72,11 @@ export function registerOwnerKeyRoutes(app: Express, options: {
     if (!await consume(req)) return res.status(403).json({ error: "Подтверждение уже использовано или истекло. Обновите статус." });
     await options.keys.revoke();
     res.json({ revoked: true });
+  }));
+  app.post(`${base}/disable-secret`, express.json({ limit: "1kb" }), mutation, safe(async (req, res) => {
+    if (!await consume(req)) return res.status(403).json({ error: "Подтверждение уже использовано или истекло. Обновите статус." });
+    if (!options.secretKey) return res.status(409).json({ error: "Секрет не настроен." });
+    await options.secretKey.disable();
+    res.json({ disabled: true });
   }));
 }

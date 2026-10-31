@@ -7,6 +7,7 @@ import { ProductCrewOwnerKey, type OwnerKeyStore } from "./ownerKey";
 import { registerOwnerKeyRoutes } from "./ownerKeyRoutes";
 import { registerProductCrew } from "./routes";
 import { ProductCrewOAuth } from "./oauth";
+import { ProductCrewSecretKey, type SecretKeyStore } from "./secretKey";
 import { createRequestLoggingMiddleware } from "../requestLogging";
 import type { Marker, MarkerStore } from "../chatgpt/security";
 import type { ModelRepository } from "../projectModel/repository";
@@ -46,6 +47,21 @@ describe("owner-key HTTP security and shared MCP boundary", () => {
   const keysStore = new Keys(), keys = new ProductCrewOwnerKey(keysStore, "owner"), markers = new Markers();
   const signingKey = () => "isolated-test-signing-secret-".repeat(3);
   let ownerAllowed = true, writesOpen = false, storageDown = false;
+  let secretValue = "isolated_Secrets_credential_".repeat(3), secretStorageDown = false;
+  const secretDisabled = new Set<string>(), secretUsed = new Map<string, string>();
+  const secretStore: SecretKeyStore = {
+    async status(owner, hash) {
+      if (secretStorageDown) throw Error("unsafe secret storage detail");
+      return { disabled: secretDisabled.has(owner + hash), lastUsedAt: secretUsed.get(owner + hash) ?? null };
+    },
+    async use(owner, hash) {
+      if (secretStorageDown) throw Error("unsafe secret storage detail");
+      if (secretDisabled.has(owner + hash)) return false;
+      secretUsed.set(owner + hash, new Date().toISOString()); return true;
+    },
+    async disable(owner, hash) { secretDisabled.add(owner + hash); },
+  };
+  const secretKey = new ProductCrewSecretKey(secretStore, "owner", () => secretValue);
   const logs: string[] = [];
   const root = applyCommand(initialModel(), { type: "saveOperatingModel", baseVersion: 0,
     data: buildCompanyStructure(defaultOperatingModel()) }, "owner");
@@ -75,9 +91,9 @@ describe("owner-key HTTP security and shared MCP boundary", () => {
       status: owner => keysStore.status(owner),
       rotate: async (...args) => { if (storageDown) throw Error("unsafe provider detail"); return keysStore.rotate(...args); },
       revoke: owner => keysStore.revoke(owner), use: (...args) => keysStore.use(...args),
-    }, "owner"), authorizedOwner, csrfStore: markers });
+    }, "owner"), secretKey, authorizedOwner, csrfStore: markers });
     registerProductCrew(app, { origin, key: signingKey, store: markers, repo, admin,
-      authorizedOwner, production: true, ownerKey: { owner: "owner", keys } });
+      authorizedOwner, production: true, ownerKey: { owner: "owner", keys }, secretKey });
     server = app.listen(0, "127.0.0.1");
     await new Promise<void>(resolve => server.once("listening", resolve));
     url = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -180,12 +196,13 @@ describe("owner-key HTTP security and shared MCP boundary", () => {
   });
   it("uses only owner/new-country and propagates the existing closed-write gate", async () => {
     const { key } = await keys.create();
-    const readResult = await (await mcp(key, "tools/call", { name: "get_roadmap", arguments: {} })).json() as any;
+    for (const credential of [key, secretValue]) {
+    const readResult = await (await mcp(credential, "tools/call", { name: "get_roadmap", arguments: {} })).json() as any;
     expect(readResult.result.isError).toBe(false);
     expect(read).toHaveBeenLastCalledWith("owner", "new-country");
     const data = root.operatingModel!.revisions.at(-1)!.data;
     const role = data.nodes.find(n => n.kind === "role")!, process = data.nodes.find(n => n.kind === "process")!;
-    const r = await (await mcp(key, "tools/call", { name: "record_information", arguments: {
+    const r = await (await mcp(credential, "tools/call", { name: "record_information", arguments: {
       revision: root.revision, requestId: randomUUID(), title: "Fixture", description: "Fixture", client: "Owner",
       need: "Fixture", roleId: role.id, processId: process.id, relatedIds: [], nextStep: "Fixture",
       source: "Fixture", sourceDate: "2026-10-31", evidence: "Fixture", classification: "user_report",
@@ -193,6 +210,48 @@ describe("owner-key HTTP security and shared MCP boundary", () => {
     expect(r.result.isError).toBe(true);
     expect(JSON.parse(r.result.content[0].text).status).toBe(423);
     expect(updateMany).toHaveBeenCalledWith("owner", root.revision, expect.any(Array), "new-country");
+    }
+  });
+  it("Secrets credential uses the same production tools, owner gate and excludes acceptance/external actions", async () => {
+    expect((await mcp(secretValue)).status).toBe(200);
+    const list = await (await mcp(secretValue, "tools/list")).json() as any;
+    expect(list.result.tools.some((t: any) => t.name === "get_team")).toBe(true);
+    expect(list.result.tools.some((t: any) => t.name === "review_result")).toBe(false);
+    expect(list.result.tools.every((t: any) => t.securitySchemes[0].type === "apiKey")).toBe(true);
+    for (const name of ["review_result", "make_call", "publish", "delete_document", "get_secret", "charge_money"]) {
+      const result = await (await mcp(secretValue, "tools/call", { name, arguments: {} })).json() as any;
+      expect(result.result.isError).toBe(true);
+    }
+    expect((await mcp(secretValue, "ping", undefined, { Authorization: "Bearer fake" })).status).toBe(401);
+    ownerAllowed = false;
+    expect((await mcp(secretValue)).status).toBe(401);
+    ownerAllowed = true;
+    expect(logs.join("\n")).not.toContain(secretValue);
+  });
+  it("Secrets metadata never exposes value/hash; protected disable is one-use, immediate and independent of manual key", async () => {
+    const s = await status(), manual = await keys.create();
+    expect(s.body.secretStatus).toMatchObject({ configured: true, disabled: false, lastUsedAt: expect.any(String) });
+    expect(JSON.stringify(s.body)).not.toContain(secretValue);
+    expect(JSON.stringify(s.body)).not.toContain(createHash("sha256").update(secretValue).digest("hex"));
+    expect((await mutation(s.cookie, "", "/disable-secret")).status).toBe(403);
+    expect((await mutation(s.cookie, s.body.csrfToken, "/disable-secret", { Origin: "https://evil.example" })).status).toBe(403);
+    const r = await mutation(s.cookie, s.body.csrfToken, "/disable-secret");
+    expect(r.status).toBe(200); expect(await r.json()).toEqual({ disabled: true });
+    expect((await mcp(secretValue)).status).toBe(401);
+    expect((await mutation(s.cookie, s.body.csrfToken, "/disable-secret")).status).toBe(403);
+    expect((await mcp(manual.key)).status).toBe(200);
+    expect((await status(s.cookie)).body.secretStatus.disabled).toBe(true);
+    const old = secretValue;
+    secretValue += "_replacement";
+    expect((await mcp(old)).status).toBe(401);
+    expect((await mcp(secretValue)).status).toBe(200);
+    expect((await status(s.cookie)).body.secretStatus.disabled).toBe(false);
+    secretStorageDown = true;
+    const failed = await mcp(secretValue);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain("unsafe secret storage detail");
+    secretStorageDown = false;
+    expect(logs.join("\n")).not.toContain(secretValue);
   });
   it("keeps the OAuth flow and credentials working beside header keys", async () => {
     const oauth = new ProductCrewOAuth(origin, signingKey, markers), verifier = "v".repeat(43);

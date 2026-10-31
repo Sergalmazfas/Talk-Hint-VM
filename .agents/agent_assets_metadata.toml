@@ -2329,3 +2329,17 @@ mtime_ms = 1793465087514
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/07ab2206-7be4-4906-9152-4849dcaf8260/96bccad7-3f23-466c-9ade-95a405129047"
 storage_version_token = "1793465094241683"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "5hn2WqTPm-SXTa-hfkduB"
+uri = "file://generated-artifacts/product-crew-secrets-security-review.zip"
+type = "unspecified"
+title = "MCP через Secrets — diff для Claude"
+description = "Короткий и полный diff, исходники, 2784 прошедших теста, 19 браузерных проверок и все логи, включая промежуточные таймауты. Секрет ещё не сохранён; Publish до сверки и настройки не выполнять."
+logical_id = "865b2c93-7bf5-4d3f-a0bd-730452f51146"
+content_hash = "sha256:0867cd5eccd736e55e55c5a41fbf58e97364f657e34a729210b3ff3f6ba4fb9b"
+size = 238484
+mtime_ms = 1793468110262
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/865b2c93-7bf5-4d3f-a0bd-730452f51146/dcdccd4c-c409-4612-803a-5c2002562ca7"
+storage_version_token = "1793468120879848"
+content_type = "application/octet-stream"

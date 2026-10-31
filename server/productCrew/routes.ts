@@ -6,6 +6,7 @@ import { inputs, ProductCrewService, writeTools, type ToolName } from "./service
 import type { MarkerStore } from "../chatgpt/security";
 import type { ModelRepository } from "../projectModel/repository";
 import type { ProductCrewOwnerKey } from "./ownerKey";
+import type { ProductCrewSecretKey } from "./secretKey";
 const escape = (s: unknown) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 function sendDocument(res: express.Response, text: string, format: unknown) {
   if (format === "json") {
@@ -37,11 +38,14 @@ export function registerProductCrew(app: Express, options: {
   production?: boolean;
   /** Only the fixed production owner may use the alternative header credential. */
   ownerKey?: { owner: string; keys: ProductCrewOwnerKey };
+  secretKey?: ProductCrewSecretKey;
 }) {
   const production = options.production ?? process.env.NODE_ENV === "production";
   const publicAccess = !!options.publicDevOwner && process.env.NODE_ENV !== "production";
   if (options.production && options.publicDevOwner) throw Error("Public production MCP is forbidden");
   if (options.ownerKey && (!production || publicAccess)) throw Error("Owner keys require private production MCP");
+  if (options.secretKey && (!production || publicAccess || !options.ownerKey))
+    throw Error("Secret keys require fixed-owner private production MCP");
   const auth = new ProductCrewOAuth(options.origin, options.key, options.store),
     service = new ProductCrewService(options.repo, { production });
   const advertisedTools = Object.keys(inputs).filter(n => production ? n !== "review_result" :
@@ -113,7 +117,9 @@ export function registerProductCrew(app: Express, options: {
       if (headerKey !== undefined) {
         if (!options.ownerKey || !await options.authorizedOwner(options.ownerKey.owner))
           throw Object.assign(Error("Product key access unavailable"), { status: 401 });
-        owner = await options.ownerKey.keys.authenticate(headerKey);
+        owner = options.secretKey?.matches(headerKey)
+          ? await options.secretKey.authenticate(headerKey)
+          : await options.ownerKey.keys.authenticate(headerKey);
       } else {
         owner = publicAccess
           ? await options.publicDevOwner!()

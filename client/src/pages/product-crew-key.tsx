@@ -28,8 +28,15 @@ type KeyStatus = {
   lastUsedAt: string | null;
 };
 
+type SecretStatus = {
+  configured: boolean;
+  disabled: boolean;
+  lastUsedAt: string | null;
+};
+
 type OwnerKeyView = {
   status: KeyStatus | null;
+  secretStatus?: SecretStatus;
   csrfToken: string;
   header: "X-API-Key";
   environment: "production";
@@ -53,6 +60,12 @@ function validateView(value: unknown): OwnerKeyView {
     data.environment !== "production" ||
     data.model !== "new-country" ||
     data.lifetimeDays !== 90 ||
+    (data.secretStatus !== undefined && (
+      !data.secretStatus ||
+      typeof data.secretStatus.configured !== "boolean" ||
+      typeof data.secretStatus.disabled !== "boolean" ||
+      !(typeof data.secretStatus.lastUsedAt === "string" || data.secretStatus.lastUsedAt === null)
+    )) ||
     !(data.status === null || (
       typeof data.status === "object" &&
       typeof data.status.createdAt === "string" &&
@@ -68,6 +81,7 @@ function validateView(value: unknown): OwnerKeyView {
 export default function ProductCrewKeyPage() {
   const [, setLocation] = useLocation();
   const [status, setStatus] = useState<KeyStatus | null>(null);
+  const [secretStatus, setSecretStatus] = useState<SecretStatus | undefined>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [mutating, setMutating] = useState(false);
@@ -120,6 +134,7 @@ export default function ProductCrewKeyPage() {
       const view = validateView(response.data);
       csrfRef.current = view.csrfToken;
       setStatus(view.status);
+      setSecretStatus(view.secretStatus);
       setRequiresRead(false);
       setOperationError("");
       return true;
@@ -145,7 +160,7 @@ export default function ProductCrewKeyPage() {
   async function createOrRotate() {
     if (inFlight.current || !csrfRef.current || requiresRead || rawKey) return;
     const confirmed = window.confirm(
-      "Создать новый ключ TalkHint MCP?\n\nВсе прежние ключи будут отозваны. Ключ действует 90 дней и даёт доступ только к production-модели new-country.\n\nСекрет будет показан один раз — сохраните его в Replit Advanced settings."
+      "Создать новый ручной ключ TalkHint MCP?\n\nБудет отозван только прежний ручной ключ; Secrets-доступ это не меняет. Ключ действует 90 дней и даёт доступ только к production-модели new-country.\n\nСекрет будет показан один раз — сохраните его в Replit Advanced settings."
     );
     if (!confirmed || inFlight.current) return;
     inFlight.current = true;
@@ -211,6 +226,7 @@ export default function ProductCrewKeyPage() {
       const view = validateView(response.data);
       csrfRef.current = view.csrfToken;
       setStatus(view.status);
+      setSecretStatus(view.secretStatus);
       setRequiresRead(false);
       setOperationError("");
       return true;
@@ -261,6 +277,43 @@ export default function ProductCrewKeyPage() {
     }
   }
 
+  async function disableSecret() {
+    if (inFlight.current || !csrfRef.current || requiresRead || rawKey) return;
+    const confirmed = window.confirm(
+      "Отключить Secrets-доступ TalkHint MCP?\n\nТекущее значение секрета будет отозвано без возможности повторного включения. Для замены добавьте новое значение и выполните Publish."
+    );
+    if (!confirmed || inFlight.current) return;
+    inFlight.current = true;
+    setMutating(true);
+    setOperationError("");
+    setNotice("");
+    const csrfToken = csrfRef.current;
+    csrfRef.current = "";
+    try {
+      const response = await keyRequest(`${OWNER_KEY_URL}/disable-secret`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "x-product-key-csrf": csrfToken,
+        },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const result = response.data as { disabled?: unknown } | null;
+      if (!response.ok || result?.disabled !== true) throw new Error(AMBIGUOUS_MESSAGE);
+      setNotice("Secrets-доступ отключён. Для нового значения добавьте секрет и выполните Publish.");
+      const refreshed = await readStatusAfterMutation();
+      if (!refreshed) setNotice("Отключение подтверждено. Обновите статус перед следующими действиями.");
+    } catch {
+      setRequiresRead(true);
+      setOperationError(AMBIGUOUS_MESSAGE);
+      setNotice("");
+    } finally {
+      inFlight.current = false;
+      setMutating(false);
+    }
+  }
+
   async function copySecret() {
     if (!secretRef.current || !navigator.clipboard?.writeText) {
       setCopied(false);
@@ -298,7 +351,7 @@ export default function ProductCrewKeyPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#86b19b]">Production access · MCP</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[#f0f3ef] sm:text-4xl">Ключ команды продукта</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[#a9b8b0] sm:text-base">
-            Управление ключом владельца для подключения TalkHint MCP. Ключ открывает только production-модель <span className="font-mono text-[#d9e7df]">new-country</span>.
+            Основной способ доступа TalkHint MCP — Secrets: задайте <span className="font-mono text-[#d9e7df]">PRODUCT_CREW_KEY</span> в окружении и выполните Publish. Ручной ключ и OAuth остаются запасными способами подключения. Доступ ограничен production-моделью <span className="font-mono text-[#d9e7df]">new-country</span>.
           </p>
         </div>
 
@@ -372,6 +425,51 @@ export default function ProductCrewKeyPage() {
               </dl>
             </div>
           )}
+
+          <div className="border-t border-[#344742] bg-[#172320] px-5 py-5 sm:px-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                {secretStatus?.configured && !secretStatus.disabled ? (
+                  <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-[#8bc59f]" aria-hidden="true" />
+                ) : (
+                  <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-[#d3ae70]" aria-hidden="true" />
+                )}
+                <div>
+                  <h3 className="font-semibold text-[#e8efeb]">Secrets-доступ MCP</h3>
+                  <p className="mt-1 text-sm leading-6 text-[#a9b8b0]">
+                    {secretStatus === undefined
+                      ? "Статус Secrets не предоставлен сервером; готовность не подтверждена."
+                      : secretStatus.disabled
+                        ? "Секрет отключён и отозван. Для замены задайте новое значение и выполните Publish."
+                        : secretStatus.configured
+                          ? "Секрет настроен и включён."
+                          : "Секрет не настроен — Secrets-доступ не готов."}
+                  </p>
+                </div>
+              </div>
+              {secretStatus?.configured && !secretStatus.disabled && (
+                <button
+                  type="button"
+                  onClick={disableSecret}
+                  disabled={actionDisabled}
+                  className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-[#76524c] px-4 text-sm font-semibold text-[#efc4bb] hover:bg-[#382724] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  Отключить
+                </button>
+              )}
+            </div>
+            <dl className="mt-4 grid gap-2 border-t border-[#344742] pt-4 text-sm sm:grid-cols-2">
+              <div className="flex flex-col gap-1 sm:flex-row sm:justify-between">
+                <dt className="text-[#8fa299]">Имя секрета</dt>
+                <dd className="font-mono text-[#d6e0da]">PRODUCT_CREW_KEY</dd>
+              </div>
+              <div className="flex flex-col gap-1 sm:flex-row sm:justify-between">
+                <dt className="text-[#8fa299]">Последнее использование</dt>
+                <dd className="text-[#d6e0da]">{secretStatus ? formatDate(secretStatus.lastUsedAt) : "Статус недоступен"}</dd>
+              </div>
+            </dl>
+          </div>
 
           {rawKey && (
             <div className="border-t border-[#5b6748] bg-[#262d23] px-5 py-5 sm:px-6">

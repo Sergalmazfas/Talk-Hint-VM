@@ -6,6 +6,7 @@ import { join } from "node:path";
 import net from "node:net";
 import { Pool } from "pg";
 import { pgOwnerKeyStore, ProductCrewOwnerKey } from "./ownerKey";
+import { pgSecretKeyStore, ProductCrewSecretKey } from "./secretKey";
 
 // Opt-in: starts a disposable local PostgreSQL, NEVER the app's database.
 // No DATABASE_URL, credentials, migrations or application state are read.
@@ -75,5 +76,27 @@ describe.skipIf(!enabled)("owner key: real, isolated PostgreSQL concurrency", ()
     const existingHash = rows[0].id.slice("productcrew:ownerkey:".length);
     await expect(store.rotate("fixture-owner", existingHash, new Date(Date.now() + 86400000))).rejects.toBeDefined();
     expect(await keys.authenticate(issued.key)).toBe("fixture-owner");
+  });
+  it("Secrets use/disable serialize across workers and revocation survives restart and session expiry cleanup", async () => {
+    const raw = "fixture_only_postgres_secret_".repeat(3), owner = "secret-fixture";
+    const store = pgSecretKeyStore(async () => pool);
+    const key = new ProductCrewSecretKey(store, owner, () => raw);
+    expect(await key.status()).toEqual({ configured: true, disabled: false, lastUsedAt: null });
+    await key.authenticate(raw);
+    await Promise.all([key.disable(), ...Array.from({ length: 20 }, async () => {
+      try { await key.authenticate(raw); } catch (e: any) { expect(e.status).toBe(401); }
+    })]);
+    await pool.query("DELETE FROM sessions WHERE expires_at<NOW()");
+    const restarted = new ProductCrewSecretKey(pgSecretKeyStore(async () => pool), owner, () => raw);
+    await expect(restarted.authenticate(raw)).rejects.toMatchObject({ status: 401 });
+    expect(await restarted.status()).toMatchObject({ configured: true, disabled: true, lastUsedAt: expect.any(String) });
+    const rows = (await pool.query("SELECT * FROM sessions WHERE user_id=$1", [owner])).rows;
+    expect(rows).toHaveLength(2);
+    expect(JSON.stringify(rows)).not.toContain(raw);
+    const replacement = raw + "_replacement";
+    expect(await new ProductCrewSecretKey(store, owner, () => replacement).authenticate(replacement)).toBe(owner);
+    const foreign = new ProductCrewSecretKey(store, "other-secret-owner", () => raw);
+    expect((await foreign.status()).disabled).toBe(false);
+    await expect(restarted.authenticate(raw)).rejects.toMatchObject({ status: 401 });
   });
 });
