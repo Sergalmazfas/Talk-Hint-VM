@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import { initialState } from "./domain";
+import { applyOwnerCommand, initialState } from "./domain";
 const f=vi.hoisted(()=>({state:null as any, session:{} as any,
   message:vi.fn(),models:vi.fn(),evidence:vi.fn(),initialized:false,builtAt:"now"}));
 vi.mock("./hintEvidence",async importOriginal=>{
@@ -45,6 +45,41 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it("closes a stalled pilot only through owner, Origin, CSRF and fresh CAS, then returns the saved state",async()=>{
+  const at="2026-11-01T20:00:00Z",models=["claude-sonnet-5-5","claude-opus-5-5"];
+  applyOwnerCommand(f.state,{kind:"hint_pilot_prepare",candidate:"latency",ratesConfirmed:true},"owner",at,models,await f.evidence());
+  applyOwnerCommand(f.state,{kind:"control",enabled:true,dailyLimitMicroUsd:1000000,staleHours:24},"owner",at);
+  applyOwnerCommand(f.state,{kind:"hint_pilot_start",taskId:f.state.tasks[0].id,ownerApproved:true},"owner",at);
+  f.state.control.enabled=false;
+  const t=await csrf(),command={kind:"hint_pilot_close_stalled",taskId:f.state.tasks[0].id,ownerApproved:true};
+  const before=structuredClone(f.state);
+  expect((await fetch(base+"/api/admin/ai-crew/command",{method:"POST",
+    headers:{"Content-Type":"application/json",origin:"https://owner.test"},body:JSON.stringify({revision:0,command})})).status).toBe(403);
+  expect((await post("/command",{revision:0,command})).status).toBe(403);
+  expect((await fetch(base+"/api/admin/ai-crew/command",{method:"POST",
+    headers:{"x-owner":"yes","Content-Type":"application/json","x-crew-csrf":t},body:JSON.stringify({revision:0,command})})).status).toBe(403);
+  expect((await post("/command",{revision:100,command},t)).status).toBe(409);
+  expect((await post("/command",{revision:0,command:{...command,ownerApproved:false}},t)).status).toBe(400);
+  expect(f.state).toEqual(before);
+  for(const unsafe of ["running","unknown","reserve","budget"]){
+   f.state=structuredClone(before);
+   if(unsafe==="running"||unsafe==="unknown")f.state.runs[0].status=unsafe;
+   if(unsafe==="reserve")f.state.runs[0].reserved=10;
+   if(unsafe==="budget")f.state.budget.today={spent:0,reserved:10};
+   const blocked=structuredClone(f.state);
+   expect((await post("/command",{revision:0,command},t)).status).toBe(409);
+   expect(f.state).toEqual(blocked);
+  }
+  f.state=structuredClone(before);
+  expect((await post("/command",{revision:0,command},t)).status).toBe(200);
+  const state=(await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).state;
+  expect(state.revision).toBe(1);
+  expect(state.tasks[0]).toMatchObject({closed:true,phase:"outcome",hintPilot:{status:"not_completed"}});
+  expect(state.runs[0]).toMatchObject({status:"discarded",cost:0});
+  expect(state.control).toMatchObject({enabled:false,dailyLimitMicroUsd:0});
+  expect((await post("/command",{revision:1,command},t)).status).toBe(409);
+  expect(f.message).not.toHaveBeenCalled();expect(f.models).not.toHaveBeenCalled();
+ });
  it("Hint evidence is owner-only, production-only, read-only and fails closed on unavailable source",async()=>{
   vi.stubEnv("NODE_ENV","production");
   expect((await fetch(base+"/api/admin/ai-crew/hint-pilot")).status).toBe(403);

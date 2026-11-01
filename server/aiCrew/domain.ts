@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { HINT_AGENTS, pilotReviewComplete, prepareHintPilot, startHintPilot, type HintPilot } from "./hintPilot";
+import { closeStalledHintPilot, HINT_AGENTS, pilotReviewComplete, prepareHintPilot, startHintPilot,
+  STALLED_PILOT_OUTCOME, type HintPilot } from "./hintPilot";
 import type { HintEvidence } from "./hintEvidence";
 
 export const phases = ["problem", "analysis", "owner_decision", "code", "verification", "outcome"] as const;
@@ -9,6 +10,7 @@ export const commandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("hint_pilot_prepare"), candidate: z.enum(["latency", "usefulness", "unavailable"]),
     ratesConfirmed: z.literal(true) }).strict(),
   z.object({ kind: z.literal("hint_pilot_start"), taskId: z.string().uuid(), ownerApproved: z.literal(true) }).strict(),
+  z.object({ kind: z.literal("hint_pilot_close_stalled"), taskId: z.string().uuid(), ownerApproved: z.literal(true) }).strict(),
   z.object({ kind: z.literal("control"), enabled: z.boolean(), dailyLimitMicroUsd: z.number().int().min(0).max(1e11),
     staleHours: z.number().int().min(1).max(8760) }).strict(),
   z.object({ kind: z.literal("task"), title: text, holder: text, problem: text }).strict(),
@@ -81,6 +83,13 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
     if (c.kind === "hint_pilot_start") {
       startHintPilot(s, task, actor, at);
       log(s, actor, "hint_pilot_start_authorized", { taskId: task.id }, at);
+    } else if (c.kind === "hint_pilot_close_stalled") {
+      const closed = closeStalledHintPilot(s, task, actor, at);
+      for (const runId of closed.discardedRunIds)
+        log(s, actor, "run_discarded_without_execution", { taskId: task.id, runId,
+          costMicroUsd: 0, reason: STALLED_PILOT_OUTCOME }, at);
+      log(s, actor, "hint_pilot_closed_stalled", { taskId: task.id, outcome: STALLED_PILOT_OUTCOME,
+        ...closed, dailyLimitMicroUsd: 0, costMicroUsd: 0, enabled: false, agentsStarted: false }, at);
     } else if (c.kind === "publication") {
       const code = [...task.steps].reverse().find(x => x.phase === "code" && x.commit === c.commit);
       if (!code) throw Error("PUBLICATION_WITHOUT_RECORDED_CODE");

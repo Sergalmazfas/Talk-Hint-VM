@@ -2819,3 +2819,17 @@ mtime_ms = 1793556574721
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ccae0a36-7984-46dc-af5c-b97f2f9c7dbb/d65b0514-2779-47bb-8eaa-22bc0affab87"
 storage_version_token = "1793556585925158"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "FdiumErGqBaWYWY0VEqNG"
+uri = "file://generated-artifacts/Hint_close_stalled_owner_Claudiy_review.zip"
+type = "unspecified"
+title = "Hint: закрытие зависшего пилота — Клавдию"
+description = "Точечный diff, полный текущий код AI Crew, контракт owner-команды, UI/API/PostgreSQL-тесты, 4 зелёных шарда и инструкция после Publish. Production не изменялся, агенты не запускались."
+logical_id = "e5592d7e-849a-469b-b447-a203f8730d3b"
+content_hash = "sha256:77cd5da72d65b7befef0dbcfa61b8383749e844714df81fca85d965afb651190"
+size = 323731
+mtime_ms = 1793563778337
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e5592d7e-849a-469b-b447-a203f8730d3b/7ba0d7ff-d279-4b5c-9b82-d48d1e6b3cc9"
+storage_version_token = "1793563786618100"
+content_type = "application/octet-stream"

@@ -37,7 +37,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
  <article class="panel span4"><h2>Лимиты и контроль</h2><div class="warning">Сохранение всегда отправляет <code>enabled:false</code>. Общая настройка лимита не включает агентов. Для пилота используйте отдельные owner-действия.</div>
 <div class="fields"><div><label>Текущий дневной лимит (только чтение)</label><div id="dailyLimit"></div></div><div><label for="staleHours">Срок устаревания, часы</label><input id="staleHours" type="number" min="1" max="8760" step="1" value="24"></div></div><p class="hint">Лимит задаётся в долларах только в блоке пилота выше: 5 означает $5. Здесь лимит не меняется. Сохранение выключает контроль и меняет только срок устаревания.</p><button id="saveControl" class="primary">Сохранить выключенный контроль</button></article>
  <article class="panel span6"><h2>Проверка модели (production only)</h2><p class="hint">Список ниже приходит от Anthropic. Probe — один короткий диагностический запрос, максимум 8 выходных токенов. Не повторяйте после неизвестного результата.</p><label for="modelSelect">Фактический ID модели из ответа</label><select id="modelSelect"><option value="">Сначала загрузите модели</option></select><button id="probe" class="danger" disabled>Выполнить одноразовый probe</button><div id="probeStatus" class="hint"></div></article>
- <article class="panel span12"><h2>Пилот Hint · решение владельца</h2><p class="warning">Каждый шаг требует отдельного подтверждения. Запуск может вызвать платные запросы к двум моделям. Не повторяйте действие при неизвестном результате.</p><div class="bar"><button id="prepareHintPilot">Подготовить пилот: задержки</button><div style="min-width:190px;flex:0 1 210px"><label for="pilotLimitUsd">Дневной лимит, USD</label><input id="pilotLimitUsd" type="text" inputmode="decimal" value="1" aria-label="Дневной лимит пилота в долларах"></div><button id="enableHintPilot">Включить с лимитом</button><button class="primary" id="startHintPilot">Запустить пилот</button></div><div id="pilotResults" class="list"><div class="empty">Пилотных задач пока нет.</div></div></article>
+ <article class="panel span12"><h2>Пилот Hint · решение владельца</h2><p class="warning">Каждый шаг требует отдельного подтверждения. Запуск может вызвать платные запросы к двум моделям. Не повторяйте действие при неизвестном результате.</p><div class="bar"><button id="prepareHintPilot">Подготовить пилот: задержки</button><div style="min-width:190px;flex:0 1 210px"><label for="pilotLimitUsd">Дневной лимит, USD</label><input id="pilotLimitUsd" type="text" inputmode="decimal" value="1" aria-label="Дневной лимит пилота в долларах"></div><button id="enableHintPilot">Включить с лимитом</button><button class="primary" id="startHintPilot">Запустить пилот</button><button id="closeStalledHintPilot">Закрыть зависший пилот</button></div><p class="hint">Закрытие возможно только при OFF, без выполненных запусков и резервов. История сохраняется; лимит станет 0 для новой подготовки. Это не запускает новый пилот.</p><div id="pilotResults" class="list"><div class="empty">Пилотных задач пока нет.</div></div></article>
 <article class="panel span6"><h2>Устаревшие задачи / держатели</h2><div class="list" id="staleList"><div class="empty">Загрузка…</div></div></article>
 <article class="panel span6"><h2>Задачи и текущие держатели</h2><div class="list scroll" id="tasks"></div></article>
 <article class="panel span6"><h2>Агенты и расписания</h2><div id="agents"></div><h3>Расписания</h3><div id="schedules"></div></article>
@@ -89,6 +89,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
       var p=task.hintPilot||{}, box=node("div","item");
       box.appendChild(node("strong","","Пилот Hint · "+(p.status||"—")+(task.closed?" · закрыта":"")));
       box.appendChild(node("div","muted","Задача "+task.id+" · кандидат: "+text(p.candidate)));
+      if(p.status==="not_completed")box.appendChild(node("div","muted","не выполнено: зависание диспетчера"));
       if(p.status==="owner"&&state.control&&state.control.enabled===false)box.appendChild(node("div","muted","Пилот завершён · контроль автоматически выключен."));
       var docs=state.documents||[], runs=(state.runs||[]).filter(function(r){return r.taskId===task.id}), agents=state.agents||[];
       var proposal=p.proposalId?docs.find(function(d){return d.id===p.proposalId}):null;
@@ -124,12 +125,18 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
   function updatePilotButtons(){var disabled=pilotBusy||pilotBlocked||!pilotStateValid(payload),state=payload&&payload.state,open=state&&findOpenPilot(state),prepared=open&&open.hintPilot.status==="prepared"&&open.phase==="analysis";
     $("prepareHintPilot").disabled=!!(disabled||open||state.control.enabled||state.control.dailyLimitMicroUsd!==0);
     $("enableHintPilot").disabled=!!(disabled||!prepared||state.control.enabled);
-    $("startHintPilot").disabled=!!(disabled||!prepared||!state.control.enabled||state.control.dailyLimitMicroUsd<=0)}
+    $("startHintPilot").disabled=!!(disabled||!prepared||!state.control.enabled||state.control.dailyLimitMicroUsd<=0);
+    $("closeStalledHintPilot").disabled=!!(disabled||!canCloseStalledPilot(state,open))}
+  function canCloseStalledPilot(state,task){
+    if(!state||!state.control||state.control.enabled!==false||!task||task.closed||task.phase!=="analysis"||!task.hintPilot||task.hintPilot.status!=="author"||task.hintPilot.proposalId||task.hintPilot.reviewId||!state.budget)return false;
+    var runs=(state.runs||[]).filter(function(r){return r.taskId===task.id});
+    return runs.some(function(r){return r.status==="queued"})&&runs.every(function(r){return ["queued","discarded"].indexOf(r.status)>=0&&(r.reserved===undefined||r.reserved===0)&&(r.cost===undefined||r.cost===0)&&(!r.usage||(r.usage.input_tokens===0&&r.usage.output_tokens===0))})&&Object.keys(state.budget).every(function(day){return state.budget[day].reserved===0})&&!(state.documents||[]).some(function(d){return d.taskId===task.id})
+  }
   function pilotStateValid(data){return !!data&&data.initialized===true&&data.environment==="production"&&data.state&&Number.isSafeInteger(data.state.revision)&&data.state.control}
   async function pilotAction(kind){
     if(pilotBusy||pilotBlocked)return;
     var limitRaw=$("pilotLimitUsd").value;
-    var confirmations={prepare:"Вы уверены? Подготовить production-пилот Hint по задержкам? Ставки будут зафиксированы, но агенты не запустятся.",enable:"Вы уверены? Включить AI Crew с дневным лимитом $"+limitRaw+"? Это разрешит расходы пилота.",start:"Вы уверены? Запустить подготовленный пилот Hint? Будут выполнены два анализа с возможными расходами."};
+    var confirmations={prepare:"Вы уверены? Подготовить production-пилот Hint по задержкам? Ставки будут зафиксированы, но агенты не запустятся.",enable:"Вы уверены? Включить AI Crew с дневным лимитом $"+limitRaw+"? Это разрешит расходы пилота.",start:"Вы уверены? Запустить подготовленный пилот Hint? Будут выполнены два анализа с возможными расходами.",close:"Вы уверены? Закрыть зависший пилот как «не выполнено: зависание диспетчера»? Очередь будет отмечена discarded, история сохранится. Контроль останется OFF, лимит станет 0. Нового запуска не будет."};
     if(!window.confirm(confirmations[kind]))return;
     pilotBusy=true;var intent=++pilotIntent;updatePilotButtons();setMessage("Получаем свежие данные и проверяем условия пилота…");
     var writeAttempted=false;
@@ -150,6 +157,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
         if(!open||!open.hintPilot||open.hintPilot.status!=="prepared"||open.phase!=="analysis"||open.closed||state.control.enabled!==false)throw Error("Включение доступно только для свежего подготовленного открытого анализа при выключенном контроле.");
         if(!Number.isInteger(state.control.staleHours)||state.control.staleHours<1||state.control.staleHours>8760)throw Error("Свежий срок устаревания некорректен.");
         command={kind:"control",enabled:true,dailyLimitMicroUsd:Number(microsBig),staleHours:state.control.staleHours};
+      }else if(kind==="close"){
+        if(!canCloseStalledPilot(state,open))throw Error("Закрытие запрещено: нужен OFF и зависшая очередь без выполненных запусков и резервов.");
+        command={kind:"hint_pilot_close_stalled",taskId:open.id,ownerApproved:true};
       }else{
         if(!open||!open.hintPilot||open.hintPilot.status!=="prepared"||open.phase!=="analysis"||open.closed||state.control.enabled!==true||!Number.isFinite(state.control.dailyLimitMicroUsd)||state.control.dailyLimitMicroUsd<=0)throw Error("Запуск доступен только для свежего подготовленного открытого анализа при включённом положительном лимите.");
         command={kind:"hint_pilot_start",taskId:open.id,ownerApproved:true};
@@ -165,6 +175,10 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
         if(kind==="prepare"&&(!found||found.hintPilot.candidate!=="latency"||found.hintPilot.status!=="prepared"||after.state.control.enabled||after.state.control.dailyLimitMicroUsd!==0))throw Error("Состояние подготовки не совпало.");
         if(kind==="enable"&&(after.state.control.enabled!==true||after.state.control.dailyLimitMicroUsd!==command.dailyLimitMicroUsd))throw Error("Состояние включения не совпало.");
         if(kind==="start"&&(!found||found.id!==command.taskId||["author","review","owner"].indexOf(found.hintPilot.status)<0))throw Error("Состояние запуска не совпало.");
+        if(kind==="close"){
+          var closed=(after.state.tasks||[]).find(function(t){return t.id===command.taskId}),previousRuns=(state.runs||[]).filter(function(r){return r.taskId===command.taskId&&r.status==="queued"});
+          if(after.state.revision!==state.revision+1||!closed||!closed.closed||closed.phase!=="outcome"||closed.hintPilot.status!=="not_completed"||closed.steps.slice(-1)[0].actual!=="не выполнено: зависание диспетчера"||after.state.control.enabled!==false||after.state.control.dailyLimitMicroUsd!==0||!previousRuns.every(function(r){return (after.state.runs||[]).some(function(x){return x.id===r.id&&x.status==="discarded"&&x.cost===0})})||!(after.state.journal||[]).some(function(e){return e.kind==="hint_pilot_closed_stalled"&&e.detail&&e.detail.taskId===command.taskId}))throw Error("Состояние закрытия не совпало.");
+        }
         setMessage("Состояние перечитано и проверено после подтверждённого действия.","good")}
       catch(readError){pilotBlocked=true;setMessage("СТОП. Действие подтверждено, но проверка повторного чтения не прошла: "+readError.message+". Новые действия заблокированы до ручного обновления.","error")}
     }catch(e){
@@ -179,6 +193,7 @@ async function post(path,body,success){if(busy)return;busy=true;setMessage("Ож
   $("prepareHintPilot").addEventListener("click",function(){pilotAction("prepare")});
   $("enableHintPilot").addEventListener("click",function(){pilotAction("enable")});
   $("startHintPilot").addEventListener("click",function(){pilotAction("start")});
+  $("closeStalledHintPilot").addEventListener("click",function(){pilotAction("close")});
   $("initialize").addEventListener("click",function(){if(!window.confirm("Инициализировать AI Crew? Будет создана новая таблица с выключенными агентами и бюджетом 0. Продолжить?"))return;post("/initialize",{},"Инициализация подтверждена")});
   $("disable").addEventListener("click",function(){if(!window.confirm("Аварийно выключить AI Crew на сервере? Это изменит переключатель и остановит локальный runtime."))return;pilotIntent++;post("/disable",{},"Запрос аварийного выключения подтверждён")});
   $("saveControl").addEventListener("click",async function(){if(busy||pilotBusy)return;var hours=Number($("staleHours").value);if(!Number.isInteger(hours)||hours<1||hours>8760){setMessage("Срок устаревания должен быть целым числом от 1 до 8760 часов.","error");return}if(!window.confirm("Вы уверены? Выключить контроль и сохранить срок устаревания? Дневной лимит не изменится."))return;busy=true;var fresh;try{fresh=await request("",{method:"GET"});render(fresh);if(!fresh.initialized||!Number.isSafeInteger(fresh.state.revision)||!Number.isSafeInteger(fresh.state.control.dailyLimitMicroUsd))throw Error("Нет свежих настроек");}catch(e){setMessage("Настройки не сохранены: "+e.message,"error");return}finally{busy=false}post("/command",{revision:fresh.state.revision,command:{kind:"control",enabled:false,dailyLimitMicroUsd:fresh.state.control.dailyLimitMicroUsd,staleHours:hours}},"Настройки выключенного контроля сохранены; лимит не изменён")});

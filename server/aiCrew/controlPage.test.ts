@@ -49,9 +49,22 @@ async function page(initial = payload()) {
   let answer: (path: string, method: string, body: any) => Promise<any> = async (_path, method, body) => {
     if (method !== "POST") return { ok: true, data: current };
     const command = body?.command;
-    if (command?.kind === "hint_pilot_prepare") current.state.tasks = state("prepared").tasks;
+    if (command?.kind === "hint_pilot_prepare") {
+      const task=state("prepared").tasks[0];
+      if(current.state.tasks.some(t=>t.id===task.id))task.id="b1616161-aaaa-4bbb-8ccc-dddddddddddd";
+      current.state.tasks.push(task);
+    }
     if (command?.kind === "control") Object.assign(current.state.control, command);
-    if (command?.kind === "hint_pilot_start") current.state.tasks[0].hintPilot!.status = "author";
+    if (command?.kind === "hint_pilot_start") current.state.tasks.find(t=>t.id===command.taskId)!.hintPilot!.status = "author";
+    if (command?.kind === "hint_pilot_close_stalled") {
+      const task=current.state.tasks.find(t=>t.id===command.taskId)!;
+      task.closed=true;task.phase="outcome";task.hintPilot!.status="not_completed";
+      task.steps.push({phase:"outcome",holder:"owner",actor:"owner",updatedAt:"now",
+        note:"не выполнено: зависание диспетчера",actual:"не выполнено: зависание диспетчера",met:false});
+      current.state.runs.filter(r=>r.taskId===task.id&&r.status==="queued").forEach(r=>{r.status="discarded";r.cost=0});
+      current.state.control.enabled=false;current.state.control.dailyLimitMicroUsd=0;
+      current.state.journal.push({id:"close",at:"now",actor:"owner",kind:"hint_pilot_closed_stalled",detail:{taskId:task.id}});
+    }
     current.state.revision++;
     return { ok: true, data: { saved: true } };
   };
@@ -272,5 +285,66 @@ describe("AI Crew owner pilot buttons — shipped script interactions", () => {
     p.setConfirm(true);p.setAnswer(async()=>({ok:false,status:503,data:{error:"unavailable"}}));
     await p.click("saveControl");
     expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(0);
+  });
+  function queuedPilot(){
+    const s=state("author");s.control.dailyLimitMicroUsd=1000000;
+    s.runs.push({id:"queued",taskId:s.tasks[0].id,agentId:"product-manager-specialist",eventId:"event",status:"queued",at:"now"});
+    return s;
+  }
+  it("closes with confirmation, fresh CSRF/revision and readback; then enables ordinary preparation",async()=>{
+    const p=await page(payload(queuedPilot()));
+    expect(p.el("closeStalledHintPilot").disabled).toBe(false);
+    const fresh=payload(queuedPilot(),"c".repeat(64));fresh.state.revision=45;p.setState(fresh);
+    await p.click("closeStalledHintPilot");
+    const writes=p.calls.filter(c=>c.method==="POST");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({body:{revision:45,command:{kind:"hint_pilot_close_stalled",
+      taskId:fresh.state.tasks[0].id,ownerApproved:true}},headers:{"x-crew-csrf":"c".repeat(64)}});
+    expect(p.confirms[0]).toContain("Вы уверены?");expect(p.confirms[0]).toContain("лимит станет 0");
+    expect(p.calls.at(-1)?.method).toBe("GET");
+    expect(p.el("pilotResults").textContent).toContain("не выполнено: зависание диспетчера");
+    expect(p.el("prepareHintPilot").disabled).toBe(false);
+    expect(p.el("closeStalledHintPilot").disabled).toBe(true);
+    expect(p.el("startHintPilot").disabled).toBe(true);
+    await p.click("prepareHintPilot");
+    await p.click("enableHintPilot");
+    await p.click("startHintPilot");
+    expect(p.calls.filter(c=>c.method==="POST").map(c=>c.body.command.kind)).toEqual([
+      "hint_pilot_close_stalled","hint_pilot_prepare","control","hint_pilot_start"]);
+    expect(fresh.state.tasks).toHaveLength(2);
+    expect(fresh.state.tasks[0].closed).toBe(true);
+    expect(fresh.state.tasks[1].hintPilot?.status).toBe("author");
+  });
+  it.each(["running","unknown","run_reserve","budget_reserve","on"])("disables closing for %s, rechecks fresh state even on a forced click",async kind=>{
+    const p=await page(payload(queuedPilot())),s=queuedPilot();
+    if(kind==="running"||kind==="unknown")s.runs[0].status=kind;
+    if(kind==="run_reserve")s.runs[0].reserved=1;
+    if(kind==="budget_reserve")s.budget.today={spent:0,reserved:1};
+    if(kind==="on")s.control.enabled=true;
+    p.setState(payload(s));
+    await p.click("closeStalledHintPilot",true);
+    expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(0);
+    expect(p.el("closeStalledHintPilot").disabled).toBe(true);
+  });
+  it("cancelled close or mismatched receipt is never retried",async()=>{
+    const p=await page(payload(queuedPilot()));p.setConfirm(false);
+    await p.click("closeStalledHintPilot");expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(0);
+    p.setConfirm(true);
+    p.setAnswer(async(_path,method)=>({ok:true,data:method==="POST"?{saved:true}:payload(queuedPilot())}));
+    await p.click("closeStalledHintPilot");
+    expect(p.el("message").textContent).toContain("СТОП");
+    await p.click("closeStalledHintPilot",true);
+    expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(1);
+  });
+  it.each(["error","unclear"])("never repeats close after an %s response",async kind=>{
+    const p=await page(payload(queuedPilot()));
+    p.setAnswer(async(_path,method)=>method==="POST"
+      ?{ok:kind!=="error",status:409,data:kind==="error"?{error:"RELOAD"}:{}}
+      :{ok:true,data:payload(queuedPilot())});
+    await p.click("closeStalledHintPilot");
+    expect(p.el("message").textContent).toContain("СТОП");
+    await p.click("closeStalledHintPilot",true);
+    expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(1);
+    expect(p.calls.at(-1)?.method).toBe("GET");
   });
 });

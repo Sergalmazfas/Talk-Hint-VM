@@ -11,7 +11,7 @@ export const HINT_AGENTS = [
   { agentId: "Hint-lg-qa-role", modelId: "claude-opus-5-5", inputMicroUsdPerToken: 4, outputMicroUsdPerToken: 20 },
 ] as const;
 export type HintPilot = { candidate: HintCandidate; evidence: HintEvidence; evidenceHash: string;
-  ownerId: string; status: "prepared" | "author" | "review" | "owner";
+  ownerId: string; status: "prepared" | "author" | "review" | "owner" | "not_completed";
   proposalId?: string; reviewId?: string; verdict?: "confirmed" | "not_confirmed";
   ratesConfirmedBy: string; pricingUrl: string };
 
@@ -42,6 +42,36 @@ export function startHintPilot(s: CrewState, task: Task, actor: string, at: stri
   p.status = "author";
   s.runs.push({ id: randomUUID(), taskId: task.id, agentId: HINT_AGENTS[0].agentId,
     eventId: `hint-author:${task.id}`, at, status: "queued" });
+}
+export const STALLED_PILOT_OUTCOME = "не выполнено: зависание диспетчера";
+export function closeStalledHintPilot(s: CrewState, task: Task, actor: string, at: string) {
+  const p = task.hintPilot, runs = s.runs.filter(r => r.taskId === task.id);
+  if (s.control.enabled !== false) throw Error("PILOT_CLOSE_REQUIRES_OFF");
+  if (!p || p.ownerId !== actor || p.status !== "author" || task.closed || task.phase !== "analysis")
+    throw Error("PILOT_NOT_STALLED");
+  // Never turn a paid/unknown result into zero cost or free its reservation.
+  // The company budget is shared: an unattributed reservation also blocks close.
+  if (!runs.some(r => r.status === "queued") ||
+      runs.some(r => !["queued", "discarded"].includes(r.status) ||
+        (r.reserved !== undefined && r.reserved !== 0) || (r.cost !== undefined && r.cost !== 0) ||
+        (r.usage !== undefined && (r.usage.input_tokens !== 0 || r.usage.output_tokens !== 0))) ||
+      Object.values(s.budget).some(b => b.reserved !== 0) ||
+      p.proposalId || p.reviewId || s.documents.some(d => d.taskId === task.id))
+    throw Error("PILOT_CLOSE_UNSAFE_EXECUTION_OR_RESERVATION");
+  const discardedRunIds: string[] = [];
+  for (const run of runs) {
+    if (run.status !== "queued") continue;
+    run.status = "discarded"; run.cost = 0; run.completedAt = at;
+    discardedRunIds.push(run.id);
+  }
+  const previousLimitMicroUsd = s.control.dailyLimitMicroUsd;
+  // Explicit owner close, not automatic chain completion: new preparation
+  // requires OFF/0. Preserve all actual spending/history, reset only the cap.
+  s.control = { ...s.control, dailyLimitMicroUsd: 0, epoch: s.control.epoch + 1 };
+  p.status = "not_completed"; task.closed = true; task.phase = "outcome";
+  task.steps.push({ phase: "outcome", holder: actor, actor, updatedAt: at,
+    note: STALLED_PILOT_OUTCOME, actual: STALLED_PILOT_OUTCOME, met: false });
+  return { discardedRunIds, previousLimitMicroUsd };
 }
 export function pilotInput(s: CrewState, task: Task, agentId: string, modelId: string): string {
   const p = task.hintPilot!;
