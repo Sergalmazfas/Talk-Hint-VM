@@ -2623,3 +2623,17 @@ mtime_ms = 1793518631118
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c58966b8-3171-49ba-b4e7-18720ad59adf/8cdbe967-5439-41d4-8560-c179fec12ac8"
 storage_version_token = "1793518687126895"
 content_type = "text/html"
+
+[[outputs]]
+id = "81MeaBnLBidIBQOTxgMo_"
+uri = "file://generated-artifacts/Maria_Sobol_HEAD06_review_r1161.zip"
+type = "unspecified"
+title = "Мария Соболь — JSON для сверки Claude"
+description = "Текущая анкета r1161 и JSON плана предлагаемых изменений. Изменения не применены; production не затронут."
+logical_id = "b727822d-08a4-492f-8ede-757486bda8ab"
+content_hash = "sha256:f584cf7d450ded58ea6bb6b821d72b88816b9de470a3329d0b3a7334501a9af0"
+size = 7920
+mtime_ms = 1793535210531
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b727822d-08a4-492f-8ede-757486bda8ab/a789da35-8dd9-4df2-bd46-0c25e105c526"
+storage_version_token = "1793535216079119"
+content_type = "application/octet-stream"
