@@ -29,20 +29,21 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
 </style>
 </head>
 <body><main>
-<header class="top"><div><div class="eyebrow">TalkHint / приватная зона владельца</div><h1>AI Crew</h1><p class="sub">Диагностика состояния и ручное управление журналируемым workflow. Агенты остаются выключены; эта панель не активирует выполнение.</p></div><div class="badge"><i class="dot" id="switchDot"></i><span id="switchText">Загрузка состояния…</span></div></header>
+ <header class="top"><div><div class="eyebrow">TalkHint / приватная зона владельца</div><h1>AI Crew</h1><p class="sub">Диагностика состояния и журналируемый workflow. Подготовка, лимит и запуск пилота Hint требуют отдельных решений владельца.</p></div><div class="badge"><i class="dot" id="switchDot"></i><span id="switchText">Загрузка состояния…</span></div></header>
 <nav class="bar" aria-label="Основные действия"><button id="refresh">Обновить состояние</button><button class="primary" id="initialize">Инициализировать таблицу</button><button class="danger" id="disable">Аварийно выключить всё</button><button id="loadModels">Загрузить модели Anthropic</button></nav>
 <div id="message" class="message" role="status" aria-live="polite">Получаем состояние сервера…</div>
 <section class="grid">
 <article class="panel span8"><div class="split"><h2>Состояние системы</h2><span class="small" id="updated"></span></div><div class="metrics" id="metrics"></div><div style="height:14px"></div><div class="kv" id="meta"></div><p class="hint" id="notice"></p></article>
-<article class="panel span4"><h2>Лимиты и контроль</h2><div class="warning">Сохранение всегда отправляет <code>enabled:false</code>. Действия включения нет. Настройка лимита не включает агентов.</div>
+ <article class="panel span4"><h2>Лимиты и контроль</h2><div class="warning">Сохранение всегда отправляет <code>enabled:false</code>. Общая настройка лимита не включает агентов. Для пилота используйте отдельные owner-действия.</div>
 <div class="fields"><div><label for="dailyLimit">Дневной бюджет, microUSD</label><input id="dailyLimit" type="number" min="0" step="1" value="0"></div><div><label for="staleHours">Срок устаревания, часы</label><input id="staleHours" type="number" min="1" max="8760" step="1" value="24"></div></div><p class="hint">1 USD = 1 000 000 microUSD. Целое число; бюджет 0 означает нулевой лимит.</p><button id="saveControl" class="primary">Сохранить выключенный контроль</button></article>
-<article class="panel span6"><h2>Проверка модели (production only)</h2><p class="hint">Список ниже приходит от Anthropic. Probe — один короткий диагностический запрос, максимум 8 выходных токенов. Не повторяйте после неизвестного результата.</p><label for="modelSelect">Фактический ID модели из ответа</label><select id="modelSelect"><option value="">Сначала загрузите модели</option></select><button id="probe" class="danger" disabled>Выполнить одноразовый probe</button><div id="probeStatus" class="hint"></div></article>
+ <article class="panel span6"><h2>Проверка модели (production only)</h2><p class="hint">Список ниже приходит от Anthropic. Probe — один короткий диагностический запрос, максимум 8 выходных токенов. Не повторяйте после неизвестного результата.</p><label for="modelSelect">Фактический ID модели из ответа</label><select id="modelSelect"><option value="">Сначала загрузите модели</option></select><button id="probe" class="danger" disabled>Выполнить одноразовый probe</button><div id="probeStatus" class="hint"></div></article>
+ <article class="panel span12"><h2>Пилот Hint · решение владельца</h2><p class="warning">Каждый шаг требует отдельного подтверждения. Запуск может вызвать платные запросы к двум моделям. Не повторяйте действие при неизвестном результате.</p><div class="bar"><button id="prepareHintPilot">Подготовить пилот: задержки</button><div style="min-width:190px;flex:0 1 210px"><label for="pilotLimitUsd">Дневной лимит, USD</label><input id="pilotLimitUsd" type="text" inputmode="decimal" value="1" aria-label="Дневной лимит пилота в долларах"></div><button id="enableHintPilot">Включить с лимитом</button><button class="primary" id="startHintPilot">Запустить пилот</button></div><div id="pilotResults" class="list"><div class="empty">Пилотных задач пока нет.</div></div></article>
 <article class="panel span6"><h2>Устаревшие задачи / держатели</h2><div class="list" id="staleList"><div class="empty">Загрузка…</div></div></article>
 <article class="panel span6"><h2>Задачи и текущие держатели</h2><div class="list scroll" id="tasks"></div></article>
 <article class="panel span6"><h2>Агенты и расписания</h2><div id="agents"></div><h3>Расписания</h3><div id="schedules"></div></article>
 <article class="panel span6"><h2>Очередь запусков и расходы</h2><div id="runs"></div><h3>Расходы по дням (microUSD)</h3><div id="costs"></div></article>
 <article class="panel span6"><h2>Предложения и публикации</h2><div id="proposals"></div><h3>Публикации</h3><div id="publications"></div></article>
-<article class="panel span12"><div class="split"><h2>Команда владельца (JSON)</h2><span class="small">API проверит схему и revision</span></div><div class="warning">Команды меняют workflow-данные, но не продуктовые данные. Запись описания агента, enqueue и schedule не активируют агентов. Поле enabled:true запрещено интерфейсом; активация исключена.</div>
+ <article class="panel span12"><div class="split"><h2>Команда владельца (JSON)</h2><span class="small">API проверит схему и revision</span></div><div class="warning">Команды меняют workflow-данные, но не продуктовые данные. Запись описания агента, enqueue и schedule не активируют агентов. Поле enabled:true запрещено в JSON-редакторе; включение возможно только отдельной подтверждённой кнопкой пилота.</div>
 <p class="hint">Выберите пример, заполните реальные идентификаторы и отправьте. Команда control будет принудительно сохранена с enabled:false.</p><div class="templates" id="templates"></div><label for="commandJson">JSON команды</label><textarea id="commandJson" spellcheck="false" aria-label="JSON команды владельца"></textarea><button id="submitCommand" class="primary">Отправить команду</button></article>
 <article class="panel span12"><div class="split"><h2>Журнал событий</h2><span class="small" id="journalCount"></span></div><div id="journal" class="list scroll"></div></article>
 </section>
@@ -50,7 +51,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
 <script>
 (function(){
   "use strict";
-  var API="/api/admin/ai-crew", csrf="", payload=null, models=[], modelEnvironment="", busy=false;
+  var API="/api/admin/ai-crew", csrf="", payload=null, models=[], modelEnvironment="", busy=false, pilotBusy=false, pilotBlocked=false, pilotPoll=null, pilotIntent=0;
   var $=function(id){return document.getElementById(id)};
   function text(value){if(value===null||value===undefined)return "—";if(typeof value==="string")return value;if(typeof value==="number"||typeof value==="boolean")return String(value);try{return JSON.stringify(value)}catch(_){return "[не удалось отобразить]"}}
   function node(tag, className, value){var el=document.createElement(tag);if(className)el.className=className;if(value!==undefined)el.textContent=text(value);return el}
@@ -78,7 +79,34 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
     renderJournal(state.journal||[]);
     if(state.probe){$("probeStatus").textContent="Сохранённый probe: "+state.probe.status+" · "+state.probe.modelId+" · "+when(state.probe.at)+(state.probe.usage?" · usage "+text(state.probe.usage):"");}
     else $("probeStatus").textContent=data.environment==="production"?"Одноразовый probe ещё не отмечен.":"Probe разрешён только в production.";
-    updateProbe();
+    updateProbe();renderPilotResults(state);updatePilotButtons();
+  }
+  function findOpenPilot(state){return (state.tasks||[]).find(function(t){return t.hintPilot&&!t.closed})||null}
+  function renderPilotResults(state){
+    var el=$("pilotResults");clear(el);var tasks=(state.tasks||[]).filter(function(t){return t.hintPilot});
+    if(!tasks.length){empty(el,"Пилотных задач пока нет.");return}
+    tasks.slice().reverse().forEach(function(task){
+      var p=task.hintPilot||{}, box=node("div","item");
+      box.appendChild(node("strong","","Пилот Hint · "+(p.status||"—")+(task.closed?" · закрыта":"")));
+      box.appendChild(node("div","muted","Задача "+task.id+" · кандидат: "+text(p.candidate)));
+      if(p.status==="owner"&&state.control&&state.control.enabled===false)box.appendChild(node("div","muted","Пилот завершён · контроль автоматически выключен."));
+      var docs=state.documents||[], runs=(state.runs||[]).filter(function(r){return r.taskId===task.id}), agents=state.agents||[];
+      var proposal=p.proposalId?docs.find(function(d){return d.id===p.proposalId}):null;
+      var review=p.reviewId?docs.find(function(d){return d.id===p.reviewId}):null;
+      box.appendChild(node("div","muted","Паша · предложение "+(proposal?"("+p.proposalId+"): "+proposal.text:"ещё не получено")));
+      box.appendChild(node("div","muted","Фома · вердикт "+(p.verdict==="confirmed"?"подтверждено":p.verdict==="not_confirmed"?"не подтверждено":"ожидается")+(review?" · документ "+p.reviewId+": "+review.text:"")));
+      var known=0, knownCount=0, reserved=0, hasUnknownCost=false, hasUnknownReservation=false;
+      runs.forEach(function(r){if(typeof r.cost==="number"&&Number.isFinite(r.cost)){known+=r.cost;knownCount++}else if(r.status==="unknown"||r.status==="running")hasUnknownCost=true;if(r.status==="unknown"||r.status==="running"){if(typeof r.reserved==="number"&&Number.isFinite(r.reserved))reserved+=r.reserved;else hasUnknownReservation=true}});
+      box.appendChild(node("div","muted","Фактическая цена по учтённым токенам: "+(hasUnknownCost?"неизвестна целиком; известная часть "+fmtUsd(known):fmtUsd(known))+" · оставшийся резерв: "+(hasUnknownReservation?"неизвестно":fmtUsd(reserved))+(knownCount?" · учтено запусков: "+knownCount:"")));
+      ["product-manager-specialist","Hint-lg-qa-role"].forEach(function(id){var agent=agents.find(function(a){return a.agentId===id}), usageRuns=runs.filter(function(r){return r.agentId===id}), usage=usageRuns.reduce(function(sum,r){if(r.usage){sum.input+=Number(r.usage.input_tokens)||0;sum.output+=Number(r.usage.output_tokens)||0;sum.known++}else sum.unknown++;return sum},{input:0,output:0,known:0,unknown:0}), prefix=(id==="product-manager-specialist"?"Паша":"Фома")+" · "+id+" · "+(agent?"ставки "+agent.inputMicroUsdPerToken+"/"+agent.outputMicroUsdPerToken+" microUSD/token":"ставки недоступны");box.appendChild(node("div","muted",prefix+" · input "+(usage.known?usage.input:"неизвестно")+" · output "+(usage.known?usage.output:"неизвестно")+(usage.unknown?" · usage неизвестно для "+usage.unknown+" запуска(ов)":"")))});
+      el.appendChild(box)
+    });
+    schedulePilotPoll(state);
+  }
+  function schedulePilotPoll(state){
+    if(pilotPoll){clearTimeout(pilotPoll);pilotPoll=null}
+    var active=(state.tasks||[]).some(function(t){return t.hintPilot&&!t.closed&&(t.hintPilot.status==="author"||t.hintPilot.status==="review")});
+    if(active)pilotPoll=setTimeout(function(){request("",{method:"GET"}).then(function(data){render(data)}).catch(function(){if(!pilotBlocked)setMessage("Не удалось обновить состояние пилота. Используйте «Обновить состояние» для проверки.","error")})},5000)
   }
   function renderStale(rows){var el=$("staleList");clear(el);if(!rows.length){empty(el,"Устаревших незакрытых задач нет.");return}rows.forEach(function(t){item(el,(t.phase||"")+" · "+(t.holder||"держатель не указан"),"Задача "+t.taskId+" · последнее обновление "+when(t.lastEntryAt))})}
   function renderTasks(rows){var el=$("tasks");clear(el);if(!rows.length){empty(el,"Задач пока нет.");return}rows.slice().reverse().forEach(function(t){var step=(t.steps||[]).slice(-1)[0]||{};item(el,t.title||t.id,(t.closed?"закрыта":"этап: "+t.phase)+" · держатель: "+(step.holder||"—")+" · обновлено: "+when(step.updatedAt)+" · ID: "+t.id)})}
@@ -89,14 +117,70 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
   function renderProposals(docs,pubs){var el=$("proposals");clear(el);if(!docs.length)empty(el,"Предложений нет.");else docs.slice().reverse().forEach(function(d){item(el,d.status+" · "+d.agentId+" · "+when(d.at),d.text+" · task "+d.taskId+" · run "+d.runId)});
     var p=$("publications");clear(p);if(!pubs.length)empty(p,"Публикаций нет.");else pubs.slice().reverse().forEach(function(x){item(p,x.commit+" · "+when(x.at),x.fixes+" · task "+x.taskId+" · "+x.actor)})}
   function renderJournal(rows){var el=$("journal");clear(el);$("journalCount").textContent=rows.length+" событий";if(!rows.length){empty(el,"Журнал пуст.");return}rows.slice().reverse().forEach(function(e){var box=node("div","item");box.appendChild(node("strong","",e.kind+" · "+when(e.at)));box.appendChild(node("div","muted","actor: "+e.actor+" · "+text(e.detail)));el.appendChild(box)})}
-  async function request(path,options){var opt=options||{};opt.headers=Object.assign({"Accept":"application/json"},opt.headers||{});if(opt.body)opt.headers["Content-Type"]="application/json";if(opt.method==="POST")opt.headers["x-crew-csrf"]=csrf;
+  async function request(path,options){var opt=options||{};opt.cache="no-store";opt.credentials="same-origin";opt.headers=Object.assign({"Accept":"application/json"},opt.headers||{});if(opt.body)opt.headers["Content-Type"]="application/json";if(opt.method==="POST")opt.headers["x-crew-csrf"]=csrf;
     var response=await fetch(API+path,opt), data;try{data=await response.json()}catch(_){data={error:"Ответ сервера не является JSON"}}
     if(!response.ok)throw Error(data.error||("HTTP "+response.status));return data}
-  async function refresh(){if(busy)return;busy=true;setMessage("Запрашиваем актуальное состояние…");try{var data=await request("",{method:"GET"});render(data);setMessage("Состояние получено от сервера.","good")}catch(e){setMessage("Не удалось получить состояние: "+e.message+". Данные на экране могут быть устаревшими.","error")}finally{busy=false}}
+  async function refresh(manual){if(busy)return;busy=true;setMessage("Запрашиваем актуальное состояние…");try{var data=await request("",{method:"GET"});render(data);if(manual===true)pilotBlocked=false;updatePilotButtons();setMessage("Состояние получено от сервера.","good")}catch(e){setMessage("Не удалось получить состояние: "+e.message+". Данные на экране могут быть устаревшими.","error")}finally{busy=false}}
+  function updatePilotButtons(){var disabled=pilotBusy||pilotBlocked||!pilotStateValid(payload),state=payload&&payload.state,open=state&&findOpenPilot(state),prepared=open&&open.hintPilot.status==="prepared"&&open.phase==="analysis";
+    $("prepareHintPilot").disabled=!!(disabled||open||state.control.enabled||state.control.dailyLimitMicroUsd!==0);
+    $("enableHintPilot").disabled=!!(disabled||!prepared||state.control.enabled);
+    $("startHintPilot").disabled=!!(disabled||!prepared||!state.control.enabled||state.control.dailyLimitMicroUsd<=0)}
+  function pilotStateValid(data){return !!data&&data.initialized===true&&data.environment==="production"&&data.state&&Number.isSafeInteger(data.state.revision)&&data.state.control}
+  async function pilotAction(kind){
+    if(pilotBusy||pilotBlocked)return;
+    var limitRaw=$("pilotLimitUsd").value;
+    var confirmations={prepare:"Вы уверены? Подготовить production-пилот Hint по задержкам? Ставки будут зафиксированы, но агенты не запустятся.",enable:"Вы уверены? Включить AI Crew с дневным лимитом $"+limitRaw+"? Это разрешит расходы пилота.",start:"Вы уверены? Запустить подготовленный пилот Hint? Будут выполнены два анализа с возможными расходами."};
+    if(!window.confirm(confirmations[kind]))return;
+    pilotBusy=true;var intent=++pilotIntent;updatePilotButtons();setMessage("Получаем свежие данные и проверяем условия пилота…");
+    var writeAttempted=false;
+    try{
+      var fresh=await request("",{method:"GET"});
+      csrf=typeof fresh.csrf==="string"?fresh.csrf:"";
+      if(!pilotStateValid(fresh))throw Error("Нужна инициализированная production-среда и свежая revision.");
+      render(fresh);
+      var state=fresh.state, open=findOpenPilot(state), command;
+      if(kind==="prepare"){
+        if(state.control.enabled!==false||state.control.dailyLimitMicroUsd!==0||open)throw Error("Подготовка разрешена только при выключенном контроле, лимите 0 и отсутствии открытого пилота.");
+        command={kind:"hint_pilot_prepare",candidate:"latency",ratesConfirmed:true};
+      }else if(kind==="enable"){
+        var raw=limitRaw;
+        if(typeof raw!=="string"||raw.length>32||!/^\d+(?:\.\d{1,6})?$/.test(raw))throw Error("Введите положительную сумму без экспоненты, максимум с 6 знаками после точки.");
+        var parts=raw.split("."), whole=BigInt(parts[0]), fraction=BigInt(((parts[1]||"")+"000000").slice(0,6)), microsBig=whole*1000000n+fraction;
+        if(microsBig<=0n||microsBig>100000000000n)throw Error("Лимит должен быть больше 0 и не превышать 100000 USD.");
+        if(!open||!open.hintPilot||open.hintPilot.status!=="prepared"||open.phase!=="analysis"||open.closed||state.control.enabled!==false)throw Error("Включение доступно только для свежего подготовленного открытого анализа при выключенном контроле.");
+        if(!Number.isInteger(state.control.staleHours)||state.control.staleHours<1||state.control.staleHours>8760)throw Error("Свежий срок устаревания некорректен.");
+        command={kind:"control",enabled:true,dailyLimitMicroUsd:Number(microsBig),staleHours:state.control.staleHours};
+      }else{
+        if(!open||!open.hintPilot||open.hintPilot.status!=="prepared"||open.phase!=="analysis"||open.closed||state.control.enabled!==true||!Number.isFinite(state.control.dailyLimitMicroUsd)||state.control.dailyLimitMicroUsd<=0)throw Error("Запуск доступен только для свежего подготовленного открытого анализа при включённом положительном лимите.");
+        command={kind:"hint_pilot_start",taskId:open.id,ownerApproved:true};
+      }
+      if(intent!==pilotIntent)throw Error("Действие отменено аварийным выключением.");
+      writeAttempted=true;
+      var result=await request("/command",{method:"POST",body:JSON.stringify({revision:state.revision,command:command})});
+      if(!result||result.saved!==true)throw Error("Нет однозначного подтверждения saved=true.");
+      setMessage("Действие пилота принято сервером · "+text(result),"good");
+      try{var after=await request("",{method:"GET"});render(after);
+        if(!pilotStateValid(after)||after.state.revision<=state.revision)throw Error("Revision не увеличилась после записи.");
+        var found=findOpenPilot(after.state);
+        if(kind==="prepare"&&(!found||found.hintPilot.candidate!=="latency"||found.hintPilot.status!=="prepared"||after.state.control.enabled||after.state.control.dailyLimitMicroUsd!==0))throw Error("Состояние подготовки не совпало.");
+        if(kind==="enable"&&(after.state.control.enabled!==true||after.state.control.dailyLimitMicroUsd!==command.dailyLimitMicroUsd))throw Error("Состояние включения не совпало.");
+        if(kind==="start"&&(!found||found.id!==command.taskId||["author","review","owner"].indexOf(found.hintPilot.status)<0))throw Error("Состояние запуска не совпало.");
+        setMessage("Состояние перечитано и проверено после подтверждённого действия.","good")}
+      catch(readError){pilotBlocked=true;setMessage("СТОП. Действие подтверждено, но проверка повторного чтения не прошла: "+readError.message+". Новые действия заблокированы до ручного обновления.","error")}
+    }catch(e){
+      if(writeAttempted){
+        pilotBlocked=true;setMessage("СТОП. Результат записи неоднозначен или отклонён: "+e.message+". Запись не повторялась; перечитываем состояние для диагностики. Новые действия заблокированы до ручного обновления.","error");
+        try{var diagnosis=await request("",{method:"GET"});render(diagnosis)}catch(readError){setMessage("Результат записи неизвестен: "+e.message+". Диагностическое чтение также не удалось: "+readError.message+". Запись не повторялась; нажмите «Обновить состояние».","error")}
+      }else setMessage("Действие не выполнено: "+e.message,"error");
+    }finally{pilotBusy=false;updatePilotButtons()}
+  }
 async function post(path,body,success){if(busy)return;busy=true;setMessage("Ожидаем подтверждение сервера…");var confirmed=false;try{var result=await request(path,{method:"POST",body:JSON.stringify(body||{})});setMessage(success+" · "+text(result),"good");confirmed=true}catch(e){setMessage("Сервер не подтвердил операцию: "+e.message+". Обновите состояние перед повтором.","error")}finally{busy=false}if(confirmed)await refresh()}
-  $("refresh").addEventListener("click",refresh);
+  $("refresh").addEventListener("click",function(){refresh(true)});
+  $("prepareHintPilot").addEventListener("click",function(){pilotAction("prepare")});
+  $("enableHintPilot").addEventListener("click",function(){pilotAction("enable")});
+  $("startHintPilot").addEventListener("click",function(){pilotAction("start")});
   $("initialize").addEventListener("click",function(){if(!window.confirm("Инициализировать AI Crew? Будет создана новая таблица с выключенными агентами и бюджетом 0. Продолжить?"))return;post("/initialize",{},"Инициализация подтверждена")});
-  $("disable").addEventListener("click",function(){if(!window.confirm("Аварийно выключить AI Crew на сервере? Это изменит переключатель и остановит локальный runtime."))return;post("/disable",{},"Запрос аварийного выключения подтверждён")});
+  $("disable").addEventListener("click",function(){if(!window.confirm("Аварийно выключить AI Crew на сервере? Это изменит переключатель и остановит локальный runtime."))return;pilotIntent++;post("/disable",{},"Запрос аварийного выключения подтверждён")});
   $("saveControl").addEventListener("click",function(){var limit=Number($("dailyLimit").value),hours=Number($("staleHours").value);if(!Number.isSafeInteger(limit)||limit<0||limit>100000000000){setMessage("Бюджет должен быть целым числом от 0 до 100000000000 microUSD.","error");return}if(!Number.isInteger(hours)||hours<1||hours>8760){setMessage("Срок устаревания должен быть целым числом от 1 до 8760 часов.","error");return}post("/command",{revision:payload&&payload.state?payload.state.revision:NaN,command:{kind:"control",enabled:false,dailyLimitMicroUsd:limit,staleHours:hours}},"Настройки выключенного контроля сохранены")});
   $("loadModels").addEventListener("click",async function(){var button=$("loadModels");button.disabled=true;setMessage("Запрашиваем реальные модели у Anthropic…");try{var result=await request("/models",{method:"GET"});models=Array.isArray(result.models)?result.models.filter(function(m){return m&&typeof m.id==="string"}):[];modelEnvironment=result.environment||"";var select=$("modelSelect");clear(select);if(!models.length){select.appendChild(new Option("Ответ не содержит model ID",""));setMessage("Модели не подтверждены: ответ не содержит ID.","error")}else{select.appendChild(new Option("Выберите модель…",""));models.forEach(function(m){select.appendChild(new Option(m.id,m.id))});setMessage("Получены ID из фактического ответа Anthropic · "+text(result.source),"good")}updateProbe()}catch(e){models=[];clear($("modelSelect"));$("modelSelect").appendChild(new Option("Список недоступен",""));setMessage("Не удалось подтвердить модели: "+e.message,"error");updateProbe()}finally{button.disabled=false}});
   function updateProbe(){var state=payload&&payload.state;var unused=state&&!state.probe;var allowed=payload&&payload.environment==="production"&&modelEnvironment==="production"&&models.length>0&&unused&&!busy;$("probe").disabled=!allowed}

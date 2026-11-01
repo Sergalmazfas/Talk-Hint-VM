@@ -96,6 +96,14 @@ export class CrewRuntime {
                   log(s, run.agentId, "hint_pilot_handoff", { taskId: task.id, documentId: doc.id,
                     status: task.hintPilot.status, verdict: task.hintPilot.verdict ?? null,
                     ownerAcceptance: false }, run.completedAt);
+                  if (task.hintPilot.status === "owner") {
+                    // Same transaction as Foma's result: no enabled window
+                    // after a completed chain. Preserve the owner's limit.
+                    s.control.enabled = false; s.control.epoch++;
+                    log(s, "production-server", "hint_pilot_auto_off", { taskId: task.id,
+                      dailyLimitMicroUsd: s.control.dailyLimitMicroUsd, epoch: s.control.epoch,
+                      reason: "chain_complete_owner_review_required" }, run.completedAt);
+                  }
                 }
               }
             }

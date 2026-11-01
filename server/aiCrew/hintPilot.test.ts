@@ -102,6 +102,7 @@ describe("Hint pilot Pasha → Foma → owner", () => {
     const runtime = new CrewRuntime(m, p, "production", () => new Date(at));
     await runtime.tick();
     expect(m.state.tasks[0].hintPilot?.status).toBe("review");
+    expect(m.state.control.enabled).toBe(true);
     expect(m.state.documents[0].status).toBe("proposed");
     expect(m.state.runs[1]).toMatchObject({ status: "queued", agentId: HINT_AGENTS[1].agentId });
     expect(p.message).toHaveBeenCalledTimes(1);
@@ -112,6 +113,8 @@ describe("Hint pilot Pasha → Foma → owner", () => {
     expect(m.state.tasks[0]).toMatchObject({ phase: "analysis", closed: false, hintPilot: { status: "owner", verdict: "confirmed" } });
     expect(m.state.tasks[0].steps.at(-1)?.holder).toBe("owner");
     expect(m.state.documents).toHaveLength(2);
+    expect(m.state.control).toMatchObject({ enabled: false, dailyLimitMicroUsd: 1000000, epoch: 2 });
+    expect(m.state.journal.filter(e => e.kind === "hint_pilot_auto_off")).toHaveLength(1);
     expect(pilotReviewComplete(m.state, m.state.tasks[0])).toBe(true);
     expect(m.state.budget["2026-11-01"].spent).toBe(27000); // 2k*2+500*10 + 2k*4+500*20
     applyOwnerCommand(m.state, { kind: "advance", taskId: m.state.tasks[0].id, holder: "owner", note: "Проверено два разбора",
@@ -134,6 +137,8 @@ describe("Hint pilot Pasha → Foma → owner", () => {
       const r = new CrewRuntime(m, p, "production"); await r.tick(); await r.tick();
       expect(m.state.tasks[0].hintPilot?.verdict).toBe("not_confirmed");
       expect(m.state.tasks[0].phase).toBe("analysis");
+      expect(m.state.control).toMatchObject({ enabled: false, dailyLimitMicroUsd: 1000000 });
+      expect(m.state.journal.some(e => e.kind === "hint_pilot_auto_off")).toBe(true);
     });
   it("keeps Foma queued when budget cannot reserve 2000 output tokens, never retries Pasha", async () => {
     const m = prepared(), p = provider(); start(m);

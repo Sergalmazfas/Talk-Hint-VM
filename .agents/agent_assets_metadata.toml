@@ -2777,3 +2777,17 @@ mtime_ms = 1793550948730
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9a06e2f4-8789-450e-82c3-c1a8b1e20697/a5573969-28c8-4fb4-87fe-5f6817327f8a"
 storage_version_token = "1793550957038069"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "RchNTTfDUVS1yszuEENnW"
+uri = "file://generated-artifacts/Hint_latency_owner_panel_Claudiy_review.zip"
+type = "unspecified"
+title = "Hint: кнопки пилота — ZIP Клавдию"
+description = "Скачать и передать Клавдию на сверку: diff, исходники, 4 части полного прогона, журнал проверок и инструкция после Publish. Агентов не запускали."
+logical_id = "7ac59cdc-db8d-4b8d-8814-399f79861a99"
+content_hash = "sha256:ba880548904842616a9dc819f665ac59087d299550668cd5161b9c25533cd3d6"
+size = 307102
+mtime_ms = 1793551737018
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7ac59cdc-db8d-4b8d-8814-399f79861a99/3c24a95e-427b-4a8d-8e2d-176b6fbde2c7"
+storage_version_token = "1793551744448624"
+content_type = "application/octet-stream"
