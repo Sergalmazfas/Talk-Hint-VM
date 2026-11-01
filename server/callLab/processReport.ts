@@ -66,6 +66,13 @@ export function processReport(report: any) {
 }
 
 export function renderProcessLetter(report: any): { subject: string; body: string } {
+  const rendered = renderProcessLetterContent(report), v = report.code_version;
+  const versionLine = v && typeof v === "object"
+    ? `Версия кода звонка: ${v.commit ?? "commit неизвестен"}; source ${v.sourceHash ?? "неизвестен"}${v.dirty ? "; рабочая версия с изменениями" : ""}.`
+    : "Версия кода звонка: неизвестна (историческая запись без метки).";
+  return { ...rendered, body: `${rendered.body}\n\n${versionLine}` };
+}
+function renderProcessLetterContent(report: any): { subject: string; body: string } {
   const reports = Array.isArray(report.action_reports) ? report.action_reports : [];
   if (reports.length) {
     const section = reports.map(actionReportText).join("\n\n");

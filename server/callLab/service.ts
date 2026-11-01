@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { recordedCallVersion } from "../codeVersion";
 import { isBenchmarkAdmin } from "../benchmark/adminGate";
 import { GmailLabMail } from "./mail";
 import { startHintDaily } from "./dailyReport";
@@ -105,6 +106,7 @@ export async function bootstrapLab(pool: Pool, options: { expectedOwnerId?: stri
 export function unavailableReport(call: any, reason: string) {
   return {
     format: "talkhint.plab.call-report", version: 1, mode: "hint", call_id: call.call_sid,
+    code_version: recordedCallVersion(call),
     environment: environment(), synthetic: false, ended_at: call.ended_at, languages: [],
     duration_ms: Number.isFinite(Date.parse(call.ended_at) - Date.parse(call.started_at))
       ? Date.parse(call.ended_at) - Date.parse(call.started_at) : null,
@@ -148,6 +150,8 @@ export async function hintLabTick(pool: Pool, dependencies: {
     const finishWithProduct = async (key: string, source: any, report: any) => {
       const result = await (dependencies.product ?? attachProductFollowup)(pool, report, source,
         { owner: config.owner!, environment: config.environment });
+      result.code_version = source?.code_version ?? report?.code_version ?? null;
+      result.code_version_basis = result.code_version ? "recorded_at_call_start" : "historical_unknown";
       result.action_reports ??= labActionReports(result, new Date().toISOString());
       const needsDecision = result.product_followup.issues.some((i: any) => i.decision === "awaiting_owner");
       if (needsDecision) for (const r of result.action_reports)

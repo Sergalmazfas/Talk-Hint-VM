@@ -1,3 +1,4 @@
+import { recordedCallVersion } from "../codeVersion";
 let registeredOwner: string | undefined;
 export function registerLabSourceOwner(id: string) { registeredOwner = id; }
 export function hintSourceMarker(userId: string | undefined) {
@@ -20,6 +21,7 @@ export function authorizedHintSource(call: any, control: any, environment: strin
   const entries = Array.isArray(latency?.entries) ? latency.entries : [];
   return {
     call_id: call.call_sid, mode: "hint", environment, synthetic: false,
+    code_version: recordedCallVersion(call),
     owner_verified: true, processing_authorized: true,
     source_basis: "Владелец разрешил внутренний разбор уже сохранённого текста/телеметрии; новых аудиозаписей нет",
     ended_at: new Date(call.ended_at).toISOString(),

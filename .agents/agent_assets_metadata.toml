@@ -2749,3 +2749,17 @@ mtime_ms = 1793545377472
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6608340d-3d2b-4fe2-86c6-9de47e317cc2/8fc32cda-904e-41cc-8a13-cfe135f69a83"
 storage_version_token = "1793545382013954"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "VmwJNjnUJ9BtctLlmGUJ3"
+uri = "file://generated-artifacts/AI_Crew_launch_Claudiy_review.zip"
+type = "unspecified"
+title = "AI Crew — ZIP на сверку Клавдию"
+description = "Код и diff, полный прогон 4 частей, логи и ограничения, план после Publish. Агентов и модели не включали; production probe ещё не выполнен."
+logical_id = "55104783-3df4-4935-8ea2-0753bd587f3a"
+content_hash = "sha256:402e3ef319858b1ee33ad057f7896443583adafe2a2759628317288f1b216f6e"
+size = 413793
+mtime_ms = 1793548078634
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/55104783-3df4-4935-8ea2-0753bd587f3a/e8be3312-44d2-42bd-8461-dbcc5409663c"
+storage_version_token = "1793548131414009"
+content_type = "application/octet-stream"

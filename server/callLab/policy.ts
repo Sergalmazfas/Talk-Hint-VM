@@ -1,3 +1,4 @@
+import { recordedCallVersion } from "../codeVersion";
 /** Owner decision 2026-10-28. Never authorizes other users or new recordings. */
 export const labRelease = {
   version: "owner-calls-v6",
@@ -27,6 +28,7 @@ export function modeNotice(call: any, environment: string) {
   return {
     format: "talkhint.plab.mode-notice", version: 1, lab_release: labRelease,
     mode, call_id: call.call_sid, environment, synthetic: false,
+    code_version: recordedCallVersion(call),
     execution: "mode_analysis_not_connected", qa_status: "НЕ ПРИМЕНИМО: разбор не подключён",
     ended_at: call.ended_at, analysis: null,
     letter: { subject: `Звонок в ${modeLabel(mode)} · разбор не подключён`,

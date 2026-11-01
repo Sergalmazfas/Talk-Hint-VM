@@ -4,6 +4,14 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 export { callLabControls, callLabJobs, callLabOutbox } from "./callLabSchema";
 
+// Separate runtime journal; no edits to the production/new-country model.
+// New rows are explicitly initialized OFF / zero budget by owner readiness.
+export const aiCrewRuntimeState = pgTable("ai_crew_runtime_state", {
+  environment: text("environment").primaryKey(),
+  state: jsonb("state").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),

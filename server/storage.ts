@@ -18,6 +18,7 @@ import { db, pool, isDatabaseAvailable } from "./db";
 import { eq, and, or, sql, gt, lte, desc, asc, getTableColumns } from "drizzle-orm";
 import { configureVoiceWebhook } from "./twilioService";
 import { resolveProductionBaseUrl } from "./baseUrl";
+import { stampCallMetadata } from "./codeVersion";
 
 export const MAX_USER_CONTEXT_LENGTH = 4000;
 
@@ -860,7 +861,7 @@ export class DatabaseStorage implements IStorage {
   
   async createCall(call: InsertCall): Promise<Call> {
     try {
-      const [newCall] = await db.insert(calls).values(call).returning();
+      const [newCall] = await db.insert(calls).values({ ...call, metadata: stampCallMetadata(call.metadata) }).returning();
       recordWriteSuccess("calls");
       return newCall;
     } catch (error) {
@@ -873,7 +874,13 @@ export class DatabaseStorage implements IStorage {
   
   async updateCall(id: string, updates: Partial<Call>): Promise<Call | undefined> {
     try {
-      const [updated] = await db.update(calls).set(updates).where(eq(calls.id, id)).returning();
+      // Immutable call-start version survives metadata replacements. Historical
+      // unknown stays null, never relabelled with the later analysis build.
+      const safe = updates.metadata !== undefined ? { ...updates,
+        metadata: sql`jsonb_set(CASE WHEN jsonb_typeof(${JSON.stringify(updates.metadata)}::jsonb)='object'
+          THEN ${JSON.stringify(updates.metadata)}::jsonb ELSE '{}'::jsonb END,
+          '{codeVersion}',COALESCE(${calls.metadata}->'codeVersion','null'::jsonb))` } : updates;
+      const [updated] = await db.update(calls).set(safe).where(eq(calls.id, id)).returning();
       recordWriteSuccess("calls");
       return updated;
     } catch (error) {

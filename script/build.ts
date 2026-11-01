@@ -5,6 +5,7 @@ import { resolve, join } from "node:path";
 import { createHash } from "node:crypto";
 import { verifyMcpBuild } from "./mcp-build-verification";
 import { checkHintLabRuntime } from "../server/callLab/process";
+import { sourceVersion } from "../server/codeVersion";
 
 // Publishing no longer depends on the retired external Tutor Engine.
 // Local application/MCP bundle checks remain required below.
@@ -80,6 +81,7 @@ async function buildAll() {
     metafile: true,
     define: {
       "process.env.NODE_ENV": '"production"',
+      "__TALKHINT_BUILD__": JSON.stringify(sourceVersion()),
     },
     minify: true,
     external: externals,
