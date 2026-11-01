@@ -9,6 +9,8 @@ import { applyOwnerCommand, commandSchema, initialState, log, staleTasks } from 
 import { AnthropicCrewProvider } from "./anthropic";
 import { CrewRuntime } from "./runtime";
 import { crewControlPage } from "./controlPage";
+import { readHintEvidence } from "./hintEvidence";
+import { HINT_AGENTS, HINT_PRICING_URL } from "./hintPilot";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 export function registerCrewRoutes(app: Express) {
@@ -28,7 +30,7 @@ export function registerCrewRoutes(app: Express) {
     // require the owner session token as well as the existing Origin boundary.
     if (req.get("authorization")?.startsWith("Bearer ")) return next();
     const token = String(req.get("x-crew-csrf") ?? ""), expected = String(req.session?.crewCsrf ?? "");
-    if (!expected || token.length !== expected.length || !timingSafeEqual(Buffer.from(token), Buffer.from(expected)))
+    if (!expected || !/^[a-f0-9]{64}$/.test(token) || token.length !== expected.length || !timingSafeEqual(Buffer.from(token), Buffer.from(expected)))
       return res.status(403).json({ error: "CREW_CSRF_REQUIRED" });
     next();
   };
@@ -85,11 +87,21 @@ export function registerCrewRoutes(app: Express) {
     const parsed = commandSchema.safeParse(req.body?.command);
     if (!parsed.success || !Number.isSafeInteger(req.body?.revision)) return res.status(400).json({ error: "INVALID_CREW_COMMAND" });
     try {
-      const models = parsed.data.kind === "agent" ? (await provider.listModels()).map(m => m.id) : [];
-      await store().change(s => applyOwnerCommand(s, parsed.data, String(req.user!.id), new Date().toISOString(), models), req.body.revision);
+      const models = ["agent", "hint_pilot_prepare"].includes(parsed.data.kind) ? (await provider.listModels()).map(m => m.id) : [];
+      if (parsed.data.kind === "hint_pilot_prepare" && environment() !== "production") throw Error("PRODUCTION_EVIDENCE_ONLY");
+      const evidence = parsed.data.kind === "hint_pilot_prepare" ? await readHintEvidence(pool!, String(req.user!.id)) : undefined;
+      await store().change(s => applyOwnerCommand(s, parsed.data, String(req.user!.id), new Date().toISOString(), models, evidence), req.body.revision);
       if (parsed.data.kind === "control" && !parsed.data.enabled) runtime?.stopLocal();
       res.json({ saved: true, productChanged: false });
     } catch { res.status(409).json({ error: "COMMAND_NOT_CONFIRMED_RELOAD_STATE" }); }
+  });
+  app.get(api + "/hint-pilot", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    if (environment() !== "production") return res.status(409).json({ error: "PRODUCTION_EVIDENCE_ONLY" });
+    try {
+      res.json({ evidence: await readHintEvidence(pool!, String(req.user!.id)), agents: HINT_AGENTS,
+        pricingUrl: HINT_PRICING_URL, ratesStatus: "requires_owner_confirmation", agentsStarted: false });
+    } catch { res.status(503).json({ error: "HINT_EVIDENCE_UNAVAILABLE" }); }
   });
   app.post(api + "/probe", protect, async (req, res) => {
     if (environment() !== "production") return res.status(409).json({ error: "PRODUCTION_PROBE_ONLY" });

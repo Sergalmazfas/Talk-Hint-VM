@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { HINT_AGENTS, pilotReviewComplete, prepareHintPilot, startHintPilot, type HintPilot } from "./hintPilot";
+import type { HintEvidence } from "./hintEvidence";
 
 export const phases = ["problem", "analysis", "owner_decision", "code", "verification", "outcome"] as const;
 const text = z.string().trim().min(1).max(4000);
 export const commandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("hint_pilot_prepare"), candidate: z.enum(["latency", "usefulness", "unavailable"]),
+    ratesConfirmed: z.literal(true) }).strict(),
+  z.object({ kind: z.literal("hint_pilot_start"), taskId: z.string().uuid(), ownerApproved: z.literal(true) }).strict(),
   z.object({ kind: z.literal("control"), enabled: z.boolean(), dailyLimitMicroUsd: z.number().int().min(0).max(1e11),
     staleHours: z.number().int().min(1).max(8760) }).strict(),
   z.object({ kind: z.literal("task"), title: text, holder: text, problem: text }).strict(),
@@ -12,7 +17,7 @@ export const commandSchema = z.discriminatedUnion("kind", [
     testedCommit: z.string().regex(/^[a-f0-9]{7,40}$/).optional(), actual: text.optional(), met: z.boolean().optional(),
     laboratoryActor: text.optional(), reviewerActor: text.optional() }).strict(),
   z.object({ kind: z.literal("publication"), taskId: z.string().uuid(), commit: z.string().regex(/^[a-f0-9]{7,40}$/), fixes: text }).strict(),
-  z.object({ kind: z.literal("agent"), agentId: z.string().regex(/^[a-z0-9._-]{1,100}$/),
+  z.object({ kind: z.literal("agent"), agentId: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/),
     modelId: z.string().min(1).max(160), inputMicroUsdPerToken: z.number().int().positive().max(10000),
     outputMicroUsdPerToken: z.number().int().positive().max(10000) }).strict(),
   z.object({ kind: z.literal("enqueue"), taskId: z.string().uuid(), agentId: z.string().max(100),
@@ -21,7 +26,7 @@ export const commandSchema = z.discriminatedUnion("kind", [
     everyMinutes: z.number().int().min(5).max(43200), nextAt: z.string().datetime() }).strict(),
 ]);
 export type Command = z.infer<typeof commandSchema>;
-export type Task = { id: string; title: string; phase: typeof phases[number]; closed: boolean;
+export type Task = { id: string; title: string; phase: typeof phases[number]; closed: boolean; hintPilot?: HintPilot;
   steps: { phase: typeof phases[number]; holder: string; updatedAt: string; note: string; actor: string;
     expectation?: string; approved?: boolean; commit?: string; testedCommit?: string; actual?: string; met?: boolean;
     laboratoryActor?: string; reviewerActor?: string }[] };
@@ -48,9 +53,14 @@ export function log(s: CrewState, actor: string, kind: string, detail: unknown, 
   const task = typeof taskId === "string" ? s.tasks.find(t => t.id === taskId) : null;
   if (task && !task.closed) task.steps.at(-1)!.updatedAt = at;
 }
-export function applyOwnerCommand(s: CrewState, command: Command, actor: string, at: string, availableModels: string[] = []) {
+export function applyOwnerCommand(s: CrewState, command: Command, actor: string, at: string, availableModels: string[] = [], evidence?: HintEvidence) {
   const c = commandSchema.parse(command);
-  if (c.kind === "control") {
+  if (c.kind === "hint_pilot_prepare") {
+    if (!evidence) throw Error("SERVER_EVIDENCE_REQUIRED");
+    const task = prepareHintPilot(s, c.candidate, evidence, actor, at, availableModels);
+    log(s, actor, "hint_pilot_prepared", { taskId: task.id, evidenceHash: task.hintPilot!.evidenceHash,
+      ratesConfirmed: true, agentsStarted: false }, at);
+  } else if (c.kind === "control") {
     s.control = { ...c, epoch: s.control.epoch + 1 };
     delete (s.control as any).kind;
     log(s, actor, "control", s.control, at);
@@ -59,6 +69,8 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
       steps: [{ phase: "problem", holder: c.holder, updatedAt: at, note: c.problem, actor }] };
     s.tasks.push(task); log(s, actor, "task_created", { taskId: task.id }, at);
   } else if (c.kind === "agent") {
+    if (HINT_AGENTS.some(a => a.agentId === c.agentId) && s.tasks.some(t => t.hintPilot && !t.closed))
+      throw Error("PILOT_RATES_AND_MODELS_FROZEN");
     if (!availableModels.includes(c.modelId)) throw Error("MODEL_NOT_VERIFIED");
     const { kind, ...agent } = c;
     s.agents = [...s.agents.filter(a => a.agentId !== c.agentId), agent];
@@ -66,7 +78,10 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
   } else {
     const task = s.tasks.find(t => t.id === c.taskId);
     if (!task) throw Error("TASK_NOT_FOUND");
-    if (c.kind === "publication") {
+    if (c.kind === "hint_pilot_start") {
+      startHintPilot(s, task, actor, at);
+      log(s, actor, "hint_pilot_start_authorized", { taskId: task.id }, at);
+    } else if (c.kind === "publication") {
       const code = [...task.steps].reverse().find(x => x.phase === "code" && x.commit === c.commit);
       if (!code) throw Error("PUBLICATION_WITHOUT_RECORDED_CODE");
       s.publications.push({ taskId: task.id, commit: c.commit, fixes: c.fixes, at, actor });
@@ -76,6 +91,9 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
       // The command records the completed current phase and hands off to the next.
       if (task.phase === "analysis" && (!c.laboratoryActor || !c.reviewerActor || c.laboratoryActor === c.reviewerActor))
         throw Error("INDEPENDENT_REVIEW_REQUIRED");
+      if (task.phase === "analysis" && task.hintPilot && (!pilotReviewComplete(s, task) ||
+          c.laboratoryActor !== HINT_AGENTS[0].agentId || c.reviewerActor !== HINT_AGENTS[1].agentId))
+        throw Error("PILOT_TWO_COMPLETED_EXECUTORS_REQUIRED");
       if (task.phase === "owner_decision" && (!c.approved || !c.expectation)) throw Error("OWNER_EXPECTATION_REQUIRED");
       if (task.phase === "code" && !c.commit) throw Error("CODE_COMMIT_REQUIRED");
       if (task.phase === "verification") {
@@ -100,6 +118,7 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
       }
       log(s, actor, "task_step", { taskId: task.id, completed, currentPhase: task.phase, closed: task.closed }, at);
     } else {
+      if (task.hintPilot) throw Error("PILOT_USES_DEDICATED_START_NOT_GENERIC_QUEUE");
       if (task.closed || task.phase !== "analysis") throw Error("ANALYSIS_TASK_REQUIRED");
       if (!s.agents.some(a => a.agentId === c.agentId)) throw Error("AGENT_NOT_CONFIGURED");
       if (c.kind === "schedule") {

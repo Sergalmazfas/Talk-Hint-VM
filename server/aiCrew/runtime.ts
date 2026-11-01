@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CREW_SYSTEM, type CrewProvider } from "./anthropic";
 import { log, type Agent, type CrewState } from "./domain";
 import type { StateStore } from "./store";
+import { finishPilotRun, HINT_MAX_OUTPUT, pilotInput } from "./hintPilot";
 
 export class CrewRuntime {
   private active = new Map<string, AbortController>();
@@ -31,10 +32,10 @@ export class CrewRuntime {
         if (!run) return null;
         const task = s.tasks.find(t => t.id === run.taskId), agent = s.agents.find(a => a.agentId === run.agentId);
         if (!task || task.closed || task.phase !== "analysis" || !agent) return null;
-        const input = JSON.stringify({ title: task.title, problem: task.steps[0].note,
+        const input = task.hintPilot ? pilotInput(s, task, agent.agentId, agent.modelId) : JSON.stringify({ title: task.title, problem: task.steps[0].note,
           analysis: task.steps.filter(x => x.phase === "analysis").at(-1)?.note });
-        if (Buffer.byteLength(input, "utf8") > 16000) throw Error("TASK_TOO_LARGE");
-        const maxTokens = 256;
+        if (Buffer.byteLength(input, "utf8") > (task.hintPilot ? 48000 : 16000)) throw Error("TASK_TOO_LARGE");
+        const maxTokens = HINT_MAX_OUTPUT;
         // No tools, images, caching or thinking. Conservative UTF-8 byte bound
         // plus framing margin; rates must be explicitly owner-supplied.
         const reserve = (Buffer.byteLength(input + CREW_SYSTEM, "utf8") + 4096) * agent.inputMicroUsdPerToken +
@@ -51,7 +52,7 @@ export class CrewRuntime {
       const controller = new AbortController();
       this.active.set(claimed.run.id, controller);
       let monitorBusy = false;
-      const timer = setTimeout(() => controller.abort(), 45000);
+      const timer = setTimeout(() => controller.abort(), 120000);
       const monitor = setInterval(async () => {
         if (monitorBusy) return;
         monitorBusy = true;
@@ -79,10 +80,25 @@ export class CrewRuntime {
           run.status = canSave ? "done" : "discarded";
           if (cost > run.reserved!) { s.control.enabled = false; s.control.epoch++; run.status = "discarded"; }
           if (run.status === "done") {
-            s.documents.push({ id: randomUUID(), taskId: run.taskId, runId: run.id, agentId: run.agentId,
-              at: run.completedAt, text: result.text.slice(0, 12000), status: "proposed" });
+            const doc = { id: randomUUID(), taskId: run.taskId, runId: run.id, agentId: run.agentId,
+              at: run.completedAt, text: result.text.slice(0, 16000), status: "proposed" as const };
+            s.documents.push(doc);
             const task = s.tasks.find(t => t.id === run.taskId);
-            if (task && !task.closed && task.phase === "analysis") task.steps.at(-1)!.updatedAt = run.completedAt;
+            if (task && !task.closed && task.phase === "analysis") {
+              task.steps.at(-1)!.updatedAt = run.completedAt;
+              if (task.hintPilot) {
+                // Exact requested model identity is required for pilot evidence.
+                if (result.model !== run.modelId) {
+                  run.status = "discarded";
+                  doc.text = "MODEL_ID_MISMATCH: результат не принят в пилот";
+                } else {
+                  finishPilotRun(s, task, doc.id, doc.text, run.completedAt);
+                  log(s, run.agentId, "hint_pilot_handoff", { taskId: task.id, documentId: doc.id,
+                    status: task.hintPilot.status, verdict: task.hintPilot.verdict ?? null,
+                    ownerAcceptance: false }, run.completedAt);
+                }
+              }
+            }
           }
           log(s, run.agentId, "run_settled", { runId: run.id, taskId: run.taskId, day: run.day, cost, usage: run.usage,
             modelRequested: run.modelId, modelEffective: result.model, status: run.status,

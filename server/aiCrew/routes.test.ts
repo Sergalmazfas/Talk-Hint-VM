@@ -3,7 +3,11 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import { initialState } from "./domain";
 const f=vi.hoisted(()=>({state:null as any, session:{} as any,
-  message:vi.fn(),models:vi.fn(),initialized:false,builtAt:"now"}));
+  message:vi.fn(),models:vi.fn(),evidence:vi.fn(),initialized:false,builtAt:"now"}));
+vi.mock("./hintEvidence",async importOriginal=>{
+ const actual=await importOriginal<typeof import("./hintEvidence")>();
+ return {...actual,readHintEvidence:(...args:any[])=>f.evidence(...args)};
+});
 vi.mock("../db",()=>({pool:{}}));
 vi.mock("../benchmark/adminGate",()=>({requireBenchmarkAdmin:(req:any,res:any,next:any)=>{
  if(req.get("x-owner")!=="yes")return res.sendStatus(403);req.user={id:"owner"};next();
@@ -31,6 +35,8 @@ beforeEach(async()=>{
  f.state=initialState();f.session={};f.initialized=true;f.builtAt="now";
  f.models.mockReset().mockResolvedValue([{id:"from-api",display_name:"actual model"}]);
  f.message.mockReset().mockResolvedValue({text:"OK",model:"from-api",usage:{input_tokens:1,output_tokens:1}});
+ f.evidence.mockReset().mockResolvedValue({version:1,calls:[{ref:"session-1",latency:{e2eP95Ms:4063},slaMs:1000,usage:{},errors:{}}],
+   reports:[],problems:[],limitations:[]});
  const app=express();app.use(express.json());app.use((req:any,_res,next)=>{req.session=f.session;next()});
  registerCrewRoutes(app);server=createServer(app);
  await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));base=`http://127.0.0.1:${(server.address()as any).port}`;
@@ -39,6 +45,36 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it("Hint evidence is owner-only, production-only, read-only and fails closed on unavailable source",async()=>{
+  vi.stubEnv("NODE_ENV","production");
+  expect((await fetch(base+"/api/admin/ai-crew/hint-pilot")).status).toBe(403);
+  expect(f.evidence).not.toHaveBeenCalled();
+  const r=await fetch(base+"/api/admin/ai-crew/hint-pilot",{headers});
+  expect(r.status).toBe(200);expect(f.evidence.mock.calls[0][1]).toBe("owner");
+  expect(f.state.revision).toBe(0);expect(f.message).not.toHaveBeenCalled();
+  f.evidence.mockRejectedValue(Error("source contains private text"));
+  const failed=await fetch(base+"/api/admin/ai-crew/hint-pilot",{headers});
+  expect(failed.status).toBe(503);expect(await failed.text()).not.toContain("private text");
+ });
+ it("prepares Hint only with CSRF, confirmed rates, actual models and CAS; does not start",async()=>{
+  const token=await csrf();vi.stubEnv("NODE_ENV","production");
+  f.models.mockResolvedValue([{id:"claude-sonnet-5-5"},{id:"claude-opus-5-5"}]);
+  const command={kind:"hint_pilot_prepare",candidate:"latency",ratesConfirmed:true};
+  expect((await post("/command",{revision:0,command})).status).toBe(403);
+  expect((await post("/command",{revision:0,command:{...command,ratesConfirmed:false}},token)).status).toBe(400);
+  expect((await post("/command",{revision:100,command},token)).status).toBe(409);
+  expect(f.state.tasks).toEqual([]);
+  expect((await post("/command",{revision:0,command},token)).status).toBe(200);
+  expect(f.state.tasks[0].hintPilot.status).toBe("prepared");
+  expect(f.state.control).toMatchObject({enabled:false,dailyLimitMicroUsd:0});
+  expect(f.state.runs).toEqual([]);expect(f.message).not.toHaveBeenCalled();
+  expect(f.state.revision).toBe(1);
+ });
+ it("rejects multibyte or malformed CSRF without an internal error",async()=>{
+  await csrf();
+  expect((await post("/disable",{},"é".repeat(64))).status).toBe(403);
+  expect((await post("/disable",{},"g".repeat(64))).status).toBe(403);
+ });
  it("denies anonymous requests and cookie writes without CSRF or Origin",async()=>{
   expect((await fetch(base+"/api/admin/ai-crew")).status).toBe(403);
   expect((await post("/disable",{})).status).toBe(403);

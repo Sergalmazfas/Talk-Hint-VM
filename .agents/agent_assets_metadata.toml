@@ -2763,3 +2763,17 @@ mtime_ms = 1793548078634
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/55104783-3df4-4935-8ea2-0753bd587f3a/e8be3312-44d2-42bd-8461-dbcc5409663c"
 storage_version_token = "1793548131414009"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "P1_oznCXhgJi0kS2fxMhF"
+uri = "file://generated-artifacts/Hint_pilot_Pasha_Foma_Claudiy_review.zip"
+type = "unspecified"
+title = "Пилот Hint — ZIP Клавдию"
+description = "Diff, исходники, все 4 части тестов, официальные ставки, реальные кандидаты задач и оценка цены. OFF/0 сохранены; платный пилот не запускался; Publish — только после сверки."
+logical_id = "9a06e2f4-8789-450e-82c3-c1a8b1e20697"
+content_hash = "sha256:fb5d975e7f1099f850271f422e6c5ec4cf18eb56cfbbf4ba7be2c4b74b708b1d"
+size = 304546
+mtime_ms = 1793550948730
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9a06e2f4-8789-450e-82c3-c1a8b1e20697/a5573969-28c8-4fb4-87fe-5f6817327f8a"
+storage_version_token = "1793550957038069"
+content_type = "application/octet-stream"

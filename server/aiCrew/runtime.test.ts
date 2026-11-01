@@ -53,7 +53,7 @@ describe("AI Crew launch boundaries",()=>{
  });
  it("serializes company budget reservations across two runtime instances",async()=>{
   const m=ready(),p=provider();
-  m.state.control.dailyLimitMicroUsd=7000;
+  m.state.control.dailyLimitMicroUsd=11000;
   m.state.runs.push({...m.state.runs[0],id:crypto.randomUUID(),eventId:crypto.randomUUID()});
   p.message.mockImplementation(async()=>({text:"p",model:"actual-id",usage:{input_tokens:10000,output_tokens:1000}}));
   await Promise.all([new CrewRuntime(m,p,"production",()=>new Date(at)).tick(),new CrewRuntime(m,p,"production",()=>new Date(at)).tick()]);
