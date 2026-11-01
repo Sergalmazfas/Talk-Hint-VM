@@ -2637,3 +2637,17 @@ mtime_ms = 1793535210531
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b727822d-08a4-492f-8ede-757486bda8ab/a789da35-8dd9-4df2-bd46-0c25e105c526"
 storage_version_token = "1793535216079119"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "2Z68absF0AxlBb6iHpSYZ"
+uri = "file://generated-artifacts/Maria_HEAD06_STOP_r1161.zip"
+type = "unspecified"
+title = "Мария HEAD.06 — отчёт об остановке и уточнённый план"
+description = "Свежая сверка r1161, текущая анкета, план с условием владельца, журнал без записей и проверка блокера. Production не изменён."
+logical_id = "9ec14ca8-9dee-48bf-a50f-981c213cb1ec"
+content_hash = "sha256:305369fc20d508e51aa8593220aaf83d38652ea23f400d4e93f4becdde575f57"
+size = 21410
+mtime_ms = 1793535529571
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9ec14ca8-9dee-48bf-a50f-981c213cb1ec/7039c3d5-dd63-4938-ac8c-c3d86f6a025c"
+storage_version_token = "1793535533597804"
+content_type = "application/octet-stream"
