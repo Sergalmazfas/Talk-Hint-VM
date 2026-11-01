@@ -2581,3 +2581,17 @@ mtime_ms = 1793504452238
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9cbaf2aa-b472-4e63-81a8-eb7ad1142fb4/72ce0f1f-8679-40b0-8412-b4a77a5212f4"
 storage_version_token = "1793504457544768"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "KU9x92iDHfXvlmXgO2mbd"
+uri = "file://generated-artifacts/Production_owner_policy_STOP_r1049.zip"
+type = "unspecified"
+title = "Production r1049 — отчёт об остановке"
+description = "Шаг 1 подтверждён повторным чтением. Журнал записи, сохранность паспорта, текущие анкеты Hint и сводка четырёх шардов. Шаги 2–5 не выполнены."
+logical_id = "141987f8-9f26-476f-b6d8-15a282b39740"
+content_hash = "sha256:6b815b99929f39adf55a273febc116722bc6fe107b1539c27760f31a6eb6743c"
+size = 394141
+mtime_ms = 1793506968205
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/141987f8-9f26-476f-b6d8-15a282b39740/5e13ca43-f5df-40a2-92c8-79be1d41e085"
+storage_version_token = "1793506983984376"
+content_type = "application/octet-stream"
