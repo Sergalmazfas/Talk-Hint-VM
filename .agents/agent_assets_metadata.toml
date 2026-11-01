@@ -2707,3 +2707,17 @@ mtime_ms = 1793539280220
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61f140e7-143a-40a9-8ab9-977a1d38aa4f/aa0a018d-aa36-4171-ae36-1c35826ca131"
 storage_version_token = "1793539294988903"
 content_type = "text/html"
+
+[[outputs]]
+id = "ANwUPhSaLdPAEqV1g_-2r"
+uri = "file://generated-artifacts/Secretary_STOP_before_write_review.zip"
+type = "unspecified"
+title = "Секретарь — план и журнал STOP до записи"
+description = "Согласованные ответы владельца, журнал отказа tools/list и последние прочитанные ссылки каталога. Production-записей: 0. Это не итог выполненного этапа."
+logical_id = "119c1ba6-d6fd-4333-be62-bb51c06594ba"
+content_hash = "sha256:9d682e86e9268744bfa97064cd1a0ea287ba770715cdb80f3b61be755ff38a93"
+size = 6802
+mtime_ms = 1793541792512
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/119c1ba6-d6fd-4333-be62-bb51c06594ba/bddb3537-6df0-4387-84ec-f3acd1718525"
+storage_version_token = "1793541797906906"
+content_type = "application/octet-stream"
