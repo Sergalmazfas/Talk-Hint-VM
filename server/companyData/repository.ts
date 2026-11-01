@@ -8,6 +8,7 @@ import { inspectSchema, project, readRootFromSql, insertProjection } from "./rel
 import { textHash, semanticHash } from "./valueTree";
 import { assertModelWriteAllowed } from "./migrationFreeze";
 import { lockCompanyWrite } from "./cutover/guard";
+import { assertTransactionBatch } from "../projectModel/transactionBatch";
 
 export type CompanyEnvironment = "development" | "production";
 /** Always bound by server authentication, never an owner key taken from input JSON. */
@@ -91,7 +92,7 @@ export class CompanyModelRepository implements ModelRepository {
   async updateMany(owner: string, revision: number, commands: ModelCommand[], hypothesis = "original") {
     assertModelWriteAllowed(owner, this.environment);
     if (this.shadowVerification) throw new ModelError(403, "Теневой reader не принимает записи.");
-    if (!commands.length || commands.length > 3) throw new ModelError(400, "Invalid transaction size");
+    assertTransactionBatch(owner, revision, commands, hypothesis);
     const db = await (await this.getPool()).connect();
     try {
       await db.query("BEGIN");

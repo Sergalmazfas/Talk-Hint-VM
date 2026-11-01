@@ -10,6 +10,7 @@ import { at, arrayInsert, decode, encode, replace, type Frame } from "./codec";
 import { SqlFrameStore } from "./store";
 import { assertModelWriteAllowed } from "../migrationFreeze";
 import { lockCompanyWrite } from "../cutover/guard";
+import { assertRevisionAdvance } from "../../projectModel/transactionBatch";
 
 export interface DeltaEdit {
   path: string[];
@@ -59,8 +60,7 @@ export class IncrementalCompanyRepository {
           writerMs: performance.now() - started, verificationMs: 0, delta: {}, sqlReads: store.sqlReads };
       }
       if (!edits.length) throw new ModelError(400, "Empty company delta");
-      if (!Number.isSafeInteger(revisionAdvance) || revisionAdvance < 1 || revisionAdvance > 3)
-        throw new ModelError(400, "Invalid company revision advance");
+      assertRevisionAdvance(owner, expectedRevision, prepare, revisionAdvance);
       let root = w.root_hash as string;
       const docs: { hypothesis: string; id: string; frame: string }[] = [];
       for (const edit of edits) {

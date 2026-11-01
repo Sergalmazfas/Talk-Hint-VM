@@ -6,9 +6,10 @@ import { semanticHash } from "../valueTree";
 import { at, arrayAt, arrayLength, decode, type Frame } from "./codec";
 import { entityArrayEdits } from "./entityArrays";
 import { projectFragment } from "./projection";
-import { IncrementalCompanyRepository, type DeltaEdit } from "./repository";
+import { IncrementalCompanyRepository, type DeltaEdit, type PrepareDelta } from "./repository";
 import type { SqlFrameStore } from "./store";
 import { cachedResponse, rememberResponse, mergeWriteResponse } from "./responseCache";
+import { assertTransactionBatch, bindSecretaryDepartmentPreparation } from "../../projectModel/transactionBatch";
 
 const empty = (revision: number): ProjectModelState => ({
   schema: 1, revision, elements: [], relations: [], documents: [], decisions: [], proposals: [], taskDrafts: [],
@@ -95,8 +96,8 @@ export class CommandCompanyRepository {
   }
   async writeMany(owner: string, expected: number, commands: ModelCommand[], hypothesis = "original",
     prepared?: (after: ProjectModelState) => void) {
-    if (!commands.length || commands.length > 3) throw new ModelError(400, "Expected one to three company commands");
-    this.lastReceipt = await this.data.commitDelta(owner, expected, async store => {
+    assertTransactionBatch(owner, expected, commands, hypothesis);
+    const prepare: PrepareDelta = async store => {
       const { rows } = await store.db.query("SELECT root_hash FROM company_v3_workspaces WHERE workspace_id=$1", [store.workspace]);
       const root = rows[0].root_hash as string;
       const { view, prefix, alternatives } = await workingState(store, root, hypothesis, commands);
@@ -176,10 +177,13 @@ export class CommandCompanyRepository {
       }
       store.stats.company_v3_size_budgets = { inserted: 0, updated: 2, logicalBytes: 16 };
       return { edits, revisionAdvance: scopedRoot.revision - expected };
-    }, owner);
+    };
+    bindSecretaryDepartmentPreparation(owner, expected, commands, hypothesis, prepare);
+    this.lastReceipt = await this.data.commitDelta(owner, expected, prepare, owner);
     return this.lastReceipt;
   }
   async updateMany(owner: string, expected: number, commands: ModelCommand[], hypothesis = "original") {
+    assertTransactionBatch(owner, expected, commands, hypothesis);
     const key = await this.responseKey(owner, hypothesis, expected);
     // Cold clients pay the existing read BEFORE the transaction, not a second
     // full read after commit. GET/MCP-read clients reuse their exact base.

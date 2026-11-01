@@ -8,6 +8,7 @@ import { activeCompanyRepository, hasNormalizedCompanySource } from "../companyD
 import { blocksLegacySeed } from "../companyData/v3/importApproval";
 import { assertModelWriteAllowed, modelWritesFrozen } from "../companyData/migrationFreeze";
 import { checkpointRoot, checkpointDocument, cutoverControl, lockCompanyWrite } from "../companyData/cutover/guard";
+import { assertTransactionBatch } from "./transactionBatch";
 
 export interface ModelRepository {
   read(owner: string, hypothesis?: string): Promise<ProjectModelState>;
@@ -94,7 +95,7 @@ export class PgModelRepository implements ModelRepository {
   /** A result document and its work status must commit or roll back together. */
   async updateMany(owner: string, revision: number, commands: ModelCommand[], hypothesis = "original") {
     assertModelWriteAllowed(owner, process.env.NODE_ENV === "production" ? "production" : "development");
-    if (!commands.length || commands.length > 3) throw new ModelError(400, "Invalid transaction size");
+    assertTransactionBatch(owner, revision, commands, hypothesis);
     const pool = await this.database();
     const active = await activeCompanyRepository(pool, owner);
     if (active) return active.updateMany(owner, revision, commands, hypothesis);

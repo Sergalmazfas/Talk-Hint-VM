@@ -2525,3 +2525,17 @@ mtime_ms = 1793492963979
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/631770cd-124e-489a-984b-d27c1d3a465a/b70273ee-3a2c-4809-b77a-02a1c32924e6"
 storage_version_token = "1793492979183307"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "exxcLukflnOwTrW8Vsib1"
+uri = "file://generated-artifacts/Secretary_atomic_batch_Claude_review.zip"
+type = "unspecified"
+title = "Отдел Секретаря: атомарная запись — сверка Claude"
+description = "Точечный diff, исходники, 31 новый тест и результаты проверки. Полный прогон: 2865 прошли, 34 пропущены, 0 падений. Production не изменён."
+logical_id = "551e1684-9527-4132-97d8-277ba4caec97"
+content_hash = "sha256:1de96541745dc69f06b8a33cedbbec47f4cea70644952a61aee6b2a634a88457"
+size = 78922
+mtime_ms = 1793496661513
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/551e1684-9527-4132-97d8-277ba4caec97/2e30dc5e-d733-41cb-9a11-6cab612edc9c"
+storage_version_token = "1793496670502339"
+content_type = "application/octet-stream"

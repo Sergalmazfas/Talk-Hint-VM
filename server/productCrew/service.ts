@@ -11,6 +11,7 @@ import { getPassportChapterPacket } from "../../shared/passportChapter";
 import { documentVolumeLength, documentVolumeManifest } from "../projectModel/documentVolumes";
 import { teamChangeInputs, buildTeamChange, projectionManagers } from "./teamChanges";
 import { secretaryDepartment } from "./secretaryDepartment";
+import { authorizeSecretaryDepartmentBatch } from "../projectModel/transactionBatch";
 const text = (n = 3000) => z.string().trim().min(1).max(n);
 const key = text(120), ids = z.array(key).max(40);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid() };
@@ -281,6 +282,8 @@ export class ProductCrewService {
       } else return fail(400, "Недопустимая операция");
     }
     commands.push({ type: state.elements.some(e => e.id === id) ? "saveElement" : "createElement", id, element });
+    if (name === "create_secretary_department_structure")
+      authorizeSecretaryDepartmentBatch(owner, state.revision, commands);
     if (!this.repo.updateMany) return fail(503, "Атомарное хранилище не подключено");
     try {
       const next = await this.repo.updateMany(owner, state.revision, commands, "new-country");
