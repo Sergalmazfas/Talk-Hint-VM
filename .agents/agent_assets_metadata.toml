@@ -2721,3 +2721,17 @@ mtime_ms = 1793541792512
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/119c1ba6-d6fd-4333-be62-bb51c06594ba/bddb3537-6df0-4387-84ec-f3acd1718525"
 storage_version_token = "1793541797906906"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "rg5y_MB4iNal0vzK1N0MP"
+uri = "file://generated-artifacts/Secretary_descriptions_r1175_review.zip"
+type = "unspecified"
+title = "Секретарь — итоговый ZIP r1175 на сверку"
+description = "Три анкеты и штатные паспорта, карта связей, журнал 6 вызовов / 9 команд с hash и UUID, ID источников Кати только чтением, проверка 0 самоприёмок, тесты и ограничения."
+logical_id = "31be66cf-86d9-445e-b07c-2f10e03ec14c"
+content_hash = "sha256:09ee73f99a6dee5486842714ed6cc9e12f59602ad1e2409b01f270aefa962a69"
+size = 46185
+mtime_ms = 1793543414956
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/31be66cf-86d9-445e-b07c-2f10e03ec14c/b72d6b00-7eb1-480b-8e9f-4cebaa4b69c5"
+storage_version_token = "1793543422265506"
+content_type = "application/octet-stream"
