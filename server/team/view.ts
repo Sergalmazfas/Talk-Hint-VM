@@ -5,6 +5,7 @@ import { semanticHash, textHash } from "../companyData/valueTree";
 import { mariaResponsibilitiesSchema } from "../productCrew/mariaPassport";
 import { secretaryDepartment } from "../productCrew/secretaryDepartment";
 import { readEmployeeSections } from "../../shared/employeeSections";
+import { inheritOwnerProductPolicy } from "../productCrew/ownerProductPolicy";
 
 const string = (v: unknown): string | null => typeof v === "string" && v.trim() ? v : null;
 const json = (v: unknown) => { try { return JSON.parse(String(v)); } catch { return null; } };
@@ -121,7 +122,10 @@ export function teamView(c: TeamContext, environment: string): TeamView {
         ].filter(Boolean).join("\n")) })),
       relations: Array.from(new Map(relations.map(r => [`${r.kind}:${r.id}`, r])).values()),
       tools: Array.from(new Set([...n.resourceIds, ...duties.flatMap(a => a.resourceIds)].map(id => byId.get(id)?.name).filter(Boolean))) as string[],
-      prohibitions: Array.from(new Set([...(product?.prohibitions ?? []), n.constraints, ...duties.map(a => a.constraints)].filter(Boolean))),
+      prohibitions: Array.from(new Set([...(product?.prohibitions ?? []),
+        ...(Array.isArray(profile?.prohibitions) ? profile.prohibitions.filter((p: unknown) => typeof p === "string") :
+          typeof profile?.prohibitions === "string" ? profile.prohibitions.split("\n").filter(Boolean) : []),
+        n.constraints, ...duties.map(a => a.constraints)].filter(Boolean))),
       model: string(profile?.prompt?.model),
       prompt: { text: prompt?.text_body ?? null, version: prompt?.prompt_version ?? null,
         status: prompt?.status ?? null, acceptedBy: prompt?.accepted_by ?? null },
@@ -163,6 +167,7 @@ export function teamView(c: TeamContext, environment: string): TeamView {
       metrics: { plan: null, fact: null }, lastWork: null, lessons: [], history: [] });
   }
   const completed = completedSteps(c);
+  inheritOwnerProductPolicy(members, c.documents);
   const available = environment === "production" && c.workspace === TEAM_BASE.workspace &&
     c.phase === "active" && c.writesOpen && completed >= 0 && completed < TEAM_STEPS;
   return { source: { environment, workspace: c.workspace, revision: c.revision, rootHash: c.rootHash, phase: c.phase },

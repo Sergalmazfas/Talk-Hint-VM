@@ -2567,3 +2567,17 @@ mtime_ms = 1793502767091
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61f7a730-4956-4f15-90d8-4cad4da1bb51/18e2d542-806c-4ca3-b697-2d50d435a2c8"
 storage_version_token = "1793502771828029"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "DU558ntwkd9z1EqMB3aJE"
+uri = "file://generated-artifacts/Owner_product_policy_Claude_review.zip"
+type = "unspecified"
+title = "Правило компании — пакет на сверку Claude"
+description = "Узкий MCP-инструмент, diff, исходники и проверки. 139 тестов прошли; полный прогон не подтверждён из-за тайм-аута. Production не менялся."
+logical_id = "9cbaf2aa-b472-4e63-81a8-eb7ad1142fb4"
+content_hash = "sha256:77e793f69b0a9a543611d6ffb321aa75fe47ebe5981bdaac66a3384edc6eb3b2"
+size = 96274
+mtime_ms = 1793504452238
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9cbaf2aa-b472-4e63-81a8-eb7ad1142fb4/72ce0f1f-8679-40b0-8412-b4a77a5212f4"
+storage_version_token = "1793504457544768"
+content_type = "application/octet-stream"

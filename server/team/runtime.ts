@@ -1,3 +1,4 @@
+import { inheritOwnerProductPolicy } from "../productCrew/ownerProductPolicy";
 import type { TeamView, TeamMember } from "../../shared/team";
 import type { TeamContext } from "./repository";
 import { labActionReports, secretaryActionReport } from "./actionReports";
@@ -114,6 +115,7 @@ export function withTeamRuntime(view: TeamView, c: TeamContext, checks: RuntimeC
     title: `${r.role} · ${r.outcome === "completed" ? "выполнено" : r.outcome === "partial" ? "частично" : "не выполнено"}`,
     detail: `${r.assigned}\nПолучилось: ${r.succeeded.join(" ") || "не подтверждено"}\nНе получилось: ${r.failed.join(" ") || "не зафиксировано"}\nОт владельца: ${r.needsOwner.join(" ") || "решение не запрошено"}\nИсточник: ${r.source}`,
   }))].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100);
+  inheritOwnerProductPolicy(members, c.documents);
   return { ...view, members, feed };
 }
 

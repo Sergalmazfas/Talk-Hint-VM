@@ -3,6 +3,19 @@ name: Document reader verification
 description: A saved organizational document must remain readable by the actual book and MCP readers, not just the database.
 ---
 
+### Нормативные правила и размер паспорта
+
+Длинное общее правило хранить одним отдельным нормативным документом со стабильной
+ссылкой из канонического паспорта, а не дублировать весь текст в его JSON.
+
+**Why:** при подготовке правила согласования изменений продукта сохранённый паспорт
+уже занимал почти весь допустимый размер документа. Дублирование полного правила
+не помещалось без потери прежнего содержимого.
+
+**How to apply:** проверять полный итоговый документ и пакет вместе с квитанцией
+против настоящих лимитов; сохранять неизвестные поля и дописанный владельцем текст.
+Не расширять общий лимит и не обрезать паспорт ради добавления правила.
+
 When updating the existing organization book, verify the actual document reader
 against the saved representation. A successful database write and a plausible
 title/version are not proof that the web book can parse the same content.

@@ -11,6 +11,7 @@ import { semanticHash } from "../companyData/valueTree";
 import type { TeamPin } from "../../shared/team";
 import { withTeamRuntime } from "./runtime";
 import { EXTERNAL_PARTNERS_DOCUMENT, withExternalPartners } from "./external";
+import { inheritOwnerProductPolicy } from "../productCrew/ownerProductPolicy";
 import { teamRuntimeChecks } from "./runtimeChecks";
 import type { TeamContext } from "./repository";
 import type { RuntimeChecks } from "./runtime";
@@ -68,6 +69,8 @@ export function registerTeamRoutes(app: Express, getPool: () => Promise<Pool>, o
           view = withExternalPartners(withTeamRuntime(view, context, checks),
             context.documents.find(d => d.id === EXTERNAL_PARTNERS_DOCUMENT)?.text);
         }
+        // Last: external partners and other late projections inherit the same rule.
+        inheritOwnerProductPolicy(view.members, context.documents);
         view.partners = partnersState(context);
         view.apply.csrfToken = session.teamCsrf; return view;
       };
