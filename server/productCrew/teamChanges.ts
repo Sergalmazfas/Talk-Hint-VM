@@ -102,7 +102,7 @@ export function buildTeamChange(state: ProjectModelState, name: keyof typeof tea
   } else if (name === "update_role_title") {
     const selected = role(a.roleId);
     const p = profile(a.roleId);
-    if (p.value.plannedRole === true && state.documents.some(d => {
+    if (p.value.plannedRole === true && p.value.mode !== a.mode && state.documents.some(d => {
       if (d.id === p.doc.id) return false;
       try { const other = JSON.parse(d.text); return other.plannedRole === true && other.mode === a.mode; } catch { return false; }
     })) return fail(409, "Пустая должность этого режима уже существует.");
