@@ -2553,3 +2553,17 @@ mtime_ms = 1793500660428
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dcab8425-9be2-4b73-88cb-f1754ccff05b/8e5ae506-08e1-414d-94f1-4ae72b657731"
 storage_version_token = "1793500684025835"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "hDpAzU9i0I81Hru62z5jE"
+uri = "file://generated-artifacts/Hint_employee_sections_Claude.zip"
+type = "unspecified"
+title = "Hint — diff и анкеты для Claude"
+description = "Исходники, diff, 5 анкет, карта связей и план после Publish. 109 профильных тестов прошли; полный прогон не подтверждён из-за тайм-аута. Production не менялся."
+logical_id = "61f7a730-4956-4f15-90d8-4cad4da1bb51"
+content_hash = "sha256:f44fbeb62530391d25eec955c2f768dc6770cec87979a37311c4a34acd13c44f"
+size = 169344
+mtime_ms = 1793502767091
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61f7a730-4956-4f15-90d8-4cad4da1bb51/18e2d542-806c-4ca3-b697-2d50d435a2c8"
+storage_version_token = "1793502771828029"
+content_type = "application/octet-stream"

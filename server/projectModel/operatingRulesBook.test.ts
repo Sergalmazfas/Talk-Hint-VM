@@ -24,12 +24,15 @@ describe("rules application uses the actual book reader", () => {
   });
   it("recovers only the known appended review text through the canonical formatter", () => {
     const broken = { ...doc, text: doc.text + rulesAppendixHeading + "Согласованная ссылка" };
-    expect(readProductBook(broken)).toBeNull();
+    expect(readProductBook(broken)?.preservedSourceSuffix).toBe(rulesAppendixHeading + "Согласованная ссылка");
     const fixed = readProductBook({ ...doc, text: rulesBookText(broken, 14, "2026-10-27", true) })!;
     expect(fixed.version).toBe(14);
     expect(fixed.previousPassport).toBe(book.previousPassport);
+    expect(fixed.preservedSourceSuffix).toBe(rulesAppendixHeading + "Согласованная ссылка");
   });
   it("refuses unknown malformed payload instead of dropping content", () => {
+    expect(readProductBook({ ...doc, text: doc.text + "\nUnknown payload" })?.preservedSourceSuffix)
+      .toBe("\nUnknown payload");
     expect(() => rulesBookText({ ...doc, text: doc.text + "\nUnknown payload" }, 14, "now", true)).toThrow();
   });
 });

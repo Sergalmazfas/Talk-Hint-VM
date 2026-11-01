@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { TeamEvent, TeamMember, TeamPin, TeamStatus, TeamView } from "@shared/team";
 import { partitionTeamMembers } from "@/lib/teamPresentation";
+import EmployeeSectionsView from "@/components/team/EmployeeSections";
 import {
   Activity, AlertCircle, ArrowLeft, ArrowRight, BriefcaseBusiness, Check, ChevronDown,
   CircleHelp, Clock3, Eye, EyeOff, Fingerprint, LockKeyhole, Network, RefreshCw, X,
@@ -652,13 +653,13 @@ function Profile({ member, members, onSelect }: { member: TeamMember; members: T
             <Field label="Девиз"><p className="text-sm leading-6 text-[#52685b]">{missing(member.motto)}</p></Field>
             <Field label="План"><p className="text-sm leading-6 text-[#52685b]">{missing(member.metrics.plan)}</p></Field>
             <Field label="Факт"><p className="text-sm leading-6 text-[#52685b]">{missing(member.metrics.fact)}</p></Field>
-            <Field label="Модель"><p className="text-sm leading-6 text-[#52685b]">{missing(member.model)}</p></Field>
             <Field label="Последнее действие">
               <p className="text-sm leading-6 text-[#52685b]">{member.lastActionAt ? dateLabel(member.lastActionAt) : "Не заполнено"}</p>
               <p className="mt-1 text-[10px] leading-4 text-[#89958b]">Дата не оценивает качество или результат работы.</p>
             </Field>
             <Field label="Источник исполнения"><p className="text-sm leading-6 text-[#52685b]">{missing(member.runtimeSource)}</p></Field>
           </div>
+          <EmployeeSectionsView sections={member.employeeSections} currentModel={member.model} />
           </>}
         </div>
 

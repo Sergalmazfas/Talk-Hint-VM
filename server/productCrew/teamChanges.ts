@@ -6,6 +6,7 @@ import { ModelError } from "../projectModel/modelError";
 import { competitorSnapshotSchema } from "../projectModel/competitorSchema";
 import { mariaProfileCommands } from "./mariaPassport";
 import { createSecretaryDepartment } from "./secretaryDepartment";
+import { employeeSectionCommands, updateEmployeeSectionsInput } from "./employeeSections";
 
 const text = (n: number) => z.string().trim().min(1).max(n);
 const key = text(120);
@@ -13,6 +14,7 @@ const mode = z.enum(["company", "hint", "secretary", "copilot", "translator"]);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid(),
   reason: text(3000), ownerDecisionRef: text(1000) };
 export const teamChangeInputs = {
+  update_employee_sections: updateEmployeeSectionsInput,
   create_secretary_department_structure: z.object({ ...base }).strict(),
   update_maria_profile: z.object({ ...base, roleId: z.enum(["head-product"]),
     sourceVersion: z.number().int().min(1),
@@ -44,6 +46,7 @@ export function projectionManagers(documents: ProjectModelState["documents"]) {
 }
 /** Pure command builder. No storage, provider calls, activation or arbitrary patches. */
 export function buildTeamChange(state: ProjectModelState, name: keyof typeof teamChangeInputs, a: any) {
+  if (name === "update_employee_sections") return employeeSectionCommands(state, a);
   if (name === "create_secretary_department_structure")
     return createSecretaryDepartment(state, projectionManagersDocument, projectionManagers(state.documents));
   if (name === "update_maria_profile") return mariaProfileCommands(state, a);

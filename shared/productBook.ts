@@ -18,6 +18,7 @@ export interface ProductBookFeature {
   comparisonKey?: string;
 }
 export interface ProductBook {
+  [extra: string]: unknown;
   version: number; updatedAt: string; snapshotDate: string; status: string;
   lifecycle: string; purpose: string; vision: string; b2c: string; b2b: string;
   current: string; nextStage: string; completion: string;
@@ -26,11 +27,43 @@ export interface ProductBook {
   previousPassport: string;
   chapterRefs?: Record<string, string>;
 }
-export function readProductBook(document?: ModelDocument): ProductBook | null {
+export function readProductBook(document?: ModelDocument, options: { strictReviewAppendix?: boolean } = {}): ProductBook | null {
   if (!document?.text.includes(productBookMarker)) return null;
-  const raw = document.text.split(productBookMarker)[1]?.trim();
+  // A marker can also occur inside an escaped previousPassport. Never split
+  // the structured JSON on such a marker, or discard appended owner notes.
+  const raw = document.text.slice(document.text.indexOf(productBookMarker) + productBookMarker.length).trim();
   try {
-    const book = JSON.parse(raw) as ProductBook;
+    if (!raw.startsWith("{")) return null;
+    let depth = 0, quoted = false, escaped = false, end = -1;
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+        else if (c === '"') quoted = false;
+      } else if (c === '"') quoted = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        if (--depth === 0) { end = i + 1; break; }
+      }
+    }
+    if (end < 0) return null;
+    const book = JSON.parse(raw.slice(0, end)) as ProductBook;
+    const suffix = raw.slice(end);
+    if (suffix.trim()) {
+      // Human addenda start on a new line. A glued JSON token is corruption,
+      // not an extension (e.g. `}invalid` must remain unreadable).
+      if (!/^[ \t]*\r?\n/.test(suffix)) return null;
+      // Read-only display preserves owner addenda without interpreting them.
+      // Legacy rules writers may request their narrower recovery policy.
+      if (options.strictReviewAppendix &&
+          !suffix.trimStart().startsWith("## Правила v3 и единый журнал улучшений\n")) return null;
+      // Preserve every original field, even in the unlikely event that a
+      // previous extension already used the metadata key.
+      let field = "preservedSourceSuffix";
+      while (Object.prototype.hasOwnProperty.call(book, field)) field = `_${field}`;
+      book[field] = suffix;
+    }
     return book.version >= 2 && Array.isArray(book.features) && typeof book.previousPassport === "string" ? book : null;
   } catch { return null; }
 }

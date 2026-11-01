@@ -1,6 +1,8 @@
 import type { SecretaryDepartmentStructure } from "./secretaryDepartment";
+import type { EmployeeSections } from "./employeeSections";
 export type TeamStatus = "autonomous" | "replit" | "disconnected" | "planned" | "unresolved" | "owner_chat" | "contractor";
 export interface TeamMember {
+  employeeSections?: EmployeeSections | null;
   id: string; name: string; title: string; code: string; department: string;
   mode: string | null; status: TeamStatus; statusEvidence: string;
   portrait: string | null; nameStatus: string | null;

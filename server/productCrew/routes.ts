@@ -187,6 +187,11 @@ export function registerProductCrew(app: Express, options: {
 function toJsonSchema(schema: any): any {
   const def = schema._def, type = def.typeName;
   if (type === "ZodOptional") return toJsonSchema(def.innerType);
+  // Refinements remain enforced by the server parser; no transforms/preprocessors.
+  if (type === "ZodEffects" && def.effect.type === "refinement") return toJsonSchema(def.schema);
+  if (type === "ZodNullable") return { anyOf: [toJsonSchema(def.innerType), { type: "null" }] };
+  if (type === "ZodLiteral" && ["string", "boolean", "number"].includes(typeof def.value))
+    return { type: typeof def.value, enum: [def.value] };
   if (type === "ZodObject") {
     const shape = def.shape();
     return { type: "object", properties: Object.fromEntries(Object.entries(shape).map(([k, v]) => [k, toJsonSchema(v)])),
@@ -207,10 +212,11 @@ const toolDescription: Record<ToolName, string> = {
   update_maria_profile: "Production: перенести сохранённый полный должностной паспорт Марии HEAD.06 в DOC-TEAM-HEAD06. Пять обязанностей, клиенты и входы; источник version и hash анкеты обязательны. Без смены личности, промпта, графа или приёмки.",
   create_planned_role: "Production: одна пустая будущая должность под Марией, без сотрудника, задач, ресурсов и расписания. Дубли запрещены.",
   update_role_title: "Production: название и режим одной существующей роли и её анкеты, без изменения личности, промпта, прав или исполнителя.",
+  update_employee_sections: "Production: только описание рабочего места, рекомендация модели enabled=false и исправление reportsTo по текущему графу одной существующей анкеты. SHA-256 анкеты обязателен. Без создания анкеты, изменения личности, промпта, прав или исполнителя.",
   set_projection_manager: "Production: руководитель единственной живой проекции employee-katya. Не создаёт вторую Катю и не меняет её поведение.",
   replace_employee_profile: "Production: Нина v2 из сохранённого документа в существующую P.ORG. SHA-256 источника и старой анкеты обязательны. Без подключения и runtime-промпта.",
   add_competitor: "Production: одна новая карточка competitorDirectory из snapshotJson по схеме каталога, verification=provided. Дубли, удаление и live_verified запрещены.",
-  update_structure: "Production: изменить руководителя одной существующей роли либо заказчика/принимающего одной задачи. Без самоприёмки и циклов; revision/requestId и ссылка на решение обязательны. Не запускает сотрудников.",
+  update_structure: "Production: руководитель роли, роль/заказчик/принимающий одной задачи либо согласованная пометка передачи Паши/Фомы. Пометка сохраняет назначение. Передача требует независимого принимающего и не меняет назначенного исполнителя. Без самоприёмки, циклов или запуска; revision/requestId и решение обязательны.",
   update_team_character: "Production: записать три черты и девиз в единственный существующий профиль. Не меняет имя, промпт, права или статус запуска; revision/requestId и ссылка на решение обязательны.",
   get_roadmap: "Где находится единый roadmap: этапы, сохранённые работы, блокеры и следующий шаг. Ничего не запускает.",
   get_team: "Общая структура: роли, подчинение, действия, клиенты результатов, ресурсы и состояние подключения.",

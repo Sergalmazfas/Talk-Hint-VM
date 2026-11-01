@@ -12,59 +12,59 @@ const references = z.array(text);
 const progressSchema = z.object({
   described: z.boolean().nullable(), implemented: z.boolean().nullable(),
   verified: z.boolean().nullable(), accepted: z.boolean().nullable(), planned: z.boolean(),
-}).strict();
+}).passthrough();
 const layerSchema = z.object({
   title: text, summary: text, progress: progressSchema, leadRoleId: text.nullable(),
   participantRoleIds: references, assignment: text, actionIds: references,
   inputs: text, output: text, receiver: text, acceptance: text, next: text,
   sourceIds: references, unknown: references,
-}).strict();
+}).passthrough();
 export const passportChapterSchema = z.object({
   format: z.literal("talkhint.passport-chapter"), version: z.number().int().positive(),
   mode: z.literal("hint"), title: text, status: z.literal("На согласовании"),
   bookDocumentId: z.literal(productBookDocumentId), relatedFeatureIds: references,
   snapshotDate: text, capturedAt: text, sourceRevision: z.number().int().nonnegative(),
   scope: text, identityNote: text,
-  schedule: z.object({ startedOn: text, dueOn: text, basis: text }).strict(),
+  schedule: z.object({ startedOn: text, dueOn: text, basis: text }).passthrough(),
   layers: z.object({ product: layerSchema, workflow: layerSchema, lab: layerSchema,
-    metrics: layerSchema, bench: layerSchema, design: layerSchema }).strict(),
+    metrics: layerSchema, bench: layerSchema, design: layerSchema }).passthrough(),
   sources: z.array(z.object({
     id: text, type: text, title: text, location: text, date: z.string().nullable(),
     evidence: text, limitation: text,
-  }).strict()),
+  }).passthrough()),
   metrics: z.array(z.object({
     id: text, name: text, definition: text, unit: text, denominator: text,
     target: z.number().nullable(), actual: z.number().nullable(),
     status: z.literal("ждёт решения владельца"), method: text,
-  }).strict()),
+  }).passthrough()),
   labs: z.array(z.object({
     name: text, path: text, workflow: text, storage: text, retention: text,
     sourceIds: references, limitations: text,
-  }).strict()),
+  }).passthrough()),
   runs: z.array(z.object({
     id: text, createdAt: text, status: text, configuration: text,
     summary: text, source: text, metrics: z.record(z.unknown()),
     limitations: text,
-  }).strict()),
+  }).passthrough()),
   labHistory: z.object({ status: z.literal("предложение"), proposal: text,
-    fields: references, noImplementation: text }).strict(),
+    fields: references, noImplementation: text }).passthrough(),
   procedures: z.array(z.object({
     id: text, title: text, roleId: text, input: text, steps: references,
     resources: text, result: text, recipient: text, acceptance: text,
     returnTo: text, deadline: text, actionIds: references, limitations: text,
-  }).strict()),
+  }).passthrough()),
   requests: z.array(z.object({
     id: text, to: text, request: text, materials: references,
     receivingActionId: text.nullable(), status: text, response: z.string().nullable(),
-  }).strict()),
+  }).passthrough()),
   reviewProtocol: z.array(z.object({
     id: text, check: text, status: z.literal("не выполнено"),
     evidence: z.string().nullable(), blocker: z.string().nullable(), responsible: text,
-  }).strict()),
+  }).passthrough()),
   nextChapters: references, limitations: references,
   katyaDuration: z.object({ milliseconds: z.literal(300000), scope: text, evidence: text,
-    remoteVerified: z.literal(false), separateSilenceTimeout: z.literal(true) }).strict(),
-}).strict();
+    remoteVerified: z.literal(false), separateSilenceTimeout: z.literal(true) }).passthrough(),
+}).passthrough();
 export type PassportChapter = z.infer<typeof passportChapterSchema>;
 export type PassportLayer = typeof chapterLayers[number][0];
 
@@ -84,9 +84,11 @@ export function getPassportChapterPacket(state: ProjectModelState, mode: string)
   const chapter = readPassportChapter(doc);
   if (!chapter || chapter.mode !== mode || !doc || !book) return null;
   const nodes = state.operatingModel?.revisions.at(-1)?.data.nodes ?? [];
-  const roleIds = new Set(Object.values(chapter.layers).flatMap(l => [l.leadRoleId, ...l.participantRoleIds]).filter(Boolean));
+  // Preserve extension metadata, but never interpret it as another role layer.
+  const knownLayers = chapterLayers.map(([key]) => chapter.layers[key]);
+  const roleIds = new Set(knownLayers.flatMap(l => [l.leadRoleId, ...l.participantRoleIds]).filter(Boolean));
   chapter.procedures.forEach(p => roleIds.add(p.roleId));
-  const actionIds = new Set([...Object.values(chapter.layers).flatMap(l => l.actionIds), ...chapter.procedures.flatMap(p => p.actionIds)]);
+  const actionIds = new Set([...knownLayers.flatMap(l => l.actionIds), ...chapter.procedures.flatMap(p => p.actionIds)]);
   return {
     format: "talkhint.passport-chapter-package" as const, version: 1,
     revision: state.revision, bookVersion: book.version,

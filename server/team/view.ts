@@ -4,6 +4,7 @@ import { completedSteps, type TeamContext } from "./repository";
 import { semanticHash, textHash } from "../companyData/valueTree";
 import { mariaResponsibilitiesSchema } from "../productCrew/mariaPassport";
 import { secretaryDepartment } from "../productCrew/secretaryDepartment";
+import { readEmployeeSections } from "../../shared/employeeSections";
 
 const string = (v: unknown): string | null => typeof v === "string" && v.trim() ? v : null;
 const json = (v: unknown) => { try { return JSON.parse(String(v)); } catch { return null; } };
@@ -98,6 +99,7 @@ export function teamView(c: TeamContext, environment: string): TeamView {
     const metricText = (key: "plan" | "fact") => metrics.filter(m => m[key] !== null)
       .map(m => `${m.name}: ${m[key]} ${m.unit} (${m.scope}; ${m.evidence || "источник не заполнен"})`).join("\n") || null;
     return { id: n.id, code: n.code, title: string(v?.position) ?? n.name,
+      employeeSections: readEmployeeSections(profile?.employeeSections),
       name: physical?.display_name ?? proposedName ?? n.name,
       department: secretaryRoleIds.has(n.id) ? "Секретарь" :
         n.parentId === "dir-product" ? "Продукт" : n.parentId === "dir-engineering" ? "Инженерия" :
@@ -113,7 +115,10 @@ export function teamView(c: TeamContext, environment: string): TeamView {
       duties: product ? product.duties.map(a => ({ id: `${n.id}:${a.code}`,
         title: `${a.code} — ${a.title}`,
         detail: `${a.does}\nТриггер: ${a.trigger}\nРезультат: ${a.result}\nЗаказчик: владелец. Принимающий: владелец.` }))
-        : duties.map(a => ({ id: a.id, title: a.name, detail: string(a.procedure || a.description || a.purpose) })),
+        : duties.map(a => ({ id: a.id, title: a.name, detail: string([
+          a.procedure || a.description || a.purpose,
+          ...(a.questions ?? "").split("\n").filter(line => line.startsWith("Передача: ")),
+        ].filter(Boolean).join("\n")) })),
       relations: Array.from(new Map(relations.map(r => [`${r.kind}:${r.id}`, r])).values()),
       tools: Array.from(new Set([...n.resourceIds, ...duties.flatMap(a => a.resourceIds)].map(id => byId.get(id)?.name).filter(Boolean))) as string[],
       prohibitions: Array.from(new Set([...(product?.prohibitions ?? []), n.constraints, ...duties.map(a => a.constraints)].filter(Boolean))),

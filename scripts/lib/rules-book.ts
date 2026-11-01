@@ -4,7 +4,7 @@ import type { ModelDocument } from "../../shared/projectModel";
 
 export const rulesAppendixHeading = "\n\n## Правила v3 и единый журнал улучшений\n";
 export function rulesBookText(document: ModelDocument, version: number, at: string, repair = false) {
-  let book = readProductBook(document);
+  let book = readProductBook(document, { strictReviewAppendix: true });
   if (!book && repair) {
     const raw = document.text.split(productBookMarker)[1];
     assert(raw, "Missing original book payload");

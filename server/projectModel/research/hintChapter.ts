@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { ProjectModelState } from "../../../shared/projectModel";
-import { passportChapterSchema, hintChapterDocumentId, type PassportChapter } from "../../../shared/passportChapter";
+import { passportChapterSchema, hintChapterDocumentId, chapterLayers, type PassportChapter } from "../../../shared/passportChapter";
 import { productBookDocumentId, productBookText, readProductBook } from "../../../shared/productBook";
 import { applyHypothesisCommand, readHypothesis } from "../hypotheses";
 
@@ -161,7 +161,7 @@ export function prepareHintChapter(root: ProjectModelState, runs: HistoricalHint
   chapter.layers.design.participantRoleIds = ["product-manager-specialist", "management-role-mobile-specialist"];
   chapter.layers.metrics.participantRoleIds = ["management-role-finance-analyst", "lg-qa-role"];
   const parsed = passportChapterSchema.parse(chapter);
-  for (const l of Object.values(parsed.layers)) {
+  for (const l of chapterLayers.map(([key]) => parsed.layers[key])) {
     assert.ok(data.nodes.some(n => n.id === l.leadRoleId && n.kind === "role"), `Missing role ${l.leadRoleId}`);
     for (const id of l.participantRoleIds) assert.ok(data.nodes.some(n => n.id === id && n.kind === "role"), `Missing participant ${id}`);
     for (const id of l.sourceIds) assert.ok(parsed.sources.some(s => s.id === id), `Missing source ${id}`);

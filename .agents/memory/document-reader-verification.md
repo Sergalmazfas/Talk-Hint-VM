@@ -52,3 +52,16 @@ was not a compute shortage or permission to remove earlier work.
 references instead of another action catalogue, and verify both stored document
 reads and the fully expanded review export. Do not change active passport links
 or runtime prompts just to register a proposal.
+
+## Owner addenda and write recovery
+
+Read-only passport display must retain owner paragraphs appended after its JSON;
+they are source material, not commands or accepted operational results. A narrow
+legacy formatter may still refuse unknown appended text before writing.
+
+**Why:** a production passport had an owner decision appended as prose. Relaxing
+display alone must not silently broaden an old write/repair contract or lose that
+decision during a later round trip.
+
+**How to apply:** test the full real source and round-trip preservation, and test
+the formatter's refusal separately; do not substitute a tiny clean fixture.
