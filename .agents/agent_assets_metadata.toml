@@ -2791,3 +2791,17 @@ mtime_ms = 1793551737018
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7ac59cdc-db8d-4b8d-8814-399f79861a99/3c24a95e-427b-4a8d-8e2d-176b6fbde2c7"
 storage_version_token = "1793551744448624"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "VMshABYRKSjpJUORpKmcB"
+uri = "file://generated-artifacts/crew-schema-parity/report.txt"
+type = "text"
+title = "Отчёт: Publish — 0 миграций"
+description = "Точное совпадение Dev/production для ai_crew_runtime_state, проверка остальных таблиц и колонок, список исключений и результат проверки Publish. Production не изменялся."
+logical_id = "93cba998-7c79-4049-87a3-97787e9a68e2"
+content_hash = "sha256:a7bd62d6860de8f47fba7537c54e547d313ece11a4c76b91d8e2821888a75d60"
+size = 5626
+mtime_ms = 1793552634190
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/93cba998-7c79-4049-87a3-97787e9a68e2/43a7a5da-ef41-45b0-9f46-eb3eff6c8f10"
+storage_version_token = "1793552672470191"
+content_type = "text/plain"
