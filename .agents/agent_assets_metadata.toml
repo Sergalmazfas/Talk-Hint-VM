@@ -2805,3 +2805,17 @@ mtime_ms = 1793552634190
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/93cba998-7c79-4049-87a3-97787e9a68e2/43a7a5da-ef41-45b0-9f46-eb3eff6c8f10"
 storage_version_token = "1793552672470191"
 content_type = "text/plain"
+
+[[outputs]]
+id = "af2rnnNj94HrdnMDAI6gi"
+uri = "file://generated-artifacts/Hint_queued_dispatcher_Claudiy_review.zip"
+type = "unspecified"
+title = "Hint: зависание queued — пакет Клавдию"
+description = "Диагноз и границы production-доказательств, diff, красное воспроизведение на PostgreSQL, 4 зелёных шарда, безопасная диагностика, исправление microUSD и ограничение возобновления старого пилота. Не опубликовано, агенты не запускались."
+logical_id = "ccae0a36-7984-46dc-af5c-b97f2f9c7dbb"
+content_hash = "sha256:5b627fc35c0fbd3ddca2cc37d70e478bf5a88b5b02cb51703aed68cbb68454d9"
+size = 314280
+mtime_ms = 1793556574721
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ccae0a36-7984-46dc-af5c-b97f2f9c7dbb/d65b0514-2779-47bb-8eaa-22bc0affab87"
+storage_version_token = "1793556585925158"
+content_type = "application/octet-stream"

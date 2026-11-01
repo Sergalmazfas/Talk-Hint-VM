@@ -31,6 +31,25 @@ function ready() {
 const provider=()=>({listModels:vi.fn(async()=>[{id:"actual-id",display_name:"From API"}]),
  message:vi.fn(async()=>({text:"proposal only",model:"actual-id",usage:{input_tokens:30,output_tokens:20}}))});
 describe("AI Crew launch boundaries",()=>{
+ it("clears ticking after a pre-reservation failure, without a provider call or paid retry",async()=>{
+  const m=ready(),p=provider(),read=vi.spyOn(m,"read").mockRejectedValueOnce(Error("DATABASE_UNAVAILABLE"));
+  const r=new CrewRuntime(m,p,"production",()=>new Date(at));
+  await expect(r.tick()).rejects.toThrow("DATABASE_UNAVAILABLE");
+  expect(p.message).not.toHaveBeenCalled();read.mockRestore();
+  await r.tick();expect(p.message).toHaveBeenCalledTimes(1);
+ });
+ it("logs an insufficient five-microUSD limit without input text or reserving a run",async()=>{
+  const m=ready(),p=provider();m.state.control.dailyLimitMicroUsd=5;
+  const output=vi.spyOn(console,"info").mockImplementation(()=>{});
+  try{
+   await new CrewRuntime(m,p,"production",()=>new Date(at)).tick();
+   expect(p.message).not.toHaveBeenCalled();
+   expect(m.state.runs[0].status).toBe("queued");
+   expect(output).toHaveBeenCalledWith("[AI Crew]",expect.stringContaining('"event":"run_budget_blocked"'));
+   expect(output).toHaveBeenCalledWith("[AI Crew]",expect.stringContaining('"limitMicroUsd":5'));
+   expect(JSON.stringify(output.mock.calls)).not.toContain(m.state.tasks[0].title);
+  }finally{output.mockRestore()}
+ });
  it("starts OFF with zero company budget and 24h stale threshold",()=>{
   const s=initialState();expect(s.control).toMatchObject({enabled:false,dailyLimitMicroUsd:0,staleHours:24});
   expect(s.agents).toEqual([]);expect(s.schedules).toEqual([]);

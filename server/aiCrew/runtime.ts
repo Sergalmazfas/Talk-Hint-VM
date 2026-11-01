@@ -3,6 +3,7 @@ import { CREW_SYSTEM, type CrewProvider } from "./anthropic";
 import { log, type Agent, type CrewState } from "./domain";
 import type { StateStore } from "./store";
 import { finishPilotRun, HINT_MAX_OUTPUT, pilotInput } from "./hintPilot";
+import { crewDiagnostic } from "./dispatcher";
 
 export class CrewRuntime {
   private active = new Map<string, AbortController>();
@@ -42,7 +43,11 @@ export class CrewRuntime {
           maxTokens * agent.outputMicroUsdPerToken;
         if (!Number.isSafeInteger(reserve) || reserve <= 0) throw Error("UNPRICED_AGENT");
         const day = at.slice(0, 10), b = s.budget[day] ??= { spent: 0, reserved: 0 };
-        if (b.spent + b.reserved + reserve > s.control.dailyLimitMicroUsd) return null;
+        if (b.spent + b.reserved + reserve > s.control.dailyLimitMicroUsd) {
+          crewDiagnostic("run_budget_blocked", { reserveMicroUsd: reserve,
+            limitMicroUsd: s.control.dailyLimitMicroUsd, spentMicroUsd: b.spent, reservedMicroUsd: b.reserved });
+          return null;
+        }
         b.reserved += reserve;
         Object.assign(run, { status: "running", day, epoch: s.control.epoch, reserved: reserve, modelId: agent.modelId });
         log(s, agent.agentId, "run_reserved", { runId: run.id, taskId: run.taskId, day, reserve, modelId: agent.modelId }, at);

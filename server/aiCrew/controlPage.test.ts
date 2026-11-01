@@ -251,4 +251,26 @@ describe("AI Crew owner pilot buttons — shipped script interactions", () => {
     expect(p.el("pilotResults").textContent).toMatch(/неизвест|не подтвержд/i);
     expect(p.el("pilotResults").textContent).toMatch(/резерв/i);
   });
+  it("removes the editable microUSD field; lower save preserves the freshly read limit",async()=>{
+    expect(crewControlPage).not.toMatch(/<input[^>]*id="dailyLimit"/);
+    expect(crewControlPage).toContain("5 означает $5");
+    const s=state();s.control.dailyLimitMicroUsd=5;
+    const p=await page(payload(s));
+    expect(p.el("dailyLimit").textContent).toMatch(/0[,.]000005/);
+    const fresh=state();fresh.revision=27;fresh.control.dailyLimitMicroUsd=1000000;
+    p.setState(payload(fresh,"b".repeat(64)));p.el("staleHours").value="36";
+    await p.click("saveControl");
+    const writes=p.calls.filter(c=>c.method==="POST");
+    expect(writes).toHaveLength(1);
+    expect(writes[0].body).toEqual({revision:27,command:{kind:"control",enabled:false,dailyLimitMicroUsd:1000000,staleHours:36}});
+    expect(writes[0].headers["x-crew-csrf"]).toBe("b".repeat(64));
+    expect(p.calls.at(-1)?.method).toBe("GET");
+  });
+  it("lower control save does not write after cancel or failed fresh read",async()=>{
+    const p=await page();p.setConfirm(false);await p.click("saveControl");
+    expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(0);
+    p.setConfirm(true);p.setAnswer(async()=>({ok:false,status:503,data:{error:"unavailable"}}));
+    await p.click("saveControl");
+    expect(p.calls.filter(c=>c.method==="POST")).toHaveLength(0);
+  });
 });

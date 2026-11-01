@@ -89,3 +89,4 @@
 - [Large model verification](data-platform-verification.md) — полный снимок проверять порционно; маленький fixture скрывает OOM и плохие планы join после импорта.
 - [Правила v3: проверка этапов](stage-review-policy.md) — один ZIP в конце этапа; рискованные изменения всегда до Publish; Dev не копировать, модель только в production, самоприёмки нет.
 - [AI Crew: граница запуска](ai-crew-launch-boundary.md) — подготовка не включает агентов; OFF/0, неизвестный расход не повторять, Dev-проверка не доказывает production.
+- [Хэши после jsonb](jsonb-evidence-hashes.md) — порядок ключей не равен изменению снимка; проверять hash через PostgreSQL, сохранять совместимость подготовленных данных.

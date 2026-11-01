@@ -11,6 +11,7 @@ import { CrewRuntime } from "./runtime";
 import { crewControlPage } from "./controlPage";
 import { readHintEvidence } from "./hintEvidence";
 import { HINT_AGENTS, HINT_PRICING_URL } from "./hintPilot";
+import { startCrewDispatcher } from "./dispatcher";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 export function registerCrewRoutes(app: Express) {
@@ -130,17 +131,6 @@ export function registerCrewRoutes(app: Express) {
   });
   // Production server owns the dispatcher. No timer in Dev, no provider call
   // until the durable global switch, positive budget and assignments all exist.
-  if (environment() === "production") {
-    let busy = false, observed = false;
-    const timer = setInterval(async () => {
-      if (busy) return;
-      busy = true;
-      try {
-        if (!observed) { await deployment(); observed = true; }
-        await getRuntime().tick();
-      } catch { /* missing schema/DB/control => fail closed, never infer enabled */ }
-      finally { busy = false; }
-    }, 15000);
-    timer.unref();
-  }
+  startCrewDispatcher({ environment: environment(), observePublication: deployment,
+    tick: () => getRuntime().tick() });
 }

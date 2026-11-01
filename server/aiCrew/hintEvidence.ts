@@ -36,7 +36,23 @@ export function projectHintEvidence(rows: { calls: any[]; reports: any[]; proble
       "latency_starts_at_stt_final_not_physical_speech_end", "usage_matching_is_not_user_satisfaction",
       "historical_signals_do_not_prove_current_failure", "problem_source_is_call_lab_watchdog_not_all_company_issues"] };
 }
-export function evidenceHash(e: HintEvidence) { return createHash("sha256").update(JSON.stringify(e)).digest("hex"); }
+// jsonb preserves values, NOT object insertion order. Use the v1 projection's
+// original field order so existing prepared hashes remain valid after Publish.
+// Unknown keys are retained (sorted), never dropped to make a hash pass.
+const evidenceShape = projectHintEvidence({ calls: [{}], reports: [{}], problems: [{}] });
+function orderedEvidence(value: any, shape: any): any {
+  if (Array.isArray(value)) return value.map(v => orderedEvidence(v, Array.isArray(shape) ? shape[0] : undefined));
+  if (value && typeof value === "object") {
+    const preferred = shape && typeof shape === "object" && !Array.isArray(shape) ? Object.keys(shape) : [];
+    const keys = [...preferred.filter(k => Object.hasOwn(value, k)),
+      ...Object.keys(value).filter(k => !preferred.includes(k)).sort()];
+    return Object.fromEntries(keys.map(k => [k, orderedEvidence(value[k], shape?.[k])]));
+  }
+  return value;
+}
+export function evidenceHash(e: HintEvidence) {
+  return createHash("sha256").update(JSON.stringify(orderedEvidence(e, evidenceShape))).digest("hex");
+}
 
 /** Fixed, owner-scoped SELECTs. No user SQL, arbitrary table names, or raw text. */
 export async function readHintEvidence(pool: Pool, ownerId: string): Promise<HintEvidence> {
