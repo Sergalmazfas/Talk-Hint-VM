@@ -109,6 +109,10 @@ describe("five narrow production model operations", () => {
     expect(profile(result, ninaId)).toMatchObject({ sourceProfile: nina,
       status: "described_not_connected", runtimeChanged: false, promptDraft: nina.promptDraft });
     expect(profile(result, ninaId).prompt).toBeUndefined();
+    expect(profile(result, ninaId).visualPassport).toMatchObject({
+      selectedName: null, ownerSelectionStatus: "proposed",
+      nameProposal: { value: "Нина Кадрова", status: "proposed" },
+    });
     expect(result.documents).toHaveLength(state.documents.length);
     expect(() => apply(state, "replace_employee_profile", { ...a, sourceHash: "0".repeat(64) })).toThrow();
     expect(() => apply(state, "replace_employee_profile", { ...a, targetHash: "0".repeat(64) })).toThrow();

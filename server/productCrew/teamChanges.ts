@@ -144,10 +144,17 @@ export function buildTeamChange(state: ProjectModelState, name: keyof typeof tea
     if (profiles(selected.id).some(d => d.id !== target.id))
       return fail(409, "Найдена другая анкета P.ORG; дубли не создаются.");
     const employee = nina.employee;
+    if (!z.string().min(1).max(240).refine(name => !!name.trim()).safeParse(employee.name).success ||
+        !["proposed", "accepted"].includes(employee.nameStatus))
+      return fail(400, "Нужны непустое имя Нины и явный статус proposed/accepted; выбор владельца не угадывается.");
+    // selectedName is an accepted owner choice in the relational projector.
+    // A source proposal must remain a separate proposal, not an implicit acceptance.
+    const acceptedName = employee.nameStatus === "accepted";
     // Source remains intact; promptDraft is not a runtime prompt or executable configuration.
     const value = { format: nina.format, version: 1, sourceVersion: 2, mode: "company",
       status: "described_not_connected", sourceDocumentId: source.id, sourceHash: a.sourceHash,
-      sourceProfile: nina, visualPassport: { roleId: selected.id, selectedName: employee.name,
+      sourceProfile: nina, visualPassport: { roleId: selected.id, selectedName: acceptedName ? employee.name : null,
+        ...(!acceptedName ? { nameProposal: { value: employee.name, status: "proposed" } } : {}),
         ownerSelectionStatus: employee.nameStatus, position: employee.position,
         character: employee.character, portrait: { asset: null, image: employee.portrait?.file ?? null } },
       prohibitions: nina.prohibitions, duties: nina.duties, clients: nina.clients,

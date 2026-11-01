@@ -2511,3 +2511,17 @@ mtime_ms = 1793488294905
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c39eddf9-e487-497a-8f19-e50de712a904/2032422e-1bc1-44ca-b0bd-6a24305c976d"
 storage_version_token = "1793492505284442"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "_QWfX54mQLeh9WEXFDDm3"
+uri = "file://generated-artifacts/Nina_proposed_name_fix_Claude_review.zip"
+type = "unspecified"
+title = "Нина: proposed без приёмки — на сверку Claude"
+description = "Точечный diff, исходники, 12 регрессионных тестов и логи. Полный прогон: 2834 passed, 34 skipped, 0 failed. Только Dev; production не изменён."
+logical_id = "631770cd-124e-489a-984b-d27c1d3a465a"
+content_hash = "sha256:6e3973d2d1d3f336234f2566be880ee3e4767d4c957611ae671a52e729d1cad7"
+size = 39858
+mtime_ms = 1793492963979
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/631770cd-124e-489a-984b-d27c1d3a465a/b70273ee-3a2c-4809-b77a-02a1c32924e6"
+storage_version_token = "1793492979183307"
+content_type = "application/octet-stream"
