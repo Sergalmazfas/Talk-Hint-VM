@@ -2595,3 +2595,17 @@ mtime_ms = 1793506968205
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/141987f8-9f26-476f-b6d8-15a282b39740/5e13ca43-f5df-40a2-92c8-79be1d41e085"
 storage_version_token = "1793506983984376"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "fIg8WVePvdoDkaIkiT24u"
+uri = "file://generated-artifacts/Owner_policy_Hint_production_r1159_review.zip"
+type = "unspecified"
+title = "Production r1159 — правило и Hint на сверку"
+description = "12 анкет, журнал 56 подтверждённых записей, совпадающие хэши правила, четыре шарда тестов и пропуски. В Hint — 0 самоприёмок; общий инженерный стык ENG.1.1 вынесен отдельно. Это не самоприёмка."
+logical_id = "e98c672a-513f-4cec-a5f7-66e754c467c0"
+content_hash = "sha256:c8ea6f8b1180e1b121660b05e841916d186c97bc073a099bff953f004495ca76"
+size = 1326194
+mtime_ms = 1793512346163
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e98c672a-513f-4cec-a5f7-66e754c467c0/edb646b7-c312-456c-b2cb-51880e9a0174"
+storage_version_token = "1793512388220076"
+content_type = "application/octet-stream"
