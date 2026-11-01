@@ -7,7 +7,8 @@ import { log } from "./domain";
 import { auditStructure } from "./structureAudit";
 import type { ProjectModelState } from "../../shared/projectModel";
 
-const mutations = ["crew_test_prepare", "crew_test_enable", "crew_test_start", "crew_test_off", "crew_test_close_stalled"] as const;
+const mutations = ["crew_test_prepare", "crew_test_enable", "crew_test_start", "crew_test_off", "crew_test_close_stalled",
+  "crew_test_writeoff_legacy_unknown"] as const;
 const base = { revision: z.number().int().nonnegative(), requestId: z.string().uuid() };
 const writeSchema = z.object({ ...base, command: testActions }).strict();
 const readNames = ["crew_test_state", "crew_structure_check"];
@@ -50,10 +51,14 @@ export function registerTestMcp(app: Express, o: {
                 t.hintPilot.status === "author" && !ids.has(t.id)).map(t => ({
                   taskId: t.id, status: t.hintPilot!.status,
                   runs: s.runs.filter(r => r.taskId === t.id).map(r => ({
-                    status: r.status, cost: r.cost, reserved: r.reserved,
+                    id: r.id, status: r.status, cost: r.cost, reserved: r.reserved, day: r.day,
                   })),
                 })),
               documents: s.documents.filter(d => ids.has(d.taskId)),
+               writtenOffLegacy: s.runs.filter(r => r.legacyUnknownWriteoff?.seriesId === s.testGrant?.id &&
+                 !!r.legacyUnknownWriteoff).map(r => ({ taskId: r.taskId, runId: r.id,
+                   status: r.status, reserved: r.reserved, day: r.day, cost: r.cost,
+                   writeoff: r.legacyUnknownWriteoff, dayBudget: r.day ? s.budget[r.day] : undefined })),
               journal: s.journal.filter(e => e.actor === TEST_ACTOR ||
                 ids.has((e.detail as any)?.taskId)),
               structureReports: s.structureReports ?? [] };
@@ -92,6 +97,8 @@ export function registerTestMcp(app: Express, o: {
                   ...["enable", "start", "close_stalled"].map(action => ({ type: "object", additionalProperties: false,
                     required: ["action", "taskId"], properties: { action: { const: action }, taskId: { type: "string", format: "uuid" } } })),
                   { type: "object", additionalProperties: false, required: ["action"], properties: { action: { const: "off" } } },
+                   { type: "object", additionalProperties: false,
+                     required: ["action"], properties: { action: { const: "writeoff_legacy_unknown" } } },
                 ] } } },
           annotations: { readOnlyHint: readNames.includes(name), destructiveHint: false, idempotentHint: false },
         })) } : rpc.method === "initialize" ? { protocolVersion: "2024-11-05",

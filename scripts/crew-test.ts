@@ -3,23 +3,19 @@
  * Key comes only from CREW_TEST_KEY. Never print headers, errors or payloads
  * containing credentials. This file does nothing unless explicitly executed.
  *
- * npx tsx scripts/crew-test.ts state|structure|latency
+ * npx tsx scripts/crew-test.ts state|writeoff|structure|latency
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-const endpoint = "https://talkhint.app/api/crew-test/mcp";
+import { crewTestRpc } from "./lib/crew-test-rpc";
+import { LEGACY_AMOUNT, LEGACY_TASK_ID } from "../server/aiCrew/legacyUnknown";
 async function main() {
   const key = process.env.CREW_TEST_KEY;
   if (!key || key.length < 43) throw Error("CREW_TEST_KEY_NOT_CONFIGURED");
   const action = process.argv[2];
-  if (!["state", "structure", "latency"].includes(action)) throw Error("USE_STATE_STRUCTURE_OR_LATENCY");
+  if (!["state", "structure", "writeoff", "latency"].includes(action)) throw Error("USE_STATE_STRUCTURE_WRITEOFF_OR_LATENCY");
   async function rpc(method: string, params?: unknown): Promise<any> {
-    const r = await fetch(endpoint, { method: "POST", redirect: "error", signal: AbortSignal.timeout(20000),
-      headers: { "Content-Type": "application/json", "X-API-Key": key! },
-      body: JSON.stringify({ jsonrpc: "2.0", id: randomUUID(), method, params }) });
-    const b = await r.json() as any;
-    if (!r.ok || b.error) throw Error("MCP_UNCONFIRMED_STOP_NO_RETRY");
-    return method === "tools/call" ? JSON.parse(b.result.content[0].text) : b.result;
+    return crewTestRpc(method, params, key!);
   }
   async function read() { return rpc("tools/call", { name: "crew_test_state", arguments: {} }); }
   async function command(command: object) {
@@ -33,6 +29,19 @@ async function main() {
     return after;
   }
   await rpc("tools/list");
+  if (action === "writeoff") {
+    const before = await read();
+    const old = before.legacyStalledCandidates?.find((t: any) => t.taskId === LEGACY_TASK_ID);
+    if (before.control.enabled || old?.runs.length !== 1 || old.runs[0].status !== "unknown" ||
+        old.runs[0].reserved !== LEGACY_AMOUNT) throw Error("WRITEOFF_PRECONDITION_STOP");
+    const after = await command({ action: "writeoff_legacy_unknown" });
+    const receipt = after.writtenOffLegacy?.find((r: any) => r.taskId === LEGACY_TASK_ID);
+    if (after.control.enabled || receipt?.status !== "discarded" || receipt.reserved !== 0 ||
+        receipt.cost !== LEGACY_AMOUNT || after.grant.spent !== before.grant.spent + LEGACY_AMOUNT ||
+        (after.legacyStalledCandidates ?? []).some((t: any) => t.taskId === LEGACY_TASK_ID))
+      throw Error("WRITEOFF_READBACK_STOP_NO_RETRY");
+    console.log(JSON.stringify(after, null, 2)); return;
+  }
   if (action !== "latency") {
     const data = action === "state" ? await read() : await rpc("tools/call", { name: "crew_structure_check", arguments: {} });
     // Scope response omits credential hashes, unrelated owner docs and excerpts.
@@ -40,14 +49,9 @@ async function main() {
   }
   let s = await read();
   if (s.control.enabled) throw Error("INITIAL_STATE_NOT_OFF");
-  // Approved safe legacy cleanup only; no release of unknown reservations.
-  for (const old of s.legacyStalledCandidates ?? []) {
-    if (old.runs.some((r: any) => !["queued", "discarded"].includes(r.status) || r.reserved || r.cost))
-      throw Error("LEGACY_EXECUTION_REQUIRES_OWNER_REVIEW");
-    s = await command({ action: "close_stalled", taskId: old.taskId });
-    if ((s.legacyStalledCandidates ?? []).some((x: any) => x.taskId === old.taskId))
-      throw Error("LEGACY_CLOSE_NOT_CONFIRMED");
-  }
+  // No generic cleanup. The exact approved writeoff is a separate action before
+  // structure check; any remaining legacy candidate requires a new decision.
+  if ((s.legacyStalledCandidates ?? []).length) throw Error("LEGACY_REQUIRES_OWNER_REVIEW");
   s = await command({ action: "prepare", candidate: "latency" });
   const task = s.tasks.find((t: any) => !t.closed && t.hintPilot?.status === "prepared");
   if (!task || s.control.enabled) throw Error("PREPARE_NOT_CONFIRMED");

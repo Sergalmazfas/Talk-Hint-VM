@@ -3,6 +3,7 @@ import { z } from "zod";
 import { applyOwnerCommand, log, type CrewState, type Task } from "./domain";
 import type { HintEvidence } from "./hintEvidence";
 import { closeStalledHintPilot, STALLED_PILOT_OUTCOME } from "./hintPilot";
+import { hasLegacyWriteoff, writeOffLegacyUnknown } from "./legacyUnknown";
 
 export const TEST_ACTOR = "replit-test";
 export const SERIES_LIMIT = 5_000_000;
@@ -11,6 +12,7 @@ export const testActions = z.discriminatedUnion("action", [
   z.object({ action: z.literal("enable"), taskId: z.string().uuid() }).strict(),
   z.object({ action: z.literal("start"), taskId: z.string().uuid() }).strict(),
   z.object({ action: z.literal("close_stalled"), taskId: z.string().uuid() }).strict(),
+  z.object({ action: z.literal("writeoff_legacy_unknown") }).strict(),
   z.object({ action: z.literal("off") }).strict(),
 ]);
 export const keyHash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -61,11 +63,19 @@ export function applyTestAction(s: CrewState, raw: unknown, at: string, models: 
   if (!validGrant(s, Date.parse(at))) throw Error("CREW_TEST_DENIED");
   const a = testActions.parse(raw), g = s.testGrant!;
   if (a.action === "off") { stopTest(s, at, "requested"); return; }
+  if (a.action === "writeoff_legacy_unknown") {
+    writeOffLegacyUnknown(s, at);
+    return;
+  }
+  const blockingRun = s.runs.some(r => ["running", "unknown"].includes(r.status));
   if (a.action === "prepare") {
-    if (g.spent + g.reserved >= g.limit || s.runs.some(r => ["running", "unknown"].includes(r.status)) ||
+    if (g.spent + g.reserved >= g.limit || blockingRun ||
         s.control.enabled) throw Error("CREW_TEST_NOT_SAFE");
     // Do not reset a different owner's limit. Only our own prior OFF can prepare again.
-    if (s.control.testSeriesId === g.id) s.control = { ...s.control, dailyLimitMicroUsd: 0 };
+    // The exact, owner-approved writeoff also permits OFF/0 preparation.
+    // Never reset expenses or other reservations.
+    if (s.control.testSeriesId === g.id || hasLegacyWriteoff(s))
+      s.control = { ...s.control, dailyLimitMicroUsd: 0 };
     applyOwnerCommand(s, { kind: "hint_pilot_prepare", candidate: a.candidate, ratesConfirmed: true },
       TEST_ACTOR, at, models, evidence);
     s.tasks.at(-1)!.testSeriesId = g.id;
@@ -83,7 +93,7 @@ export function applyTestAction(s: CrewState, raw: unknown, at: string, models: 
     const task = testTask(s, a.taskId);
     if (a.action === "enable") {
       if (s.control.enabled || task.closed || task.hintPilot?.status !== "prepared" ||
-          g.spent + g.reserved >= g.limit || s.runs.some(r => ["running", "unknown"].includes(r.status)))
+          g.spent + g.reserved >= g.limit || blockingRun)
         throw Error("CREW_TEST_NOT_SAFE");
       // The delegated global ON cannot execute unrelated queues/schedules.
       s.control = { ...s.control, enabled: true, dailyLimitMicroUsd: SERIES_LIMIT,

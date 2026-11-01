@@ -36,6 +36,8 @@ export type Task = { id: string; title: string; phase: typeof phases[number]; cl
 export type Agent = { agentId: string; modelId: string; inputMicroUsdPerToken: number; outputMicroUsdPerToken: number };
 export type Run = { id: string; taskId: string; agentId: string; eventId: string; status: "queued" | "running" | "done" | "unknown" | "discarded";
   testSeriesId?: string; startedAt?: string;
+  legacyUnknownWriteoff?: { at: string; actor: "replit-test"; seriesId: string;
+    amountMicroUsd: number; providerOutcome: "unknown"; reason: "owner_emergency_off" };
   at: string; day?: string; epoch?: number; reserved?: number; cost?: number; usage?: { input_tokens: number; output_tokens: number };
   modelId?: string; completedAt?: string };
 export type CrewState = {

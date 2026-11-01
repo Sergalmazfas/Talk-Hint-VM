@@ -2847,3 +2847,45 @@ mtime_ms = 1793569597697
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/cc97b92d-067a-4cfd-8986-d1bb40c5f4dd/bbec8669-7b69-4bd6-97e8-6c221c05f1bf"
 storage_version_token = "1793569604397449"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "psIYMgCW3U-WAWrfzOaMR"
+uri = "file://generated-artifacts/Crew_test_production_STOP_Claudiy_2026-11-01.zip"
+type = "unspecified"
+title = "Клавдию: production crew-test — STOP до платного запуска"
+description = "Реальные state/tools-list, журнал серии, проверка структуры, диагностика и ограничения. Финальный OFF, новая серия $0 из $5; старый unknown с резервом $0.036716 сохранён. Паша и Фома не запускались."
+logical_id = "8916ea47-582b-43f7-b415-da05db704212"
+content_hash = "sha256:1980786001573c79b920273c165aae3082260e7ff17fd36a122077e8ff70b093"
+size = 28148
+mtime_ms = 1793574822904
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8916ea47-582b-43f7-b415-da05db704212/d9aef551-ba9b-4166-9a4f-847b6f1eebef"
+storage_version_token = "1793574835684761"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "YxeasEjaB1kTE5xsYlLFw"
+uri = "file://generated-artifacts/Crew_legacy_unknown_recovery_Claudiy_review.zip"
+type = "unspecified"
+title = "Клавдию: безопасное восстановление старого unknown — diff и тесты"
+description = "Узкая команда изоляции: unknown и исходный резерв сохраняются, сумма учитывается в лимите $5, повтора запроса нет. Diff, исходники, контракт, PostgreSQL/CAS-регрессии и полный прогон 4 шардами: 3119 passed, 0 failed, 34 штатных skip. Production не менялся."
+logical_id = "320ceb03-5534-440c-bb7f-0d1ac27d2d97"
+content_hash = "sha256:88acbd9a55d9369345e6bcb908cb777310fb4912a56afb7743b2c6d3a22d04d2"
+size = 349925
+mtime_ms = 1793575763804
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/320ceb03-5534-440c-bb7f-0d1ac27d2d97/e7aea57d-c61f-4545-9e9c-9a9ee4a2cfeb"
+storage_version_token = "1793575777606219"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ba5bvuyRLWMZVBDk7lw-X"
+uri = "file://generated-artifacts/Crew_oneoff_writeoff_structure_Claudiy_review.zip"
+type = "unspecified"
+title = "Клавдию: разовое списание $0.036716 + исправление structure check"
+description = "Только утверждённый старый запуск, резерв → потрачено при OFF, точный итог владельца, без повтора и новой кнопки. Structure read до 90с, записи 20с без повторов. Diff, исходники, 4 шарда: 3123 passed, 0 failed, 34 штатных skip. Production не менялся."
+logical_id = "0cdc424d-6bfa-4499-ba5f-fc4d08f26656"
+content_hash = "sha256:d35ffa3b228c2e53e4fbc448f97b6853ea9b6a7812d0e97693a2ddfcda7c47f9"
+size = 355168
+mtime_ms = 1793576352209
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0cdc424d-6bfa-4499-ba5f-fc4d08f26656/5aa1bc26-4558-427d-bb4a-73614cb1cac1"
+storage_version_token = "1793576370820324"
+content_type = "application/octet-stream"
