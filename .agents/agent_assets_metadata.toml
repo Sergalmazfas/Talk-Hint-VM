@@ -2833,3 +2833,17 @@ mtime_ms = 1793563778337
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e5592d7e-849a-469b-b447-a203f8730d3b/7ba0d7ff-d279-4b5c-9b82-d48d1e6b3cc9"
 storage_version_token = "1793563786618100"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "fJuOzUxG58VIpw4o5jXUK"
+uri = "file://generated-artifacts/Crew_test_5USD_7days_Claudiy_review.zip"
+type = "unspecified"
+title = "AI Crew: самостоятельные проверки $5 / 7 дней — Клавдию"
+description = "Diff и полный код, узкий MCP crew-test, общий бюджет серии, отзыв и watchdog, проверка структуры, отчёты 4 шардов, границы и план после Publish. 3090 passed, 0 failed, 34 штатных skip. Реальных запусков не было; отдельный Secret пока не настроен."
+logical_id = "cc97b92d-067a-4cfd-8986-d1bb40c5f4dd"
+content_hash = "sha256:e0cc65fd9208959492e06ca34ad925dc82d86fe477773e418c733eef5677cb6b"
+size = 370639
+mtime_ms = 1793569597697
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/cc97b92d-067a-4cfd-8986-d1bb40c5f4dd/bbec8669-7b69-4bd6-97e8-6c221c05f1bf"
+storage_version_token = "1793569604397449"
+content_type = "application/octet-stream"

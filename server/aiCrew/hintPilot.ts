@@ -17,7 +17,10 @@ export type HintPilot = { candidate: HintCandidate; evidence: HintEvidence; evid
 
 export function prepareHintPilot(s: CrewState, candidate: HintCandidate, evidence: HintEvidence, actor: string, at: string, models: string[]) {
   if (s.control.enabled || s.control.dailyLimitMicroUsd !== 0) throw Error("PREPARE_REQUIRES_OFF_ZERO");
-  if (s.tasks.some(t => t.hintPilot && !t.closed)) throw Error("ONE_PILOT_TASK_ONLY");
+  if (s.tasks.some(t => t.hintPilot && !t.closed &&
+      !(actor === "replit-test" && t.testSeriesId === s.testGrant?.id &&
+        t.hintPilot.ownerId === actor && t.hintPilot.status === "owner")))
+    throw Error("ONE_PILOT_TASK_ONLY");
   if (!HINT_AGENTS.every(a => models.includes(a.modelId))) throw Error("PILOT_MODELS_UNVERIFIED");
   if (!evidence.calls.length && !evidence.reports.length && !evidence.problems.length) throw Error("NO_HINT_EVIDENCE");
   if (candidate === "latency" && !evidence.calls.some(c => c.latency.e2eP95Ms != null && c.slaMs != null && c.latency.e2eP95Ms > c.slaMs) ||
@@ -44,10 +47,10 @@ export function startHintPilot(s: CrewState, task: Task, actor: string, at: stri
     eventId: `hint-author:${task.id}`, at, status: "queued" });
 }
 export const STALLED_PILOT_OUTCOME = "не выполнено: зависание диспетчера";
-export function closeStalledHintPilot(s: CrewState, task: Task, actor: string, at: string) {
+export function closeStalledHintPilot(s: CrewState, task: Task, actor: string, at: string, delegated = false) {
   const p = task.hintPilot, runs = s.runs.filter(r => r.taskId === task.id);
   if (s.control.enabled !== false) throw Error("PILOT_CLOSE_REQUIRES_OFF");
-  if (!p || p.ownerId !== actor || p.status !== "author" || task.closed || task.phase !== "analysis")
+  if (!p || (!delegated && p.ownerId !== actor) || p.status !== "author" || task.closed || task.phase !== "analysis")
     throw Error("PILOT_NOT_STALLED");
   // Never turn a paid/unknown result into zero cost or free its reservation.
   // The company budget is shared: an unattributed reservation also blocks close.

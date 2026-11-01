@@ -29,15 +29,20 @@ export const commandSchema = z.discriminatedUnion("kind", [
 ]);
 export type Command = z.infer<typeof commandSchema>;
 export type Task = { id: string; title: string; phase: typeof phases[number]; closed: boolean; hintPilot?: HintPilot;
+  testSeriesId?: string;
   steps: { phase: typeof phases[number]; holder: string; updatedAt: string; note: string; actor: string;
     expectation?: string; approved?: boolean; commit?: string; testedCommit?: string; actual?: string; met?: boolean;
     laboratoryActor?: string; reviewerActor?: string }[] };
 export type Agent = { agentId: string; modelId: string; inputMicroUsdPerToken: number; outputMicroUsdPerToken: number };
 export type Run = { id: string; taskId: string; agentId: string; eventId: string; status: "queued" | "running" | "done" | "unknown" | "discarded";
+  testSeriesId?: string; startedAt?: string;
   at: string; day?: string; epoch?: number; reserved?: number; cost?: number; usage?: { input_tokens: number; output_tokens: number };
   modelId?: string; completedAt?: string };
 export type CrewState = {
-  version: 1; revision: number; control: { enabled: boolean; epoch: number; dailyLimitMicroUsd: number; staleHours: number };
+  version: 1; revision: number; control: { enabled: boolean; epoch: number; dailyLimitMicroUsd: number; staleHours: number; testSeriesId?: string };
+  testGrant?: { id: string; keyHash: string; createdAt: string; expiresAt: string; revokedAt?: string;
+    lastUsedAt?: string; limit: number; spent: number; reserved: number };
+  structureReports?: { day: string; at: string; modelRevision: number; findings: { status: "ok" | "problem"; where: string; check: string }[] }[];
   agents: Agent[]; tasks: Task[]; runs: Run[];
   schedules: { taskId: string; agentId: string; everyMinutes: number; nextAt: string }[];
   budget: Record<string, { spent: number; reserved: number }>;

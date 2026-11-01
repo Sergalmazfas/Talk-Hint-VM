@@ -29,6 +29,7 @@ vi.mock("./anthropic",()=>({AnthropicCrewProvider:class{
 }}));
 vi.mock("../codeVersion",()=>({codeVersion:()=>({commit:"a".repeat(40),sourceHash:"hash",taskRef:"roadmap:test",fixes:"fix",dirty:false,builtAt:f.builtAt})}));
 import { registerCrewRoutes } from "./routes";
+import { authorizeTest, keyHash } from "./testGrant";
 let server:Server,base:string;
 const headers={"x-owner":"yes","Content-Type":"application/json",origin:"https://owner.test"};
 beforeEach(async()=>{
@@ -45,6 +46,24 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it("revokes separate test grant only with owner, Origin, CSRF, fresh revision; tombstone survives reread",async()=>{
+  authorizeTest(f.state,keyHash("fixture-only-".repeat(5)),"2026-11-01T18:00:00Z");
+  const t=await csrf(),before=structuredClone(f.state);
+  expect((await fetch(base+"/api/admin/ai-crew/crew-test/revoke",{method:"POST",
+   headers:{"Content-Type":"application/json",origin:"https://owner.test","x-crew-csrf":t},
+   body:JSON.stringify({revision:0})})).status).toBe(403);
+  expect((await post("/crew-test/revoke",{revision:0})).status).toBe(403);
+  expect((await fetch(base+"/api/admin/ai-crew/crew-test/revoke",{method:"POST",
+   headers:{"x-owner":"yes","Content-Type":"application/json","x-crew-csrf":t},
+   body:JSON.stringify({revision:0})})).status).toBe(403);
+  expect((await post("/crew-test/revoke",{revision:99},t)).status).toBe(409);
+  expect(f.state).toEqual(before);
+  expect((await post("/crew-test/revoke",{revision:0},t)).status).toBe(200);
+  const saved=(await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).state;
+  expect(saved.testGrant.revokedAt).toBeTruthy();expect(saved.revision).toBe(1);
+  expect(saved.journal.at(-1).actor).toBe("owner");
+  expect(f.message).not.toHaveBeenCalled();
+ });
  it("closes a stalled pilot only through owner, Origin, CSRF and fresh CAS, then returns the saved state",async()=>{
   const at="2026-11-01T20:00:00Z",models=["claude-sonnet-5-5","claude-opus-5-5"];
   applyOwnerCommand(f.state,{kind:"hint_pilot_prepare",candidate:"latency",ratesConfirmed:true},"owner",at,models,await f.evidence());

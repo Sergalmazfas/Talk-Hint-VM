@@ -6,7 +6,28 @@ import { applyOwnerCommand } from "./domain";
 import { projectHintEvidence, evidenceHash } from "./hintEvidence";
 import { HINT_AGENTS } from "./hintPilot";
 import { CrewRuntime } from "./runtime";
+import { applyTestAction, authorizeTest, keyHash } from "./testGrant";
 describe.skipIf(process.env.CREW_RUNTIME_PG_TEST!=="true")("AI Crew actual PostgreSQL transaction",()=>{
+ it("persists the one-time series through jsonb and a new store instance without resetting spend/expiry",async()=>{
+  const pool=new Pool({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:3000,max:1}),c=await pool.connect();
+  try{
+   await c.query("CREATE TEMP TABLE ai_crew_runtime_state(environment text PRIMARY KEY,state jsonb NOT NULL,updated_at timestamptz DEFAULT now())");
+   await c.query("INSERT INTO ai_crew_runtime_state(environment,state) VALUES($1,$2::jsonb)",["development",JSON.stringify(initialState())]);
+   const wrapper:any={query:(...a:any[])=>c.query(...a as [any]),connect:async()=>({query:(...a:any[])=>c.query(...a as [any]),release:()=>{}})};
+   const store=new CrewStore(wrapper,"development"),at="2026-11-01T18:00:00Z",hash=keyHash("fixture".repeat(10));
+   await store.change(s=>{authorizeTest(s,hash,at);s.testGrant!.spent=4800000},0);
+   const other=new CrewStore(wrapper,"development");
+   await other.change(s=>authorizeTest(s,hash,"2026-11-02T18:00:00Z"),1);
+   const before=await other.read();
+   expect(before.testGrant!.spent).toBe(4800000);expect(before.testGrant!.expiresAt).toBe("2026-11-08T18:00:00.000Z");
+   await expect(other.change(s=>{s.testGrant!.spent=0;throw Error("rollback")},2)).rejects.toThrow("rollback");
+   expect(await store.read()).toEqual(before);
+   await expect(store.change(s=>authorizeTest(s,hash,"2026-11-08T18:00:00Z"),2)).rejects.toThrow("DENIED");
+   expect(await other.read()).toEqual(before);
+   await expect(store.change(s=>applyTestAction(s,{action:"advance"},at,[]),2)).rejects.toThrow();
+   expect(await store.read()).toEqual(before);
+  }finally{c.release();await pool.end()}
+ });
  it("closes the queued fixture atomically through CrewStore and preserves it on unsafe or stale writes",async()=>{
   const pool=new Pool({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:3000,max:1}),c=await pool.connect();
   try{

@@ -12,6 +12,12 @@ import { crewControlPage } from "./controlPage";
 import { readHintEvidence } from "./hintEvidence";
 import { HINT_AGENTS, HINT_PRICING_URL } from "./hintPilot";
 import { startCrewDispatcher } from "./dispatcher";
+import { registerTestMcp } from "./testMcp";
+import { revokeTest } from "./testGrant";
+import { startCrewMaintenance } from "./maintenance";
+import { productionProductRepository } from "../productCrew/production";
+import { TEAM_OWNER } from "../team/plan";
+import { auditStructure } from "./structureAudit";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 export function registerCrewRoutes(app: Express) {
@@ -22,6 +28,14 @@ export function registerCrewRoutes(app: Express) {
   const provider = new AnthropicCrewProvider();
   let runtime: CrewRuntime | null = null;
   const getRuntime = () => runtime ??= new CrewRuntime(store(), provider, environment());
+  const company = productionProductRepository(async () => {
+    if (environment() !== "production" || !pool) throw Error("PRODUCTION_ONLY");
+    return pool;
+  });
+  const readCompany = () => company.read(TEAM_OWNER, "new-country");
+  registerTestMcp(app, { environment: environment(), store, secret: () => process.env.CREW_TEST_KEY,
+    evidence: () => readHintEvidence(pool!, TEAM_OWNER),
+    models: async () => (await provider.listModels()).map(m => m.id), model: readCompany });
   const csrf = (req: any) => {
     if (!req.session) throw Error("OWNER_SESSION_REQUIRED");
     return req.session.crewCsrf ??= randomBytes(32).toString("hex");
@@ -84,6 +98,18 @@ export function registerCrewRoutes(app: Express) {
       runtime?.stopLocal(); res.json({ enabled: false });
     } catch { runtime?.stopLocal(); res.status(503).json({ error: "STOP_NOT_PERSISTED_LOCAL_ABORTED" }); }
   });
+  app.post(api + "/crew-test/revoke", protect, async (req, res) => {
+    if (!Number.isSafeInteger(req.body?.revision)) return res.status(400).json({ error: "REVISION_REQUIRED" });
+    try {
+      await store().change(s => revokeTest(s, String(req.user!.id), new Date().toISOString()), req.body.revision);
+      runtime?.stopLocal();
+      res.json({ saved: true, revision: req.body.revision + 1 });
+    } catch { res.status(409).json({ error: "REVOKE_NOT_CONFIRMED_READ_STATE" }); }
+  });
+  app.get(api + "/structure-check", async (_req, res) => {
+    try { res.json(auditStructure(await readCompany(), await store().read(), new Date().toISOString())); }
+    catch { res.status(503).json({ error: "STRUCTURE_READ_UNAVAILABLE" }); }
+  });
   app.post(api + "/command", protect, async (req, res) => {
     const parsed = commandSchema.safeParse(req.body?.command);
     if (!parsed.success || !Number.isSafeInteger(req.body?.revision)) return res.status(400).json({ error: "INVALID_CREW_COMMAND" });
@@ -133,4 +159,5 @@ export function registerCrewRoutes(app: Express) {
   // until the durable global switch, positive budget and assignments all exist.
   startCrewDispatcher({ environment: environment(), observePublication: deployment,
     tick: () => getRuntime().tick() });
+  startCrewMaintenance({ environment: environment(), store, model: readCompany, stopLocal: () => runtime?.stopLocal() });
 }

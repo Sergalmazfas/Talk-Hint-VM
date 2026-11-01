@@ -33,6 +33,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
 <nav class="bar" aria-label="Основные действия"><button id="refresh">Обновить состояние</button><button class="primary" id="initialize">Инициализировать таблицу</button><button class="danger" id="disable">Аварийно выключить всё</button><button id="loadModels">Загрузить модели Anthropic</button></nav>
 <div id="message" class="message" role="status" aria-live="polite">Получаем состояние сервера…</div>
 <section class="grid">
+<article class="panel span12"><h2>Самостоятельные проверки Replit</h2><p class="hint">Отдельный scope crew-test: только пилоты Hint. Общий бюджет серии $5, срок 7 дней с первого использования ключа. Не сбрасывается новым днём, рестартом или заменой ключа. Отзыв окончательный для этой серии.</p><div id="crewTestStatus" class="hint"></div><button class="danger" id="revokeCrewTest">Отключить доступ Replit crew-test</button><button id="checkCrewStructure">Проверить структуру без моделей</button><pre id="crewStructureResult"></pre></article>
 <article class="panel span8"><div class="split"><h2>Состояние системы</h2><span class="small" id="updated"></span></div><div class="metrics" id="metrics"></div><div style="height:14px"></div><div class="kv" id="meta"></div><p class="hint" id="notice"></p></article>
  <article class="panel span4"><h2>Лимиты и контроль</h2><div class="warning">Сохранение всегда отправляет <code>enabled:false</code>. Общая настройка лимита не включает агентов. Для пилота используйте отдельные owner-действия.</div>
 <div class="fields"><div><label>Текущий дневной лимит (только чтение)</label><div id="dailyLimit"></div></div><div><label for="staleHours">Срок устаревания, часы</label><input id="staleHours" type="number" min="1" max="8760" step="1" value="24"></div></div><p class="hint">Лимит задаётся в долларах только в блоке пилота выше: 5 означает $5. Здесь лимит не меняется. Сохранение выключает контроль и меняет только срок устаревания.</p><button id="saveControl" class="primary">Сохранить выключенный контроль</button></article>
@@ -64,6 +65,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
   function render(data){
     payload=data; csrf=typeof data.csrf==="string"?data.csrf:"";
     var state=data.state||{}, control=state.control||{};
+    var grant=state.testGrant;
+    if(state.structureReports&&state.structureReports.length)$("crewStructureResult").textContent=JSON.stringify(state.structureReports[state.structureReports.length-1],null,2);
+    $("crewTestStatus").textContent=grant?("Серия "+grant.id+" · "+(grant.revokedAt?"ОТОЗВАНО":Date.parse(grant.expiresAt)<=Date.now()?"ИСТЁК":"разрешена")+" · до "+when(grant.expiresAt)+" · потрачено/unknown "+fmtUsd(grant.spent)+" · резерв "+fmtUsd(grant.reserved)+" · последнее использование "+when(grant.lastUsedAt)):"Ключ ещё не использован; агенты не запущены.";
     $("switchDot").className="dot"+(control.enabled?" on":"");
     $("switchText").textContent=control.enabled?"ВНИМАНИЕ · сервер сообщил enabled=true":"ВЫКЛЮЧЕНО";
     $("updated").textContent="Обновлено "+new Date().toLocaleTimeString("ru-RU");
@@ -118,6 +122,19 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
   function renderProposals(docs,pubs){var el=$("proposals");clear(el);if(!docs.length)empty(el,"Предложений нет.");else docs.slice().reverse().forEach(function(d){item(el,d.status+" · "+d.agentId+" · "+when(d.at),d.text+" · task "+d.taskId+" · run "+d.runId)});
     var p=$("publications");clear(p);if(!pubs.length)empty(p,"Публикаций нет.");else pubs.slice().reverse().forEach(function(x){item(p,x.commit+" · "+when(x.at),x.fixes+" · task "+x.taskId+" · "+x.actor)})}
   function renderJournal(rows){var el=$("journal");clear(el);$("journalCount").textContent=rows.length+" событий";if(!rows.length){empty(el,"Журнал пуст.");return}rows.slice().reverse().forEach(function(e){var box=node("div","item");box.appendChild(node("strong","",e.kind+" · "+when(e.at)));box.appendChild(node("div","muted","actor: "+e.actor+" · "+text(e.detail)));el.appendChild(box)})}
+  $("revokeCrewTest").addEventListener("click",async function(){
+    if(!window.confirm("Вы уверены? Отключить crew-test и остановить его пилоты? Возобновления этой серии не будет."))return;
+    var button=$("revokeCrewTest");if(button.disabled)return;button.disabled=true;
+    try{var fresh=await request("",{method:"GET"});render(fresh);
+      var saved=await request("/crew-test/revoke",{method:"POST",body:JSON.stringify({revision:fresh.state.revision})});
+      var after=await request("",{method:"GET"});render(after);
+      if(saved.saved!==true||after.state.revision!==fresh.state.revision+1||!after.state.testGrant||!after.state.testGrant.revokedAt)throw Error("Отзыв не подтверждён.");
+      setMessage("Доступ crew-test отозван. Автозапуска нет.","good");
+    }catch(_){setMessage("СТОП: отзыв не подтверждён. Обновите состояние, не повторяйте запись вслепую.","error")}
+  });
+  $("checkCrewStructure").addEventListener("click",async function(){var b=$("checkCrewStructure");if(b.disabled)return;b.disabled=true;
+    try{$("crewStructureResult").textContent=JSON.stringify(await request("/structure-check",{method:"GET"}),null,2)}
+    catch(_){$("crewStructureResult").textContent="Проверка недоступна — это не результат «ок»."}finally{b.disabled=false}});
   async function request(path,options){var opt=options||{};opt.cache="no-store";opt.credentials="same-origin";opt.headers=Object.assign({"Accept":"application/json"},opt.headers||{});if(opt.body)opt.headers["Content-Type"]="application/json";if(opt.method==="POST")opt.headers["x-crew-csrf"]=csrf;
     var response=await fetch(API+path,opt), data;try{data=await response.json()}catch(_){data={error:"Ответ сервера не является JSON"}}
     if(!response.ok)throw Error(data.error||("HTTP "+response.status));return data}

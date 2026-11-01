@@ -103,6 +103,41 @@ async function page(initial = payload()) {
   };
 }
 describe("AI Crew owner pilot buttons — shipped script interactions", () => {
+  it("revokes crew-test with confirmation, fresh CSRF/revision and verified reread, no retry", async () => {
+    const p = await page(), fresh = payload();
+    fresh.state.revision = 45;
+    let posts = 0;
+    p.setAnswer(async (path, method, body) => {
+      if (method !== "POST") return { ok: true, data: structuredClone(fresh) };
+      posts++; expect(path).toBe("/api/admin/ai-crew/crew-test/revoke");
+      expect(body).toEqual({ revision: 45 });
+      fresh.state.revision = 46;
+      fresh.state.testGrant = { id: "series", keyHash: "", createdAt: "now", expiresAt: "now",
+        revokedAt: "now", limit: 5000000, spent: 0, reserved: 0 };
+      return { ok: true, data: { saved: true, revision: 46 } };
+    });
+    await p.click("revokeCrewTest");
+    expect(posts).toBe(1); expect(p.confirms[0]).toContain("Вы уверены?");
+    const write = p.calls.find(c => c.method === "POST")!;
+    expect(write.headers["x-crew-csrf"]).toBe(fresh.csrf);
+    expect(p.el("message").textContent).toContain("отозван");
+    await p.click("revokeCrewTest"); expect(posts).toBe(1);
+  });
+  it("cancelled revoke does not POST and structural audit uses GET only", async () => {
+    const p = await page(); p.setConfirm(false);
+    await p.click("revokeCrewTest");
+    await p.click("checkCrewStructure");
+    expect(p.calls.every(c => c.method === "GET")).toBe(true);
+    expect(p.calls.some(c => c.path.endsWith("/structure-check"))).toBe(true);
+  });
+  it("unclear revoke answer blocks blind repeat and reports STOP", async () => {
+    const p = await page();
+    p.setAnswer(async (_p, method) => method === "POST" ? { ok: true, data: {} } :
+      { ok: true, data: payload() });
+    await p.click("revokeCrewTest"); await p.click("revokeCrewTest");
+    expect(p.calls.filter(c => c.method === "POST")).toHaveLength(1);
+    expect(p.el("message").textContent).toContain("СТОП");
+  });
   it("renders the three requested actions and default $1; opening is read-only", async () => {
     const p = await page();
     expect(crewControlPage).toContain("Подготовить пилот: задержки");
