@@ -2651,3 +2651,31 @@ mtime_ms = 1793535529571
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9ec14ca8-9dee-48bf-a50f-981c213cb1ec/7039c3d5-dd63-4938-ac8c-c3d86f6a025c"
 storage_version_token = "1793535533597804"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "otHKVlHRGMRqB4GQTOu3P"
+uri = "file://generated-artifacts/Maria_HEAD06_STOP_r1162_review.zip"
+type = "unspecified"
+title = "Мария — STOP r1162: журнал и текущая анкета"
+description = "Одна подтверждённая запись паспорта; основная анкета не изменена. Журнал UUID/hash/revision, 42 теста, предварительный план Секретаря."
+logical_id = "ed13b61c-9bff-4b9f-9c0d-fbc12d5416d5"
+content_hash = "sha256:f0103aff89b298f01950114d211aef2efdb91326c770de71166de896fa52a1af"
+size = 52214
+mtime_ms = 1793538208993
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ed13b61c-9bff-4b9f-9c0d-fbc12d5416d5/bf31d187-a9b8-498b-9eec-25c688aa0d31"
+storage_version_token = "1793538215767369"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Y1Sgw-YeuljIzbTh1od07"
+uri = "file://generated-artifacts/Secretary_stage2_preliminary_plan.html"
+type = "html"
+title = "Секретарь — опись стенда и предварительный план"
+description = "Читается на телефоне. По отделу ничего не записано и не включено; Мария пока не завершена."
+logical_id = "a2a34175-2bb4-4152-9252-62fa42e27f99"
+content_hash = "sha256:41819c742d85819dffc39164dd85289e0b4aa8c977a0b7204e5de760e5a776bf"
+size = 13262
+mtime_ms = 1793538208956
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a2a34175-2bb4-4152-9252-62fa42e27f99/6b30aaff-1f67-42ae-9fb9-c5d2b9b19cdd"
+storage_version_token = "1793538216591129"
+content_type = "text/html"
