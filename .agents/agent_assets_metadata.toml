@@ -2539,3 +2539,17 @@ mtime_ms = 1793496661513
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/551e1684-9527-4132-97d8-277ba4caec97/2e30dc5e-d733-41cb-9a11-6cab612edc9c"
 storage_version_token = "1793496670502339"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "YrV5i-MyGSdgk-WEfK3A1"
+uri = "file://generated-artifacts/Hint_structure_and_duties_r1046_Claude.zip"
+type = "unspecified"
+title = "Hint r1046 — анкеты и карта связей для Claude"
+description = "Проект на сверку: 5 отдельных JSON, рабочие места, карточка лаборатории, модели без включения, исходные обязанности и список пробелов. 34 проверки целостности; новые анкеты в production не применены."
+logical_id = "dcab8425-9be2-4b73-88cb-f1754ccff05b"
+content_hash = "sha256:7b03b3aa45d45f1f1e8c985de60b28f6a4cac3d79e85ffe0389228da278b7d21"
+size = 105544
+mtime_ms = 1793500660428
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dcab8425-9be2-4b73-88cb-f1754ccff05b/8e5ae506-08e1-414d-94f1-4ae72b657731"
+storage_version_token = "1793500684025835"
+content_type = "application/octet-stream"
