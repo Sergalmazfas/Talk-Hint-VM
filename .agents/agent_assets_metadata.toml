@@ -2679,3 +2679,31 @@ mtime_ms = 1793538208956
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a2a34175-2bb4-4152-9252-62fa42e27f99/6b30aaff-1f67-42ae-9fb9-c5d2b9b19cdd"
 storage_version_token = "1793538216591129"
 content_type = "text/html"
+
+[[outputs]]
+id = "-R-Ua0oioKo6gVppySHRR"
+uri = "file://generated-artifacts/Maria_HEAD06_r1166_review.zip"
+type = "unspecified"
+title = "Мария HEAD.06 — итоговый ZIP r1166"
+description = "Анкета после записи, карта входов/выходов, полный журнал revision/hash/UUID, квитанции, тесты и что не проверено. Внутри также план Секретаря."
+logical_id = "2a2fff96-6886-4ebe-b7a2-cd9d55d09275"
+content_hash = "sha256:0b1bce981eef34fded0c16c7311ad8d118d2d05ce277a5b814c02d0474574b34"
+size = 67713
+mtime_ms = 1793539280268
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2a2fff96-6886-4ebe-b7a2-cd9d55d09275/079cd8bf-564c-405c-83b9-1e9f5541c368"
+storage_version_token = "1793539294170211"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "GmHJ0_fRpbKiJNeac0b56"
+uri = "file://generated-artifacts/Secretary_stage2_plan_r1166.html"
+type = "html"
+title = "Секретарь — опись стенда и план на проверку"
+description = "Удобно читать на телефоне. Сева, Лёва, Тома и каталог: текущее состояние, предложения, ограничения инструментов и вопросы владельцу. Production-записей нет."
+logical_id = "61f140e7-143a-40a9-8ab9-977a1d38aa4f"
+content_hash = "sha256:356df721fdea2e05c9e40631474ea4d87febedaacfdfb310a713c1d45605933b"
+size = 14402
+mtime_ms = 1793539280220
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61f140e7-143a-40a9-8ab9-977a1d38aa4f/aa0a018d-aa36-4171-ae36-1c35826ca131"
+storage_version_token = "1793539294988903"
+content_type = "text/html"
