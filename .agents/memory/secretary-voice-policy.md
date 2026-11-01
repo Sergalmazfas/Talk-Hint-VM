@@ -3,6 +3,18 @@ name: Secretary voice choice policy
 description: Owner-approved Retell + Engine native default, GPT fallback choice, and safe rollout boundaries.
 ---
 
+For the Secretary department's workplace descriptions, the owner chose Retell
+as the lab provider, calling it “лучший по всем параметрам”. This is the owner's
+decision, not an independently measured universal comparison. ElevenLabs and
+the GPT bench are “не используется”, retained as comparison archives; recording
+a native speaker's voice is not used.
+
+**Why:** Explicit owner decision about the department's current working environment.
+
+**How to apply:** Do not delete archived benches or recordings, or silently change
+runtime options. The live Katya stays on telephone Retell; any live-setting change
+needs the owner's “да” and is carried out by Replit, not the department.
+
 After personally rating Retell + TalkHint Engine highly in the browser bench, the owner explicitly approved adding it to telephone Secretary and the existing Swift/Xcode admin app, making it the native default while retaining a GPT choice. This supersedes the former GPT-Live-only Secretary policy. Browser approval is not proof of PSTN/iPhone operation.
 
 **Why:** The user said Retell had passed their bench, authorized telephone testing, and requested its existing settings and priority in the native Secretary.
