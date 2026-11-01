@@ -2609,3 +2609,17 @@ mtime_ms = 1793512346163
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e98c672a-513f-4cec-a5f7-66e754c467c0/edb646b7-c312-456c-b2cb-51880e9a0174"
 storage_version_token = "1793512388220076"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "TW-cmvW3OZeKSvw7YjTqG"
+uri = "file://generated-artifacts/Maria_HEAD06_plan_r1161.html"
+type = "html"
+title = "Мария HEAD.06 — план на проверку"
+description = "Открывается на телефоне. План трёх записей, память сотрудников и поиск по знаниям; внутри JSON проекта и журнал ENG.1.1. Мария в production не изменена."
+logical_id = "c58966b8-3171-49ba-b4e7-18720ad59adf"
+content_hash = "sha256:532d80c861e7bad69d6aede77c4caa28cdea094dc3e0ba0422b933b0da027ac4"
+size = 41721
+mtime_ms = 1793518631118
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c58966b8-3171-49ba-b4e7-18720ad59adf/8cdbe967-5439-41d4-8560-c179fec12ac8"
+storage_version_token = "1793518687126895"
+content_type = "text/html"
