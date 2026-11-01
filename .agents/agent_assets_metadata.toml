@@ -2497,3 +2497,17 @@ mtime_ms = 1793489670048
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fa4da633-ada2-42cd-b88e-3dd4d22ed780/0ef1b264-cd98-43c7-a957-05142801a859"
 storage_version_token = "1793489710722792"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3Gsgxlc_zfc_FV90yC13f"
+uri = "file://generated-artifacts/secretary-structure/review/Stage2_questions.json"
+type = "unspecified"
+title = "Секретарь — 18 вопросов этапа 2"
+description = "Вопросы для определения действий Севы, Лёвы и Томы: стенд, провайдеры, голоса, меню, отзывы и приёмка. Действия не созданы, агенты не включены."
+logical_id = "c39eddf9-e487-497a-8f19-e50de712a904"
+content_hash = "sha256:bb9633c8e11621b27f806c4490afebd5ccdb40ffc1fd48680e55efebc457f483"
+size = 4225
+mtime_ms = 1793488294905
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c39eddf9-e487-497a-8f19-e50de712a904/2032422e-1bc1-44ca-b0bd-6a24305c976d"
+storage_version_token = "1793492505284442"
+content_type = "application/octet-stream"
