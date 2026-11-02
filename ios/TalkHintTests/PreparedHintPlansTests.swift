@@ -110,4 +110,111 @@ final class PreparedHintPlansTests: XCTestCase {
         for _ in 0..<20 { await Task.yield() }
         XCTAssertFalse(identifiers(view).contains("prepare-saved-plan-fixture"))
     }
+
+    // Offline render of the real production view, not an approximate mockup.
+    private struct Fixture {
+        let host: UIViewController
+        let scroll: UIScrollView
+        let plans: PreparedHintPlansView
+        let traits: UITraitCollection
+    }
+    private func fixture(style: UIUserInterfaceStyle, largeType: Bool = false,
+                         configure: (PreparedHintPlansView) -> Void) -> Fixture {
+        let traits = UITraitCollection(traitsFrom: [
+            UITraitCollection(userInterfaceStyle: style),
+            UITraitCollection(preferredContentSizeCategory: largeType ? .accessibilityExtraExtraExtraLarge : .large)
+        ])
+        let host = UIViewController()
+        host.view.frame = CGRect(x: 0, y: 0, width: 320, height: 568)
+        host.overrideUserInterfaceStyle = style
+        host.view.backgroundColor = .systemBackground
+        let child = UIViewController()
+        host.addChild(child)
+        child.view.frame = host.view.bounds
+        host.view.addSubview(child.view)
+        child.didMove(toParent: host)
+        host.setOverrideTraitCollection(traits, forChild: child)
+        let scroll = UIScrollView(frame: child.view.bounds)
+        child.view.addSubview(scroll)
+        var plans: PreparedHintPlansView!
+        traits.performAsCurrent {
+            plans = PreparedHintPlansView()
+            // Even an accidental refresh must never use APIClient/production.
+            plans.loadPlans = { throw APIError.http(503, "offline fixture") }
+            configure(plans)
+        }
+        plans.translatesAutoresizingMaskIntoConstraints = false
+        scroll.addSubview(plans)
+        NSLayoutConstraint.activate([
+            plans.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
+            plans.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
+            plans.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 16),
+            plans.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -16),
+            plans.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -32)
+        ])
+        host.view.layoutIfNeeded()
+        scroll.layoutIfNeeded()
+        return Fixture(host: host, scroll: scroll, plans: plans, traits: traits)
+    }
+    private func attach(_ fixture: Fixture, name: String) {
+        fixture.host.view.layoutIfNeeded()
+        fixture.traits.performAsCurrent {
+            let image = UIGraphicsImageRenderer(bounds: fixture.host.view.bounds).image {
+                fixture.host.view.layer.render(in: $0.cgContext)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+    private func checkSavedFixture(largeType: Bool) throws {
+        let saved = try response()
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let screen = fixture(style: style, largeType: largeType) {
+                $0.render(saved, at: Date(timeIntervalSince1970: 1_790_000_000))
+            }
+            let name = "\(style == .dark ? "dark" : "light")-\(largeType ? "large-type" : "normal")"
+            XCTAssertFalse(screen.plans.hasAmbiguousLayout)
+            for label in labels(screen.plans) where !(label.text ?? "").isEmpty {
+                XCTAssertGreaterThan(label.bounds.width, 0)
+                XCTAssertGreaterThan(label.bounds.height, 0)
+                let needed = label.sizeThatFits(CGSize(width: label.bounds.width, height: .greatestFiniteMagnitude))
+                XCTAssertGreaterThanOrEqual(label.bounds.height + 1, needed.height, "Clipped text in \(name)")
+            }
+            if largeType {
+                XCTAssertTrue(labels(screen.plans).contains { $0.font.pointSize > 30 },
+                              "Fixture must actually apply accessibility Dynamic Type")
+            }
+            attach(screen, name: "Prepare-\(name)-top")
+            XCTAssertGreaterThan(screen.scroll.contentSize.height, screen.scroll.bounds.height)
+            screen.scroll.setContentOffset(CGPoint(x: 0, y: screen.scroll.contentSize.height - screen.scroll.bounds.height),
+                                           animated: false)
+            screen.host.view.layoutIfNeeded()
+            let last = try XCTUnwrap(labels(screen.plans).last)
+            let bottom = last.convert(last.bounds, to: screen.host.view).maxY
+            XCTAssertLessThanOrEqual(bottom, screen.host.view.bounds.maxY + 1)
+            XCTAssertGreaterThan(bottom, 0, "End of plan must be reachable")
+            attach(screen, name: "Prepare-\(name)-bottom")
+            screen.plans.stopLoading()
+        }
+    }
+    func testVisualFixturesSavedPlanCompactLightAndDark() throws {
+        try checkSavedFixture(largeType: false)
+    }
+    func testVisualFixturesLargeTypeReachesLastField() throws {
+        try checkSavedFixture(largeType: true)
+    }
+    func testVisualFixturesLoadingEmptyAndError() async {
+        let screen = fixture(style: .light) { $0.refresh() }
+        defer { screen.plans.stopLoading() }
+        XCTAssertTrue(labels(screen.plans).contains { $0.text == NSLocalizedString("prepare.saved.loading", comment: "") })
+        attach(screen, name: "Prepare-loading")
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(labels(screen.plans).contains { $0.text == NSLocalizedString("prepare.saved.error", comment: "") })
+        attach(screen, name: "Prepare-error")
+        screen.plans.render(PreparedHintPlansResponse(plans: [], serverTime: "2026-11-02T00:00:00.000Z"), at: Date())
+        XCTAssertTrue(labels(screen.plans).contains { $0.text == NSLocalizedString("prepare.saved.empty", comment: "") })
+        attach(screen, name: "Prepare-empty")
+    }
 }

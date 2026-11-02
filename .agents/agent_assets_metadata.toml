@@ -3239,3 +3239,17 @@ mtime_ms = 1793648928982
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/85bef878-474f-4a3c-a3b2-c377bacd7f13/8c819fff-ab9c-49f9-821b-9729ca3b285e"
 storage_version_token = "1793648936650984"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "xnEJqKGLeZN7cLPVUrX9H"
+uri = "file://generated-artifacts/prepare-mac-ux-tests/Prepare_Collapse_Test_and_Visual_Fixtures.zip"
+type = "unspecified"
+title = "Prepare — исправление теста и визуальные фикстуры"
+description = "Только тесты и документация: текущее collapse/expand сохранено, три новых обязательных offline-рендера. Новый GitHub HEAD d135205. 37 целевых и 47 Python-проверок прошли; native XCTest ожидают Mac."
+logical_id = "04fb0c2b-cac6-4764-9ec9-ec7da26981a3"
+content_hash = "sha256:f20eabefc12f7ec7914975bec89da30c51c32d5a5143d7c1d4c8c8fa2e42579c"
+size = 35698
+mtime_ms = 1793649820421
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/04fb0c2b-cac6-4764-9ec9-ec7da26981a3/31660bd8-b53d-4f99-a129-e6be78ede1b6"
+storage_version_token = "1793649826066274"
+content_type = "application/octet-stream"

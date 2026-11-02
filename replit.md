@@ -189,7 +189,7 @@ JSON роли — версионированный снимок модели: р
    - репозиторий, ветка, коммит кода, базовый коммит;
    - проверки чистоты checkout: `git status`, без stash, reset, force, rebase; чужие изменения не трогать;
    - что изменено и что проверить;
-   - команда сборки: `DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer bash ios/scripts/validate-native.sh`; полный тестовый target, не фильтровать;
+   - команда сборки: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer bash ios/scripts/validate-native.sh`; путь и версию сверять с актуальным отчётом Mac (в отчёте 2026-11-02 — Xcode 26.5, старого `Xcode_16.4.app` нет); не переименовывать Xcode и не создавать подменяющие symlink; полный тестовый target, не фильтровать;
    - список обязательных тестов поимённо;
    - строгие границы: без публикации, реальных звонков, ключей, смены Apple Team и сертификатов;
    - что вернуть: ветка и HEAD; версии Xcode, XcodeGen, SDK, симулятора; passed/failed/skipped; обязательные тесты отдельно; логи; что не проверено; итог «готово к релизу / блокер».

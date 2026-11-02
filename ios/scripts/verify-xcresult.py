@@ -22,6 +22,9 @@ REQUIRED_TESTS = {
         "testReadOnlyViewHasNoCallControls",
         "testRefreshFailureShowsErrorNotEmpty",
         "testCancelledRefreshCannotRepopulatePlan",
+        "testVisualFixturesSavedPlanCompactLightAndDark",
+        "testVisualFixturesLargeTypeReachesLastField",
+        "testVisualFixturesLoadingEmptyAndError",
     ),
     "SecretaryPersonalityTests": (
         "testSettingsFixtureProvidesBothValidCallProfiles",
@@ -67,7 +70,7 @@ REQUIRED_TESTS = {
         "testRealKeychainCanStoreReadAndDeleteSessionToken",
     ),
     "InCallCaptionTests": (
-        "testPrepareOpeningShowsOnSmallScreenAndOneTapHidesIt",
+        "testPrepareOpeningShowsOnSmallScreenAndTogglesCollapse",
         "testGuestAndOwnerLiveCardsAreIndependent",
         "testReconnectIndicatorAcrossFullRetryCycle",
         "testManualReconnectButtonReArmsStreamAfterTerminalFailure",

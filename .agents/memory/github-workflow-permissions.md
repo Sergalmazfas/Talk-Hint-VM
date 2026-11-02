@@ -52,3 +52,12 @@ original patch rather than reconstructing an allegedly identical fix.
 both an earlier call-screen crash fix and a Secretary async test fix in untouched
 files. Mac correctly stopped before building; its unavailable push authorization
 had left the crash fix only in the local Mac checkout.
+
+Preserving a historical patch exactly is not enough to prove its regression test
+still matches the destination branch's approved behavior. Restore the fix, then
+check the test's UX assumptions against current behavior; do not change product
+behavior merely to satisfy an older test.
+
+**Why:** the restored screen-load test also expected one-tap removal, while the
+destination branch already supported collapse/expand. Native execution confirmed
+the crash fix but rejected that unrelated historical UX expectation.
