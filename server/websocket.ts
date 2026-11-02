@@ -57,6 +57,7 @@ import { authorizeSecretaryConfirmation, handlePrepareConfirmGoal, isSecretaryCo
 import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { englishFirstHint, type EnglishFirstHint } from "./liveHintEnglishFirst";
+import { deliverGuestCaption } from "./liveGuestCaption";
 import { callPlanSchema, callPlanContext } from "@shared/callPlan";
 import { liveHintModes } from "./liveHintModeRoutes";
 import { canUpdateEnglishFirst } from "./liveHintDelivery";
@@ -2032,8 +2033,8 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         !reactionOnly && !isFarewell && !waitingForInfo;
 
       const translationStart = Date.now();
-      let translationPromise: Promise<{ translation: string; providerUsed: string }> =
-        translationEnabled && !useEnglishFirst
+      const translationPromise: Promise<{ translation: string; providerUsed: string }> =
+        translationEnabled
           ? translateGuestText(text, currentLanguage, brainModelOverride)
           : Promise.resolve({ translation: "", providerUsed: "translation_off" });
 
@@ -2127,32 +2128,22 @@ NEVER output JSON - only plain text with the phrase and translation.`);
       const suggestionPromise = (wantSuggestion && !libraryHit)
         ? firstEnglish ?? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext + preparedPlanContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
         : null;
-      if (useEnglishFirst) {
-        translationPromise = firstEnglish
-          ? firstEnglish.then(r => r.finishTranslation()).then(r => {
-              if (r.suggestion) latencyRecorder.translationReady(utteranceId);
-              return { translation: r.translation, providerUsed: "english-first-translation" };
-            })
-              .catch(() => ({ translation: "", providerUsed: "english-first-translation-error" }))
-          : translationEnabled ? translateGuestText(text, currentLanguage, brainModelOverride)
-            : Promise.resolve({ translation: "", providerUsed: "translation_off" });
-      }
-
       // ----- Caption: broadcast as soon as the translation resolves -----
-      const emitCaption = async (caption: { translation: string; providerUsed: string }) => {
+      const emitCaption = (caption: { translation: string; providerUsed: string }) => {
         if (streamClosed) return;
-        if (useEnglishFirst && streamUserId) {
-          const settings = await storage.getUserCallSettings(streamUserId).catch(() => null);
-          if (streamClosed) return;
-          if (!settings?.translationEnabled) caption = { ...caption, translation: "" };
-        }
         uiBroadcast({ type: "guest_transcript", text, translation: caption.translation,
           isFinal: true, isComplete: true, confidence, utteranceId, callSid });
         if (useEnglishFirst)
           log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${Date.now() - translationStart} provider_used=${caption.providerUsed} utteranceId=${utteranceId}`, "websocket");
       };
       // V's English must not wait behind the caption/native-language request.
-      if (useEnglishFirst) void translationPromise.then(emitCaption).catch(() => {});
+      if (useEnglishFirst) void deliverGuestCaption(translationPromise, {
+        closed: () => streamClosed,
+        translationAllowed: async () => !!streamUserId &&
+          (await storage.getUserCallSettings(streamUserId)).translationEnabled,
+        emit: emitCaption,
+        failed: () => log(`[HintCaption] translation unavailable utteranceId=${utteranceId}`, "websocket"),
+      }).catch(() => log(`[HintCaption] delivery failed utteranceId=${utteranceId}`, "websocket"));
       const tr = useEnglishFirst ? { translation: "", providerUsed: "pending" } : await translationPromise;
       const translationMs = useEnglishFirst ? null : Date.now() - translationStart;
       fastLayer.onGptResponseReceived();
@@ -2394,6 +2385,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         if (firstEnglish && translationEnabled) {
           const originalEnglish = translated.suggestion.en;
           void firstEnglish.then(r => r.finishTranslation()).then(async r => {
+            if (r.suggestion) latencyRecorder.translationReady(utteranceId);
             if (!r.suggestion || !streamUserId || streamClosed ||
                 utteranceId !== latestGuestUtteranceId || hintDeliveryEpoch.get(streamUserId) !== deliveredEpoch) return;
             const [freshMode, freshSettings] = await Promise.all([
@@ -3236,7 +3228,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         const flushGoalType = callGoalType;
         // Positive provenance from the Hint handler only. Translator/Copilot/Secretary
         // use different handlers. This records no audio and does not run a laboratory.
-        const flushLabSource = hintSourceMarker(streamUserId);
+        const flushLabSource = hintSourceMarker(streamUserId, "closed");
         setTimeout(async () => {
           // Never let a slow initial marker overwrite the final ready snapshot.
           await sourceMarkerPersist;

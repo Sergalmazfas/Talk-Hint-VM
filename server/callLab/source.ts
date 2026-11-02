@@ -1,11 +1,13 @@
 import { recordedCallVersion } from "../codeVersion";
 let registeredOwner: string | undefined;
 export function registerLabSourceOwner(id: string) { registeredOwner = id; }
-export function hintSourceMarker(userId: string | undefined) {
+export function hintSourceMarker(userId: string | undefined, phase: "open" | "closed" = "open") {
   const env = process.env.NODE_ENV === "production" ? "production" : "development";
   if (!userId || userId !== registeredOwner || process.env.LAB_ENABLED !== "true" ||
       process.env.LAB_TARGET_ENVIRONMENT !== env) return null;
-  return { mode: "hint", environment: env, closedAt: new Date().toISOString() };
+  const at = new Date().toISOString();
+  return { mode: "hint", environment: env, phase,
+    ...(phase === "closed" ? { closedAt: at } : { openedAt: at }) };
 }
 
 export function authorizedHintSource(call: any, control: any, environment: string) {

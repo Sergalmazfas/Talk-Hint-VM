@@ -15,6 +15,24 @@ const binding = { recipient: "owner@example.invalid", connection_id: "fixture-co
 const messageId = messageIdFor(labKey("development", "owner", "synthetic"));
 
 describe("private Hint source scope", () => {
+  it("stream start never claims closure; only the close handler stamps closedAt", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-02T21:17:02Z"));
+    vi.stubEnv("LAB_ENABLED", "true");
+    vi.stubEnv("LAB_TARGET_ENVIRONMENT", "development");
+    vi.stubEnv("NODE_ENV", "development");
+    registerLabSourceOwner("owner");
+    try {
+      const opened = hintSourceMarker("owner");
+      expect(opened).toMatchObject({ phase: "open", openedAt: "2026-11-02T21:17:02.000Z" });
+      expect(opened).not.toHaveProperty("closedAt");
+      vi.advanceTimersByTime(114_000);
+      expect(hintSourceMarker("owner", "closed")).toMatchObject({
+        phase: "closed", closedAt: "2026-11-02T21:18:56.000Z",
+      });
+      expect(hintSourceMarker("owner", "closed")).not.toHaveProperty("openedAt");
+    } finally { vi.useRealTimers(); vi.unstubAllEnvs(); }
+  });
   it("does not stamp other users or paused/wrong-environment live streams", () => {
     vi.stubEnv("LAB_ENABLED", "true");
     vi.stubEnv("LAB_TARGET_ENVIRONMENT", "development");

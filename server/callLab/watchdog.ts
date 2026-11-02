@@ -139,7 +139,10 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
     for (const [id, entry] of Object.entries(state))
       if (older(entry.detectedAt, 90 * 86_400_000, now)) delete state[id];
     const rows = (await client.query(`SELECT c.call_sid,c.ended_at,
-      c.metadata#>>'{labHintSource,closedAt}' AS closed_at,
+      CASE WHEN c.metadata#>>'{labHintSource,phase}'='closed'
+        OR (c.metadata#>>'{labHintSource,phase}' IS NULL
+          AND c.metadata#>>'{hintTelemetry,state}'='ready')
+        THEN c.metadata#>>'{labHintSource,closedAt}' END AS closed_at,
       j.key AS job_key,j.status AS job_status,j.created_at AS job_created,j.updated_at AS job_updated,
       j.report->>'execution' AS execution,j.report->>'qa_status' AS qa_status,
       j.report->>'action_delivery' AS action_delivery,

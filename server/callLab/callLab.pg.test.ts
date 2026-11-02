@@ -83,6 +83,29 @@ describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL
     expect(resolved[0].resolvedAt).toBeTruthy();
     expect(hintWatchdogStatus().state).toBe("checked");
   });
+  it("does not mistake a live collecting stream's legacy closedAt for a lost terminal callback", async () => {
+    await client.query("UPDATE call_lab_controls SET activated_at=now()-interval '10 minutes'");
+    const oldTimestamp = new Date(Date.now() - 120_000).toISOString();
+    const marker = { mode: "hint", environment: env, closedAt: oldTimestamp };
+    await client.query(`UPDATE calls SET started_at=now()-interval '4 minutes',ended_at=NULL,
+      metadata=$1::jsonb`, [JSON.stringify({
+      mode: "hint", labHintSource: marker, hintTelemetry: { state: "collecting" },
+    })]);
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).not.toHaveBeenCalled();
+    await client.query("UPDATE calls SET metadata=$1::jsonb", [JSON.stringify({
+      mode: "hint", labHintSource: { ...marker, phase: "closed" }, hintTelemetry: { state: "ready" },
+    })]);
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).toHaveBeenCalledOnce();
+    expect(next.mail.sendNotice.mock.calls[0][2]).toContain("CALL_END_MISSING");
+    // A delayed real terminal callback resolves the incident, without a second notice.
+    await client.query("UPDATE calls SET ended_at=now()");
+    await hintWatchdogTick(facade, watchConfig, next.mail);
+    expect(next.mail.sendNotice).toHaveBeenCalledOnce();
+    expect(hintWatchdogStatus().activeIncidents).toBe(0);
+    expect(next.run).not.toHaveBeenCalled();
+  });
   it("watchdog never resends an ambiguous notice, even over subsequent ticks", async () => {
     await lateCall();
     next.mail.sent.mockReset().mockResolvedValue(null);

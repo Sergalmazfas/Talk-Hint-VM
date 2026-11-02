@@ -3253,3 +3253,17 @@ mtime_ms = 1793649820421
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/04fb0c2b-cac6-4764-9ec9-ec7da26981a3/31660bd8-b53d-4f99-a129-e6be78ede1b6"
 storage_version_token = "1793649826066274"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "NqleaWrtz1Gseckz8z1jJ"
+uri = "file://generated-artifacts/english-first-dialogue-fix/Hint_EnglishFirst_Dialogue_Fix_Review.zip"
+type = "unspecified"
+title = "Hint English-first — исправления и разбор звонка"
+description = "Серверный diff, регрессии перевода диалога и ложного CALL_END_MISSING, полный прогон четырьмя частями, production-факты и ограничения. Без расшифровок, номеров, ключей и изменений iOS."
+logical_id = "449c0790-cea8-4fff-9ade-b72ef65b6309"
+content_hash = "sha256:d719dc96b3074f5c9a6599c2ef11c9b36438c85bba84c298c9b84bd5b14b7da7"
+size = 236793
+mtime_ms = 1793655199986
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/449c0790-cea8-4fff-9ade-b72ef65b6309/8f115380-b7c7-4f29-8e8a-8f883a0c6ddc"
+storage_version_token = "1793655228045768"
+content_type = "application/octet-stream"
