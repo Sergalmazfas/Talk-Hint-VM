@@ -4,9 +4,28 @@
 
 - Repository: https://github.com/Sergalmazfas/Talk-Hint-VM
 - Branch: `xcode-chatgpt-prepare-2026-11-02`
-- Code commit: `1052648cfa54da4ba5f6adcaa09d7035aa9a9e50`
+- Original Prepare code commit: `1052648cfa54da4ba5f6adcaa09d7035aa9a9e50`
+- Latest code commit (both Mac fixes + mandatory regression gate):
+  `c14983b925d61fcdea4c304cae17cd918fc86737`
 - Remote base: `efaaaec857c9a55ebc60b85f5c63756e46e39563`
 - Branch HEAD also contains this handoff in a separate documentation commit.
+- The updated branch also restores both original Mac fixes: the call-screen
+  safe-area constraint fix (original patch from the owner's uploaded archive,
+  equivalent to the Mac DTMF-branch cherry-pick) and the existing asynchronous
+  Secretary review test fix. They are now in both Replit Dev and this branch.
+  No DTMF patch or historical full-file snapshot was reapplied.
+- Restored crash fix commit: `03e015037d2e287d90f3d9866b5ace668a14a288`.
+  Its stable patch-id is `0377117b84337c149cb0f9e57d6da58b2dfa6164`,
+  identical to the owner's original crash patch.
+- Restored Secretary test commit: `6d41960460c6206db896f33e7c6d529038641ac1`.
+  Its stable patch-id is `e6a2fdddfa0a10ebc0fa2559743a1edfb0dd02fb`,
+  identical to the original asynchronous test patch.
+- Original author attribution is retained in both restoration commits. Original
+  Mac hashes need not be ancestors of this branch: verify the equivalent deltas
+  above and their tests, rather than rejecting the branch for different hashes.
+- The earlier STOP for these two missing fixes is resolved in this delivery.
+  Verify their code and regression tests on the fetched HEAD; do not cherry-pick
+  them again. The original Prepare code commit below remains an ancestor.
 - Native delta only. It does not replace the repository with the Replit Dev tree.
   All eight existing changed native files matched the remote base before this delta.
 
@@ -16,11 +35,16 @@ Run `git status --short`, record the current branch and HEAD, and inspect local
 commits. **Do not use stash, reset, force, rebase, merge, or overwrite another
 person's changes.** If there are local modifications, missing objects, or an
 untransferred Mac-side fix needed by these sources, stop and report it.
+The owner's unrelated untracked Mac files must stay untouched. Use a fresh,
+uniquely named local branch for this updated remote HEAD, without overwriting
+the existing DTMF branch or an earlier local Prepare branch.
 
 Fetch this exact branch from the existing authorized origin. If a local branch
 already exists, do not overwrite it. Use a clean checkout of the remote branch;
 verify that the code commit above is its ancestor and that the native changes
-relative to the base are only the eleven intended paths. No changes to `main`
+relative to the base are the eleven original Prepare paths plus the three
+restored Mac paths (`InCallViewController.swift`, `InCallCaptionTests.swift`,
+`SecretaryPersonalityUITests.swift`). No changes to `main`
 or `clean-main`. Do not push Mac fixes without reporting the exact diff.
 
 ## What changed
@@ -71,6 +95,18 @@ Class: `PreparedHintPlansTests`
 All existing mandatory tests remain mandatory, especially `InCallCaptionTests`,
 `PrepareGoalProposalAppearanceTests`, `CallHintStreamPrepareTests`,
 Secretary confirmation/recovery and DTMF tests.
+
+### Restored Mac regressions — must execute and pass
+
+- `InCallCaptionTests.testPrepareOpeningShowsOnSmallScreenAndOneTapHidesIt`
+  (also required by `verify-xcresult.py`).
+- `SecretaryPersonalityUITests.testReviewBlocksRetellWithoutSavedOutgoingLine`
+  must be `async throws`, wait for the fixture's default-line refusal, keep Start
+  disabled and prove that no task-start request was sent.
+
+Record both separately alongside all nine Prepare tests. No tests were disabled;
+the height-cap multipliers remain 0.38/0.22. The new fix does not alter Katya's
+runtime behavior.
 
 ## Visual checks without real calls
 
