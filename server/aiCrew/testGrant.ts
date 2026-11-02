@@ -4,6 +4,7 @@ import { applyOwnerCommand, log, type CrewState, type Task } from "./domain";
 import type { HintEvidence } from "./hintEvidence";
 import { closeStalledHintPilot, STALLED_PILOT_OUTCOME } from "./hintPilot";
 import { hasLegacyWriteoff, writeOffLegacyUnknown } from "./legacyUnknown";
+import { isSupersededChargedUnknown, supersedeApprovedFailure } from "./failedPilot";
 
 export const TEST_ACTOR = "replit-test";
 export const SERIES_LIMIT = 5_000_000;
@@ -67,18 +68,24 @@ export function applyTestAction(s: CrewState, raw: unknown, at: string, models: 
     writeOffLegacyUnknown(s, at);
     return;
   }
-  const blockingRun = s.runs.some(r => ["running", "unknown"].includes(r.status));
+  const blocked = (state: CrewState) => state.runs.some(r => r.status === "running" ||
+    (r.status === "unknown" && !isSupersededChargedUnknown(state, r)));
   if (a.action === "prepare") {
-    if (g.spent + g.reserved >= g.limit || blockingRun ||
+    // All-or-nothing even for direct callers; failed evidence/models validation
+    // must not close the old task. No publication/startup side effect.
+    const draft = structuredClone(s);
+    supersedeApprovedFailure(draft, at);
+    if (g.spent + g.reserved >= g.limit || blocked(draft) ||
         s.control.enabled) throw Error("CREW_TEST_NOT_SAFE");
     // Do not reset a different owner's limit. Only our own prior OFF can prepare again.
     // The exact, owner-approved writeoff also permits OFF/0 preparation.
     // Never reset expenses or other reservations.
     if (s.control.testSeriesId === g.id || hasLegacyWriteoff(s))
-      s.control = { ...s.control, dailyLimitMicroUsd: 0 };
-    applyOwnerCommand(s, { kind: "hint_pilot_prepare", candidate: a.candidate, ratesConfirmed: true },
+      draft.control = { ...draft.control, dailyLimitMicroUsd: 0 };
+    applyOwnerCommand(draft, { kind: "hint_pilot_prepare", candidate: a.candidate, ratesConfirmed: true },
       TEST_ACTOR, at, models, evidence);
-    s.tasks.at(-1)!.testSeriesId = g.id;
+    draft.tasks.at(-1)!.testSeriesId = g.id;
+    Object.assign(s, draft);
   } else {
     // Explicit approved legacy cleanup only; never adopt its ownership or
     // paid results. The same existing helper enforces OFF/no execution/reserve.
@@ -93,7 +100,7 @@ export function applyTestAction(s: CrewState, raw: unknown, at: string, models: 
     const task = testTask(s, a.taskId);
     if (a.action === "enable") {
       if (s.control.enabled || task.closed || task.hintPilot?.status !== "prepared" ||
-          g.spent + g.reserved >= g.limit || blockingRun)
+          g.spent + g.reserved >= g.limit || blocked(s))
         throw Error("CREW_TEST_NOT_SAFE");
       // The delegated global ON cannot execute unrelated queues/schedules.
       s.control = { ...s.control, enabled: true, dailyLimitMicroUsd: SERIES_LIMIT,

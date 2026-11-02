@@ -23,13 +23,14 @@ vi.mock("./store",()=>({CrewStore:class{
   if(rev!==undefined&&rev!==f.state.revision)throw Error("stale");
   const s=structuredClone(f.state),r=fn(s);s.revision++;f.state=s;return r}
 }}));
-vi.mock("./anthropic",()=>({AnthropicCrewProvider:class{
+vi.mock("./anthropic",async importOriginal=>({...(await importOriginal<typeof import("./anthropic")>()),AnthropicCrewProvider:class{
  listModels(){return f.models()}
  message(...args:any[]){return f.message(...args)}
 }}));
 vi.mock("../codeVersion",()=>({codeVersion:()=>({commit:"a".repeat(40),sourceHash:"hash",taskRef:"roadmap:test",fixes:"fix",dirty:false,builtAt:f.builtAt})}));
 import { registerCrewRoutes } from "./routes";
 import { authorizeTest, keyHash } from "./testGrant";
+import { CrewProviderError } from "./anthropic";
 let server:Server,base:string;
 const headers={"x-owner":"yes","Content-Type":"application/json",origin:"https://owner.test"};
 beforeEach(async()=>{
@@ -176,6 +177,16 @@ describe("AI Crew owner boundary",()=>{
   expect(response.status).toBe(503);expect(await response.text()).not.toContain("never expose");
   expect(f.state.probe.status).toBe("unknown");
   expect((await post("/probe",{modelId:"from-api"},t)).status).toBe(409);
+  expect(f.message).toHaveBeenCalledTimes(1);
+ });
+ it.each([200,400])("owner probe records HTTP %i + request-id, no raw provider error",async status=>{
+  const t=await csrf();vi.stubEnv("NODE_ENV","production");
+  const http={httpStatus:status,requestId:"req_owner_probe_123"};
+  if(status===200)f.message.mockResolvedValue({text:"OK",model:"from-api",usage:{input_tokens:1,output_tokens:1},http});
+  else f.message.mockRejectedValue(new CrewProviderError("http_rejected",http));
+  expect((await post("/probe",{modelId:"from-api"},t)).status).toBe(status===200?200:503);
+  expect(f.state.journal.find((e:any)=>e.kind==="anthropic_http_response").detail)
+   .toMatchObject({...http,stage:"owner_probe",modelId:"from-api"});
   expect(f.message).toHaveBeenCalledTimes(1);
  });
 });

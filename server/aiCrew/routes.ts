@@ -6,7 +6,7 @@ import { pool } from "../db";
 import { codeVersion } from "../codeVersion";
 import { CrewStore } from "./store";
 import { applyOwnerCommand, commandSchema, initialState, log, staleTasks } from "./domain";
-import { AnthropicCrewProvider } from "./anthropic";
+import { AnthropicCrewProvider, CrewProviderError } from "./anthropic";
 import { CrewRuntime } from "./runtime";
 import { crewControlPage } from "./controlPage";
 import { readHintEvidence } from "./hintEvidence";
@@ -144,13 +144,22 @@ export function registerCrewRoutes(app: Express) {
       try {
         const result = await provider.message(modelId, "Reply only OK.", 8, AbortSignal.timeout(15000));
         await store().change(s => {
+          log(s, String(req.user!.id), "anthropic_http_response", { stage: "owner_probe",
+            modelId, category: "response_received", httpStatus: result.http?.httpStatus ?? null,
+            requestId: result.http?.requestId ?? null }, new Date().toISOString());
           s.probe!.status = "done"; s.probe!.usage = result.usage;
           log(s, String(req.user!.id), "diagnostic_complete", { modelRequested: modelId, modelEffective: result.model,
             usage: result.usage, agentsStarted: false }, new Date().toISOString());
         });
         res.json({ success: true, model: result.model, usage: result.usage, environment: "production", agentsStarted: false });
-      } catch {
-        await store().change(s => { s.probe!.status = "unknown"; });
+      } catch (e) {
+        await store().change(s => {
+          log(s, String(req.user!.id), "anthropic_http_response", { stage: "owner_probe", modelId,
+            category: e instanceof CrewProviderError ? e.category : "local_error",
+            httpStatus: e instanceof CrewProviderError ? e.http.httpStatus : null,
+            requestId: e instanceof CrewProviderError ? e.http.requestId : null }, new Date().toISOString());
+          s.probe!.status = "unknown";
+        });
         res.status(503).json({ error: "PROBE_UNCONFIRMED_NO_RETRY" });
       }
     } catch { res.status(409).json({ error: "PROBE_NOT_STARTED_RELOAD_STATE" }); }

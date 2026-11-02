@@ -3,6 +3,7 @@ import type { CrewState, Task } from "./domain";
 import { evidenceHash, HINT_CANDIDATES, type HintCandidate, type HintEvidence } from "./hintEvidence";
 
 export const HINT_MAX_OUTPUT = 2000;
+export const HINT_REVIEW_MAX_OUTPUT = 4000;
 export const HINT_PRICING_URL = "https://platform.claude.com/docs/en/about-claude/pricing#model-pricing";
 // USD per million == microUSD per token; standard synchronous API, no caching,
 // no fast/batch/geographic multiplier. Owner must explicitly confirm rates.
@@ -10,6 +11,9 @@ export const HINT_AGENTS = [
   { agentId: "product-manager-specialist", modelId: "claude-sonnet-5-5", inputMicroUsdPerToken: 2, outputMicroUsdPerToken: 10 },
   { agentId: "Hint-lg-qa-role", modelId: "claude-opus-5-5", inputMicroUsdPerToken: 4, outputMicroUsdPerToken: 20 },
 ] as const;
+export function hintMaxOutput(agentId: string) {
+  return agentId === HINT_AGENTS[1].agentId ? HINT_REVIEW_MAX_OUTPUT : HINT_MAX_OUTPUT;
+}
 export type HintPilot = { candidate: HintCandidate; evidence: HintEvidence; evidenceHash: string;
   ownerId: string; status: "prepared" | "author" | "review" | "owner" | "not_completed";
   proposalId?: string; reviewId?: string; verdict?: "confirmed" | "not_confirmed";
@@ -90,7 +94,7 @@ export function pilotInput(s: CrewState, task: Task, agentId: string, modelId: s
     evidenceHash: p.evidenceHash, evidence: p.evidence,
     instruction: p.status === "author"
       ? "Паша: разбор → предложение. Отдельно факты, гипотезы, пробелы, варианты проверки. До 2000 токенов. Только описание, никаких действий."
-      : "Фома: независимо проверь предложение Паши по тем же фактам. Ответ строго JSON: {\"verdict\":\"confirmed\" или \"not_confirmed\",\"analysis\":\"обоснование, расхождения, что не проверено\"}. Это проверка разбора, НЕ приёмка продукта. До 2000 токенов. Ничего не выполнять.",
+      : "Фома: независимо проверь предложение Паши по тем же фактам. Ответ строго JSON: {\"verdict\":\"confirmed\" или \"not_confirmed\",\"analysis\":\"обоснование, расхождения, что не проверено\"}. Это проверка разбора, НЕ приёмка продукта. До 4000 токенов вместе с размышлением. Ничего не выполнять.",
     ...(proposal ? { untrustedAuthorProposal: proposal.text } : {}),
   });
 }

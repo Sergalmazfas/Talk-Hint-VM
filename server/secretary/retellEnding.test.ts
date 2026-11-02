@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { SecretaryConversationEngine, type EngineStream } from "./conversationEngine";
 import { RetellEngineRegistry } from "../secretaryLab/retellEngine";
 
@@ -23,13 +23,19 @@ class Socket extends EventEmitter {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 describe("Retell telephone farewell", () => {
+  afterEach(() => vi.useRealTimers());
   it("allows only a validated end preparation and never imports browser fixture data", async () => {
+    // The browser fixture date must not collide with the real runtime UTC date.
+    // Fake Date only: stream/event-loop timers remain real.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
     const engine = new SecretaryConversationEngine("owner", "Confirmed telephone assignment", speech(), true);
     expect(await engine.respond([{ role: "user", content: "Yes, that is all. Goodbye." }],
       new AbortController().signal, () => {})).toEqual(ending);
     expect(engine.report.testOnly).toBe(false);
     expect(JSON.stringify(engine.report.context)).not.toContain("TEST practice");
     expect(engine.instructions).not.toContain("2026-11-02");
+    expect(engine.instructions).toContain("Current time: 2026-01-15T12:00:00.000Z");
     expect(() => engine.execute("save_test_message", "{}", new AbortController().signal)).toThrow();
   });
   it("does not end after a different reply or an aborted response", async () => {

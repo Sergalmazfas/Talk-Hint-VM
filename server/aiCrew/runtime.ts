@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { CREW_SYSTEM, type CrewProvider } from "./anthropic";
+import { CREW_SYSTEM, CrewProviderError, type CrewProvider, type CrewHttp } from "./anthropic";
 import { log, type Agent, type CrewState } from "./domain";
 import type { StateStore } from "./store";
-import { finishPilotRun, HINT_MAX_OUTPUT, pilotInput } from "./hintPilot";
+import { finishPilotRun, hintMaxOutput, pilotInput } from "./hintPilot";
 import { crewDiagnostic } from "./dispatcher";
 import { enforceTestSafety, validGrant, unknownTestRun, stopTest, TEST_ACTOR } from "./testGrant";
+import { isSupersededChargedUnknown } from "./failedPilot";
 
 export class CrewRuntime {
   private active = new Map<string, AbortController>();
@@ -39,14 +40,16 @@ export class CrewRuntime {
         if (!task || task.closed || task.phase !== "analysis" || !agent) return null;
         const series = task.testSeriesId;
         if (series && (!validGrant(s, +now) || s.testGrant?.id !== series ||
-            s.control.testSeriesId !== series || s.runs.some(r => r.testSeriesId === series && r.status === "unknown")))
+            s.control.testSeriesId !== series || s.runs.some(r => r.testSeriesId === series &&
+              r.status === "unknown" && !isSupersededChargedUnknown(s, r))))
           return null;
         const input = task.hintPilot ? pilotInput(s, task, agent.agentId, agent.modelId) : JSON.stringify({ title: task.title, problem: task.steps[0].note,
           analysis: task.steps.filter(x => x.phase === "analysis").at(-1)?.note });
         if (Buffer.byteLength(input, "utf8") > (task.hintPilot ? 48000 : 16000)) throw Error("TASK_TOO_LARGE");
-        const maxTokens = HINT_MAX_OUTPUT;
-        // No tools, images, caching or thinking. Conservative UTF-8 byte bound
-        // plus framing margin; rates must be explicitly owner-supplied.
+        const maxTokens = hintMaxOutput(agent.agentId);
+        // No tools, images or caching. Thinking (required by Opus 5.5) and
+        // visible text share maxTokens and the same billed output rate.
+        // Conservative UTF-8 byte bound + framing; owner-frozen rates.
         const reserve = (Buffer.byteLength(input + CREW_SYSTEM, "utf8") + 4096) * agent.inputMicroUsdPerToken +
           maxTokens * agent.outputMicroUsdPerToken;
         if (!Number.isSafeInteger(reserve) || reserve <= 0) throw Error("UNPRICED_AGENT");
@@ -64,7 +67,7 @@ export class CrewRuntime {
         Object.assign(run, { status: "running", day, epoch: s.control.epoch, reserved: reserve,
           modelId: agent.modelId, ...(series ? { testSeriesId: series, startedAt: at } : {}) });
         log(s, series ? TEST_ACTOR : agent.agentId, "run_reserved", { runId: run.id, taskId: run.taskId,
-          agentId: agent.agentId, day, reserve, modelId: agent.modelId }, at);
+          agentId: agent.agentId, day, reserve, modelId: agent.modelId, maxOutputTokens: maxTokens }, at);
         return { run: structuredClone(run), agent: { ...agent }, input, maxTokens };
       });
       if (!claimed) return;
@@ -82,11 +85,24 @@ export class CrewRuntime {
         } catch { controller.abort(); }
         finally { monitorBusy = false; }
       }, 1000);
+      let stage = "preflight", responseLogged = false, observedHttp: CrewHttp | undefined;
+      const recordResponse = async (http: CrewHttp, category: string) => {
+        await this.store.change(s => {
+          log(s, claimed.run.testSeriesId ? TEST_ACTOR : claimed.agent.agentId, "anthropic_http_response",
+            { runId: claimed.run.id, taskId: claimed.run.taskId, modelId: claimed.agent.modelId,
+              stage, category, httpStatus: http.httpStatus, requestId: http.requestId }, this.now().toISOString());
+        });
+        responseLogged = true;
+      };
       try {
         const gate = await this.store.read();
         if (!gate.control.enabled || gate.control.epoch !== claimed.run.epoch ||
             (claimed.run.testSeriesId && !validGrant(gate, +this.now()))) throw Error("STOPPED");
+        stage = "provider";
         const result = await this.provider.message(claimed.agent.modelId, claimed.input, claimed.maxTokens, controller.signal);
+        observedHttp = result.http;
+        if (observedHttp) await recordResponse(observedHttp, "response_received");
+        stage = "settlement";
         await this.store.change(s => {
           const run = s.runs.find(r => r.id === claimed.run.id)!;
           // A watchdog or previous unknown outcome is final. No late refund,
@@ -143,14 +159,18 @@ export class CrewRuntime {
             modelRequested: run.modelId, modelEffective: result.model, status: run.status,
             accounting: "usage × owner-frozen rates; not provider invoice" }, run.completedAt);
         });
-      } catch {
+      } catch (e) {
+        const category = e instanceof CrewProviderError ? e.category : "local_error";
+        const http = e instanceof CrewProviderError ? e.http : observedHttp ?? { httpStatus: null, requestId: null };
+        if (!responseLogged) await recordResponse(http, category);
         // Ambiguous network/abort/crash: keep the whole reservation. Never
         // retry a paid generation or falsely account it as zero.
         await this.store.change(s => {
           const r = s.runs.find(r => r.id === claimed.run.id)!;
           unknownTestRun(s, r.id, this.now().toISOString());
           log(s, r.testSeriesId ? TEST_ACTOR : r.agentId, "run_unknown", { runId: r.id, taskId: r.taskId,
-            agentId: r.agentId, reservationRetained: true }, this.now().toISOString());
+            agentId: r.agentId, reservationRetained: true, stage, category,
+            httpStatus: http.httpStatus, requestId: http.requestId }, this.now().toISOString());
         });
       } finally {
         clearInterval(monitor); clearTimeout(timer); this.active.delete(claimed.run.id);

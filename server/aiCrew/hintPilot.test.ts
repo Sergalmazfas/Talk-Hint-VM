@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { applyOwnerCommand, initialState, type CrewState } from "./domain";
 import { projectHintEvidence, evidenceHash } from "./hintEvidence";
-import { HINT_AGENTS, HINT_MAX_OUTPUT, pilotReviewComplete } from "./hintPilot";
+import { HINT_AGENTS, HINT_MAX_OUTPUT, HINT_REVIEW_MAX_OUTPUT, pilotInput, hintMaxOutput, pilotReviewComplete } from "./hintPilot";
+import { CREW_SYSTEM } from "./anthropic";
 import { CrewRuntime } from "./runtime";
 
 const at = "2026-11-01T18:00:00Z";
@@ -92,6 +93,11 @@ describe("Hint pilot privacy and preparation", () => {
   });
 });
 describe("Hint pilot Pasha → Foma → owner", () => {
+  it("uses 2000 for Pasha/other roles and 4000 only for Foma", () => {
+    expect(hintMaxOutput(HINT_AGENTS[0].agentId)).toBe(2000);
+    expect(hintMaxOutput(HINT_AGENTS[1].agentId)).toBe(4000);
+    expect(hintMaxOutput("other-role")).toBe(2000);
+  });
   it("does not infer activation from prepared descriptions", async () => {
     const m = prepared(), p = provider();
     await new CrewRuntime(m, p, "production").tick();
@@ -109,6 +115,13 @@ describe("Hint pilot Pasha → Foma → owner", () => {
     await runtime.tick(); await runtime.tick();
     expect(p.message).toHaveBeenCalledTimes(2);
     expect((p.message.mock.calls[0] as any)[2]).toBe(HINT_MAX_OUTPUT);
+    expect((p.message.mock.calls[1] as any)[2]).toBe(HINT_REVIEW_MAX_OUTPUT);
+    expect((p.message.mock.calls[1] as any)[1]).toContain("До 4000 токенов");
+    const reviewInput = (p.message.mock.calls[1] as any)[1];
+    const reviewReserve = (Buffer.byteLength(reviewInput + CREW_SYSTEM, "utf8") + 4096) * 4 + 4000 * 20;
+    expect(m.state.journal.find(e => e.kind === "run_reserved" &&
+      (e.detail as any).agentId === HINT_AGENTS[1].agentId)?.detail)
+      .toMatchObject({ reserve: reviewReserve, maxOutputTokens: 4000 });
     expect((p.message.mock.calls[1] as any)[1]).toContain("untrustedAuthorProposal");
     expect(m.state.tasks[0]).toMatchObject({ phase: "analysis", closed: false, hintPilot: { status: "owner", verdict: "confirmed" } });
     expect(m.state.tasks[0].steps.at(-1)?.holder).toBe("owner");
@@ -140,11 +153,13 @@ describe("Hint pilot Pasha → Foma → owner", () => {
       expect(m.state.control).toMatchObject({ enabled: false, dailyLimitMicroUsd: 1000000 });
       expect(m.state.journal.some(e => e.kind === "hint_pilot_auto_off")).toBe(true);
     });
-  it("keeps Foma queued when budget cannot reserve 2000 output tokens, never retries Pasha", async () => {
+  it("keeps Foma queued when budget covers 2000 but not 4000 output tokens, never retries Pasha", async () => {
     const m = prepared(), p = provider(); start(m);
     m.state.control.dailyLimitMicroUsd = 70000;
     const r = new CrewRuntime(m, p, "production", () => new Date(at)); await r.tick();
-    m.state.control.dailyLimitMicroUsd = m.state.budget["2026-11-01"].spent + 1;
+    const review = pilotInput(m.state, m.state.tasks[0], HINT_AGENTS[1].agentId, models[1]);
+    const oldReserve = (Buffer.byteLength(review + CREW_SYSTEM, "utf8") + 4096) * 4 + 2000 * 20;
+    m.state.control.dailyLimitMicroUsd = m.state.budget["2026-11-01"].spent + oldReserve;
     await r.tick();
     expect(p.message).toHaveBeenCalledTimes(1);
     expect(m.state.runs[1].status).toBe("queued");
