@@ -28,9 +28,24 @@ the owner's ChatGPT still exposed the previous catalogue.
 **How to apply:** verify live `initialize` and `tools/list` first; follow OpenAI's
 [Refresh metadata](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata)
 instructions before proposing disconnect/reconnect or another Publish. Distinguish
-direct custom MCP connections from submitted plugins, whose updates use review
-and publication. Do not invent the app-specific Manage URL or assume the same
-workspace controls are available on every plan.
+direct custom MCP connections from submitted plugins: tool definitions and shared
+server instructions use continuous review; submitted names and imported skills
+require a new version, review and publication. Do not invent the app-specific
+Manage URL or assume the same workspace controls are available on every plan.
+
+The owner's selected installed plugin is a separate artifact from the generic
+plugin export in this repository. Preserve its identity and account; do not
+replace it with the generic package or infer it is outdated just by comparing
+its version with the MCP server version.
+
+**Why:** the installed plugin has its own version and copied Secretary skill;
+updating the server alone cannot rename that installed package or its skill.
+
+**How to apply:** establish the original package/source and publication status
+before preparing a replacement. The prior boundary is documented in
+`docs/chatgpt-card-resource-compatibility.md` under “Release / installed-plugin distinction”.
+For submitted plugins consult
+https://developers.openai.com/plugins/deploy/app-review#continuous-review-and-tool-updates .
 
 Do not switch the native phone server's HTTPS ingress or restart it just to
 expose an Actions test service. Use an approved isolated test origin on 443.
