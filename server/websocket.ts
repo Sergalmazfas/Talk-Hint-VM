@@ -1526,6 +1526,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
     // must abort and finish any sockets it created — otherwise short/rejected
     // calls leak orphaned realtime sessions and mutate state after teardown.
     let streamClosed = false;
+    let sourceMarkerPersist: Promise<unknown> = Promise.resolve();
     // Hint latency stages for this call (recorded for every call, flushed to
     // calls.metadata on close so candidate vs baseline can be compared).
     const latencyRecorder = new LiveLatencyRecorder();
@@ -2014,6 +2015,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         : { mode: "legacy" as const, revision: 0 };
       if (streamClosed) return;
       const useEnglishFirst = responseMode.mode === "english-first";
+      latencyRecorder.responseMode(utteranceId, responseMode.mode);
       let firstEnglish: Promise<EnglishFirstHint> | null = null;
 
       // A suggestion is only generated for turns that can actually receive one.
@@ -2123,7 +2125,10 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         : null;
       if (useEnglishFirst) {
         translationPromise = firstEnglish
-          ? firstEnglish.then(r => r.finishTranslation()).then(r => ({ translation: r.translation, providerUsed: "english-first-translation" }))
+          ? firstEnglish.then(r => r.finishTranslation()).then(r => {
+              if (r.suggestion) latencyRecorder.translationReady(utteranceId);
+              return { translation: r.translation, providerUsed: "english-first-translation" };
+            })
               .catch(() => ({ translation: "", providerUsed: "english-first-translation-error" }))
           : translationEnabled ? translateGuestText(text, currentLanguage, brainModelOverride)
             : Promise.resolve({ translation: "", providerUsed: "translation_off" });
@@ -2405,6 +2410,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
               ...(r.suggestion.options ? { options: r.suggestion.options } : {}),
               ...(r.suggestion.nativeHelper ? { nativeHelper: r.suggestion.nativeHelper } : {}),
               utteranceId, callSid });
+            latencyRecorder.translationSent(utteranceId);
           }).catch(() => log("[HintEnglishFirst] translation unavailable; English retained", "websocket"));
         }
         // Strategy Memory: only a hint that actually REACHED the user opens a
@@ -2881,7 +2887,14 @@ NEVER output JSON - only plain text with the phrase and translation.`);
               };
 
               streamUserId = callOwners.get(callSid);
+              const markHintSource = (uid: string, sid: string) => {
+                const marker = hintSourceMarker(uid);
+                if (marker) sourceMarkerPersist = storage.mergeCallMetadataByCallSid(sid, {
+                  mode: "hint", labHintSource: marker, hintTelemetry: { state: "collecting" },
+                }).catch(() => log("[HintTelemetry] source marker persist failed", "websocket"));
+              };
               if (streamUserId) {
+                markHintSource(streamUserId, callSid);
                 // Expose this call's latency recorder for suggestion_ack routing
                 // (device-delivery stage of the speech→hint chain). Registered
                 // with an ownership snapshot so acks keep working through the
@@ -2900,6 +2913,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
                     const uid = rows[0]?.userId;
                     if (uid) {
                       streamUserId = uid;
+                      markHintSource(uid, sidForLookup);
                       callOwners.set(sidForLookup, uid);
                       registerLatencyRecorder(sidForLookup, uid, latencyRecorder);
                       registerAskBridge();
@@ -3203,7 +3217,9 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         // Positive provenance from the Hint handler only. Translator/Copilot/Secretary
         // use different handlers. This records no audio and does not run a laboratory.
         const flushLabSource = hintSourceMarker(streamUserId);
-        setTimeout(() => {
+        setTimeout(async () => {
+          // Never let a slow initial marker overwrite the final ready snapshot.
+          await sourceMarkerPersist;
           const visibility = uiVisibilitySnapshot(flushSid);
           unregisterLatencyRecorder(flushSid);
           if (latencyRecorder.count > 0 || flushGoalText || flushLabSource) {
@@ -3216,7 +3232,11 @@ NEVER output JSON - only plain text with the phrase and translation.`);
               meta.goalText = flushGoalText;
               meta.goalType = flushGoalType;
             }
-            if (flushLabSource) meta.labHintSource = flushLabSource;
+            if (flushLabSource) {
+              meta.mode = "hint";
+              meta.labHintSource = flushLabSource;
+              meta.hintTelemetry = { state: "ready" };
+            }
             if (visibility.length) meta.hintUiVisibility = { version: 1, events: visibility, capped: visibility.length >= 200 };
             void storage
               .mergeCallMetadataByCallSid(flushSid, meta)

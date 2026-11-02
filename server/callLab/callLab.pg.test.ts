@@ -46,7 +46,8 @@ describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL
           { status: "unavailable", cases: [], previous: [], reason: "synthetic fixture" }) };
       }),
       run: vi.fn(async (source: any) => ({ ...unavailableReport({ call_sid: source.call_id }, "fixture-only"),
-        synthetic: true, qa_status: "QA: принято", execution: "mocked_synthetic_analysis" })),
+        synthetic: true, analysis: { findings: [], limitations: [] },
+        qa_status: "QA: принято", qa_issues: [], execution: "mocked_synthetic_analysis" })),
       mail: { verify: vi.fn(async () => {}),
         sendNotice: vi.fn(async () => "fixture-notice-id"),
         sent: vi.fn().mockResolvedValueOnce(null).mockResolvedValue("fixture-gmail-id"),
@@ -164,6 +165,40 @@ describe.skipIf(process.env.CALL_LAB_DB_TESTS !== "1")("private queue PostgreSQL
     expect(next.mail.send).toHaveBeenCalledTimes(1);
     expect((await client.query("SELECT status FROM call_lab_outbox")).rows[0].status).toBe("sent_confirmed");
     expect(next.run.mock.calls[0][0].full_hint_history).toBe(false);
+  });
+  it("waits for the final English-first snapshot, then routes it through full Hint analysis once", async () => {
+    await client.query(`UPDATE calls SET metadata='{}'::jsonb`);
+    await hintLabTick(facade, next);
+    expect((await client.query("SELECT count(*)::int AS n FROM call_lab_jobs")).rows[0].n).toBe(0);
+    await client.query(`UPDATE calls SET metadata=jsonb_build_object(
+      'mode','hint','hintTelemetry',jsonb_build_object('state','collecting'),
+      'labHintSource',jsonb_build_object('mode','hint','environment',$1::text))`, [env]);
+    await hintLabTick(facade, next);
+    expect(next.run).not.toHaveBeenCalled();
+    await client.query(`UPDATE calls SET metadata=metadata || $1::jsonb`, [JSON.stringify({
+      hintTelemetry: { state: "ready" }, hintResponseMode: "english-first",
+      hintLatency: { responseModes: ["english-first"], entries: [{ utteranceId: 1, outcome: "sent",
+        sttFinalAt: 1000, readyAt: 1300, translationReadyAt: 1600, sentAt: 1310, deliveredAt: 1400, text: "Hello" }] },
+      hintUsage: { delivered: 1, usedFull: 1 },
+    })]);
+    await hintLabTick(facade, next); await hintLabTick(facade, next);
+    expect(next.run).toHaveBeenCalledTimes(1);
+    expect(next.run.mock.calls[0][0]).toMatchObject({ mode: "hint", response_modes: ["english-first"],
+      hints: [{ english_ready_at: 1300, translation_ready_at: 1600 }] });
+    const report = (await client.query("SELECT report FROM call_lab_jobs")).rows[0].report;
+    expect(report.execution).toBe("mocked_synthetic_analysis");
+    expect(report.deterministic).toMatchObject({ sent: 1,
+      stt_final_to_english_ready_ms: { p50: 300 }, stt_final_to_translation_ready_ms: { p50: 600 } });
+    expect(next.mail.send).toHaveBeenCalledTimes(1);
+  });
+  it("does not wait forever or pretend incomplete telemetry is full analysis after a crash", async () => {
+    await client.query(`UPDATE calls SET ended_at=now()-interval '3 minutes',
+      metadata=metadata || '{"hintTelemetry":{"state":"collecting"}}'::jsonb`);
+    await hintLabTick(facade, next);
+    expect(next.run).not.toHaveBeenCalled();
+    const report = (await client.query("SELECT report FROM call_lab_jobs")).rows[0].report;
+    expect(report.execution).toBe("analysis_not_completed");
+    expect(report.qa_status).not.toBe("QA: принято");
   });
   it("lost send response is reconciled by Message-ID, never resent", async () => {
     next.mail.send.mockRejectedValue(new Error("simulated lost response"));

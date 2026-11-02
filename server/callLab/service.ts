@@ -175,6 +175,9 @@ export async function hintLabTick(pool: Pool, dependencies: {
     // No old calls, guessed modes, synthetic production calls or other users.
     const candidates = await client.query(`SELECT c.call_sid FROM (${ownerCallsSql}) c
       WHERE c.user_id=$1 AND c.started_at>=$2 AND c.ended_at IS NOT NULL
+      AND (c.lab_mode <> 'unknown' OR c.ended_at < now()-interval '10 seconds')
+      AND (coalesce(c.metadata#>>'{hintTelemetry,state}','ready')='ready'
+        OR c.ended_at < now()-interval '2 minutes')
       AND coalesce(c.metadata#>>'{labHintSource,environment}',$3)=$3
       AND NOT EXISTS(SELECT 1 FROM call_lab_jobs j WHERE j.environment=$3 AND j.owner_id=$1 AND j.call_sid=c.call_sid)
       ORDER BY c.ended_at LIMIT 100`, [config.owner, control.activated_at, config.environment]);

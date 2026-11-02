@@ -23,6 +23,15 @@ export function hintMeasurements(source: any) {
     return start !== null && end !== null && end >= start ? [end - start] : [];
   }).sort((a, b) => a - b);
   const percentile = (p: number) => latency.length ? latency[Math.max(0, Math.ceil(p * latency.length) - 1)] : null;
+  const stage = (field: string) => {
+    const values = sent.flatMap(e => {
+      const start = millis(e.stt_final_at), end = millis(e[field]);
+      return start !== null && end !== null && end >= start ? [end - start] : [];
+    }).sort((a, b) => a - b);
+    const p = (n: number) => values.length ? values[Math.ceil(n * values.length) - 1] : null;
+    return { samples: values.length, p50: p(.5), p95: p(.95),
+      basis: "saved STT final, not physical speech end or device display" };
+  };
   return {
     basis: "saved_snapshot_only", complete_hint_history: source?.full_hint_history === true,
     recorded_attempts: entries?.length ?? null,
@@ -40,6 +49,9 @@ export function hintMeasurements(source: any) {
     } : null,
     stt_final_to_ack_ms: { samples: latency.length, p50: percentile(.5), p95: percentile(.95),
       method: "nearest_rank; saved sent events with both timestamps; not screen or speech-end latency" },
+    stt_final_to_english_ready_ms: stage("english_ready_at"),
+    stt_final_to_translation_ready_ms: stage("translation_ready_at"),
+    hint_usage: source?.hint_usage ?? null,
     brain_ms: {
       p50: Number.isFinite(source?.latency_summary?.brainP50Ms) ? source.latency_summary.brainP50Ms : null,
       p95: Number.isFinite(source?.latency_summary?.brainP95Ms) ? source.latency_summary.brainP95Ms : null,

@@ -303,6 +303,9 @@ export function classifyPipelineCall(pipelineMeta: {
 export interface HintLatencyEntry {
   utteranceId: number;
   sttFinalAt: number;
+  responseMode?: "legacy" | "english-first";
+  translationReadyAt?: number;
+  translationSentAt?: number;
   triggerAt?: number;
   readyAt?: number;
   sentAt?: number;
@@ -364,7 +367,7 @@ export function summarizeHintLatencies(entries: HintLatencyEntry[]): HintLatency
   const e2es = delivered.map((e) => e.deliveredAt! - e.sttFinalAt).sort((a, b) => a - b);
   const stageNotes: string[] = [
     "speech-end не измеряется: STT (Flux/OpenAI realtime) не отдаёт wall-clock конец речи — sttFinal уже включает задержку end-of-turn детекции",
-    "first-text = ready: live-модель вызывается без стриминга, первый пригодный текст совпадает с полным ответом",
+    "first-text = readyAt — полный проверенный английский, не первый токен; English-first: translationReadyAt записывается отдельно",
   ];
   if (sent.length > 0 && delivered.length === 0) {
     stageNotes.push("доставка на устройство не подтверждена ни для одной подсказки (клиент не прислал suggestion_ack — старая версия UI/приложения?)");
@@ -409,6 +412,18 @@ export class LiveLatencyRecorder {
     const e = this.byUtterance.get(utteranceId);
     if (e && !e.triggerAt) e.triggerAt = Date.now();
   }
+  responseMode(utteranceId: number, mode: "legacy" | "english-first"): void {
+    const e = this.byUtterance.get(utteranceId);
+    if (e) e.responseMode = mode;
+  }
+  translationReady(utteranceId: number): void {
+    const e = this.byUtterance.get(utteranceId);
+    if (e && !e.translationReadyAt) e.translationReadyAt = Date.now();
+  }
+  translationSent(utteranceId: number): void {
+    const e = this.byUtterance.get(utteranceId);
+    if (e && !e.translationSentAt) e.translationSentAt = Date.now();
+  }
   ready(utteranceId: number, source?: string): void {
     const e = this.byUtterance.get(utteranceId);
     if (e && !e.readyAt) {
@@ -448,7 +463,9 @@ export class LiveLatencyRecorder {
     sttInfo?: { effective: "swapped" | "failed" | null; swapDelayMs: number | null },
     ownerTurns?: OwnerTurn[]
   ): Record<string, unknown> {
+    const responseModes = Array.from(new Set(this.entries.flatMap(e => e.responseMode ? [e.responseMode] : [])));
     return {
+      hintResponseMode: responseModes.length === 1 ? responseModes[0] : responseModes.length > 1 ? "mixed" : null,
       // Which delivered hints the owner actually spoke (Brain quality metric).
       hintUsage: computeHintUsage(this.entries, ownerTurns ?? []),
       candidatePipeline: {
@@ -461,6 +478,7 @@ export class LiveLatencyRecorder {
       hintLatency: {
         slaMs: HINT_SLA_MS,
         summary: summarizeHintLatencies(this.entries),
+        responseModes,
         entries: this.entries.slice(0, 200), // hard cap: metadata stays bounded
       },
     };

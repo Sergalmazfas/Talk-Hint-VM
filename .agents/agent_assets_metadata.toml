@@ -3099,3 +3099,31 @@ mtime_ms = 1793629443664
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a102af92-6dde-4757-9ba5-3f54bcb94c2c/c0816fa4-1bd2-40f0-9d12-45143f9795a6"
 storage_version_token = "1793629471281932"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Q5sYY-DVy5oJGCsG26_m0"
+uri = "file://generated-artifacts/hint-english-telemetry/owner-report.html"
+type = "html"
+title = "Разбор звонка Hint · 2 ноября"
+description = "Измерения, использование подсказок, сравнение с прошлым звонком и ограничения повторной AI-проверки."
+logical_id = "dda255ee-7934-4d0e-bed1-f53111ef9a2f"
+content_hash = "sha256:bd1aad4be61a962b8bc9dd0aab5c2c8179874af35a5f1adb62f607eec031e847"
+size = 10116
+mtime_ms = 1793632493073
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dda255ee-7934-4d0e-bed1-f53111ef9a2f/93c55795-97ec-4632-9e54-ab76fa135b0f"
+storage_version_token = "1793632528647502"
+content_type = "text/html"
+
+[[outputs]]
+id = "UU7ScHeUAG1V6X0Xh1G-6"
+uri = "file://generated-artifacts/Hint_Telemetry_Fix_and_Call_Review.zip"
+type = "unspecified"
+title = "Hint · исправление телеметрии и разбор для Клавдия"
+description = "Diff, исходники, 189 зелёных проверок, результаты сборки, полный повторный AI-разбор с замечаниями QA и отчёт владельцу. Без ключей и новых звонков."
+logical_id = "2d5df6de-309b-4de1-b24c-67adbd67b4b3"
+content_hash = "sha256:4932807f049c20ad4dd0b12d1b25a4be78e91c28f553cb145571de4a168fe56e"
+size = 109583
+mtime_ms = 1793632515885
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2d5df6de-309b-4de1-b24c-67adbd67b4b3/0c6cb61a-e925-4cce-a61c-fea94aa396e0"
+storage_version_token = "1793632529460115"
+content_type = "application/octet-stream"

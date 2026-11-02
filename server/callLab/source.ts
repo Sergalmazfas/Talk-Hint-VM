@@ -16,7 +16,7 @@ export function authorizedHintSource(call: any, control: any, environment: strin
       Date.parse(call.started_at) < Date.parse(control.activated_at) ||
       call.metadata?.diagnosticAudioBlocked === true) return null;
   const transcript = typeof call.transcript === "string" ? call.transcript : "";
-  if (!transcript.trim() || !call.ended_at) return null;
+  if (!transcript.trim() || !call.ended_at || call.metadata?.hintTelemetry?.state === "collecting") return null;
   const latency = call.metadata?.hintLatency;
   const entries = Array.isArray(latency?.entries) ? latency.entries : [];
   return {
@@ -25,12 +25,18 @@ export function authorizedHintSource(call: any, control: any, environment: strin
     owner_verified: true, processing_authorized: true,
     source_basis: "Владелец разрешил внутренний разбор уже сохранённого текста/телеметрии; новых аудиозаписей нет",
     ended_at: new Date(call.ended_at).toISOString(),
+    response_modes: latency?.responseModes ?? [],
+    hint_usage: call.metadata?.hintUsage ?? null,
     duration_ms: Date.parse(call.ended_at) - Date.parse(call.started_at),
     languages: [], goal: call.metadata?.goalText ?? null, transcript,
     hints: entries.map((e: any, i: number) => ({
       id: String(e.utteranceId ?? `recorded-hint-${i}`), text: e.text,
       outcome: e.outcome, delivered_at: e.deliveredAt ?? null, sent_at: e.sentAt ?? null,
       stt_final_at: e.sttFinalAt ?? null,
+      english_ready_at: e.readyAt ?? null,
+      translation_ready_at: e.translationReadyAt ?? null,
+      translation_sent_at: e.translationSentAt ?? null,
+      response_mode: e.responseMode ?? null,
       drop_reason: e.dropReason ?? null,
     })),
     // The persisted recorder is capped and text is bounded; never invent complete history.
