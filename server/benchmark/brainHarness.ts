@@ -24,11 +24,13 @@ import {
 import {
   ENVELOPE_JSON_SCHEMA,
   chatStream,
+  chatOnce,
   parseEnvelope,
   type FetchLike,
 } from "./openaiClient";
 import { runDeterministicChecks, hintRejectedByNextOwnerTurn } from "./brainChecks";
 import { judgeTurnAggregated, pickJudgeModel, pickSecondJudgeModel } from "./judge";
+import { buildLiveBenchmarkRequest, parseLiveBenchmarkReply, benchmarkValidity, type LivePromptContext } from "./liveParity";
 
 const TURN_TIMEOUT_MS = 15_000;
 // Constant estimate for WS delivery + client render overhead when real delivery
@@ -60,6 +62,8 @@ export interface RunBrainOpts {
   // Injectable for tests (no network).
   fetchImpl?: FetchLike;
   nowMs?: () => number;
+  /** API uses LIVE; absent only for explicitly legacy/offline-envelope callers. */
+  liveContext?: Omit<LivePromptContext, "goal" | "conversationContext">;
 }
 
 export interface BrainScorecardEntry {
@@ -87,6 +91,7 @@ export interface BrainScorecardEntry {
   // not applicable or the second judge failed (fail-closed, never substituted).
   crossJudgeModel: string | null;
   crossJudgeAverages: Record<string, number> | null;
+  validity?: ReturnType<typeof benchmarkValidity>;
 }
 
 export interface RunBrainResult {
@@ -207,7 +212,18 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
       const bumpMiss = () => (consecutiveMissed = trackMiss(cont, ++consecutiveMissed));
 
       try {
-        const stream = await chatStream({
+        const live = opts.liveContext ? buildLiveBenchmarkRequest(candidate.model,
+          env.currentGuestTurn.text, { ...opts.liveContext, goal: opts.fixture.goal,
+            conversationContext: env.conversationSoFar.map(t => `${t.role === "owner" ? "Owner" : "Guest"}: ${t.text}`).join("\n"),
+          }) : null;
+        const stream = live ? await (async () => {
+          const reply = await chatOnce({
+            model: candidate.model, system: live.system, user: live.user, maxTokens: 250,
+            timeoutMs: TURN_TIMEOUT_MS, fetchImpl: opts.fetchImpl, nowMs, bodyOverride: live.body,
+          });
+          return { ...reply, firstTokenMs: reply.latencyMs, fullOutputMs: reply.latencyMs,
+            tokensIn: reply.usage?.prompt_tokens ?? null, tokensOut: reply.usage?.completion_tokens ?? null };
+        })() : await chatStream({
           model: candidate.model,
           system,
           user,
@@ -230,6 +246,12 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
           tokensOut: stream.tokensOut,
           suggestionReadyAfterGuestEndMs: null,
         };
+        if (live) Object.assign(base, {
+          promptProfile: live.promptVersion, systemHash: live.systemHash, userHash: live.userHash,
+          requestHash: live.requestHash, firstWordBasis: "non-streaming: available only after full JSON",
+          timingOrigin: "brain-request: NOT speech-end; STT bypassed",
+          httpStatus: stream.status, requestId: (stream as any).requestId ?? null,
+        });
 
         if (!stream.ok) {
           // Timeout or API error — record miss (stage: brain) and CONTINUE.
@@ -239,7 +261,9 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
           continue;
         }
 
-        const output = parseEnvelope(stream.content);
+        const output = live
+          ? parseLiveBenchmarkReply(stream.content, opts.liveContext!.translateEnabled)
+          : parseEnvelope(stream.content);
         base.rawText = stream.content;
 
         if (!output) {
@@ -316,8 +340,14 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
         // Judge failure (bounded timeout OR any thrown error) => judge:null and
         // a note; it must NEVER abort the turn loop.
         try {
+          const independentJudge = judgeModel !== candidate.model ? judgeModel : secondJudgeModel;
+          if (opts.liveContext && !independentJudge) {
+            tr.judge = null;
+            notes.push(`no independent judge for ${candidate.id}; excluded from quality comparison`);
+            continue;
+          }
           const js = await judgeTurnAggregated(
-            judgeModel,
+            opts.liveContext ? independentJudge! : judgeModel,
             candidate.model,
             env,
             tr.output,
@@ -364,7 +394,16 @@ export async function runBrainBenchmark(opts: RunBrainOpts): Promise<RunBrainRes
 
     turnResults.push(...candTurnResults);
     continuity[candidate.id] = cont;
-    scorecardEntries.push(buildScorecardEntry(candidate, candTurnResults));
+    const entry = buildScorecardEntry(candidate, candTurnResults);
+    entry.validity = benchmarkValidity({
+      requested: candTurnResults.length, successful: entry.successfulHints,
+      errors: entry.errors, schemaInvalid: entry.schemaInvalid,
+      ...(opts.judgeEnabled ? {
+        judged: candTurnResults.filter(r => r.judge && !r.judge.selfJudged).length,
+        independentJudge: !!judgeModel && (judgeModel !== candidate.model || !!secondJudgeModel),
+      } : {}),
+    });
+    scorecardEntries.push(entry);
   }
 
   return {

@@ -65,6 +65,8 @@ export interface NonStreamResult {
   content: string;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   latencyMs: number;
+  requestId?: string | null;
+  finishReason?: string | null;
 }
 
 export interface ChatRequestOptions {
@@ -77,6 +79,8 @@ export interface ChatRequestOptions {
   timeoutMs: number;
   fetchImpl?: FetchLike;
   nowMs: () => number;
+  /** Pure LIVE builder output, used only for lab parity (no schema/stream drift). */
+  bodyOverride?: Record<string, any>;
 }
 
 // Build the request body. Some newer models require max_completion_tokens and
@@ -150,35 +154,37 @@ async function doFetchStreaming(
 // A single non-streaming chat call, timeout-bounded.
 export async function chatOnce(opts: ChatRequestOptions): Promise<NonStreamResult> {
   const start = opts.nowMs();
-  const body = buildChatBody(opts, false);
-  let resp: any;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    resp = await doFetch(
-      OPENAI_CHAT_URL,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify(body),
-      },
-      opts.timeoutMs,
-      opts.fetchImpl,
-    );
+    // The deadline must include consuming JSON/error bodies, not just headers.
+    return await Promise.race([
+      (async (): Promise<NonStreamResult> => {
+        const resp = await (opts.fetchImpl || fetch)(OPENAI_CHAT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+          body: JSON.stringify(opts.bodyOverride ?? buildChatBody(opts, false)),
+          signal: controller.signal,
+        });
+        const requestId = (resp as any).headers?.get?.("x-request-id") ?? null;
+        if (!resp.ok) return { ok: false, status: resp.status, requestId,
+          errorText: (await resp.text()).slice(0, 500), content: "", latencyMs: opts.nowMs() - start };
+        const data = await resp.json();
+        return { ok: true, status: resp.status, requestId,
+          content: data?.choices?.[0]?.message?.content ?? "", usage: data?.usage,
+          finishReason: data?.choices?.[0]?.finish_reason ?? null, latencyMs: opts.nowMs() - start };
+      })(),
+      new Promise<NonStreamResult>((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Error(`timeout after ${opts.timeoutMs}ms`)); }, opts.timeoutMs);
+      }),
+    ]);
   } catch (e: any) {
     const latencyMs = opts.nowMs() - start;
     const msg = e?.name === "AbortError" ? `timeout after ${opts.timeoutMs}ms` : String(e?.message || e);
     return { ok: false, status: 0, errorText: msg, content: "", latencyMs };
+  } finally {
+    clearTimeout(timer);
   }
-  const latencyMs = opts.nowMs() - start;
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => "");
-    return { ok: false, status: resp.status, errorText: errText.slice(0, 500), content: "", latencyMs };
-  }
-  const data = await resp.json().catch(() => null);
-  const content = data?.choices?.[0]?.message?.content ?? "";
-  return { ok: true, status: resp.status, content, usage: data?.usage, latencyMs };
 }
 
 export interface StreamResult {

@@ -2959,3 +2959,17 @@ mtime_ms = 1793589293577
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ae741253-c1f8-43c6-bc7a-db084e14358d/43286e34-7417-460a-a15c-ebe2b18e1357"
 storage_version_token = "1793589298276261"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "n-8psAdfRS8tmkidXp8ZA"
+uri = "file://generated-artifacts/Hint_VAD_36_recordings.zip"
+type = "unspecified"
+title = "Hint: VAD-разметка 36 записей"
+description = "36 JSON-аннотаций, сводка по 72 каналам, выборочная проверка трёх записей, графики и тесты. Без аудио и текста разговоров."
+logical_id = "d43445bd-8dab-406a-bf70-fa30d42c850c"
+content_hash = "sha256:216a20d3f78c43f6c91d62ddedd08d312aec4c7dab42d658294ac8addb9cf431"
+size = 135044
+mtime_ms = 1793591027149
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d43445bd-8dab-406a-bf70-fa30d42c850c/6505349e-14b3-47d8-afc9-53de25c06868"
+storage_version_token = "1793591035881074"
+content_type = "application/octet-stream"

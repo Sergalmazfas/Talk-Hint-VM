@@ -24,3 +24,18 @@ replay the full timing pipeline.
 **How to apply:** treat this as requested laboratory scope, not an already
 working recording route or evidence of each other participant's agreement.
 Keep participant grounds, access and retention explicit before activation.
+
+## Approved historical benchmark cohort
+
+The owner permitted internal laboratory reuse of the existing 36 recorded-call
+benchmark fixtures. Do not export the audio or copy conversation text into
+reports. This does not authorize new calls or new recording.
+
+**Why:** the owner explicitly approved this historical cohort for repairing the
+Hint benchmark, then requested automatic channel-local VAD and a 2–3-recording
+spot check.
+
+**How to apply:** retain the frozen source and human-verification flags.
+VAD identifies acoustic regions, not transcript-to-audio alignment; never assign
+reference sentences to regions merely by count/order or promote automatic
+boundaries to human-verified ground truth.

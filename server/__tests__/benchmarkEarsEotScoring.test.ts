@@ -33,8 +33,8 @@ const REALTIME_LAST_FRAME = 500; // arbitrary non-zero value
 // ---------------------------------------------------------------------------
 
 describe("REALTIME_ACCEL constant", () => {
-  it("is 4 (harness streams at 4x real time)", () => {
-    expect(REALTIME_ACCEL).toBe(4);
+  it("is 1 (harness streams without acceleration)", () => {
+    expect(REALTIME_ACCEL).toBe(1);
   });
   it("PREMATURE_THRESHOLD_MS is negative (guards against annotation jitter)", () => {
     expect(PREMATURE_THRESHOLD_MS).toBeLessThan(0);
@@ -47,15 +47,11 @@ describe("REALTIME_ACCEL constant", () => {
 
 describe("scoreTurn: EOT after turn boundary → not premature, not false-wait", () => {
   it("computes speechEndToEotMs in real audio time when candidate fires EOT after tEndMs", () => {
-    // Reference turn ended at 3 000 ms in the real audio.
-    // Harness (4x speed) → frame for t=3000ms was sent at wall 750ms.
-    // Candidate fires EOT at harness wall 900ms (150ms after that frame).
-    // Candidate EOT in audio time: 900 * 4 = 3600ms.
-    // speechEndToEotMs = 3600 - 3000 = 600ms (candidate took 600ms after turn ended).
+    // 1x replay: boundary 3000ms, final at 3600ms => 600ms.
     const a = makeAligned({
       refTurn: { idx: 0, role: "owner", text: "hello world", tEndMs: 3000 },
       hypText: "hello world",
-      hypAtMs: 900,
+      hypAtMs: 3600,
       hypEndOfTurn: true,
     });
     const tr = scoreTurn("dg-flux", a, EMPTY_CRITICAL, REALTIME_LAST_FRAME);
@@ -89,13 +85,11 @@ describe("scoreTurn: EOT after turn boundary → not premature, not false-wait",
 
 describe("scoreTurn: EOT before turn boundary → premature=true", () => {
   it("flags prematureEot when candidate fires well before tEndMs", () => {
-    // Reference turn ends at 5 000 ms.
-    // Candidate fires EOT at harness wall 500ms → audio time 500 * 4 = 2000ms.
-    // speechEndToEotMs = 2000 - 5000 = -3000ms (massively premature).
+    // 1x: final at 2000ms before the 5000ms boundary.
     const a = makeAligned({
       refTurn: { idx: 1, role: "owner", text: "please proceed with the transfer", tEndMs: 5000 },
       hypText: "please proceed",
-      hypAtMs: 500,
+      hypAtMs: 2000,
       hypEndOfTurn: true,
     });
     const tr = scoreTurn("dg-flux", a, EMPTY_CRITICAL, REALTIME_LAST_FRAME);

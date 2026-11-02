@@ -10,9 +10,7 @@
 //    failures are caught so one failure never aborts the whole run.
 //  - Zero imports from the production call path.
 //
-// Runtime note: real-time streaming is accelerated (frames sent faster than
-// wall-clock) to bound total runtime. That acceleration is recorded in notes,
-// and latency figures are scaled back to real time where computable.
+// Replay at 1x. Multiplying accelerated receipt times cannot recover EOT latency.
 
 import WebSocket from "ws";
 import type { BenchmarkFixture } from "@shared/schema";
@@ -45,7 +43,7 @@ function streamGuardMs(mulawBytes: number): number {
   return Math.max(CANDIDATE_STREAM_TIMEOUT_MS, Math.round(streamMs) + 30_000);
 }
 /** @internal exported for unit tests only */
-export const REALTIME_ACCEL = 4; // send 20ms frames every 5ms (4x faster than realtime)
+export const REALTIME_ACCEL = 1; // 20ms audio per 20ms, never accelerated
 const FRAME_BYTES_MULAW = 160; // 20ms @ 8kHz mulaw
 
 interface CollectedFinal {
@@ -96,7 +94,7 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
   const finals: CollectedFinal[] = [];
   if (!key) return { finals, lastFrameSentAtMs: 0, error: "DEEPGRAM_API_KEY missing" };
   const url = buildDeepgramUrl(c.config);
-  const start = nowMs();
+  let start = nowMs();
   // Real (unaccelerated) audio duration — Deepgram processes accelerated input
   // at roughly REALTIME pace, so its transcript can lag the sender by minutes.
   const audioDurationMs = Math.round((mulaw.length / 8000) * 1000);
@@ -175,6 +173,7 @@ async function streamDeepgram(c: EarsCandidate, mulaw: Buffer): Promise<StreamOu
 
     ws.on("open", async () => {
       try {
+        start = nowMs(); // audio clock excludes DNS/TLS/WebSocket handshake
         for (let off = 0; off < mulaw.length; off += FRAME_BYTES_MULAW) {
           if (settled) return;
           const frame = mulaw.subarray(off, Math.min(off + FRAME_BYTES_MULAW, mulaw.length));
@@ -310,7 +309,7 @@ async function streamOpenAiRealtime(c: EarsCandidate, mulaw: Buffer): Promise<St
 
   const pcm = mulawToPcm16_24k(mulaw);
   const PCM_FRAME = 24000 * 2 * 0.02; // 20ms @ 24kHz pcm16 = 960 bytes
-  const start = nowMs();
+  let start = nowMs();
 
   return await new Promise<StreamOutcome>((resolve) => {
     let settled = false;
@@ -368,6 +367,7 @@ async function streamOpenAiRealtime(c: EarsCandidate, mulaw: Buffer): Promise<St
 
     ws.on("open", async () => {
       try {
+        start = nowMs();
         for (let off = 0; off < pcm.length; off += PCM_FRAME) {
           if (settled) return;
           const frame = pcm.subarray(off, Math.min(off + PCM_FRAME, pcm.length));
@@ -527,23 +527,18 @@ export function scoreTurn(
   const ea = entityAccuracy(critical, hyp);
   const termsAcc = termsAccuracy(critical.terms, ref, hyp);
 
-  // Latency (realtime only): from last-audio-frame-sent to this turn's final.
-  // `lastFrameSentAtMs > 0` distinguishes realtime streams from batch (batch
-  // sets lastFrameSentAtMs = 0 and should not produce latency figures here).
+  // Per-turn audio boundary, not the last frame of the WHOLE recording.
+  // At 1x all offsets share the replay audio clock; absent reference => unknown.
   const isRealtime = lastFrameSentAtMs > 0;
   let speechEndToFinalMs: number | null = null;
-  if (a.hypAtMs !== null && isRealtime) {
-    const delta = a.hypAtMs - lastFrameSentAtMs;
-    // Scale accelerated harness clock back toward real time.
-    speechEndToFinalMs = delta >= 0 ? Math.round(delta * REALTIME_ACCEL) : null;
+  if (a.hypAtMs !== null && isRealtime && typeof a.refTurn.tEndMs === "number") {
+    speechEndToFinalMs = Math.round(a.hypAtMs - a.refTurn.tEndMs);
   }
 
   // EOT boundary metrics — only computable when:
   //   (a) ground-truth turn end timing is annotated (tEndMs on the ref turn), AND
   //   (b) the candidate is realtime (batch has no streaming EOT concept).
-  // Formula: convert harness wall-clock (accelerated) to real audio-time offset,
-  // then subtract the ground-truth turn boundary.
-  //   candidate EOT in audio time = hypAtMs * REALTIME_ACCEL
+  // Formula: 1x receipt clock minus the ground-truth audio turn boundary.
   //   speechEndToEotMs = candidateEotAudioMs − tEndMs
   //   > 0 → candidate fired after turn ended (desirable, measures reaction delay)
   //   < 0 → candidate fired before turn ended (premature, cuts off speech)
@@ -554,7 +549,7 @@ export function scoreTurn(
   if (isRealtime && typeof tEndMs === "number") {
     if (a.hypAtMs !== null && a.hypEndOfTurn === true) {
       // Candidate fired an EOT signal for this turn.
-      const candidateEotAudioMs = a.hypAtMs * REALTIME_ACCEL;
+      const candidateEotAudioMs = a.hypAtMs;
       speechEndToEotMs = Math.round(candidateEotAudioMs - tEndMs);
       prematureEot = speechEndToEotMs < PREMATURE_THRESHOLD_MS;
       falseContinuation = false;

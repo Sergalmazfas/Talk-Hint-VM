@@ -11,6 +11,7 @@ import { benchmarkRuns, benchmarkFixtures, type BenchmarkRun, type BenchmarkFixt
 import { EARS_CANDIDATES, BRAIN_CANDIDATES } from "./candidates";
 import type { AvailabilityResult } from "./types";
 import { corpusHash } from "./seed";
+import { LIVE_PARITY_VERSION, inspectTimedCorpus } from "./liveParity";
 
 type RunType = "ears" | "brain" | "availability" | "replay" | "goal_return";
 
@@ -93,6 +94,10 @@ export async function startEarsRun(
   opts?: { candidateIds?: string[] }
 ): Promise<{ runId: string }> {
   const fixtures = (await Promise.all(fixtureIds.map(getFixture))).filter((f): f is BenchmarkFixture => !!f);
+  if (fixtures.length !== fixtureIds.length) throw new Error("fixture not found; no API requests sent");
+  // Missing reference boundaries used to create completed runs with NULL EOT.
+  const readiness = inspectTimedCorpus(fixtures, 1);
+  if (!readiness.valid) throw new Error(`INVALID_CORPUS: ${readiness.problems.join("; ")}; no API requests sent`);
   // Optional candidate subset (e.g. realtime-only shortlist runs). Unknown ids
   // are rejected loudly — a silent no-op subset would fake an empty run.
   let candidates = EARS_CANDIDATES;
@@ -122,8 +127,12 @@ export async function startEarsRun(
       } catch (e: any) {
         report = `EARS report generation failed: ${String(e?.message ?? e)}`;
       }
+      const valid = result.turnResults.length > 0 && !result.turnResults.some(t => !!t.error) &&
+        candidates.every(c => result.turnResults.some(t => t.candidateId === c.id &&
+          (c.referenceOnly || typeof t.speechEndToEotMs === "number")));
       await finishRun(run.id, {
-        status: "completed",
+        status: valid ? "completed" : "failed",
+        error: valid ? null : "INVALID_RUN: zero measurements or API/transport errors; excluded from comparison",
         availability: { ears: availability },
         results: { turnResults: result.turnResults, notes: result.notes },
         scorecard: result.scorecard,
@@ -244,8 +253,12 @@ export async function startGoalReturnRun(callsIn: GoalReturnRunCall[]): Promise<
 export async function startBrainRun(fixtureId: string, opts?: { judgeEnabled?: boolean }): Promise<{ runId: string }> {
   const fixture = await getFixture(fixtureId);
   if (!fixture) throw new Error("fixture not found");
-  const { PROMPT_VERSION } = await import("./brainEnvelope");
-  const run = await createRun("brain", [fixture], { candidates: BRAIN_CANDIDATES, judgeEnabled: opts?.judgeEnabled !== false }, PROMPT_VERSION);
+  const PROMPT_VERSION = LIVE_PARITY_VERSION;
+  const liveContext = { language: "ru", contextSections: "", strategyMemory: "", translateEnabled: true };
+  const run = await createRun("brain", [fixture], { candidates: BRAIN_CANDIDATES,
+    judgeEnabled: opts?.judgeEnabled !== false, liveContext,
+    reconstruction: "reference history; original user/contact/cards/strategy snapshots unavailable",
+    timingOrigin: "brain-only; not end-to-end baseline" }, PROMPT_VERSION);
   void (async () => {
     try {
       const { checkBrainAvailability } = await import("./brainAvailability");
@@ -256,6 +269,7 @@ export async function startBrainRun(fixtureId: string, opts?: { judgeEnabled?: b
         candidates: BRAIN_CANDIDATES,
         availability,
         judgeEnabled: opts?.judgeEnabled !== false,
+        liveContext,
       });
       const { generateReport } = await import("./report");
       let report: string | null = null;
@@ -276,8 +290,11 @@ export async function startBrainRun(fixtureId: string, opts?: { judgeEnabled?: b
       } catch (e: any) {
         report = `Report generation failed: ${String(e?.message ?? e)}`;
       }
+      const valid = result.scorecard.candidates.length > 0 &&
+        result.scorecard.candidates.every(c => c.validity?.status === "valid");
       await finishRun(run.id, {
-        status: "completed",
+        status: valid ? "completed" : "failed",
+        error: valid ? null : "INVALID_RUN: see candidate validity; excluded from comparison",
         availability: { brain: availability },
         results: { turnResults: result.turnResults, continuity: result.continuity, judgeModel: result.judgeModel, secondJudgeModel: result.secondJudgeModel, notes: result.notes },
         scorecard: result.scorecard,
