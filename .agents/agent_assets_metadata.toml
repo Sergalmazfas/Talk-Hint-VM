@@ -3141,3 +3141,31 @@ mtime_ms = 1793632354124
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8c1009be-128b-4bfa-9ea1-bbf87aa3e5ec/9680114b-922b-4563-af58-d464ebbe5db0"
 storage_version_token = "1793632737593671"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "MCggqWlPENBLMZ0kI-dUk"
+uri = "file://generated-artifacts/hint-prep/report.html"
+type = "html"
+title = "P.PREP — зафиксированный план и результат сверки"
+description = "План с SHA-256 и временем, опросник, сравнение с одной записью и ограничения опыта. Откройте для чтения на телефоне."
+logical_id = "cd763005-c099-47c6-a3b9-2c1ce5643a4a"
+content_hash = "sha256:24c2a5be27571a3af49a7409a15b86d72627a855338d2bf74e7ed56850b5fc25"
+size = 25111
+mtime_ms = 1793636963408
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/cd763005-c099-47c6-a3b9-2c1ce5643a4a/25f9071b-5a8c-47c7-95ea-6eaca02aa151"
+storage_version_token = "1793636980621941"
+content_type = "text/html"
+
+[[outputs]]
+id = "oj0RgWl9zu45-U6wW4XEN"
+uri = "file://generated-artifacts/P_PREP_Hypothesis_and_Narrow_Tool_Review.zip"
+type = "unspecified"
+title = "P.PREP — пакет Клавдию"
+description = "Передайте Клавдию: узкий инструмент, анкета, замороженный план, журнал r1204, расходы и результаты тестов. Production-роль пока не создана."
+logical_id = "a1ae55f8-4fc8-4f67-8693-c191b03fb904"
+content_hash = "sha256:575d7d1a8b2afc3e190ed5aadc66d2a01a365cd5e245c73b4324f26744bb9e4c"
+size = 276011
+mtime_ms = 1793636965336
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a1ae55f8-4fc8-4f67-8693-c191b03fb904/2a9b3847-2a5b-4199-8617-f886bc681b4a"
+storage_version_token = "1793636981293911"
+content_type = "application/octet-stream"
