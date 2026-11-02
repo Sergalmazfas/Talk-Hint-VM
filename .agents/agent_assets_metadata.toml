@@ -3267,3 +3267,17 @@ mtime_ms = 1793655199986
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/449c0790-cea8-4fff-9ade-b72ef65b6309/8f115380-b7c7-4f29-8e8a-8f883a0c6ddc"
 storage_version_token = "1793655228045768"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "QdgN0nrJ_Iw4pX--NmAbR"
+uri = "file://generated-artifacts/secretary-call-2026-11-02/report.html"
+type = "html"
+title = "Катя — разбор звонка и готовность команды"
+description = "Проверка поручения, доказанные условия и ограничения, ручной разбор по обязанностям отдела, что реально подключено и что пока не работает автоматически. Без полного транскрипта и чужих личных данных."
+logical_id = "116368fd-2d1e-43f8-bf57-a888cc9e1dce"
+content_hash = "sha256:d0be78e328ad91ad04bbf694757419fd5860b9af5f5160ba2c5b52c02cf34e98"
+size = 16714
+mtime_ms = 1793660073269
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/116368fd-2d1e-43f8-bf57-a888cc9e1dce/e84fe0fd-3a46-4853-8e08-b3cb730135b7"
+storage_version_token = "1793660117491440"
+content_type = "text/html"
