@@ -3057,3 +3057,31 @@ mtime_ms = 1793604382300
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7855d3ec-ce92-484c-8ffc-d1c9c93b65cd/395ce9ff-16dd-479d-bf3c-9fa4c95b5a72"
 storage_version_token = "1793604423156055"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "EYfWucn2ztcYQvFEDCEpG"
+uri = "file://generated-artifacts/hint-polygon/c-followups-review/comparison.csv"
+type = "table"
+title = "Hint — таблица А / В и факторов"
+description = "Открой сравнение: скорость p50/p95, качество, покрытие и верхняя оценка цены. Основной корпус и малая панель помечены отдельно."
+logical_id = "440ef32f-7c40-44cc-a107-44bbd757bb9d"
+content_hash = "sha256:3ba8e5597be8a3fe64e66388719bfd1521331b4efd6e490eca4526f4d18550ff"
+size = 2197
+mtime_ms = 1793626404539
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/440ef32f-7c40-44cc-a107-44bbd757bb9d/46d19027-03cc-49d9-b96f-9c3403469604"
+storage_version_token = "1793626440171104"
+content_type = "text/csv"
+
+[[outputs]]
+id = "Mqhhlo00vtOhHHxkmIZE0"
+uri = "file://generated-artifacts/Hint_English_First_Followups_Review.zip"
+type = "unspecified"
+title = "Клавдию — расширенный полигон Hint"
+description = "Скачай и передай Клавдию: отчёт, таблица, тесты, исходники и снимки версий, отказы, журнал расходов и проверка неизменности истории. Без аудио, транскриптов и ключей."
+logical_id = "61556c91-4e44-4857-8873-74016ab9f809"
+content_hash = "sha256:5961d2bd6242e0ef8c892c6184b09179aca515896a7256657dd1d3bfce5cd3a3"
+size = 1075346
+mtime_ms = 1793626408015
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61556c91-4e44-4857-8873-74016ab9f809/e6200717-2ed4-4bc9-9664-c48c5153f324"
+storage_version_token = "1793626441229387"
+content_type = "application/octet-stream"

@@ -99,7 +99,10 @@ describe("series budget, crash and unknown safety",()=>{
     expect(()=>new Ledger(p)).toThrow();
   });
   it("prices cached/uncached tokens and refuses absent usage, not zero dollars",()=>{
-    expect(tokenCost({prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:20}},money.brain)).toBe(284);
+    expect(tokenCost({prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:20}},money.brain)).toBe(324);
+    expect(tokenCost({prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:20,cache_write_tokens:40}},money.brain)).toBe(304);
+    expect(tokenCost({prompt_tokens:100,completion_tokens:10,prompt_tokens_details:{cached_tokens:20,cache_write_tokens:0}},money.brain)).toBe(284);
+    expect(()=>tokenCost({prompt_tokens:10,completion_tokens:1,prompt_tokens_details:{cached_tokens:5,cache_write_tokens:6}},money.brain)).toThrow("CACHE_WRITE");
     expect(()=>tokenCost(undefined,money.brain)).toThrow();expect(()=>tokenCost({prompt_tokens:10,completion_tokens:1,prompt_tokens_details:{cached_tokens:11}},money.brain)).toThrow();
   });
 });
@@ -132,7 +135,7 @@ describe("provider failures, blind judge and first-word contract",()=>{
   it("rejects successful but truncated output and still counts its usage",async()=>{
     vi.stubGlobal("fetch",vi.fn(async()=>reply(BASELINE.model,"{}", "length")));const l=new Ledger(path());
     await expect(chat(l,"x","brain",{model:BASELINE.model,max_completion_tokens:250,messages:[]})).rejects.toThrow("TRUNCATED");
-    expect(l.snapshot().entries[0].status).toBe("spent");expect(l.held()).toBe(260);l.close();
+    expect(l.snapshot().entries[0].status).toBe("spent");expect(l.held()).toBe(265);l.close();
   });
   it("rejects silently substituted model",async()=>{
     vi.stubGlobal("fetch",vi.fn(async()=>reply("another-model","{}")));const l=new Ledger(path());

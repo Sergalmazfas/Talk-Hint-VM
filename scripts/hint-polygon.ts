@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import * as asyncFs from"node:fs/promises";
-import { BASELINE, ARCHITECTURES, FACTOR_PLAN, SERIES, LIMIT_MICRO_USD, sha, assertAdapter, money, RecipeSchema, assertOneFactor } from "../server/hintPolygon/contracts";
+import { BASELINE, ARCHITECTURES, FACTOR_PLAN, SERIES, LIMIT_MICRO_USD, sha, assertAdapter, assertPaidRecipeOpen, money, RecipeSchema, assertOneFactor } from "../server/hintPolygon/contracts";
 import { Ledger } from "../server/hintPolygon/ledger";
 import { replay, type Fixture } from "../server/hintPolygon/replay";
 import { summarize, type Row } from "../server/hintPolygon/metrics";
@@ -61,6 +61,14 @@ if(JSON.stringify(recipe)!==JSON.stringify(BASELINE)){
   if(recipe.architecture==="stt-brain")assertOneFactor(BASELINE,recipe);
 }
 assertAdapter(recipe);
+if(process.argv.includes("--execute"))assertPaidRecipeOpen(recipe);
+if(process.argv.includes("--execute")&&existsSync(`${root}/pricing-accounting-hold.json`)){
+ const hold=JSON.parse(readFileSync(`${root}/pricing-accounting-hold.json`,"utf8"));
+ const entry=JSON.parse(readFileSync(`${root}/series-ledger.json`,"utf8")).entries.find((e:any)=>e.id===hold.contingencyId);
+ if(hold.status!=="resolved"||!entry||entry.kind!=="accounting-contingency"||entry.status!=="unknown"||
+    entry.reserve!==hold.reservedMicro||entry.payloadHash!==hold.payloadHash)
+  throw Error("PRICING_ACCOUNTING_REVIEW_REQUIRED_NO_PAID_REQUEST");
+}
 function sourceTree(path:string):string[]{
  return readdirSync(path,{withFileTypes:true}).flatMap(d=>d.isDirectory()?sourceTree(path+"/"+d.name):d.name.endsWith(".ts")?[path+"/"+d.name]:[]);
 }

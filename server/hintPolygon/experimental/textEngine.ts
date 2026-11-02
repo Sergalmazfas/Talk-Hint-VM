@@ -30,6 +30,19 @@ export function localCard(text:string,cards:Card[]):Card|null{
  }
  return best;
 }
+/** Conservative free lookup, never the retired paid classifier. */
+export function addonCard(text:string,cards:Card[]):Card|null{
+ if(/\b(no|not|never|cannot|can't|don't|doesn't|won't|unavailable|cancel)\b/i.test(text))return null;
+ const stop=new Set(["a","an","the","is","are","you","your","i","we","it","to","for","of","and","can","do","please"]);
+ const tokens=new Set(words(text).filter(w=>!stop.has(w)));
+ let best:Card|null=null,bestScore=0;
+ for(const card of cards){
+  const terms=Array.from(new Set(card.triggers.flatMap(words).filter(w=>!stop.has(w))));
+  const matches=terms.filter(w=>tokens.has(w)).length,score=terms.length?matches/terms.length:0;
+  if(matches>=2&&score>=.75&&score>bestScore){best=card;bestScore=score;}
+ }
+ return best;
+}
 const compact="For this English-first experiment, return JSON with translation=\"\" and suggestion={en: one concise English reply, translation:\"\"}. No Russian in this first stage. Preserve factual grounding and allow en=\"\" when no reply is needed.";
 const plan="Create at most 8 useful, specific reply cards BEFORE a call, using ONLY its saved goal. Never invent names, dates, bookings, prices or answers absent from that goal. Prefer safe questions. Output JSON {cards:[{id, triggers:[English keyword], en:short English reply, native:Russian translation}]}. No future utterances or recordings are available.";
 const classifier="Choose one suitable precomputed reply for the LAST guest utterance. Return JSON {card_id:string|null}. Null if none fits or this is only an acknowledgement. Never rewrite a card.";
@@ -48,11 +61,12 @@ export function textEngine(f:Fixture,r:Recipe,ledger:Ledger,run:string):HintEngi
  const settled=async()=>{await Promise.all(Array.from(specs.values(),s=>s.promise));};
  return{
   async open(){
-   if(r.architecture!=="precomputed"&&r.architecture!=="classifier-card")return;
+   if(!["precomputed","classifier-card","hint-first-cards"].includes(r.architecture))return;
+   const began=performance.now();
    const body=buildOpenAIChatBody(r.model,plan,"Saved goal:\n"+f.goal,1200);
    const value=await chat(ledger,`${prefix}-cards`,"brain",body,f.id,parseCards);
    cards=value.prepared as Card[];audit.push({stage:"goal-only-precompute",cards:cards.length,usage:value.usage,
-    systemHash:sha(plan),systemChars:Array.from(plan).length,cardsHash:sha(JSON.stringify(cards))});
+    systemHash:sha(plan),systemChars:Array.from(plan).length,cardsHash:sha(JSON.stringify(cards)),precomputeMs:performance.now()-began});
   },
   frame(){},owner(){},
   partial(turnKey,text,history){
@@ -65,9 +79,15 @@ export function textEngine(f:Fixture,r:Recipe,ledger:Ledger,run:string):HintEngi
   },
   async generate(turnId,text,history,turnKey){
    if(fatal)throw fatal;
-   if(r.architecture==="hint-first"){
+   if(r.architecture==="hint-first"||r.architecture==="hint-first-cards"){
     const req=full(text,history),body=buildOpenAIChatBody(r.model,req.system+"\n"+compact,req.user,r.maxOutputTokens);
-    const a=await streamHint(ledger,`${run}-${turnId}-english`,body,f.id);
+    const card=r.architecture==="hint-first-cards"?addonCard(text,cards):null;
+    const now=performance.now();
+    if(r.architecture==="hint-first-cards")audit.push({stage:"card-decision",turnId,hit:!!card,cardIdHash:card?sha(card.id):null,source:card?"card":"stream"});
+    // A miss runs EXACTLY V, never abstains. A hit still translates the Guest
+    // using the same second stage; it does not remove translation coverage.
+    const a=card?{en:card.en,firstAt:now,fullAt:now,usage:{prompt_tokens:0,completion_tokens:0}}:
+      await streamHint(ledger,`${run}-${turnId}-english`,body,f.id);
     const t=buildOpenAIChatBody(r.model,
       "Translate only supplied text into Russian. Return JSON {translation:Russian guest utterance,native:Russian English-reply translation}. No additional commentary.",
       JSON.stringify({guest:text,english:a.en}),250);
@@ -79,7 +99,8 @@ export function textEngine(f:Fixture,r:Recipe,ledger:Ledger,run:string):HintEngi
     return{en:a.en,native:h.native,translation:h.translation,firstAt:a.firstAt,fullAt:a.fullAt,
      translationAt:b.readyAt,inputTokens:a.usage.prompt_tokens+b.usage.prompt_tokens,
      outputTokens:a.usage.completion_tokens+b.usage.completion_tokens,
-     systemHash:sha(req.system+"\n"+compact),systemChars:Array.from(req.system+"\n"+compact).length};
+     systemHash:sha(card?"card-lookup:"+sha(JSON.stringify(cards)):req.system+"\n"+compact),
+     systemChars:card?0:Array.from(req.system+"\n"+compact).length};
    }
    if(r.architecture==="precomputed"||r.architecture==="classifier-card"){
     let card:Card|null,at:number;
@@ -119,14 +140,15 @@ export function textEngine(f:Fixture,r:Recipe,ledger:Ledger,run:string):HintEngi
   async settle(){await settled();if(fatal)throw Error("SPECULATIVE_PROVIDER_FAILURE_"+fatal.message);},
   async close(){await settled();},
   audit:()=>[...audit,...Array.from(specs.entries(),([key,s])=>({stage:"speculation",turnKey:key,used:s.used,error:s.error?.message??null}))],
-  metadata:()=>({systemHash:sha((r.architecture==="hint-first"?full("","").system+"\n"+compact:
+  metadata:()=>({systemHash:sha((["hint-first","hint-first-cards"].includes(r.architecture)?full("","").system+"\n"+compact:
     r.architecture==="speculative"?full("","").system:plan)+"\n"+f.goal),
-   systemChars:Array.from(r.architecture==="hint-first"?full("","").system+"\n"+compact:
+   systemChars:Array.from(["hint-first","hint-first-cards"].includes(r.architecture)?full("","").system+"\n"+compact:
     r.architecture==="speculative"?full("","").system:plan).length,
-   promptVersion:"experimental-"+r.architecture+"-"+sha(r.architecture==="hint-first"?compact:plan).slice(0,16),
+   promptVersion:"experimental-"+r.architecture+"-"+r.prompt+"-"+sha(["hint-first","hint-first-cards"].includes(r.architecture)?compact:plan).slice(0,16),
    contextProvenance:r.architecture==="precomputed"||r.architecture==="classifier-card"?
     "goal-only cards before replay; no future Guest data; classifier sees actual final history":
     r.architecture==="speculative"?"real Flux Update only; exact-text+history reuse after EOT; mismatches discarded and paid":
+    r.architecture==="hint-first-cards"?"goal-only cards; conservative local match else unchanged English-first; Guest Russian preserved":
     "real Terra English SSE first; separate Terra Russian request; no live product mutation"}),
  };
 }

@@ -6,7 +6,7 @@ export const sha = (v: string | Buffer) => createHash("sha256").update(v).digest
 export const SERIES = "hint-polygon-owner-36-v1";
 export const LIMIT_MICRO_USD = 15_000_000;
 export const RecipeSchema = z.object({
-  id: z.string().regex(/^[a-z0-9-]+$/), architecture: z.enum(["stt-brain", "audio-direct", "hint-first", "precomputed", "classifier-card", "speculative"]),
+  id: z.string().regex(/^[a-z0-9-]+$/), architecture: z.enum(["stt-brain", "audio-direct", "hint-first", "hint-first-cards", "precomputed", "classifier-card", "speculative"]),
   model: z.string().min(1), judgeModel: z.string().min(1),
   stt: z.string(), prompt: z.enum(["full", "reduced", "minimal"]),
   maxOutputTokens: z.number().int().positive().max(4000),
@@ -42,12 +42,27 @@ export function assertOneFactor(a: Recipe, b: Recipe) {
   if (fields.length !== 1) throw Error("EXACTLY_ONE_FACTOR_REQUIRED");
   return fields[0];
 }
+export function assertPaidRecipeOpen(r:Recipe){
+ if(r.architecture==="audio-direct")throw Error("NATIVE_DEFERRED_BY_OWNER_NO_PAID_REQUEST");
+ if(["speculative","classifier-card","precomputed"].includes(r.architecture))
+  throw Error("STANDALONE_RECIPE_CLOSED_BY_OWNER_NO_PAID_REQUEST");
+}
 export function canonicalModel(id: string) { return id.replace(/-\d{4}-\d{2}-\d{2}$/, ""); }
 export function assertIndependent(author: string, judge: string) {
   if (canonicalModel(author) === canonicalModel(judge)) throw Error("JUDGE_NOT_INDEPENDENT");
 }
 export function assertAdapter(r: Recipe) {
   RecipeSchema.parse(r); assertIndependent(r.model, r.judgeModel);
+  // Each follow-up changes ONE factor against English-first, not against A.
+  // Prompt reduction and earlier Flux EOT must never be silently combined.
+  if(["hint-first","hint-first-cards"].includes(r.architecture)&&
+    r.model==="gpt-5.6-terra"&&r.judgeModel==="gpt-4.1-mini"&&r.stt==="flux-general-en"&&
+    r.cache==="provider-auto"&&r.maxOutputTokens===250&&r.stream&&r.translation==="separate"&&
+    r.eotTimeoutMs===3000&&[.5,.6,.7].includes(r.eotThreshold)&&
+    ["full","reduced"].includes(r.prompt)){
+    const reference:Recipe={...r,architecture:"hint-first",prompt:"full",eotThreshold:.7};
+    if(changedFactors(reference,r).length<=1)return;
+  }
   if(r.architecture==="audio-direct"&&r.model==="gemini-3.8-live"&&r.judgeModel==="gpt-4.1-mini"&&
     r.stt==="flux-general-en"&&r.prompt==="minimal"&&r.stream&&r.translation==="separate"&&r.cache==="provider-auto"&&
     r.maxOutputTokens===500&&r.eotThreshold===.7&&r.eotTimeoutMs===3000)return;
@@ -87,15 +102,21 @@ export function percentile(values: number[], q: number): number | null {
 export const money = {
   sourceDate: "2026-11-02",
   deepgram: { perMinuteMicro: 7700, source: "https://deepgram.com/pricing" },
-  brain: { input: 2, cached: 0.2, output: 12, source: "https://developers.openai.com/api/docs/models/gpt-5.6-terra" },
+  brain: { input: 2, cached: 0.2, output: 12, cacheWriteMultiplier:1.25, source: "https://developers.openai.com/api/docs/models/gpt-5.6-terra" },
   judge: { input: 0.4, cached: 0.1, output: 1.6, source: "https://developers.openai.com/api/docs/models/gpt-4.1-mini" },
 };
-export function tokenCost(usage: any, rate: typeof money.brain) {
+export function tokenCost(usage: any, rate: {input:number;cached:number;output:number;source:string;cacheWriteMultiplier?:number}) {
   const input = usage?.prompt_tokens, output = usage?.completion_tokens;
   const cached = usage?.prompt_tokens_details?.cached_tokens ?? 0;
   if (![input, output, cached].every(v => Number.isInteger(v) && v >= 0) || cached > input)
     throw Error("MISSING_OR_INVALID_USAGE");
-  return Math.ceil((input-cached)*rate.input + cached*rate.cached + output*rate.output);
+  const multiplier=rate.cacheWriteMultiplier??1;
+  // GPT-5.6 cache writes are a replacement input rate, not an additive full
+  // input charge. Missing breakdown holds the conservative maximum premium.
+  const writes=usage?.prompt_tokens_details?.cache_write_tokens??(multiplier>1?input-cached:0);
+  if(!Number.isInteger(writes)||writes<0||writes>input-cached)throw Error("MISSING_OR_INVALID_CACHE_WRITE_USAGE");
+  return Math.ceil((input-cached-writes)*rate.input + writes*rate.input*multiplier+
+    cached*rate.cached + output*rate.output);
 }
 export const FACTOR_PLAN = [
   "prompt: full/reduced/minimal", "maxOutputTokens: 250/one-line",
