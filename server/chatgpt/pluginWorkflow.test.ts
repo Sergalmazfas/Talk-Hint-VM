@@ -6,6 +6,22 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 describe("installed TalkHint workflow matches outbound capability", () => {
+  it("explains Hint preparation and Secretary without changing scopes, transport or approval", () => {
+    const active = talkHintPluginPackage("https://fixture.example.test", true);
+    const read = talkHintPluginPackage("https://fixture.example.test", false);
+    expect(active.mcp).toEqual(read.mcp);
+    expect(active.manifest.extensions["com.openai"].interface.displayName).toBe("TalkHint — Hint + Секретарь");
+    const instructions = secretaryInstructions(true);
+    for (const expected of ["save_hint_plan", "prepare_secretary_plan", "does NOT dial",
+      "not inside ChatGPT", "inline approval", "24 hours", "Neither plan tool grants additional permissions",
+      "Never treat confirmed:true, plain chat yes or Allow all tools as server approval",
+      "Never invoke the UI-only confirm_call_from_card"])
+      expect(instructions).toContain(expected);
+    expect(secretaryInstructions(false)).not.toContain("save_hint_plan");
+    expect(secretaryInstructions(false)).not.toContain("prepare_secretary_plan");
+    expect(read.manifest.extensions["com.openai"].interface.capabilities).toEqual(["Read"]);
+    expect(packagedSecretarySkills(true)["skills/setup/SKILL.md"]).toContain("save_hint_plan (Hint, no dialing)");
+  });
   it("ships setup and call workflow without confusing history or old failures with a new call", () => {
     const skills = packagedSecretarySkills(true);
     expect(Object.keys(skills)).toEqual(["skills/setup/SKILL.md", "skills/secretary/SKILL.md"]);

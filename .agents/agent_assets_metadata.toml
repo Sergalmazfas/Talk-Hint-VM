@@ -3197,3 +3197,17 @@ mtime_ms = 1793641316271
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/26ab431e-7566-4feb-8dee-28c9295b621f/e0d6d3f5-d506-4214-a2a8-8aa961e5d12b"
 storage_version_token = "1793641342360663"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "i2qS1DNEbN8Tisvv74BHv"
+uri = "file://generated-artifacts/chatgpt-description/TalkHint_connection_description.zip"
+type = "unspecified"
+title = "TalkHint — Hint + Секретарь: описание подключения"
+description = "Только название и описание, diff и результаты 177 тестов. OAuth, права, инструменты и подтверждения не изменены. Production не менялся."
+logical_id = "8e771a77-f8dc-4fae-bcb7-55239e9b89b8"
+content_hash = "sha256:e16a20aea40eb66e6eab08f51cc9fe26277c4fe625415a0ac8adc5ce4b01b346"
+size = 16541
+mtime_ms = 1793643429263
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8e771a77-f8dc-4fae-bcb7-55239e9b89b8/ac2bcbd7-6a10-45c2-a74d-f908916d5fee"
+storage_version_token = "1793643448632166"
+content_type = "application/octet-stream"

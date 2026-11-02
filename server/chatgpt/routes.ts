@@ -12,7 +12,7 @@ import { finalCallResult } from "./finalResult";
 import { CardApproval } from "./cardApproval";
 import { CALL_APPROVAL_RESOURCE, callApprovalWidgetHtml } from "./callApprovalWidget";
 import { callApprovalResource, hostUiSupport, LEGACY_CALL_APPROVAL_RESOURCES, uiResourceLabel } from "./uiResources";
-import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION } from "./pluginWorkflow";
+import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION, TALKHINT_CONNECTION_TITLE } from "./pluginWorkflow";
 import { actionsExchange } from "./actionsOAuth";
 import { talkHintActionsSchema, registerActionOperations, CALL_PLAN_OPENAPI } from "./actionsSchema";
 import { callPlanSchema, secretaryInstruction } from "../../shared/callPlan";
@@ -558,7 +558,7 @@ export function registerChatGPTIntegration(
       protocolVersion: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"].includes(String(rpc.params?.protocolVersion)) ?
         rpc.params!.protocolVersion : "2025-11-25",
       capabilities: { tools: {}, ...(cardEnabled ? { resources: {} } : {}) },
-      serverInfo: { name: "talkhint-secretary", title: "TalkHint", version: TALKHINT_MCP_VERSION },
+      serverInfo: { name: "talkhint-secretary", title: TALKHINT_CONNECTION_TITLE, version: TALKHINT_MCP_VERSION },
       instructions: secretaryInstructions(config.outboundEnabled === true),
       };
     }

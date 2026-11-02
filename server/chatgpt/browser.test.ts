@@ -473,7 +473,7 @@ describe("separate TalkHint plugin and owner Secretary history", () => {
     const mcp = await request(app).get("/api/chatgpt/mcp.json");
     expect(manifest.status).toBe(200);
     expect(manifest.body.name).toBe("talkhint");
-    expect(manifest.body.extensions["com.openai"].interface.displayName).toBe("TalkHint Secretary");
+    expect(manifest.body.extensions["com.openai"].interface.displayName).toBe("TalkHint — Hint + Секретарь");
     expect(mcp.body.mcpServers.talkhint.url).toBe(`${base}/api/chatgpt/mcp`);
     expect(manifest.headers["cache-control"]).toBe("no-store");
     expect(JSON.stringify([manifest.body, mcp.body])).not.toContain("alice");
