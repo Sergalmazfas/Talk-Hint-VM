@@ -3225,3 +3225,17 @@ mtime_ms = 1793647903066
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b7045b73-0970-4ad8-bb25-03f300b3afda/d3d34699-1640-49b6-ad41-5adaa5dc700e"
 storage_version_token = "1793647910293149"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ffb8M0tydMjITbHyivHSF"
+uri = "file://generated-artifacts/prepare-mac-fixes/ChatGPT_Prepare_Mac_Fixes_Review.zip"
+type = "unspecified"
+title = "Prepare — восстановленные Mac-исправления"
+description = "Два точных исходных исправления, обновлённое задание Mac, diff и результаты 37 целевых и 47 Python-проверок. Новый GitHub HEAD: cd58373. Сборка и XCTest ожидают Mac."
+logical_id = "85bef878-474f-4a3c-a3b2-c377bacd7f13"
+content_hash = "sha256:8ef5bf6a5f30a5971dee595e0bd8b8072fc0da1fc9f46bd8347cea273b773c78"
+size = 57340
+mtime_ms = 1793648928982
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/85bef878-474f-4a3c-a3b2-c377bacd7f13/8c819fff-ab9c-49f9-821b-9729ca3b285e"
+storage_version_token = "1793648936650984"
+content_type = "application/octet-stream"
