@@ -3127,3 +3127,17 @@ mtime_ms = 1793632515885
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2d5df6de-309b-4de1-b24c-67adbd67b4b3/0c6cb61a-e925-4cce-a61c-fea94aa396e0"
 storage_version_token = "1793632529460115"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "T-A5BnAqlz96xAyqpLQ_J"
+uri = "file://generated-artifacts/Hint_native_bench_preparation.zip"
+type = "unspecified"
+title = "Native Hint — подготовка без расходов"
+description = "Код изолированного стенда, 34 локальных теста, проверка типов, каталог моделей, пустой новый журнал $15 и таблица NOT_RUN. Это не результаты платного сравнения."
+logical_id = "8c1009be-128b-4bfa-9ea1-bbf87aa3e5ec"
+content_hash = "sha256:d35edb2f5b346251b13726f095b5fb39ccd598317f2127de72e1fcca1c0fab0e"
+size = 64566
+mtime_ms = 1793632354124
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8c1009be-128b-4bfa-9ea1-bbf87aa3e5ec/9680114b-922b-4563-af58-d464ebbe5db0"
+storage_version_token = "1793632737593671"
+content_type = "application/octet-stream"
