@@ -51,6 +51,7 @@
 - [Translator realtime architecture](translator-spike.md) — RU↔EN uses isolated transports; PSTN routing is asymmetric so Owner hears Guest original and monitors both translations.
 - [LIVE prompt evaluation](live-prompt-evaluation.md) — compare both message roles and normalized output; reconstructed requests and single-turn success are not end-to-end proof.
 - [Hint model choice provenance](hint-model-choice-provenance.md) — объяснение владельца о Terra сохранять отдельно от git; offline AI-оценка не равна live-проверке.
+- [English-first Hint](english-first-rollout.md) — В разрешён со строгой схемой и откатом; default старый, iPhone сначала получает целую английскую карточку.
 - [Copilot private audio boundary](copilot-private-translator-boundary.md) — Copilot translation is read-first; only a tap on its card may speak verified English with owner's clone to Guest.
 - [Voice Lab rollout approval](voice-lab-rollout.md) — owner approved opt-in Cartesia/ElevenLabs live comparison; ElevenLabs default, Copilot remains tap-only.
 - [Secretary live-call intent](secretary-live-call-intent.md) — one manual call; owner only monitors, Secretary speaks autonomously; Hint is design reference, not a feature target.
@@ -78,6 +79,7 @@
 - [Product passport baseline](product-passport-baseline.md) — dated owner confirmation: Translator, Copilot and one Katya; no built-in email chat; «линк» is unresolved.
 - [Frontend verification](frontend-verification.md) — isolated bundlers can differ from Vite; keep auth intact and distinguish fixture checks from signed-in UI verification.
 - [Полный Vitest по шардам](large-vitest-suite.md) — последовательные шарды вместо тайм-аута; один снимок, полное покрытие файлов, штатные skip отдельно.
+- [Тесты и provenance I/O](test-provenance-boundary.md) — unit-тест ошибок БД не должен запускать реальный Git; stamp версии проверяется отдельно.
 - [GitHub workflow permissions](github-workflow-permissions.md) — generic PUSH_REJECTED can mask missing OAuth workflow scope; dry-run success does not verify server acceptance.
 - [Native audio boundaries](native-audio-boundaries.md) — ordinary Twilio audio, Copilot private gates and visible Secretary monitoring must not compete for one audio session.
 - [Secretary Lab cost boundaries](secretary-lab-cost-boundaries.md) — Agents minutes differ from TTS API prices; provider usage is not an invoice; freeze tariffs, never reprice history.

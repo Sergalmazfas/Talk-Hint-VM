@@ -3085,3 +3085,17 @@ mtime_ms = 1793626408015
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/61556c91-4e44-4857-8873-74016ab9f809/e6200717-2ed4-4bc9-9664-c48c5153f324"
 storage_version_token = "1793626441229387"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "FMWixtrNIx4s3L4uovRX3"
+uri = "file://generated-artifacts/Hint_English_First_Strict_Rollback_Review.zip"
+type = "unspecified"
+title = "Hint В — пакет на сверку Клавдию"
+description = "Строгие схемы, переключатель и откат, diff и исходники, полный прогон 339 файлов, API-контроль, ожидаемые добавления БД и ограничения проверки."
+logical_id = "a102af92-6dde-4757-9ba5-3f54bcb94c2c"
+content_hash = "sha256:98000fbe5729135c05db937c89f95e0ae2bffd51ff02f6405995c1a9cb17e7a6"
+size = 441489
+mtime_ms = 1793629443664
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a102af92-6dde-4757-9ba5-3f54bcb94c2c/c0816fa4-1bd2-40f0-9d12-45143f9795a6"
+storage_version_token = "1793629471281932"
+content_type = "application/octet-stream"

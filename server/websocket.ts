@@ -56,6 +56,9 @@ import { prepareMessage, clearPrepareState, clearOpeningDedup, PrepareUnavailabl
 import { authorizeSecretaryConfirmation, handlePrepareConfirmGoal, isSecretaryConfirmationCurrent, releaseSecretaryConfirmation } from "./prepareConfirm";
 import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
+import { englishFirstHint, type EnglishFirstHint } from "./liveHintEnglishFirst";
+import { liveHintModes } from "./liveHintModeRoutes";
+import { canUpdateEnglishFirst } from "./liveHintDelivery";
 import { StrategyMemoryTracker } from "./strategyMemory";
 import { createCopilotStream } from "./copilotStream";
 import { hintSourceMarker } from "./callLab/source";
@@ -625,12 +628,15 @@ function filterJsonFromText(text: string): string {
 // Delivers a message only to the connected /ui sockets belonging to `userId`.
 // Fails closed: if the owning user is unknown, the message is dropped rather
 // than leaked to other users' clients.
+const hintDeliveryEpoch = new Map<string, symbol>();
 function sendToUser(userId: string | undefined, message: object) {
   if (!userId) {
     log(`[sendToUser] No owner for ${(message as any).type} - dropping (fail-closed)`, "server");
     return;
   }
   const data = JSON.stringify(message);
+  if (["suggestion", "fast_phrase"].includes((message as any).type) && !(message as any).updateOnly)
+    hintDeliveryEpoch.set(userId, Symbol());
   let sent = 0;
   uiClients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN && uiClientUsers.get(client) === userId) {
@@ -2000,6 +2006,15 @@ NEVER output JSON - only plain text with the phrase and translation.`);
       // suggestion generation. The suggestion keeps the existing combined prompt
       // + all downstream guards unchanged.
       const translationEnabled = callSettings.translationEnabled;
+      const responseMode = streamUserId
+        ? await liveHintModes.read(streamUserId).catch(() => {
+          log("[HintMode] persistent setting unavailable; using safe legacy path", "websocket");
+          return { mode: "legacy" as const, revision: 0 };
+        })
+        : { mode: "legacy" as const, revision: 0 };
+      if (streamClosed) return;
+      const useEnglishFirst = responseMode.mode === "english-first";
+      let firstEnglish: Promise<EnglishFirstHint> | null = null;
 
       // A suggestion is only generated for turns that can actually receive one.
       // Reaction-only / farewell / wait-state turns never emit a model
@@ -2013,8 +2028,8 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         !reactionOnly && !isFarewell && !waitingForInfo;
 
       const translationStart = Date.now();
-      const translationPromise: Promise<{ translation: string; providerUsed: string }> =
-        translationEnabled
+      let translationPromise: Promise<{ translation: string; providerUsed: string }> =
+        translationEnabled && !useEnglishFirst
           ? translateGuestText(text, currentLanguage, brainModelOverride)
           : Promise.resolve({ translation: "", providerUsed: "translation_off" });
 
@@ -2076,21 +2091,65 @@ NEVER output JSON - only plain text with the phrase and translation.`);
 
       const suggestionStart = Date.now();
       if (wantSuggestion) latencyRecorder.trigger(utteranceId);
+      if (useEnglishFirst && wantSuggestion && !libraryHit) {
+        firstEnglish = englishFirstHint({
+          system: withActionResults(buildLiveSystemPrompt({
+            goal: ownerGoal, language: currentLanguage, conversationContext: contextHistory,
+            contextSections: buildContextProviderChain({ userContext: ownerContext, contactContext, staticCards, tutorMemory: tutorMemoryBlock }),
+            translateEnabled: translationEnabled, strategyMemory: strategyMemory.render(),
+          })),
+          user: buildLiveUserPrompt(hintText), guest: text, language: currentLanguage,
+          translateEnabled: translationEnabled, model: brainModelOverride || "gpt-5.6-terra",
+          stripPreamble,
+          translationAllowed: async () => {
+            if (streamClosed || !streamUserId) return false;
+            const [settings, mode] = await Promise.all([
+              storage.getUserCallSettings(streamUserId), liveHintModes.read(streamUserId),
+            ]);
+            return !streamClosed && settings.liveHintsEnabled && settings.translationEnabled &&
+              mode.mode === "english-first" && mode.revision === responseMode.revision;
+          },
+        }).catch(() => {
+          log("[HintEnglishFirst] generation refused/failed; no unvalidated hint delivered", "websocket");
+          return { translation: "", providerUsed: "english-first-error", finishTranslation: async () => ({ translation: "" }) };
+        });
+      }
       // Fired in parallel with the translation so neither waits for the other.
       // translateAndSuggest never throws (it catches internally), so if this turn
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
+        ? firstEnglish ?? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
         : null;
+      if (useEnglishFirst) {
+        translationPromise = firstEnglish
+          ? firstEnglish.then(r => r.finishTranslation()).then(r => ({ translation: r.translation, providerUsed: "english-first-translation" }))
+              .catch(() => ({ translation: "", providerUsed: "english-first-translation-error" }))
+          : translationEnabled ? translateGuestText(text, currentLanguage, brainModelOverride)
+            : Promise.resolve({ translation: "", providerUsed: "translation_off" });
+      }
 
       // ----- Caption: broadcast as soon as the translation resolves -----
-      const tr = await translationPromise;
-      const translationMs = Date.now() - translationStart;
+      const emitCaption = async (caption: { translation: string; providerUsed: string }) => {
+        if (streamClosed) return;
+        if (useEnglishFirst && streamUserId) {
+          const settings = await storage.getUserCallSettings(streamUserId).catch(() => null);
+          if (streamClosed) return;
+          if (!settings?.translationEnabled) caption = { ...caption, translation: "" };
+        }
+        uiBroadcast({ type: "guest_transcript", text, translation: caption.translation,
+          isFinal: true, isComplete: true, confidence, utteranceId, callSid });
+        if (useEnglishFirst)
+          log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${Date.now() - translationStart} provider_used=${caption.providerUsed} utteranceId=${utteranceId}`, "websocket");
+      };
+      // V's English must not wait behind the caption/native-language request.
+      if (useEnglishFirst) void translationPromise.then(emitCaption).catch(() => {});
+      const tr = useEnglishFirst ? { translation: "", providerUsed: "pending" } : await translationPromise;
+      const translationMs = useEnglishFirst ? null : Date.now() - translationStart;
       fastLayer.onGptResponseReceived();
       // ALWAYS broadcast the guest transcript (caption), even if the suggestion
       // is later blocked. Payload shape is unchanged (backward-compatible UI).
-      uiBroadcast({
+      if (!useEnglishFirst) uiBroadcast({
         type: "guest_transcript",
         text: text,
         translation: tr.translation,
@@ -2101,7 +2160,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         callSid
       });
       // `now` is captured at handler entry ≈ Deepgram EndOfTurn (commitTurn fires this synchronously).
-      log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${translationMs} provider_used=${tr.providerUsed} utteranceId=${utteranceId}`, "websocket");
+      if (!useEnglishFirst) log(`[TIMING] reaction end_of_turn->caption=${Date.now() - now}ms translation_latency_ms=${translationMs} provider_used=${tr.providerUsed} utteranceId=${utteranceId}`, "websocket");
       
       // ===== HINT THROTTLING CHECKS (only for suggestions, not transcripts) =====
       
@@ -2220,6 +2279,22 @@ NEVER output JSON - only plain text with the phrase and translation.`);
       if (translated?.suggestion?.en) {
         latencyRecorder.ready(utteranceId, translated.providerUsed === "library" ? "library" : "gpt");
       }
+      if (streamClosed) return;
+      if (useEnglishFirst && streamUserId) {
+        const [freshMode, freshSettings] = await Promise.all([
+          liveHintModes.read(streamUserId).catch(() => null),
+          storage.getUserCallSettings(streamUserId).catch(() => null),
+        ]);
+        if (streamClosed) return;
+        if (!freshSettings?.liveHintsEnabled) {
+          dropHint("hints_disabled", "- disabled during generation", true);
+          return;
+        }
+        if (!freshMode || freshMode.mode !== responseMode.mode || freshMode.revision !== responseMode.revision) {
+          dropHint("mode_changed", "- rollback during generation", true);
+          return;
+        }
+      }
       log(`[HINT] model=${libraryHit ? "library" : (brainModelOverride || currentModel)} provider_used=${translated.providerUsed ?? "unknown"} translation_latency_ms=${translationMs} suggestion_latency_ms=${suggestionMs} total_hint_latency_ms=${Date.now() - now} utteranceId=${utteranceId}`, "websocket");
 
       // Freshness/stale guard: while this suggestion was generating, the Guest started
@@ -2306,6 +2381,32 @@ NEVER output JSON - only plain text with the phrase and translation.`);
           callSid
         });
         latencyRecorder.sent(utteranceId, translated.suggestion.en);
+        const deliveredEpoch = streamUserId ? hintDeliveryEpoch.get(streamUserId) : undefined;
+        if (firstEnglish && translationEnabled) {
+          const originalEnglish = translated.suggestion.en;
+          void firstEnglish.then(r => r.finishTranslation()).then(async r => {
+            if (!r.suggestion || !streamUserId || streamClosed ||
+                utteranceId !== latestGuestUtteranceId || hintDeliveryEpoch.get(streamUserId) !== deliveredEpoch) return;
+            const [freshMode, freshSettings] = await Promise.all([
+              liveHintModes.read(streamUserId), storage.getUserCallSettings(streamUserId),
+            ]);
+            if (!canUpdateEnglishFirst({
+              closed: streamClosed, utterance: utteranceId, latestUtterance: latestGuestUtteranceId,
+              deliveredEpoch, currentEpoch: hintDeliveryEpoch.get(streamUserId),
+              mode: freshMode.mode, revision: freshMode.revision, startedRevision: responseMode.revision,
+              liveHints: freshSettings.liveHintsEnabled, translation: freshSettings.translationEnabled,
+              originalEnglish, updatedEnglish: r.suggestion.en,
+            })) return;
+            // Existing iOS replaces the pinned banner. Do not open a new
+            // strategy cycle or record a second hint delivery for this update.
+            uiBroadcast({ type: "suggestion", updateOnly: true, target: "HON", eventType: "suggestion",
+              source: "gpt", basedOnSpeaker: "GST", en: originalEnglish, translation: r.suggestion.translation,
+              ...(r.suggestion.type ? { suggestionType: r.suggestion.type } : {}),
+              ...(r.suggestion.options ? { options: r.suggestion.options } : {}),
+              ...(r.suggestion.nativeHelper ? { nativeHelper: r.suggestion.nativeHelper } : {}),
+              utteranceId, callSid });
+          }).catch(() => log("[HintEnglishFirst] translation unavailable; English retained", "websocket"));
+        }
         // Strategy Memory: only a hint that actually REACHED the user opens a
         // cycle (drops/stale/dedup above never do — an unseen hint can't shape
         // the owner's behavior). Library hits count too: the user saw them.

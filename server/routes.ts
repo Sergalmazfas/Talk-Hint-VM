@@ -3,6 +3,7 @@ import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
 import { registerCallLabRoutes } from "./callLab/routes";
 import { registerCrewRoutes } from "./aiCrew/routes";
+import { registerLiveHintModeRoutes } from "./liveHintModeRoutes";
 import { registerIncomingRoutes } from "./incomingSecretary/routes";
 import { registerPersonalityRoutes } from "./secretary/personalities/routes";
 import { tryIncomingSecretary, stopIncomingCard } from "./incomingSecretary/runtime";
@@ -2374,6 +2375,7 @@ USER'S NATIVE LANGUAGE: ${langName}`;
   registerPersonalityRoutes(app);
   registerCallLabRoutes(app);
   registerCrewRoutes(app);
+  registerLiveHintModeRoutes(app);
   registerCallProfileRoutes(app, authMiddleware, {
     numbers: owner => storage.getUserPhoneNumbers(owner),
     pool: () => storage.getAllAvailableNumbers(),

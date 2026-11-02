@@ -52,6 +52,8 @@ class AuthStorage implements IAuthStorage {
       candidatePipelineEnabled: false,
       candidateStt: null,
       candidateBrainModel: null,
+      hintResponseMode: "legacy",
+      hintModeRevision: 0,
       createdAt: new Date(),
     };
 

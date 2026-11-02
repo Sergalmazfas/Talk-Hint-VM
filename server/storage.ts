@@ -454,6 +454,8 @@ export class DatabaseStorage implements IStorage {
         candidatePipelineEnabled: false,
         candidateStt: null,
         candidateBrainModel: null,
+        hintResponseMode: "legacy",
+        hintModeRevision: 0,
         createdAt: new Date(),
       };
       memoryUsers.set(newUser.id, newUser);
@@ -488,6 +490,8 @@ export class DatabaseStorage implements IStorage {
         candidatePipelineEnabled: false,
         candidateStt: null,
         candidateBrainModel: null,
+        hintResponseMode: "legacy",
+        hintModeRevision: 0,
         createdAt: new Date(),
       };
       memoryUsers.set(fallbackUser.id, fallbackUser);

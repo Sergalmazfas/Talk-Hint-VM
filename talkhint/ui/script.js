@@ -1290,7 +1290,27 @@ function handleMessage(data) {
     case 'ai_hint':
     case 'hint':
       if (data.en || data.english) {
+        if (data.updateOnly) {
+          // Translation of an already displayed English-first hint: update,
+          // never append a second card or acknowledge a second hint.
+          var existing = Array.from(document.querySelectorAll('.hint.hon-suggestion')).find(function(el) {
+            return el.dataset.callSid === String(data.callSid) && el.dataset.utteranceId === String(data.utteranceId)
+              && el.querySelector('.hint-phrase')?.textContent === data.en;
+          });
+          if (existing && data.translation) {
+            var translationEl = existing.querySelector('.hint-translation');
+            if (!translationEl) {
+              translationEl = document.createElement('div'); translationEl.className = 'hint-translation';
+              existing.querySelector('.hint-card').appendChild(translationEl);
+            }
+            translationEl.textContent = data.translation;
+          }
+          break;
+        }
         addHint(data.en || data.english, data.translation || data.ru || data.russian);
+        var cards = document.querySelectorAll('.hint.hon-suggestion');
+        var newest = cards[cards.length - 1];
+        if (newest) { newest.dataset.callSid = String(data.callSid); newest.dataset.utteranceId = String(data.utteranceId); }
         // Delivery ack: confirms the device rendered the hint (final stage of
         // the speech→hint latency chain measured server-side).
         if (typeof data.utteranceId === 'number' && data.callSid && socket && socket.readyState === WebSocket.OPEN) {

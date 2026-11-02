@@ -206,7 +206,9 @@ describe("one user-facing TalkHint product passport awaiting owner approval", ()
     const roadmap = b.documents.find(d => d.title === passportRoadmapTitle)!;
     expect(a.documents.some(d => d.id === roadmap.id)).toBe(true);
     expect(prepareProductPassport(next, "owner")).toBe(next);
-  });
+  // Same full-model fixture budget as the neighbouring benchmark projection
+  // cases; this checks history preservation, not a five-second performance SLA.
+  }, 15000);
   it("separates owner confirmation, implementation limits and plans without inventing link or approval", () => {
     const m = readHypothesis(prepareProductPassport(before(), "owner"), "new-country");
     const text = m.documents.find(d => d.id === productPassportId)!.text;

@@ -39,6 +39,8 @@ export const users = pgTable("users", {
   candidatePipelineEnabled: boolean("candidate_pipeline_enabled").notNull().default(false),
   candidateStt: text("candidate_stt"),
   candidateBrainModel: text("candidate_brain_model"),
+  hintResponseMode: text("hint_response_mode").notNull().default("legacy"),
+  hintModeRevision: integer("hint_mode_revision").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -52,6 +54,8 @@ export const insertUserSchema = createInsertSchema(users).omit({
   authProvider: true,
   twilioSubaccountSid: true,
   twilioSubaccountToken: true,
+  hintResponseMode: true,
+  hintModeRevision: true,
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

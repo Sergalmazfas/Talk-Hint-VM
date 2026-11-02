@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+// This suite verifies DB error tracking, not source/build provenance. The first
+// createCall otherwise hashes the source tree and executes Git synchronously,
+// making an unrelated filesystem operation part of the test's timeout.
+// Real stamping is covered separately by codeVersion.test.ts.
+vi.mock("../codeVersion", () => ({
+  stampCallMetadata: (metadata: unknown) => ({
+    ...(metadata && typeof metadata === "object" ? metadata : {}),
+    codeVersion: { commit: null, sourceHash: "test-fixture", dirty: false, builtAt: "2026-01-01T00:00:00Z" },
+  }),
+}));
+
 // ---------------------------------------------------------------------------
 // The write-health tracker (recordWriteSuccess / recordWriteFailure, surfaced
 // per-table via getWriteHealth) is generic. contactMemoryHealth.test.ts and
