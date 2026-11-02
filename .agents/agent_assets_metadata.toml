@@ -2931,3 +2931,17 @@ mtime_ms = 1793583651064
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/74322047-8ee7-40d9-aa75-e99d2cb1861c/f342199e-e290-4d02-8f90-e32ed31e51cb"
 storage_version_token = "1793583663934563"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "wCeTBEfhdwC98iGsoQG8P"
+uri = "file://generated-artifacts/Hint_Crew_production_test_2026-11-02.zip"
+type = "unspecified"
+title = "Клавдию — реальный тест Hint Crew"
+description = "Паша → Фома → автоматический OFF. Оба HTTP 200; новый пилот $0.081186. Документы, независимый вердикт «не подтверждено», журнал, токены и аудит структуры."
+logical_id = "08a93569-c135-4664-9d1c-5d9b6be3ca2e"
+content_hash = "sha256:f62c12799b7fa88f03909d6b43775b5c001d524cdf7f3835fce51d912ca5a9a6"
+size = 54113
+mtime_ms = 1793586168589
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/08a93569-c135-4664-9d1c-5d9b6be3ca2e/f9e872c6-712d-441b-b736-b04dab656fc0"
+storage_version_token = "1793586186484230"
+content_type = "application/octet-stream"
