@@ -103,8 +103,11 @@ final class SecretaryPersonalityUITests: XCTestCase {
 
     private func waitUntil(file: StaticString = #filePath, line: UInt = #line,
                            fixture: SecretaryPersonalityFixture? = nil,
+                           timeout: TimeInterval = 4,
+                           diagnostics: (() -> String)? = nil,
                            _ condition: () async -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(4)
+        // Upper bound only: the loop returns as soon as the condition holds.
+        let deadline = Date().addingTimeInterval(timeout)
         while !(await condition()) {
             guard Date() < deadline else {
                 let recorded = await (fixture ?? server)?.recorded() ?? []
@@ -114,7 +117,8 @@ final class SecretaryPersonalityUITests: XCTestCase {
                     "attached=\(top?.viewIfLoaded?.window != nil) " +
                     "transition=\(nav?.transitionCoordinator != nil) " +
                     "presented=\(String(describing: top?.presentedViewController.map { type(of: $0) })) " +
-                    "fixtureRequests=\(paths)", file: file, line: line)
+                    "fixtureRequests=\(paths)" + (diagnostics.map { " conditions: " + $0() } ?? ""),
+                    file: file, line: line)
                 throw URLError(.timedOut)
             }
             try await Task.sleep(nanoseconds: 1_000_000)
@@ -355,6 +359,27 @@ final class SecretaryPersonalityUITests: XCTestCase {
         XCTAssertEqual(SessionStore.shared.pendingSecretaryCall?.voiceProvider, .retell)
     }
 
+    /// Every provider-sheet readiness condition, reported if the presentation wait times out.
+    private func providerSheetDiagnostics() -> String {
+        let sheet = settings.presentedViewController as? UIAlertController
+        let presenter = sheet?.presentingViewController
+        let coordinator = sheet?.transitionCoordinator
+        let presenterName = presenter === settings ? "settings" : presenter === nav ? "nav"
+            : presenter.map { String(describing: type(of: $0)) } ?? "nil"
+        return [
+            "sheet=\(sheet != nil)", "presenter=\(presenterName)",
+            "presenterLinksSheet=\(sheet != nil && presenter?.presentedViewController === sheet)",
+            "presenterInWindow=\(presenter != nil && presenter?.viewIfLoaded?.window === window)",
+            "sheetInWindow=\(sheet != nil && sheet?.viewIfLoaded?.window === window)",
+            "isBeingPresented=\(sheet?.isBeingPresented ?? false)", "isBeingDismissed=\(sheet?.isBeingDismissed ?? false)",
+            "sheetTC=\(coordinator != nil)", "presenterTC=\(presenter?.transitionCoordinator != nil)",
+            "settingsTC=\(settings.transitionCoordinator != nil)", "navTC=\(nav.transitionCoordinator != nil)",
+            "tcAnimated=\(coordinator?.isAnimated ?? false)", "tcCancelled=\(coordinator?.isCancelled ?? false)",
+            "tcDuration=\(coordinator.map { String(format: "%.3f", $0.transitionDuration) } ?? "-")",
+            "windowKey=\(window.isKeyWindow)", "animationsEnabled=\(UIView.areAnimationsEnabled)",
+        ].joined(separator: " ")
+    }
+
     func testGPTAndRetellSelectionOnlyChangesFutureDrafts() async throws {
         let screen = try await open()
         await screen.load("work-line")
@@ -372,7 +397,10 @@ final class SecretaryPersonalityUITests: XCTestCase {
         let pending = draft(attempted: false)
         XCTAssertTrue(SessionStore.shared.savePendingSecretaryCall(pending))
         select(settings, 3, 0)
-        try await waitUntil {
+        // On a cold simulator the first action sheet can stall for seconds while UIKit
+        // builds its render pipeline. 30 s is only the upper bound for the presentation
+        // to finish; every readiness condition below is unchanged.
+        try await waitUntil(timeout: 30, diagnostics: { self.providerSheetDiagnostics() }) {
             guard let sheet = self.settings.presentedViewController as? UIAlertController,
                   let presenter = sheet.presentingViewController else { return false }
             // UIKit may delegate a child's presentation to its navigation
