@@ -55,3 +55,15 @@ before a network mock is installed.
 **How to apply:** Preserve this boundary when adding hosted native tests. Require
 successful execution of the isolation assertion in native results; skipped tests
 or a Linux source check cannot establish safety or a successful iOS build.
+
+Off-window trait overrides are not proof that a UIKit fixture actually renders
+dark appearance or accessibility text. Validate rendered colors and actual font
+sizes, not merely requested traits or screenshot names.
+
+**Why:** Mac verification found nominal light/dark and normal/large fixtures
+producing identical images; a test without a color assertion passed falsely,
+while the actual-font-size assertion correctly failed.
+
+**How to apply:** Host visual fixtures in a real scene-backed window, restore
+the previous window afterward, and verify effective traits plus rendered output
+on Mac. Preserve the assertions; do not change production UI to fix a fixture.
