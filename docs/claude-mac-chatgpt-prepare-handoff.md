@@ -5,8 +5,8 @@
 - Repository: https://github.com/Sergalmazfas/Talk-Hint-VM
 - Branch: `xcode-chatgpt-prepare-2026-11-02`
 - Original Prepare code commit: `1052648cfa54da4ba5f6adcaa09d7035aa9a9e50`
-- Latest code commit (both Mac fixes + mandatory regression gate):
-  `c14983b925d61fcdea4c304cae17cd918fc86737`
+- Latest code commit (preserved UX test correction + offline visual fixtures):
+  `cd3b715f45af41d1f694a9e085e88fa103bb11f7`
 - Remote base: `efaaaec857c9a55ebc60b85f5c63756e46e39563`
 - Branch HEAD also contains this handoff in a separate documentation commit.
 - The updated branch also restores both original Mac fixes: the call-screen
@@ -30,6 +30,12 @@
   All eight existing changed native files matched the remote base before this delta.
 
 ## Before checkout
+
+The Mac report for `cd58373ab8a1cb0c129db30843f3d633742bfcf7` recorded a successful
+build and 222 passed / 1 failed / 0 skipped XCTest; the final xcresult gate did
+not run. The only failure was an old test's one-tap-hide expectation. This
+delivery preserves the current collapse/expand UX and updates only tests,
+fixture rendering and documentation. It is not yet a passing native release.
 
 Run `git status --short`, record the current branch and HEAD, and inspect local
 commits. **Do not use stash, reset, force, rebase, merge, or overwrite another
@@ -69,7 +75,7 @@ The existing manual preparation and confirmation flow is preserved.
 Use exactly:
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer bash ios/scripts/validate-native.sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer bash ios/scripts/validate-native.sh
 ```
 
 Run the **entire** `TalkHintTests` target. No `-only-testing`, `-skip-testing`,
@@ -77,6 +83,9 @@ renamed targets, disabled tests or weakening `verify-xcresult.py`.
 The existing script regenerates XcodeGen sources and verifies source inclusion,
 entitlements and xcresult. New Swift files must be included exactly once.
 Verify that the final `verify-xcresult.py` step actually executes.
+The reported Mac has Xcode 26.5 at `/Applications/Xcode.app`; the previously
+templated `Xcode_16.4.app` is absent. Check the actual Xcode version first.
+Do not rename Xcode, create a misleading symlink, or claim to have used 16.4.
 
 ### Mandatory new tests, all must execute and pass
 
@@ -92,19 +101,35 @@ Class: `PreparedHintPlansTests`
 8. `testRefreshFailureShowsErrorNotEmpty`
 9. `testCancelledRefreshCannotRepopulatePlan`
 
+### Additional offline visual fixture tests — all required
+
+10. `testVisualFixturesSavedPlanCompactLightAndDark`
+11. `testVisualFixturesLargeTypeReachesLastField`
+12. `testVisualFixturesLoadingEmptyAndError`
+
+These render the actual `PreparedHintPlansView` with synthetic data and an
+injected throwing loader, not a live session or an approximate mockup. They attach
+top/bottom images for light/dark, normal/accessibility Dynamic Type at 320×568,
+plus loading/error/empty images to xcresult. Inspect the attachments as well as
+the assertions. There are no production requests or real calls in these fixtures.
+
 All existing mandatory tests remain mandatory, especially `InCallCaptionTests`,
 `PrepareGoalProposalAppearanceTests`, `CallHintStreamPrepareTests`,
 Secretary confirmation/recovery and DTMF tests.
 
 ### Restored Mac regressions — must execute and pass
 
-- `InCallCaptionTests.testPrepareOpeningShowsOnSmallScreenAndOneTapHidesIt`
+- `InCallCaptionTests.testPrepareOpeningShowsOnSmallScreenAndTogglesCollapse`
   (also required by `verify-xcresult.py`).
+  The old `...OneTapHidesIt` name is intentionally replaced: first tap hides the
+  translation and makes English one truncated line; second tap restores wrapping
+  and translation. The scroll view stays visible. The screen-load, height-cap
+  and single-use checks remain, and the 0.38/0.22 runtime constants are untouched.
 - `SecretaryPersonalityUITests.testReviewBlocksRetellWithoutSavedOutgoingLine`
   must be `async throws`, wait for the fixture's default-line refusal, keep Start
   disabled and prove that no task-start request was sent.
 
-Record both separately alongside all nine Prepare tests. No tests were disabled;
+Record both separately alongside all twelve Prepare tests. No tests were disabled;
 the height-cap multipliers remain 0.38/0.22. The new fix does not alter Katya's
 runtime behavior.
 
@@ -133,7 +158,8 @@ do not weaken the gate.
 - Branch and full HEAD; `git status` before/after; any diff.
 - Xcode version, XcodeGen version, SDK, simulator model and runtime versions.
 - Build result and full-target passed/failed/skipped counts.
-- Each of the nine mandatory tests separately, including absence/skips.
+- Each of the twelve mandatory Prepare tests and both restored regressions
+  separately, including absence/skips.
 - Whether source/entitlement/xcresult final verification ran and passed.
 - Build/test/xcresult logs and fixture screenshots, with no credentials or
   personal call data.
