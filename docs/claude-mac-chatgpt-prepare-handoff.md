@@ -5,8 +5,8 @@
 - Repository: https://github.com/Sergalmazfas/Talk-Hint-VM
 - Branch: `xcode-chatgpt-prepare-2026-11-02`
 - Original Prepare code commit: `1052648cfa54da4ba5f6adcaa09d7035aa9a9e50`
-- Latest code commit (exact Mac-validated window-fixture correction):
-  `9efa14a6efc172f393c838d475ffd9e0b9516122`
+- Latest code commit (exact imported Mac provider-sheet wait patch):
+  `b8d1cb3bd7a189c00b424143c4002b9b53782318`
 - Remote base: `efaaaec857c9a55ebc60b85f5c63756e46e39563`
 - Branch HEAD also contains this handoff in a separate documentation commit.
 - The updated branch also restores both original Mac fixes: the call-screen
@@ -52,16 +52,38 @@ That exact patch is now imported, with no application-source changes:
   checks and previous-key-window restoration are retained exactly.
 - All twelve Prepare tests and both restored regressions remain mandatory.
 
-The Mac currently has this patch uncommitted. Before fetching/checking out,
-verify its local diff matches the supplied patch and its full-file hash above.
-Do not overwrite, reset or stash it. Use a separate clean Git worktree for
-the updated remote branch so the original checkout and untracked files remain
-intact. Run the full gate on the delivered HEAD and report its SHA and result.
+The clean-worktree gate on `1db6dfb691c3cc37cdcca060ef927ae9ce332564`
+then passed 225 / failed 1 / skipped 0: all twelve Prepare tests and both
+mandatory regressions passed, but
+`SecretaryPersonalityUITests.testGPTAndRetellSelectionOnlyChangesFutureDrafts`
+timed out while presenting the provider sheet. Final `verify-xcresult.py` did
+not execute. Diagnostics showed the sheet still being presented during cold
+simulator rendering stalls. The earlier green run does not override this failure.
+
+The owner-supplied follow-up patch is now imported exactly:
+- Patch SHA-256: `de779ecdc7f43fa0ce4dd7d625f1c33c9c00bd1d08da441678f09da03ddb86b8`.
+- `ios/TalkHintTests/SecretaryPersonalityUITests.swift` SHA-256:
+  `8d39aae64fd157b17de8203628c2ce876bd4bf665a1a0a70f35557c1577c5906`.
+- Only the provider-sheet presentation wait in that test has a 30-second upper
+  bound; it returns immediately when ready. Other waits retain the 4-second
+  default. Every readiness condition is unchanged; failure diagnostics include
+  presentation links, windows, transition coordinators and animation state.
+- No application changes, warm-up, fixed delay, gate retries or skipped tests.
+
+No Mac pass report for this latest patch was supplied. Run the delivered HEAD
+on a cold simulator, then the full unfiltered gate including successful
+`verify-xcresult.py`; stop/report any failure rather than rerunning to green.
+Include this provider-selection test separately in the returned results.
+
+The Mac may still have the imported fixture patch and provider-sheet wait patch
+uncommitted in different checkouts. Verify them against their source hashes,
+but do not overwrite, reset or stash either checkout. Use a separate clean Git
+worktree for the updated remote branch so existing files remain intact.
 
 Run `git status --short`, record the current branch and HEAD, and inspect local
 commits. **Do not use stash, reset, force, rebase, merge, or overwrite another
-person's changes.** The exact imported fixture patch above may remain in the
-original checkout; leave it there and validate the delivered HEAD in a separate
+person's changes.** The exact imported patches above may remain in existing
+checkouts; leave them there and validate the delivered HEAD in a separate
 clean worktree. For any other local modifications, missing objects, or an
 untransferred Mac-side fix needed by these sources, stop and report it.
 The owner's unrelated untracked Mac files must stay untouched. Use a fresh,
@@ -191,8 +213,9 @@ do not weaken the gate.
   authorize Archive/TestFlight; those need a separate owner's yes.
 
 Replit has not built or executed iOS here. Server Publish alone does not update
-the installed iPhone application. The exact patch passed on Mac before transfer;
-final verification on the delivered GitHub HEAD remains pending.
+the installed iPhone application. The fixture patch previously passed on Mac,
+but the later clean-worktree full gate was red on a different test. The new
+provider-sheet wait patch and delivered GitHub HEAD still need native validation.
 
 Remaining unverified: Hint-only mounting versus Secretary and preservation after
 manual reset, real signed-in backend, installed iPhone, calls, and non-English
