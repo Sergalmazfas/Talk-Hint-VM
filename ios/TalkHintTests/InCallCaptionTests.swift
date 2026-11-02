@@ -784,7 +784,7 @@ final class InCallCaptionTests: XCTestCase {
     /// label collapses to height 0 under constraint pressure.
     /// Regression: the Prepare opening's height cap used to be activated before the
     /// scroll view joined the hierarchy, throwing NSGenericException on screen load.
-    func testPrepareOpeningShowsOnSmallScreenAndOneTapHidesIt() throws {
+    func testPrepareOpeningShowsOnSmallScreenAndTogglesCollapse() throws {
         let store = SessionStore.shared
         let oldGoal = store.callGoal
         defer { store.callGoal = oldGoal; _ = store.takeHintOpening() }
@@ -801,7 +801,19 @@ final class InCallCaptionTests: XCTestCase {
         XCTAssertLessThanOrEqual(scroll.bounds.height, vc.view.safeAreaLayoutGuide.layoutFrame.height * 0.22 + 0.5)
         XCTAssertLessThan(button.englishLabel.frame.minY, button.translationLabel.frame.minY)
         button.sendActions(for: .touchUpInside)
-        XCTAssertTrue(scroll.isHidden)
+        vc.view.layoutIfNeeded()
+        XCTAssertFalse(scroll.isHidden)
+        XCTAssertTrue(button.translationLabel.isHidden)
+        XCTAssertEqual(button.englishLabel.numberOfLines, 1)
+        XCTAssertEqual(button.englishLabel.lineBreakMode, .byTruncatingTail)
+        button.sendActions(for: .touchUpInside)
+        vc.view.layoutIfNeeded()
+        XCTAssertFalse(scroll.isHidden)
+        XCTAssertFalse(button.translationLabel.isHidden)
+        XCTAssertEqual(button.englishLabel.numberOfLines, 0)
+        XCTAssertEqual(button.englishLabel.lineBreakMode, .byWordWrapping)
+        XCTAssertGreaterThan(scroll.bounds.height, 0)
+        XCTAssertLessThanOrEqual(scroll.bounds.height, vc.view.safeAreaLayoutGuide.layoutFrame.height * 0.22 + 0.5)
         // Single use: a later call screen for the same goal does not bring it back.
         let next = makeLoadedViewControllerWithSize(CGSize(width: 320, height: 568))
         XCTAssertNil(view(withIdentifier: "scroll-opening", in: next.view))
