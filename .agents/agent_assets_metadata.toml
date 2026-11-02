@@ -2973,3 +2973,45 @@ mtime_ms = 1793591027149
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d43445bd-8dab-406a-bf70-fa30d42c850c/6505349e-14b3-47d8-afc9-53de25c06868"
 storage_version_token = "1793591035881074"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "FMwzMfXfuEW6Kdt_8yFgR"
+uri = "file://generated-artifacts/Hint_Laboratory_Team_Link.zip"
+type = "unspecified"
+title = "Hint: лаборатория связана с командой · r1192"
+description = "Связи четырёх рабочих мест, объект промпта, 8 предложенных уроков, дополнение AI Crew и журнал revision/hash/UUID. Без аудио, разговоров и ключей."
+logical_id = "03e78c28-ed5f-49aa-a272-34151a3f7815"
+content_hash = "sha256:235ab43015f6b4624290f0acf65b3cd29d9cdf615d423917866f72fd89af7997"
+size = 27571
+mtime_ms = 1793593332509
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/03e78c28-ed5f-49aa-a272-34151a3f7815/ef623917-7f7e-422a-bfcc-6ba483b09c78"
+storage_version_token = "1793593356849386"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "R1OZlFvJKDoQsudQSBfhy"
+uri = "file://generated-artifacts/Hint_New_Polygon_A_Review.zip"
+type = "unspecified"
+title = "Hint — новый полигон: пакет Клавдию"
+description = "Код, 88 тестов, расходы, журнал r1192–r1203 и блокер VAD/Flux. Полного сравнения 36 записей пока нет."
+logical_id = "c3c08e4c-5c18-4890-b7aa-30e84f216793"
+content_hash = "sha256:8be7d783d045ac74359c21f95b413ba4d901b22a793918022f33ab1fd87890c2"
+size = 109154
+mtime_ms = 1793595798809
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c3c08e4c-5c18-4890-b7aa-30e84f216793/f4a86208-8ab7-4917-881f-f8b952428208"
+storage_version_token = "1793595844791169"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "YSEGFETr76QFgMOxNzIq8"
+uri = "file://generated-artifacts/hint-polygon/comparison.csv"
+type = "table"
+title = "Таблица контрольных попыток"
+description = "Все три попытки недействительны; это журнал диагностики, не рейтинг скорости или качества."
+logical_id = "01ef1ed1-8e09-42a8-8f81-881b11a1daed"
+content_hash = "sha256:1da76f15f10d9a0b18d1f9769cce6d053ce45ead44af065beb53074357ed44a0"
+size = 693
+mtime_ms = 1793594950265
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/01ef1ed1-8e09-42a8-8f81-881b11a1daed/399d408c-26af-499b-820b-454285330992"
+storage_version_token = "1793595845623393"
+content_type = "text/csv"

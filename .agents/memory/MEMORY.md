@@ -3,7 +3,7 @@
 - [Атомарные MCP-операции](mcp-atomic-boundaries.md) — проверять пакет вместе с квитанцией на настоящем репозитории; in-memory тест пропускает ограничения хранилища.
 - [OAuth: повтор согласия](product-crew-consent-replay.md) — успешный redirect может предшествовать ошибке одноразовости; не путать с истечением срока и не просить слепых повторов.
 - [MCP: Secrets и резервный ключ](product-crew-owner-key-boundary.md) — основной header из Secrets; OAuth/ручной ключ запасные, долговечный отзыв, сверка Claude до Publish, затем реальное чтение.
-- [Отдел кадров — ручной цикл](hr-manual-first.md) — Нина P.ORG сначала описана, не подключена; знания по источникам, слои без смены смысла, предложения не включать.
+- [Отдел кадров — ручной цикл](hr-manual-first.md) — Нина P.ORG не подключена; смена метода — обновить обязанности и книжки в тот же день; уроки остаются предложениями.
 - [Target product teams](product-teams-target.md) — Мария → владелец; Паша → Замир/Фома в Hint; Тихон — дежурный компании под HEAD.07; Dev frozen.
 - [Hint lab release boundary](hint-lab-release-boundary.md) — owner calls auto-resume after Publish readiness; independent duty, versioned reports; manual baselines are not automatic execution proof.
 - [Process on-call](process-on-call.md) — action reports; one email per call; decisions/outages immediate, ordinary failures in morning; no false green or blind retries.
@@ -35,7 +35,7 @@
 - [Local prod-boot testing](prod-boot-local-testing.md) — NEVER run dist build locally without DISABLE_AUTO_WEBHOOK_REPOINT=true (it hijacks live Twilio webhooks to dev); ready-wait failure w/o logs = platform, retry.
 - [Publish gating via build script](publish-gating.md) — no publish hook exists; mandatory pre-publish checks must run inside script/build.ts and exit non-zero to block deploy.
 - [Tutor compat handshake](tutor-compat-handshake.md) — fail-closed contract check inside createTutorSession; unverifiable metadata/outage refuses the lesson, never fail-open.
-- [Ears & Brain benchmark bench](benchmark-bench.md) — separate admin layer, fail-closed availability (no silent substitution); OpenAI credits exhausted blocked Run #1; realtime STT now provisioned via client_secrets.
+- [Ears & Brain benchmark bench](benchmark-bench.md) — старый стенд не трогать; новый полигон изолирован; другие архитектуры только после независимой базовой линии.
 - [Benchmark run ops](benchmark-run-ops.md) — benchmark storage = dev DB; run via dev-server HTTP + temp session row, never detached tsx scripts (they die silently).
 - [Benchmark admin allowlist](benchmark-admin-allowlist.md) — admin = email allowlist (ADMIN_PROVISION_USER + BENCHMARK_ADMIN_EMAILS); "admin UI missing after publish" is usually a non-allowlisted email.
 - [PREPARE stage voice goal prep](prepare-stage.md) — gpt-5.6-sol via /v1/responses only (honest error, no fallback); gpt-4o-transcribe STT; serialized per-user state w/ reset epoch; goal only on explicit confirm.

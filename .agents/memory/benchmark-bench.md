@@ -19,3 +19,28 @@ description: Durable rules for benchmark work — isolation from production tele
 - OpenAI GA realtime (2026): no `OpenAI-Beta: realtime=v1` header (beta_api_shape_disabled); under server/semantic VAD never send manual input_audio_buffer.commit (commit_empty, which must also be non-fatal) — append a silence tail instead.
 - Long real calls: stream guard timeouts must scale with (audio duration / accel) + flush window, or multi-minute calls time out mid-stream at the fixed 60s guard.
 - Production transcript is never reference ground truth — fixtures import it as a draft tagged needs-reference-review; the admin listens and edits via the reference editor (each save appends a ref-v<ts> tag).
+
+## Новый полигон: граница владельца
+
+Новый экспериментальный полигон Hint должен быть отдельным от прежнего стенда.
+Не переделывать старый стенд и не менять рабочий Hint под видом лабораторной работы.
+Сначала честная базовая линия текущей живой связки; другие архитектуры — после
+независимой проверки метода. Попадание отдельной задержки в ожидаемый диапазон
+не является приёмкой всей базовой линии.
+
+**Why:** владелец отдельно потребовал новый полигон рядом со старым и запретил
+перенос экспериментального промпта в рабочий продукт без своего «да».
+
+**How to apply:** сохранять изоляцию и точные версии метода; неполный live-контекст,
+неподтверждённые физические тайминги и недействительные попытки показывать явно.
+Нельзя ослаблять проверку VAD/окон или исключать расходы, чтобы получить красивую таблицу.
+
+Доступность model ID через каталог не доказывает совместимость платного endpoint
+и его параметров. До длинного корпуса нужен короткий отдельный контрольный запрос
+без данных звонка; сохранять HTTP, request-id и очищенную ошибку.
+
+**Why:** каталог модели отвечал успешно, а реальный запрос судьи был отклонён
+из-за несовместимой формы запроса. Один успешный GET не проверяет POST.
+
+**How to apply:** проверять новый adapter/формат ответа до длинного опыта,
+учитывать диагностику в том же бюджете и не повторять unknown-payload.
