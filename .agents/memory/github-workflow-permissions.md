@@ -61,3 +61,15 @@ behavior merely to satisfy an older test.
 **Why:** the restored screen-load test also expected one-tap removal, while the
 destination branch already supported collapse/expand. Native execution confirmed
 the crash fix but rejected that unrelated historical UX expectation.
+
+A matching source hash does not replace the full native gate on the delivered
+HEAD. Keep later failures explicit even if an identical source tree passed
+earlier; do not rerun until green or attribute unrelated failures to the delta
+without diagnostics.
+
+**Why:** a byte-identical transferred fixture passed its checks, but a clean
+worktree full run exposed a cold-simulator presentation timeout in another test.
+
+**How to apply:** separate source-transfer evidence from native execution
+evidence. Preserve UI readiness assertions and diagnose the unmet conditions;
+test-environment wait limits are not automatically product performance limits.
