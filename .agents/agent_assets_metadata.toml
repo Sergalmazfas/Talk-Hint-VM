@@ -2889,3 +2889,17 @@ mtime_ms = 1793576352209
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0cdc424d-6bfa-4499-ba5f-fc4d08f26656/5aa1bc26-4558-427d-bb4a-73614cb1cac1"
 storage_version_token = "1793576370820324"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ANDdTKif54jSh1F_kVbTA"
+uri = "file://generated-artifacts/crew-live-check/report.html"
+type = "html"
+title = "Hint: реальный тест production и что мешает полной цепочке"
+description = "Старое списание выполнено. Новый пилот остановлен на unknown, OFF подтверждён, повтора нет. Структура, локальные тесты call-lab, проверка production и план подключения реального маршрута до Марии и владельца."
+logical_id = "9ace0052-f3f0-4c82-8adf-ec24c6fb6a41"
+content_hash = "sha256:16ebee277bc86f01a2f711f792c0ab37b5dc6328295b8c79f8dd943de23094df"
+size = 8918
+mtime_ms = 1793581227576
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9ace0052-f3f0-4c82-8adf-ec24c6fb6a41/cf4f176a-3915-40fe-a4f3-88ba12ea4353"
+storage_version_token = "1793581246834112"
+content_type = "text/html"
