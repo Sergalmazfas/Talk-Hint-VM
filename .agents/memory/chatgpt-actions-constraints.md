@@ -3,6 +3,18 @@ name: Personal ChatGPT Actions constraints
 description: Why personal Actions needs a distinct OAuth mode and why Plus/iPhone installation cannot be promised from local tests.
 ---
 
+## Verify the installed transport before extending ChatGPT
+
+An owner saying “my GPT” does not establish whether the active connection uses
+personal Actions or the ChatGPT MCP app. Check the actual adapter before
+promising a schema-only update will expose a new capability.
+
+**Why:** an Actions-focused request coincided with an active MCP connection;
+an Actions-only implementation would leave that existing connection unchanged.
+
+**How to apply:** reuse one business operation where both adapters are approved,
+but retain distinct OAuth audiences, owner binding and the existing per-call
+approval. A refreshed Actions schema does not refresh the MCP tool catalogue.
 Do not switch the native phone server's HTTPS ingress or restart it just to
 expose an Actions test service. Use an approved isolated test origin on 443.
 Loopback HTTPS with a test CA proves transport behavior, not public reachability,

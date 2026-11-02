@@ -4,6 +4,19 @@ import { labRelease } from "./policy";
 import { productLetterSection } from "./productFollowup";
 import { actionReportText } from "../team/actionReports";
 
+export function preparationLetterSection(report: any): string {
+  const p = report?.preparation;
+  if (!p || p.status === "no_valid_plan") return "";
+  return `\nПодготовка звонка · P.PREP\nПлан: ${p.planId ?? "неизвестен"} (${p.planHash ?? "нет hash"}).
+Вопросов в плане: ${p.expectedQuestions ?? "не измерено"}.
+Точных совпадений вопросов: ${p.exactQuestionsObserved ?? "не измерено"}.
+Точных совпадений ответов владельца: ${p.exactAnswersObserved ?? "не измерено"}.
+Это только текстовые признаки, не процент качества или полезности.
+Семантическая проверка: ${p.semanticReview?.status === "lab_qa_reviewed" ? "лаборатория + QA" : "не измерено"}.
+${p.semanticReview?.text ?? ""}
+${(p.limitations ?? []).join("\n")}\n`;
+}
+
 export function completeLabReport(report: any, source: unknown, key: string) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error("LAB_BAD_REPORT_KEY");
   const result = { ...report, lab_release: report.lab_release ?? labRelease, deterministic: hintMeasurements(source),
@@ -70,7 +83,7 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
   const versionLine = v && typeof v === "object"
     ? `Версия кода звонка: ${v.commit ?? "commit неизвестен"}; source ${v.sourceHash ?? "неизвестен"}${v.dirty ? "; рабочая версия с изменениями" : ""}.`
     : "Версия кода звонка: неизвестна (историческая запись без метки).";
-  return { ...rendered, body: `${rendered.body}\n\n${versionLine}` };
+  return { ...rendered, body: `${rendered.body}\n\n${versionLine}${preparationLetterSection(report)}` };
 }
 function renderProcessLetterContent(report: any): { subject: string; body: string } {
   const reports = Array.isArray(report.action_reports) ? report.action_reports : [];

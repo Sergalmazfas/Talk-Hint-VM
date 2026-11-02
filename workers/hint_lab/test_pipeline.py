@@ -74,6 +74,21 @@ class FlowTests(unittest.TestCase):
         self.assertNotIn("Ответь в summary_ru отдельно на все D1–D5", mocked.call_args_list[1].args[1])
         self.assertNotIn("D1–D5", mocked.call_args_list[2].args[1])
 
+    def test_preparation_uses_existing_analysis_and_qa_without_extra_model_calls(self):
+        source = copy.deepcopy(SOURCE)
+        source["call_plan"] = {"id": "synthetic-plan", "hash": "synthetic-hash", "plan": {
+            "goal": "Synthetic goal", "expectedQuestions": [{"q": "Which axle?", "answer": None}],
+            "unknowns": ["Axle"], "executor": "hint"}}
+        with patch("socket.socket.connect", side_effect=AssertionError("NETWORK_FORBIDDEN")), \
+                patch("workers.hint_lab.pipeline.single_pass", side_effect=[
+                    (ANALYSIS.model_copy(deep=True), {}), (QA(verdict="accepted", issues=[]), {}), (LETTER, {}),
+                ]) as mocked:
+            run(source, llm=LLM(model="openai/gpt-5.2", api_key="offline-test-not-a-key"))
+        self.assertEqual(mocked.call_count, 3)
+        self.assertIn("P.PREP", mocked.call_args_list[0].args[1])
+        self.assertIn("НЕ готовый ответ", mocked.call_args_list[0].args[1])
+        self.assertIn("Независимо проверь раздел P.PREP", mocked.call_args_list[1].args[1])
+
     def test_schema_and_rubric_drift_fails_before_any_model_request(self):
         schema = copy.deepcopy(Finding.model_json_schema())
         schema["properties"]["category"]["enum"].append("без полноты")

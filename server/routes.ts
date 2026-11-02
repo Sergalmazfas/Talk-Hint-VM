@@ -1788,6 +1788,10 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
             });
             console.log("[TwiML Voice] Created outgoing call record:", callSid);
           }
+          if (!copilotMode) {
+            const { callPlans } = await import("./callPlans/runtime");
+            await (await callPlans()).bind(placingUserId, callSid);
+          }
         } catch (e: any) {
           console.error("[TwiML Voice] Failed to create outgoing call record:", e.message);
         }

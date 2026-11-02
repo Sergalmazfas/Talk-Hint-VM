@@ -77,6 +77,43 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+describe("structured plans in the owner's existing ChatGPT MCP", () => {
+  const plan = { goal: "Ask tire stock", ownerFacts: [], sayAsk: ["Price?"], expectedQuestions: [{ q: "Axle?", answer: null }],
+    unknowns: ["Axle"], disclosurePolicy: { allowed: ["Requirements"], forbidden: ["Payment"] }, language: "en", executor: "hint" };
+  it("requires the independently bound owner as well as an existing write grant", async () => {
+    const { token } = await access();
+    backend.saveHintPlan = vi.fn(async () => ({ id: "plan", status: "pending" } as any));
+    expect((await tool("save_hint_plan", token, { plan, clientRequestId: randomUUID() })).status).toBe(403);
+    expect(backend.saveHintPlan).not.toHaveBeenCalled();
+    backend.isCallPlanOwner = vi.fn(async id => id === "alice");
+    const saved = await tool("save_hint_plan", token, { plan, clientRequestId: randomUUID() });
+    expect(saved.status).toBe(200);
+    expect(saved.body.dialed).toBe(false);
+    expect(backend.start).not.toHaveBeenCalled();
+    const read = await access("calls:read");
+    expect((await tool("save_hint_plan", read.token, { plan, clientRequestId: randomUUID() })).status).toBe(403);
+    const other = await access(undefined, "bob");
+    expect((await tool("save_hint_plan", other.token, { plan, clientRequestId: randomUUID() })).status).toBe(403);
+  });
+  it("advertises the shared schema and preserves the inline approval for a Secretary plan", async () => {
+    backend.isCallPlanOwner = vi.fn(async id => id === "alice");
+    const { token } = await access();
+    const catalog = await request(app).post("/api/chatgpt/mcp").auth(token, { type: "bearer" })
+      .send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const planTool = catalog.body.result.tools.find((t: any) => t.name === "save_hint_plan");
+    expect(planTool.inputSchema.required).toEqual(["plan", "clientRequestId"]);
+    expect(planTool.annotations.readOnlyHint).toBe(false);
+    expect(planTool.inputSchema.properties.plan.properties.disclosurePolicy.required).toEqual(["allowed", "forbidden"]);
+    const prepared = await request(app).post("/api/chatgpt/mcp").auth(token, { type: "bearer" })
+      .send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "prepare_secretary_plan",
+        arguments: { plan: { ...plan, executor: "secretary", targetPhone: "+12025550123" }, clientRequestId: randomUUID() } } });
+    expect(prepared.body.result.isError).toBe(false);
+    expect(prepared.body.result.structuredContent.confirmationMethod).toBe("inline_card");
+    expect(prepared.body.result._meta["talkhint/cardApproval"]).toBeDefined();
+    expect(backend.start).not.toHaveBeenCalled();
+  });
+});
+
 describe("isolated owner-authorized ChatGPT adapter", () => {
   it("is fail-closed by default and never reaches data/dialing", async () => {
     const disabled = express();

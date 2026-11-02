@@ -57,6 +57,7 @@ import { authorizeSecretaryConfirmation, handlePrepareConfirmGoal, isSecretaryCo
 import { SuggestionDedupGuard } from "./hintDedup";
 import { normalizeSuggestion, type NormalizedSuggestion } from "./hintShape";
 import { englishFirstHint, type EnglishFirstHint } from "./liveHintEnglishFirst";
+import { callPlanSchema, callPlanContext } from "@shared/callPlan";
 import { liveHintModes } from "./liveHintModeRoutes";
 import { canUpdateEnglishFirst } from "./liveHintDelivery";
 import { StrategyMemoryTracker } from "./strategyMemory";
@@ -1565,6 +1566,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
     // goalText mirrors goalsByUser[streamUserId] (updated whenever goal text
     // changes); goalType mirrors the GoalEngine's last reported goalType.
     let callGoalText = "";
+    let preparedPlanContext = "";
     let callGoalType: GoalType = "other";
     const HINT_COOLDOWN_MS = 1500;         // Block second hint for 1.5 sec
     
@@ -1602,7 +1604,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
       snapshot: () => ({
         conversationContext: conversationLog.map((m) => `${m.speaker}: ${m.text}`).join("\n"),
         currentHint: lastSuggestionText,
-        userContext: ownerContext,
+        userContext: ownerContext + preparedPlanContext,
         contactContext,
         staticCards,
         tutorMemory: tutorMemoryBlock,
@@ -2086,7 +2088,9 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         log(`[Dialogue] SKIP library for owner-only question utteranceId=${utteranceId}: "${text.substring(0, 50)}"`, "websocket");
       }
       const ownerGoal = getUserGoal(streamUserId);
-      const libraryHit = (wantSuggestion && !carried && !ownerOnly) ? matchDialogueLibrary(text, ownerGoal, detectedGoalType) : null;
+      // A generic pre-authored library answer must not bypass the owner's specific
+      // facts/disclosure policy. The grounded Brain selects prepared answers first.
+      const libraryHit = (wantSuggestion && !carried && !ownerOnly && !preparedPlanContext) ? matchDialogueLibrary(text, ownerGoal, detectedGoalType) : null;
       if (libraryHit) {
         log(`[Dialogue] HIT goal="${libraryHit.library.goalText.substring(0, 30)}" (${libraryHit.library.goalType}) type=${libraryHit.entry.type} trigger="${libraryHit.entry.trigger.substring(0, 30)}" — serving library line, skipping LLM`, "websocket");
       }
@@ -2097,7 +2101,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
         firstEnglish = englishFirstHint({
           system: withActionResults(buildLiveSystemPrompt({
             goal: ownerGoal, language: currentLanguage, conversationContext: contextHistory,
-            contextSections: buildContextProviderChain({ userContext: ownerContext, contactContext, staticCards, tutorMemory: tutorMemoryBlock }),
+            contextSections: buildContextProviderChain({ userContext: ownerContext, contactContext, staticCards, tutorMemory: tutorMemoryBlock }) + preparedPlanContext,
             translateEnabled: translationEnabled, strategyMemory: strategyMemory.render(),
           })),
           user: buildLiveUserPrompt(hintText), guest: text, language: currentLanguage,
@@ -2121,7 +2125,7 @@ NEVER output JSON - only plain text with the phrase and translation.`);
       // is blocked before the suggestion is read, the floating promise is safe.
       // Skipped on a library hit — the ready line is used instead.
       const suggestionPromise = (wantSuggestion && !libraryHit)
-        ? firstEnglish ?? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
+        ? firstEnglish ?? translateAndSuggest(hintText, ownerGoal, currentLanguage, contextHistory, true, ownerContext + preparedPlanContext, contactContext, staticCards, translationEnabled, tutorMemoryBlock, brainModelOverride, strategyMemory.render())
         : null;
       if (useEnglishFirst) {
         translationPromise = firstEnglish
@@ -3056,6 +3060,22 @@ NEVER output JSON - only plain text with the phrase and translation.`);
                 })
                 .catch((err) => log(`[CandidatePipeline] Load failed (staying on production): ${err}`, "twilio"));
               callSettingsReady = callSettingsReady.then(() => pipelineReady);
+              const goalBeforePlan = getUserGoal(streamUserId);
+              const planReady = ownerContextReady.then(async () => {
+                if (streamClosed || !streamUserId || !callSid) return;
+                const saved = await storage.getCallByCallSid(callSid);
+                if (streamClosed || saved?.userId !== streamUserId) return;
+                const snapshot = (saved.metadata as any)?.callPlan;
+                const parsed = callPlanSchema.safeParse(snapshot?.plan);
+                if (!parsed.success || parsed.data.executor !== "hint") return;
+                preparedPlanContext = callPlanContext(parsed.data);
+                // Do not let a late snapshot overwrite a newer explicit owner goal.
+                if (getUserGoal(streamUserId) === goalBeforePlan) {
+                  setUserGoal(streamUserId, parsed.data.goal);
+                  callGoalText = parsed.data.goal;
+                }
+              }).catch(() => log("[CallPlan] snapshot unavailable; voice unchanged", "websocket"));
+              callSettingsReady = Promise.all([callSettingsReady, planReady]).then(() => {});
 
               // Check for PSTN forwarding mode (roles inverted)
               const callType = message.start.customParameters?.callType;

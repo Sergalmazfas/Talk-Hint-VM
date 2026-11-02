@@ -3,6 +3,17 @@ name: PREPARE stage (pre-call voice goal prep)
 description: Web pre-call preparation chat — provider policy, state model, and UI gotchas
 ---
 
+## Приоритет подготовки звонка
+
+Владелец считает подготовку звонка главным направлением Hint: цель — правильные,
+быстрые подсказки, которыми действительно пользуются. «99%» — желаемый результат,
+не подтверждённая метрика. Официальный ChatGPT — место подготовки и постановки
+поручений Hint и Секретарю, не замена телефонного приложения.
+
+**Why:** владелец явно задал этот приоритет и попросил сначала связать ChatGPT с Hint.
+
+**How to apply:** сравнивать подготовку с фактическим разговором и отзывом владельца;
+не выдавать угаданные темы или совпадение текста за полезность и доказанный процент успеха.
 # PREPARE stage (web)
 
 - **One brain, no fallback:** PREPARE uses OpenAI `gpt-5.6-sol` via `/v1/responses` (needs `max_output_tokens`, output parsed from `output[].content[].output_text`). On failure show an honest Russian error — never substitute another model. **Why:** owner's fixed provider policy v1.

@@ -17,6 +17,8 @@ import { fail, type Claims } from "./security";
 import { savedTaskEvents } from "./savedEvents";
 import { prepareDefaultCall, confirmedOutgoingContext, contextHash } from "../secretary/personalities/defaults";
 import { assertOutgoingRetryLine } from "../secretary/personalities/outgoing";
+import { preparationAssessment } from "../callPlans/assessment";
+import { callLabJobs } from "@shared/schema";
 
 /** Reuses the same durable lease/dialer/streams/reporting as native Secretary. */
 export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
@@ -27,6 +29,16 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
     reused,
   });
   return {
+    async isCallPlanOwner(userId: string) {
+      // Existing verified owner binding; a generic integration token is not enough.
+      // This does not enable the lab, change its owner or broaden the admin allowlist.
+      const { labConfiguration } = await import("../callLab/service");
+      return labConfiguration().owner === userId;
+    },
+    async saveHintPlan(userId: string, requestId: string, plan: unknown) {
+      const { callPlans } = await import("../callPlans/runtime");
+      return (await callPlans()).save(userId, requestId, plan);
+    },
     async prepare(userId: string, input: NonNullable<Claims["call"]>) {
       return prepareDefaultCall(userId, input);
     },
@@ -45,10 +57,25 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
       const taskId = (call.metadata as { secretaryTaskId?: unknown } | null)?.secretaryTaskId;
       const task = typeof taskId === "string" ? await getSecretaryTaskById(taskId) : undefined;
       const report = task?.userId === userId && task.callId === call.id ? task : undefined;
+      let preparation;
+      if (transcript && ["completed", "failed", "busy", "no-answer", "canceled"].includes(call.status)) {
+        preparation = preparationAssessment((call.metadata as any)?.callPlan, call.transcript);
+        if ((call.metadata as any)?.callPlan && preparation.status !== "no_valid_plan") {
+          try {
+            const [lab] = await db.select({ report: callLabJobs.report }).from(callLabJobs).where(and(
+              eq(callLabJobs.ownerId, userId), eq(callLabJobs.callSid, call.callSid),
+              eq(callLabJobs.environment, process.env.NODE_ENV === "production" ? "production" : "development"),
+            )).orderBy(desc(callLabJobs.updatedAt)).limit(1);
+            const saved = (lab?.report as any)?.preparation;
+            if (saved?.planHash === (call.metadata as any).callPlan.hash) preparation = saved;
+          } catch { /* No paid work or fallback transcript access: local evidence explicitly remains not_measured. */ }
+        }
+      }
       return { id: call.id, direction: call.direction, fromNumber: call.fromNumber, toNumber: call.toNumber,
         status: call.status, startedAt: call.startedAt, endedAt: call.endedAt,
         summary: report?.summary ?? null, secretaryTaskId: report?.id ?? null,
-        ...(transcript ? { transcript: call.transcript } : {}) };
+        ...(transcript ? { transcript: call.transcript,
+          ...(preparation ? { preparation } : {}) } : {}) };
     },
     async tasks(userId: string) {
       return (await listSecretaryTasks(userId)).slice(0, 50).map(task => {
@@ -67,8 +94,13 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
       if (!task || task.userId !== userId) return fail(404, "Task not found");
       const report = toSecretaryTaskReport(task);
       const { transcript: text, transcriptTurns, ...rest } = report;
+      let preparation;
+      if (transcript && task.callId && ["completed", "failed", "canceled", "cancelled"].includes(task.status)) {
+        const call = await storage.getCall(task.callId);
+        if (call?.userId === userId) preparation = preparationAssessment((call.metadata as any)?.callPlan, text);
+      }
       return { ...rest, events: savedTaskEvents(task), eventCoverage: "saved_checkpoints",
-        ...(transcript ? { transcript: text, transcriptTurns } : {}) };
+        ...(transcript ? { transcript: text, transcriptTurns, ...(preparation ? { preparation } : {}) } : {}) };
     },
     async incoming(userId: string) {
       const rows = await db.select().from(pendingCalls).where(and(eq(pendingCalls.userId, userId),
@@ -122,5 +154,5 @@ export function secretaryBackend(dial: SecretaryWorkerDependencies["dial"]) {
     },
   };
 }
-export type SecretaryBackend = Omit<ReturnType<typeof secretaryBackend>, "taskByClientRequest"> &
-  Partial<Pick<ReturnType<typeof secretaryBackend>, "taskByClientRequest">>;
+export type SecretaryBackend = Omit<ReturnType<typeof secretaryBackend>, "taskByClientRequest" | "saveHintPlan" | "isCallPlanOwner"> &
+  Partial<Pick<ReturnType<typeof secretaryBackend>, "taskByClientRequest" | "saveHintPlan" | "isCallPlanOwner">>;

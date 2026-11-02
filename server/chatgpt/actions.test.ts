@@ -47,6 +47,7 @@ function setup(outbound = true) {
   const tasks = new Map<string, any>();
   mockDial = vi.fn();
   backend = {
+    saveHintPlan: vi.fn(async (_owner, _requestId, _plan) => ({ id: "saved-plan", status: "pending", planHash: "a".repeat(64) })),
     history: vi.fn(async () => [{ id: "owned-call", status: "completed" }]),
     tasks: vi.fn(async () => Array.from(tasks.values())),
     call: vi.fn(async (_owner, id, transcript) => {
@@ -350,7 +351,7 @@ describe("offline Actions schema and export", () => {
   it("matches all HTTP operations, scopes and consequential writes without external refs/secrets", () => {
     const schema = talkHintActionsSchema(origin, true);
     expect(schema.openapi).toBe("3.1.0");
-    expect(Object.keys(schema.paths)).toHaveLength(8);
+    expect(Object.keys(schema.paths)).toHaveLength(10);
     const ids = new Set<string>();
     for (const [path, methods] of Object.entries(schema.paths)) {
       for (const [method, value] of Object.entries(methods as any)) {
@@ -361,13 +362,13 @@ describe("offline Actions schema and export", () => {
         expect(operation.description.length).toBeLessThanOrEqual(300);
         expect(operation["x-openai-isConsequential"]).toBe(method === "post");
         expect(operation.security[0].TalkHintOAuth).toEqual([method === "get" ? "calls:read" : "secretary:start"]);
-        expect(operation.responses[method === "get" || path.endsWith("/drafts") ? "200" : "202"]).toBeDefined();
+        expect(operation.responses[path.endsWith("/launches") ? "202" : "200"]).toBeDefined();
         if (path.includes("{id}")) expect(operation.parameters).toContainEqual(expect.objectContaining({
           name: "id", in: "path", required: true,
         }));
       }
     }
-    expect(ids.size).toBe(8);
+    expect(ids.size).toBe(10);
     expect(JSON.stringify(schema)).not.toMatch(/\$ref|client_secret|Route Leader|Road Ranger|confirmed/);
     expect(schema.components.securitySchemes.TalkHintOAuth.flows.authorizationCode.authorizationUrl)
       .toBe(`${origin}${api}/oauth/authorize`);
@@ -378,8 +379,62 @@ describe("offline Actions schema and export", () => {
     const text = readFileSync("generated-artifacts/talkhint-actions/draft/talkhint-actions-NOT-FOR-CONNECTION.json", "utf8");
     const schema = JSON.parse(text);
     expect(schema.servers).toEqual([{ url: "https://talkhint-actions.invalid" }]);
-    expect(Object.keys(schema.paths)).toHaveLength(8);
+    expect(Object.keys(schema.paths)).toHaveLength(10);
     expect(text).not.toContain(secret);
     expect(mockDial).not.toHaveBeenCalled();
+  });
+});
+
+describe("owner Actions call preparation", () => {
+  const plan = { goal: "Buy tire", ownerFacts: ["Trailer"], sayAsk: ["Price"], expectedQuestions: [{ q: "Axle?", answer: "Trailer" }],
+    unknowns: ["Budget"], disclosurePolicy: { allowed: ["Requirements"], forbidden: ["Payment details"] },
+    language: "en", executor: "hint" };
+  beforeEach(() => setup());
+  it("saves only under the existing owner write grant without dialing", async () => {
+    const id = randomUUID(), access = await token("calls:read secretary:start");
+    const result = await request(app).post(`${api}/hint-plan`).auth(access, { type: "bearer" }).send({ plan, clientRequestId: id });
+    expect(result.status).toBe(200);
+    expect(result.body.dialed).toBe(false);
+    expect(backend.saveHintPlan).toHaveBeenCalledExactlyOnceWith("alice", id, plan);
+    expect(mockDial).not.toHaveBeenCalled();
+  });
+  it("rejects absent/foreign credentials, read-only grants, owner selection and wrong executor", async () => {
+    const input = { plan, clientRequestId: randomUUID() };
+    expect((await request(app).post(`${api}/hint-plan`).send(input)).status).toBe(401);
+    for (const scopeUser of [["calls:read", "alice"], ["calls:read secretary:start", "bob"]]) {
+      expect((await request(app).post(`${api}/hint-plan`).auth(await token(...scopeUser as [string, string]), { type: "bearer" })
+        .send(input)).status).toBe(403);
+    }
+    const access = await token("calls:read secretary:start");
+    expect((await request(app).post(`${api}/hint-plan`).auth(access, { type: "bearer" }).send({ ...input, userId: "bob" })).status).toBe(400);
+    expect((await request(app).post(`${api}/hint-plan`).auth(access, { type: "bearer" })
+      .send({ ...input, plan: { ...plan, executor: "secretary" } })).status).toBe(400);
+    expect(backend.saveHintPlan).not.toHaveBeenCalled();
+  });
+  it("prepares a Secretary draft from the same JSON, preserving separate launch approval", async () => {
+    const access = await token("calls:read secretary:start");
+    const result = await request(app).post(`${api}/secretary-plan`).auth(access, { type: "bearer" })
+      .send({ plan: { ...plan, executor: "secretary", targetPhone: "+12025550123" }, clientRequestId: randomUUID() });
+    expect(result.status).toBe(200);
+    expect(result.body.status).toBe("owner_approval_required");
+    expect(result.body.call.instruction).toContain('"ownerFacts":["Trailer"]');
+    expect((await request(app).post(`${api}/launches`).auth(access, { type: "bearer" })
+      .send({ confirmation: result.body.confirmation })).status).toBe(403);
+    expect(mockDial).not.toHaveBeenCalled();
+  });
+  it("does not truncate a too-long Secretary plan or accept a missing number", async () => {
+    const access = await token("calls:read secretary:start");
+    for (const p of [{ ...plan, executor: "secretary" },
+      { ...plan, executor: "secretary", targetPhone: "+12025550123", ownerFacts: Array(10).fill("x".repeat(500)) }]) {
+      expect((await request(app).post(`${api}/secretary-plan`).auth(access, { type: "bearer" })
+        .send({ plan: p, clientRequestId: randomUUID() })).status).toBe(400);
+    }
+    expect(mockDial).not.toHaveBeenCalled();
+  });
+  it("does not expose the new write operations in the read-only integration stage", async () => {
+    setup(false);
+    const access = await token();
+    expect((await request(app).post(`${api}/hint-plan`).auth(access, { type: "bearer" })
+      .send({ plan, clientRequestId: randomUUID() })).status).toBe(404);
   });
 });

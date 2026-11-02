@@ -1,5 +1,28 @@
 import type { Express, Request, Response, RequestHandler } from "express";
 import { z } from "zod";
+import { callPlanSchema } from "../../shared/callPlan";
+
+export const CALL_PLAN_OPENAPI = {
+  type: "object", additionalProperties: false,
+  required: ["goal", "ownerFacts", "sayAsk", "expectedQuestions", "unknowns", "disclosurePolicy", "language", "executor"],
+  properties: {
+    goal: { type: "string", minLength: 1, maxLength: 1000 },
+    ownerFacts: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 500 } },
+    sayAsk: { type: "array", maxItems: 15, items: { type: "string", minLength: 1, maxLength: 500 } },
+    expectedQuestions: { type: "array", maxItems: 20, items: {
+      type: "object", additionalProperties: false, required: ["q", "answer"],
+      properties: { q: { type: "string", minLength: 1, maxLength: 500 }, answer: { type: ["string", "null"], maxLength: 500 } },
+    } },
+    unknowns: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 500 } },
+    disclosurePolicy: { type: "object", additionalProperties: false, required: ["allowed", "forbidden"],
+      properties: Object.fromEntries(["allowed", "forbidden"].map(k => [k, {
+        type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 500 },
+      }])) },
+    language: { type: "string", enum: ["en", "ru", "es", "kk", "uk"] },
+    executor: { type: "string", enum: ["hint", "secretary"] },
+    targetPhone: { type: "string", pattern: "^\\+[1-9]\\d{6,14}$" },
+  },
+};
 
 const API = "/api/chatgpt-actions";
 const reads = [
@@ -41,6 +64,18 @@ export function talkHintActionsSchema(origin: string, outbound = false) {
         properties: { [name === "list_calls" ? "calls" : "tasks"]: { type: "array", items: record } } } : record), ...errors },
   } };
   if (outbound) {
+    for (const [path, operationId, description] of [
+      ["hint-plan", "save_hint_plan", "Save owner's plan for the next matching outgoing Hint call. Does not dial. Expires after use or 24 hours. Same clientRequestId with same plan is idempotent; never create a new ID to retry an ambiguous response."],
+      ["secretary-plan", "prepare_secretary_plan", "Prepare a Secretary draft from the same call plan (executor secretary, +1 targetPhone required). Does not dial; preserves existing independent owner approval and start_call. Existing prepare_call still works."],
+    ]) paths[`${API}/${path}`] = { post: {
+      operationId, description, "x-openai-isConsequential": true,
+      security: [{ TalkHintOAuth: ["secretary:start"] }],
+      requestBody: { required: true, content: { "application/json": { schema: {
+        type: "object", additionalProperties: false, required: ["plan", "clientRequestId"],
+        properties: { plan: CALL_PLAN_OPENAPI, clientRequestId: { type: "string", format: "uuid" } },
+      } } } },
+      responses: { "200": response("Saved plan or approval-required Secretary draft; no call placed"), ...errors },
+    } };
     paths[`${API}/drafts`] = { post: {
       operationId: "prepare_call", description: "Prepare a signed draft only. Open approval_url for independent owner review. Does not queue or dial.",
       "x-openai-isConsequential": true, security: [{ TalkHintOAuth: ["secretary:start"] }],
@@ -69,8 +104,8 @@ export function talkHintActionsSchema(origin: string, outbound = false) {
     } };
   }
   return {
-    openapi: "3.1.0", info: { title: "TalkHint Secretary — personal Actions", version: "1.0.0",
-      description: "Owner-only TalkHint calls and Secretary. No SMS, incoming AI, forwarding or automatic recording." },
+    openapi: "3.1.0", info: { title: "TalkHint — Hint plans and Secretary Actions", version: "1.1.0",
+      description: "Owner-only Hint preparation and existing Secretary. No SMS, incoming AI, forwarding or automatic recording." },
     servers: [{ url: origin }], paths,
     components: { securitySchemes: { TalkHintOAuth: { type: "oauth2", flows: { authorizationCode: {
       authorizationUrl: `${origin}${API}/oauth/authorize`, tokenUrl: `${origin}${API}/oauth/token`,
@@ -97,6 +132,12 @@ export function registerActionOperations(app: Express, api: string, outbound: bo
       { id: req.params.id, ...(name === "get_call_result" ? {} : { includeTranscript: query.includeTranscript === "true" }) } : {}));
   }));
   if (outbound) {
+    for (const [path, name] of [["hint-plan", "save_hint_plan"], ["secretary-plan", "prepare_secretary_plan"]]) {
+      app.post(`${api}/${path}`, wrap(async (req, res) => {
+        const args = z.object({ plan: callPlanSchema, clientRequestId: z.string().uuid() }).strict().parse(req.body);
+        return send(res, await execute(req, name, args));
+      }));
+    }
     app.post(`${api}/drafts`, wrap(async (req, res) => {
       const args = z.object({ phoneNumber: z.string(), instruction: z.string(), clientRequestId: z.string() })
         .strict().parse(req.body);

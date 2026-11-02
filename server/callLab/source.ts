@@ -29,6 +29,7 @@ export function authorizedHintSource(call: any, control: any, environment: strin
     hint_usage: call.metadata?.hintUsage ?? null,
     duration_ms: Date.parse(call.ended_at) - Date.parse(call.started_at),
     languages: [], goal: call.metadata?.goalText ?? null, transcript,
+    call_plan: call.metadata?.callPlan ?? null,
     hints: entries.map((e: any, i: number) => ({
       id: String(e.utteranceId ?? `recorded-hint-${i}`), text: e.text,
       outcome: e.outcome, delivered_at: e.deliveredAt ?? null, sent_at: e.sentAt ?? null,

@@ -124,6 +124,24 @@ export const calls = pgTable("calls", {
   metadata: jsonb("metadata"),
 });
 
+// No startup DDL. Development is prepared explicitly; production via owner's Publish.
+export const hintCallPlans = pgTable("hint_call_plans", {
+  id: varchar("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  requestId: varchar("request_id").notNull(),
+  plan: jsonb("plan").notNull(),
+  planHash: text("plan_hash").notNull(),
+  targetPhone: text("target_phone"),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  callSid: text("call_sid"),
+}, t => ({
+  request: uniqueIndex("hint_call_plans_owner_request").on(t.userId, t.requestId),
+  call: uniqueIndex("hint_call_plans_call").on(t.callSid),
+  pending: index("hint_call_plans_pending").on(t.userId, t.status, t.expiresAt),
+}));
+
 export const insertCallSchema = createInsertSchema(calls).omit({
   id: true,
   startedAt: true,

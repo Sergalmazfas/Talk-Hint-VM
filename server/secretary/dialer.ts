@@ -1,3 +1,5 @@
+import { secretaryPlanFromInstruction } from "../../shared/callPlan";
+import { planHash } from "../callPlans/store";
 import { SECRETARY_CALL_LIMIT_SECONDS } from "./limits";
 import twilio from "twilio";
 import { eq } from "drizzle-orm";
@@ -16,6 +18,7 @@ export interface SecretaryDialJob {
   id: string;
   userId: string;
   phoneNumber: string;
+  instruction?: string;
   voiceProvider: string;
   outgoingContext?: unknown;
 }
@@ -80,6 +83,7 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
   // subsequent history write fails, the worker must NOT redial an ambiguous
   // call; it will report an error and remain in its single-use starting state.
   const existing = await storage.getCallByCallSid(created.sid);
+  const preparation = secretaryPlanFromInstruction(job.instruction ?? "", job.phoneNumber);
   const call = existing ?? await storage.createCall({
     userId: job.userId,
     callSid: created.sid,
@@ -89,6 +93,7 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     status: "ringing",
     transcript: "",
     metadata: { mode: "secretary", secretaryTaskId: job.id, voiceProvider: job.voiceProvider,
+      ...(preparation ? { callPlan: { id: job.id, hash: planHash(preparation), plan: preparation } } : {}),
       ...(job.voiceProvider === "openai" ? { model: SECRETARY_AUDIO_MODEL, voice: SECRETARY_AUDIO_VOICE } : {}) },
   });
   return { sid: created.sid, callId: call.id };

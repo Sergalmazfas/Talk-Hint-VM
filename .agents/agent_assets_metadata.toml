@@ -3169,3 +3169,31 @@ mtime_ms = 1793636965336
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a1ae55f8-4fc8-4f67-8693-c191b03fb904/2a9b3847-2a5b-4199-8617-f886bc681b4a"
 storage_version_token = "1793636981293911"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Z0u8tPwQFB7xVAestkV6P"
+uri = "file://generated-artifacts/chatgpt-hint-plan/owner-guide.html"
+type = "html"
+title = "ChatGPT → Hint: инструкция и схема GPT"
+description = "Что сделано, проверки, копируемые инструкции и схема Actions. Для существующего MCP менять авторизацию не нужно. Использовать после сверки и Publish."
+logical_id = "c6756559-a409-4152-b093-355fa6a02a2a"
+content_hash = "sha256:1601a7174967cdc405fb383b61fca191fb8844d5bc890deaff5b822f2f1d0a9f"
+size = 95673
+mtime_ms = 1793641315658
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c6756559-a409-4152-b093-355fa6a02a2a/bb3c12c2-e3d2-44e9-9f3c-76c1482e8d54"
+storage_version_token = "1793641341628671"
+content_type = "text/html"
+
+[[outputs]]
+id = "N5FyBt6WgJ7D14dmUtDcP"
+uri = "file://generated-artifacts/ChatGPT_Hint_Call_Plan_Review.zip"
+type = "unspecified"
+title = "Клавдию — общий план Hint / Secretary"
+description = "Код и diff, схема GPT, инструкция, полный прогон 4 шардами, 33 теста лаборатории, схема пустой Dev-таблицы, ограничения и проверки после Publish. Production не менялся."
+logical_id = "26ab431e-7566-4feb-8dee-28c9295b621f"
+content_hash = "sha256:b07aa619cc32470b7c4510fef7cc2830fb52a174d0eb158be9ca10a935bf9af9"
+size = 406950
+mtime_ms = 1793641316271
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/26ab431e-7566-4feb-8dee-28c9295b621f/e0d6d3f5-d506-4214-a2a8-8aa961e5d12b"
+storage_version_token = "1793641342360663"
+content_type = "application/octet-stream"

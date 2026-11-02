@@ -14,7 +14,8 @@ import { CALL_APPROVAL_RESOURCE, callApprovalWidgetHtml } from "./callApprovalWi
 import { callApprovalResource, hostUiSupport, LEGACY_CALL_APPROVAL_RESOURCES, uiResourceLabel } from "./uiResources";
 import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION } from "./pluginWorkflow";
 import { actionsExchange } from "./actionsOAuth";
-import { talkHintActionsSchema, registerActionOperations } from "./actionsSchema";
+import { talkHintActionsSchema, registerActionOperations, CALL_PLAN_OPENAPI } from "./actionsSchema";
+import { callPlanSchema, secretaryInstruction } from "../../shared/callPlan";
 
 export interface IntegrationConfig {
   enabled: boolean; origin: string; clientId: string; redirectUri: string;
@@ -57,6 +58,8 @@ const schemas = {
   get_incoming: z.object({}).strict(),
   prepare_call: CALL_INPUT.extend({ recipient: z.string().trim().min(1).max(200).optional() }),
   start_call: z.object({ confirmation: z.string().max(16000) }).strict(),
+  save_hint_plan: z.object({ plan: callPlanSchema, clientRequestId: z.string().uuid() }).strict(),
+  prepare_secretary_plan: z.object({ plan: callPlanSchema, clientRequestId: z.string().uuid() }).strict(),
 };
 type Tool = keyof typeof schemas;
 const permissions: Record<Tool, Scope> = {
@@ -64,6 +67,7 @@ const permissions: Record<Tool, Scope> = {
   list_tasks: "calls:read", get_task: "calls:read", get_incoming: "incoming:read",
   prepare_call: "secretary:start", start_call: "secretary:start",
   get_call_result: "calls:read",
+  save_hint_plan: "secretary:start", prepare_secretary_plan: "secretary:start",
 };
 const uuidPattern = /^[a-f0-9-]{36}$/i;
 const TOKEN_MS = 10 * 60_000;
@@ -85,6 +89,8 @@ const TOOL_INPUTS: Record<Tool, object> = {
     translationLanguage: { type: "string", enum: ["ru", "es"] },
   },
   start_call: { confirmation: { type: "string" } },
+  save_hint_plan: { plan: CALL_PLAN_OPENAPI, clientRequestId: { type: "string", format: "uuid" } },
+  prepare_secretary_plan: { plan: CALL_PLAN_OPENAPI, clientRequestId: { type: "string", format: "uuid" } },
 };
 
 /**
@@ -450,12 +456,28 @@ export function registerChatGPTIntegration(
     const args = schemas[name].parse(raw) as any;
     if (args.includeTranscript) need(claims, "calls:transcript");
     switch (name) {
+      case "save_hint_plan": {
+        if (config.actions ? claims.sub !== config.actions.ownerId : !await backend.isCallPlanOwner?.(claims.sub))
+          return fail(403, "Owner call preparation access required");
+        if (args.plan.executor !== "hint") return fail(400, "Hint executor required");
+        if (!backend.saveHintPlan) return fail(503, "Hint plan storage unavailable");
+        return { ...await backend.saveHintPlan(claims.sub, args.clientRequestId, args.plan), dialed: false,
+          note: "Saved for the next matching outgoing Hint call, expires in 24 hours. No call started." };
+      }
+      case "prepare_secretary_plan": {
+        if (config.actions ? claims.sub !== config.actions.ownerId : !await backend.isCallPlanOwner?.(claims.sub))
+          return fail(403, "Owner call preparation access required");
+        const instruction = secretaryInstruction(args.plan);
+        return execute(req, "prepare_call", {
+          phoneNumber: args.plan.targetPhone, instruction, clientRequestId: args.clientRequestId,
+        });
+      }
       case "get_profile": return { id: claims.sub };
       case "list_calls": return { calls: await backend.history(claims.sub) };
       case "get_call": {
         const call = await backend.call(claims.sub, args.id, args.includeTranscript);
         if (!["completed", "failed", "busy", "no-answer", "canceled"].includes(call.status)) {
-          const { transcript, ...saved } = call;
+          const { transcript, preparation, ...saved } = call;
           return saved;
         }
         return call;
@@ -561,6 +583,7 @@ export function registerChatGPTIntegration(
     else if (rpc.method === "tools/list") result = { tools: [...mcpTools.map(name =>
       publicToolMetadata(name, permissions[name], TOOL_INPUTS[name],
         name === "prepare_call" ? ["phoneNumber", "instruction", "clientRequestId"] :
+        ["save_hint_plan", "prepare_secretary_plan"].includes(name) ? ["plan", "clientRequestId"] :
         name === "start_call" ? ["confirmation"] : ["get_call", "get_task"].includes(name) ? ["id"] : [], cardEnabled)),
       ...(cardEnabled ? [cardApprovalToolMetadata()] : [])] };
     else if (rpc.method === "tools/call") {
@@ -594,7 +617,7 @@ export function registerChatGPTIntegration(
               taskId: value.task_id,
             } };
           }
-          if (name === "prepare_call") {
+          if (name === "prepare_call" || name === "prepare_secretary_plan") {
             // No approval URL or approval capability in model-visible content.
             const { approval_url, approvalEndpoint, note, ...preview } = value;
             const recipient = credentials.read(value.confirmation, "confirmation").recipient;
@@ -606,7 +629,7 @@ export function registerChatGPTIntegration(
               note: "Confirm this exact call using the button in this chat. If the card is unavailable, stop. No call has started." };
           }
         }
-        const text = name === "prepare_call" ?
+        const text = name === "prepare_call" || name === "prepare_secretary_plan" ?
           `Call preview: ${value.call.recipient ?? "Recipient not supplied"}; ${value.call.phoneNumber}; ${value.call.instruction}. ` +
           `Selected: ${value.execution.model}; voice: ${value.execution.voice}; provider: ${value.execution.provider}. ` +
           "No call has started. Use the inline card's single confirmation button. If this host shows only text/JSON, it has NOT displayed a confirmation card: stop and explain the host limitation. Refresh connection metadata and test in ChatGPT web with MCP Apps support. Do not replace the card with a website or chat yes, claim approval or invoke start_call." :

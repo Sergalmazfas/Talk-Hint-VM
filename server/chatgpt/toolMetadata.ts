@@ -3,9 +3,11 @@ import { CALL_APPROVAL_RESOURCE } from "./callApprovalWidget";
 import { CALL_PRESENTATION_SCHEMA } from "./callPresentation";
 
 export const PUBLIC_TOOLS = ["get_profile", "list_calls", "get_call", "list_tasks", "get_task",
-  "prepare_call", "start_call", "get_call_result"] as const;
+  "prepare_call", "start_call", "get_call_result", "save_hint_plan", "prepare_secretary_plan"] as const;
 export type PublicTool = typeof PUBLIC_TOOLS[number];
 const descriptions: Record<PublicTool, [string, string]> = {
+  save_hint_plan: ["План для Hint", "Save the authenticated owner's structured call plan for the next matching outgoing Hint call, expires after use or 24 hours. Does NOT dial. Use one stable clientRequestId UUID; do not replace it on an ambiguous response. Unknown answers must be null; ownerFacts must be confirmed. Requires existing secretary:start permission and verified company-owner identity."],
+  prepare_secretary_plan: ["Задание Кате из плана", "Prepare the same structured call plan for Secretary (executor secretary and exact +1 targetPhone required). Same independent inline card approval as prepare_call. No dialing, new rights, voice or personality changes. If the approval card is unavailable, stop. A chat yes is not approval."],
   get_profile: ["Connected TalkHint profile", "Return the stable profile ID represented by the authenticated credentials. No account selector."],
   list_calls: ["Your recent calls", "List up to 50 calls from the connected TalkHint account, their saved statuses and available Secretary summaries. No audio or transcript."],
   get_call: ["Saved call details", "Read one call from the connected account. Include transcript only when explicitly requested and separately authorized."],
@@ -18,13 +20,14 @@ const descriptions: Record<PublicTool, [string, string]> = {
 
 export function publicToolMetadata(name: PublicTool, scope: Scope, properties: object, required: string[], taskCard = false) {
   const write = name === "start_call";
-  const preview = name === "prepare_call";
+  const preview = name === "prepare_call" || name === "prepare_secretary_plan";
+  const planWrite = name === "save_hint_plan";
   const securitySchemes = [{ type: "oauth2", scopes: name === "get_call_result" ? ["calls:read", "calls:transcript"] : [scope] }];
   return {
     name, title: descriptions[name][0], description: descriptions[name][1],
     inputSchema: { type: "object", properties, required, additionalProperties: false },
     annotations: {
-      readOnlyHint: !write && !preview, destructiveHint: write, openWorldHint: write || preview,
+      readOnlyHint: !write && !preview && !planWrite, destructiveHint: write, openWorldHint: write || preview,
       idempotentHint: !preview,
     },
     securitySchemes,
