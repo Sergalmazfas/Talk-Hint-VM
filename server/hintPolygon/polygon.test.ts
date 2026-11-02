@@ -13,6 +13,13 @@ import { buildOpenAIChatBody } from "../hintProvider";
 
 const dirs:string[]=[];
 const path=()=>{const d=mkdtempSync(join(tmpdir(),"hint-polygon-"));dirs.push(d);return join(d,"ledger.json");};
+it("rejects malformed write metadata before it can make the durable ledger unreadable",()=>{
+ const p=path(),l=new Ledger(p);
+ expect(()=>l.reserve("x","brain",75,"literal-not-SHA")).toThrow("INVALID_PAYLOAD_HASH");
+ expect(()=>l.reserve("","brain",75)).toThrow("INVALID_REQUEST_ID");
+ expect(l.snapshot().entries).toHaveLength(0);l.close();
+ const reopened=new Ledger(p);expect(reopened.held()).toBe(0);reopened.close();
+});
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();for(const d of dirs.splice(0))rmSync(d,{recursive:true,force:true});});
 describe("isolated corpus/recipe contract",()=>{
   it("refuses accelerated replay",()=>expect(()=>RecipeSchema.parse({...BASELINE,replayRate:2})).toThrow());

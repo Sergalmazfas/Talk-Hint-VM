@@ -26,12 +26,12 @@ export const BASELINE: Recipe = RecipeSchema.parse({
 });
 /** Multi-factor architectures are not mislabeled as one-factor experiments. */
 export const ARCHITECTURES = [
-  { id: "b-openai-realtime", architecture: "audio-direct", phase: 2, adapter: "not_implemented" },
-  { id: "b-gemini-live", architecture: "audio-direct", phase: 2, adapter: "not_implemented" },
-  { id: "c-hint-first", architecture: "hint-first", phase: 3, adapter: "not_implemented" },
-  { id: "d-precomputed", architecture: "precomputed", phase: 3, adapter: "not_implemented" },
-  { id: "e-classifier-card", architecture: "classifier-card", phase: 3, adapter: "not_implemented" },
-  { id: "f-speculative", architecture: "speculative", phase: 3, adapter: "not_implemented" },
+  { id: "b-openai-realtime", architecture: "audio-direct", phase: 2, adapter: "controlled_flux_eot_only; native autonomous EOT not implemented" },
+  { id: "b-gemini-live", architecture: "audio-direct", phase: 2, adapter: "experimental_AUDIO_output_transcription; controlled_Flux_EOT; NOT_text_native" },
+  { id: "c-hint-first", architecture: "hint-first", phase: 3, adapter: "experimental_English_SSE_then_Russian" },
+  { id: "d-precomputed", architecture: "precomputed", phase: 3, adapter: "experimental_goal_only_local_lookup" },
+  { id: "e-classifier-card", architecture: "classifier-card", phase: 3, adapter: "experimental_Terra_classifier" },
+  { id: "f-speculative", architecture: "speculative", phase: 3, adapter: "experimental_actual_Flux_Update_exact_match_EOT_release" },
 ] as const;
 export function changedFactors(a: Recipe, b: Recipe) {
   return (Object.keys(a) as (keyof Recipe)[]).filter(k => !["id", "judgeModel"].includes(k) && a[k] !== b[k]);
@@ -48,6 +48,18 @@ export function assertIndependent(author: string, judge: string) {
 }
 export function assertAdapter(r: Recipe) {
   RecipeSchema.parse(r); assertIndependent(r.model, r.judgeModel);
+  if(r.architecture==="audio-direct"&&r.model==="gemini-3.8-live"&&r.judgeModel==="gpt-4.1-mini"&&
+    r.stt==="flux-general-en"&&r.prompt==="minimal"&&r.stream&&r.translation==="separate"&&r.cache==="provider-auto"&&
+    r.maxOutputTokens===500&&r.eotThreshold===.7&&r.eotTimeoutMs===3000)return;
+  if(["hint-first","precomputed","classifier-card","speculative"].includes(r.architecture)&&
+    r.model==="gpt-5.6-terra"&&r.judgeModel==="gpt-4.1-mini"&&r.stt==="flux-general-en"&&
+    r.cache==="provider-auto"&&r.eotThreshold===.7&&r.eotTimeoutMs===3000&&
+    r.prompt===(["precomputed","classifier-card"].includes(r.architecture)?"minimal":"full")&&
+    r.maxOutputTokens===(r.architecture==="classifier-card"?32:250)&&
+    r.stream===(r.architecture==="hint-first")&&r.translation===(r.architecture==="hint-first"?"separate":"together"))return;
+  if(r.architecture==="audio-direct"&&r.model==="gpt-realtime-2.1"&&r.judgeModel==="gpt-4.1-mini"&&
+    r.stt==="flux-general-en"&&r.prompt==="full"&&r.stream&&r.translation==="together"&&r.cache==="provider-auto"&&
+    (r.maxOutputTokens===250||r.maxOutputTokens===500)&&r.eotThreshold===.7&&r.eotTimeoutMs===3000)return;
   if (r.architecture !== "stt-brain" || r.prompt !== "full" || r.stream || r.translation !== "together" ||
       r.cache !== "provider-auto" || r.stt !== "flux-general-en" || r.model !== "gpt-5.6-terra" ||
       r.judgeModel !== "gpt-4.1-mini") throw Error("ADAPTER_NOT_IMPLEMENTED_NO_SUBSTITUTION");

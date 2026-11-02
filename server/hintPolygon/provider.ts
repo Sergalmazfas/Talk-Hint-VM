@@ -4,6 +4,7 @@ import { buildOpenAIChatBody } from "../hintProvider";
 import { normalizeSuggestion } from "../hintShape";
 import { assertIndependent, canonicalModel, money, sha, tokenCost, type Recipe } from "./contracts";
 import type { Ledger } from "./ledger";
+import {performance}from"node:perf_hooks";
 
 export function promptRequest(recipe: Recipe, text: string, goal: string, history: string) {
   const actionResultsEnabled=recipe.actionResultsEnabled;
@@ -19,7 +20,7 @@ export function promptRequest(recipe: Recipe, text: string, goal: string, histor
     version:`live-template-${sha(template).slice(0,16)}`,
     systemHash:sha(system),systemChars:Array.from(system).length};
 }
-export async function chat(ledger: Ledger, id: string, kind: "brain"|"judge", body: Record<string,any>) {
+export async function chat(ledger: Ledger, id: string, kind: "brain"|"judge", body: Record<string,any>,scope?:string,prepare?:(text:string)=>unknown) {
   if(body.response_format?.type==="json_object" && !body.messages?.some((m:any)=>/\bjson\b/i.test(String(m.content))))
     throw Error("JSON_MODE_REQUIRES_EXPLICIT_JSON_INSTRUCTION");
   const rate=money[kind], serialized=JSON.stringify(body);
@@ -27,7 +28,9 @@ export async function chat(ledger: Ledger, id: string, kind: "brain"|"judge", bo
   // UTF-8 byte count is deliberately conservative, not a token estimate.
   // Include envelope overhead and a possible cache-write premium in reserve.
   const reserve=Math.ceil((Buffer.byteLength(serialized)+2048)*rate.input*1.25+maxOut*rate.output);
-  ledger.reserve(id,kind,reserve,sha(serialized));
+  const reservationStarted=performance.now();
+  await ledger.reserve(id,kind,reserve,sha(serialized),scope);
+  const reservationWaitMs=performance.now()-reservationStarted;
   let status:number|undefined,requestId:string|null=null;
   try {
     const r=await fetch("https://api.openai.com/v1/chat/completions",{
@@ -41,22 +44,28 @@ export async function chat(ledger: Ledger, id: string, kind: "brain"|"judge", bo
       const key=process.env.OPENAI_API_KEY;
       let message=String(result.error?.message??"").replace(/(?:sk|dg|rk)-[A-Za-z0-9_-]{6,}/g,"[REDACTED]");
       if(key)message=message.split(key).join("[REDACTED]");
-      ledger.diagnostic(id,message,String(result.error?.param??""));
+       await ledger.diagnostic(id,message,String(result.error?.param??""));
       throw Error(`OPENAI_HTTP_${status}_${code}`);
     }
     if(canonicalModel(result.model??"")!==canonicalModel(body.model)) throw Error("MODEL_SUBSTITUTION");
     const cost=tokenCost(result.usage,rate);
-    ledger.finish(id,cost,{httpStatus:status,requestId});
     const choice=result.choices?.[0];
-    if(choice?.finish_reason!=="stop")throw Error("OUTPUT_TRUNCATED_OR_UNFINISHED");
-    if(typeof choice.message?.content!=="string" || !choice.message.content.trim())throw Error("EMPTY_MODEL_OUTPUT");
-    return {text:choice.message.content,usage:result.usage,model:result.model,cost,requestId,httpStatus:status};
-  } catch(e) {ledger.unknown(id,{httpStatus:status,requestId});throw e;}
+    let prepared:unknown,parseError:Error|undefined;
+    try{
+      if(choice?.finish_reason!=="stop")throw Error("OUTPUT_TRUNCATED_OR_UNFINISHED");
+      if(typeof choice.message?.content!=="string" || !choice.message.content.trim())throw Error("EMPTY_MODEL_OUTPUT");
+      prepared=prepare?.(choice.message.content);
+    }catch(e){parseError=e as Error;}
+    const readyAt=performance.now(); // parsed content available, BEFORE accounting I/O
+    await ledger.finish(id,cost,{httpStatus:status,requestId});
+    if(parseError)throw parseError;
+    return {text:choice.message.content,prepared,readyAt,reservationWaitMs,usage:result.usage,model:result.model,cost,requestId,httpStatus:status};
+  } catch(e) {await ledger.unknown(id,{httpStatus:status,requestId});throw e;}
 }
 export function parseHint(text:string) {
   const match=text.match(/\{[\s\S]*\}/);
   if(!match)throw Error("NOT_LIVE_JSON");
-  const value=JSON.parse(match[0]);
+  let value;try{value=JSON.parse(match[0]);}catch{throw Error("INVALID_HINT_JSON");}
   if("should_suggest" in value || typeof value.translation!=="string")throw Error("NOT_LIVE_SCHEMA");
   const suggestion=normalizeSuggestion(value.suggestion,{translateEnabled:true});
   // Mirror live normalization: a greeting/empty suggestion can normalize to
@@ -79,7 +88,7 @@ export async function judge(ledger:Ledger,id:string,recipe:Recipe,goal:string,it
     };
     const result=await chat(ledger,`${id}-${i}`,"judge",body);
     assertIndependent(recipe.model,result.model);
-    const parsed=JSON.parse(result.text);
+    let parsed;try{parsed=JSON.parse(result.text);}catch{throw Error("INVALID_JUDGE_JSON");}
     if(!Array.isArray(parsed.items) || parsed.items.length!==batch.length)throw Error("JUDGE_INCOMPLETE");
     const ids=new Set<string>();
     for(const row of parsed.items) {

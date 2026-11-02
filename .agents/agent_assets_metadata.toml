@@ -3015,3 +3015,45 @@ mtime_ms = 1793594950265
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/01ef1ed1-8e09-42a8-8f81-881b11a1daed/399d408c-26af-499b-820b-454285330992"
 storage_version_token = "1793595845623393"
 content_type = "text/csv"
+
+[[outputs]]
+id = "CML10lppoio1GDGH5H8lu"
+uri = "file://generated-artifacts/hint-polygon/qc30-report/primary-baseline.csv"
+type = "table"
+title = "Hint A — основная группа с целью"
+description = "14 обработано: 13 действительных, 1 отклонена; ещё 1 удержана из-за прежнего unknown. p50 1,75 с; p95 2,93 с. Только серверная цепочка."
+logical_id = "eb7d6880-48ef-48e3-a89b-adc9cd0c5826"
+content_hash = "sha256:470b5bc97b044d1ecf33123061d39880472a586c14cc0373b7248564dc274743"
+size = 307
+mtime_ms = 1793598749328
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/eb7d6880-48ef-48e3-a89b-adc9cd0c5826/6b95157c-9878-4f0c-95df-8a2381f34303"
+storage_version_token = "1793598762043593"
+content_type = "text/csv"
+
+[[outputs]]
+id = "JKbBPkfFNT4wMDvGwWKEU"
+uri = "file://generated-artifacts/hint-polygon/recipes-review/comparison.csv"
+type = "table"
+title = "Полигон Hint — сравнительная таблица"
+description = "Открой таблицу: одинаковые три записи, 24 пригодные реплики, скорость, покрытие, качество и ограничения."
+logical_id = "b8235fd3-2dfc-47e9-98e0-07e3389585b8"
+content_hash = "sha256:572fbe846ae9d9c34593fd4587e39ef9ad6425b923edc913342836904cd99324"
+size = 1547
+mtime_ms = 1793604378452
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b8235fd3-2dfc-47e9-98e0-07e3389585b8/c40708d3-21a9-4123-816b-259c994a3473"
+storage_version_token = "1793604422023902"
+content_type = "text/csv"
+
+[[outputs]]
+id = "SpjPTTU2a_7N5eHlNb4nD"
+uri = "file://generated-artifacts/Hint_Polygon_A_F_Review.zip"
+type = "unspecified"
+title = "Полигон Hint — ZIP на сверку Клавдию"
+description = "Скачай и передай Клавдию. README, результаты, тесты, исходники и снимки версий, расходы и неудачные попытки. Без аудио, транскриптов и ключей."
+logical_id = "7855d3ec-ce92-484c-8ffc-d1c9c93b65cd"
+content_hash = "sha256:de5023adbc48870d8c735f3cf57714c6e06c07589967dd5fa33cb086ba356c3b"
+size = 1519658
+mtime_ms = 1793604382300
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7855d3ec-ce92-484c-8ffc-d1c9c93b65cd/395ce9ff-16dd-479d-bf3c-9fa4c95b5a72"
+storage_version_token = "1793604423156055"
+content_type = "application/octet-stream"
