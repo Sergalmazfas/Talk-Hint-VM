@@ -79,6 +79,7 @@ final class PrepareViewController: UIViewController {
     private let sendButton = UIButton(type: .system)
     private let micButton = UIButton(type: .system)
     private let statusLabel = UILabel()
+    private let savedPlansView = PreparedHintPlansView()
 
     /// The transient "…" thinking bubble shown while Sol is working.
     private var thinkingBubble: UIView?
@@ -124,6 +125,7 @@ final class PrepareViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         isScreenActive = true
+        if mode == .hint { savedPlansView.refresh() }
     }
 
     override func viewDidLoad() {
@@ -143,6 +145,7 @@ final class PrepareViewController: UIViewController {
             navigationItem.leftBarButtonItem = close
         }
         buildUI()
+        if mode == .hint { feedStack.addArrangedSubview(savedPlansView) }
 
         stream.delegate = self
         stream.connect()
@@ -167,6 +170,7 @@ final class PrepareViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isScreenActive = false
+        savedPlansView.stopLoading()
         isStartingRecording = false
         // Sheet is being swiped down or closed: stop the recorder immediately so
         // the iOS microphone indicator clears without waiting for deinit.
@@ -536,6 +540,11 @@ final class PrepareViewController: UIViewController {
         pendingGoalButtons?.removeFromSuperview()
         pendingProposalGoal = nil
         feedStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // Reset only the manual dialog; the read-only saved-plan list is separate.
+        if mode == .hint {
+            feedStack.addArrangedSubview(savedPlansView)
+            savedPlansView.refresh()
+        }
         initialMessage = nil
         addAIMessage(NSLocalizedString(mode == .secretary ? "secretary.prepare.reset.intro" : "prepare.reset.intro", comment: ""))
     }

@@ -558,6 +558,12 @@ load();
 </html>`);
   });
 
+  const { registerPreparedHintPlans } = await import("./callPlans/routes");
+  registerPreparedHintPlans(app, authMiddleware, async () => {
+    const { callPlans } = await import("./callPlans/runtime");
+    return callPlans();
+  });
+
   app.get("/api/calls", authMiddleware, async (req, res) => {
     try {
       const user = (req as any).user;

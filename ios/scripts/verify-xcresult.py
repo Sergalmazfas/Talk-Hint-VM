@@ -12,6 +12,17 @@ REQUIRED_TESTS = {
         "testKeypadButtonsDispatchAndCompactScreenCanScroll",
         "testFailedDispatchShowsErrorWithoutDisplayingUnsentDigits",
     ),
+    "PreparedHintPlansTests": (
+        "testDecodesCommonPlanAndUnknownAnswers",
+        "testAuthenticatedPreviewUsesGETAndNoBody",
+        "testMissingLoginDoesNotReadPlans",
+        "testPreviewServiceFailureIsNotEmpty",
+        "testPreviewDisplaysGoalNumberAnswersAndExpiry",
+        "testExpiredAndNonHintPlansAreHidden",
+        "testReadOnlyViewHasNoCallControls",
+        "testRefreshFailureShowsErrorNotEmpty",
+        "testCancelledRefreshCannotRepopulatePlan",
+    ),
     "SecretaryPersonalityTests": (
         "testSettingsFixtureProvidesBothValidCallProfiles",
         "testSecretaryIDsKeepHyphensAndUUIDsWithoutDoubleEncoding",

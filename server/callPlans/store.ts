@@ -9,6 +9,21 @@ type Query = Pick<PoolClient, "query">;
 /** A per-owner advisory transaction lock serializes save, supersession and consumption. */
 export class CallPlanStore {
   constructor(private pool: Pick<Pool, "connect">) {}
+  /** Read only: opening Prepare must never consume, extend or activate a plan. */
+  async pending(owner: string) {
+    const c = await this.pool.connect();
+    try {
+      const { rows } = await c.query(`SELECT id,plan,plan_hash,created_at,expires_at
+        FROM hint_call_plans WHERE user_id=$1 AND status='pending' AND expires_at>now()
+        ORDER BY created_at DESC,id LIMIT 50`, [owner]);
+      return rows.map(row => {
+        const plan = callPlanSchema.parse(row.plan);
+        if (plan.executor !== "hint" || planHash(plan) !== row.plan_hash) throw new Error("CALL_PLAN_HASH_MISMATCH");
+        return { id: row.id, planHash: row.plan_hash, plan,
+          createdAt: new Date(row.created_at).toISOString(), expiresAt: new Date(row.expires_at).toISOString() };
+      });
+    } finally { c.release(); }
+  }
   private async transaction<T>(owner: string, fn: (c: Query) => Promise<T>) {
     const c = await this.pool.connect();
     try {

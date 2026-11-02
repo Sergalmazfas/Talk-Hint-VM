@@ -23,6 +23,30 @@ describe("durable call plan binding in PostgreSQL (temporary tables only)", () =
     store = new CallPlanStore({ connect: async () => ({ query: c.query.bind(c), release() {} }) } as any);
   });
   beforeEach(async () => { await c.query("TRUNCATE pg_temp.hint_call_plans,pg_temp.calls"); });
+  it("reads only own pending unexpired plans without consuming, changing TTL or activating goals", async () => {
+    const saved = await store.save("alice", randomUUID(), plan);
+    await store.save("bob", randomUUID(), plan);
+    const before = (await c.query("SELECT * FROM pg_temp.hint_call_plans WHERE id=$1", [saved.id])).rows[0];
+    const list = await store.pending("alice");
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: saved.id, plan, planHash: saved.planHash });
+    expect(await store.pending("alice")).toEqual(list);
+    expect((await c.query("SELECT * FROM pg_temp.hint_call_plans WHERE id=$1", [saved.id])).rows[0]).toEqual(before);
+    expect(await store.pending("unknown")).toEqual([]);
+    await c.query("UPDATE pg_temp.hint_call_plans SET expires_at=now()-interval '1 second' WHERE id=$1", [saved.id]);
+    expect(await store.pending("alice")).toEqual([]);
+  });
+  it("does not preview superseded or consumed plans and rejects a corrupted hash", async () => {
+    await store.save("alice", randomUUID(), plan);
+    const saved = await store.save("alice", randomUUID(), plan);
+    expect((await store.pending("alice")).map(x => x.id)).toEqual([saved.id]);
+    await call("preview");
+    await store.bind("alice", "preview");
+    expect(await store.pending("alice")).toEqual([]);
+    await store.save("alice", randomUUID(), plan);
+    await c.query("UPDATE pg_temp.hint_call_plans SET plan_hash='bad' WHERE status='pending'");
+    await expect(store.pending("alice")).rejects.toThrow("CALL_PLAN_HASH_MISMATCH");
+  });
   afterAll(async () => { c?.release(); await pool.end(); });
   const call = (sid: string, owner = "alice", phone = "+12025550123", direction = "outgoing", mode = "hint") =>
     c.query("INSERT INTO pg_temp.calls(id,user_id,call_sid,direction,to_number,metadata) VALUES($1::varchar,$2,$1::text,$3,$4,$5::jsonb)",

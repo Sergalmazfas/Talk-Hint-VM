@@ -3211,3 +3211,17 @@ mtime_ms = 1793643429263
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8e771a77-f8dc-4fae-bcb7-55239e9b89b8/ac2bcbd7-6a10-45c2-a74d-f908916d5fee"
 storage_version_token = "1793643448632166"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "kHTEpA7w-G3kzNgESubuv"
+uri = "file://generated-artifacts/prepare-chatgpt/Prepare_ChatGPT_Review_and_Mac.zip"
+type = "unspecified"
+title = "Prepare — планы ChatGPT: пакет на сверку"
+description = "Правка сервера и iOS, полный прогон четырьмя частями, SHA256, diff и задание Claude на Mac. 3329 тестов прошли, 43 штатно пропущены. Native XCTest и сборка ожидают Mac."
+logical_id = "b7045b73-0970-4ad8-bb25-03f300b3afda"
+content_hash = "sha256:c58c7cda194b36711f768f07ff1e08eb5c5b342fc5109ba246275a3520d6e564"
+size = 341380
+mtime_ms = 1793647903066
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b7045b73-0970-4ad8-bb25-03f300b3afda/d3d34699-1640-49b6-ad41-5adaa5dc700e"
+storage_version_token = "1793647910293149"
+content_type = "application/octet-stream"

@@ -86,6 +86,12 @@ final class APIClient {
         self.tokenProvider = tokenProvider
     }
 
+    /// Read-only preview; no goal activation, TTL extension or call reservation.
+    func preparedHintPlans() async throws -> PreparedHintPlansResponse {
+        let data = try await request("/api/prepare/hint-plans", method: "GET", json: nil, authenticated: true)
+        return try JSONDecoder().decode(PreparedHintPlansResponse.self, from: data)
+    }
+
     // MARK: - Auth
 
     struct LoginResult { let token: String; let userId: String; let email: String }
