@@ -2945,3 +2945,17 @@ mtime_ms = 1793586168589
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/08a93569-c135-4664-9d1c-5d9b6be3ca2e/f9e872c6-712d-441b-b736-b04dab656fc0"
 storage_version_token = "1793586186484230"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "RpdqlBtq3X5Msi9BlEtS7"
+uri = "file://generated-artifacts/TalkHint_laboratories_inventory_Claudiy.zip"
+type = "unspecified"
+title = "Клавдию — лаборатории и связки TalkHint"
+description = "README, 7 разделов, 73 benchmark-прогона, 391 строка кандидатов, исторический журнал из 96 записей, замеры, цены и источники. Только чтение; без аудио и ключей."
+logical_id = "ae741253-c1f8-43c6-bc7a-db084e14358d"
+content_hash = "sha256:44257f1fb31182b9ce20cb93590663601a02f6d0a7cd3ea4962cf993e965b6a0"
+size = 120824
+mtime_ms = 1793589293577
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ae741253-c1f8-43c6-bc7a-db084e14358d/43286e34-7417-460a-a15c-ebe2b18e1357"
+storage_version_token = "1793589298276261"
+content_type = "application/octet-stream"
