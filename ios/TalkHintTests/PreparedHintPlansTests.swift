@@ -112,29 +112,57 @@ final class PreparedHintPlansTests: XCTestCase {
     }
 
     // Offline render of the real production view, not an approximate mockup.
+    // Hosted in a real UIWindow on the active scene (as SecretaryPersonalityUITests does)
+    // so UIKit actually applies the requested appearance and Dynamic Type.
     private struct Fixture {
+        let window: UIWindow
         let host: UIViewController
         let scroll: UIScrollView
         let plans: PreparedHintPlansView
         let traits: UITraitCollection
     }
+    private var fixtureWindows: [UIWindow] = []
+    private var previousKeyWindow: UIWindow?
+
+    override func tearDown() async throws {
+        for window in fixtureWindows {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        fixtureWindows = []
+        previousKeyWindow?.makeKey()
+        previousKeyWindow = nil
+        try await super.tearDown()
+    }
+
     private func fixture(style: UIUserInterfaceStyle, largeType: Bool = false,
-                         configure: (PreparedHintPlansView) -> Void) -> Fixture {
+                         configure: (PreparedHintPlansView) -> Void) throws -> Fixture {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive })
+        if previousKeyWindow == nil { previousKeyWindow = scene.windows.first { $0.isKeyWindow } }
         let traits = UITraitCollection(traitsFrom: [
             UITraitCollection(userInterfaceStyle: style),
             UITraitCollection(preferredContentSizeCategory: largeType ? .accessibilityExtraExtraExtraLarge : .large)
         ])
         let host = UIViewController()
-        host.view.frame = CGRect(x: 0, y: 0, width: 320, height: 568)
         host.overrideUserInterfaceStyle = style
         host.view.backgroundColor = .systemBackground
         let child = UIViewController()
         host.addChild(child)
-        child.view.frame = host.view.bounds
         host.view.addSubview(child.view)
         child.didMove(toParent: host)
         host.setOverrideTraitCollection(traits, forChild: child)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 568)
+        window.overrideUserInterfaceStyle = style
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        fixtureWindows.append(window)
+        child.view.frame = host.view.bounds
+        child.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         let scroll = UIScrollView(frame: child.view.bounds)
+        scroll.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         child.view.addSubview(scroll)
         var plans: PreparedHintPlansView!
         traits.performAsCurrent {
@@ -152,14 +180,22 @@ final class PreparedHintPlansTests: XCTestCase {
             plans.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -16),
             plans.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -32)
         ])
+        window.layoutIfNeeded()
         host.view.layoutIfNeeded()
         scroll.layoutIfNeeded()
-        return Fixture(host: host, scroll: scroll, plans: plans, traits: traits)
+        // The real view must have received the requested traits, not just the fixture request.
+        XCTAssertTrue(plans.window === window)
+        XCTAssertEqual(plans.traitCollection.userInterfaceStyle, style)
+        XCTAssertEqual(plans.traitCollection.preferredContentSizeCategory, traits.preferredContentSizeCategory)
+        return Fixture(window: window, host: host, scroll: scroll, plans: plans, traits: traits)
     }
-    private func attach(_ fixture: Fixture, name: String) {
+    @discardableResult
+    private func attach(_ fixture: Fixture, name: String) -> UIImage {
+        fixture.window.layoutIfNeeded()
         fixture.host.view.layoutIfNeeded()
+        var image = UIImage()
         fixture.traits.performAsCurrent {
-            let image = UIGraphicsImageRenderer(bounds: fixture.host.view.bounds).image {
+            image = UIGraphicsImageRenderer(bounds: fixture.host.view.bounds).image {
                 fixture.host.view.layer.render(in: $0.cgContext)
             }
             let attachment = XCTAttachment(image: image)
@@ -167,11 +203,34 @@ final class PreparedHintPlansTests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
+        return image
+    }
+    /// Relative luminance (0 black ... 1 white) of one rendered pixel, read from the image itself.
+    private func luminance(_ image: UIImage, at point: CGPoint) throws -> CGFloat {
+        let cg = try XCTUnwrap(image.cgImage)
+        let x = Int(point.x * image.scale), y = Int(point.y * image.scale)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        try pixel.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(
+                data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cg, in: CGRect(x: -x, y: y - cg.height + 1, width: cg.width, height: cg.height))
+        }
+        return (0.2126 * CGFloat(pixel[0]) + 0.7152 * CGFloat(pixel[1]) + 0.0722 * CGFloat(pixel[2])) / 255
+    }
+    private func assertRenderedBackground(_ image: UIImage, style: UIUserInterfaceStyle, name: String) throws {
+        // Top-left margin is the host's systemBackground, outside the plan card.
+        let background = try luminance(image, at: CGPoint(x: 4, y: 4))
+        if style == .dark {
+            XCTAssertLessThan(background, 0.2, "Dark frame \(name) must actually render a dark background")
+        } else {
+            XCTAssertGreaterThan(background, 0.8, "Light frame \(name) must actually render a light background")
+        }
     }
     private func checkSavedFixture(largeType: Bool) throws {
         let saved = try response()
         for style in [UIUserInterfaceStyle.light, .dark] {
-            let screen = fixture(style: style, largeType: largeType) {
+            let screen = try fixture(style: style, largeType: largeType) {
                 $0.render(saved, at: Date(timeIntervalSince1970: 1_790_000_000))
             }
             let name = "\(style == .dark ? "dark" : "light")-\(largeType ? "large-type" : "normal")"
@@ -186,7 +245,8 @@ final class PreparedHintPlansTests: XCTestCase {
                 XCTAssertTrue(labels(screen.plans).contains { $0.font.pointSize > 30 },
                               "Fixture must actually apply accessibility Dynamic Type")
             }
-            attach(screen, name: "Prepare-\(name)-top")
+            let top = attach(screen, name: "Prepare-\(name)-top")
+            try assertRenderedBackground(top, style: style, name: "\(name)-top")
             XCTAssertGreaterThan(screen.scroll.contentSize.height, screen.scroll.bounds.height)
             screen.scroll.setContentOffset(CGPoint(x: 0, y: screen.scroll.contentSize.height - screen.scroll.bounds.height),
                                            animated: false)
@@ -205,8 +265,8 @@ final class PreparedHintPlansTests: XCTestCase {
     func testVisualFixturesLargeTypeReachesLastField() throws {
         try checkSavedFixture(largeType: true)
     }
-    func testVisualFixturesLoadingEmptyAndError() async {
-        let screen = fixture(style: .light) { $0.refresh() }
+    func testVisualFixturesLoadingEmptyAndError() async throws {
+        let screen = try fixture(style: .light) { $0.refresh() }
         defer { screen.plans.stopLoading() }
         XCTAssertTrue(labels(screen.plans).contains { $0.text == NSLocalizedString("prepare.saved.loading", comment: "") })
         attach(screen, name: "Prepare-loading")
