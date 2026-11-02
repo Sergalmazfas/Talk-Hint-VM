@@ -5,8 +5,8 @@
 - Repository: https://github.com/Sergalmazfas/Talk-Hint-VM
 - Branch: `xcode-chatgpt-prepare-2026-11-02`
 - Original Prepare code commit: `1052648cfa54da4ba5f6adcaa09d7035aa9a9e50`
-- Latest code commit (preserved UX test correction + offline visual fixtures):
-  `cd3b715f45af41d1f694a9e085e88fa103bb11f7`
+- Latest code commit (exact Mac-validated window-fixture correction):
+  `9efa14a6efc172f393c838d475ffd9e0b9516122`
 - Remote base: `efaaaec857c9a55ebc60b85f5c63756e46e39563`
 - Branch HEAD also contains this handoff in a separate documentation commit.
 - The updated branch also restores both original Mac fixes: the call-screen
@@ -35,11 +35,34 @@ The Mac report for `cd58373ab8a1cb0c129db30843f3d633742bfcf7` recorded a success
 build and 222 passed / 1 failed / 0 skipped XCTest; the final xcresult gate did
 not run. The only failure was an old test's one-tap-hide expectation. This
 delivery preserves the current collapse/expand UX and updates only tests,
-fixture rendering and documentation. It is not yet a passing native release.
+fixture rendering and documentation.
+
+The subsequent Mac run on `d1352056fee97f7ee99f57b9c7e9646e3642a861`
+passed 225 / failed 1 / skipped 0 because off-window fixtures did not apply
+appearance or accessibility text. The owner's test-only window patch then
+passed the full native gate: **226 passed / 0 failed / 0 skipped**, exit 0,
+including successful `verify-xcresult.py`, on Xcode 26.5 / iPhone 11 /
+iOS Simulator 26.5. This result is from the supplied Mac report, not Replit.
+
+That exact patch is now imported, with no application-source changes:
+- Patch SHA-256: `ae0e069131f7c73702476da6cff7a0b6e26b1e3f8e810b7098fe49602291b810`.
+- `ios/TalkHintTests/PreparedHintPlansTests.swift` SHA-256:
+  `4dd6314001a17d00856522e6a7ff7437e56b6cd29bd573d2a43df755e2c73807`.
+- Scene-backed windows, effective trait assertions, rendered pixel luminance
+  checks and previous-key-window restoration are retained exactly.
+- All twelve Prepare tests and both restored regressions remain mandatory.
+
+The Mac currently has this patch uncommitted. Before fetching/checking out,
+verify its local diff matches the supplied patch and its full-file hash above.
+Do not overwrite, reset or stash it. Use a separate clean Git worktree for
+the updated remote branch so the original checkout and untracked files remain
+intact. Run the full gate on the delivered HEAD and report its SHA and result.
 
 Run `git status --short`, record the current branch and HEAD, and inspect local
 commits. **Do not use stash, reset, force, rebase, merge, or overwrite another
-person's changes.** If there are local modifications, missing objects, or an
+person's changes.** The exact imported fixture patch above may remain in the
+original checkout; leave it there and validate the delivered HEAD in a separate
+clean worktree. For any other local modifications, missing objects, or an
 untransferred Mac-side fix needed by these sources, stop and report it.
 The owner's unrelated untracked Mac files must stay untouched. Use a fresh,
 uniquely named local branch for this updated remote HEAD, without overwriting
@@ -168,4 +191,10 @@ do not weaken the gate.
   authorize Archive/TestFlight; those need a separate owner's yes.
 
 Replit has not built or executed iOS here. Server Publish alone does not update
-the installed iPhone application. Mac report is pending; no release is authorized.
+the installed iPhone application. The exact patch passed on Mac before transfer;
+final verification on the delivered GitHub HEAD remains pending.
+
+Remaining unverified: Hint-only mounting versus Secretary and preservation after
+manual reset, real signed-in backend, installed iPhone, calls, and non-English
+fixture screenshots. The reported small Refresh button under Dynamic Type is
+not changed by this test-only transfer. No release is authorized.
