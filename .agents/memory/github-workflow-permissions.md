@@ -40,4 +40,15 @@ native delta; do not synchronize the full development tree.
 Copying the entire local native tree would have overwritten that unrelated fix.
 
 **How to apply:** verify the live remote baseline and compare affected files
-against the delta's parent before preparing an additive delivery.
+against the delta's parent before preparing an additive delivery. That comparison
+alone is insufficient: the chosen baseline must also retain all previously
+accepted Mac fixes, including files outside the new delta. Ask for the Mac
+baseline and unpushed fixes before preparing another delivery when this is
+uncertain. A clean remote branch can still be behind the accepted Mac lineage.
+An unpushed Mac commit cannot be recovered merely from its hash; obtain the
+original patch rather than reconstructing an allegedly identical fix.
+
+**Why:** a Prepare-only delivery matched every changed remote file but omitted
+both an earlier call-screen crash fix and a Secretary async test fix in untouched
+files. Mac correctly stopped before building; its unavailable push authorization
+had left the crash fix only in the local Mac checkout.
