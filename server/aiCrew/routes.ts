@@ -20,6 +20,7 @@ import { startCrewMaintenance } from "./maintenance";
 import { productionProductRepository } from "../productCrew/production";
 import { TEAM_OWNER } from "../team/plan";
 import { auditStructure } from "./structureAudit";
+import { commandFailure } from "./commandError";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 export function registerCrewRoutes(app: Express) {
@@ -116,18 +117,27 @@ export function registerCrewRoutes(app: Express) {
   app.post(api + "/command", protect, async (req, res) => {
     const parsed = commandSchema.safeParse(req.body?.command);
     if (!parsed.success || !Number.isSafeInteger(req.body?.revision)) return res.status(400).json({ error: "INVALID_CREW_COMMAND" });
+    let stage: "models" | "characters" | "evidence" | "command" = "models";
     try {
       const models = (["agent", "hint_pilot_prepare"].includes(parsed.data.kind) ||
         parsed.data.kind === "secretary_review_config" && parsed.data.enabled)
         ? (await provider.listModels()).map(m => m.id) : [];
+      stage = "characters";
       if (parsed.data.kind === "secretary_review_config" && parsed.data.enabled)
         secretaryCharacters(await readCompany());
+      stage = "evidence";
       if (parsed.data.kind === "hint_pilot_prepare" && environment() !== "production") throw Error("PRODUCTION_EVIDENCE_ONLY");
       const evidence = parsed.data.kind === "hint_pilot_prepare" ? await readHintEvidence(pool!, String(req.user!.id)) : undefined;
+      stage = "command";
       await store().change(s => applyOwnerCommand(s, parsed.data, String(req.user!.id), new Date().toISOString(), models, evidence), req.body.revision);
       if (parsed.data.kind === "control" && !parsed.data.enabled) runtime?.stopLocal();
       res.json({ saved: true, productChanged: false });
-    } catch { res.status(409).json({ error: "COMMAND_NOT_CONFIRMED_RELOAD_STATE" }); }
+    } catch (error) {
+      const failure = commandFailure(error, stage);
+      console.warn("[ai-crew] owner_command_failed", { code: failure.error, stage,
+        command: parsed.data.kind, expectedRevision: req.body.revision });
+      res.status(409).json(failure);
+    }
   });
   app.get(api + "/hint-pilot", async (req, res) => {
     res.set("Cache-Control", "no-store");

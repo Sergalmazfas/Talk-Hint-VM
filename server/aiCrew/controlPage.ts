@@ -38,7 +38,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
 <div class="fields"><label>Лимит отдела в месяц, $<input id="secretaryMonthly" type="text" inputmode="decimal" value="20"></label><label>Дополнительный общий дневной лимит, $<input id="secretaryDaily" type="text" inputmode="decimal" value="1"></label></div>
 <p class="warning">Включение — отдельное решение владельца после сверки и Publish. Если общий контроль OFF, кнопка разрешит его только при отсутствии чужой очереди и расписаний. Аварийное выключение сверху останавливает всех. Приватные/медицинские источники не анализируются; без аудио паузы и акцент не проверены.</p>
 <div class="bar"><button id="secretaryEnable">Включить разбор Секретаря</button><button id="secretaryDisable">Отключить отдел Секретаря</button></div></article>
-<article class="panel span12"><h2>Самостоятельные проверки Replit</h2><p class="hint">Отдельный scope crew-test: только пилоты Hint. Общий бюджет серии $5, срок 7 дней с первого использования ключа. Не сбрасывается новым днём, рестартом или заменой ключа. Отзыв окончательный для этой серии.</p><div id="crewTestStatus" class="hint"></div><button class="danger" id="revokeCrewTest">Отключить доступ Replit crew-test</button><button id="checkCrewStructure">Проверить структуру без моделей</button><pre id="crewStructureResult"></pre></article>
+<article class="panel span12"><h2>Самостоятельные проверки Replit</h2><p class="hint">Отдельный scope crew-test: только пилоты Hint. Общий бюджет серии $5, срок 7 дней с первого использования ключа. Не сбрасывается новым днём, рестартом или заменой ключа. Отзыв окончательный для этой серии.</p><div id="crewTestStatus" class="hint"></div><button class="danger" id="revokeCrewTest">Отключить доступ Replit crew-test</button><button id="checkCrewStructure">Проверить структуру без моделей</button><p id="crewStructureSummary" role="status">Проверка ещё не выполнена.</p><details id="crewStructureDetails"><summary>Подробнее</summary><pre id="crewStructureResult"></pre></details></article>
 <article class="panel span8"><div class="split"><h2>Состояние системы</h2><span class="small" id="updated"></span></div><div class="metrics" id="metrics"></div><div style="height:14px"></div><div class="kv" id="meta"></div><p class="hint" id="notice"></p></article>
  <article class="panel span4"><h2>Лимиты и контроль</h2><div class="warning">Сохранение всегда отправляет <code>enabled:false</code>. Общая настройка лимита не включает агентов. Для пилота используйте отдельные owner-действия.</div>
 <div class="fields"><div><label>Текущий дневной лимит (только чтение)</label><div id="dailyLimit"></div></div><div><label for="staleHours">Срок устаревания, часы</label><input id="staleHours" type="number" min="1" max="8760" step="1" value="24"></div></div><p class="hint">Лимит задаётся в долларах только в блоке пилота выше: 5 означает $5. Здесь лимит не меняется. Сохранение выключает контроль и меняет только срок устаревания.</p><button id="saveControl" class="primary">Сохранить выключенный контроль</button></article>
@@ -67,11 +67,17 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
   function item(parent,title,details){var box=node("div","item");var strong=node("strong","",title);box.appendChild(strong);if(details!==undefined){var body=node("div","muted",details);box.appendChild(body)}parent.appendChild(box)}
   function empty(el,msg){clear(el);el.appendChild(node("div","empty",msg))}
   function fmtUsd(n){var value=Number(n);return Number.isFinite(value)?(value/1000000).toLocaleString("ru-RU",{maximumFractionDigits:6})+" USD ("+value.toLocaleString("ru-RU")+" microUSD)":text(n)}
+  function renderStructure(report){
+    var valid=report&&report.summary&&Number.isSafeInteger(report.summary.ok)&&Number.isSafeInteger(report.summary.problems);
+    $("crewStructureSummary").textContent=valid?("OK: "+report.summary.ok+" · проблем: "+report.summary.problems+" · без моделей"):"Проверка недоступна — это не результат «ок».";
+    $("crewStructureResult").textContent=report?JSON.stringify(report,null,2):"";
+    $("crewStructureDetails").open=false;
+  }
   function render(data){
     payload=data; csrf=typeof data.csrf==="string"?data.csrf:"";
     var state=data.state||{}, control=state.control||{};
     var grant=state.testGrant;
-    if(state.structureReports&&state.structureReports.length)$("crewStructureResult").textContent=JSON.stringify(state.structureReports[state.structureReports.length-1],null,2);
+    if(state.structureReports&&state.structureReports.length)renderStructure(state.structureReports[state.structureReports.length-1]);
     $("crewTestStatus").textContent=grant?("Серия "+grant.id+" · "+(grant.revokedAt?"ОТОЗВАНО":Date.parse(grant.expiresAt)<=Date.now()?"ИСТЁК":"разрешена")+" · до "+when(grant.expiresAt)+" · потрачено/unknown "+fmtUsd(grant.spent)+" · резерв "+fmtUsd(grant.reserved)+" · последнее использование "+when(grant.lastUsedAt)):"Ключ ещё не использован; агенты не запущены.";
     $("switchDot").className="dot"+(control.enabled?" on":"");
     $("switchText").textContent=control.enabled?"ВНИМАНИЕ · сервер сообщил enabled=true":"ВЫКЛЮЧЕНО";
@@ -138,11 +144,11 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
     }catch(_){setMessage("СТОП: отзыв не подтверждён. Обновите состояние, не повторяйте запись вслепую.","error")}
   });
   $("checkCrewStructure").addEventListener("click",async function(){var b=$("checkCrewStructure");if(b.disabled)return;b.disabled=true;
-    try{$("crewStructureResult").textContent=JSON.stringify(await request("/structure-check",{method:"GET"}),null,2)}
-    catch(_){$("crewStructureResult").textContent="Проверка недоступна — это не результат «ок»."}finally{b.disabled=false}});
+    try{renderStructure(await request("/structure-check",{method:"GET"}))}
+    catch(_){renderStructure(null)}finally{b.disabled=false}});
   async function request(path,options){var opt=options||{};opt.cache="no-store";opt.credentials="same-origin";opt.headers=Object.assign({"Accept":"application/json"},opt.headers||{});if(opt.body)opt.headers["Content-Type"]="application/json";if(opt.method==="POST")opt.headers["x-crew-csrf"]=csrf;
     var response=await fetch(API+path,opt), data;try{data=await response.json()}catch(_){data={error:"Ответ сервера не является JSON"}}
-    if(!response.ok)throw Error(data.error||("HTTP "+response.status));return data}
+    if(!response.ok)throw Error((data.error||("HTTP "+response.status))+(typeof data.message==="string"?" — "+data.message:""));return data}
   async function refresh(manual){if(busy)return;busy=true;setMessage("Запрашиваем актуальное состояние…");try{var data=await request("",{method:"GET"});render(data);if(manual===true)pilotBlocked=false;updatePilotButtons();setMessage("Состояние получено от сервера.","good")}catch(e){setMessage("Не удалось получить состояние: "+e.message+". Данные на экране могут быть устаревшими.","error")}finally{busy=false}}
   function updatePilotButtons(){var disabled=pilotBusy||pilotBlocked||!pilotStateValid(payload),state=payload&&payload.state,open=state&&findOpenPilot(state),prepared=open&&open.hintPilot.status==="prepared"&&open.phase==="analysis";
     $("prepareHintPilot").disabled=!!(disabled||open||state.control.enabled||state.control.dailyLimitMicroUsd!==0);

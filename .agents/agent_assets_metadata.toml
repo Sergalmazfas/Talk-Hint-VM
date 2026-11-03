@@ -3351,3 +3351,17 @@ mtime_ms = 1793679110494
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5e4a117c-9c6a-4ed6-a1dc-27bab6090aba/14a377ae-fcc6-453b-87f7-611a1e838ecb"
 storage_version_token = "1793679190663025"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "1Grcn3gTksibu_3YiEJxQ"
+uri = "file://generated-artifacts/crew-panel-diagnostics/AI_Crew_panel_diagnostics_Claude.zip"
+type = "unspecified"
+title = "AI Crew — диагностика и исправление панели"
+description = "Diff, воспроизведение блокера, полный прогон 4 частями, причины отказа и сводка структуры. Отдел остаётся OFF; production не изменён."
+logical_id = "6aa060d1-a337-45b3-ae04-123760d65b21"
+content_hash = "sha256:3bef15dfdc3daa5a6fd3ec5e0a3ed75276b459d72ec79b08beb84346516db313"
+size = 220255
+mtime_ms = 1793709855189
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6aa060d1-a337-45b3-ae04-123760d65b21/aca5040f-4c90-4b6f-b768-28a1db5d5e2a"
+storage_version_token = "1793709868797387"
+content_type = "application/octet-stream"

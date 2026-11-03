@@ -47,6 +47,17 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it("reports catalog failure with safe code and never attempts a paid request or write",async()=>{
+  const token=await csrf(),before=structuredClone(f.state);
+  f.models.mockRejectedValueOnce(Error("private upstream body DO_NOT_EXPOSE"));
+  const response=await post("/command",{revision:0,command:{kind:"secretary_review_config",
+    enabled:true,monthlyLimitMicroUsd:20e6,dailyLimitMicroUsd:1e6}},token);
+  expect(response.status).toBe(409);
+  const body=await response.json();
+  expect(body.error).toBe("MODEL_CATALOG_UNAVAILABLE");
+  expect(JSON.stringify(body)).not.toContain("DO_NOT_EXPOSE");
+  expect(f.state).toEqual(before);expect(f.message).not.toHaveBeenCalled();
+ });
  it("revokes separate test grant only with owner, Origin, CSRF, fresh revision; tombstone survives reread",async()=>{
   authorizeTest(f.state,keyHash("fixture-only-".repeat(5)),"2026-11-01T18:00:00Z");
   const t=await csrf(),before=structuredClone(f.state);
