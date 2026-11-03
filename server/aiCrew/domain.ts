@@ -3,6 +3,7 @@ import { z } from "zod";
 import { closeStalledHintPilot, HINT_AGENTS, pilotReviewComplete, prepareHintPilot, startHintPilot,
   STALLED_PILOT_OUTCOME, type HintPilot } from "./hintPilot";
 import type { HintEvidence } from "./hintEvidence";
+import type { HintSeriesCompletion } from "./finalizeHintSeries";
 import { configureSecretary, secretaryReviewComplete, SECRETARY_AGENTS, type SecretaryReview, type SecretarySettings, type SecretaryBudget } from "./secretaryReview";
 
 export const phases = ["problem", "analysis", "owner_decision", "code", "verification", "outcome"] as const;
@@ -46,6 +47,7 @@ export type Run = { id: string; taskId: string; agentId: string; eventId: string
   at: string; day?: string; epoch?: number; reserved?: number; cost?: number; usage?: { input_tokens: number; output_tokens: number };
   modelId?: string; completedAt?: string; secretaryMonth?: string };
 export type CrewState = {
+  hintSeriesCompletion?: HintSeriesCompletion;
   secretarySettings?: SecretarySettings; secretaryBudget?: SecretaryBudget;
   version: 1; revision: number; control: { enabled: boolean; epoch: number; dailyLimitMicroUsd: number; staleHours: number; testSeriesId?: string };
   testGrant?: { id: string; keyHash: string; createdAt: string; expiresAt: string; revokedAt?: string;

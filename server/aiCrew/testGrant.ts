@@ -5,6 +5,7 @@ import type { HintEvidence } from "./hintEvidence";
 import { closeStalledHintPilot, STALLED_PILOT_OUTCOME } from "./hintPilot";
 import { hasLegacyWriteoff, writeOffLegacyUnknown } from "./legacyUnknown";
 import { isSupersededChargedUnknown, supersedeApprovedFailure } from "./failedPilot";
+import { finalizeHintSeries } from "./finalizeHintSeries";
 
 export const TEST_ACTOR = "replit-test";
 export const SERIES_LIMIT = 5_000_000;
@@ -14,6 +15,7 @@ export const testActions = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start"), taskId: z.string().uuid() }).strict(),
   z.object({ action: z.literal("close_stalled"), taskId: z.string().uuid() }).strict(),
   z.object({ action: z.literal("writeoff_legacy_unknown") }).strict(),
+  z.object({ action: z.literal("finalize_hint_series") }).strict(),
   z.object({ action: z.literal("off") }).strict(),
 ]);
 export const keyHash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -64,6 +66,8 @@ export function applyTestAction(s: CrewState, raw: unknown, at: string, models: 
   if (!validGrant(s, Date.parse(at))) throw Error("CREW_TEST_DENIED");
   const a = testActions.parse(raw), g = s.testGrant!;
   if (a.action === "off") { stopTest(s, at, "requested"); return; }
+  if (a.action === "finalize_hint_series") { finalizeHintSeries(s, at); return; }
+  if (s.hintSeriesCompletion) throw Error("HINT_SERIES_FINALIZED_NO_NEW_PILOTS");
   if (a.action === "writeoff_legacy_unknown") {
     writeOffLegacyUnknown(s, at);
     return;

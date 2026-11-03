@@ -8,7 +8,7 @@ import { auditStructure } from "./structureAudit";
 import type { ProjectModelState } from "../../shared/projectModel";
 
 const mutations = ["crew_test_prepare", "crew_test_enable", "crew_test_start", "crew_test_off", "crew_test_close_stalled",
-  "crew_test_writeoff_legacy_unknown"] as const;
+  "crew_test_writeoff_legacy_unknown", "crew_test_finalize_hint_series"] as const;
 const base = { revision: z.number().int().nonnegative(), requestId: z.string().uuid() };
 const writeSchema = z.object({ ...base, command: testActions }).strict();
 const readNames = ["crew_test_state", "crew_structure_check"];
@@ -42,7 +42,7 @@ export function registerTestMcp(app: Express, o: {
           } else {
             const s = await o.store().read(), tasks = s.tasks.filter(t => t.testSeriesId === s.testGrant?.id);
             const ids = new Set(tasks.map(t => t.id));
-            result = { revision: s.revision, control: s.control,
+            result = { revision: s.revision, control: s.control, hintSeriesCompletion: s.hintSeriesCompletion,
               grant: s.testGrant ? { ...s.testGrant, keyHash: undefined } : null,
               tasks: tasks.map(({ hintPilot, ...t }) => ({ ...t, hintPilot: hintPilot ?
                 { ...hintPilot, evidence: undefined } : undefined })),
@@ -97,6 +97,8 @@ export function registerTestMcp(app: Express, o: {
                   ...["enable", "start", "close_stalled"].map(action => ({ type: "object", additionalProperties: false,
                     required: ["action", "taskId"], properties: { action: { const: action }, taskId: { type: "string", format: "uuid" } } })),
                   { type: "object", additionalProperties: false, required: ["action"], properties: { action: { const: "off" } } },
+                  { type: "object", additionalProperties: false, required: ["action"],
+                    properties: { action: { const: "finalize_hint_series" } } },
                    { type: "object", additionalProperties: false,
                      required: ["action"], properties: { action: { const: "writeoff_legacy_unknown" } } },
                 ] } } },

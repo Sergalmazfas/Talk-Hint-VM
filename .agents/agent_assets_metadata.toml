@@ -3365,3 +3365,17 @@ mtime_ms = 1793709855189
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6aa060d1-a337-45b3-ae04-123760d65b21/aca5040f-4c90-4b6f-b768-28a1db5d5e2a"
 storage_version_token = "1793709868797387"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "XqBy1qMUu1FHIIo0sKOTV"
+uri = "file://generated-artifacts/crew-series-completion/Hint_series_completion_and_panel_Claude.zip"
+type = "unspecified"
+title = "Клавдию — завершение серии Hint + панель"
+description = "Единый diff, исходники, тесты четырьмя частями, проверка PostgreSQL, хэши файлов и порядок записи после Publish. Production не изменён; отдел OFF."
+logical_id = "02100e70-6aec-409f-b491-0c23608cf4ff"
+content_hash = "sha256:93631821b41cab6590ae4d46fd222eb2939a9be2f55a683ae0ede7ec22c892ef"
+size = 244303
+mtime_ms = 1793710504672
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/02100e70-6aec-409f-b491-0c23608cf4ff/c11f0c27-1521-4dff-a49c-67ccbe1335a0"
+storage_version_token = "1793710526813326"
+content_type = "application/octet-stream"
