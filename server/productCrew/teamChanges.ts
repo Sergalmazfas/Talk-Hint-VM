@@ -9,6 +9,7 @@ import { createSecretaryDepartment } from "./secretaryDepartment";
 import { employeeSectionCommands, updateEmployeeSectionsInput } from "./employeeSections";
 import { applyOwnerProductPolicyInput, ownerProductPolicyCommands } from "./ownerProductPolicy";
 import { createHintPrepRole, createHintPrepRoleInput } from "./hintCallPrepRole";
+import { approveSecretaryNameCommands, approveSecretaryNameInput } from "./approveSecretaryName";
 
 const text = (n: number) => z.string().trim().min(1).max(n);
 const key = text(120);
@@ -16,6 +17,7 @@ const mode = z.enum(["company", "hint", "secretary", "copilot", "translator"]);
 const base = { revision: z.number().int().min(0), requestId: z.string().uuid(),
   reason: text(3000), ownerDecisionRef: text(1000) };
 export const teamChangeInputs = {
+  approve_secretary_name: approveSecretaryNameInput,
   create_hint_call_prep_role: createHintPrepRoleInput,
   apply_owner_product_change_policy: applyOwnerProductPolicyInput,
   update_employee_sections: updateEmployeeSectionsInput,
@@ -50,6 +52,7 @@ export function projectionManagers(documents: ProjectModelState["documents"]) {
 }
 /** Pure command builder. No storage, provider calls, activation or arbitrary patches. */
 export function buildTeamChange(state: ProjectModelState, name: keyof typeof teamChangeInputs, a: any) {
+  if (name === "approve_secretary_name") return approveSecretaryNameCommands(state, a);
   if (name === "create_hint_call_prep_role") return createHintPrepRole(state, a);
   if (name === "apply_owner_product_change_policy") return ownerProductPolicyCommands(state, a);
   if (name === "update_employee_sections") return employeeSectionCommands(state, a);

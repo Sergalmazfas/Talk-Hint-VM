@@ -1,10 +1,38 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error Standalone Node CLI intentionally has no TS build dependency.
-import { callProductionMcp, verifyProductionMcp } from "../../script/product-crew-production-mcp.mjs";
+import { callProductionMcp, verifyProductionMcp, productionMcpDiagnostic } from "../../script/product-crew-production-mcp.mjs";
 const key = "fixture_client_Secrets_key_".repeat(3);
 const env = { PRODUCT_CREW_KEY: key };
 afterEach(() => vi.useRealTimers());
 describe("Dev to production MCP client safety", () => {
+  it("classifies a refusal without leaking response text, credentials or changing retry rules", async () => {
+    for (const [message, code] of [["Invalid transaction size", "TRANSACTION_SIZE"],
+      ["P.PREP или её ID уже существует; ничего не заменено.", "PREP_COLLISION"],
+      ["arbitrary private internal detail", "UNCLASSIFIED_REFUSAL"]]) {
+      const fetcher = vi.fn(async (_url, init) => Response.json({
+        jsonrpc: "2.0", id: JSON.parse(init.body).id, result: { isError: true,
+          content: [{ type: "text", text: JSON.stringify({ status: 409, error: message }) }] },
+      }));
+      let caught;
+      try { await callProductionMcp("tools/call", { name: "create_hint_call_prep_role" }, { env, fetcher }); }
+      catch (error) { caught = error; }
+      expect(productionMcpDiagnostic(caught)).toEqual({ category: "tool_refusal",
+        httpStatus: 200, rpcStatus: 409, reasonCode: code });
+      expect(String(caught)).not.toContain(message);
+      expect(JSON.stringify(productionMcpDiagnostic(caught))).not.toContain(key);
+      expect(fetcher).toHaveBeenCalledOnce();
+    }
+  });
+  it("never classifies a secret-bearing payload using its text and never trusts raw exceptions", async () => {
+    const fetcher = vi.fn(async (_url, init) => Response.json({
+      jsonrpc: "2.0", id: JSON.parse(init.body).id, result: { isError: true,
+        content: [{ type: "text", text: JSON.stringify({ status: 409, error: key }) }] },
+    }));
+    let caught;
+    try { await callProductionMcp("tools/list", undefined, { env, fetcher }); } catch (error) { caught = error; }
+    expect(productionMcpDiagnostic(caught)).toEqual({ category: "sensitive_response" });
+    expect(productionMcpDiagnostic(Error(key))).toEqual({ category: "unclassified" });
+  });
   it("has exactly one fixed HTTPS destination, no redirects, bounded wait and no retry", async () => {
     const fetcher = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe("https://talkhint.app/api/product-crew/mcp");
