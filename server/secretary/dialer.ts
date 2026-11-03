@@ -1,10 +1,9 @@
-import { secretaryPlanFromInstruction } from "../../shared/callPlan";
-import { planHash } from "../callPlans/store";
+import { secretaryPreparationMetadata } from "../callPlans/secretary";
 import { SECRETARY_CALL_LIMIT_SECONDS } from "./limits";
 import twilio from "twilio";
-import { eq } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "../db";
-import { phoneNumbers } from "@shared/schema";
+import { calls, phoneNumbers } from "@shared/schema";
 import { storage } from "../storage";
 import { resolveProductionBaseUrl } from "../baseUrl";
 import { getClone, getCartesiaClone } from "../voiceLab/store";
@@ -83,7 +82,15 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
   // subsequent history write fails, the worker must NOT redial an ambiguous
   // call; it will report an error and remain in its single-use starting state.
   const existing = await storage.getCallByCallSid(created.sid);
-  const preparation = secretaryPlanFromInstruction(job.instruction ?? "", job.phoneNumber);
+  const preparation = secretaryPreparationMetadata(job);
+  // The callback can create history before REST create returns. Enrich that
+  // same owner-scoped row rather than silently dropping the approved plan.
+  if (existing) {
+    if (existing.userId !== job.userId) throw new Error("Secretary history owner mismatch");
+    await db.update(calls).set({
+      metadata: sql`coalesce(${calls.metadata}, '{}'::jsonb) || ${JSON.stringify(preparation)}::jsonb`,
+    }).where(and(eq(calls.id, existing.id), eq(calls.userId, job.userId)));
+  }
   const call = existing ?? await storage.createCall({
     userId: job.userId,
     callSid: created.sid,
@@ -93,7 +100,7 @@ export async function dialSecretaryTask(job: SecretaryDialJob): Promise<{ sid: s
     status: "ringing",
     transcript: "",
     metadata: { mode: "secretary", secretaryTaskId: job.id, voiceProvider: job.voiceProvider,
-      ...(preparation ? { callPlan: { id: job.id, hash: planHash(preparation), plan: preparation } } : {}),
+      ...preparation,
       ...(job.voiceProvider === "openai" ? { model: SECRETARY_AUDIO_MODEL, voice: SECRETARY_AUDIO_VOICE } : {}) },
   });
   return { sid: created.sid, callId: call.id };

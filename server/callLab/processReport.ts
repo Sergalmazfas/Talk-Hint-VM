@@ -13,7 +13,12 @@ export function preparationLetterSection(report: any): string {
 Точных совпадений ответов владельца: ${p.exactAnswersObserved ?? "не измерено"}.
 Это только текстовые признаки, не процент качества или полезности.
 Семантическая проверка: ${p.semanticReview?.status === "lab_qa_reviewed" ? "лаборатория + QA" : "не измерено"}.
-${p.semanticReview?.text ?? ""}
+${p.semanticReview?.status === "lab_qa_reviewed" ? [
+  `По смыслу: покрыто ${p.semanticReview.questionsCovered}/${p.semanticReview.questionsAssessed} оценённых вопросов (${p.semanticReview.questionCoveragePercent ?? "не измерено"}%).`,
+  `Готовые ответы: совпало ${p.semanticReview.answersMatched}/${p.semanticReview.preparedAnswersAssessed} (${p.semanticReview.answerMatchPercent ?? "не измерено"}%); частично ${p.semanticReview.partialAnswers}; не оценено ${p.semanticReview.answersUnassessed ?? "неизвестно"}.`,
+  ...(p.semanticReview.rows ?? []).map((r: any) => `Вопрос: ${r.guestQuote}; пункт плана: ${r.planIndex === null ? "не был" : r.planIndex + 1}; ответ владельца: ${r.ownerQuote ?? "нет данных"}; ${r.answerMatch}. ${r.explanation}`),
+  p.semanticReview.basis, ...(p.semanticReview.limitations ?? []),
+].join("\n") : `Причина: ${p.semanticReview?.reason ?? "нет проверенной смысловой оценки"}`}
 ${(p.limitations ?? []).join("\n")}\n`;
 }
 

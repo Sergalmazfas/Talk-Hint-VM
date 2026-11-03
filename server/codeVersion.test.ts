@@ -1,4 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+// These tests check stamp semantics, not an uncontrolled Git subprocess.
+// The offline release build separately exercises real sourceVersion/Git.
+vi.mock("node:child_process", () => ({
+ execFileSync: vi.fn((_file: string, args: string[]) => {
+  if (args.join(" ") === "rev-parse HEAD") return "f".repeat(40);
+  if (args.join(" ") === "status --porcelain") return " M fixture.ts";
+  throw Error("Unexpected provenance command");
+ }),
+}));
 import { codeVersion, recordedCallVersion, stampCallMetadata } from "./codeVersion";
 import { modeNotice } from "./callLab/policy";
 import { authorizedHintSource } from "./callLab/source";

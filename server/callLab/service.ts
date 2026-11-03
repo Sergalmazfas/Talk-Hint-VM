@@ -7,7 +7,7 @@ import { completeLabReport } from "./processReport";
 import { LabStore } from "./store";
 import { runHintLab, checkHintLabRuntime, cleanupLabScratch, labAnalysisFailure } from "./process";
 import { authorizedHintSource, registerLabSourceOwner } from "./source";
-import { preparationAssessment } from "../callPlans/assessment";
+import { reviewedPreparationAssessment } from "../callPlans/semanticAssessment";
 import { startHintWatchdog } from "./watchdog";
 import { labStartupReady, labStartupStatus, labStartupStep, resetLabStartup } from "./startup";
 import { ownerCallsSql, modeNotice } from "./policy";
@@ -152,16 +152,7 @@ export async function hintLabTick(pool: Pool, dependencies: {
       const result = await (dependencies.product ?? attachProductFollowup)(pool, report, source,
         { owner: config.owner!, environment: config.environment });
       result.code_version = source?.code_version ?? report?.code_version ?? null;
-      result.preparation = preparationAssessment(source?.call_plan, source?.transcript);
-      if (source?.call_plan && result.preparation.status !== "no_valid_plan") {
-        result.preparation.semanticReview = {
-          status: result.qa_status === "QA: принято" && result.analysis?.summary_ru?.includes("P.PREP")
-            ? "lab_qa_reviewed" : "not_measured",
-          text: result.qa_status === "QA: принято" && result.analysis?.summary_ru?.includes("P.PREP")
-            ? result.analysis.summary_ru : null,
-          basis: "Existing authorized call-lab analysis and independent QA; not a newly enabled P.PREP agent.",
-        };
-      }
+      result.preparation = reviewedPreparationAssessment(source?.call_plan, source?.transcript, result);
       result.code_version_basis = result.code_version ? "recorded_at_call_start" : "historical_unknown";
       result.action_reports ??= labActionReports(result, new Date().toISOString());
       const needsDecision = result.product_followup.issues.some((i: any) => i.decision === "awaiting_owner");

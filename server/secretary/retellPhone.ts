@@ -1,4 +1,5 @@
 import { SECRETARY_CALL_LIMIT_MS } from "./limits";
+import { secretaryPreparationMetadata } from "../callPlans/secretary";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { calls, secretaryTasks } from "@shared/schema";
 import { db } from "../db";
@@ -159,7 +160,9 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
     const agentId = await requireRetellPhone(origin);
     const reservation = { state: "registering", taskId };
     const reserved = await db.update(calls).set({
-      metadata: sql`coalesce(${calls.metadata}, '{}'::jsonb) || ${JSON.stringify({ retellPhone: reservation })}::jsonb`,
+      metadata: sql`coalesce(${calls.metadata}, '{}'::jsonb) || ${JSON.stringify({
+        retellPhone: reservation, ...secretaryPreparationMetadata(task),
+      })}::jsonb`,
     }).where(and(eq(calls.callSid, callSid), eq(calls.userId, task.userId),
       sql`${calls.metadata}->'retellPhone' IS NULL`)).returning({ id: calls.id });
     if (!reserved.length) throw new Error("Retell registration already attempted; automatic retry prohibited");

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from crewai import LLM
 from workers.hint_lab.pipeline import (
-    Analysis, Finding, Letter, QA, run, validate_source, failure_diagnostic,
+    Analysis, Finding, Letter, QA, PreparationReview, PreparationRow, run, validate_source, failure_diagnostic,
     RUBRIC_CONTRACT, RUBRIC_TEXT, rubric_contract,
 )
 
@@ -88,6 +88,26 @@ class FlowTests(unittest.TestCase):
         self.assertIn("P.PREP", mocked.call_args_list[0].args[1])
         self.assertIn("НЕ готовый ответ", mocked.call_args_list[0].args[1])
         self.assertIn("Независимо проверь раздел P.PREP", mocked.call_args_list[1].args[1])
+
+    def test_semantic_preparation_is_structured_and_seen_by_existing_qa(self):
+        source = copy.deepcopy(SOURCE)
+        source["call_plan"] = {"id": "synthetic", "hash": "test-only", "plan": {
+            "expectedQuestions": [{"q": "Which axle?", "answer": "Trailer axle"}]}}
+        analysis = ANALYSIS.model_copy(deep=True)
+        analysis.preparation = PreparationReview(rows=[
+            PreparationRow(guestQuote="Is this for your trailer?", planIndex=0,
+                           ownerQuote="Yes, the trailer.", answerMatch="matched",
+                           explanation="Different wording, same meaning")
+        ], limitations=["Unverified STT"])
+        with patch("socket.socket.connect", side_effect=AssertionError("NETWORK_FORBIDDEN")), \
+                patch("workers.hint_lab.pipeline.single_pass", side_effect=[
+                    (analysis, {}), (QA(verdict="accepted", issues=[]), {}), (LETTER, {}),
+                ]) as mocked:
+            result = run(source, llm=LLM(model="openai/gpt-5.2", api_key="offline-test-not-a-key"))
+        self.assertEqual(mocked.call_count, 3)
+        self.assertEqual(result["analysis"]["preparation"]["rows"][0]["planIndex"], 0)
+        self.assertIn("Is this for your trailer?", mocked.call_args_list[1].args[1])
+        self.assertIn("индекс expectedQuestions С НУЛЯ", mocked.call_args_list[1].args[1])
 
     def test_schema_and_rubric_drift_fails_before_any_model_request(self):
         schema = copy.deepcopy(Finding.model_json_schema())

@@ -3281,3 +3281,31 @@ mtime_ms = 1793660073269
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/116368fd-2d1e-43f8-bf57-a888cc9e1dce/e84fe0fd-3a46-4853-8e08-b3cb730135b7"
 storage_version_token = "1793660117491440"
 content_type = "text/html"
+
+[[outputs]]
+id = "CeFvvDTef8etUUY6pOMXu"
+uri = "file://generated-artifacts/crew-role-audit/Crew_Roles_Step1.zip"
+type = "unspecified"
+title = "Шаг 1 — JSON восьми ролей для Клавдия"
+description = "Обязанности, фактическая ручная работа, модели и пробелы. MCP r1204; ограничения и хэши источников включены. Независимая проверка и подключение сотрудников не имитируются."
+logical_id = "ad330a89-5cd7-4b7a-ac70-0a764ad7241f"
+content_hash = "sha256:b565aa110c312236aa18de7aa9e2a881139bb88e2123249f8470f80897d7325b"
+size = 14104
+mtime_ms = 1793661740208
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ad330a89-5cd7-4b7a-ac70-0a764ad7241f/da01ef84-44d5-4d09-bdd7-3e0ee7babeb2"
+storage_version_token = "1793661744837531"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "9QiHRyZ6vX08_g5lyw5a-"
+uri = "file://generated-artifacts/crew-step2-review/Crew_Step2_Review.zip"
+type = "unspecified"
+title = "Шаг 2 — код, тесты и отчёт STOP для Клавдия"
+description = "31 файл: diff и исходники, полный прогон 4 частей, Python 34/34, сборка, журнал неподтверждённого MCP-вызова и явно невыполненные production-записи. Это не пакет автоматизации шага 3."
+logical_id = "05a445c7-8d56-45cb-b211-68259239e866"
+content_hash = "sha256:6770d5f34ce62f4a5511a03f1e507c962b7de4aa00adde33a95221bec4af0cbb"
+size = 270979
+mtime_ms = 1793664114710
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/05a445c7-8d56-45cb-b211-68259239e866/1d468554-4b7e-4b61-b688-852b6a0abd9b"
+storage_version_token = "1793664173877509"
+content_type = "application/octet-stream"
