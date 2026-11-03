@@ -4,6 +4,7 @@
  */
 import type { PoolClient } from "pg";
 import type { ProjectModelState } from "../../shared/projectModel";
+import hintPrepProfile from "../../shared/hintCallPrepProfile.json";
 import { canonical, child, assign, flatten, inflate, semanticHash, textHash, type Json, type Leaf } from "./valueTree";
 
 export const businessTables = [
@@ -255,10 +256,20 @@ export function project(root: ProjectModelState, workspace: string, schema: Sche
         }
         const ps = { workspace_id: workspace, hypothesis_id: h.id,
           operating_version: lastOp.version, entity_id: roleId, profile_version: Number(j.version) };
-        const traits = v.character?.traits;
+        // The owner's fixed P.PREP v1 explicitly leaves personality unassigned.
+        // Preserve that source document: NULL is not an invented personality.
+        // This exception is not a general relaxation of employee profiles.
+        const unsetHintPrepCharacter = d.id === "DOC-HINT-CALL-PREP-MASTER" &&
+          j.format === hintPrepProfile.format && roleId === hintPrepProfile.visualPassport.roleId &&
+          Number.isSafeInteger(j.version) && j.version >= 1 &&
+          v.nameProposal === hintPrepProfile.visualPassport.nameProposal &&
+          v.character === undefined &&
+          j.character?.status === hintPrepProfile.character.status &&
+          Object.keys(j.character).length === 1;
+        const traits = unsetHintPrepCharacter ? [null, null, null] : v.character?.traits;
         if (!Array.isArray(traits) || traits.length !== 3) throw new Error("Profile must have exactly 3 traits");
         emit("company_employee_profiles", {}, null, ps, { display_name: v.selectedName ?? null,
-          trait_1: traits[0], trait_2: traits[1], trait_3: traits[2], motto: v.character.motto ?? null,
+          trait_1: traits[0], trait_2: traits[1], trait_3: traits[2], motto: v.character?.motto ?? null,
           portrait_description: v.portrait?.image ?? null, portrait_file_url: v.portrait?.asset ?? null,
           portrait_style: v.portrait?.styleId ?? null, role_color: v.roleColor?.value ?? null,
           owner_selection_status: v.selectedName ? "accepted" : "not_selected",

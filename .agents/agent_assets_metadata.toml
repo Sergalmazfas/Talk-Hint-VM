@@ -3323,3 +3323,17 @@ mtime_ms = 1793670473161
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/df331f47-57c9-465f-b7ee-13d6f047a058/cc8538b3-22d3-4642-878a-0d12fd4877b0"
 storage_version_token = "1793670487966703"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "7CyfVPe8wvfunNd1aP6-1"
+uri = "file://generated-artifacts/crew-step3/Gleb_PPREP_projection_fix_Claude.zip"
+type = "unspecified"
+title = "Глеб P.PREP — исправление 500 для Клавдия"
+description = "Полный неопубликованный diff, причина и воспроизведение до/после, 4 зелёных шарда, хэши и порядок одного повтора после Publish. Production-записей не было."
+logical_id = "a56a6f9b-b5f3-4f4c-8ee0-ce7e81ebc5e5"
+content_hash = "sha256:efde5ed8cf0c91f199f4eca13fdeac9a71aa07f5923f009c4020fa06ca103e71"
+size = 653100
+mtime_ms = 1793672543284
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a56a6f9b-b5f3-4f4c-8ee0-ce7e81ebc5e5/0c945c66-c21a-43b8-88b8-f9b2f20fb078"
+storage_version_token = "1793672567311575"
+content_type = "application/octet-stream"
