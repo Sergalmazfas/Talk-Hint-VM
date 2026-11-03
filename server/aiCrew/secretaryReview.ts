@@ -82,17 +82,24 @@ export function secretaryCharacters(model: ProjectModelState): SecretaryReview["
     return [a.agentId, { traits: [...c.traits], motto: c.motto }];
   }));
 }
-export function configureSecretary(s: CrewState, enabled: boolean, limit: number, ownerId: string, at: string, models: string[],
+/** Cheap read-only preflight; configureSecretary repeats it inside the CAS lock. */
+export function assertSecretaryConfigurationState(s: CrewState, enabled: boolean, ownerId: string,
   dailyLimitMicroUsd?: number) {
-  if (enabled && !SECRETARY_AGENTS.every(a => models.includes(a.modelId))) throw Error("SECRETARY_MODELS_UNVERIFIED");
   if (s.secretarySettings && s.secretarySettings.ownerId !== ownerId) throw Error("SECRETARY_OWNER_MISMATCH");
   if (enabled && s.control.testSeriesId) throw Error("HINT_PILOT_REQUIRES_SEPARATE_OWNER_DECISION");
   if (enabled && !s.control.enabled) {
     if (s.schedules.length || s.runs.some(r => ["queued", "running"].includes(r.status) &&
       !s.tasks.find(t => t.id === r.taskId)?.secretaryReview)) throw Error("OTHER_CREW_WORK_REQUIRES_OWNER_DECISION");
-    s.control.enabled = true; s.control.dailyLimitMicroUsd = dailyLimitMicroUsd ?? 1e6; s.control.epoch++;
   } else if (enabled && dailyLimitMicroUsd !== undefined && s.control.dailyLimitMicroUsd !== dailyLimitMicroUsd) {
     throw Error("GLOBAL_LIMIT_CHANGE_REQUIRES_SEPARATE_OWNER_DECISION");
+  }
+}
+export function configureSecretary(s: CrewState, enabled: boolean, limit: number, ownerId: string, at: string, models: string[],
+  dailyLimitMicroUsd?: number) {
+  if (enabled && !SECRETARY_AGENTS.every(a => models.includes(a.modelId))) throw Error("SECRETARY_MODELS_UNVERIFIED");
+  assertSecretaryConfigurationState(s, enabled, ownerId, dailyLimitMicroUsd);
+  if (enabled && !s.control.enabled) {
+    s.control.enabled = true; s.control.dailyLimitMicroUsd = dailyLimitMicroUsd ?? 1e6; s.control.epoch++;
   }
   s.secretarySettings = { ownerId, enabled, monthlyLimitMicroUsd: limit,
     activatedAt: s.secretarySettings?.enabled || !enabled ? s.secretarySettings?.activatedAt ?? at : at };

@@ -3,7 +3,10 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import { applyOwnerCommand, initialState } from "./domain";
 const f=vi.hoisted(()=>({state:null as any, session:{} as any,
-  message:vi.fn(),models:vi.fn(),evidence:vi.fn(),initialized:false,builtAt:"now"}));
+  message:vi.fn(),models:vi.fn(),evidence:vi.fn(),companyRead:vi.fn(),initialized:false,builtAt:"now"}));
+vi.mock("../productCrew/production",()=>({productionProductRepository:()=>({
+ read:(...args:any[])=>f.companyRead(...args),
+})}));
 vi.mock("./hintEvidence",async importOriginal=>{
  const actual=await importOriginal<typeof import("./hintEvidence")>();
  return {...actual,readHintEvidence:(...args:any[])=>f.evidence(...args)};
@@ -20,7 +23,7 @@ vi.mock("./store",()=>({CrewStore:class{
  async initialize(){f.initialized=true}
  async read(){if(!f.initialized)throw Error("not initialized");return structuredClone(f.state)}
  async change(fn:any,rev?:number){if(!f.initialized)throw Error("not initialized");
-  if(rev!==undefined&&rev!==f.state.revision)throw Error("stale");
+  if(rev!==undefined&&rev!==f.state.revision)throw Error("STALE_REVISION");
   const s=structuredClone(f.state),r=fn(s);s.revision++;f.state=s;return r}
 }}));
 vi.mock("./anthropic",async importOriginal=>({...(await importOriginal<typeof import("./anthropic")>()),AnthropicCrewProvider:class{
@@ -39,6 +42,9 @@ beforeEach(async()=>{
  f.message.mockReset().mockResolvedValue({text:"OK",model:"from-api",usage:{input_tokens:1,output_tokens:1}});
  f.evidence.mockReset().mockResolvedValue({version:1,calls:[{ref:"session-1",latency:{e2eP95Ms:4063},slaMs:1000,usage:{},errors:{}}],
    reports:[],problems:[],limitations:[]});
+ f.companyRead.mockReset().mockResolvedValue({documents:[
+  "secretary-lab-engineer","secretary-qa","secretary-project-head",
+ ].map(roleId=>({text:JSON.stringify({visualPassport:{roleId,character:{traits:["a","b","c"],motto:"fixture"}}})}))});
  const app=express();app.use(express.json());app.use((req:any,_res,next)=>{req.session=f.session;next()});
  registerCrewRoutes(app);server=createServer(app);
  await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));base=`http://127.0.0.1:${(server.address()as any).port}`;
@@ -47,6 +53,50 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it.each(["series","queue","limit","owner","revision"])("rejects local %s blocker before any expensive dependencies",async blocker=>{
+  const token=await csrf();
+  if(blocker==="series")f.state.control.testSeriesId="approved-series-not-yet-finalized";
+  if(blocker==="queue")f.state.schedules.push({id:"fixture"} as any);
+  if(blocker==="limit"){f.state.control.enabled=true;f.state.control.dailyLimitMicroUsd=5e6}
+  if(blocker==="owner")f.state.secretarySettings={ownerId:"different-owner"};
+  const before=structuredClone(f.state);
+  // If route ordering regresses, this never-resolving dependency would hang.
+  f.models.mockImplementation(()=>new Promise(()=>{}));
+  const response=await post("/command",{revision:blocker==="revision"?99:0,command:{
+   kind:"secretary_review_config",enabled:true,monthlyLimitMicroUsd:20e6,dailyLimitMicroUsd:1e6}},token);
+  expect(response.status).toBe(409);
+  expect((await response.json()).error).toBe({
+   series:"HINT_PILOT_REQUIRES_SEPARATE_OWNER_DECISION",
+   queue:"OTHER_CREW_WORK_REQUIRES_OWNER_DECISION",limit:"GLOBAL_LIMIT_CHANGE_REQUIRES_SEPARATE_OWNER_DECISION",
+   owner:"SECRETARY_OWNER_MISMATCH",revision:"STALE_REVISION",
+  }[blocker]);
+  expect(f.models).not.toHaveBeenCalled();expect(f.companyRead).not.toHaveBeenCalled();
+  expect(f.evidence).not.toHaveBeenCalled();expect(f.message).not.toHaveBeenCalled();
+  expect(f.state).toEqual(before);
+ });
+ it("keeps commit-time CAS when another owner command changes state during dependencies",async()=>{
+  const token=await csrf();
+  f.models.mockImplementationOnce(async()=>{
+   f.state.control.testSeriesId="concurrent-series";
+   f.state.revision++;
+   return [{id:"claude-sonnet-5-5"},{id:"claude-opus-5-5"}];
+  });
+  const response=await post("/command",{revision:0,command:{
+   kind:"secretary_review_config",enabled:true,monthlyLimitMicroUsd:20e6,dailyLimitMicroUsd:1e6}},token);
+  expect(response.status).toBe(409);expect((await response.json()).error).toBe("STALE_REVISION");
+  expect(f.state.control.enabled).toBe(false);expect(f.state.secretarySettings).toBeUndefined();
+  expect(f.state.revision).toBe(1);expect(f.message).not.toHaveBeenCalled();
+ });
+ it("enables only an unblocked explicit owner command, with models and characters still checked",async()=>{
+  const token=await csrf();
+  f.models.mockResolvedValue([{id:"claude-sonnet-5-5"},{id:"claude-opus-5-5"}]);
+  const response=await post("/command",{revision:0,command:{
+   kind:"secretary_review_config",enabled:true,monthlyLimitMicroUsd:20e6,dailyLimitMicroUsd:1e6}},token);
+  expect(response.status).toBe(200);expect(f.models).toHaveBeenCalledTimes(1);
+  expect(f.companyRead).toHaveBeenCalledTimes(1);
+  expect(f.state.secretarySettings.enabled).toBe(true);expect(f.state.control.enabled).toBe(true);
+  expect(f.state.runs).toEqual([]);expect(f.message).not.toHaveBeenCalled();
+ });
  it("reports catalog failure with safe code and never attempts a paid request or write",async()=>{
   const token=await csrf(),before=structuredClone(f.state);
   f.models.mockRejectedValueOnce(Error("private upstream body DO_NOT_EXPOSE"));

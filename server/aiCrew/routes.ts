@@ -14,7 +14,7 @@ import { HINT_AGENTS, HINT_PRICING_URL } from "./hintPilot";
 import { startCrewDispatcher } from "./dispatcher";
 import { registerTestMcp } from "./testMcp";
 import { bindSecretaryAutomation } from "./secretaryAutomation";
-import { secretaryCharacters } from "./secretaryReview";
+import { assertSecretaryConfigurationState, secretaryCharacters } from "./secretaryReview";
 import { revokeTest } from "./testGrant";
 import { startCrewMaintenance } from "./maintenance";
 import { productionProductRepository } from "../productCrew/production";
@@ -117,19 +117,35 @@ export function registerCrewRoutes(app: Express) {
   app.post(api + "/command", protect, async (req, res) => {
     const parsed = commandSchema.safeParse(req.body?.command);
     if (!parsed.success || !Number.isSafeInteger(req.body?.revision)) return res.status(400).json({ error: "INVALID_CREW_COMMAND" });
-    let stage: "models" | "characters" | "evidence" | "command" = "models";
+    type Stage = "models" | "characters" | "evidence" | "command";
+    let stage: Stage = "command";
+    const started = performance.now(), timingsMs: Record<string, number> = {};
+    const timed = async <T>(name: Stage | "preflight", fn: () => Promise<T>): Promise<T> => {
+      stage = name === "preflight" ? "command" : name;
+      const start = performance.now();
+      try { return await fn(); }
+      finally { timingsMs[name] = Math.round(performance.now() - start); }
+    };
     try {
+      // Reject stale revisions and known local blockers BEFORE expensive catalog
+      // and full company-model reads. Never replace the authoritative locked CAS.
+      await timed("preflight", async () => {
+        const before = await store().read();
+        if (before.revision !== req.body.revision) throw Error("STALE_REVISION");
+        if (parsed.data.kind === "secretary_review_config")
+          assertSecretaryConfigurationState(before, parsed.data.enabled, String(req.user!.id), parsed.data.dailyLimitMicroUsd);
+      });
       const models = (["agent", "hint_pilot_prepare"].includes(parsed.data.kind) ||
         parsed.data.kind === "secretary_review_config" && parsed.data.enabled)
-        ? (await provider.listModels()).map(m => m.id) : [];
-      stage = "characters";
+        ? await timed("models", async () => (await provider.listModels()).map(m => m.id)) : [];
       if (parsed.data.kind === "secretary_review_config" && parsed.data.enabled)
-        secretaryCharacters(await readCompany());
+        await timed("characters", async () => secretaryCharacters(await readCompany()));
       stage = "evidence";
       if (parsed.data.kind === "hint_pilot_prepare" && environment() !== "production") throw Error("PRODUCTION_EVIDENCE_ONLY");
-      const evidence = parsed.data.kind === "hint_pilot_prepare" ? await readHintEvidence(pool!, String(req.user!.id)) : undefined;
-      stage = "command";
-      await store().change(s => applyOwnerCommand(s, parsed.data, String(req.user!.id), new Date().toISOString(), models, evidence), req.body.revision);
+      const evidence = parsed.data.kind === "hint_pilot_prepare"
+        ? await timed("evidence", () => readHintEvidence(pool!, String(req.user!.id))) : undefined;
+      await timed("command", () => store().change(s =>
+        applyOwnerCommand(s, parsed.data, String(req.user!.id), new Date().toISOString(), models, evidence), req.body.revision));
       if (parsed.data.kind === "control" && !parsed.data.enabled) runtime?.stopLocal();
       res.json({ saved: true, productChanged: false });
     } catch (error) {
@@ -137,6 +153,10 @@ export function registerCrewRoutes(app: Express) {
       console.warn("[ai-crew] owner_command_failed", { code: failure.error, stage,
         command: parsed.data.kind, expectedRevision: req.body.revision });
       res.status(409).json(failure);
+    } finally {
+      // Durations and fixed stage/command names only: no bodies, keys or PII.
+      console.info("[ai-crew] owner_command_timing", { command: parsed.data.kind,
+        elapsedMs: Math.round(performance.now() - started), timingsMs });
     }
   });
   app.get(api + "/hint-pilot", async (req, res) => {

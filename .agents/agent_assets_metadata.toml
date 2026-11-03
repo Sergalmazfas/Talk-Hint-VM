@@ -3379,3 +3379,17 @@ mtime_ms = 1793710504672
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/02100e70-6aec-409f-b491-0c23608cf4ff/c11f0c27-1521-4dff-a49c-67ccbe1335a0"
 storage_version_token = "1793710526813326"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "QyJ_HDq39binXYYXMCFaW"
+uri = "file://generated-artifacts/crew-series-post-publish/Hint_finalized_panel_preflight_Claude.zip"
+type = "unspecified"
+title = "Клавдию — серия Hint завершена, ускорение панели"
+description = "Журнал одной production-команды и проверок, diff ускорения отказов, исходники, полный прогон 4 шардами: 3460 прошли, 0 упало. Ускорение подготовлено в Dev; отдел не включён."
+logical_id = "ac37b72d-34cf-4856-8415-b70a199961ec"
+content_hash = "sha256:e0a77dc06ad06f32aff02e8279d08bc0e40c50866204f810e7bb668d2e101ece"
+size = 346331
+mtime_ms = 1793727758471
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ac37b72d-34cf-4856-8415-b70a199961ec/1b29d326-bf57-4252-a5f2-8dad2027c562"
+storage_version_token = "1793727764717042"
+content_type = "application/octet-stream"
