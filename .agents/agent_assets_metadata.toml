@@ -3309,3 +3309,17 @@ mtime_ms = 1793664114710
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/05a445c7-8d56-45cb-b211-68259239e866/1d468554-4b7e-4b61-b688-852b6a0abd9b"
 storage_version_token = "1793664173877509"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Advt-f9JdqIZFWRYFMGn0"
+uri = "file://generated-artifacts/crew-step3/Gleb_MCP_retry_STOP_r1208.zip"
+type = "unspecified"
+title = "Глеб: STOP r1208 — журнал повтора"
+description = "Один разрешённый повтор, безопасная диагностика отказа 500, повторное чтение и опубликованный контракт. Не финальный пакет этапа 3."
+logical_id = "df331f47-57c9-465f-b7ee-13d6f047a058"
+content_hash = "sha256:c6c66658fbb1c0691ead655ffce9cabdb67728f566b9428608ac43c6daaa5602"
+size = 6062
+mtime_ms = 1793670473161
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/df331f47-57c9-465f-b7ee-13d6f047a058/cc8538b3-22d3-4642-878a-0d12fd4877b0"
+storage_version_token = "1793670487966703"
+content_type = "application/octet-stream"
