@@ -3337,3 +3337,17 @@ mtime_ms = 1793672543284
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a56a6f9b-b5f3-4f4c-8ee0-ce7e81ebc5e5/0c945c66-c21a-43b8-88b8-f9b2f20fb078"
 storage_version_token = "1793672567311575"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "hdf_N4RAY9DK5HqVx4YTc"
+uri = "file://generated-artifacts/crew-after-publish-nov03/Secretary_step3_Claude_and_production_r1246.zip"
+type = "unspecified"
+title = "Секретарь · пакет Клавдию · r1246"
+description = "Скачайте ZIP и передайте Клавдию: проверенные production-записи, анкеты, журнал revision/hash/UUID, код авторазбора и полный прогон тестов четырьмя частями. Автозапуск не включён."
+logical_id = "5e4a117c-9c6a-4ed6-a1dc-27bab6090aba"
+content_hash = "sha256:5ed5b9a8d9cb65571549527484e2fcd255c157af869e18880737c628c61d4693"
+size = 371118
+mtime_ms = 1793679110494
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5e4a117c-9c6a-4ed6-a1dc-27bab6090aba/14a377ae-fcc6-453b-87f7-611a1e838ecb"
+storage_version_token = "1793679190663025"
+content_type = "application/octet-stream"

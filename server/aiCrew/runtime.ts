@@ -6,6 +6,7 @@ import { finishPilotRun, hintMaxOutput, pilotInput } from "./hintPilot";
 import { crewDiagnostic } from "./dispatcher";
 import { enforceTestSafety, validGrant, unknownTestRun, stopTest, TEST_ACTOR } from "./testGrant";
 import { isSupersededChargedUnknown } from "./failedPilot";
+import { finishSecretaryRun, secretaryInput, secretaryReserve, secretarySettle } from "./secretaryReview";
 
 export class CrewRuntime {
   private active = new Map<string, AbortController>();
@@ -33,7 +34,9 @@ export class CrewRuntime {
             s.runs.push({ id: randomUUID(), taskId: task.id, agentId: schedule.agentId, eventId, at, status: "queued" });
           schedule.nextAt = new Date(+now + schedule.everyMinutes * 60000).toISOString();
         }
-        const run = s.runs.find(r => r.status === "queued" && (!s.control.testSeriesId ||
+        const run = s.runs.find(r => r.status === "queued" &&
+          (!s.tasks.find(t => t.id === r.taskId)?.secretaryReview || s.secretarySettings?.enabled) &&
+          (!s.control.testSeriesId ||
           s.tasks.find(t => t.id === r.taskId)?.testSeriesId === s.control.testSeriesId));
         if (!run) return null;
         const task = s.tasks.find(t => t.id === run.taskId), agent = s.agents.find(a => a.agentId === run.agentId);
@@ -43,10 +46,26 @@ export class CrewRuntime {
             s.control.testSeriesId !== series || s.runs.some(r => r.testSeriesId === series &&
               r.status === "unknown" && !isSupersededChargedUnknown(s, r))))
           return null;
-        const input = task.hintPilot ? pilotInput(s, task, agent.agentId, agent.modelId) : JSON.stringify({ title: task.title, problem: task.steps[0].note,
-          analysis: task.steps.filter(x => x.phase === "analysis").at(-1)?.note });
-        if (Buffer.byteLength(input, "utf8") > (task.hintPilot ? 48000 : 16000)) throw Error("TASK_TOO_LARGE");
-        const maxTokens = hintMaxOutput(agent.agentId);
+        let secretaryPrepared: string | undefined;
+        if (task.secretaryReview) {
+          try { secretaryPrepared = secretaryInput(s, task, agent.agentId, agent.modelId); }
+          catch {
+            task.secretaryReview.status = "blocked"; task.secretaryReview.error = "SECRETARY_PRECHECK_FAILED";
+            run.status = "discarded"; run.cost = 0; run.completedAt = at;
+            log(s, agent.agentId, "secretary_precheck_failed", { taskId: task.id, runId: run.id }, at);
+            return null;
+          }
+        }
+        const input = secretaryPrepared ?? (task.hintPilot ? pilotInput(s, task, agent.agentId, agent.modelId) : JSON.stringify({ title: task.title, problem: task.steps[0].note,
+          analysis: task.steps.filter(x => x.phase === "analysis").at(-1)?.note }));
+        if (Buffer.byteLength(input, "utf8") > (task.secretaryReview ? 128000 : task.hintPilot ? 48000 : 16000)) {
+          if (!task.secretaryReview) throw Error("TASK_TOO_LARGE");
+          task.secretaryReview.status = "blocked"; task.secretaryReview.error = "SECRETARY_INPUT_TOO_LARGE";
+          run.status = "discarded"; run.cost = 0; run.completedAt = at;
+          log(s, agent.agentId, "secretary_input_too_large", { taskId: task.id, runId: run.id }, at);
+          return null;
+        }
+        const maxTokens = agent.agentId === "secretary-qa" ? 4000 : hintMaxOutput(agent.agentId);
         // No tools, images or caching. Thinking (required by Opus 5.5) and
         // visible text share maxTokens and the same billed output rate.
         // Conservative UTF-8 byte bound + framing; owner-frozen rates.
@@ -58,13 +77,25 @@ export class CrewRuntime {
           stopTest(s, at, "series_budget_exhausted"); return null;
         }
         if (b.spent + b.reserved + reserve > s.control.dailyLimitMicroUsd) {
+          if (task.secretaryReview) {
+            task.secretaryReview.status = "blocked"; task.secretaryReview.error = "GLOBAL_DAILY_BUDGET";
+            run.status = "discarded"; run.cost = 0; run.completedAt = at;
+          }
           crewDiagnostic("run_budget_blocked", { reserveMicroUsd: reserve,
             limitMicroUsd: s.control.dailyLimitMicroUsd, spentMicroUsd: b.spent, reservedMicroUsd: b.reserved });
+          return null;
+        }
+        const secretaryMonth = task.secretaryReview ? at.slice(0, 7) : undefined;
+        if (secretaryMonth && !secretaryReserve(s, reserve, secretaryMonth)) {
+          task.secretaryReview!.status = "blocked"; task.secretaryReview!.error = "DEPARTMENT_MONTHLY_BUDGET";
+          run.status = "discarded"; run.cost = 0; run.completedAt = at;
+          log(s, agent.agentId, "secretary_budget_blocked", { taskId: task.id, month: secretaryMonth }, at);
           return null;
         }
         b.reserved += reserve;
         if (series) s.testGrant!.reserved += reserve;
         Object.assign(run, { status: "running", day, epoch: s.control.epoch, reserved: reserve,
+          ...(secretaryMonth ? { secretaryMonth, startedAt: at } : {}),
           modelId: agent.modelId, ...(series ? { testSeriesId: series, startedAt: at } : {}) });
         log(s, series ? TEST_ACTOR : agent.agentId, "run_reserved", { runId: run.id, taskId: run.taskId,
           agentId: agent.agentId, day, reserve, modelId: agent.modelId, maxOutputTokens: maxTokens }, at);
@@ -81,6 +112,7 @@ export class CrewRuntime {
         try {
           const s = await this.store.read();
           if (!s.control.enabled || s.control.epoch !== claimed.run.epoch ||
+              (claimed.run.secretaryMonth && !s.secretarySettings?.enabled) ||
               (claimed.run.testSeriesId && !validGrant(s, +this.now()))) controller.abort();
         } catch { controller.abort(); }
         finally { monitorBusy = false; }
@@ -97,6 +129,7 @@ export class CrewRuntime {
       try {
         const gate = await this.store.read();
         if (!gate.control.enabled || gate.control.epoch !== claimed.run.epoch ||
+            (claimed.run.secretaryMonth && !gate.secretarySettings?.enabled) ||
             (claimed.run.testSeriesId && !validGrant(gate, +this.now()))) throw Error("STOPPED");
         stage = "provider";
         const result = await this.provider.message(claimed.agent.modelId, claimed.input, claimed.maxTokens, controller.signal);
@@ -113,12 +146,14 @@ export class CrewRuntime {
             result.usage.output_tokens * claimed.agent.outputMicroUsdPerToken;
           if (!Number.isSafeInteger(cost) || cost < 0) throw Error("UNVERIFIED_USAGE");
           budget.reserved -= run.reserved!; budget.spent += cost;
+          if (run.secretaryMonth) secretarySettle(s, run.secretaryMonth, run.reserved!, cost);
           if (run.testSeriesId) {
             s.testGrant!.reserved -= run.reserved!; s.testGrant!.spent += cost;
           }
           run.usage = result.usage; run.cost = cost; run.completedAt = this.now().toISOString();
           const currentTask = s.tasks.find(t => t.id === run.taskId);
           const canSave = s.control.enabled && s.control.epoch === run.epoch && !controller.signal.aborted &&
+            (!run.secretaryMonth || s.secretarySettings?.enabled) &&
             (!run.testSeriesId || validGrant(s, +this.now())) &&
             currentTask?.phase === "analysis" && !currentTask.closed;
           run.status = canSave ? "done" : "discarded";
@@ -131,7 +166,15 @@ export class CrewRuntime {
             const task = s.tasks.find(t => t.id === run.taskId);
             if (task && !task.closed && task.phase === "analysis") {
               task.steps.at(-1)!.updatedAt = run.completedAt;
-              if (task.hintPilot) {
+              if (task.secretaryReview) {
+                if (result.model !== run.modelId) {
+                  run.status = "discarded"; task.secretaryReview.status = "blocked";
+                  task.secretaryReview.error = "MODEL_ID_MISMATCH";
+                  doc.text = "MODEL_ID_MISMATCH: результат не подтверждён";
+                } else finishSecretaryRun(s, task, doc.id, doc.text, run.completedAt);
+                log(s, run.agentId, "secretary_review_handoff", { taskId: task.id,
+                  documentId: doc.id, status: task.secretaryReview.status, ownerAcceptance: false }, run.completedAt);
+              } else if (task.hintPilot) {
                 // Exact requested model identity is required for pilot evidence.
                 if (result.model !== run.modelId) {
                   run.status = "discarded";

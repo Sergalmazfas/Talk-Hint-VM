@@ -33,6 +33,11 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
 <nav class="bar" aria-label="Основные действия"><button id="refresh">Обновить состояние</button><button class="primary" id="initialize">Инициализировать таблицу</button><button class="danger" id="disable">Аварийно выключить всё</button><button id="loadModels">Загрузить модели Anthropic</button></nav>
 <div id="message" class="message" role="status" aria-live="polite">Получаем состояние сервера…</div>
 <section class="grid">
+<article class="panel span12"><h2>Секретарь · автоматический разбор</h2>
+<p class="hint">По умолчанию OFF. Только новые звонки владельца: Лёва (Sonnet 5.5) → Тома (Opus 5.5) → Сева (Sonnet 5.5) → Мария и одно письмо владельцу. Только предложения; Катя и её настройки не меняются. Месячный расход и unknown-резервы сохраняются при перезапуске.</p>
+<div class="fields"><label>Лимит отдела в месяц, $<input id="secretaryMonthly" type="text" inputmode="decimal" value="20"></label><label>Дополнительный общий дневной лимит, $<input id="secretaryDaily" type="text" inputmode="decimal" value="1"></label></div>
+<p class="warning">Включение — отдельное решение владельца после сверки и Publish. Если общий контроль OFF, кнопка разрешит его только при отсутствии чужой очереди и расписаний. Аварийное выключение сверху останавливает всех. Приватные/медицинские источники не анализируются; без аудио паузы и акцент не проверены.</p>
+<div class="bar"><button id="secretaryEnable">Включить разбор Секретаря</button><button id="secretaryDisable">Отключить отдел Секретаря</button></div></article>
 <article class="panel span12"><h2>Самостоятельные проверки Replit</h2><p class="hint">Отдельный scope crew-test: только пилоты Hint. Общий бюджет серии $5, срок 7 дней с первого использования ключа. Не сбрасывается новым днём, рестартом или заменой ключа. Отзыв окончательный для этой серии.</p><div id="crewTestStatus" class="hint"></div><button class="danger" id="revokeCrewTest">Отключить доступ Replit crew-test</button><button id="checkCrewStructure">Проверить структуру без моделей</button><pre id="crewStructureResult"></pre></article>
 <article class="panel span8"><div class="split"><h2>Состояние системы</h2><span class="small" id="updated"></span></div><div class="metrics" id="metrics"></div><div style="height:14px"></div><div class="kv" id="meta"></div><p class="hint" id="notice"></p></article>
  <article class="panel span4"><h2>Лимиты и контроль</h2><div class="warning">Сохранение всегда отправляет <code>enabled:false</code>. Общая настройка лимита не включает агентов. Для пилота используйте отдельные owner-действия.</div>
@@ -216,6 +221,39 @@ async function post(path,body,success){if(busy)return;busy=true;setMessage("Ож
   $("saveControl").addEventListener("click",async function(){if(busy||pilotBusy)return;var hours=Number($("staleHours").value);if(!Number.isInteger(hours)||hours<1||hours>8760){setMessage("Срок устаревания должен быть целым числом от 1 до 8760 часов.","error");return}if(!window.confirm("Вы уверены? Выключить контроль и сохранить срок устаревания? Дневной лимит не изменится."))return;busy=true;var fresh;try{fresh=await request("",{method:"GET"});render(fresh);if(!fresh.initialized||!Number.isSafeInteger(fresh.state.revision)||!Number.isSafeInteger(fresh.state.control.dailyLimitMicroUsd))throw Error("Нет свежих настроек");}catch(e){setMessage("Настройки не сохранены: "+e.message,"error");return}finally{busy=false}post("/command",{revision:fresh.state.revision,command:{kind:"control",enabled:false,dailyLimitMicroUsd:fresh.state.control.dailyLimitMicroUsd,staleHours:hours}},"Настройки выключенного контроля сохранены; лимит не изменён")});
   $("loadModels").addEventListener("click",async function(){var button=$("loadModels");button.disabled=true;setMessage("Запрашиваем реальные модели у Anthropic…");try{var result=await request("/models",{method:"GET"});models=Array.isArray(result.models)?result.models.filter(function(m){return m&&typeof m.id==="string"}):[];modelEnvironment=result.environment||"";var select=$("modelSelect");clear(select);if(!models.length){select.appendChild(new Option("Ответ не содержит model ID",""));setMessage("Модели не подтверждены: ответ не содержит ID.","error")}else{select.appendChild(new Option("Выберите модель…",""));models.forEach(function(m){select.appendChild(new Option(m.id,m.id))});setMessage("Получены ID из фактического ответа Anthropic · "+text(result.source),"good")}updateProbe()}catch(e){models=[];clear($("modelSelect"));$("modelSelect").appendChild(new Option("Список недоступен",""));setMessage("Не удалось подтвердить модели: "+e.message,"error");updateProbe()}finally{button.disabled=false}});
   function updateProbe(){var state=payload&&payload.state;var unused=state&&!state.probe;var allowed=payload&&payload.environment==="production"&&modelEnvironment==="production"&&models.length>0&&unused&&!busy;$("probe").disabled=!allowed}
+  var secretaryBusy=false;
+  function secretaryDollars(id){
+    var raw=$(id).value.trim();if(!/^\d+(?:\.\d{1,6})?$/.test(raw))throw Error("Введите сумму в долларах, например 20 или 0.50");
+    var p=raw.split("."),n=BigInt(p[0])*BigInt(1000000)+BigInt((p[1]||"").padEnd(6,"0"));
+    if(n<=BigInt(0)||n>BigInt(100000000000))throw Error("Лимит должен быть положительным и не превышать $100000");
+    return Number(n);
+  }
+  async function secretaryControl(enabled){
+    if(secretaryBusy||pilotBusy||pilotBlocked)return;
+    if(!window.confirm("Вы уверены? "+(enabled?"Разрешить автоматический разбор новых звонков Секретаря в указанных лимитах?":"Отключить отдел Секретаря? Неизвестные расходы не возвращаются.")))return;
+    secretaryBusy=true;var attempted=false,intent=pilotIntent;
+    try{
+      var data=await request("",{method:"GET"});render(data);
+      if(!pilotStateValid(data)||data.environment!=="production")throw Error("Нужно свежее состояние production");
+      var state=data.state,cfg=state.secretarySettings,command={kind:"secretary_review_config",enabled:enabled,
+        monthlyLimitMicroUsd:enabled?secretaryDollars("secretaryMonthly"):(cfg?cfg.monthlyLimitMicroUsd:20000000)};
+      if(enabled)command.dailyLimitMicroUsd=secretaryDollars("secretaryDaily");
+      if(intent!==pilotIntent)throw Error("Отменено аварийным выключением");
+      attempted=true;
+      var result=await request("/command",{method:"POST",body:JSON.stringify({revision:state.revision,command:command})});
+      if(!result||result.saved!==true)throw Error("Нет saved=true");
+      var after=await request("",{method:"GET"});render(after);
+      if(!pilotStateValid(after)||after.state.revision<=state.revision||!after.state.secretarySettings||
+        after.state.secretarySettings.enabled!==enabled||
+        after.state.secretarySettings.monthlyLimitMicroUsd!==command.monthlyLimitMicroUsd||
+        enabled&&(!after.state.control.enabled||after.state.control.dailyLimitMicroUsd!==command.dailyLimitMicroUsd))
+        throw Error("Повторное чтение не совпало");
+      setMessage("Секретарь: настройка подтверждена повторным чтением; автоприёмки и изменений продукта нет.","good");
+    }catch(e){if(attempted)pilotBlocked=true;setMessage("СТОП. "+e.message+". Запись не повторялась.","error")}
+    finally{secretaryBusy=false}
+  }
+  $("secretaryEnable").addEventListener("click",function(){secretaryControl(true)});
+  $("secretaryDisable").addEventListener("click",function(){secretaryControl(false)});
   $("modelSelect").addEventListener("change",updateProbe);
   $("probe").addEventListener("click",function(){var modelId=$("modelSelect").value;if(!modelId||!models.some(function(m){return m.id===modelId})){setMessage("Выберите ID, подтверждённый ответом Anthropic.","error");return}if(!window.confirm("Одноразовый production probe для "+modelId+". Возможен расход API. После timeout повтор запрещён: результат может быть неизвестен. Выполнить?"))return;post("/probe",{modelId:modelId},"Результат probe получен")});
   var examples={

@@ -13,6 +13,8 @@ import { readHintEvidence } from "./hintEvidence";
 import { HINT_AGENTS, HINT_PRICING_URL } from "./hintPilot";
 import { startCrewDispatcher } from "./dispatcher";
 import { registerTestMcp } from "./testMcp";
+import { bindSecretaryAutomation } from "./secretaryAutomation";
+import { secretaryCharacters } from "./secretaryReview";
 import { revokeTest } from "./testGrant";
 import { startCrewMaintenance } from "./maintenance";
 import { productionProductRepository } from "../productCrew/production";
@@ -33,6 +35,7 @@ export function registerCrewRoutes(app: Express) {
     return pool;
   });
   const readCompany = () => company.read(TEAM_OWNER, "new-country");
+  bindSecretaryAutomation({ store, model: readCompany, environment: environment() });
   registerTestMcp(app, { environment: environment(), store, secret: () => process.env.CREW_TEST_KEY,
     evidence: () => readHintEvidence(pool!, TEAM_OWNER),
     models: async () => (await provider.listModels()).map(m => m.id), model: readCompany });
@@ -114,7 +117,11 @@ export function registerCrewRoutes(app: Express) {
     const parsed = commandSchema.safeParse(req.body?.command);
     if (!parsed.success || !Number.isSafeInteger(req.body?.revision)) return res.status(400).json({ error: "INVALID_CREW_COMMAND" });
     try {
-      const models = ["agent", "hint_pilot_prepare"].includes(parsed.data.kind) ? (await provider.listModels()).map(m => m.id) : [];
+      const models = (["agent", "hint_pilot_prepare"].includes(parsed.data.kind) ||
+        parsed.data.kind === "secretary_review_config" && parsed.data.enabled)
+        ? (await provider.listModels()).map(m => m.id) : [];
+      if (parsed.data.kind === "secretary_review_config" && parsed.data.enabled)
+        secretaryCharacters(await readCompany());
       if (parsed.data.kind === "hint_pilot_prepare" && environment() !== "production") throw Error("PRODUCTION_EVIDENCE_ONLY");
       const evidence = parsed.data.kind === "hint_pilot_prepare" ? await readHintEvidence(pool!, String(req.user!.id)) : undefined;
       await store().change(s => applyOwnerCommand(s, parsed.data, String(req.user!.id), new Date().toISOString(), models, evidence), req.body.revision);

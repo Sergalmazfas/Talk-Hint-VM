@@ -3,10 +3,14 @@ import { z } from "zod";
 import { closeStalledHintPilot, HINT_AGENTS, pilotReviewComplete, prepareHintPilot, startHintPilot,
   STALLED_PILOT_OUTCOME, type HintPilot } from "./hintPilot";
 import type { HintEvidence } from "./hintEvidence";
+import { configureSecretary, secretaryReviewComplete, SECRETARY_AGENTS, type SecretaryReview, type SecretarySettings, type SecretaryBudget } from "./secretaryReview";
 
 export const phases = ["problem", "analysis", "owner_decision", "code", "verification", "outcome"] as const;
 const text = z.string().trim().min(1).max(4000);
 export const commandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("secretary_review_config"), enabled: z.boolean(),
+    monthlyLimitMicroUsd: z.number().int().min(0).max(1e11),
+    dailyLimitMicroUsd: z.number().int().min(1).max(1e11).optional() }).strict(),
   z.object({ kind: z.literal("hint_pilot_prepare"), candidate: z.enum(["latency", "usefulness", "unavailable"]),
     ratesConfirmed: z.literal(true) }).strict(),
   z.object({ kind: z.literal("hint_pilot_start"), taskId: z.string().uuid(), ownerApproved: z.literal(true) }).strict(),
@@ -29,6 +33,7 @@ export const commandSchema = z.discriminatedUnion("kind", [
 ]);
 export type Command = z.infer<typeof commandSchema>;
 export type Task = { id: string; title: string; phase: typeof phases[number]; closed: boolean; hintPilot?: HintPilot;
+  secretaryReview?: SecretaryReview;
   testSeriesId?: string;
   steps: { phase: typeof phases[number]; holder: string; updatedAt: string; note: string; actor: string;
     expectation?: string; approved?: boolean; commit?: string; testedCommit?: string; actual?: string; met?: boolean;
@@ -39,8 +44,9 @@ export type Run = { id: string; taskId: string; agentId: string; eventId: string
   legacyUnknownWriteoff?: { at: string; actor: "replit-test"; seriesId: string;
     amountMicroUsd: number; providerOutcome: "unknown"; reason: "owner_emergency_off" };
   at: string; day?: string; epoch?: number; reserved?: number; cost?: number; usage?: { input_tokens: number; output_tokens: number };
-  modelId?: string; completedAt?: string };
+  modelId?: string; completedAt?: string; secretaryMonth?: string };
 export type CrewState = {
+  secretarySettings?: SecretarySettings; secretaryBudget?: SecretaryBudget;
   version: 1; revision: number; control: { enabled: boolean; epoch: number; dailyLimitMicroUsd: number; staleHours: number; testSeriesId?: string };
   testGrant?: { id: string; keyHash: string; createdAt: string; expiresAt: string; revokedAt?: string;
     lastUsedAt?: string; limit: number; spent: number; reserved: number };
@@ -64,7 +70,10 @@ export function log(s: CrewState, actor: string, kind: string, detail: unknown, 
 }
 export function applyOwnerCommand(s: CrewState, command: Command, actor: string, at: string, availableModels: string[] = [], evidence?: HintEvidence) {
   const c = commandSchema.parse(command);
-  if (c.kind === "hint_pilot_prepare") {
+  if (c.kind === "secretary_review_config") {
+    configureSecretary(s, c.enabled, c.monthlyLimitMicroUsd, actor, at, availableModels, c.dailyLimitMicroUsd);
+    log(s, actor, "secretary_review_config", { ...s.secretarySettings, ownerAcceptance: false }, at);
+  } else if (c.kind === "hint_pilot_prepare") {
     if (!evidence) throw Error("SERVER_EVIDENCE_REQUIRED");
     const task = prepareHintPilot(s, c.candidate, evidence, actor, at, availableModels);
     log(s, actor, "hint_pilot_prepared", { taskId: task.id, evidenceHash: task.hintPilot!.evidenceHash,
@@ -78,6 +87,8 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
       steps: [{ phase: "problem", holder: c.holder, updatedAt: at, note: c.problem, actor }] };
     s.tasks.push(task); log(s, actor, "task_created", { taskId: task.id }, at);
   } else if (c.kind === "agent") {
+    if (SECRETARY_AGENTS.some(a => a.agentId === c.agentId) && s.tasks.some(t => t.secretaryReview && !t.closed))
+      throw Error("SECRETARY_RATES_AND_MODELS_FROZEN");
     if (HINT_AGENTS.some(a => a.agentId === c.agentId) && s.tasks.some(t => t.hintPilot && !t.closed))
       throw Error("PILOT_RATES_AND_MODELS_FROZEN");
     if (!availableModels.includes(c.modelId)) throw Error("MODEL_NOT_VERIFIED");
@@ -110,6 +121,9 @@ export function applyOwnerCommand(s: CrewState, command: Command, actor: string,
       if (task.phase === "analysis" && task.hintPilot && (!pilotReviewComplete(s, task) ||
           c.laboratoryActor !== HINT_AGENTS[0].agentId || c.reviewerActor !== HINT_AGENTS[1].agentId))
         throw Error("PILOT_TWO_COMPLETED_EXECUTORS_REQUIRED");
+      if (task.phase === "analysis" && task.secretaryReview && (!secretaryReviewComplete(s, task) ||
+          c.laboratoryActor !== SECRETARY_AGENTS[0].agentId || c.reviewerActor !== SECRETARY_AGENTS[1].agentId))
+        throw Error("SECRETARY_INDEPENDENT_EXECUTORS_REQUIRED");
       if (task.phase === "owner_decision" && (!c.approved || !c.expectation)) throw Error("OWNER_EXPECTATION_REQUIRED");
       if (task.phase === "code" && !c.commit) throw Error("CODE_COMMIT_REQUIRED");
       if (task.phase === "verification") {

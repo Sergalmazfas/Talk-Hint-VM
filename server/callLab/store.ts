@@ -39,6 +39,12 @@ export class LabStore {
     await this.db.query("UPDATE call_lab_jobs SET status='failed',updated_at=now() WHERE key=$1 AND status='running'", [key]);
     await this.note(key, code); // fixed codes only; no raw provider exceptions.
   }
+  async awaitCrew(key: string) {
+    // Waiting for the durable AI Crew chain is not a failed paid-generation attempt.
+    await this.db.query(`UPDATE call_lab_jobs SET status='pending',attempts=GREATEST(attempts-1,0),
+      updated_at=now() WHERE key=$1 AND status='running'`, [key]);
+    await this.note(key, "secretary:awaiting_crew");
+  }
   async recover(environment: string, owner: string) {
     // The old child has a ten-minute hard deadline. Only stale analysis may retry, once.
     await this.db.query(`UPDATE call_lab_jobs SET status=CASE WHEN attempts<2 THEN 'pending' ELSE 'failed' END,

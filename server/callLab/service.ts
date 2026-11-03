@@ -13,6 +13,7 @@ import { labStartupReady, labStartupStatus, labStartupStep, resetLabStartup } fr
 import { ownerCallsSql, modeNotice } from "./policy";
 import { attachProductFollowup } from "./productContext";
 import { labActionReports, secretaryActionReport, reportDelivery } from "../team/actionReports";
+import { reviewSecretaryCall } from "../aiCrew/secretaryAutomation";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -136,6 +137,7 @@ async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
 export async function hintLabTick(pool: Pool, dependencies: {
   run: typeof runHintLab; mail: Pick<GmailLabMail, "verify" | "sent" | "send">;
   product?: typeof attachProductFollowup;
+  secretary?: typeof reviewSecretaryCall;
 } = {
   run: runHintLab, mail: new GmailLabMail(),
 }) {
@@ -185,7 +187,7 @@ export async function hintLabTick(pool: Pool, dependencies: {
       ORDER BY c.ended_at LIMIT 100`, [config.owner, control.activated_at, config.environment]);
     for (const row of candidates.rows) await store.enqueue(config.environment, config.owner, row.call_sid);
     const job = await store.claim(config.environment, config.owner);
-    if (job) {
+    processClaim: if (job) {
       await store.note(job.key, "analysis:claimed");
       const call = (await client.query(`SELECT * FROM (${ownerCallsSql}) c
         WHERE call_sid=$1 AND user_id=$2`, [job.call_sid, config.owner])).rows[0];
@@ -199,6 +201,25 @@ export async function hintLabTick(pool: Pool, dependencies: {
             WHERE user_id=$1 AND call_sid=$2`, [config.owner, call.call_sid])).rows[0];
           const r = secretaryActionReport(call, task);
           notice.action_reports = r ? [r] : [];
+          const review = await (dependencies.secretary ?? reviewSecretaryCall)(call, task, config.owner, config.environment);
+          if (review?.pending) {
+            await store.awaitCrew(job.key);
+            break processClaim; // Continue draining unrelated mail; no preliminary/duplicate report.
+          }
+          if (review) {
+            const action = r ?? { id: `secretary-crew:${job.key}`, role: "SECRETARY" as const,
+              at: new Date(call.ended_at).toISOString(), assigned: "Разобрать завершённый звонок по поручению",
+              outcome: "partial" as const, succeeded: [], failed: [], needsOwner: [], source: `ai_crew:${review.taskId ?? "unavailable"}` };
+            action.succeeded.push(...review.succeeded); action.failed.push(...review.failed);
+            action.needsOwner.push(...review.needsOwner);
+            notice.action_reports = [action];
+            notice.secretaryReview = review;
+            notice.codeVersion = recordedCallVersion(call);
+            // Maria is the descriptive recipient; do not silently run an extra product-model request.
+            await store.finish(job.key, null, notice);
+            await store.note(job.key, "secretary:crew_report_saved");
+            break processClaim;
+          }
         }
         await finishWithProduct(job.key, null, notice);
         await store.note(job.key, `mode:${call.lab_mode}:analysis_not_connected`);
