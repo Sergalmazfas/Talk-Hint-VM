@@ -1,23 +1,34 @@
 import OpenAI from "openai";
-import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
+import { RetellSecretaryLab, type RetellLabProfile, type RetellReport } from "./retell";
 import { SecretaryConversationEngine, secretaryTestTools, type EngineStream } from "../secretary/conversationEngine";
 import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import type { PersonalityBinding } from "../secretary/personalities/types";
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
 import { compactSpeedPrompt, speedProfiles, speedStream, type SpeedVariant } from "./speedExperiment";
 import { SpeedBudget } from "./speedBudget";
+import { SpeedLimitError, SpeedRequestBudget, speedLimitText, speedSettlement } from "./speedRequestBudget";
 import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
 
 export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
   const profile = speedProfiles[variant];
+  const requestBudget = new SpeedRequestBudget();
   const metrics = { variant, requests: 0, usageRequests: 0, input: 0, output: 0,
-    conservativeModelMicroUsd: 0, requestLog: [] as any[] };
+    conservativeModelMicroUsd: 0, requestLog: [] as any[], requestBudget: requestBudget.snapshot(),
+    limitReason: null as null | { code: string; message: string } };
+  const update = () => { metrics.requestBudget = requestBudget.snapshot(); };
+  const limit = (e: unknown) => {
+    if (e instanceof SpeedLimitError) metrics.limitReason = { code: e.code, message: speedLimitText(e.code) };
+    update();
+  };
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 25_000 });
   const adapter = { responses: { create: async (body: any, options: any) => {
-    if (++metrics.requests > 12) throw Error("SPEED_MAX_TWELVE_REQUESTS");
-    if (Buffer.byteLength(body.instructions + JSON.stringify(body.input) + JSON.stringify(body.tools), "utf8") > 20_000)
-      throw Error("SPEED_INPUT_BUDGET_BOUND");
+    if (options?.signal?.aborted) throw options.signal.reason ?? Error("Cancelled before admission");
+    // Pin ordinary pricing; never inherit a project's auto/priority tier.
+    if (body.service_tier === undefined) body = { ...body, service_tier: "default" };
+    let reservation: ReturnType<SpeedRequestBudget["admit"]>;
+    try { reservation = requestBudget.admit(body); } catch (e) { limit(e); throw e; }
+    metrics.requests++; update(); // Provider attempts, never locally rejected response events.
     const started = performance.now();
     const log: any = { model: body.model, httpStatus: null, requestId: null, firstTextMs: null,
       complete: false, outputChars: 0, outputText: "", error: null };
@@ -26,13 +37,14 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
       const { data, response } = await client.responses.create(body, options).withResponse();
       log.httpStatus = response.status; log.requestId = response.headers.get("x-request-id");
       return (async function* () {
-        for await (const event of data as any) {
+        try { for await (const event of data as any) {
           if (event.type === "response.output_text.delta") {
             log.firstTextMs ??= performance.now() - started; log.outputChars += event.delta.length;
             log.outputText += event.delta;
           }
           const u = event.response?.usage;
-          if (u && ["response.completed", "response.incomplete", "response.failed"].includes(event.type)) {
+          if (u && ["response.completed", "response.incomplete", "response.failed"].includes(event.type) &&
+            requestBudget.complete(reservation, u)) {
             metrics.usageRequests++; metrics.input += u.input_tokens; metrics.output += u.output_tokens;
             // Deliberately upper-bounds ordinary input AND cache writes, not a bill.
             metrics.conservativeModelMicroUsd += Math.ceil(u.input_tokens * 5 + u.output_tokens * 10);
@@ -41,11 +53,15 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
           if (event.type === "response.completed") log.complete = true;
           if (event.type === "response.incomplete") log.error = "OUTPUT_INCOMPLETE";
           yield event;
-        }
+        } } catch (e) {
+          log.error ??= options?.signal?.aborted ? "CANCELLED_USAGE_UNKNOWN" : "STREAM_ERROR";
+          limit(e); throw e;
+        } finally { requestBudget.unknown(reservation); update(); }
       })();
     } catch (e: any) {
       log.httpStatus = e.status ?? log.httpStatus; log.requestId = e.request_id ?? log.requestId;
-      log.error = e.code ?? "PROVIDER_OR_NETWORK_ERROR"; throw e;
+      log.error = e.code ?? "PROVIDER_OR_NETWORK_ERROR";
+      requestBudget.unknown(reservation); limit(e); throw e;
     }
   } } };
   const rawStream = speedStream(adapter, variant, secretaryTestTools);
@@ -93,7 +109,7 @@ export function speedLab(deps: {
     if (r.status !== "ended") return;
     const m = (r.engine as any)?.speed;
     const seconds = r.providerDurationSeconds ?? Math.min(300, (Date.parse(r.endedAt!) - Date.parse(r.createdAt)) / 1000 + 5);
-    const debit = m && m.requests <= 12 && m.requests === m.usageRequests
+    const debit = m?.requestBudget ? speedSettlement(m, seconds) : m && m.requests <= 12 && m.requests === m.usageRequests
       ? Math.ceil(m.conservativeModelMicroUsd + Math.max(0, seconds) / 60 * 70_000) : null;
     await budget.settle(row.requestId, debit);
   };
@@ -101,6 +117,10 @@ export function speedLab(deps: {
     const row = owners.get(id);
     if (!row || row.owner !== owner) throw Object.assign(Error("Session not found"), { status: 404 });
     return row.lab;
+  };
+  const withLimit = (report: RetellReport) => {
+    const reason = (report.engine as any)?.speed?.limitReason;
+    return reason ? { ...report, labLimit: reason } : report;
   };
   class SpeedLab extends RetellSecretaryLab {
     async readiness(owner: string) {
@@ -143,13 +163,16 @@ export function speedLab(deps: {
         throw e;
       }
     }
-    report(owner: string, id: string) { return find(owner, id).report(owner, id); }
-    reports(owner: string) { return Array.from(labs.values()).flatMap(l => l.reports(owner)); }
+    report(owner: string, id: string) {
+      const result = find(owner, id).report(owner, id);
+      return { ...result, report: withLimit(result.report) };
+    }
+    reports(owner: string) { return Array.from(labs.values()).flatMap(l => l.reports(owner)).map(withLimit); }
     async connected(owner: string, id: string) { return find(owner, id).connected(owner, id); }
     observe(owner: string, id: string, input: any) { return find(owner, id).observe(owner, id, input); }
     async stop(owner: string, id: string, reason?: string) {
-      const report = await find(owner, id).stop(owner, id, reason);
-      await finish(id); return report;
+      await find(owner, id).stop(owner, id, reason);
+      await finish(id); return this.report(owner, id).report;
     }
     sweep() { for (const l of Array.from(labs.values())) l.sweep(); }
   }

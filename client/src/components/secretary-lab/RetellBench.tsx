@@ -19,6 +19,7 @@ type RetellTurn = { id: string; role: "guest" | "secretary"; text: string; atMs:
 type RetellEvent = { type: string; atMs: number; detail?: string };
 type RetellObservation = { atMs: number; outcome: "stopped" | "continued" | "unknown"; note?: string };
 export type RetellReport = {
+  labLimit?: { code: string; message: string };
   cost?: LabRunCost;
   profileId?: "A" | "B" | "C";
   personality?: { id: string; name: string; version: number; mode: "personal" | "work" } | null;
@@ -492,7 +493,7 @@ export default function RetellBench({
           <div className="history-list">{config!.history.map((item) => <button key={item.id} disabled={busy} className={`history-item ${current?.id === item.id ? "current" : ""}`} onClick={() => { setSelected(item); setReport(null); reportRef.current = null; }}>
              <span className={`history-dot ${item.status === "live" || item.status === "connecting" ? "running" : ""}`} /><span className="history-detail"><b>{item.model} · {item.voice}</b><small>{formatLabTime(item.createdAt)} · {item.status} · {item.personality === null ? "без личности · legacy" : item.personality ? `${item.personality.name} v${item.personality.version} · TEST ${item.personality.mode}` : "persona неизвестна"}</small></span><span className="history-arrow">→</span>
           </button>)}</div>}
-         {current && <div className="retell-report-actions"><div><b>Отчёт · {current.status}</b><small>{current.reason || `Prompt ${current.promptHash}`}</small>{isEngine && <small>Engine actions: {current.engine?.actions ? current.engine.actions.length : "not reported"} · events: {current.engine?.events ? current.engine.events.length : "not reported"}</small>}</div><Button variant="outline" size="sm" onClick={() => exportReport(current)}><Download size={14} /> JSON</Button></div>}
+         {current && <div className="retell-report-actions"><div><b>Отчёт · {current.status}</b><small>{current.labLimit ? `${current.labLimit.code}: ${current.labLimit.message}` : current.reason || `Prompt ${current.promptHash}`}</small>{isEngine && <small>Engine actions: {current.engine?.actions ? current.engine.actions.length : "not reported"} · events: {current.engine?.events ? current.engine.events.length : "not reported"}</small>}</div><Button variant="outline" size="sm" onClick={() => exportReport(current)}><Download size={14} /> JSON</Button></div>}
         <div className="retell-history-foot"><span><Check size={13} /> API credential не включается в отчёт</span><span>{current?.endedAt ? `Завершён ${formatLabTime(current.endedAt)}` : "Без публикации и PSTN"}</span></div>
       </aside>
     </div>

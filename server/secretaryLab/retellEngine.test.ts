@@ -7,6 +7,7 @@ import { RetellEngineApi, RetellEngineRegistry, RETELL_ENGINE_AGENT, engineCallb
 import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
 import { randomUUID } from "node:crypto";
+import { SpeedLimitError, speedLimitMessage } from "./speedRequestBudget";
 const wait = () => new Promise<void>(resolve => setImmediate(resolve));
 const turn = [{ role: "user" as const, content: "Hello, please take a message" }];
 const done = { type: "complete" as const, output: [], tools: [] };
@@ -27,6 +28,27 @@ function fixture(stream: EngineStream) {
   return { registry, path, ws, r };
 }
 afterEach(() => { registryList.splice(0).forEach(r => r.dispose()); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers(); });
+it("Dev budget exhaustion speaks the real reason and ends once, without retrying the engine", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const calls = vi.fn();
+  const { ws } = fixture(async function* () { calls(); throw new SpeedLimitError("SPEED_SESSION_BUDGET_EXHAUSTED"); });
+  ws.frame({ interaction_type: "call_details", call: { call_id: "web_call_1", call_type: "web_call" } });
+  await wait(); await wait();
+  expect(ws.sent.some(f => f.content === speedLimitMessage)).toBe(true);
+  expect(ws.sent.some(f => f.end_call === true && f.content_complete)).toBe(true);
+  expect(ws.sent.some(f => String(f.content).includes("не удалось получить ответ"))).toBe(false);
+  ws.frame({ interaction_type: "response_required", response_id: 1, transcript: turn });
+  await wait();
+  expect(calls).toHaveBeenCalledTimes(1);
+});
+it("a budget-shaped error outside Dev does not enable the laboratory end-call path", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  const { ws } = fixture(async function* () { throw new SpeedLimitError("SPEED_SESSION_BUDGET_EXHAUSTED"); });
+  ws.frame({ interaction_type: "call_details", call: { call_id: "web_call_1", call_type: "web_call" } });
+  await wait(); await wait();
+  expect(ws.sent.some(f => f.end_call)).toBe(false);
+  expect(ws.sent.some(f => String(f.content).includes("не удалось получить ответ"))).toBe(true);
+});
 describe("TalkHint text Engine, independent of voice provider", () => {
   it("uses core Secretary identity/rules, same fixture, OpenAI model and an explicit sandbox tool allowlist", async () => {
     const seen: any[] = [];

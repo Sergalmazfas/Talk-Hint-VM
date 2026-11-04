@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SpeedBudget } from "./speedBudget";
+import { SpeedRequestBudget, speedSettlement } from "./speedRequestBudget";
 const dirs: string[] = [];
 afterEach(async () => { for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true }); });
 async function budget() {
@@ -43,4 +44,22 @@ it("concurrent admissions cannot both reserve money", async () => {
   const results = await Promise.allSettled([b.reserve("one", "A"), b.reserve("two", "B")]);
   expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
   expect((await b.state()).reservedMicroUsd).toBe(2_000_000);
+});
+it("new per-request settlement preserves old unknowns and cannot reset or replenish the series", async () => {
+  const { b, path } = await budget();
+  await b.reserve("legacy", "A"); await b.settle("legacy", null);
+  const old = JSON.stringify((await b.state()).runs.legacy);
+  await b.reserve("bounded-new", "C");
+  const ledger = new SpeedRequestBudget();
+  for (let i = 0; i < 20; i++)
+    ledger.complete(ledger.admit({ instructions: "fixture", max_output_tokens: 300 }), { input_tokens: 10, output_tokens: 10 });
+  ledger.unknown(ledger.admit({ instructions: "fixture", max_output_tokens: 300 }));
+  const debit = speedSettlement({ requests: 21, requestBudget: ledger.snapshot() }, 120)!;
+  await b.settle("bounded-new", debit);
+  const state = await new SpeedBudget(path).state();
+  expect(JSON.stringify(state.runs.legacy)).toBe(old);
+  expect(state.spentMicroUsd).toBe(2_100_000 + debit);
+  expect(state.runs["bounded-new"].status).toBe("settled");
+  await b.settle("legacy", 0);
+  expect((await b.state()).spentMicroUsd).toBe(state.spentMicroUsd);
 });

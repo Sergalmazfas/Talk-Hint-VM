@@ -26,6 +26,7 @@ export interface RetellReport {
   cost?: LabRunCost;
   ttsModel?: string;
   profileId?: string;
+  labLimit?: { code: string; message: string };
   personality?: LabPersonalitySummary | null;
   audioConnectedAt?: string;
   providerDurationSeconds?: number;

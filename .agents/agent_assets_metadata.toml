@@ -3421,3 +3421,17 @@ mtime_ms = 1793754471238
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ed68cd17-c058-43d4-b3c6-cfcaa07ae24c/08abc41a-0b9a-4543-b229-33097739cbc1"
 storage_version_token = "1793754505405313"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "4OE6e8c0F75dF91ADrP-z"
+uri = "file://generated-artifacts/secretary-limit-fix/Katya_Dev_limit_fix_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: исправление ограничителя Dev-стенда"
+description = "Diff, исходники, регрессионные тесты, сводка 4 шардов, доказательство неизменности бюджета и ограничения проверки. Платных запусков — 0; production и боевая Катя не менялись."
+logical_id = "4a48e16e-c108-4ded-9731-3707fa349a30"
+content_hash = "sha256:70aa00a1a7ca800f73f803b31abea9314d6a36bab3ba906d39d0a01cad437734"
+size = 57581
+mtime_ms = 1793756833266
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4a48e16e-c108-4ded-9731-3707fa349a30/1ee0fc44-53fb-4aef-90b8-b6839ea35576"
+storage_version_token = "1793756847213505"
+content_type = "application/octet-stream"

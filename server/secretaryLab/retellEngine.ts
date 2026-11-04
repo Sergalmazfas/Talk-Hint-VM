@@ -1,6 +1,7 @@
 import { SECRETARY_CALL_LIMIT_MS } from "../secretary/limits";
 import { randomBytes, createHash } from "node:crypto";
 import type WebSocket from "ws";
+import { SpeedLimitError, speedLimitText } from "./speedRequestBudget";
 import { RetellApi, RetellApiError, RETELL_LAB_MODEL, RETELL_LAB_VOICE } from "./retellApi";
 import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
 import { SecretaryConversationEngine, type EngineStream, type SpokenTurn, type TelephoneTools } from "../secretary/conversationEngine";
@@ -177,7 +178,12 @@ export class RetellEngineRegistry {
     const abort = () => {
       entry.epoch++; entry.abort?.abort(); entry.engine.record("response_cancelled");
     };
+    let labLimitEnded = false;
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
+      if (labLimitEnded) {
+        send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
+        return;
+      }
       if (entry.handled.has(id) || id <= entry.responseId) {
         if (entry.pending !== id) send({ response_type: "response", response_id: id, content: "", content_complete: true });
         return;
@@ -199,8 +205,16 @@ export class RetellEngineRegistry {
         if (current() && !controller.signal.aborted) send({ response_type: "response", response_id: id, content: text, content_complete: false });
       }, reminder).then(end => {
         endCall = !!(this.options.phone && end && current() && !controller.signal.aborted);
-      }).catch(() => {
+      }).catch((error: unknown) => {
         if (current() && !controller.signal.aborted) {
+          if (!this.options.phone && process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" &&
+            error instanceof SpeedLimitError) {
+            labLimitEnded = true;
+            entry.engine.record("lab_budget_limit_reached");
+            send({ response_type: "response", response_id: id, content: speedLimitText(error.code), content_complete: false });
+            endCall = true;
+            return;
+          }
           entry.engine.record("engine_error");
           send({ response_type: "response", response_id: id, content: "Извините, сейчас не удалось получить ответ. Никакие реальные действия не выполнены.", content_complete: false });
         }

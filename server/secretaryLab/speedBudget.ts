@@ -47,8 +47,9 @@ export class SpeedBudget {
       // separately requested manual voice test shares this same $5 ceiling,
       // but is not disabled just because automation used its sample slots.
       const used = s.probeDebitMicroUsd + Object.values(s.runs).reduce((n, r) => n + r.spent + r.reserved, 0);
-      // 12 requests × (20k input bytes × $5/M + 1600 × $10/M)
-      // plus 5 minutes Retell/Merritt at $0.07/min < $2. No premium service tier.
+      // New runtime: <= $1 model envelopes (including unknown/cancelled requests)
+      // + $1 protective voice envelope / 5 minutes, enforced before requests.
+      // Legacy admissions retain their original accounting; no history repricing.
       if (used + 2_000_000 > s.limitMicroUsd) throw Error("SPEED_SERIES_BUDGET_EXHAUSTED");
       s.runs[id] = { variant, reserved: 2_000_000, spent: 0, status: "reserved" };
     });
