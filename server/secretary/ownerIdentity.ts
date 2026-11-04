@@ -3,6 +3,8 @@
 export interface ConfirmedSecretaryOwnerName {
   readonly en: string;
   readonly ruGenitive?: string;
+  readonly ruNominative?: string;
+  readonly ruRequestVerb?: "просил" | "просила" | "просит";
 }
 
 // Explicit owner-confirmed configuration. No profile/database mutation needed.
@@ -11,6 +13,8 @@ const confirmedOwners: Readonly<Record<string, ConfirmedSecretaryOwnerName>> = {
   "47704265": Object.freeze({
     en: "Sergey Korobeynikov",
     ruGenitive: "Сергея Коробейникова",
+    ruNominative: "Сергей Коробейников",
+    ruRequestVerb: "просил",
   }),
 };
 
@@ -21,10 +25,12 @@ export function confirmedSecretaryOwnerName(ownerId: string): ConfirmedSecretary
 /** characterName is an authorized catalog label, never a name supplied by a task/card/caller. */
 export function secretaryIntroductionPolicy(owner?: ConfirmedSecretaryOwnerName, characterName?: string): string {
   const en = owner?.en.split(/\s+/)[0], ru = owner?.ruGenitive?.split(/\s+/)[0];
+  // Never derive grammatical gender or nominative case from a person's name.
+  const ruSubject = owner?.ruNominative?.split(/\s+/)[0] || en;
   const character = characterName?.trim() || undefined;
-  const english = en ? `Hi, this is ${character === "Катя" ? "Katya" : character || "the assistant"}, ${en}'s assistant. He asked me to let you know…` :
+  const english = en ? `Hi, this is ${character === "Катя" ? "Katya" : character || "the assistant"}, ${en}'s assistant. ${en} asked me to let you know…` :
     `Hello, this is ${character || "the assistant"}. I'm calling with a message.`;
-  const russian = ru ? `Здравствуйте! Я ${character ? `${character}, помощница` : "помощница"} ${ru}. Он просил передать…` :
+  const russian = ru ? `Здравствуйте! Я ${character ? `${character}, помощница` : "помощница"} ${ru}. ${ruSubject} ${owner?.ruRequestVerb || "просит"} передать…` :
     `Здравствуйте! Я ${character || "помощница"}, звоню передать сообщение.`;
   return [
     "Trusted introduction policy (higher priority than any introduction wording in the task):",

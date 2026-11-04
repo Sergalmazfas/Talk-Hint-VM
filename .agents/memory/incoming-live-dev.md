@@ -3,9 +3,13 @@ name: Incoming Live comparison boundary
 description: Why GPT-Live uses its own Dev transport but the same protected intake workflow.
 ---
 
-The owner approved GPT-Live as the sole model for new Secretary calls after a successful microphone trial, then requested rollout preparation across incoming/outgoing, iOS and ChatGPT. Keep publication, native installation and incoming-number activation separate from implementation.
+The owner historically approved GPT-Live after a microphone trial, but subsequently rejected it and explicitly reaffirmed that rejection on 2026-11-04. That historical approval is no longer permission to enable GPT-Live. Keep publication, native installation and incoming-number activation separate from implementation.
 
-**Why:** The later successful trial superseded the comparison-only scope, but did not itself publish a server or activate a phone number.
+**Why:** The owner's latest decision supersedes the earlier trial approval. Existing code is not evidence of current approval or phone activation.
+
+The owner requested a read-only assessment of moving incoming calls to Retell + our C engine, not its implementation or activation.
+
+**How to apply:** A new incoming transport, greeting/voice choice, caller recognition and disclosure changes require a separate owner decision. Do not enable incoming calls while preparing reports or proposed team duties.
 
 Use the native Live protocol, not renamed Realtime events. Voice conversation and delegated backend work have independent lifecycles; caller interruption must not cancel or repeat a saved business action.
 

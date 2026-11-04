@@ -3645,3 +3645,17 @@ mtime_ms = 1793821512865
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/291a14b1-9efc-4cb0-8a06-856d840cb3b2/2c4f386a-0240-4561-9546-2ee075731584"
 storage_version_token = "1793821623694475"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Zr15g-Wwm9w1Dk1q06pYO"
+uri = "file://generated-artifacts/Secretary_Incoming_Review_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию — входящий Секретарь и именная правка"
+description = "Короткий отчёт по текущей входящей ветке, proposed-обязанности и нормы, diff именной заготовки, полный прогон четырьмя частями и план уроков после Publish."
+logical_id = "2a7bb701-c6c4-4818-a028-0a8cbc57507f"
+content_hash = "sha256:448fea68b2aef3051f61734edd994df3fc8a9d64c69977c6406c906197b28f18"
+size = 300796
+mtime_ms = 1793823862965
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2a7bb701-c6c4-4818-a028-0a8cbc57507f/48be2e32-7bc1-4040-b15f-c0eb16d74ebb"
+storage_version_token = "1793823885113906"
+content_type = "application/octet-stream"
