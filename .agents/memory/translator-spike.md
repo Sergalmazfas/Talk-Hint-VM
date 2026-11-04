@@ -45,3 +45,10 @@ Incoming Guest→RU delivery is a device-local, call-snapshotted `voice|text` pr
 For the current translator effort, the conversational `gpt-realtime` adapter is the selected candidate: it has demonstrated faithful RU↔EN behavior and should be integrated only through the separate Translator surface. The dedicated continuous translator is deprioritized.
 **Why:** the live stand showed good quality and reverse-direction potential for `gpt-realtime`, while the continuous model emitted premature fragments and was not useful for the immediate deadline.
 **How to apply:** preserve the existing Deepgram, hints, hint-model, and ordinary telephony paths; translator work must remain isolated until the iOS reverse-direction check is complete.
+
+## Отказ от стендовой модели синхронного перевода OpenAI
+Владелец подтвердил: модель синхронного перевода OpenAI проверена на стенде и отклонена как хуже текущей связки. Точное model_id в этом решении не указано.
+
+**Why:** решение владельца от 2026-11-04; не возобновлять уже отвергнутые предложения и платные сравнения без нового поручения.
+
+**How to apply:** сохранять текущую связку. Не распространять отказ на все OpenAI-модели или утверждённый разговорный адаптер без уточнения; не смешивать с отдельным отказом от GPT-Live Секретаря. Не выдумывать model_id и количественные результаты.

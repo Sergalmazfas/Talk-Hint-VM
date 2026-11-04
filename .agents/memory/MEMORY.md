@@ -49,7 +49,7 @@
 - [iOS UI localization](ios-ui-localization.md) — UI follows iPhone system language (en/ru/es/kk/uk); 5 .strings files must stay key/placeholder-identical; hint language is separate.
 - [Tutor page WKWebView caching](tutor-page-caching.md) — /tutor must be no-store + iOS ignores cache; stale cached page caused «5 deploys didn't help»; diag beacons need Bearer auth.
 - [Tutor / Calls separation](tutor-calls-separation.md) — Tutor tab = learning only (Session Report end screen); ALL call prep lives in Calls flow; Engine stays call-agnostic (MBLEx reuse).
-- [Translator realtime architecture](translator-spike.md) — RU↔EN uses isolated transports; PSTN routing is asymmetric so Owner hears Guest original and monitors both translations.
+- [Translator realtime](translator-spike.md) — isolated RU↔EN transports; owner rejected the OpenAI synchronous-translation bench candidate, not all OpenAI adapters.
 - [LIVE prompt evaluation](live-prompt-evaluation.md) — compare both message roles and normalized output; reconstructed requests and single-turn success are not end-to-end proof.
 - [Hint model choice provenance](hint-model-choice-provenance.md) — объяснение владельца о Terra сохранять отдельно от git; offline AI-оценка не равна live-проверке.
 - [English-first Hint](english-first-rollout.md) — В разрешён со строгой схемой и откатом; default старый, iPhone сначала получает целую английскую карточку.
