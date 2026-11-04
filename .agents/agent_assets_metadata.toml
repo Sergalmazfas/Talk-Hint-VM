@@ -3393,3 +3393,17 @@ mtime_ms = 1793727758471
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ac37b72d-34cf-4856-8415-b70a199961ec/1b29d326-bf57-4252-a5f2-8dad2027c562"
 storage_version_token = "1793727764717042"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ULnM2eipvvp9jiR_7UY4o"
+uri = "file://generated-artifacts/secretary-speed/Katya_speed_PREPARATION_only.zip"
+type = "unspecified"
+title = "Катя — подготовка сравнения скорости A/B/C"
+description = "Исходники, 43 пройденных теста, аудит моделей и Retell, кандидат промпта и ограничения. Аудиосерия не проведена; production не изменён."
+logical_id = "aef96619-b213-4639-8613-394f1267a181"
+content_hash = "sha256:360ca9028243d7f7d9127e51a38fc9bb6c55fb619a75a5d59aedc1128a87ef01"
+size = 23439
+mtime_ms = 1793751026299
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/aef96619-b213-4639-8613-394f1267a181/e91e802d-59d0-47cc-8bc7-4fc1fd4640a9"
+storage_version_token = "1793751039836794"
+content_type = "application/octet-stream"
