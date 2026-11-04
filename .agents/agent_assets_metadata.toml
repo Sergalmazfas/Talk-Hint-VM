@@ -3659,3 +3659,17 @@ mtime_ms = 1793823862965
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2a7bb701-c6c4-4818-a028-0a8cbc57507f/48be2e32-7bc1-4040-b15f-c0eb16d74ebb"
 storage_version_token = "1793823885113906"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "6CfDuAuBHzvYTIxKkPGcq"
+uri = "file://generated-artifacts/aiphone-benchmark/benchmark.html"
+type = "html"
+title = "Бенчмарк конкурентов — AI Phone"
+description = "Читаемая proposed-копия для Марии: исходный текст владельца сохранён дословно; заявления и цены не выданы за независимо проверенные факты."
+logical_id = "f507dc8a-b847-4584-85a0-fd9f30b4a5cc"
+content_hash = "sha256:53d744a28703368895de956ee9ff63233a40641f957f48223b35f3a659637cb0"
+size = 6400
+mtime_ms = 1793829493485
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f507dc8a-b847-4584-85a0-fd9f30b4a5cc/801f7cc7-8c2c-4058-b445-1456b4ec630e"
+storage_version_token = "1793829515275913"
+content_type = "text/html"
