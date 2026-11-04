@@ -11,11 +11,17 @@ const rpc = async (name, args = {}) =>
   (await callProductionMcp("tools/call", { name, arguments: args })).structuredContent.result;
 const journalId = "DOC-TALKHINT-IMPROVEMENT-JOURNAL";
 const log = { status: "preflight", operations: [] };
+const baselineHashes = new Map(), checkedBaseline = new Set();
 let revision;
 const persist = () => save(`${dir}/new-lessons-log.json`, log);
 async function read(id) {
   const d = await rpc("get_document", { documentId: id });
   if (d.revision !== revision || d.snapshotHash !== hash(d.text)) throw Error("READ_MISMATCH");
+  if (!checkedBaseline.has(id)) {
+    if (!baselineHashes.has(id) || baselineHashes.get(id) !== d.snapshotHash)
+      throw Error("EXPECTED_BASELINE_HASH_MISMATCH");
+    checkedBaseline.add(id);
+  }
   await save(`${dir}/latest-${id}.json`, d);
   return d;
 }
@@ -52,6 +58,9 @@ async function main() {
   const first = await load(`${dir}/write-log.json`);
   if (first.status !== "first_plan_verified" || first.operations.length !== 15 ||
       first.operations.some(x => x.status !== "verified")) throw Error("FIRST_PHASE_NOT_VERIFIED");
+  for (const operation of first.operations)
+    for (const document of operation.readback)
+      baselineHashes.set(document.id, document.sha256);
   revision = first.operations.at(-1).revisionAfter;
   if (revision !== 1280) throw Error("FIRST_PHASE_COMMAND_COUNT_MISMATCH");
   if (!validateOnly) {

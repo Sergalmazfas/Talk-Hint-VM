@@ -3575,3 +3575,17 @@ mtime_ms = 1793808734204
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b6aa2973-7622-449d-9c2e-9ba25e2ca869/7ab97f8b-5c53-4713-833f-30922bcd70ed"
 storage_version_token = "1793808742000129"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "gIDxdoIxrZl7RvCfcAPf2"
+uri = "file://generated-artifacts/TalkHint_Step2_r1288_Receipt.zip"
+type = "unspecified"
+title = "Шаг 2 выполнен — r1288"
+description = "Записанная запись журнала, 7 proposed-уроков и журнал четырёх операций с UUID, revision, хэшами и квитанциями readback."
+logical_id = "bbc6bc84-5266-4cf1-9acd-c2b41e5450e6"
+content_hash = "sha256:2d4ad1df3eb9f38fc06dfc1fed564c662452731fdab83f99587c5d1bcb76ed2b"
+size = 9129
+mtime_ms = 1793811340967
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bbc6bc84-5266-4cf1-9acd-c2b41e5450e6/87542303-86a4-4047-ac38-e7ec6e7d26be"
+storage_version_token = "1793811367654741"
+content_type = "application/octet-stream"
