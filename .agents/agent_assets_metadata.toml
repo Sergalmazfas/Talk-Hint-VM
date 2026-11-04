@@ -3491,3 +3491,31 @@ mtime_ms = 1793766993368
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/730ec103-46d1-42fb-b348-7ed3a9cfe11a/cd86e30c-e526-40e8-9108-7284fb179a77"
 storage_version_token = "1793767007733371"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "2X6U1hgtVSdxfQdiBl6ED"
+uri = "file://generated-artifacts/crew-append-tools/PLAN.html"
+type = "html"
+title = "План привязки семи книжек — до записи"
+description = "Источник r1246: четыре новые книжки и три старых документа. Ссылки на текущие анкеты, порядок записи и ограничения."
+logical_id = "2f14163b-8c03-42a4-ac7e-6c4fc97789ac"
+content_hash = "sha256:65e448fee5fc2253af8d87e36001e26ae60b91848fb0316083a47bcc84b01bd8"
+size = 5473
+mtime_ms = 1793768221358
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/2f14163b-8c03-42a4-ac7e-6c4fc97789ac/d72fd56f-c9cc-418b-aa93-9d082cc8250f"
+storage_version_token = "1793768240943746"
+content_type = "text/html"
+
+[[outputs]]
+id = "_YFGF6TcQv0lOeWSbiwMn"
+uri = "file://generated-artifacts/Crew_append_journal_books_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: MCP журнала и книжек"
+description = "Diff, исходники, 23 новых теста, полный прогон четырьмя шардами, план привязки и запись после Publish. Production не изменён; перенос C в пакет пока не входит."
+logical_id = "e55f42c4-92f9-4c3e-a54b-43f2fa7aef65"
+content_hash = "sha256:d9cb666b078dbda6ca55ca148442a0c4a83347f32732587001704eeed2ab0091"
+size = 264478
+mtime_ms = 1793768221829
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e55f42c4-92f9-4c3e-a54b-43f2fa7aef65/a94c3082-42e6-4600-b2c3-cf59b0dbb311"
+storage_version_token = "1793768241717183"
+content_type = "application/octet-stream"

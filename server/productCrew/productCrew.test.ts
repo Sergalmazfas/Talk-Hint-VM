@@ -221,7 +221,14 @@ describe("production MCP protocol boundary", () => {
     expect(initialized.result.instructions).not.toContain("Расходы, production, публикация");
     const list = await (await request(token, "tools/list")).json() as any;
     const names = list.result.tools.map((t: any) => t.name);
-    expect(names).toHaveLength(25); expect(names).toContain("update_structure"); expect(names).not.toContain("review_result");
+    expect(names).toHaveLength(28); expect(names).toContain("update_structure"); expect(names).not.toContain("review_result");
+    for (const name of ["append_journal_entries", "append_knowledge_lessons", "bind_employee_knowledge_book"])
+      expect(names).toContain(name);
+    const lessonSchema = list.result.tools.find((t: any) => t.name === "append_knowledge_lessons")
+      .inputSchema.properties.lessons.items;
+    expect(lessonSchema.properties.status.enum).toEqual(["proposed"]);
+    expect(lessonSchema.properties.acceptedAt).toEqual({ type: "null" });
+    expect(lessonSchema.additionalProperties).toBe(false);
     expect(names).toContain("approve_secretary_name");
     for (const name of ["apply_owner_product_change_policy", "create_planned_role", "update_role_title", "update_employee_sections", "set_projection_manager", "replace_employee_profile", "add_competitor", "update_maria_profile", "create_secretary_department_structure"])
       expect(names).toContain(name);

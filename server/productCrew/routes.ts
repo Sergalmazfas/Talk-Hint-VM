@@ -187,6 +187,7 @@ export function registerProductCrew(app: Express, options: {
 function toJsonSchema(schema: any): any {
   const def = schema._def, type = def.typeName;
   if (type === "ZodOptional") return toJsonSchema(def.innerType);
+  if (type === "ZodNull") return { type: "null" };
   // Refinements remain enforced by the server parser; no transforms/preprocessors.
   if (type === "ZodEffects" && def.effect.type === "refinement") return toJsonSchema(def.schema);
   if (type === "ZodNullable") return { anyOf: [toJsonSchema(def.innerType), { type: "null" }] };
@@ -208,6 +209,9 @@ function toJsonSchema(schema: any): any {
   throw Error(`Unsupported product tool input schema: ${type}`);
 }
 const toolDescription: Record<ToolName, string> = {
+  append_journal_entries: "Production: только дописать описательные записи в DOC-TALKHINT-IMPROVEMENT-JOURNAL. SHA-256 исходника, revision и UUID обязательны; старые поля и история сохраняются, дубли ID запрещены. Без приёмки, удаления, изменения промптов, доступов или запуска. После записи get_document.",
+  append_knowledge_lessons: "Production: только дописать proposed-уроки в привязанную книжку одной из семи согласованных ролей. Источник должен существовать в журнале. Без active, приёмки, изменения прежних уроков, промптов или доступов. SHA-256 книжки, revision, UUID и повторное get_document.",
+  bind_employee_knowledge_book: "Production: однократная фиксированная привязка семи книжек. Севе/Лёве/Томе/Глебу создаёт пустую книжку; Замиру/Фоме/Тихону привязывает согласованный старый ID без изменения документа. Только ссылка и версия анкеты; hash, revision и UUID. Переназначение и запуск запрещены.",
   approve_secretary_name: "Production: только ранее утверждённое владельцем имя Севы, Лёвы или Томы, proposed → accepted. Фиксированные три роли и три имени; hash анкеты, revision, UUID и ссылка на решение обязательны. Не меняет должность, характер, промпт, обязанности, права, исполнителя, модель или статус включения.",
   create_secretary_department_structure: "Production, этап 1: атомарно создать пустые роли Севы, Лёвы, Томы (имена proposed), ссылки на существующий каталог и два пустых слота; существующую проекцию Кати подчинить Севе. Без задач, расписаний, расходов, новых агентов, копии Кати, смены личности, промпта, голоса или телефонных назначений. Коллизия/существующий отдел → отказ, не перезапись.",
   update_maria_profile: "Production: перенести сохранённый полный должностной паспорт Марии HEAD.06 в DOC-TEAM-HEAD06. Пять обязанностей, клиенты и входы; источник version и hash анкеты обязательны. Без смены личности, промпта, графа или приёмки.",
