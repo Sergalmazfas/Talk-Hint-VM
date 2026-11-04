@@ -34,14 +34,16 @@ function refusalDiagnostic(result, httpStatus) {
     reasonCode: safeReasons.get(detail?.error) ?? "UNCLASSIFIED_REFUSAL" };
 }
 
-export async function callProductionMcp(method, params, { env = process.env, fetcher = fetch } = {}) {
+export async function callProductionMcp(method, params, { env = process.env, fetcher = fetch, timeoutMs = 60000 } = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000)
+    throw Error("Invalid bounded MCP timeout.");
   const key = env.PRODUCT_CREW_KEY;
   if (typeof key !== "string" || !/^[A-Za-z0-9_-]{43,512}$/.test(key))
     throw Error("PRODUCT_CREW_KEY is missing or invalid in project Secrets.");
   const id = randomUUID();
   // Every model operation reads a production snapshot, which can take >15s.
   // Keep a bounded wait, including response parsing, and never retry writes.
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 60000);
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetcher(endpoint, {
       method: "POST", redirect: "error", cache: "no-store", signal: controller.signal,

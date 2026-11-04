@@ -9,13 +9,14 @@ const strings = array(str);
 export const mannerKinds = ["repeat_questions", "multi_questions", "repeat_intro", "recap_words", "thank_you", "got_it"] as const;
 const manner = object({ kind: { type: "string", enum: mannerKinds },
   value: { type: ["integer", "null"] }, quote: str, turn: integer, reason: str });
-const row = { index: integer, quote: str, turn: integer, reason: str };
+const kind = { type: "string", enum: ["say", "ask", "unknown"] };
+const row = { index: integer, kind, quote: str, turn: integer, reason: str };
 const expectationChecks = array(object({ entryId: str, metric: str, actual: { type: ["number", "null"] },
   status: { type: "string", enum: ["сошлось", "не сошлось", "не проверено"] }, reason: str }));
 const proposal = object({ status: { type: "string", const: "proposed" }, acceptor: { type: "string", const: "owner" },
   target: { type: "string", enum: ["katya_checklist", "preparation"] }, rule: str, before: str, after: str });
 const dialogue = object({
-  checklist: array(object({ index: integer, answer: str, closed: { type: "boolean" }, quote: str, turn: integer })),
+  checklist: array(object({ index: integer, kind, answer: str, closed: { type: "boolean" }, quote: str, turn: integer })),
   katyaTurns: integer, excessTurns: integer,
   hypothetical: { type: "boolean", const: true },
   ideal: array(object({ speaker: { type: "string", enum: ["secretary", "guest"] }, text: str, sourceTurns: array(integer) })),
@@ -32,7 +33,8 @@ export function secretaryOutputSchema(stage: string) {
     learned: str, wentWrong: str, nextAction: str, proposals: array(proposal) });
 }
 const text = z.string().max(6000);
-const rows = { index: z.number().int(), quote: text, turn: z.number().int(), reason: text };
+const itemKind = z.enum(["say", "ask", "unknown"]);
+const rows = { index: z.number().int(), kind: itemKind, quote: text, turn: z.number().int(), reason: text };
 const expectationCheckRows = z.array(z.object({ entryId: text, metric: text, actual: z.number().finite().nonnegative().nullable(),
   status: z.enum(["сошлось", "не сошлось", "не проверено"]), reason: text.min(1) }).strict()).max(16);
 const manners = z.array(z.object({ kind: z.enum(mannerKinds), value: z.number().int().nonnegative().nullable(),
@@ -41,7 +43,7 @@ const manners = z.array(z.object({ kind: z.enum(mannerKinds), value: z.number().
 const proposals = z.array(z.object({ status: z.literal("proposed"), acceptor: z.literal("owner"),
   target: z.enum(["katya_checklist", "preparation"]), rule: text, before: text, after: text }).strict()).max(5);
 const dialogueCheck = z.object({
-  checklist: z.array(z.object({ index: z.number().int(), answer: text, closed: z.boolean(), quote: text, turn: z.number().int() }).strict()).max(20),
+  checklist: z.array(z.object({ index: z.number().int(), kind: itemKind, answer: text, closed: z.boolean(), quote: text, turn: z.number().int() }).strict()).max(20),
   katyaTurns: z.number().int().nonnegative(), excessTurns: z.number().int().nonnegative(), hypothetical: z.literal(true),
   ideal: z.array(z.object({ speaker: z.enum(["secretary", "guest"]), text, sourceTurns: z.array(z.number().int()).max(150) }).strict()).max(150),
 }).strict();

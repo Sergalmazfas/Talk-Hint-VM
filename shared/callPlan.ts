@@ -27,7 +27,8 @@ export type CallPlan = z.infer<typeof callPlanSchema>;
 export function checklistCallPlan(plan: CallPlan): CallPlan {
   // Existing non-empty items are authoritative. Goal supplies a checklist only
   // when no items were provided; no factual answer is generated.
-  const sayAsk = splitCallChecklist(plan.sayAsk.length ? plan.sayAsk : [plan.goal]);
+  if (plan.sayAsk.length) return plan;
+  const sayAsk = splitCallChecklist([plan.goal]);
   // A single long goal may exceed an item's existing 500-character bound.
   // Keep the existing validated plan rather than silently truncating a fact.
   if (!plan.sayAsk.length && sayAsk.some(s => s.length > 500)) return plan;
@@ -74,17 +75,10 @@ export function legacySecretaryPlan(instruction: string, targetPhone: string): C
   if (instruction.startsWith("Owner-approved call plan."))
     throw Object.assign(new Error("Malformed structured plan; use prepare_secretary_plan"), { status: 400 });
   const pieces = splitCallChecklist([instruction]);
-  // Split long items at whitespace; never shorten a number, fact or constraint.
-  const items = pieces.flatMap(piece => {
-    const result: string[] = [];
-    while (piece.length > 500) {
-      const at = piece.lastIndexOf(" ", 500);
-      if (at < 1) throw Object.assign(new Error("Plan item too long; use prepare_secretary_plan"), { status: 400 });
-      result.push(piece.slice(0, at)); piece = piece.slice(at + 1);
-    }
-    if (piece) result.push(piece);
-    return result;
-  });
+  // Do not turn a complete thought into arbitrary fragments to fit the schema.
+  if (pieces.some(piece => piece.length > 500))
+    throw Object.assign(new Error("Complete plan item too long; shorten it explicitly using prepare_secretary_plan"), { status: 400 });
+  const items = pieces;
   // A factual negation ("не закрыт", "не нужно платить", "не знаю") is not
   // a disclosure ban. Only recognizable explicit prohibitions are projected;
   // every original sentence remains in the authorized checklist regardless.

@@ -9,9 +9,9 @@ import { renderProcessLetter } from "../callLab/processReport";
 
 const at="2026-11-04T10:00:00Z";
 const manners=mannerKinds.map(kind=>({kind,value:0,quote:"",turn:-1,reason:"No occurrence in excerpt"}));
-const author={points:[{index:0,status:"выполнено",quote:"$150",turn:0,reason:"Quoted price"}],
+const author={points:[{index:0,kind:"ask",status:"выполнено",quote:"$150",turn:0,reason:"Quoted price"}],
   openingLanguage:"en",recognitionIssues:[],unverified:[],manners, proposals:[],expectationChecks:[],
-  dialogue:{checklist:[{index:0,answer:"$150",closed:true,quote:"$150",turn:0}],katyaTurns:0,excessTurns:0,
+  dialogue:{checklist:[{index:0,kind:"ask",answer:"$150",closed:true,quote:"$150",turn:0}],katyaTurns:0,excessTurns:0,
     hypothetical:true,ideal:[{speaker:"guest",text:"$150",sourceTurns:[0]}]}};
 function harness() {
   let s=initialState();

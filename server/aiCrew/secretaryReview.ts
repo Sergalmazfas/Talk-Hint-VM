@@ -4,7 +4,7 @@ import type { ProjectModelState } from "../../shared/projectModel";
 import { HINT_AGENTS } from "./hintPilot";
 import { validSecretaryOutput } from "./secretaryOutput";
 import { callPlanSchema } from "../../shared/callPlan";
-import { splitCallChecklist } from "../../shared/callChecklist";
+import { splitCallChecklist, checklistItemKind, type ChecklistItemKind } from "../../shared/callChecklist";
 import { validExpectationChecks, type ExpectationSnapshot } from "./expectations";
 
 export const SECRETARY_AGENTS = [
@@ -14,6 +14,7 @@ export const SECRETARY_AGENTS = [
 ] as const;
 export type SecretaryEvidence = {
   version: 1; points: string[]; transcript: { speaker: string; text: string }[];
+  pointKinds?: ChecklistItemKind[];
   codeVersion: string; limitations: string[];
   expectations?: ExpectationSnapshot;
   cRollout?: { ordinal: number; measurements: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics> };
@@ -79,10 +80,12 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
       items = plan.sayAsk.length ? plan.sayAsk : [plan.goal]; source = "structured";
     } catch { throw Error("SECRETARY_SOURCE_UNAVAILABLE"); }
   }
-  const points = splitCallChecklist(items).map(redact);
+  // Structured items have already been approved: preserve their boundaries.
+  const rawPoints = source === "structured" ? items : splitCallChecklist(items);
+  const points = rawPoints.map(redact);
   if (points.length > 20 || Buffer.byteLength(JSON.stringify(turns), "utf8") > 24000)
     throw Error("SECRETARY_SOURCE_TOO_LARGE");
-  return { version: 1, points, transcript: turns, codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
+  return { version: 1, points, pointKinds: rawPoints.map(checklistItemKind), transcript: turns, codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
     preparation: { source, originalItems: items.length, checklistItems: points.length, paragraphExpanded: points.length > items.length,
       proposedChecklist: points, status: "proposed", acceptor: "owner" },
     limitations: ["PII redacted; compare only the supplied excerpt", "No audio proof of pauses, accent or recognition errors",
@@ -157,9 +160,9 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
       s.runs.some(r => r.taskId === task.id && r.status === "unknown")) throw Error("SECRETARY_ASSIGNMENT_OR_EVIDENCE_CHANGED");
   const doc = (id?: string) => id ? s.documents.find(d => d.id === id && d.taskId === task.id)?.text : undefined;
   const instruction = index === 0
-    ? 'Лёва: каждый пункт поручения, цитата и индекс реплики. Ответ JSON: {"points":[{"index":0,"status":"выполнено|частично|нет|не проверено","quote":"","turn":0,"reason":""}],"openingLanguage":"en|ru|es|unknown","recognitionIssues":[],"unverified":[]}. Паузы/акцент без аудио не проверены.'
+    ? 'Лёва: каждый пункт поручения, тип, цитата и индекс реплики. Ответ JSON: {"points":[{"index":0,"kind":"say|ask|unknown","status":"выполнено|частично|нет|не проверено","quote":"","turn":0,"reason":""}],"openingLanguage":"en|ru|es|unknown","recognitionIssues":[],"unverified":[]}. Паузы/акцент без аудио не проверены.'
     : index === 1
-      ? 'Тома: независимо проверь ВСЕ пункты по исходной расшифровке, а не доверию Лёве. Ответ JSON: {"verdict":"confirmed|not_confirmed","checks":[{"index":0,"quote":"","turn":0,"reason":""}],"disagreements":[],"unverified":[]}. Неверный/неполный разбор не подтверждать.'
+      ? 'Тома: независимо проверь ВСЕ пункты и типы по исходной расшифровке, а не доверию Лёве. Ответ JSON: {"verdict":"confirmed|not_confirmed","checks":[{"index":0,"kind":"say|ask|unknown","quote":"","turn":0,"reason":""}],"disagreements":[],"unverified":[]}. Неверный/неполный разбор не подтверждать.'
       : 'Сева: сведи разбор и независимую проверку. Ответ JSON: {"outcome":"","agreed":[],"remaining":[],"unverified":[]}. Неподтверждённые выводы не объявляй договорённостью. Получатель Мария и письмо владельцу; это не приёмка продукта.';
   return JSON.stringify({ ownerCharacter: p.characters[agentId], instruction: instruction +
     (index < 2 ? " expectationChecks: для КАЖДОЙ цели из evidence.expectations.targets вернуть {entryId,metric,actual:number|null," +
@@ -168,7 +171,13 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
     "Нет заранее записанного ожидания — пустой список, цифры не выдумывать. Неуспех ожидания НЕ означает, что сам разбор неверен. " :
     " Сева: в трёх строках сводки отличать подтверждённый разбор от достижения числовых целей. " +
     "Если ожидание не сошлось или не проверено — явно указать это и причину; не писать «всё выполнено». ") +
-    " dialogue: checklist[{index,answer,closed,quote,turn}], katyaTurns, excessTurns, hypothetical=true, " +
+    " Для КАЖДОЙ строки points/checks и dialogue.checklist укажи kind: say|ask|unknown согласно evidence.pointKinds " +
+    "(для старой выдержки без pointKinds классифицируй исходную мысль; не придумывай факт). " +
+    "say = «сказать»: закрыт только после произнесения Катей полного смысла, quote/turn — из secretary. " +
+    "ask = «спросить»: закрыт после ответа собеседника или честного «не знаю», quote/turn — из guest. " +
+    "Сам вопрос Кати не закрывает ask; повтор факта собеседником не закрывает say. " +
+    "unknown/смешанный пункт не закрывать, указать неопределённость. Состав/границы/порядок исходных пунктов не менять. " +
+    " dialogue: checklist[{index,kind,answer,closed,quote,turn}], katyaTurns, excessTurns, hypothetical=true, " +
     "ideal[{speaker:secretary|guest,text,sourceTurns:[индексы]}]. Для каждого пункта: точный ответ и закрыт ли он; " +
     "«не знаю» закрывает вопрос как unknown, но НЕ означает успех поручения. " +
     "katyaTurns — фактическое число реплик secretary в выдержке; excessTurns — доказуемо лишние. " +
@@ -195,8 +204,17 @@ function citationsValid(rows: any, p: SecretaryReview, allowUnverified = true) {
   return Array.isArray(rows) && rows.length === p.evidence.points.length &&
     new Set(rows.map(r => r?.index)).size === rows.length && rows.every(r => r && Number.isInteger(r.index) &&
       r.index >= 0 && r.index < p.evidence.points.length && typeof r.reason === "string" && r.reason.trim() &&
+      (p.outputVersion !== 2 || r.kind === pointKind(p, r.index) &&
+        (!["выполнено", "частично"].includes(r.status) || closureSpeakerValid(r, p))) &&
       (allowUnverified && r.status === "не проверено" || typeof r.quote === "string" && r.quote.trim() &&
         Number.isInteger(r.turn) && p.evidence.transcript[r.turn]?.text.includes(r.quote)));
+}
+function pointKind(p: SecretaryReview, index: number): ChecklistItemKind {
+  return p.evidence.pointKinds?.[index] ?? checklistItemKind(p.evidence.points[index]);
+}
+function closureSpeakerValid(row: any, p: SecretaryReview): boolean {
+  const kind = pointKind(p, row.index);
+  return kind !== "unknown" && p.evidence.transcript[row.turn]?.speaker === (kind === "say" ? "secretary" : "guest");
 }
 export function finishSecretaryRun(s: CrewState, task: Task, documentId: string, text: string, at: string) {
   const p = task.secretaryReview!;
@@ -214,14 +232,17 @@ export function finishSecretaryRun(s: CrewState, task: Task, documentId: string,
     d.excessTurns <= d.katyaTurns && Array.isArray(d.checklist) &&
     d.checklist.length === p.evidence.points.length && new Set(d.checklist.map((r: any) => r.index)).size === d.checklist.length &&
     d.checklist.every((r: any) => r && Number.isInteger(r.index) && r.index >= 0 && r.index < p.evidence.points.length &&
-      (!r.closed || typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote))) &&
+      r.kind === pointKind(p, r.index) &&
+      (!r.closed || typeof r.answer === "string" && r.answer.trim() && closureSpeakerValid(r, p) &&
+        typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote))) &&
     Array.isArray(d.ideal) && d.ideal.every((r: any) => r && Array.isArray(r.sourceTurns) &&
       r.sourceTurns.every((i: number) => Number.isInteger(i) && !!p.evidence.transcript[i]) &&
       (r.speaker !== "guest" || r.sourceTurns.some((i: number) => p.evidence.transcript[i]?.text.includes(r.text))));
   if (p.status === "author") {
     p.authorId = documentId;
     p.authorValid = formatValid && expectationsValid && mannerEvidence && dialogueValid && citationsValid(result?.points, p) &&
-      result.points.every((r: any) => ["выполнено", "частично", "нет", "не проверено"].includes(r.status));
+      result.points.every((r: any) => ["выполнено", "частично", "нет", "не проверено"].includes(r.status) &&
+        (p.outputVersion !== 2 || r.status !== "выполнено" || d.checklist.some((item: any) => item.index === r.index && item.closed)));
     p.status = "review"; enqueue(s, task, 1, at);
   } else if (p.status === "review") {
     p.reviewId = documentId;

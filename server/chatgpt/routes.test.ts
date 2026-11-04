@@ -88,7 +88,7 @@ describe("structured plans in the owner's existing ChatGPT MCP", () => {
     expect(prepared.body.status).toBe("owner_approval_required");
     expect(prepared.body.note).toContain("prepare_secretary_plan");
     const plan = secretaryPlanFromInstruction(prepared.body.call.instruction, draft.phoneNumber);
-    expect(plan?.sayAsk).toContain("confirm $150.");
+    expect(plan?.sayAsk).toContain("Ask availability; confirm $150.");
     expect(plan?.disclosurePolicy.forbidden).toContain("Do not pay without my approval.");
     expect(backend.start).not.toHaveBeenCalled();
     const premature = await tool("start_call", token, { confirmation: prepared.body.confirmation });

@@ -8,11 +8,11 @@ describe("legacy prepare_call compatibility", () => {
   it("preserves amounts, prohibitions and short checklist without invented answers", () => {
     const text = "Ask availability; confirm total $207.57. Do not place an order or pay without my approval.";
     const plan = legacySecretaryPlan(text, phone);
-    expect(plan.sayAsk).toEqual(["Ask availability;", "confirm total $207.57.", "Do not place an order or pay without my approval."]);
+    expect(plan.sayAsk).toEqual(["Ask availability; confirm total $207.57.", "Do not place an order or pay without my approval."]);
     expect(plan.disclosurePolicy.forbidden).toEqual(["Do not place an order or pay without my approval."]);
     expect(plan.expectedQuestions).toEqual([]);
     expect(plan.ownerFacts).toEqual([]);
-    expect(plan.disclosurePolicy.allowed).toEqual(["Ask availability;", "confirm total $207.57."]);
+    expect(plan.disclosurePolicy.allowed).toEqual(["Ask availability; confirm total $207.57."]);
     const stored = secretaryInstruction(plan);
     const metadata = secretaryPreparationMetadata({ id: "task", phoneNumber: phone, instruction: stored });
     expect(metadata.callPlanPreparation.status).toBe("structured_plan");

@@ -165,7 +165,7 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       ...(p.evidence.expectations?.targets.length ?
         [`Ожидание → факт → сошлось/не сошлось/почему: Лёва ${JSON.stringify(author?.expectationChecks ?? [])}; Тома ${JSON.stringify(review?.expectationChecks ?? [])}`] :
         [`Сверка ожидания: не проверено — нет доступного числового ожидания, зафиксированного до звонка (${p.evidence.expectations?.status ?? "старая запись без снимка"}). Порог не выдумывался.`]),
-      `Пункт → ответ → закрыт: ${JSON.stringify(author?.dialogue?.checklist ?? "не проверено")}`,
+      `Пункт → тип (say=сказать, ask=спросить, unknown=не определено) → ответ/произнесено → закрыт: ${JSON.stringify(author?.dialogue?.checklist ?? "не проверено")}`,
       `Реплики Кати / лишние: ${author?.dialogue?.katyaTurns ?? "не измерено"} / ${author?.dialogue?.excessTurns ?? "не измерено"}`,
       `Идеальная короткая версия (гипотеза): ${JSON.stringify(author?.dialogue?.ideal ?? [])}; независимая версия Томы: ${JSON.stringify(review?.dialogue ?? "не проверено")}`,
       `Предложения Лёвы/Севы, принимает только владелец: ${JSON.stringify([...(author?.proposals ?? []), ...(summary?.proposals ?? [])])}`,

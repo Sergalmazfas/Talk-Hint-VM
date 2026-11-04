@@ -3589,3 +3589,45 @@ mtime_ms = 1793811340967
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bbc6bc84-5266-4cf1-9acd-c2b41e5450e6/87542303-86a4-4047-ac38-e7ec6e7d26be"
 storage_version_token = "1793811367654741"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "kQGtwCarYSCcsxCN9CAD9"
+uri = "file://generated-artifacts/Secretary_Norms_DRAFT_r1289.zip"
+type = "unspecified"
+title = "Паспорт норм — черновик и проверка r1289"
+description = "Паспорт Markdown/JSON, 67 зелёных тестов, подтверждение production и журнал остановки. Запись паспорта ещё не завершена."
+logical_id = "7892687a-4be1-4665-839d-1fbec1c427be"
+content_hash = "sha256:b67605ffbf1a8426e0fc8ad3be3a36b2252f469b2c1c9e6b8adc990cce4be4b8"
+size = 37762
+mtime_ms = 1793813848947
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7892687a-4be1-4665-839d-1fbec1c427be/2bb82e6b-85bb-4877-8c8d-3c350bc5e282"
+storage_version_token = "1793813872854966"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "8IeFhK_KL6AOCtyP4MHGt"
+uri = "file://generated-artifacts/Secretary_Norms_r1295_Receipt.zip"
+type = "unspecified"
+title = "Паспорт норм Секретаря — r1295"
+description = "Записанный паспорт Markdown/JSON, запись журнала, proposed-урок Севе, UUID/revision/хэши и результаты 67 тестов. Все записи проверены повторным чтением."
+logical_id = "ada0b7fa-118d-419e-85f0-408c2b841a31"
+content_hash = "sha256:f2ff7f7a25267c643a80230c006df83f9651f5d87a53da937162a05a10aaad67"
+size = 26657
+mtime_ms = 1793815889186
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ada0b7fa-118d-419e-85f0-408c2b841a31/ee370774-550d-4e1b-ac84-2b115d5a38c7"
+storage_version_token = "1793815915901127"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "mNLEyG7uKngi8Ws68nJNY"
+uri = "file://generated-artifacts/Checklist_Thought_Types_Clavdiy.zip"
+type = "unspecified"
+title = "Чек-лист: «сказать / спросить» — пакет Клавдию"
+description = "Dev-diff, 11 файлов, регрессионные тесты, полный прогон четырьмя частями и proposed-уроки. 3663 теста прошли, 0 ошибок, 44 штатных пропуска. Ничего не опубликовано."
+logical_id = "7c33d5cf-3e0e-403b-9cd0-94203581621b"
+content_hash = "sha256:80128bb39f997ed5a3b90b612439012eb53c0030d80a245563be758e80ea6156"
+size = 315786
+mtime_ms = 1793817030810
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7c33d5cf-3e0e-403b-9cd0-94203581621b/58ebbeb9-b3fc-422b-80b8-27f181196b55"
+storage_version_token = "1793817051333822"
+content_type = "application/octet-stream"

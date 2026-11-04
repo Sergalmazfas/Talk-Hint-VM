@@ -35,7 +35,7 @@ export const secretaryTestTools = [
 // existing call; the end tool still requires completed playback.
 export const secretaryPhoneTools = [
   { ...secretaryEndTool, type: "function" as const, strict: false,
-    description: "After every authorized checklist item has a reply (including explicit unknown), or an explicit refusal, prepare ONE thank-you/farewell. No recap/Is that right needed. Never end during IVR, silence, hold or transfer. Playback must complete; new speech cancels preparation." },
+    description: "After every authorized SAY item has actually been spoken by you and every ASK item has a guest reply (including explicit unknown), or an explicit refusal, prepare ONE thank-you/farewell. No recap/Is that right needed. Never end during IVR, silence, hold or transfer. Playback must complete; new speech cancels preparation." },
   schema("press_digits", "Navigate the current complete, non-sensitive IVR menu only.", {
     digits: { type: "string", pattern: "^[0-9*#]{1,5}$" },
     reason: { type: "string", maxLength: 300 },
