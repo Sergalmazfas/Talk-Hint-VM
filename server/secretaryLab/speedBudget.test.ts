@@ -1,15 +1,28 @@
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SpeedBudget } from "./speedBudget";
 import { SpeedRequestBudget, speedSettlement } from "./speedRequestBudget";
 const dirs: string[] = [];
-afterEach(async () => { for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true }); });
+afterEach(async () => { vi.unstubAllEnvs(); for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true }); });
 async function budget() {
   const d = await mkdtemp(join(tmpdir(), "speed-budget-")); dirs.push(d);
   const path = join(d, "budget.json"); return { b: new SpeedBudget(path), path };
 }
+it("the explicit Dev-only $10 decision preserves every previous debit and survives restart", async () => {
+  const { b, path } = await budget();
+  await b.reserve("old", "C"); await b.settle("old", null);
+  const before = await b.state();
+  vi.stubEnv("NODE_ENV", "development");
+  await b.approveTenDollarSeries(); await b.approveTenDollarSeries();
+  const after = await new SpeedBudget(path).state();
+  expect(after.limitMicroUsd).toBe(10_000_000);
+  expect(after.runs).toEqual(before.runs); expect(after.spentMicroUsd).toBe(before.spentMicroUsd);
+  expect(after.remainingMicroUsd).toBe(before.remainingMicroUsd + 5_000_000);
+  vi.stubEnv("NODE_ENV", "production");
+  expect(() => b.approveTenDollarSeries()).toThrow("SPEED_DEV_ONLY");
+});
 it("persists the fixed total across restarts, counts probes and never repeats an unknown request", async () => {
   const { b, path } = await budget();
   await b.reserve("one", "A");

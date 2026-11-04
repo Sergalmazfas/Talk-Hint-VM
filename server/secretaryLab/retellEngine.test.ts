@@ -19,14 +19,45 @@ class Socket extends EventEmitter {
   close = vi.fn(() => { this.readyState = 3; this.emit("close"); });
   frame(frame: object) { this.emit("message", Buffer.from(JSON.stringify(frame)), false); }
 }
-function fixture(stream: EngineStream) {
-  const registry = new RetellEngineRegistry(stream); registryList.push(registry);
+function fixture(stream: EngineStream, buffered = false) {
+  const registry = new RetellEngineRegistry(stream, { bufferResponses: () => buffered }); registryList.push(registry);
   const r = registry.reserve("owner", "Take a message and verify details", "test-session");
   registry.registered("test-session", "web_call_1");
   const path = `/retell-engine-stream/${r.ticket}/web_call_1`;
   const ws = new Socket(); registry.attach(ws as any, path);
   return { registry, path, ws, r };
 }
+it("only the opted-in Dev registry preserves a generation across caller updates and ack response ids", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  let release!: () => void;
+  const gate = new Promise<void>(r => { release = r; });
+  const signals: AbortSignal[] = [];
+  const { ws, r } = fixture(async function* (req) {
+    signals.push(req.signal); yield { type: "text", text: "First." };
+    await gate; yield { type: "text", text: " Second." }; yield done;
+  }, true);
+  ws.frame({ interaction_type: "response_required", response_id: 1, transcript: [ { role: "user", content: "Tell me" } ] });
+  await wait();
+  const turns = [{ role: "user", content: "Tell me" }, { role: "agent", content: "First." }, { role: "user", content: "mhm" }];
+  ws.frame({ interaction_type: "update_only", turntaking: "user_turn", transcript: turns });
+  expect(signals[0].aborted).toBe(false);
+  ws.frame({ interaction_type: "response_required", response_id: 2, transcript: turns });
+  release(); await wait(); await wait();
+  expect(signals).toHaveLength(1);
+  expect(ws.sent.filter(f => f.response_id === 2).map(f => f.content).join("")).toBe(" Second.");
+  expect((r.engine as any).cInterruption.a).toBe(1);
+});
+it.each(["production", "telephone", "deployed"])("buffer opt-in cannot affect %s", mode => {
+  vi.stubEnv("NODE_ENV", mode === "production" ? "production" : "development");
+  if (mode === "deployed") vi.stubEnv("REPLIT_DEPLOYMENT", "1");
+  const registry = new RetellEngineRegistry(undefined, { phone: mode === "telephone", bufferResponses: () => true });
+  registryList.push(registry);
+  const r = registry.reserve("owner", "test", "scope");
+  registry.registered("scope", "call_1");
+  const ws = new Socket();
+  registry.attach(ws as any, `/${mode === "telephone" ? "retell-phone-engine" : "retell-engine-stream"}/${r.ticket}/call_1`);
+  expect((r.engine as any).cInterruption).toBeUndefined();
+});
 afterEach(() => { registryList.splice(0).forEach(r => r.dispose()); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers(); });
 it("Dev budget exhaustion speaks the real reason and ends once, without retrying the engine", async () => {
   vi.stubEnv("NODE_ENV", "development");

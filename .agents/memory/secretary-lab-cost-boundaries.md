@@ -3,6 +3,30 @@ name: Secretary Lab cost boundaries
 description: Pricing assumptions and scope agreed for the private Dev voice comparison bench.
 ---
 
+The owner approved interruption-buffer experiments ONLY in Dev variant C,
+raising the existing series ceiling to $10, without resetting historical costs.
+Voice, language, greeting and Retell's normal yielding to interruptions stay
+unchanged. Ambiguous continuation must be treated as new information; production
+transfer needs a separate explicit owner decision.
+
+**Why:** the owner wants to avoid throwing away an answer on acknowledgements,
+but considers speaking stale facts worse than a conservative regeneration.
+
+**How to apply:** keep old/new runs distinguishable, preserve unknown-request
+reserves, and never describe a passed event simulation as proof of audible
+resumption or production readiness.
+
+Valid PCM is not evidence that Retell understood a synthetic caller. Local
+robotic speech can become “unintelligible”; a short ASR fragment can also look
+like a language switch.
+
+**Why:** the interruption trial exposed fixture and transcript-normalization
+effects that otherwise looked like failed response reuse.
+
+**How to apply:** use the same validated question audio for before/after,
+separate ASR failures and overlapping sound from clean latency samples, and
+retain failed attempts rather than silently replacing them with successful ones.
+
 Retell may connect a custom LLM and generate its greeting while the web call is still `registered`, before the browser joins.
 
 **Why:** a browser import failed behind the owner-only web boundary, but the already admitted session still consumed an OpenAI greeting request. Provider audio cost was zero at readback; model cost was not.

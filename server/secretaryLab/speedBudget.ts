@@ -3,14 +3,14 @@ import { dirname } from "node:path";
 export type SpeedBudgetState = { limitMicroUsd: number; probeDebitMicroUsd: number;
   runs: Record<string, { variant: string; reserved: number; spent: number; status: "reserved" | "settled" | "unknown" }> };
 const initial = (): SpeedBudgetState => ({ limitMicroUsd: 5_000_000, probeDebitMicroUsd: 100_000, runs: {} });
-/** One fixed $5 series, persisted across restarts. No reset/refill HTTP method.
+/** Owner-approved $5 -> $10 series, persisted across restarts. No reset/refill HTTP method.
  * Crash locks fail closed; they are never removed based on a guessed TTL. */
 export class SpeedBudget {
   constructor(private path = "generated-artifacts/secretary-speed-series/runtime-budget.json") {}
   private async load(): Promise<SpeedBudgetState> {
     try {
       const s = JSON.parse(await readFile(this.path, "utf8"));
-      if (s.limitMicroUsd !== 5_000_000 || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
+      if (![5_000_000, 10_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
         throw Error("SPEED_BUDGET_INVALID");
       for (const r of Object.values(s.runs) as any[]) {
         if (!r || !["A", "B", "C"].includes(r.variant) || !["reserved", "settled", "unknown"].includes(r.status) ||
@@ -21,6 +21,12 @@ export class SpeedBudget {
       }
       return s;
     } catch (e: any) { if (e.code === "ENOENT") return initial(); throw e; }
+  }
+  /** Explicit owner decision for this Dev comparison. One-way; never edits runs. */
+  approveTenDollarSeries() {
+    if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1")
+      throw Error("SPEED_DEV_ONLY");
+    return this.change(s => { s.limitMicroUsd = 10_000_000; });
   }
   async state() {
     const s = await this.load();

@@ -20,14 +20,32 @@ const pool = database.pool;
 if (!pool || !database.isDevDatabase) throw Error("Dev DB required");
 const base = `https://${process.env.REPLIT_DEV_DOMAIN}`;
 const api = "/api/admin/secretary-lab/retell-engine";
-const out = "generated-artifacts/secretary-speed-series";
+const cCompare = process.argv.includes("--c-buffer-compare");
+const out = cCompare ? "generated-artifacts/katya-c-buffer/audio" : "generated-artifacts/secretary-speed-series";
 await mkdir(out, { recursive: true });
 const token = randomBytes(32).toString("hex");
 let loginCreated = false, chrome: ReturnType<typeof spawn> | undefined, cdp: WebSocket | undefined, active = "", stopAttempted = false;
 let browserServer: Server | undefined;
 const profile = await mkdtemp(tmpdir() + "/secretary-speed-chrome-");
 const attempts: any[] = [];
+if (cCompare) {
+  try {
+    const prior = JSON.parse(await readFile(out + "/audio-series-isolated.json", "utf8"));
+    if (!process.argv.includes("--continue-c-confirmed")) throw Error("C_COMPARISON_ALREADY_ATTEMPTED_NO_RETRY");
+    const readback = JSON.parse(await readFile("generated-artifacts/katya-c-buffer/baseline-readback.json", "utf8")).report;
+    const budget = await new SpeedBudget().state();
+    if (budget.reservedMicroUsd !== 0) throw Error("UNCONFIRMED_ADMISSION_NO_CONTINUATION");
+    for (const a of prior.attempts) {
+      const report = a.report ?? (readback.id === a.id ? readback : undefined);
+      if (report?.status !== "ended" || !report.engine?.speed?.requestBudget?.verifiable)
+        throw Error("UNCONFIRMED_CALL_NO_CONTINUATION");
+      attempts.push({ ...a, report, originalStatus: a.status, status: a.status === "stopped" ? "failed_known" : a.status });
+    }
+  }
+  catch (e: any) { if (e.code !== "ENOENT") throw e; }
+}
 if (process.argv.includes("--resume-known-completed")) {
+  if (cCompare) throw Error("C_COMPARISON_NO_RESUME");
   const previous = JSON.parse(await readFile(out + "/audio-series-isolated.json", "utf8"));
   for (const a of previous.attempts ?? []) {
     const usage = a.report?.engine?.usage;
@@ -122,25 +140,34 @@ try {
     const ctx=new AudioContext();await ctx.resume();if(ctx.state!=='running')throw Error('AUDIO_NOT_RUNNING');await ctx.close();
   })()`);
   console.log(JSON.stringify({ phase: "local_browser_preflight", status: "passed", paid: false }));
-  if (!process.argv.includes("--preflight-only")) for (let scenario = 0; scenario < 3; scenario++) for (const variant of ["A", "B", "C"]) {
-    if (attempts.some(a => a.scenario === scenario && a.variant === variant && a.status === "completed")) continue;
-    const pcm = await readFile(`generated-artifacts/eleven-latency/language-${scenario === 1 ? 1 : 0}.pcm`);
+  if (!process.argv.includes("--preflight-only")) for (let scenario = 0; scenario < (cCompare ? 6 : 3); scenario++) for (const variant of (cCompare ? ["C"] : ["A", "B", "C"])) {
+    if (attempts.some(a => a.scenario === scenario && a.variant === variant && (cCompare || a.status === "completed"))) continue;
+    const language = scenario < 2 || scenario === 4 ? "ru" : "en";
+    const pcm = await readFile(cCompare ? `generated-artifacts/katya-c-buffer/fixtures/${language}-question.pcm` :
+      `generated-artifacts/eleven-latency/language-${scenario === 1 ? 1 : 0}.pcm`);
+    const extras = cCompare ? {
+      ack: (await readFile(`generated-artifacts/katya-c-buffer/fixtures/${language}-ack.pcm`)).toString("base64"),
+      correction: (await readFile(`generated-artifacts/katya-c-buffer/fixtures/${language}-correction.pcm`)).toString("base64"),
+    } : null;
     const attempt: any = { scenario, variant, fixtureHash: createHash("sha256").update(pcm).digest("hex"),
-      phase: "admission", status: "started", sampleBasis: "synthetic stored PCM; decoded remote browser audio" };
+      phase: "admission", status: "started", ...(cCompare ? { responseBuffer: scenario % 2 === 1, language } : {}),
+      sampleBasis: "synthetic stored PCM; decoded remote browser audio" };
     attempts.push(attempt); await save();
     console.log(JSON.stringify({ variant, scenario, phase: attempt.phase }));
     try {
     const before = await new SpeedBudget().state();
-    if (Object.values(before.runs).filter(r => r.variant === variant).length >= 4)
+    if (cCompare ? attempts.length > 6 : Object.values(before.runs).filter(r => r.variant === variant).length >= 4)
       throw Error("AUTOMATION_MAX_FOUR_CONVERSATIONS");
     const created = await http("/sessions", "POST", { consent: true, clientRequestId: randomUUID(), speedVariant: variant,
+      ...(cCompare ? { responseBuffer: scenario % 2 === 1 } : {}),
       instruction: "Fictional test: briefly explain how you can help; never invent prices or actions.",
       personality: { id: p.rows[0].id, version: p.rows[0].current_version, mode: "work" } });
     active = created.id; stopAttempted = false; attempt.id = active; attempt.phase = "browser_gateway"; await save();
     const admission = JSON.stringify(created.call), fixture = JSON.stringify(pcm.toString("base64"));
     await evaluate(`(async()=>{
       const {RetellClient,savedRetellAdmission}=window.__speedSdk;
-      const state=window.__speed={status:'connecting',error:null,lastSound:0,firstSound:null,fixtureEnd:null,played:false};
+      const state=window.__speed={status:'connecting',error:null,lastSound:0,firstSound:null,fixtureEnd:null,played:false,
+        samples:[],quietSince:null,ackPlayed:false,correctionPlayed:false};
       const ctx=new AudioContext(); await ctx.resume(); window.__speedCtx=ctx;
       const dest=ctx.createMediaStreamDestination(); navigator.mediaDevices.getUserMedia=async()=>dest.stream;
       const original=Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,'srcObject');
@@ -151,7 +178,11 @@ try {
           silent.gain.value=0;an.fftSize=512;src.connect(an);an.connect(silent);silent.connect(ctx.destination);
           const data=new Float32Array(512);const inspect=()=>{if(ctx.state==='closed')return;an.getFloatTimeDomainData(data);
             let n=0;for(const x of data)n+=x*x;if(Math.sqrt(n/data.length)>0.003){state.lastSound=performance.now();
-              if(state.fixtureEnd!==null&&state.lastSound>=state.fixtureEnd&&state.firstSound===null)state.firstSound=state.lastSound;}
+              const sample=state.samples.at(-1);if(sample&&state.lastSound>=sample.end&&sample.first===null){
+                sample.first=state.lastSound;sample.cleanGap=state.quietSince!==null&&state.lastSound-state.quietSince>=80;}
+              state.quietSince=null;
+              if(state.fixtureEnd!==null&&state.lastSound>=state.fixtureEnd&&state.firstSound===null)state.firstSound=state.lastSound;
+            }else{state.quietSince??=performance.now();}
             requestAnimationFrame(inspect)};inspect();}}});
       const client=new RetellClient({key:'',fetch:savedRetellAdmission(${admission})});
       window.__speedClient=client;
@@ -159,29 +190,47 @@ try {
         onStatus:s=>{state.status=s},onError:()=>{state.error='SDK_GATEWAY_ERROR'}}});
       const raw=atob(${fixture});const pcm=new Int16Array(raw.length/2);
       for(let i=0;i<pcm.length;i++)pcm[i]=(raw.charCodeAt(i*2)|(raw.charCodeAt(i*2+1)<<8))<<16>>16;
-      state.play=()=>{let last=pcm.length-1;while(last>0&&Math.abs(pcm[last])<200)last--;
-        const b=ctx.createBuffer(1,pcm.length,16000),ch=b.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;
+      const extra=${JSON.stringify(extras)};
+      const decode=(raw)=>{raw=atob(raw);const x=new Int16Array(raw.length/2);
+        for(let i=0;i<x.length;i++)x[i]=(raw.charCodeAt(i*2)|(raw.charCodeAt(i*2+1)<<8))<<16>>16;return x;};
+      state.play=(kind='question')=>{const data=kind==='question'?pcm:decode(extra[kind]);
+        let last=data.length-1;while(last>0&&Math.abs(data[last])<200)last--;
+        const b=ctx.createBuffer(1,data.length,16000),ch=b.getChannelData(0);for(let i=0;i<data.length;i++)ch[i]=data[i]/32768;
         const source=ctx.createBufferSource();source.buffer=b;source.connect(dest);
-        state.fixtureEnd=performance.now()+(last+1)/16;state.played=true;source.start();};
+        state.fixtureEnd=performance.now()+(last+1)/16;state.firstSound=null;state.played=true;
+        state.samples.push({kind,end:state.fixtureEnd,first:null,cleanGap:false});source.start();};
     })()`);
     const began = Date.now(); let played = false, audio: any;
-    while (Date.now() - began < 50_000) {
+    while (Date.now() - began < (cCompare ? 70_000 : 50_000)) {
       audio = await evaluate("JSON.parse(JSON.stringify(window.__speed,(k,v)=>typeof v==='function'?undefined:v))");
+      if (cCompare) attempt.audio = { samples: audio.samples, ackPlayed: audio.ackPlayed, correctionPlayed: audio.correctionPlayed, gatewayStatus: audio.status };
       if (audio.error || audio.status === "ended") throw Error(audio.error || "GATEWAY_ENDED_EARLY");
       if (!played && audio.status === "live" && audio.lastSound > 0 &&
         await evaluate("performance.now()-window.__speed.lastSound>1000")) {
         await http(`/sessions/${active}/connected`, "POST", {});
         await evaluate("window.__speed.play()"); played = true; attempt.phase = "audio_response"; await save();
       }
-      if (played && audio.firstSound !== null &&
+      if (cCompare && played && audio.firstSound !== null && !audio.ackPlayed) {
+        await new Promise(r => setTimeout(r, 350));
+        await evaluate("window.__speed.ackPlayed=true;window.__speed.play('ack')"); continue;
+      }
+      if (cCompare && audio.ackPlayed && !audio.correctionPlayed && audio.firstSound !== null &&
+        await evaluate("performance.now()-window.__speed.firstSound>1000")) {
+        await evaluate("window.__speed.correctionPlayed=true;window.__speed.play('correction')"); continue;
+      }
+      if (played && (!cCompare || audio.correctionPlayed) && audio.firstSound !== null &&
         await evaluate("performance.now()-window.__speed.lastSound>1200&&performance.now()-window.__speed.firstSound>2000")) break;
       await new Promise(r => setTimeout(r, 150));
     }
-    attempt.audio = { fixturePlayed: played, speechEndToDecodedAudioMs: audio?.firstSound == null ? null : audio.firstSound - audio.fixtureEnd };
+    attempt.audio = { fixturePlayed: played, speechEndToDecodedAudioMs: audio?.firstSound == null ? null : audio.firstSound - audio.fixtureEnd,
+      ...(cCompare ? { samples: audio?.samples, ackPlayed: audio?.ackPlayed, correctionPlayed: audio?.correctionPlayed } : {}) };
     stopAttempted = true;
     const final = await http(`/sessions/${active}`, "DELETE");
     const report = final.report; active = "";
     attempt.report = report; attempt.status = attempt.audio.speechEndToDecodedAudioMs === null ? "unmeasured" : "completed";
+    if (cCompare && (!report.engine?.speed?.requestBudget?.verifiable || report.status !== "ended")) {
+      await save(); throw Error("C_UNBOUNDED_OR_UNCONFIRMED_STOP_NO_RETRY");
+    }
     await evaluate("(async()=>{await window.__speedSession?.end().catch(()=>undefined);await window.__speedCtx?.close();if(window.__speedOriginal)Object.defineProperty(HTMLMediaElement.prototype,'srcObject',window.__speedOriginal)})()");
     await save();
     console.log(JSON.stringify({ variant, scenario, status: attempt.status, audio: attempt.audio }));
@@ -193,8 +242,9 @@ try {
         stopAttempted = true;
         const closed = await http(`/sessions/${active}`, "DELETE");
         const speed = closed.report?.engine?.speed;
-        if (closed.report?.status === "ended" && speed && speed.requests === speed.usageRequests &&
-          speed.requestLog.every((r: any) => r.complete || (r.error === "OUTPUT_INCOMPLETE" && r.usage))) {
+        if (closed.report?.status === "ended" && speed && (cCompare ? speed.requestBudget?.verifiable :
+          speed.requests === speed.usageRequests &&
+          speed.requestLog.every((r: any) => r.complete || (r.error === "OUTPUT_INCOMPLETE" && r.usage)))) {
           attempt.report = closed.report; attempt.status = "failed_known"; attempt.error = String(e.message).slice(0, 180);
           active = ""; await save();
           console.log(JSON.stringify({ variant, scenario, status: "failed_known", error: attempt.error }));

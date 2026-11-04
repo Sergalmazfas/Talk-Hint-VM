@@ -10,6 +10,7 @@ import type { PersonalityBinding } from "../secretary/personalities/types";
 import type { OutgoingContext } from "../secretary/personalities/outgoing";
 import { speedEngine, speedLab } from "./speedRuntime";
 import type { SpeedVariant } from "./speedExperiment";
+import { CResponseBuffer } from "./cResponseBuffer";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -61,6 +62,7 @@ type Entry = {
   handled: Set<number>; introduced: boolean; closed: boolean; expiresAt: number;
   pending?: number;
   commandCompleted?: number; interruptSequence?: number;
+  buffer?: CResponseBuffer;
 };
 /** Per-session high-entropy capability, not an owner bearer token or permanent Retell key.
  * Retell's Custom LLM socket has no signature/auth header. Never log these URL paths. */
@@ -75,6 +77,7 @@ export class RetellEngineRegistry {
     onFailure?: (id: string) => void;
     telephoneTools?: (id: string) => TelephoneTools;
     createEngine?: (owner: string, instruction: string, id: string, personality?: PersonalityBinding) => SecretaryConversationEngine;
+    bufferResponses?: (id: string) => boolean;
   } = {}) {}
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     const ticket = randomBytes(32).toString("hex");
@@ -117,7 +120,7 @@ export class RetellEngineRegistry {
   }
   ended(id: string) {
     const entry = this.entries.get(id); if (!entry) return;
-    entry.closed = true; entry.abort?.abort(); entry.engine.report.connected = false;
+    entry.closed = true; entry.buffer?.close(); entry.abort?.abort(); entry.engine.report.connected = false;
     entry.socket?.close(1000, "Test ended"); this.entries.delete(id); this.tickets.delete(entry.ticket);
     this.pendingWrites.delete(id);
   }
@@ -165,6 +168,7 @@ export class RetellEngineRegistry {
       this.pendingWrites.set(entry.id, persisted);
     };
     const previous = entry.socket;
+    entry.buffer?.close();
     entry.abort?.abort(); entry.epoch++;
     entry.pending = undefined;
     entry.socket = ws;
@@ -179,7 +183,22 @@ export class RetellEngineRegistry {
       entry.epoch++; entry.abort?.abort(); entry.engine.record("response_cancelled");
     };
     let labLimitEnded = false;
+    const buffered = !this.options.phone && process.env.NODE_ENV === "development" &&
+      process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id)
+      ? new CResponseBuffer({
+        generate: (turns, signal, emit, reminder) => entry.engine.respond(turns, signal, emit, reminder),
+        send, record: event => entry.engine.record(event),
+        error: error => {
+          const limited = error instanceof SpeedLimitError;
+          if (limited) entry.engine.record("lab_budget_limit_reached");
+          return { message: limited ? speedLimitText(error.code) :
+            "Извините, сейчас не удалось получить ответ. Никакие реальные действия не выполнены.", end: true };
+        },
+      }) : undefined;
+    entry.buffer = buffered;
+    if (buffered) (entry.engine.report as any).cInterruption = buffered.metrics;
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
+      if (buffered) { buffered.request(id, turns, reminder); return; }
       if (labLimitEnded) {
         send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
         return;
@@ -247,8 +266,14 @@ export class RetellEngineRegistry {
         return;
       }
       if (frame.interaction_type === "update_only") {
+        if (buffered) {
+          if (!Array.isArray(frame.transcript) || frame.transcript.length > 300 ||
+            frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
+              typeof t.content !== "string" || t.content.length > 4000)) { ws.close(1008, "Invalid transcript"); return; }
+          buffered.update(frame.transcript, frame.turntaking === "user_turn");
+        }
         transcript(frame);
-        if (frame.turntaking === "user_turn") abort();
+        if (!buffered && frame.turntaking === "user_turn") abort();
         return;
       }
       if (!["response_required", "reminder_required"].includes(frame.interaction_type)) return;
@@ -262,6 +287,7 @@ export class RetellEngineRegistry {
     });
     const close = () => {
       if (entry.socket !== ws) return;
+      buffered?.close();
       abort(); entry.socket = undefined; entry.engine.report.connected = false;
       entry.engine.record("custom_llm_disconnected");
       if (this.options.phone && !entry.closed) {
@@ -292,10 +318,12 @@ async function checkEngine() {
   } };
 }
 const speedVariants = new Map<string, SpeedVariant>();
+export const speedBufferModes = new Map<string, boolean>();
 export const retellEngineRegistry = new RetellEngineRegistry(undefined, {
   createEngine: (owner, instruction, id, personality) => speedEngine(owner, instruction, speedVariants.get(id) ?? "A", personality),
+  bufferResponses: id => speedVariants.get(id) === "C" && speedBufferModes.get(id) !== false,
 });
 export const retellEngineLab = speedLab({ registry: retellEngineRegistry,
   api: variant => new RetellEngineApi(engineCallbackBase, undefined, variant), check: checkEngine,
-  agentName: RETELL_ENGINE_AGENT, variantsBySession: speedVariants });
+  agentName: RETELL_ENGINE_AGENT, variantsBySession: speedVariants, bufferModesBySession: speedBufferModes });
 setInterval(() => retellEngineLab.sweep(), 60_000).unref();

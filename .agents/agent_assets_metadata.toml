@@ -3435,3 +3435,17 @@ mtime_ms = 1793756833266
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4a48e16e-c108-4ded-9731-3707fa349a30/1ee0fc44-53fb-4aef-90b8-b6839ea35576"
 storage_version_token = "1793756847213505"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "YjWIgpX9kxPW_b3sTRmj6"
+uri = "file://generated-artifacts/katya-c-buffer/Katya_C_interruption_buffer_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: буфер ответов Dev C и голосовой отчёт"
+description = "Diff, исходники, 6 голосовых попыток с отмеченными сбоями, таблица, журнал, бюджет и полный прогон 3531 теста. Production и боевая Катя не менялись."
+logical_id = "d1178255-11fc-49b6-a10d-f882223aa65d"
+content_hash = "sha256:301b5f4ba6b288a10f0b1574de68ec4839a13e9f84023055bc9734c65291d5b6"
+size = 74625
+mtime_ms = 1793759548153
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d1178255-11fc-49b6-a10d-f882223aa65d/60ff28e5-2a6c-4393-ae23-2970f3567d33"
+storage_version_token = "1793759575220652"
+content_type = "application/octet-stream"

@@ -80,8 +80,10 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
 export function speedLab(deps: {
   registry: RetellEngineRegistry; api: (v: SpeedVariant) => RetellEngineApi; check: () => Promise<object>;
   agentName: string; variantsBySession: Map<string, SpeedVariant>;
+  bufferModesBySession?: Map<string, boolean>;
 }) {
   const budget = new SpeedBudget();
+  const bufferModeByOwner = new Map<string, boolean>();
   const labs = new Map<SpeedVariant, RetellSecretaryLab>();
   for (const variant of ["A", "B", "C"] as const) {
     const profile: RetellLabProfile = {
@@ -89,6 +91,7 @@ export function speedLab(deps: {
       mode: "retell-engine", check: deps.check,
       reserve: (owner, instruction, id, personality) => {
         deps.variantsBySession.set(id, variant);
+        if (variant === "C") deps.bufferModesBySession?.set(id, bufferModeByOwner.get(owner) ?? true);
         return deps.registry.reserve(owner, instruction, id, personality);
       },
       registered: (id, callId) => deps.registry.registered(id, callId),
@@ -129,7 +132,7 @@ export function speedLab(deps: {
       return { ...await labs.get("A")!.readiness(owner),
         speedVariants: (["A", "B", "C"] as const).map(id => ({ id,
           label: `${id} · ${speedProfiles[id].model} · ${speedProfiles[id].reasoning} · ${speedProfiles[id].maxOutput}` })),
-        speedBudget: { limitUsd: 5, spentUsd: state.spentMicroUsd / 1e6,
+        speedBudget: { limitUsd: state.limitMicroUsd / 1e6, spentUsd: state.spentMicroUsd / 1e6,
           reservedUsd: state.reservedMicroUsd / 1e6, remainingUsd: state.remainingMicroUsd / 1e6,
           blocked: Object.values(state.runs).some(r => r.status === "reserved"),
           accounting: "conservative estimate, not invoice" } };
@@ -139,12 +142,13 @@ export function speedLab(deps: {
       if (!input || input.consent !== true || typeof input.instruction !== "string" ||
         input.instruction.trim().length < 8 || input.instruction.length > 4000 ||
         !/^[0-9a-f-]{36}$/i.test(input.clientRequestId ?? "") ||
-        Object.keys(input).some(k => !["instruction", "consent", "clientRequestId", "personality", "speedVariant"].includes(k)))
+        (input.responseBuffer !== undefined && (variant !== "C" || typeof input.responseBuffer !== "boolean")) ||
+        Object.keys(input).some(k => !["instruction", "consent", "clientRequestId", "personality", "speedVariant", "responseBuffer"].includes(k)))
         throw Object.assign(Error("Invalid speed experiment input"), { status: 400 });
       for (const id of Array.from(owners.keys())) await finish(id);
       const lab = labs.get(variant)!;
       const previous = Array.from(owners).find(([, r]) => r.owner === owner && r.requestId === input.clientRequestId);
-      const { speedVariant: _, ...body } = input;
+      const { speedVariant: _, responseBuffer: __, ...body } = input;
       if (previous) {
         if (previous[1].lab !== lab) throw Object.assign(Error("Request variant conflict"), { status: 409 });
         return lab.create(owner, body);
@@ -152,6 +156,7 @@ export function speedLab(deps: {
       try { await budget.reserve(input.clientRequestId, variant); }
       catch (e: any) { throw Object.assign(e, { status: 409 }); }
       const priorIds = new Set(lab.reports(owner).map(r => r.id));
+      bufferModeByOwner.set(owner, input.responseBuffer !== false);
       try {
         const result = await lab.create(owner, body);
         owners.set(result.id, { lab, owner, requestId: input.clientRequestId });
@@ -161,6 +166,8 @@ export function speedLab(deps: {
         await budget.settle(input.clientRequestId,
           failed?.reason === "create_result_unknown" || failed?.status === "stop_failed" ? null : 0);
         throw e;
+      } finally {
+        bufferModeByOwner.delete(owner);
       }
     }
     report(owner: string, id: string) {
