@@ -63,3 +63,53 @@ export function secretaryPlanFromInstruction(instruction: string, targetPhone: s
     return result.success && result.data.executor === "secretary" && result.data.targetPhone === targetPhone ? result.data : null;
   } catch { return null; }
 }
+
+/** Compatibility preparation, deterministic and lossless; no guessed answers.
+ * The original free text remains in sayAsk, including every prohibition.
+ * A structured request must use prepare_secretary_plan for facts/language.
+ */
+export function legacySecretaryPlan(instruction: string, targetPhone: string): CallPlan {
+  const saved = secretaryPlanFromInstruction(instruction, targetPhone);
+  if (saved) return checklistCallPlan(saved);
+  if (instruction.startsWith("Owner-approved call plan."))
+    throw Object.assign(new Error("Malformed structured plan; use prepare_secretary_plan"), { status: 400 });
+  const pieces = splitCallChecklist([instruction]);
+  // Split long items at whitespace; never shorten a number, fact or constraint.
+  const items = pieces.flatMap(piece => {
+    const result: string[] = [];
+    while (piece.length > 500) {
+      const at = piece.lastIndexOf(" ", 500);
+      if (at < 1) throw Object.assign(new Error("Plan item too long; use prepare_secretary_plan"), { status: 400 });
+      result.push(piece.slice(0, at)); piece = piece.slice(at + 1);
+    }
+    if (piece) result.push(piece);
+    return result;
+  });
+  // A factual negation ("не закрыт", "не нужно платить", "не знаю") is not
+  // a disclosure ban. Only recognizable explicit prohibitions are projected;
+  // every original sentence remains in the authorized checklist regardless.
+  const forbidden = items.filter(s => /\b(?:do not|don't|never|must not)\b|(?:^|\s)(?:нельзя|запрещено|не\s+(?:платить|плати(?:те)?|оплачива[а-яё]*|заказыва[а-яё]*|покупа[а-яё]*|раскрыва[а-яё]*|сообща[а-яё]*|передава[а-яё]*|обеща[а-яё]*|подтвержда[а-яё]*|отправля[а-яё]*|звонить|звони(?:те)?))(?=\s|[.,;!?]|$)/i.test(s));
+  return callPlanSchema.parse({
+    goal: items[0], ownerFacts: [], sayAsk: items, expectedQuestions: [], unknowns: [],
+    // Quoted owner-authorized task text may be used for this call; forbidden
+    // items still take precedence. This grants no tools/payment permissions.
+    disclosurePolicy: { allowed: items.filter(s => !forbidden.includes(s)), forbidden },
+    // Existing telephone default, not inferred from the language of the task.
+    language: "en", executor: "secretary", targetPhone,
+  });
+}
+
+/** Presentation only: the stored instruction/confirmation remains authoritative. */
+export function displaySecretaryInstruction(instruction: string, targetPhone: string): string {
+  const plan = secretaryPlanFromInstruction(instruction, targetPhone);
+  if (!plan) return instruction;
+  return [
+    plan.goal,
+    ...plan.sayAsk.map((s, i) => `${i + 1}. ${s}`),
+    ...(plan.ownerFacts.length ? ["Facts:", ...plan.ownerFacts] : []),
+    ...plan.expectedQuestions.map(x => `${x.q} — ${x.answer ?? "Unknown"}`),
+    ...(plan.unknowns.length ? ["Unknown:", ...plan.unknowns] : []),
+    ...(plan.disclosurePolicy.allowed.length ? ["Allowed:", ...plan.disclosurePolicy.allowed] : []),
+    ...(plan.disclosurePolicy.forbidden.length ? ["Forbidden:", ...plan.disclosurePolicy.forbidden] : []),
+  ].join("\n");
+}

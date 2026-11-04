@@ -9,6 +9,7 @@ import { Credentials, fail, grantId, type Marker, type MarkerStore, type Scope }
 import type { SecretaryBackend } from "./secretary";
 import { serveStatic } from "../static";
 import { verifyMcpBuild } from "../../script/mcp-build-verification";
+import { legacySecretaryPlan, secretaryInstruction } from "../../shared/callPlan";
 
 const key = () => "synthetic-mcp-release-test-signing-key-not-a-real-secret";
 const callback = "https://chatgpt.com/connector_platform_oauth_redirect"; // Official documented example, NOT a configured connection.
@@ -131,7 +132,9 @@ describe("next-release MCP configuration (no environment mutations)", () => {
     const write = await f.token("alice", ["calls:read", "offline_access", "secretary:start"]);
     const preview = await f.rpc("prepare_call", input, write.value);
     expect(preview.body.result.structuredContent).toMatchObject({
-      status: "owner_approval_required", call: input,
+      status: "owner_approval_required", call: {
+        ...input, instruction: secretaryInstruction(legacySecretaryPlan(input.instruction, input.phoneNumber)),
+      },
     });
     const { confirmation } = preview.body.result.structuredContent;
     expect((await f.rpc("start_call", { confirmation }, write.value)).body.result.isError).toBe(true);

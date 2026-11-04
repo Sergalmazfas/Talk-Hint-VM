@@ -1,4 +1,5 @@
 import { SECRETARY_CALL_LIMIT_MS } from "./limits";
+import { displaySecretaryInstruction } from "../../shared/callPlan";
 import { deliverSecretaryNotificationOnce } from "./notificationAttempt";
 import { summarizeSecretaryReport } from "./summary";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -156,7 +157,7 @@ export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport 
     ...(task.mode === "live" ? { mode: "live" as const } : {}),
     clientRequestId: task.clientRequestId ?? null,
     phoneNumber: task.phoneNumber,
-    instruction: task.instruction,
+    instruction: displaySecretaryInstruction(task.instruction, task.phoneNumber),
     status: task.status,
     outcome: task.outcome as SecretaryOutcome | null,
     summary: task.summary,

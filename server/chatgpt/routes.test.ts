@@ -6,6 +6,7 @@ import { registerChatGPTIntegration, type IntegrationConfig } from "./routes";
 import { Credentials, digest, grantId, markerId, type Marker, type MarkerStore } from "./security";
 import type { SecretaryBackend } from "./secretary";
 import { evaluateIncomingSecretaryPolicy } from "./incoming";
+import { secretaryPlanFromInstruction } from "../../shared/callPlan";
 
 vi.mock("../auth", () => ({ authMiddleware: (_q: any, r: any) => r.sendStatus(401) }));
 const config: IntegrationConfig = {
@@ -78,6 +79,24 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("structured plans in the owner's existing ChatGPT MCP", () => {
+  it("upgrades legacy prepare_call before approval; directs old connectors to the new tool, never starts", async () => {
+    const { token } = await access();
+    const draft = call();
+    draft.instruction = "Ask availability; confirm $150. Do not pay without my approval.";
+    const prepared = await tool("prepare_call", token, draft);
+    expect(prepared.status).toBe(200);
+    expect(prepared.body.status).toBe("owner_approval_required");
+    expect(prepared.body.note).toContain("prepare_secretary_plan");
+    const plan = secretaryPlanFromInstruction(prepared.body.call.instruction, draft.phoneNumber);
+    expect(plan?.sayAsk).toContain("confirm $150.");
+    expect(plan?.disclosurePolicy.forbidden).toContain("Do not pay without my approval.");
+    expect(backend.start).not.toHaveBeenCalled();
+    const premature = await tool("start_call", token, { confirmation: prepared.body.confirmation });
+    expect(premature.status).toBe(403);
+    expect(backend.start).not.toHaveBeenCalled();
+    const reader = await access("calls:read");
+    expect((await tool("prepare_call", reader.token, draft)).status).toBe(403);
+  });
   const plan = { goal: "Ask tire stock", ownerFacts: [], sayAsk: ["Price?"], expectedQuestions: [{ q: "Axle?", answer: null }],
     unknowns: ["Axle"], disclosurePolicy: { allowed: ["Requirements"], forbidden: ["Payment"] }, language: "en", executor: "hint" };
   it("requires the independently bound owner as well as an existing write grant", async () => {
@@ -188,7 +207,7 @@ describe("isolated owner-authorized ChatGPT adapter", () => {
     const started = await tool("start_call", token, { confirmation });
     expect(started.status).toBe(202);
     expect(started.body.asynchronous).toBe(true);
-    expect(backend.start).toHaveBeenCalledWith("alice", input);
+    expect(backend.start).toHaveBeenCalledWith("alice", preview.body.call);
     expect((await tool("start_call", token, { confirmation, phoneNumber: "+12025550999" })).status).toBe(400);
     const other = await access();
     expect((await tool("start_call", other.token, { confirmation })).status).toBe(403);

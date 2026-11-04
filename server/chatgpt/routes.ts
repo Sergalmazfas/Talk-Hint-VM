@@ -15,8 +15,7 @@ import { callApprovalResource, hostUiSupport, LEGACY_CALL_APPROVAL_RESOURCES, ui
 import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION, TALKHINT_CONNECTION_TITLE } from "./pluginWorkflow";
 import { actionsExchange } from "./actionsOAuth";
 import { talkHintActionsSchema, registerActionOperations, CALL_PLAN_OPENAPI } from "./actionsSchema";
-import { callPlanSchema, checklistCallPlan, secretaryInstruction } from "../../shared/callPlan";
-import { splitCallChecklist } from "../../shared/callChecklist";
+import { callPlanSchema, checklistCallPlan, secretaryInstruction, legacySecretaryPlan } from "../../shared/callPlan";
 
 export interface IntegrationConfig {
   enabled: boolean; origin: string; clientId: string; redirectUri: string;
@@ -507,9 +506,9 @@ export function registerChatGPTIntegration(
         return finalCallResult(await backend.task(claims.sub, id, true));
       }
       case "prepare_call": {
-        // Same approval and permissions; store free-text tasks as short lines.
-        if (typeof args.instruction === "string")
-          args.instruction = splitCallChecklist([args.instruction]).join("\n");
+        // Preserve valid JSON as a whole. Splitting its quoted strings corrupts
+        // plans. Legacy text gains the same stored plan, never guessed answers.
+        args.instruction = secretaryInstruction(legacySecretaryPlan(args.instruction, args.phoneNumber));
         const { recipient, ...nativeArgs } = args;
         const requested = CALL_INPUT.parse(nativeArgs);
         const call = CALL.parse(backend.prepare ? await backend.prepare(claims.sub, requested) : requested);
@@ -521,7 +520,8 @@ export function registerChatGPTIntegration(
           status: "owner_approval_required",
           ...(!config.actions ? { approvalEndpoint: "/api/chatgpt/confirmations/approve" } : {}),
           approval_url: browser.approvalURL(confirmation),
-          note: "Owner session and explicit review required. This tool has not placed a call." };
+          note: "Owner session and explicit review required. This tool has not placed a call. " +
+            "For future preparation use prepare_secretary_plan with goal, short checklist, facts and disclosurePolicy; clarify unknowns with the owner." };
       }
       case "start_call": {
         const confirmed = credentials.read(args.confirmation, "confirmation");

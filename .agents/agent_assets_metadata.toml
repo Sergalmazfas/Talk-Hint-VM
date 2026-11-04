@@ -3561,3 +3561,17 @@ mtime_ms = 1793782291315
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bdb65186-227b-4cba-99f8-a537da3f05d0/8b894f50-315b-4584-bd67-8956b46324f0"
 storage_version_token = "1793782308419748"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "7JXcVyQLq9jG6PF_9sLiz"
+uri = "file://generated-artifacts/TalkHint_Legacy_Prepare_Call_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: prepare_call, тесты и отчёт"
+description = "Dev-правка старого prepare_call, полный прогон тестов, production readback-журнал r1246–r1280 и разбор начала Pilot 208. Шаг 2 остановлен до записи; исправленный payload только подготовлен."
+logical_id = "b6aa2973-7622-449d-9c2e-9ba25e2ca869"
+content_hash = "sha256:c74d46e47306d6d199b5528d532888306fa1217d183db2c86741c3bc6d236e1c"
+size = 65229
+mtime_ms = 1793808734204
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b6aa2973-7622-449d-9c2e-9ba25e2ca869/7ab97f8b-5c53-4713-833f-30922bcd70ed"
+storage_version_token = "1793808742000129"
+content_type = "application/octet-stream"

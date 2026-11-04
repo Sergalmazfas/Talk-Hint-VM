@@ -6,6 +6,7 @@ import { Credentials, grantId, type Scope } from "./security";
 import { testMarkerStore } from "./testSupport";
 import { CALL_APPROVAL_RESOURCE } from "./callApprovalWidget";
 import { LEGACY_CALL_APPROVAL_RESOURCES, hostUiSupport, uiResourceLabel } from "./uiResources";
+import { legacySecretaryPlan, secretaryInstruction } from "../../shared/callPlan";
 
 vi.mock("../auth", () => ({ authMiddleware: (_req: any, res: any) => res.sendStatus(401) }));
 const config: IntegrationConfig = {
@@ -151,7 +152,9 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
     const start = await tool("confirm_call_from_card", { confirmation, approvalToken, decision: "approve" }, token);
     expect(start.isError).toBe(false);
     expect(start.structuredContent).toMatchObject({ task_id: "mock-task-1", asynchronous: true });
-    expect(backend.start).toHaveBeenCalledExactlyOnceWith("alice", input);
+    expect(backend.start).toHaveBeenCalledExactlyOnceWith("alice", {
+      ...input, instruction: secretaryInstruction(legacySecretaryPlan(input.instruction, input.phoneNumber)),
+    });
     const outcome = await tool("get_task", { id: "mock-task-1" }, token);
     expect(outcome.structuredContent).toMatchObject({ status: "completed", summary: "Open at nine" });
     expect(backend.task).toHaveBeenCalledWith("alice", "mock-task-1", false);
@@ -200,7 +203,9 @@ describe("owner decision inside ChatGPT; no external confirmation site", () => {
       confirmation: fresh.confirmation, approvalToken: fresh.approvalToken, decision: "approve",
     }, token);
     expect(approved.structuredContent.task_id).toBe("mock-task-1");
-    expect(backend.start).toHaveBeenCalledExactlyOnceWith("alice", input);
+    expect(backend.start).toHaveBeenCalledExactlyOnceWith("alice", {
+      ...input, instruction: secretaryInstruction(legacySecretaryPlan(input.instruction, input.phoneNumber)),
+    });
   });
   it("does not advertise safe re-preparation after a 403 from the call backend itself", async () => {
     const { token } = await connect();
