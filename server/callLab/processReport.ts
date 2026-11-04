@@ -104,10 +104,10 @@ function renderProcessLetterContent(report: any): { subject: string; body: strin
         `Поручение: ${String(reports[0]?.assigned ?? "не сохранено").split("\n")[0].slice(0, 320)}`,
           "Пункт | тип | закрыт | цитата",
           ...(report.secretaryReview?.checklist ?? []).map((r: any) =>
-            `${r.index + 1}. ${String(r.item ?? "").replace(/[\r\n]+/g, " ").slice(0, 160)} | ${r.kind === "say" ? "сказать" : r.kind === "ask" ? "спросить" : "не определено"} | ${r.answer === "не применимо" ? "не применимо" : r.closed ? "да" : "нет"} | ${String(r.quote || "—").replace(/[\r\n]+/g, " ").slice(0, 180)}`),
+            `${r.index + 1}. ${String(r.item ?? "").replace(/[\r\n]+/g, " ").slice(0, 160)} | ${r.kind === "say" ? "сказать" : r.kind === "ask" ? "спросить" : r.kind === "prohibition" ? "запрет" : "не определено"} | ${r.answer === "не применимо" ? "не применимо" : r.closed ? "да" : "нет"} | ${String(r.quote || "—").replace(/[\r\n]+/g, " ").slice(0, 180)}`),
           "Метрики против журнала:",
           ...(report.secretaryReview?.metrics?.reviewer?.length ? report.secretaryReview.metrics.reviewer.map((m: any) =>
-            `${m.metric}: ${m.actual ?? "не измерено"} — ${m.status}; ${String(m.reason ?? "").replace(/[\r\n]+/g, " ").slice(0, 180)}`) : ["не измерено / не проверено"]),
+            `${m.metric}: ${m.actual ?? "не измерено"} — ${m.status}; ${String(m.reason ?? "").replace(/[\r\n]+/g, " ")}`) : ["не измерено / не проверено"]),
           typeof report.private_report_path === "string" && report.private_report_path.startsWith("/api/admin/call-lab/reports/") && /^[a-f0-9]{64}$/.test(report.private_report_path.split("/").pop()) ?
             `Полный разбор: ${reportOrigin(report.environment)}${report.private_report_path} (вход владельца)` : "Полный разбор: в закрытой лаборатории владельца.",
         report.secretary_summary ? "Разбор команды не является приёмкой владельцем; техническое соединение само по себе не доказывает выполнение задачи." :

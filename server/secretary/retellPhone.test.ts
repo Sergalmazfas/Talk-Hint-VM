@@ -131,10 +131,11 @@ describe("Telephone Retell + the same TalkHint text Engine", () => {
     expect(registry.permits(`/retell-engine-stream/${ticket}/call_phone`)).toBe(false);
     registry.attach(ws as any, path);
     ws.frame({ interaction_type: "call_details", call: { call_id: "call_phone", call_type: "phone_call" } }); await tick();
+    expect(calls).toBe(0); // Owner-approved opening: listen, never model-introduce on connect.
     const turns = [{ role: "agent", content: "Hello" }, { role: "user", content: "Tuesday please" }];
     const request = { interaction_type: "response_required", response_id: 1, transcript: turns };
     ws.frame(request); await tick(); ws.frame(request); await tick(); await registry.flush("task");
-    expect(calls).toBe(2); // opening and one response, no extra model call for replay
+    expect(calls).toBe(1); // only the human turn; neither connect nor replay starts a model call
     expect(persist).toHaveBeenCalledWith("task", turns);
     expect(ws.sent.some(f => f.content === "Hello" && f.content_complete === false)).toBe(true);
     registry.ended("task"); expect(registry.permits(path)).toBe(false);

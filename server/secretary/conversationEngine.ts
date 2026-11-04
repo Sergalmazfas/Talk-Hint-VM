@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { PhoneOpeningGate, PHONE_OPENING_POLICY } from "./opening";
 import { createHash } from "node:crypto";
 import { buildSecretaryInstructions } from "./agent";
 import { confirmedSecretaryOwnerName } from "./ownerIdentity";
@@ -88,6 +89,7 @@ export async function* streamSecretaryResponse(request: EngineRequest,
 }
 export type TestAction = { id: string; name: string; args: Record<string, string>; result: any; status: "test_saved" | "pending_owner_approval" };
 export class SecretaryConversationEngine {
+  readonly opening = new PhoneOpeningGate();
   readonly report = {
     provider: "OpenAI via TalkHint", model: SECRETARY_REASONING_MODEL, testOnly: true,
     personality: null as LabPersonalitySummary | null,
@@ -219,6 +221,14 @@ export class SecretaryConversationEngine {
       if (await this.telephoneTools.navigate?.(signal)) return;
       input.push({ role: "developer", content: state });
     }
+    const openingToolOnly = this.telephone && !vm && !this.opening.permit(turns);
+    if (openingToolOnly && !(this.telephoneTools?.blocksEnd() && !this.telephoneTools.navigate)) {
+      this.record("opening_wait_recording_or_human");
+      return;
+    }
+    if (openingToolOnly) input.push({ role: "developer", content:
+      "Still in recorded IVR: silently select the existing permitted IVR tool only. No introduction, filler or speech. Do not end the call." });
+    if (this.telephone) input.push({ role: "developer", content: PHONE_OPENING_POLICY });
     if (vm && this.skipVoicemail && !this.telephoneTools?.blocksEnd() && !signal.aborted) {
       this.record("voicemail_skipped");
       return { reason: "follow_up" as const, farewell: "" };
@@ -244,7 +254,7 @@ export class SecretaryConversationEngine {
           continue;
         }
         if (signal.aborted) return;
-        if (chunk.type === "text") { spoken += chunk.text; emit(chunk.text); }
+        if (chunk.type === "text") { spoken += chunk.text; if (!openingToolOnly) emit(chunk.text); }
         else completion = chunk;
       }
       if (signal.aborted) return;
@@ -268,7 +278,7 @@ export class SecretaryConversationEngine {
           } else if (this.telephone && this.telephoneTools) {
             result = await this.telephoneTools.execute(tool.name, tool.arguments, signal);
             if (result?.silent) {
-              if (result.spokenFallback && !signal.aborted) emit(result.spokenFallback);
+              if (result.spokenFallback && !signal.aborted && !openingToolOnly) emit(result.spokenFallback);
               return;
             }
           } else result = this.execute(tool.name, tool.arguments, signal);

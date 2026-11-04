@@ -12,6 +12,7 @@ import { speedEngine, speedLab } from "./speedRuntime";
 import type { SpeedVariant } from "./speedExperiment";
 import { CResponseBuffer } from "./cResponseBuffer";
 import { phoneSpeechTiming } from "../secretary/phoneMetrics";
+import { voicemailTurn } from "../secretary/voicemail";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -191,6 +192,16 @@ export class RetellEngineRegistry {
       if (ws.bufferedAmount > 256 * 1024) { ws.close(1011, "Output backpressure"); return false; }
       ws.send(JSON.stringify(frame)); return true;
     };
+    let openingTimer: ReturnType<typeof setTimeout> | undefined;
+    const heardOpening = (turns: any) => {
+      if (!this.options.phone || !Array.isArray(turns) ||
+        !turns.some(t => t?.role === "user" && t.content?.trim())) return;
+      entry.engine.opening.heardSpeech = true;
+      if (openingTimer) {
+        clearTimeout(openingTimer); openingTimer = undefined;
+        send({ response_type: "response", response_id: 0, content: "", content_complete: true });
+      }
+    };
     const abort = () => {
       entry.epoch++; entry.abort?.abort(); entry.engine.record("response_cancelled");
     };
@@ -218,7 +229,9 @@ export class RetellEngineRegistry {
     entry.buffer = buffered;
     if (buffered) (entry.engine.report as any).cInterruption = buffered.metrics;
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
-      if (buffered) { entry.pending = id; buffered.request(id, turns, reminder); return; }
+      // Silent opening/IVR must never acquire the C buffer's filler timer.
+      const openingSilent = this.options.phone && !entry.engine.opening.permit(turns) && !voicemailTurn(turns);
+      if (buffered && !openingSilent) { entry.pending = id; buffered.request(id, turns, reminder); return; }
       if (labLimitEnded) {
         send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
         return;
@@ -279,13 +292,22 @@ export class RetellEngineRegistry {
           frame.call?.call_type !== (this.options.phone ? "phone_call" : "web_call")) { ws.close(1008, "Registered call identity required"); return; }
         if (!entry.introduced) {
           entry.introduced = true;
-          reply(0, [{ role: "user", content: this.options.phone
-            ? "Begin the authorized telephone conversation using the trusted standard secretary introduction and actual assignment. Then listen."
-            : "Begin the authorized TEST conversation using the trusted standard secretary introduction. Then listen." }]);
+          if (this.options.phone) {
+            entry.engine.record("opening_listening");
+            openingTimer = setTimeout(() => {
+              openingTimer = undefined;
+              const probe = entry.engine.opening.probe();
+              send({ response_type: "response", response_id: 0, content: probe ?? "", content_complete: true });
+              if (probe) entry.engine.record("opening_silence_probe");
+            }, 3000);
+            openingTimer.unref();
+          } else reply(0, [{ role: "user", content:
+            "Begin the authorized TEST conversation using the trusted standard secretary introduction. Then listen." }]);
         } else send({ response_type: "response", response_id: 0, content: "", content_complete: true });
         return;
       }
       if (frame.interaction_type === "update_only") {
+        heardOpening(frame.transcript);
         if (buffered) {
           if (!Array.isArray(frame.transcript) || frame.transcript.length > 300 ||
             frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
@@ -302,10 +324,12 @@ export class RetellEngineRegistry {
           frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) || typeof t?.content !== "string" || t.content.length > 4000)) {
         ws.close(1008, "Invalid response request"); return;
       }
+      heardOpening(frame.transcript);
       reply(frame.response_id, frame.transcript.map((t: any) => ({ role: t.role, content: t.content })), frame.interaction_type === "reminder_required");
       transcript(frame);
     });
     const close = () => {
+      if (openingTimer) clearTimeout(openingTimer);
       if (entry.socket !== ws) return;
       buffered?.close();
       abort(); entry.socket = undefined; entry.engine.report.connected = false;

@@ -3673,3 +3673,17 @@ mtime_ms = 1793829493485
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f507dc8a-b847-4584-85a0-fd9f30b4a5cc/801f7cc7-8c2c-4058-b445-1456b4ec630e"
 storage_version_token = "1793829515275913"
 content_type = "text/html"
+
+[[outputs]]
+id = "xKW2481uxTyRY32EyXYRL"
+uri = "file://generated-artifacts/Flying706_Clavdiy_Dev.zip"
+type = "unspecified"
+title = "Flying J #706 — исправления и проверка Клавдию"
+description = "Dev-diff, обезличенная диагностика Retell/Twilio, полный прогон 4 шардами, proposed-уроки с MCP readback и отдельная iOS-правка предупреждения. Ничего не опубликовано, новых звонков не было."
+logical_id = "f06fe3ae-a33f-437c-ae83-b6a310602bc2"
+content_hash = "sha256:b884841861f6df221e00e3baa5c854468532dda2a41ae574c8194835cd3584c6"
+size = 178237
+mtime_ms = 1793832979412
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f06fe3ae-a33f-437c-ae83-b6a310602bc2/2a924f04-168a-4fde-8957-42083cc38675"
+storage_version_token = "1793832985725911"
+content_type = "application/octet-stream"

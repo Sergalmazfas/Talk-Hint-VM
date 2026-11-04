@@ -7,6 +7,7 @@ import { callPlanSchema } from "../../shared/callPlan";
 import { splitCallChecklist, checklistItemKind, type ChecklistItemKind } from "../../shared/callChecklist";
 import { validExpectationChecks, type ExpectationSnapshot } from "./expectations";
 import { voicemailAnnouncement } from "../secretary/voicemail";
+import { machineOpening, type openingTiming } from "../secretary/opening";
 
 export const SECRETARY_AGENTS = [
   { ...HINT_AGENTS[0], agentId: "secretary-lab-engineer" },
@@ -17,6 +18,8 @@ export type SecretaryEvidence = {
   version: 1; points: string[]; transcript: { speaker: string; text: string }[];
   pointKinds?: ChecklistItemKind[];
   voicemail?: boolean;
+  openingReviewRequired?: boolean;
+  openingTiming?: ReturnType<typeof openingTiming>;
   measurements?: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics>;
   codeVersion: string; limitations: string[];
   expectations?: ExpectationSnapshot;
@@ -86,18 +89,20 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
     return { speaker, text: redact(t.text) };
   });
   let items = [goal], source: "structured" | "free-text" = "free-text";
+  let prohibitions: string[] = [];
   if (goal.startsWith("Owner-approved call plan.")) {
     try {
       const plan = callPlanSchema.parse(JSON.parse(goal.slice(goal.indexOf("\n") + 1)));
       items = plan.sayAsk.length ? plan.sayAsk : [plan.goal]; source = "structured";
+      prohibitions = [...plan.disclosurePolicy.forbidden, ...(plan.voicemail === "skip" ? ["Skip voicemail"] : [])];
     } catch { throw Error("SECRETARY_SOURCE_UNAVAILABLE"); }
   }
   // Structured items have already been approved: preserve their boundaries.
-  const rawPoints = source === "structured" ? items : splitCallChecklist(items);
+  const rawPoints = source === "structured" ? [...items, ...prohibitions.filter(p => !items.includes(p))] : splitCallChecklist(items);
   const points = rawPoints.map(redact);
-  if (points.length > 20 || Buffer.byteLength(JSON.stringify(turns), "utf8") > 24000)
+  if (points.length > 40 || Buffer.byteLength(JSON.stringify(turns), "utf8") > 24000)
     throw Error("SECRETARY_SOURCE_TOO_LARGE");
-  return { version: 1, points, pointKinds: rawPoints.map(checklistItemKind), transcript: turns,
+  return { version: 1, points, pointKinds: rawPoints.map(p => prohibitions.includes(p) ? "prohibition" : checklistItemKind(p)), transcript: turns,
     voicemail: voicemailAnnouncement([...turns].reverse().find(t => t.speaker === "guest")?.text ?? ""),
     codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
     preparation: { source, originalItems: items.length, checklistItems: points.length, paragraphExpanded: points.length > items.length,
@@ -185,11 +190,19 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
     "Нет заранее записанного ожидания — пустой список, цифры не выдумывать. Неуспех ожидания НЕ означает, что сам разбор неверен. " :
     " Сева: в трёх строках сводки отличать подтверждённый разбор от достижения числовых целей. " +
     "Если ожидание не сошлось или не проверено — явно указать это и причину; не писать «всё выполнено». ") +
-    " Для КАЖДОЙ строки points/checks и dialogue.checklist укажи kind: say|ask|unknown согласно evidence.pointKinds " +
+    " Для КАЖДОЙ строки points/checks и dialogue.checklist укажи kind: say|ask|prohibition|unknown согласно evidence.pointKinds " +
     "(для старой выдержки без pointKinds классифицируй исходную мысль; не придумывай факт). " +
     "say = «сказать»: закрыт только после произнесения Катей полного смысла, quote/turn — из secretary. " +
     "Если evidence.voicemail=true, ASK: status=«не применимо», dialogue.answer=«не применимо», closed=false, quote пустая и turn=-1. Это НЕ незакрытое поручение и НЕ провал; SAY проверяй по фактической речи. Оставленное сообщение не означает согласие или решение вопроса. " +
     "ask = «спросить»: закрыт после ответа собеседника или честного «не знаю», quote/turn — из guest. " +
+    "prohibition = «запрет»: отдельно от сказать/спросить. Закрыт = не нарушен за весь наблюдаемый звонок. " +
+    "Проверь ВСЮ расшифровку, не выдумывай отсутствие внешних действий. При неполных данных — не проверено/closed=false. " +
+    "Если нарушения нет: quote пустая, turn=-1, reason/answer объясняет проверку; если есть — точная цитата нарушения. " +
+    "Начало звонка ОБЯЗАТЕЛЬНО независимо проверить Лёве и Томе: opening={answeredBy:human|recording_ivr|voicemail|silence|unknown, " +
+    "firstSpeaker:secretary|guest|unknown,spokeOverRecording:boolean|null,quote,turn,reason}. " +
+    "Thank you for calling / press / para español / calls may be recorded = запись, не человек. " +
+    "Кто говорил первым и наложение — по evidence.openingTiming (word clocks), при отсутствии — по порядку исходных реплик. Наложение звука без времён не проверено, null, НЕ false. " +
+    "В reason укажи, говорила ли Катя до окончания записи по доступным данным и что не проверено; Тома отражает пропуск в disagreements. " +
     "Сам вопрос Кати не закрывает ask; повтор факта собеседником не закрывает say. " +
     "unknown/смешанный пункт не закрывать, указать неопределённость. Состав/границы/порядок исходных пунктов не менять. " +
     " dialogue: checklist[{index,kind,answer,closed,quote,turn}], katyaTurns, excessTurns, hypothetical=true, " +
@@ -221,7 +234,9 @@ function citationsValid(rows: any, p: SecretaryReview, allowUnverified = true) {
       r.index >= 0 && r.index < p.evidence.points.length && typeof r.reason === "string" && r.reason.trim() &&
       (p.outputVersion !== 2 || r.kind === pointKind(p, r.index) &&
         (!["выполнено", "частично"].includes(r.status) || closureSpeakerValid(r, p))) &&
-      (p.evidence.voicemail && pointKind(p, r.index) === "ask" &&
+      (pointKind(p, r.index) === "prohibition" && r.turn === -1 && r.quote === "" &&
+        p.evidence.transcript.length > 0 ||
+      p.evidence.voicemail && pointKind(p, r.index) === "ask" &&
         (r.status === undefined || r.status === "не применимо") ||
       allowUnverified && r.status === "не проверено" || typeof r.quote === "string" && r.quote.trim() &&
         Number.isInteger(r.turn) && p.evidence.transcript[r.turn]?.text.includes(r.quote)));
@@ -231,12 +246,26 @@ function pointKind(p: SecretaryReview, index: number): ChecklistItemKind {
 }
 function closureSpeakerValid(row: any, p: SecretaryReview): boolean {
   const kind = pointKind(p, row.index);
+  // Negative obligations need a full-call review, not a quote pretending an action.
+  if (kind === "prohibition") return p.evidence.transcript.length > 0 &&
+    typeof (row.reason ?? row.answer) === "string" && (row.reason ?? row.answer).trim().length > 0;
   return kind !== "unknown" && p.evidence.transcript[row.turn]?.speaker === (kind === "say" ? "secretary" : "guest");
+}
+function openingValid(result: any, p: SecretaryReview) {
+  if (!p.evidence.openingReviewRequired || p.status === "summary") return true;
+  const o = result?.opening, first = p.evidence.transcript.find(t => t.speaker !== "unknown" && t.text.trim());
+  const guest = p.evidence.transcript.find(t => t.speaker === "guest");
+  const timing = p.evidence.openingTiming;
+  if (!o || o.firstSpeaker !== (timing?.firstSpeaker ?? first?.speaker ?? "unknown") || !o.reason?.trim()) return false;
+  if ((timing?.recordingTurns.length || guest && machineOpening(guest.text)) && o.answeredBy !== "recording_ivr") return false;
+  if (o.answeredBy !== "unknown" && o.answeredBy !== "silence" &&
+    (!o.quote?.trim() || !p.evidence.transcript[o.turn]?.text.includes(o.quote))) return false;
+  return o.spokeOverRecording === (timing?.spokeOverRecording ?? null);
 }
 export function finishSecretaryRun(s: CrewState, task: Task, documentId: string, text: string, at: string) {
   const p = task.secretaryReview!;
   let result: any; try { result = JSON.parse(text); } catch { result = null; }
-  const formatValid = p.outputVersion !== 2 || validSecretaryOutput(p.status, result);
+  const formatValid = (p.outputVersion !== 2 || validSecretaryOutput(p.status, result)) && openingValid(result, p);
   const expectationsValid = p.outputVersion !== 2 || p.status === "summary" ||
     validExpectationChecks(p.evidence.expectations, result, p.evidence.transcript.filter(t => t.speaker === "secretary").length);
   const mannerEvidence = p.outputVersion !== 2 || (Array.isArray(result?.manners) &&
@@ -252,7 +281,8 @@ export function finishSecretaryRun(s: CrewState, task: Task, documentId: string,
       r.kind === pointKind(p, r.index) &&
       (p.evidence.voicemail && r.kind === "ask" ? !r.closed && r.answer === "не применимо" :
       (!r.closed || typeof r.answer === "string" && r.answer.trim() && closureSpeakerValid(r, p) &&
-        typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote)))) &&
+        (r.kind === "prohibition" && r.turn === -1 && r.quote === "" ||
+          typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote))))) &&
     Array.isArray(d.ideal) && d.ideal.every((r: any) => r && Array.isArray(r.sourceTurns) &&
       r.sourceTurns.every((i: number) => Number.isInteger(i) && !!p.evidence.transcript[i]) &&
       (r.speaker !== "guest" || r.sourceTurns.some((i: number) => p.evidence.transcript[i]?.text.includes(r.text))));

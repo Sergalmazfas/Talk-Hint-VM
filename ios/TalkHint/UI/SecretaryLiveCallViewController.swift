@@ -459,7 +459,8 @@ final class SecretaryLiveCallViewController: UIViewController {
             sourceStatusLabel.textColor = .secondaryLabel
         } else if sourceConnected == false && sourceReconnectSupported == false {
             sourceStatusLabel.text = NSLocalizedString("secretary.live.source.unavailable", comment: "")
-            sourceStatusLabel.textColor = .systemRed
+            // Monitoring is read-only; a lost audio feed does NOT mean the PSTN call failed.
+            sourceStatusLabel.textColor = .systemOrange
         } else {
             sourceStatusLabel.text = NSLocalizedString("secretary.live.source.unknown", comment: "")
             sourceStatusLabel.textColor = .systemOrange

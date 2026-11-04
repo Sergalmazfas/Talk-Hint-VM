@@ -22,6 +22,28 @@ function fixture(goal:string,kind:string,turn:number,closed=true) {
   return {s,t,a};
 }
 describe("Checklist type, closure evidence and preservation",()=>{
+  it("requires a separate opening assessment for new call reports, without rewriting historical reports",()=>{
+    const {s,t,a}=fixture("Explain that payment is complete","say",1);
+    t.secretaryReview!.evidence.openingReviewRequired=true;
+    finishSecretaryRun(s,t,"author",JSON.stringify(a),at);
+    expect(t.secretaryReview!.authorValid).toBe(false);
+  });
+  it.each(["human","recording_ivr"])("checks an announcement independently instead of trusting Leva: %s", answeredBy=>{
+    const {s,t,a}=fixture("Explain that payment is complete","say",1);
+    t.secretaryReview!.evidence.openingReviewRequired=true;
+    t.secretaryReview!.evidence.transcript[0].text="Thank you for calling; Paid $207.57";
+    const opening={answeredBy,firstSpeaker:"guest",spokeOverRecording:null,
+      quote:"Thank you for calling",turn:0,reason:"First guest speech is an announcement; overlap not measured"};
+    finishSecretaryRun(s,t,"author",JSON.stringify({...a,opening}),at);
+    expect(t.secretaryReview!.authorValid).toBe(answeredBy==="recording_ivr");
+  });
+  it("a prohibition closes from non-violation, not from inventing a guest answer",()=>{
+    const {s,t,a}=fixture("Do not pay","prohibition",-1);
+    a.points[0]={...a.points[0],quote:"",reason:"No violation found in complete observed transcript"};
+    a.dialogue.checklist[0]={...a.dialogue.checklist[0],quote:"",answer:"не нарушен"};
+    finishSecretaryRun(s,t,"author",JSON.stringify(a),at);
+    expect(t.secretaryReview!.authorValid).toBe(true);
+  });
   it("keeps the invoice explanation as one structural thought through storage and lab evidence",()=>{
     const p:CallPlan={goal:"Notify recipient",sayAsk:[thought,"Спроси, получил ли квитанцию"],ownerFacts:[],
       expectedQuestions:[],unknowns:[],disclosurePolicy:{allowed:[thought],forbidden:["Не платить повторно"]},
@@ -30,7 +52,7 @@ describe("Checklist type, closure evidence and preservation",()=>{
     const saved=JSON.parse(instruction.slice(instruction.indexOf("\n")+1));
     expect(saved).toEqual(p);
     const e=secretaryEvidence(instruction,[{role:"guest",text:"Да"}],"fixture");
-    expect(e.points).toEqual(p.sayAsk);expect(e.pointKinds).toEqual(["say","ask"]);
+    expect(e.points).toEqual([...p.sayAsk,...p.disclosurePolicy.forbidden]);expect(e.pointKinds).toEqual(["say","ask","prohibition"]);
   });
   it("preserves the same free-text complete thought and refuses overlength thoughts instead of chopping them",()=>{
     expect(legacySecretaryPlan(thought,"+15550001111").sayAsk).toEqual([thought]);

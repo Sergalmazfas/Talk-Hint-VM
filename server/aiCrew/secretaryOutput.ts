@@ -9,7 +9,13 @@ const strings = array(str);
 export const mannerKinds = ["repeat_questions", "multi_questions", "repeat_intro", "recap_words", "thank_you", "got_it"] as const;
 const manner = object({ kind: { type: "string", enum: mannerKinds },
   value: { type: ["integer", "null"] }, quote: str, turn: integer, reason: str });
-const kind = { type: "string", enum: ["say", "ask", "unknown"] };
+const kind = { type: "string", enum: ["say", "ask", "prohibition", "unknown"] };
+const opening = object({
+  answeredBy: { type: "string", enum: ["human", "recording_ivr", "voicemail", "silence", "unknown"] },
+  firstSpeaker: { type: "string", enum: ["secretary", "guest", "unknown"] },
+  spokeOverRecording: { type: ["boolean", "null"] },
+  quote: str, turn: integer, reason: str,
+});
 const row = { index: integer, kind, quote: str, turn: integer, reason: str };
 const expectationChecks = array(object({ entryId: str, metric: str, actual: { type: ["number", "null"] },
   status: { type: "string", enum: ["сошлось", "не сошлось", "не проверено"] }, reason: str }));
@@ -25,15 +31,21 @@ export function secretaryOutputSchema(stage: string) {
   return stage === "author" ? object({
     points: array(object({ ...row, status: { type: "string", enum: ["выполнено", "частично", "нет", "не проверено", "не применимо"] } })),
     openingLanguage: { type: "string", enum: ["en", "ru", "es", "unknown"] },
-    recognitionIssues: strings, unverified: strings, manners: array(manner), dialogue, proposals: array(proposal), expectationChecks,
+    opening, recognitionIssues: strings, unverified: strings, manners: array(manner), dialogue, proposals: array(proposal), expectationChecks,
   }) : stage === "review" ? object({
     verdict: { type: "string", enum: ["confirmed", "not_confirmed"] },
-    checks: array(object(row)), disagreements: strings, unverified: strings, manners: array(manner), dialogue, expectationChecks,
+    opening, checks: array(object(row)), disagreements: strings, unverified: strings, manners: array(manner), dialogue, expectationChecks,
   }) : object({ outcome: str, agreed: strings, remaining: strings, unverified: strings,
     learned: str, wentWrong: str, nextAction: str, proposals: array(proposal) });
 }
 const text = z.string().max(6000);
-const itemKind = z.enum(["say", "ask", "unknown"]);
+const itemKind = z.enum(["say", "ask", "prohibition", "unknown"]);
+// Optional only to read historical stored reports; new evidence explicitly requires it.
+const openingCheck = z.object({
+  answeredBy: z.enum(["human", "recording_ivr", "voicemail", "silence", "unknown"]),
+  firstSpeaker: z.enum(["secretary", "guest", "unknown"]),
+  spokeOverRecording: z.boolean().nullable(), quote: text, turn: z.number().int(), reason: text.min(1),
+}).strict().optional();
 const rows = { index: z.number().int(), kind: itemKind, quote: text, turn: z.number().int(), reason: text };
 const expectationCheckRows = z.array(z.object({ entryId: text, metric: text, actual: z.number().finite().nonnegative().nullable(),
   status: z.enum(["сошлось", "не сошлось", "не проверено"]), reason: text.min(1) }).strict()).max(16);
@@ -43,17 +55,17 @@ const manners = z.array(z.object({ kind: z.enum(mannerKinds), value: z.number().
 const proposals = z.array(z.object({ status: z.literal("proposed"), acceptor: z.literal("owner"),
   target: z.enum(["katya_checklist", "preparation"]), rule: text, before: text, after: text }).strict()).max(5);
 const dialogueCheck = z.object({
-  checklist: z.array(z.object({ index: z.number().int(), kind: itemKind, answer: text, closed: z.boolean(), quote: text, turn: z.number().int() }).strict()).max(20),
+  checklist: z.array(z.object({ index: z.number().int(), kind: itemKind, answer: text, closed: z.boolean(), quote: text, turn: z.number().int() }).strict()).max(40),
   katyaTurns: z.number().int().nonnegative(), excessTurns: z.number().int().nonnegative(), hypothetical: z.literal(true),
   ideal: z.array(z.object({ speaker: z.enum(["secretary", "guest"]), text, sourceTurns: z.array(z.number().int()).max(150) }).strict()).max(150),
 }).strict();
 export function validSecretaryOutput(stage: string, value: unknown) {
   const schema = stage === "author" ? z.object({
-    points: z.array(z.object({ ...rows, status: z.enum(["выполнено", "частично", "нет", "не проверено", "не применимо"]) }).strict()).max(20),
-    openingLanguage: z.enum(["en", "ru", "es", "unknown"]), recognitionIssues: z.array(text),
+    points: z.array(z.object({ ...rows, status: z.enum(["выполнено", "частично", "нет", "не проверено", "не применимо"]) }).strict()).max(40),
+    opening: openingCheck, openingLanguage: z.enum(["en", "ru", "es", "unknown"]), recognitionIssues: z.array(text),
     unverified: z.array(text), manners, dialogue: dialogueCheck, proposals, expectationChecks: expectationCheckRows,
-  }).strict() : stage === "review" ? z.object({ verdict: z.enum(["confirmed", "not_confirmed"]),
-    checks: z.array(z.object(rows).strict()).max(20), disagreements: z.array(text), unverified: z.array(text), manners, dialogue: dialogueCheck, expectationChecks: expectationCheckRows }).strict() :
+  }).strict() : stage === "review" ? z.object({ opening: openingCheck, verdict: z.enum(["confirmed", "not_confirmed"]),
+    checks: z.array(z.object(rows).strict()).max(40), disagreements: z.array(text), unverified: z.array(text), manners, dialogue: dialogueCheck, expectationChecks: expectationCheckRows }).strict() :
     z.object({ outcome: text, agreed: z.array(text), remaining: z.array(text), unverified: z.array(text),
       learned: text, wentWrong: text, nextAction: text, proposals }).strict();
   return schema.safeParse(value).success;

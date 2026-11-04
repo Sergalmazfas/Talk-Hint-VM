@@ -88,15 +88,17 @@ describe("Voicemail owner decisions, evidence and reporting",()=>{
     expect(detectHintIncident({...row,lab_mode:"secretary",job_created:new Date(now-601000).toISOString()},now)?.code).toBe("QUEUE_DELAY");
   });
   it("mail is three lines, a short typed table and private link, not full JSON analysis",()=>{
+    const metricReason = "Независимая проверка полного разговора. ".repeat(8) + "КОНЕЦ_ОБЪЯСНЕНИЯ";
     const report={mode:"secretary",environment:"production",private_report_path:"/api/admin/call-lab/reports/"+"a".repeat(64),
       action_reports:[{id:"x",at:"2026-11-04T19:00:00Z",role:"SECRETARY",assigned:"Tell payment complete",outcome:"message_left",
         succeeded:["FULL_PRIVATE_ANALYSIS"],failed:[],needsOwner:[],source:"fixture"}],
       secretary_summary:{learned:"Message left",wentWrong:"No human answer",nextAction:"Wait for callback"},
       secretaryReview:{checklist:[{index:0,item:"Tell payment complete",kind:"say",closed:true,quote:"Payment complete"}],
-        metrics:{reviewer:[{metric:"repeats",actual:0,status:"сошлось",reason:"No repeat"}]}}};
+        metrics:{reviewer:[{metric:"repeats",actual:0,status:"сошлось",reason:metricReason}]}}};
     const body=renderProcessLetter(report).body;
     expect(body.split("\n").slice(0,3)).toEqual(["Что узнали: Message left","Что пошло не так: No human answer","Что сделать: Wait for callback"]);
     expect(body).toContain("сказать | да");expect(body).toContain("repeats: 0 — сошлось");
+    expect(body).toContain(metricReason);
     expect(body).toContain(report.private_report_path);expect(body).not.toContain("FULL_PRIVATE_ANALYSIS");expect(body).not.toContain('{"');
   });
 });

@@ -4,7 +4,8 @@ import { log } from "./domain";
 import type { StateStore } from "./store";
 import { secretaryCharacters, secretaryEvidence, secretaryHash, queueSecretaryReview } from "./secretaryReview";
 import { claimCReview, rolloutState } from "../secretary/phoneRollout";
-import { phoneMetrics } from "../secretary/phoneMetrics";
+import { phoneMetrics, phoneSpeechTiming } from "../secretary/phoneMetrics";
+import { openingTiming } from "../secretary/opening";
 import { RetellApi } from "../secretaryLab/retellApi";
 import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import { selectCallExpectations, callExpectation } from "./expectations";
@@ -68,6 +69,9 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
         .flatMap(s => [s, ...s.split(/\s+/)]);
       evidence = secretaryEvidence(task.instruction, task.transcript_turns,
         recordedCallVersion(call)?.commit ?? "unknown", [], ownerNames);
+      evidence.openingReviewRequired = true;
+      evidence.openingTiming = openingTiming(evidence.transcript,
+        (call.metadata?.secretaryEngine ?? call.metadata?.retellPhone?.engine)?.playback);
       const model = await dependencies.model();
       characters = secretaryCharacters(model);
       evidence.expectations = selectCallExpectations(model, call.started_at);
@@ -77,7 +81,12 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       let measurements = phoneMetrics(engine);
       const providerId = call.metadata.retellPhone.callId;
       if (/^call_[A-Za-z0-9_-]{1,110}$/.test(providerId ?? "")) {
-        try { measurements = phoneMetrics(engine, await new RetellApi().request(`/v2/get-call/${providerId}`)); }
+        try {
+          const provider = await new RetellApi().request(`/v2/get-call/${providerId}`);
+          measurements = phoneMetrics(engine, provider);
+          if (Array.isArray(provider?.transcript_object))
+            evidence.openingTiming = openingTiming(evidence.transcript, phoneSpeechTiming(provider.transcript_object));
+        }
         catch { /* No fabricated audio latency; missing evidence stays explicit. */ }
       }
       evidence.measurements = measurements;
@@ -180,7 +189,9 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       author: author?.expectationChecks ?? [], reviewer: review?.expectationChecks ?? [] },
     summaryTop: {
       learned: brief(summary?.learned, p.verdict === "confirmed" ? summary?.outcome ?? "Разбор завершён" : "Результаты требуют проверки: разбор не подтверждён"),
-      wentWrong: brief(p.error ?? (p.verdict !== "confirmed" ? "Тома не подтвердила разбор Лёвы" : summary?.wentWrong), "Подтверждённых проблем не отмечено"),
+      wentWrong: brief(p.error ?? (p.verdict !== "confirmed" ?
+        `Тома не подтвердила: ${gaps(review?.disagreements)[0] || "формат или доказательства не подтверждены"}` :
+        summary?.wentWrong), "Подтверждённых проблем не отмечено"),
       nextAction: brief(summary?.nextAction, "Проверить расхождения по расшифровке; не менять продукт без решения владельца"),
     },
     succeeded: [`Лёва: запрос разбора выполнен; ${p.authorValid ? "ссылки на цитаты проверены" : "формат/доказательства не подтверждены"}`,
@@ -192,7 +203,8 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       ...(p.evidence.expectations?.targets.length ?
         [`Ожидание → факт → сошлось/не сошлось/почему: Лёва ${JSON.stringify(author?.expectationChecks ?? [])}; Тома ${JSON.stringify(review?.expectationChecks ?? [])}`] :
         [`Сверка ожидания: не проверено — нет доступного числового ожидания, зафиксированного до звонка (${p.evidence.expectations?.status ?? "старая запись без снимка"}). Порог не выдумывался.`]),
-      `Пункт → тип (say=сказать, ask=спросить, unknown=не определено) → ответ/произнесено → закрыт: ${JSON.stringify(author?.dialogue?.checklist ?? "не проверено")}`,
+      `Начало — Лёва: ${JSON.stringify(author?.opening ?? "не проверено")}; Тома: ${JSON.stringify(review?.opening ?? "не проверено")}`,
+      `Пункт → тип (say=сказать, ask=спросить, prohibition=запрет, unknown=не определено) → ответ/произнесено → закрыт: ${JSON.stringify(author?.dialogue?.checklist ?? "не проверено")}`,
       `Реплики Кати / лишние: ${author?.dialogue?.katyaTurns ?? "не измерено"} / ${author?.dialogue?.excessTurns ?? "не измерено"}`,
       `Идеальная короткая версия (гипотеза): ${JSON.stringify(author?.dialogue?.ideal ?? [])}; независимая версия Томы: ${JSON.stringify(review?.dialogue ?? "не проверено")}`,
       `Предложения Лёвы/Севы, принимает только владелец: ${JSON.stringify([...(author?.proposals ?? []), ...(summary?.proposals ?? [])])}`,

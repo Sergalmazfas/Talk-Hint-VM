@@ -135,6 +135,7 @@ final class SecretaryTranscriptRenderingTests: XCTestCase {
         } as? UIButton)
         XCTAssertFalse(source.isHidden)
         XCTAssertEqual(source.text, NSLocalizedString("secretary.live.source.unavailable", comment: ""))
+        XCTAssertEqual(source.textColor, .systemOrange)
         XCTAssertTrue(end.isEnabled)
     }
 

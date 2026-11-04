@@ -568,7 +568,7 @@
 "secretary.review.configure" = "Elegir línea o configurar";
 "secretary.review.retry_setup" = "Reintentar comprobación";
 "secretary.live.source.connected" = "Origen de Twilio conectado mediante %@. Recepción de pistas del servidor (no confirma que se oigan): invitado %@; Secretario %@. La app solo vuelve a suscribirse al feed de solo lectura; nunca inicia el origen.";
-"secretary.live.source.unavailable" = "El origen de la llamada de Twilio no está disponible. El servidor indica que no se puede recrear. Esta app solo puede suscribirse al feed de solo lectura. El botón para finalizar sigue disponible.";
+"secretary.live.source.unavailable" = "El audio de supervisión está desconectado. Esto no significa que la llamada haya terminado. La transcripción y Finalizar siguen disponibles; reintentar solo reconecta la supervisión.";
 "secretary.live.source.unknown" = "Se desconoce el estado o la capacidad del origen de Twilio. Esta app no puede iniciarlo ni recrearlo. El botón para finalizar sigue disponible.";
 "secretary.live.source.received" = "recibido";
 "secretary.live.source.not_received" = "no recibido";

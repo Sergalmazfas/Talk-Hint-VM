@@ -4,10 +4,12 @@ export function splitCallChecklist(items: readonly string[]): string[] {
     // Keep the literal prefix too: "- 150" can be a negative amount, not a bullet.
     .map(item => item.trim()).filter(Boolean);
 }
-export type ChecklistItemKind = "say" | "ask" | "unknown";
+export type ChecklistItemKind = "say" | "ask" | "prohibition" | "unknown";
 /** Labels only; never rewrite an owner's item or infer an answer. Ambiguity stays open. */
 export function checklistItemKind(item: string): ChecklistItemKind {
   const text = item.trim().replace(/^(?:[-*•]\s+|\d+[.)]\s+)/, "").replace(/^(?:please|пожалуйста)[,\s]+/i, "");
+  if (/^(?:do not|don't|never|no payment|skip voicemail|не\s+(?:бронируй|бронировать|плати|платить|оплачивай|оплачивать|заказывай|заказывать|оставляй|оставлять)|пропусти.*(?:автоответчик|голосов)|запрещено)(?=\s|[,.!;:]|$)/i.test(text))
+    return "prohibition";
   const say = /^(?:say|tell|explain|inform|notify|relay|greet|introduce|thank)(?=\s|[,:.!?]|$)|^(?:скажи|сказать|сообщи(?:ть)?|объясни(?:ть)?|передай|передать|уведоми(?:ть)?|поздоровайся|поздороваться|представься|представиться|поблагодари(?:ть)?)(?=\s|[,:.!?]|$)/i;
   const ask = /^(?:ask|confirm|check|clarify|inquire|find out)(?=\s|[,:.!?]|$)|^(?:узнай|узнать|спроси(?:ть)?|уточни(?:ть)?|выясни(?:ть)?|подтверди(?:ть)?|проверь|проверить)(?=\s|[,:.!?]|$)/i;
   // A structurally supplied mixed item remains ONE item, but cannot be closed
@@ -22,6 +24,7 @@ export function checklistItemKind(item: string): ChecklistItemKind {
 export const SECRETARY_CHECKLIST_POLICY = `During the human conversation, follow the authorized checklist; keep a private per-item answer/closed state.
 Preserve every structurally supplied sayAsk item as ONE complete thought, in its original order; do not split at commas/semicolons or merge items.
 Distinguish SAY from ASK. A SAY item closes only after YOU have actually spoken its full authorized meaning; the guest saying it is not completion.
+PROHIBITION is a separate item type: do not perform the forbidden action; it closes only when the full observed call contains no violation. Never ask the guest to perform it or speak it as an instruction.
 An ASK item closes only after the GUEST answers (including an explicit unknown); merely asking it is not completion.
 Mixed/unclear items remain unverified rather than being declared complete from only one part.
 Ask ONE question per turn (at most two short closely related questions). Never ask an answered item again.

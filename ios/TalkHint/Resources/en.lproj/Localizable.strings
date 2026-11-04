@@ -568,7 +568,7 @@
 "secretary.review.configure" = "Choose line or configure saved setup";
 "secretary.review.retry_setup" = "Retry setup check";
 "secretary.live.source.connected" = "Twilio source connected via %@. Server track receipt (not proof of audible playback): Guest %@; Secretary %@. The app only resubscribes to the read-only feed; it never starts the source.";
-"secretary.live.source.unavailable" = "Twilio call source unavailable. The server reports that this source cannot be recreated. This app can only subscribe to its read-only feed. End remains available.";
+"secretary.live.source.unavailable" = "Monitoring audio is disconnected. This does not mean the call has ended. The transcript and End button remain available; retry reconnects monitoring only.";
 "secretary.live.source.unknown" = "Twilio call source state or capability is unknown. This app cannot start or recreate it. End remains available.";
 "secretary.live.source.received" = "received";
 "secretary.live.source.not_received" = "not received";

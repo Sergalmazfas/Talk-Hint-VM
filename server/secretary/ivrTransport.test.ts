@@ -30,6 +30,7 @@ describe("Secretary IVR transport contract — local Twilio menu / fake Retell, 
       execute: (name: string, raw: string, signal: AbortSignal) => ivr.tool(name, raw, signal),
       blocksEnd: () => ivr.blocksEnd() };
     const stream: EngineStream = async function* () {
+      yield { type: "text", text: "I will press two." }; // Never speak over the recorded menu.
       const t = { type: "function_call", call_id: "press-1", name: "press_digits",
         arguments: JSON.stringify({ digits: "2", heard_menu: menu, menu_complete: true }) };
       yield { type: "complete", output: [t], tools: [t] };
@@ -46,6 +47,7 @@ describe("Secretary IVR transport contract — local Twilio menu / fake Retell, 
       }]);
       expect(ws.sent.filter(f => f.response_type === "response" && f.content_complete)).toHaveLength(1);
       expect(ws.sent.some(f => f.end_call || f.transfer_number)).toBe(false);
+      expect(ws.sent.some(f => f.content)).toBe(false);
       expect(ws.readyState).toBe(1);
       // Duplicate response ID cannot press again.
       ws.frame({ interaction_type: "response_required", response_id: 1, transcript: [{ role: "user", content: menu }] });

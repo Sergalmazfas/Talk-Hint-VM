@@ -52,13 +52,13 @@ describe("Reviewed telephone C without lab budgets, scripts or synthetic speech"
     expect(e.instructions).toContain("AUTHORIZED_FACT_KEEP:");
     expect(e.report.phoneRuntime).toMatchObject({ variant: "C", promptMode: "full",
       fallbackReason: "COMPACT_PROMPT_EXCEEDS_9000", maxOutput: 300 });
-    await e.respond([], new AbortController().signal, () => {});
+    await e.respond([{ role: "user", content: "Hello" }], new AbortController().signal, () => {});
     expect(f.create.mock.calls[0][0]).toMatchObject({ model: "gpt-6-sol", max_output_tokens: 300 });
     expect(e.report.events.some(e => e.type === "compact_fallback_full_prompt")).toBe(true);
   });
   it("legacy rollback restores the old model/reasoning/cap and full prompt", async () => {
     const e = makeEngine("legacy");
-    await e.respond([], new AbortController().signal, () => {});
+    await e.respond([{ role: "user", content: "Hello" }], new AbortController().signal, () => {});
     expect(f.create.mock.calls[0][0]).toMatchObject({ model: "gpt-6.1-sol",
       reasoning: { effort: "medium" }, max_output_tokens: 1600 });
     expect(f.create.mock.calls[0][0].prompt_cache_key).toBeUndefined();
