@@ -3463,3 +3463,17 @@ mtime_ms = 1793763398477
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dde2b56c-2c6c-4462-a2e1-5ec0bf8bb4c4/5aa7b002-2a53-4ae0-8621-f61088992b77"
 storage_version_token = "1793763404184041"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "-VvdOIeO5ozoI63CrNo7Y"
+uri = "file://generated-artifacts/Katya_GPT_Live_Dev_review.zip"
+type = "unspecified"
+title = "GPT-Live + C · Dev: код и два голосовых прогона"
+description = "ZIP для проверки: изменения, тесты, RU/EN результаты, ограничения замера и отдельный бюджет $20. Ключей и реальных разговоров нет."
+logical_id = "fd5b6d69-7130-47a6-9415-291a2779bf55"
+content_hash = "sha256:bbda1d496ade7827fe8742100ae540e2903b4e77da8966f8a35406dfb9e0227d"
+size = 161808
+mtime_ms = 1793766063720
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fd5b6d69-7130-47a6-9415-291a2779bf55/0f1fe6c5-7f9e-445d-b23a-7db516cdba57"
+storage_version_token = "1793766093338062"
+content_type = "application/octet-stream"

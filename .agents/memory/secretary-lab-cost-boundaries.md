@@ -47,6 +47,17 @@ database so phone-based review no longer requires downloading JSON.
 **How to apply:** preserve owner isolation and existing production boundaries;
 do not silently change the separate opt-in comparison archive's 30-day retention.
 
+The owner separately approved a **$20 total series for the Dev GPT-Live comparison**,
+not an increase of the Retell C series. A first step using compact C without
+tools/backend is allowed, but must be explicitly identified as such.
+
+**Why:** the owner wants to isolate full-duplex conversation performance without
+changing live Katya or funding other providers from this new allowance.
+
+**How to apply:** keep the series accounts separate; no automatic production
+promotion. Real provider audio with synthetic input is not an iPhone playback
+test or proof of number accuracy with a human caller.
+
 Retell may connect a custom LLM and generate its greeting while the web call is still `registered`, before the browser joins.
 
 **Why:** a browser import failed behind the owner-only web boundary, but the already admitted session still consumed an OpenAI greeting request. Provider audio cost was zero at readback; model cost was not.

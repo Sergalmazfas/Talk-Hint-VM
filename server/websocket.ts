@@ -874,6 +874,16 @@ export function setupWebSocket(server: Server) {
       return;
     }
 
+    if (pathname === "/secretary-live-lab-stream") {
+      if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") { socket.destroy(); return; }
+      void Promise.all([import("./secretaryLab/routes"), import("./secretaryLab/liveEngine")])
+        .then(([{ handleSecretaryLabSocket }, { liveEngineLab }]) => {
+          if (socket.destroyed) return;
+          labWss.handleUpgrade(request, socket, head, ws =>
+            handleSecretaryLabSocket(ws, request, liveEngineLab));
+        }).catch(() => socket.destroy());
+      return;
+    }
     if (pathname === "/secretary-lab-stream") {
       // Load before upgrading so the browser's first auth frame cannot race
       // asynchronous imports. Bounds apply only to the lab, not live calls.

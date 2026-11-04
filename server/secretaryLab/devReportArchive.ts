@@ -20,7 +20,7 @@ export class DevReportArchive {
     if (!this.ready) this.ready = this.pool.query(DEV_REPORT_DDL).catch(e => { this.ready = undefined; throw e; });
     await this.ready;
   }
-  async save(owner: string, report: RetellReport) {
+  async save(owner: string, report: { id: string }) {
     await this.initialize();
     const json = JSON.stringify(report, safe);
     if (Buffer.byteLength(json) > 1_000_000) throw Error("DEV_REPORT_ARCHIVE_TOO_LARGE");

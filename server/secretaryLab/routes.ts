@@ -8,8 +8,8 @@ export function registerSecretaryLabRoutes(
   app: Express,
   lab: SecretaryLab,
   readiness: (owner: string) => Promise<unknown>,
+  base = "/api/admin/secretary-lab",
 ) {
-  const base = "/api/admin/secretary-lab";
   app.use(base, requireBenchmarkAdmin, express.json({ limit: "32kb" }), (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store"); next();
   });

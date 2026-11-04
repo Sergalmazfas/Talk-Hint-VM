@@ -44,7 +44,8 @@ export class LiveAudio implements LiveConnection {
   constructor(private instructions:string,private event:(e:any)=>void,
     private factory=()=>new WebSocket("wss://api.openai.com/v1/live/sessions",{
       headers:{Authorization:`Bearer ${process.env.OPENAI_API_KEY}`},
-    }),private configuration?:ReturnType<typeof liveConfig>){}
+    }),private configuration?:ReturnType<typeof liveConfig>,
+    private validateConfiguration?: (session: any) => boolean){}
   async connect(){
     await new Promise<void>((resolve,reject)=>{
       const socket=this.socket=this.factory();let started=false;
@@ -54,7 +55,7 @@ export class LiveAudio implements LiveConnection {
         let e:any;try{e=JSON.parse(raw.toString())}catch{return}
         if(e.type==="session.started"){
           const c=e.session;
-          if(c?.model!==LIVE_MODEL||c?.audio?.output?.voice!==LIVE_VOICE||
+          if(this.validateConfiguration ? !this.validateConfiguration(c) : c?.model!==LIVE_MODEL||c?.audio?.output?.voice!==LIVE_VOICE||
             c?.audio?.format?.type!=="audio/pcmu"||c?.audio?.format?.rate!==8000||
             c?.delegation?.responses?.model!==LIVE_BACKEND){
             clearTimeout(timer);socket.terminate();reject(new Error("Live configuration mismatch"));return;

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
-  LAB_API, LabReport, LabSnapshot, LabTurn, VoiceProvider, UlawFrameQueue,
+  LAB_API as GPT_LAB_API, LabReport, LabSnapshot, LabTurn, VoiceProvider, UlawFrameQueue,
   base64ToBytes, bytesToBase64, floatToUlaw, formatLabTime, labRequest,
   makeHoldMusic, markPlaybackDecision, playbackWouldExceedLimit, scheduleLabPlayback, labEndReasonLabel,
   selectOutboundFrame, socketUrl, ulawToPcm, ULAW_SILENCE_FRAME,
@@ -21,12 +21,18 @@ import ElevenEngineBench from "@/components/secretary-lab/ElevenEngineBench";
 import EngineFixtures from "@/components/secretary-lab/EngineFixtures";
 import { useStandReadiness } from "@/components/secretary-lab/stand-readiness";
 import "@/components/secretary-lab/stand-readiness.css";
-import { secretaryStand, secretaryStandPath, chooseSecretaryStand, type SecretaryStand } from "@/lib/secretary-lab-modes";
+import { secretaryStand, secretaryStandPath, chooseSecretaryStand, liveEngineApi, type SecretaryStand } from "@/lib/secretary-lab-modes";
 
 import SavedComparisons from "@/components/secretary-lab/SavedComparisons";
 
 type LiveState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "ended";
 type WireMessage = Record<string, any>;
+type LiveBenchReport = LabReport & {
+  liveBench?: { usageSeconds: number; voiceUsd: number; engineUsd: number; backendConnected: false };
+};
+type SecretaryLabSnapshot = LabSnapshot & {
+  liveBudget?: { spentMicroUsd: number; reservedMicroUsd: number; remainingMicroUsd: number };
+};
 
 const SUGGESTIONS = [
   "Please hold while I try to connect you",
@@ -62,10 +68,14 @@ function formatMs(value?: number) {
   return value === undefined ? "—" : `${Math.round(value)} мс`;
 }
 
+function formatUsd(value: number, digits = 2) {
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
 export default function SecretaryLab() {
   const [, setLocation] = useLocation();
   const { user, token, isLoading } = useAuth();
-  const [snapshot, setSnapshot] = useState<LabSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<SecretaryLabSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [denied, setDenied] = useState(false);
@@ -87,6 +97,8 @@ export default function SecretaryLab() {
   const [rating, setRating] = useState("");
   const [socketConnected, setSocketConnected] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const labApi = stand === "live-engine" ? liveEngineApi : GPT_LAB_API;
+  const snapshotRequestRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const rtcRef = useRef<LabRtcController | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
@@ -118,38 +130,61 @@ export default function SecretaryLab() {
   const standBusy = pending || !!active || retellBusy || uncertainStop || startLockRef.current;
   const readiness = useStandReadiness(token);
 
+  const resetStandData = useCallback(() => {
+    snapshotRequestRef.current++;
+    setSnapshot(null);
+    setReport(null);
+    setRating("");
+    setError("");
+    setLoadError("");
+    setProvider("openai");
+    setLoading(true);
+  }, []);
+
   useEffect(() => {
     const syncStand = () => {
       if (standBusy) {
         window.history.replaceState(null, "", `/admin${secretaryStandPath(stand)}`);
         return;
       }
-      setStand(chooseSecretaryStand(stand, secretaryStand(window.location.search), standBusy));
+      const next = chooseSecretaryStand(stand, secretaryStand(window.location.search), standBusy);
+      if (next !== stand) resetStandData();
+      setStand(next);
     };
     window.addEventListener("popstate", syncStand);
     return () => window.removeEventListener("popstate", syncStand);
-  }, [setLocation, stand, standBusy]);
+  }, [resetStandData, setLocation, stand, standBusy]);
 
   const selectStand = (next: SecretaryStand) => {
     const selected = chooseSecretaryStand(stand, next, standBusy);
     if (selected === stand) return;
+    resetStandData();
     setStand(selected);
     setLocation(secretaryStandPath(selected));
   };
 
   const reload = useCallback(async () => {
     if (!token) return;
+    const requestId = ++snapshotRequestRef.current;
     setLoading(true); setLoadError(""); setDenied(false);
     try {
-      const result = await labRequest<LabSnapshot>(LAB_API, token);
+      const result = await labRequest<SecretaryLabSnapshot>(labApi, token);
+      if (requestId !== snapshotRequestRef.current) return;
       setSnapshot(result);
-       setProvider("openai");
+      setProvider("openai");
     } catch (cause) {
+      if (requestId !== snapshotRequestRef.current) return;
       const e = cause as Error & { status?: number };
       if (e.status === 403) setDenied(true);
       else setLoadError(e.message || "Не удалось загрузить Secretary Lab.");
-    } finally { setLoading(false); }
-  }, [token]);
+    } finally {
+      if (requestId === snapshotRequestRef.current) setLoading(false);
+    }
+  }, [labApi, token]);
+
+  useEffect(() => {
+    resetStandData();
+  }, [labApi, resetStandData]);
 
   useEffect(() => {
     if (!isLoading && !token) setDenied(true);
@@ -206,7 +241,7 @@ export default function SecretaryLab() {
     setSocketConnected(false); setPlayingHold(false); micPausedRef.current = false; setMicPaused(false); setLiveState("ended");
     if (session && token) {
       try {
-        const result = await labRequest<{ report: LabReport }>(`${LAB_API}/sessions/${encodeURIComponent(session.id)}`, token, {
+        const result = await labRequest<{ report: LabReport }>(`${labApi}/sessions/${encodeURIComponent(session.id)}`, token, {
           method: "DELETE", body: JSON.stringify({ reason: userInitiated ? "user_stop" : clientReason }),
         });
         setReport(result.report); setActive(null); setRating("");
@@ -220,7 +255,7 @@ export default function SecretaryLab() {
       }
     }
     closingRef.current = false;
-  }, [cleanupMedia, token]);
+  }, [cleanupMedia, labApi, token]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -228,17 +263,20 @@ export default function SecretaryLab() {
       mountedRef.current = false;
       attemptIdRef.current++;
       closingRef.current = true;
-      const sessionId = currentReportRef.current?.id;
+      const currentSession = currentReportRef.current;
+      const sessionId = currentSession && (currentSession.status === "running" || currentSession.status === "awaiting_connection")
+        ? currentSession.id
+        : null;
       if (socketRef.current?.readyState === WebSocket.OPEN) {
         try { socketRef.current.send(JSON.stringify({ type: "user_stop" })); } catch {}
       }
       socketRef.current?.close();
       if (sessionId && token) {
-        void labRequest(`${LAB_API}/sessions/${encodeURIComponent(sessionId)}`, token, { method: "DELETE" }).catch(() => undefined);
+        void labRequest(`${labApi}/sessions/${encodeURIComponent(sessionId)}`, token, { method: "DELETE" }).catch(() => undefined);
       }
       cleanupMedia();
     };
-  }, [cleanupMedia, token]);
+  }, [cleanupMedia, labApi, token]);
 
   const updateReport = useCallback((fn: (previous: LabReport) => LabReport) => {
     setActive((previous) => {
@@ -336,15 +374,18 @@ export default function SecretaryLab() {
       streamRef.current = stream;
       audioClockStartRef.current = context.currentTime;
       createAttempted = true;
-      const created = await labRequest<{ id: string; ticket: string; socketPath: string; report: LabReport }>(`${LAB_API}/sessions`, token, {
+      const created = await labRequest<{ id: string; ticket: string; socketPath: string; report: LabReport }>(`${labApi}/sessions`, token, {
         method: "POST",
         body: JSON.stringify({ instruction: instruction.trim(), voiceProvider: provider, consent: true }),
       });
       createdId = created.id;
+      if (stand === "live-engine" && created.report.transport !== "simulated_twilio") {
+        throw new Error("GPT-Live + C должен использовать браузерный аудиоканал simulated_twilio; WebRTC не запускается.");
+      }
       if (!attemptIsCurrent()) {
         stream.getTracks().forEach((track) => track.stop());
         if ((context.state as AudioContextState) !== "closed") await context.close();
-        try { await labRequest(`${LAB_API}/sessions/${encodeURIComponent(created.id)}`, token, { method: "DELETE" }); } catch {}
+        try { await labRequest(`${labApi}/sessions/${encodeURIComponent(created.id)}`, token, { method: "DELETE" }); } catch {}
         return;
       }
       currentReportRef.current = created.report;
@@ -373,7 +414,10 @@ export default function SecretaryLab() {
         if (!attemptIsCurrent() || closingRef.current) return;
         let message: WireMessage;
         try { message = JSON.parse(event.data); } catch { return; }
-        if (message.type === "rtc_offer_required" && provider === "openai") {
+        if (message.type === "rtc_offer_required" && stand === "live-engine") {
+          setError("GPT-Live + C получил WebRTC-сигнал вместо simulated_twilio. Сессия остановлена; WebRTC не запускается.");
+          void stopServer(false, "client_error");
+        } else if (message.type === "rtc_offer_required" && provider === "openai") {
           if (rtcRef.current) return;
           try {
             const rtc = createLabRtcController({
@@ -400,7 +444,7 @@ export default function SecretaryLab() {
             });
             rtcRef.current = rtc;
             await rtc.negotiate((sdp) => labRequest<{ sdp: string; model: string; voice: string }>(
-              `${LAB_API}/sessions/${encodeURIComponent(created.id)}/webrtc`,
+              `${labApi}/sessions/${encodeURIComponent(created.id)}/webrtc`,
               token,
               { method: "POST", body: JSON.stringify({ sdp }) },
             ));
@@ -528,7 +572,7 @@ export default function SecretaryLab() {
       streamRef.current = null;
       if (createdId && token) {
         try {
-          await labRequest(`${LAB_API}/sessions/${encodeURIComponent(createdId)}`, token, { method: "DELETE" });
+          await labRequest(`${labApi}/sessions/${encodeURIComponent(createdId)}`, token, { method: "DELETE" });
         } catch {
           setUncertainStop(true);
           setError((old) => `${old} Остановка созданной сессии не подтверждена; смена стенда заблокирована.`);
@@ -656,6 +700,8 @@ export default function SecretaryLab() {
   const history = useMemo(() => snapshot?.sessions ?? [], [snapshot?.sessions]);
   const providerReady = snapshot?.providers[provider]?.ready ?? false;
   const visibleReport = report;
+  const visibleLiveBench = (visibleReport as LiveBenchReport | null)?.liveBench;
+  const liveBudget = snapshot?.liveBudget;
   const elapsedLabel = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
 
   if (isLoading || (loading && !snapshot && !denied && !loadError)) return <div className="lab-shell"><div className="lab-loading"><div className="skeleton-line wide" /><div className="skeleton-line" /><div className="skeleton-card" /><div className="skeleton-card" /></div></div>;
@@ -692,6 +738,7 @@ export default function SecretaryLab() {
         <button type="button" className={stand === "retell" ? "selected" : ""} aria-pressed={stand === "retell"} disabled={standBusy} onClick={() => selectStand("retell")}><Radio size={15} /> Retell <small>live web</small></button>
         <button type="button" className={stand === "retell-engine" ? "selected" : ""} aria-pressed={stand === "retell-engine"} disabled={standBusy} onClick={() => selectStand("retell-engine")}><AudioLines size={15} /> Retell + Engine <small>TalkHint LLM</small></button>
         <button type="button" className={stand === "eleven-engine" ? "selected" : ""} aria-pressed={stand === "eleven-engine"} disabled={standBusy} onClick={() => selectStand("eleven-engine")}><AudioLines size={15} /> ElevenLabs + Engine <small>TalkHint LLM</small></button>
+        <button type="button" className={stand === "live-engine" ? "selected" : ""} aria-pressed={stand === "live-engine"} disabled={standBusy} onClick={() => selectStand("live-engine")}><AudioLines size={15} /> GPT-Live + C <small>native · compact C</small></button>
         {standBusy && <small className="stand-lock">{uncertainStop ? "Состояние сессии не подтверждено · смена стенда заблокирована" : "Стенд заблокирован во время сессии"}{uncertainStop && currentReportRef.current && <button type="button" onClick={() => void stopServer(false, "client_error")}>Повторить остановку</button>}</small>}
       </nav>
 
@@ -700,8 +747,11 @@ export default function SecretaryLab() {
       {notice && <div className="lab-notice"><span>{notice}</span><button onClick={() => setNotice("")}>Понятно</button></div>}
 
       {(stand === "retell-engine" || stand === "eleven-engine") && <EngineFixtures />}
+      {stand === "live-engine" && <section className="lab-notice" aria-label="О стенде GPT-Live плюс C">
+        <span><b>Отдельный Dev-стенд.</b> Нативный GPT-Live-1 со встроенным женским голосом Marin; язык следует за собеседником (RU / EN / ES), как в C. Первый этап — компактный C: без вызова инструментов и backend-интеграций. Это не production-путь.</span>
+      </section>}
       {stand === "eleven-engine" ? <ElevenEngineBench key={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
-      stand !== "gpt" ? <RetellBench key={stand} mode={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
+      stand !== "gpt" && stand !== "live-engine" ? <RetellBench key={stand} mode={stand} token={token || ""} instruction={instruction} onInstructionChange={setInstruction} onActiveChange={setRetellBusy} /> :
       <div className="lab-layout">
         <div className="lab-primary">
           <Card className="control-card">
@@ -720,14 +770,14 @@ export default function SecretaryLab() {
                       : item?.source === "linked_existing" ? "Связанный голос" : item?.source === "sample_clone" ? "Клон из образца" : "Недоступен";
                     return <button key={name} type="button" onClick={() => { setProvider(name); setPaidConsent(false); }} disabled={!!active || pending || !item?.ready} className={`provider-option ${provider === name ? "selected" : ""} ${!item?.ready ? "unavailable" : ""}`}>
                       <span className="provider-radio">{provider === name && <Check size={12} />}</span>
-                      <span className="provider-label"><b>OpenAI · GPT-Live 1</b><small>{source}</small></span>
+                      <span className="provider-label"><b>{stand === "live-engine" ? "OpenAI · GPT-Live-1" : "OpenAI · GPT-Live 1"}</b><small>{source}</small></span>
                       <span className={`provider-ready ${item?.ready ? "ready" : ""}`}>{item?.ready ? name === "openai" ? "ДОСТУПЕН" : "ГОТОВ" : "НЕТ"}</span>
                     </button>;
                   })}
                 </div>
                 {snapshot?.providers.openai?.reason && <p className="provider-disclaimer">OpenAI доступность: {snapshot.providers.openai.reason}</p>}
-                {provider === "openai" && <p className="provider-disclaimer">Marin — встроенный голос OpenAI, не клон. Микрофон → TalkHint → GPT-Live 1; обработка gpt-6.1-sol. Та же голосовая ветка, что у телефонного Secretary, но без набора номера и без ElevenLabs/Cartesia.</p>}
-                {provider === "openai" && <p className="provider-disclaimer">Экспериментальный Dev-режим. Доступность модели не означает проверку полного разговора на вашем iPhone. При блокировке звука или соединения появится ошибка; другой провайдер автоматически не включается.</p>}
+                {provider === "openai" && stand !== "live-engine" && <p className="provider-disclaimer">Marin — встроенный голос OpenAI, не клон. Микрофон → TalkHint → GPT-Live 1; обработка gpt-6.1-sol. Та же голосовая ветка, что у телефонного Secretary, но без набора номера и без ElevenLabs/Cartesia.</p>}
+                {provider === "openai" && stand !== "live-engine" && <p className="provider-disclaimer">Экспериментальный Dev-режим. Доступность модели не означает проверку полного разговора на вашем iPhone. При блокировке звука или соединения появится ошибка; другой провайдер автоматически не включается.</p>}
                 {provider !== "openai" && snapshot?.providers[provider]?.source === "linked_existing" && <p className="provider-disclaimer">Связанный голосовой ID не подтверждает, что провайдер использует именно клон Secretary.</p>}
                 <label className={`consent-row ${!providerReady ? "muted" : ""}`}><input type="checkbox" checked={paidConsent} onChange={(event) => setPaidConsent(event.target.checked)} disabled={!!active || pending || !providerReady} /><span>Я понимаю, что разговор может использовать платные услуги AI и генерации голоса.</span></label>
               </div>
@@ -747,7 +797,7 @@ export default function SecretaryLab() {
             <CardContent>
               <div className="conversation-state">
                 <div className={`voice-orb ${liveState}`}><AudioLines size={24} /></div>
-                <div><b>{stateLabel(liveState)}</b><small>{active ? "Микрофон → TalkHint → GPT-Live 1. Телефонного набора нет." : "Транскрипт появится после подключения"}</small></div>
+                <div><b>{stateLabel(liveState)}</b><small>{active ? stand === "live-engine" ? "Микрофон → browser audio → GPT-Live-1. simulated_twilio, без WebRTC и телефонного набора." : "Микрофон → TalkHint → GPT-Live 1. Телефонного набора нет." : "Транскрипт появится после подключения"}</small></div>
               </div>
               <div className="transcript-list" aria-live="polite">
                 {(active?.turns ?? visibleReport?.turns ?? []).length === 0 ? <div className="transcript-empty"><span>ОЖИДАНИЕ ПЕРВОЙ РЕПЛИКИ</span><p>Здесь появятся реальные реплики разговора. Аудио не записывается.</p></div> :
@@ -781,9 +831,20 @@ export default function SecretaryLab() {
               <div className="metric"><span>Реплики секретаря</span><b>{(active ?? visibleReport)?.metrics.secretaryTurns ?? 0}</b></div>
               <div className="metric"><span>Первое аудио · планирование</span><b>{formatMs((active ?? visibleReport)?.metrics.firstAudioMs)}</b></div>
               <div className="metric"><span>Реплика → аудио, если измерено</span><b>{formatMs((active ?? visibleReport)?.metrics.lastTurnToAudioMs)}</b></div>
-               <div className="model-note"><span>ФАКТИЧЕСКАЯ МОДЕЛЬ</span><b>{(active ?? visibleReport)?.model ?? (provider === "openai" ? snapshot?.providers.openai?.model : snapshot?.models.realtime) ?? "—"}</b><span>ГОЛОС / ТРАНСПОРТ</span><b>{(active ?? visibleReport)?.voice ?? (provider === "openai" ? snapshot?.providers.openai?.voice : "—")} · {(active ?? visibleReport)?.transport ?? (provider === "openai" ? "webrtc" : "—")}</b><span>РЕЧЬ · STT</span><b>{snapshot?.models.stt ?? "—"}</b></div>
+                <div className="model-note"><span>ФАКТИЧЕСКАЯ МОДЕЛЬ</span><b>{(active ?? visibleReport)?.model ?? (provider === "openai" ? snapshot?.providers.openai?.model : snapshot?.models.realtime) ?? "—"}</b><span>ГОЛОС / ТРАНСПОРТ</span><b>{(active ?? visibleReport)?.voice ?? (provider === "openai" ? snapshot?.providers.openai?.voice : "—")} · {(active ?? visibleReport)?.transport ?? (provider === "openai" ? stand === "live-engine" ? "simulated_twilio" : "webrtc" : "—")}</b><span>РЕЧЬ · STT</span><b>{snapshot?.models.stt ?? "—"}</b></div>
             </CardContent>
           </Card>
+
+          {stand === "live-engine" && <Card className="telemetry-card">
+            <CardHeader className="card-heading"><div><p className="eyebrow">ОТДЕЛЬНЫЙ ЛИМИТ</p><CardTitle>Бюджет GPT-Live + C</CardTitle></div></CardHeader>
+            <CardContent>
+              <div className="metric"><span>Общий бюджет</span><b>{formatUsd(20)}</b></div>
+              <div className="metric"><span>Потрачено</span><b>{liveBudget ? formatUsd(liveBudget.spentMicroUsd / 1_000_000) : "Нет данных"}</b></div>
+              <div className="metric"><span>Зарезервировано</span><b>{liveBudget ? formatUsd(liveBudget.reservedMicroUsd / 1_000_000) : "Нет данных"}</b></div>
+              <div className="metric"><span>Остаток</span><b>{liveBudget ? formatUsd(liveBudget.remainingMicroUsd / 1_000_000) : "Нет данных"}</b></div>
+              <p className="provider-disclaimer">Ставка голоса — $0.05 за минуту, расчёт по секундам. На этом этапе начислений за engine нет. Значения отражают только liveBudget из снимка сервера.</p>
+            </CardContent>
+          </Card>}
 
           <Card className="fixture-card">
             <CardHeader className="card-heading"><div><p className="eyebrow">04 / ГРАНИЦЫ ТЕСТА</p><CardTitle>Важно знать</CardTitle></div></CardHeader>
@@ -801,11 +862,17 @@ export default function SecretaryLab() {
               {loading && !snapshot ? <div className="history-skeleton"><div /><div /><div /></div> :
                 history.length === 0 ? <div className="history-empty">История пока пуста.<small>Завершённые сессии появятся здесь на срок до часа.</small></div> :
                  <div className="history-list">{history.slice(0, 8).map((item) => <button key={item.id} className={`history-item ${visibleReport?.id === item.id ? "current" : ""}`} onClick={() => { setReport(item); setActive(null); setRating(""); }}>
-                   <span className={`history-dot ${item.status}`} /><span className="history-detail"><b>{item.voiceProvider === "elevenlabs" ? "ElevenLabs" : item.voiceProvider === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"} · {item.metrics.guestTurns + item.metrics.secretaryTurns} реплик</b><small>{formatLabTime(item.createdAt)} · {item.instruction}</small></span><span className="history-arrow">→</span>
+                    <span className={`history-dot ${item.status}`} /><span className="history-detail"><b>{stand === "live-engine" ? "GPT-Live + C" : item.voiceProvider === "elevenlabs" ? "ElevenLabs" : item.voiceProvider === "cartesia" ? "Cartesia" : "OpenAI · WebRTC"} · {item.metrics.guestTurns + item.metrics.secretaryTurns} реплик</b><small>{formatLabTime(item.createdAt)} · {item.instruction}</small></span><span className="history-arrow">→</span>
                 </button>)}</div>}
                {visibleReport && <div className="report-actions">
-                 <RunCost cost={visibleReport.cost} />
-                 <div className="report-title"><b>Отчёт выбран · {visibleReport.model ?? visibleReport.voiceProvider}</b><span>{visibleReport.voice ?? "голос не указан"} · {visibleReport.transport ?? "транспорт не указан"} · {labEndReasonLabel(visibleReport.reason)}</span></div>
+                  {stand === "live-engine" ? <div className="live-bench-usage" aria-label="Учёт GPT-Live плюс C">
+                    <div className="metric"><span>Использование</span><b>{visibleLiveBench ? `${visibleLiveBench.usageSeconds} сек.` : "Нет данных"}</b></div>
+                    <div className="metric"><span>Стоимость голоса</span><b>{visibleLiveBench ? formatUsd(visibleLiveBench.voiceUsd, 6) : "Нет данных"}</b></div>
+                    <div className="metric"><span>Стоимость engine</span><b>{visibleLiveBench ? formatUsd(visibleLiveBench.engineUsd, 6) : "Нет данных"}</b></div>
+                    <div className="metric"><span>Backend подключён</span><b>{visibleLiveBench ? visibleLiveBench.backendConnected ? "Да" : "Нет" : "Нет данных"}</b></div>
+                    {!visibleLiveBench && <small>В отчёте нет liveBench; стоимость неизвестна и не оценивается по общим полям.</small>}
+                  </div> : <RunCost cost={visibleReport.cost} />}
+                  <div className="report-title"><b>Отчёт выбран · {stand === "live-engine" ? "GPT-Live + C" : visibleReport.model ?? visibleReport.voiceProvider}</b><span>{visibleReport.voice ?? "голос не указан"} · {visibleReport.transport ?? "транспорт не указан"} · {labEndReasonLabel(visibleReport.reason)}</span></div>
                  <div className="report-instruction"><b>Инструкция сессии</b><p>{visibleReport.instruction}</p></div>
                 <Button variant="outline" size="sm" onClick={() => downloadReport({ ...visibleReport, rating: rating || undefined })}><ArrowDownToLine size={14} /> JSON</Button>
                 <label className="rating-label">Оценка секретаря <select value={rating} onChange={(event) => setRating(event.target.value)}><option value="">Не оценено</option><option>Убедительно</option><option>Нужна доработка</option><option>Не справился</option></select><small>Локальная заметка — не отправляется на сервер</small></label>

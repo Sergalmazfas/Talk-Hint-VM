@@ -42,6 +42,8 @@ export interface LabReport {
   };
 }
 export interface LabDependencies {
+  socketPath?: string;
+  stopTimeoutMs?: number;
   startEngine(socket: WebSocket, dependencies: SecretaryStreamDependencies): void;
   context(owner: string, provider: "elevenlabs" | "cartesia" | "openai"): Promise<Omit<SecretaryCallContext, "instruction">>;
   translate(text: string): Promise<{ translation?: string; unavailableReason?: string }>;
@@ -216,7 +218,7 @@ export class SecretaryLab {
     this.event(s, "session_created");
     s.timer = setTimeout(() => this.end(s, "connection_timeout"), 30_000);
     s.timer.unref?.();
-    return { id, ticket: s.ticket, socketPath: "/secretary-lab-stream", report: pricedLabReport("gpt", s.report) };
+    return { id, ticket: s.ticket, socketPath: this.deps.socketPath ?? "/secretary-lab-stream", report: pricedLabReport("gpt", s.report) };
   }
   connect(ticket: string, send: Sender, close: () => void): string {
     this.prune();
@@ -360,7 +362,7 @@ export class SecretaryLab {
     s.peer?.inject({ event: "stop" });
     if (!s.peer) this.end(s, reason);
     else {
-      s.stopTimer = setTimeout(() => this.end(s, reason), 2000);
+      s.stopTimer = setTimeout(() => this.end(s, reason), this.deps.stopTimeoutMs ?? 2000);
       s.stopTimer.unref?.();
     }
     return s.stopPromise;

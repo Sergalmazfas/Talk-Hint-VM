@@ -442,6 +442,10 @@ export async function registerRoutes(
   const { registerSecretaryLabRoutes } = await import("./secretaryLab/routes");
   const { secretaryLab, secretaryLabReadiness } = await import("./secretaryLab/runtime");
   registerSecretaryLabRoutes(app, secretaryLab, secretaryLabReadiness);
+  if (process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1") {
+    const { liveEngineLab, liveEngineReadiness } = await import("./secretaryLab/liveEngine");
+    registerSecretaryLabRoutes(app, liveEngineLab, liveEngineReadiness, "/api/admin/secretary-lab/live-engine");
+  }
   await import("./secretaryLab/retellRoutes").then(({ registerRetellLabRoutes }) => registerRetellLabRoutes(app));
   const { retellEngineLab } = await import("./secretaryLab/retellEngine");
   const { registerRetellLabRoutes } = await import("./secretaryLab/retellRoutes");
