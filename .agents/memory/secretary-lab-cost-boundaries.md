@@ -9,6 +9,18 @@ Retell may connect a custom LLM and generate its greeting while the web call is 
 
 **How to apply:** authenticate and preflight browser modules/audio before paid admission. `registered` is not evidence of zero spend. Reconcile both provider and external model usage; an unconfirmed stop keeps its reservation and blocks a blind repeat.
 
+One human turn can produce multiple Retell response requests as the caller pauses
+and resumes. Local budget-guard rejections are not paid provider requests.
+
+**Why:** a normal multi-turn owner conversation exhausted a short-session request
+guard although the model kept returning successful responses; the generic error
+made this look like a model failure.
+
+**How to apply:** distinguish response events, actual provider admissions,
+cancellations and locally rejected requests. Exercise realistic multi-turn speech
+before declaring a bounded voice bench usable; report budget exhaustion clearly,
+without silently raising the monetary ceiling or treating missing usage as free.
+
 Only extend pricing inside the existing Dev Secretary Lab and its common reports
 archive. Do not change voice settings, add Cartesia, touch production/telephony/
 Xcode or publish as part of this work.
