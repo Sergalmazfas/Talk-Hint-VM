@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import type { TeamActionReport } from "../../shared/teamActionReport";
+import { voicemailMessageLeft } from "../secretary/voicemail";
+import { displaySecretaryInstruction } from "../../shared/callPlan";
 
 const text = (v: unknown) => typeof v === "string" && v.trim() ? v.trim() : null;
 const iso = (v: unknown) => {
@@ -17,6 +19,8 @@ export function secretaryActionReport(call: any, task: any): TeamActionReport | 
   const events = Array.isArray(call.metadata?.secretaryIvr?.events) ? call.metadata.secretaryIvr.events : [];
   const succeeded: string[] = [];
   const failed: string[] = [];
+  const messageLeft = voicemailMessageLeft(task.instruction ?? "", Array.isArray(task.transcript_turns) ? task.transcript_turns : []);
+  if (messageLeft) succeeded.push("Оставлено сообщение; получение и согласие не подтверждены.");
   const connected = task.dial_started_at && (["connected", "completed"].includes(task.provider_status) ||
     (Array.isArray(task.transcript_turns) && task.transcript_turns.some((t: any) => t.role === "guest")));
   succeeded.push(connected ? "Соединение подтверждено сохранённой речью или статусом линии." :
@@ -37,8 +41,8 @@ export function secretaryActionReport(call: any, task: any): TeamActionReport | 
   const endReason = text(call.metadata?.secretary?.endReason) ?? text(call.metadata?.retellPhone?.disconnection_reason);
   failed.push(`Причина конца звонка: ${endReason ?? "не установлена; статус completed сам по себе её не объясняет"}.`);
   return { id: id(call.call_sid, "SECRETARY"), at, role: "SECRETARY",
-    assigned: text(task.instruction) ?? "Задача не сохранена",
-    outcome: confirmedGoal ? "completed" : connected || events.some((e: any) => e.kind === "press") ? "partial" : "not_completed",
+    assigned: typeof task.instruction === "string" ? displaySecretaryInstruction(task.instruction, task.phone_number ?? task.phoneNumber ?? "") : "Задача не сохранена",
+    outcome: messageLeft ? "message_left" : confirmedGoal ? "completed" : connected || events.some((e: any) => e.kind === "press") ? "partial" : "not_completed",
     succeeded, failed, needsOwner: [], source: `secretary_tasks:${task.id};calls:${call.call_sid};secretaryIvr.events` };
 }
 
@@ -71,7 +75,7 @@ export function reportDelivery(reports: TeamActionReport[], urgent = false) {
 }
 
 export function actionReportText(r: TeamActionReport) {
-  const outcomes = { completed: "выполнено", partial: "частично", not_completed: "не выполнено" };
+  const outcomes = { completed: "выполнено", partial: "частично", not_completed: "не выполнено", message_left: "оставлено сообщение" };
   return [
     `${r.role} · ${outcomes[r.outcome]}`, `Поручено: ${r.assigned}`,
     `Получилось: ${r.succeeded.join(" ") || "не подтверждено"}`,

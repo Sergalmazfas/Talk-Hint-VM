@@ -17,6 +17,13 @@ function fixture() {
 }
 afterEach(() => { buffers.splice(0).forEach(b => b.close()); vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe("C interruption rules fail conservative", () => {
+  it("never emits a delayed bridge over a voicemail announcement or silence gate",async()=>{
+    const {b,frames,calls}=fixture();
+    b.request(1,[user("Please leave your message after the beep.")]);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(calls).toHaveLength(1);expect(b.metrics.bridges).toBe(0);
+    expect(frames.filter(f=>f.content)).toHaveLength(0);
+  });
   it.each(["угу", "да", "ага", "ok", "yeah", "mhm", "yes"])("a: %s", text => {
     expect(classifyCInterruption("Tell me", "Tell me " + text).kind).toBe("a");
   });

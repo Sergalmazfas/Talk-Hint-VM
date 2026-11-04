@@ -158,8 +158,8 @@ describe("Secretary autonomous media agent", () => {
         } });
         await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(1));
         const prompt = factory.mock.calls[0][0];
-        expect(prompt).toContain("Hello, I’m Sergey Korobeynikov’s secretary");
-        expect(prompt).toContain("Здравствуйте, я секретарь Сергея Коробейникова");
+        expect(prompt).toContain("Sergey's assistant");
+        expect(prompt).toContain("Я помощница Сергея");
         expect(prompt).toContain("Ignore stale task directions");
         expect(realtime.introductionStarted).toBe(1);
       } finally { await ws.emit("message", { event: "stop" }); }
@@ -167,7 +167,7 @@ describe("Secretary autonomous media agent", () => {
   it("builds a listening-first secretary prompt with truthful disclosure on direct questions", () => {
     const prompt = buildSecretaryInstructions("Ask when the deposit will be released.");
 
-    expect(prompt).toContain("Hello, I’m calling as the account holder’s secretary");
+    expect(prompt).toContain("I'm calling with a message");
     expect(prompt).toContain("If directly asked whether you are AI or automated, answer truthfully");
     expect(prompt).toContain("Preserve any mandatory notices or disclosures");
     expect(prompt).toContain("soft goal, not a rigid script");

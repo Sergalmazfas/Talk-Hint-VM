@@ -23,7 +23,7 @@ const dialogue = object({
 });
 export function secretaryOutputSchema(stage: string) {
   return stage === "author" ? object({
-    points: array(object({ ...row, status: { type: "string", enum: ["выполнено", "частично", "нет", "не проверено"] } })),
+    points: array(object({ ...row, status: { type: "string", enum: ["выполнено", "частично", "нет", "не проверено", "не применимо"] } })),
     openingLanguage: { type: "string", enum: ["en", "ru", "es", "unknown"] },
     recognitionIssues: strings, unverified: strings, manners: array(manner), dialogue, proposals: array(proposal), expectationChecks,
   }) : stage === "review" ? object({
@@ -49,7 +49,7 @@ const dialogueCheck = z.object({
 }).strict();
 export function validSecretaryOutput(stage: string, value: unknown) {
   const schema = stage === "author" ? z.object({
-    points: z.array(z.object({ ...rows, status: z.enum(["выполнено", "частично", "нет", "не проверено"]) }).strict()).max(20),
+    points: z.array(z.object({ ...rows, status: z.enum(["выполнено", "частично", "нет", "не проверено", "не применимо"]) }).strict()).max(20),
     openingLanguage: z.enum(["en", "ru", "es", "unknown"]), recognitionIssues: z.array(text),
     unverified: z.array(text), manners, dialogue: dialogueCheck, proposals, expectationChecks: expectationCheckRows,
   }).strict() : stage === "review" ? z.object({ verdict: z.enum(["confirmed", "not_confirmed"]),

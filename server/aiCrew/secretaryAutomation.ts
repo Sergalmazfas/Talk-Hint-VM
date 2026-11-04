@@ -8,6 +8,17 @@ import { phoneMetrics } from "../secretary/phoneMetrics";
 import { RetellApi } from "../secretaryLab/retellApi";
 import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import { selectCallExpectations, callExpectation } from "./expectations";
+import type { CrewState } from "./domain";
+
+/** Per-call, not first-five-only; receipt lives with the task, not a prunable journal row. */
+export function recordSecretaryCallFact(s: CrewState, taskId: string, at: string, details: Record<string, unknown>) {
+  const current = s.tasks.find(t => t.id === taskId)?.secretaryReview;
+  if (!current || current.factRecordedAt) return;
+  current.factRecordedAt = at;
+  log(s, "secretary-qa", "katya_c_call_plan_fact_reported", {
+    ...details, taskId, ownerAcceptance: false,
+  }, at, callExpectation(current.evidence.expectations));
+}
 
 type Binding = { store: () => StateStore; model: () => Promise<ProjectModelState>; environment: string };
 let binding: Binding | undefined;
@@ -16,6 +27,7 @@ export type SecretaryOutcome = null | { pending: true } | {
   pending: false; succeeded: string[]; failed: string[]; needsOwner: string[];
   taskId?: string; costMicroUsd: number; tokens: { input: number; output: number };
   summaryTop?: { learned: string; wentWrong: string; nextAction: string };
+  checklist?: any[]; metrics?: any;
 };
 /** Runs only for the existing owner-authorized call-lab source and existing mail outbox. */
 export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
@@ -55,12 +67,12 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       const ownerNames = [identity?.en, identity?.ruGenitive].filter((s): s is string => !!s)
         .flatMap(s => [s, ...s.split(/\s+/)]);
       evidence = secretaryEvidence(task.instruction, task.transcript_turns,
-        recordedCallVersion(call)?.commit ?? "unknown", ownerNames);
+        recordedCallVersion(call)?.commit ?? "unknown", [], ownerNames);
       const model = await dependencies.model();
       characters = secretaryCharacters(model);
       evidence.expectations = selectCallExpectations(model, call.started_at);
     } catch { return unavailable("SECRETARY_SOURCE_OR_OWNER_CHARACTER_UNAVAILABLE"); }
-    if (cSelection) {
+    if (cCall) {
       const engine = call.metadata.secretaryEngine ?? call.metadata.retellPhone.engine;
       let measurements = phoneMetrics(engine);
       const providerId = call.metadata.retellPhone.callId;
@@ -68,7 +80,8 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
         try { measurements = phoneMetrics(engine, await new RetellApi().request(`/v2/get-call/${providerId}`)); }
         catch { /* No fabricated audio latency; missing evidence stays explicit. */ }
       }
-      evidence.cRollout = { ordinal: cSelection.ordinal, measurements };
+      evidence.measurements = measurements;
+      if (cSelection) evidence.cRollout = { ordinal: cSelection.ordinal, measurements };
     }
     await store.change(s => {
       const queued = queueSecretaryReview(s, ownerId, call.call_sid, evidence, characters, now.toISOString());
@@ -107,6 +120,10 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
     return { pending: true }; // Settle/retain the paid reservation before reporting a price.
   }
   if (runs.some(r => r.status === "unknown" || r.status === "discarded") || p.status === "blocked") {
+    if (cCall) await store.change(s => recordSecretaryCallFact(s, existing!.id, now.toISOString(), {
+      callRef: ref, expected: p.evidence.expectations, fact: "не измерено",
+      comparison: "не проверено: разбор заблокирован или расход unknown", verdict: "not_confirmed",
+    }));
     const result = unavailable(p.error ?? "RUN_UNKNOWN_OR_DISCARDED_NO_RETRY");
     result.failed.push(`Учтено под лимитом: $${(spent / 1e6).toFixed(6)}; неизвестный расход считается полным резервом, это не счёт провайдера`);
     if (warning) result.needsOwner.push("Достигнуто 80% месячного лимита отдела, включая unknown");
@@ -144,6 +161,13 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
   try { summary = JSON.parse(doc(p.summaryId) ?? "null"); } catch {}
   try { author = JSON.parse(doc(p.authorId) ?? "null"); } catch {}
   try { review = JSON.parse(doc(p.reviewId) ?? "null"); } catch {}
+  if (cCall && !p.factRecordedAt) await store.change(s => recordSecretaryCallFact(s, existing!.id, now.toISOString(), {
+      callRef: ref, taskId: existing!.id, expected: p.evidence.expectations,
+      author: author?.expectationChecks ?? [], independentReview: review?.expectationChecks ?? [],
+      verdict: p.verdict, measurements: p.evidence.measurements ?? p.evidence.cRollout?.measurements,
+      comparison: p.evidence.expectations?.targets.length ? "см. независимую сверку по каждой норме" : "не проверено: ожидание до звонка не зафиксировано",
+      ownerAcceptance: false,
+    }));
   const future = (text: unknown) => /(?:звонк[а-я]*|calls?)\s*2\s*[-–—]\s*5/i.test(String(text));
   const gaps = (items: any) => Array.isArray(items) ? items.filter(x => !future(x)) : [];
   const summaryText = p.error || !summary ? "Формат сводки не подтверждён"
@@ -151,6 +175,9 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
   const brief = (value: unknown, fallback: string) => typeof value === "string" && value.trim() && !future(value) ?
     value.replace(/[\r\n]+/g, " ").slice(0, 300) : fallback;
   return { pending: false, ...cost,
+    checklist: author?.dialogue?.checklist?.map((r: any) => ({ ...r, item: p.evidence.points[r.index] })),
+    metrics: { expected: p.evidence.expectations?.targets ?? [],
+      author: author?.expectationChecks ?? [], reviewer: review?.expectationChecks ?? [] },
     summaryTop: {
       learned: brief(summary?.learned, p.verdict === "confirmed" ? summary?.outcome ?? "Разбор завершён" : "Результаты требуют проверки: разбор не подтверждён"),
       wentWrong: brief(p.error ?? (p.verdict !== "confirmed" ? "Тома не подтвердила разбор Лёвы" : summary?.wentWrong), "Подтверждённых проблем не отмечено"),

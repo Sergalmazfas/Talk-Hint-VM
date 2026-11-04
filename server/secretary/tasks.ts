@@ -1,5 +1,6 @@
 import { SECRETARY_CALL_LIMIT_MS } from "./limits";
 import { displaySecretaryInstruction } from "../../shared/callPlan";
+import { voicemailMessageLeft } from "./voicemail";
 import { deliverSecretaryNotificationOnce } from "./notificationAttempt";
 import { summarizeSecretaryReport } from "./summary";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -31,7 +32,7 @@ const TERMINAL_STATUSES = [
   "completed", "no_answer", "busy", "failed", "unknown", "cancelled",
 ] as const;
 
-export type SecretaryOutcome = "resolved" | "needs_follow_up" | "not_reached" | "failed" | "unknown";
+export type SecretaryOutcome = "resolved" | "needs_follow_up" | "not_reached" | "failed" | "unknown" | "message_left";
 export type { SecretaryVoiceProvider } from "./voice";
 import { selectedSecretaryVoiceProvider as secretaryVoiceProvider } from "./voice";
 export interface SecretaryTaskReport {
@@ -152,6 +153,8 @@ export function isSecretaryCallingWindow(date: Date): boolean {
 }
 
 export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport {
+  const messageLeft = task.status === "completed" && voicemailMessageLeft(task.instruction,
+    Array.isArray(task.transcriptTurns) ? task.transcriptTurns as any : []);
   return {
     id: task.id,
     ...(task.mode === "live" ? { mode: "live" as const } : {}),
@@ -159,8 +162,9 @@ export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport 
     phoneNumber: task.phoneNumber,
     instruction: displaySecretaryInstruction(task.instruction, task.phoneNumber),
     status: task.status,
-    outcome: task.outcome as SecretaryOutcome | null,
-    summary: task.summary,
+    outcome: messageLeft ? "message_left" : task.outcome as SecretaryOutcome | null,
+    summary: messageLeft && !task.summary?.startsWith("Оставлено сообщение.")
+      ? `Оставлено сообщение. ${task.summary ?? ""}` : task.summary,
     verifiedFacts: Array.isArray(task.verifiedFacts) ? task.verifiedFacts as string[] : [],
     nextStep: task.nextStep,
     transcript: task.transcript ?? "",
@@ -851,6 +855,12 @@ async function settleSecretaryFinalization(taskId: string, callSid: string): Pro
   const report = claimed.streamEndedAt
     ? await summarizeSecretaryTranscript(claimed)
     : validateSecretaryReport(null, claimed.transcript ?? "");
+  if (claimed.streamEndedAt && voicemailMessageLeft(claimed.instruction,
+      Array.isArray(claimed.transcriptTurns) ? claimed.transcriptTurns as any : [])) {
+    report.outcome = "message_left";
+    report.summary = `Оставлено сообщение. ${report.summary}`;
+    report.nextStep = "Получение сообщения и выполнение поручения собеседником не подтверждены.";
+  }
   const [updated] = await db.update(secretaryTasks).set({
     status: "completed",
     outcome: report.outcome,

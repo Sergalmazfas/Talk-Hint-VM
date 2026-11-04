@@ -19,7 +19,7 @@ describe("Hint on-call checks (no AI, no external mail)", () => {
     [{ ended_at: null }, "CALL_END_MISSING"],
     [{ job_key: null }, "JOB_MISSING"],
     [{ job_status: "failed" }, "ANALYSIS_FAILED"],
-    [{ job_status: "pending" }, "QUEUE_DELAY"],
+    [{ job_status: "pending", mail_status: null }, "QUEUE_DELAY"],
     [{ job_status: "running", job_updated: ago(watchdogPolicy.analysisMs + 1) }, "ANALYSIS_DELAY"],
     [{ execution: "analysis_not_completed" }, "ANALYSIS_UNAVAILABLE"],
     [{ qa_status: "НЕ ПРОВЕРЕНО QA" }, "QA_UNACCEPTED"],

@@ -20,12 +20,12 @@ export const secretaryEndTool = {
   },
 };
 
-export function parseSecretaryEndRequest(raw: unknown): SecretaryEndRequest | undefined {
+export function parseSecretaryEndRequest(raw: unknown, voicemail = false): SecretaryEndRequest | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
   const value = raw as Record<string, unknown>;
   if (Object.keys(value).some(key => !["reason", "farewell"].includes(key)) ||
       !["completed", "follow_up", "declined", "human_required"].includes(String(value.reason)) ||
-      typeof value.farewell !== "string" || !value.farewell.trim() || value.farewell.length > 300) return;
+      typeof value.farewell !== "string" || !value.farewell.trim() || value.farewell.length > (voicemail ? 2000 : 300)) return;
   return { reason: value.reason as SecretaryEndRequest["reason"], farewell: value.farewell.trim() };
 }
 

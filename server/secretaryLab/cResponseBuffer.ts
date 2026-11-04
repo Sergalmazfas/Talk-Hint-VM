@@ -1,4 +1,5 @@
 import type { SpokenTurn } from "../secretary/conversationEngine";
+import { voicemailTurn } from "../secretary/voicemail";
 
 type Decision = { kind: "a" | "b" | "c"; reason: string; regenerate?: boolean };
 const norm = (s: string) => s.toLowerCase().replace(/[.,!…:;]+/g, " ").replace(/\s+/g, " ").trim();
@@ -126,7 +127,7 @@ export class CResponseBuffer {
     phrase.armed = true;
     this.bridgeTimer = setTimeout(() => {
       const g = this.generation;
-      if (this.closed || this.paused || this.phrase !== phrase || phrase.token || phrase.bridged ||
+      if (this.closed || this.paused || voicemailTurn(this.latest) || this.phrase !== phrase || phrase.token || phrase.bridged ||
         !phrase.eligible || !g || g.done || g.controller.signal.aborted || phrase.agents - this.lastBridgeAgent < 3) return;
       g.bridge = this.bridge(this.latest); phrase.bridged = true; this.lastBridgeAgent = phrase.agents;
       this.event(this.target!.id, "bridge", g.bridge);

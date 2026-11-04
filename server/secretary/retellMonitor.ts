@@ -5,9 +5,10 @@ import { publishSecretaryFeedEvent } from "./feed";
 
 type MonitorSource = { guestReceived: boolean; secretaryReceived: boolean };
 const sources = new Map<string, MonitorSource>();
+const disconnected = new Set<string>();
 export function retellPhoneMonitoring(taskId: string) {
   const source = sources.get(taskId);
-  return { transport: "twilio-both-tracks", sourceConnected: !!source,
+  return { transport: "twilio-both-tracks", sourceConnected: source ? true : disconnected.has(taskId) ? false : undefined,
     sourceReconnectSupported: false, guestReceived: source?.guestReceived ?? false,
     secretaryReceived: source?.secretaryReceived ?? false };
 }
@@ -33,6 +34,8 @@ export function handleRetellPhoneMonitor(ws: WebSocket, deps = {
         streamSid: identity.streamSid, event: reason, guestReceived: source?.guestReceived ?? false,
         secretaryReceived: source?.secretaryReceived ?? false }));
       sources.delete(identity.taskId);
+      disconnected.add(identity.taskId);
+      if (disconnected.size > 1000) disconnected.delete(disconnected.values().next().value!);
       deps.publish(identity.taskId, { type: "monitor_state", ...retellPhoneMonitoring(identity.taskId) });
     }
     identity = undefined;

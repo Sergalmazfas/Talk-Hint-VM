@@ -4,7 +4,7 @@ export interface TeamActionReport {
   at: string;
   role: string;
   assigned: string;
-  outcome: "completed" | "partial" | "not_completed";
+  outcome: "completed" | "partial" | "not_completed" | "message_left";
   succeeded: string[];
   failed: string[];
   needsOwner: string[];

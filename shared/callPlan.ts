@@ -17,6 +17,7 @@ export const callPlanSchema = z.object({
   }).strict(),
   language: z.enum(["en", "ru", "es", "kk", "uk"]),
   executor: z.enum(["hint", "secretary"]),
+  voicemail: z.enum(["leave", "skip"]).optional(),
   targetPhone: z.string().regex(/^\+[1-9]\d{6,14}$/).optional(),
 }).strict().superRefine((plan, ctx) => {
   if (JSON.stringify(plan).length > 12000)

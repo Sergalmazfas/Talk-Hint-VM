@@ -762,6 +762,7 @@ function ActionReportCard({ report }: { report: TeamActionReport }) {
   const outcome: Record<TeamActionReport["outcome"], string> = {
     completed: "Выполнено",
     partial: "Частично",
+    message_left: "Оставлено сообщение",
     not_completed: "Не выполнено",
   };
   return <article className="rounded-xl border border-[#e2e9df] bg-[#fbfcf8] p-4">
@@ -1006,6 +1007,7 @@ function ReportActivityRow({ report, member, onSelect }: { report: TeamActionRep
   const outcome: Record<TeamActionReport["outcome"], string> = {
     completed: "Выполнено",
     partial: "Частично",
+    message_left: "Оставлено сообщение",
     not_completed: "Не выполнено",
   };
   return <li className="relative py-4 pl-7 before:absolute before:left-[7px] before:top-0 before:h-full before:w-px before:bg-[#e4ebe1] first:before:top-5 last:before:h-5">

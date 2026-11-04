@@ -72,7 +72,10 @@ describe("Reviewed telephone C without lab budgets, scripts or synthetic speech"
   it("accepts 5001..9000 intact with stable prefix caching; 9001 falls back without losing rules", () => {
     const now = "2026-11-04T00:00:00Z", full = "UNCHANGED FULL PROMPT";
     const base = selectPhonePrompt(full, "fixture-owner", "", undefined, [], now);
-    for (const length of [5001, 8999, 9000]) {
+    // Greeting rules grew: the feasible lower boundary is the actual intact prefix,
+    // not a fabricated 5001-char prompt shorter than its own mandatory rules.
+    expect(base.chars).toBeLessThan(8999);
+    for (const length of [Math.max(5001, base.chars + 1), 8999, 9000]) {
       const plan = "x".repeat(length - base.chars);
       const p = selectPhonePrompt(full, "fixture-owner", plan, undefined, [], now);
       expect(p.mode).toBe("compact"); expect(p.reason).toBeNull();

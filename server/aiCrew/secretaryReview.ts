@@ -6,6 +6,7 @@ import { validSecretaryOutput } from "./secretaryOutput";
 import { callPlanSchema } from "../../shared/callPlan";
 import { splitCallChecklist, checklistItemKind, type ChecklistItemKind } from "../../shared/callChecklist";
 import { validExpectationChecks, type ExpectationSnapshot } from "./expectations";
+import { voicemailAnnouncement } from "../secretary/voicemail";
 
 export const SECRETARY_AGENTS = [
   { ...HINT_AGENTS[0], agentId: "secretary-lab-engineer" },
@@ -15,6 +16,8 @@ export const SECRETARY_AGENTS = [
 export type SecretaryEvidence = {
   version: 1; points: string[]; transcript: { speaker: string; text: string }[];
   pointKinds?: ChecklistItemKind[];
+  voicemail?: boolean;
+  measurements?: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics>;
   codeVersion: string; limitations: string[];
   expectations?: ExpectationSnapshot;
   cRollout?: { ordinal: number; measurements: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics> };
@@ -28,6 +31,7 @@ export type SecretaryReview = {
   authorId?: string; reviewId?: string; summaryId?: string;
   verdict?: "confirmed" | "not_confirmed"; authorValid?: boolean; error?: string;
   outputVersion?: 2;
+  factRecordedAt?: string;
 };
 export type SecretarySettings = { ownerId: string; enabled: boolean; activatedAt: string;
   monthlyLimitMicroUsd: number };
@@ -40,14 +44,22 @@ export const secretaryHash = (v: unknown) => createHash("sha256").update(JSON.st
 
 /** Deliberately conservative: reject unsupported text shapes; never send raw task objects. */
 export function secretaryEvidence(goal: string, transcript: unknown, codeVersion: string,
-  names: string[] = []): SecretaryEvidence {
+  names: string[] = [], ownerNames: string[] = []): SecretaryEvidence {
   const aliases = new Map<string, string>();
   const businessWords = new Set(("yes no okay ok new used available availability price tomorrow today tire tires " +
     "trailer truck wire wires installation tax taxes warranty cash card dollars usd am pm fuel restaurant parking " +
     "booking reservation ask call confirm please we you the this that hello thanks sure").split(" "));
+  const preserved = new Set([...ownerNames, "Katya", "Катя", "Кати", "Катю",
+    ...(ownerNames.some(n => /^Sergey\b/i.test(n)) ? ["Сергей"] : [])].map(n => n.trim().toLocaleLowerCase()));
   const alias = (s: string) => {
-    const key = s.toLocaleLowerCase();
-    if (!aliases.has(key)) aliases.set(key, `[ENTITY_${aliases.size + 1}]`);
+    if (preserved.has(s.trim().toLocaleLowerCase())) return s;
+    const key = s.normalize("NFKC").trim().toLocaleLowerCase().replace(/’/g, "'");
+    if (!aliases.has(key)) {
+      const first = key.split(/\s+/)[0];
+      const related = Array.from(aliases.entries()).filter(([k]) => k.split(/\s+/)[0] === first &&
+        (!key.includes(" ") || !k.includes(" ")));
+      aliases.set(key, related.length === 1 ? related[0][1] : `[ENTITY_${new Set(aliases.values()).size + 1}]`);
+    }
     return aliases.get(key)!;
   };
   const redact = (s: string) => {
@@ -85,7 +97,9 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
   const points = rawPoints.map(redact);
   if (points.length > 20 || Buffer.byteLength(JSON.stringify(turns), "utf8") > 24000)
     throw Error("SECRETARY_SOURCE_TOO_LARGE");
-  return { version: 1, points, pointKinds: rawPoints.map(checklistItemKind), transcript: turns, codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
+  return { version: 1, points, pointKinds: rawPoints.map(checklistItemKind), transcript: turns,
+    voicemail: voicemailAnnouncement([...turns].reverse().find(t => t.speaker === "guest")?.text ?? ""),
+    codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
     preparation: { source, originalItems: items.length, checklistItems: points.length, paragraphExpanded: points.length > items.length,
       proposedChecklist: points, status: "proposed", acceptor: "owner" },
     limitations: ["PII redacted; compare only the supplied excerpt", "No audio proof of pauses, accent or recognition errors",
@@ -174,6 +188,7 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
     " Для КАЖДОЙ строки points/checks и dialogue.checklist укажи kind: say|ask|unknown согласно evidence.pointKinds " +
     "(для старой выдержки без pointKinds классифицируй исходную мысль; не придумывай факт). " +
     "say = «сказать»: закрыт только после произнесения Катей полного смысла, quote/turn — из secretary. " +
+    "Если evidence.voicemail=true, ASK: status=«не применимо», dialogue.answer=«не применимо», closed=false, quote пустая и turn=-1. Это НЕ незакрытое поручение и НЕ провал; SAY проверяй по фактической речи. Оставленное сообщение не означает согласие или решение вопроса. " +
     "ask = «спросить»: закрыт после ответа собеседника или честного «не знаю», quote/turn — из guest. " +
     "Сам вопрос Кати не закрывает ask; повтор факта собеседником не закрывает say. " +
     "unknown/смешанный пункт не закрывать, указать неопределённость. Состав/границы/порядок исходных пунктов не менять. " +
@@ -206,7 +221,9 @@ function citationsValid(rows: any, p: SecretaryReview, allowUnverified = true) {
       r.index >= 0 && r.index < p.evidence.points.length && typeof r.reason === "string" && r.reason.trim() &&
       (p.outputVersion !== 2 || r.kind === pointKind(p, r.index) &&
         (!["выполнено", "частично"].includes(r.status) || closureSpeakerValid(r, p))) &&
-      (allowUnverified && r.status === "не проверено" || typeof r.quote === "string" && r.quote.trim() &&
+      (p.evidence.voicemail && pointKind(p, r.index) === "ask" &&
+        (r.status === undefined || r.status === "не применимо") ||
+      allowUnverified && r.status === "не проверено" || typeof r.quote === "string" && r.quote.trim() &&
         Number.isInteger(r.turn) && p.evidence.transcript[r.turn]?.text.includes(r.quote)));
 }
 function pointKind(p: SecretaryReview, index: number): ChecklistItemKind {
@@ -233,15 +250,16 @@ export function finishSecretaryRun(s: CrewState, task: Task, documentId: string,
     d.checklist.length === p.evidence.points.length && new Set(d.checklist.map((r: any) => r.index)).size === d.checklist.length &&
     d.checklist.every((r: any) => r && Number.isInteger(r.index) && r.index >= 0 && r.index < p.evidence.points.length &&
       r.kind === pointKind(p, r.index) &&
+      (p.evidence.voicemail && r.kind === "ask" ? !r.closed && r.answer === "не применимо" :
       (!r.closed || typeof r.answer === "string" && r.answer.trim() && closureSpeakerValid(r, p) &&
-        typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote))) &&
+        typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote)))) &&
     Array.isArray(d.ideal) && d.ideal.every((r: any) => r && Array.isArray(r.sourceTurns) &&
       r.sourceTurns.every((i: number) => Number.isInteger(i) && !!p.evidence.transcript[i]) &&
       (r.speaker !== "guest" || r.sourceTurns.some((i: number) => p.evidence.transcript[i]?.text.includes(r.text))));
   if (p.status === "author") {
     p.authorId = documentId;
     p.authorValid = formatValid && expectationsValid && mannerEvidence && dialogueValid && citationsValid(result?.points, p) &&
-      result.points.every((r: any) => ["выполнено", "частично", "нет", "не проверено"].includes(r.status) &&
+      result.points.every((r: any) => ["выполнено", "частично", "нет", "не проверено", ...(p.evidence.voicemail && r.kind === "ask" ? ["не применимо"] : [])].includes(r.status) &&
         (p.outputVersion !== 2 || r.status !== "выполнено" || d.checklist.some((item: any) => item.index === r.index && item.closed)));
     p.status = "review"; enqueue(s, task, 1, at);
   } else if (p.status === "review") {

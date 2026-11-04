@@ -90,7 +90,7 @@ describe("TalkHint text Engine, independent of voice provider", () => {
     expect(text).toEqual(["Здравствуйте."]);
     expect(e.report.model).toBe("gpt-6.1-sol");
     expect(seen[0].instructions).toContain("Arrange a meeting");
-    expect(seen[0].instructions).toContain("server-confirmed identity");
+    expect(seen[0].instructions).toContain("Server-confirmed owner only:");
     expect(seen[0].instructions).toContain(JSON.stringify(SECRETARY_TEST_CONTEXT));
     expect(e.report.testOnly).toBe(true);
   });

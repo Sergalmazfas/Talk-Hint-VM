@@ -7,7 +7,7 @@ import { ownerCallsSql, labRelease } from "./policy";
 // Technical grace periods, not approved business deadlines or quality KPIs.
 export const watchdogPolicy = {
   pollMs: 15_000, missingEventMs: 60_000, queuedMs: 120_000,
-  analysisMs: 11 * 60_000, mailMs: 120_000, scanLimit: 200,
+  analysisMs: 11 * 60_000, secretaryQueuedMs: 10 * 60_000, mailMs: 120_000, scanLimit: 200,
 };
 type Config = { environment: string; owner?: string; allowed: boolean };
 type Row = {
@@ -16,6 +16,7 @@ type Row = {
   job_updated: string | Date | null; execution: string | null; qa_status: string | null;
   mail_status: string | null; mail_updated: string | Date | null;
   action_delivery?: string | null;
+  lab_mode?: string; has_report?: boolean;
 };
 export type Incident = {
   code: string; lastStep: string; expected: string; reason: string;
@@ -53,7 +54,8 @@ export function detectHintIncident(row: Row, now = Date.now()): Incident | null 
       expected: "Задание лаборатории", reason: "Задание не появилось за время ожидания." } : null;
   if (row.job_status === "failed") return { code: "ANALYSIS_FAILED", lastStep: "Создано задание",
     expected: "Разбор и QA", reason: "Задание имеет сохранённый статус failed; причина — в закрытом журнале." };
-  if (row.job_status === "pending" && older(row.job_created, watchdogPolicy.queuedMs, now))
+  if (row.job_status === "pending" && !row.has_report && row.mail_status !== "sent_confirmed" &&
+      older(row.job_created, row.lab_mode === "secretary" ? watchdogPolicy.secretaryQueuedMs : watchdogPolicy.queuedMs, now))
     return { code: "QUEUE_DELAY", lastStep: "Задание поставлено в очередь",
       expected: "Начало разбора", reason: "Задание ожидает больше технического порога. Причина задержки ещё не установлена." };
   if (row.job_status === "running" && older(row.job_updated, watchdogPolicy.analysisMs, now))
@@ -138,7 +140,7 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
     // Match the watch window; do not forget deduplication while a call remains in scope.
     for (const [id, entry] of Object.entries(state))
       if (older(entry.detectedAt, 90 * 86_400_000, now)) delete state[id];
-    const rows = (await client.query(`SELECT c.call_sid,c.ended_at,
+    const rows = (await client.query(`SELECT c.call_sid,c.ended_at,c.lab_mode,(j.report IS NOT NULL) AS has_report,
       CASE WHEN c.metadata#>>'{labHintSource,phase}'='closed'
         OR (c.metadata#>>'{labHintSource,phase}' IS NULL
           AND c.metadata#>>'{hintTelemetry,state}'='ready')
@@ -196,6 +198,15 @@ export async function hintWatchdogTick(pool: Pool, configuration: () => Config,
         continue;
       }
       if (entry.delivery !== "prepared" || !active.has(id) || entry.resolvedAt || submissions >= 3) continue;
+      if (entry.code === "QUEUE_DELAY") {
+        const matching = rows.find(r => createHash("sha256").update(r.call_sid).digest("hex") === entry.callRef);
+        const ready = matching && (await client!.query(`SELECT j.status,j.report IS NOT NULL AS has_report,o.status AS mail_status
+          FROM call_lab_jobs j LEFT JOIN call_lab_outbox o ON o.key=j.key
+          WHERE j.key=$1 AND j.owner_id=$2 AND j.environment=$3`, [matching.job_key, config.owner, config.environment])).rows[0];
+        if (!ready || ready.status !== "pending" || ready.has_report || ready.mail_status === "sent_confirmed") {
+          entry.resolvedAt = at; active.delete(id); await persist(); continue;
+        }
+      }
       // Persist BEFORE the non-idempotent request, even if this process later dies.
       entry.delivery = "sending";
       await persist();

@@ -127,7 +127,8 @@ describe("Secretary structured output and bounded paid completion",()=>{
       action_reports:[{id:"x",role:"SECRETARY",assigned:"goal",succeeded:["detail"],failed:[],needsOwner:[]}]};
     const {body}=renderProcessLetter(report);
     expect(body.split("\n").slice(0,3)).toEqual(["Что узнали: Price","Что пошло не так: QA returned","Что сделать: Check transcript"]);
-    expect(body.indexOf("detail")).toBeGreaterThan(body.indexOf("Что сделать"));
+    expect(body).not.toContain("detail");
+    expect(body.indexOf("Пункт | тип")).toBeGreaterThan(body.indexOf("Что сделать"));
     expect(body).not.toContain("AI-оценка качества не выполнялась");
   });
 });

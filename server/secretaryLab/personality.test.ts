@@ -83,7 +83,7 @@ describe("catalog personalities in the two browser Engine transports", () => {
       expect(engine.instructions).toContain(JSON.stringify(initialKatya.rules));
       expect(engine.instructions).toContain(JSON.stringify(SECRETARY_TEST_CONTEXT));
       expect(engine.instructions).toContain("Tools are TEST ONLY");
-      expect(engine.instructions).toContain("Hello, I’m Катя");
+      expect(engine.instructions).toContain("Hello, this is Катя.");
       expect(engine.report.personality).toEqual({ ...selection, name: "Катя" });
       const args = '{"sender":"TEST","message":"Meet at eight"}';
       engine.execute("save_test_message", args, new AbortController().signal);
@@ -145,7 +145,7 @@ describe("catalog personalities in the two browser Engine transports", () => {
     expect(b.report.personality).toBeNull();
     const prompt = (f.eleven as any).sessions.get(a.id).engine.instructions;
     expect(prompt).not.toContain("SECRETARY PERSONALITY");
-    expect(prompt).toContain("Do not assign yourself a personal name");
+    expect(prompt).toContain("Authorized character label: null; not a human identity");
     expect(await resolveLabPersonality(null)).toBeUndefined();
     await f.eleven.stop("owner", a.id);
   });

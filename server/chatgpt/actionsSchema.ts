@@ -20,6 +20,7 @@ export const CALL_PLAN_OPENAPI = {
       }])) },
     language: { type: "string", enum: ["en", "ru", "es", "kk", "uk"] },
     executor: { type: "string", enum: ["hint", "secretary"] },
+    voicemail: { type: "string", enum: ["leave", "skip"], description: "Optional owner decision: leave a message or skip voicemail. Omitted means callback request only, without task details." },
     targetPhone: { type: "string", pattern: "^\\+[1-9]\\d{6,14}$" },
   },
 };

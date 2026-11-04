@@ -86,4 +86,12 @@ describe("Checklist type, closure evidence and preservation",()=>{
     const withoutKind=structuredClone(a) as any;delete withoutKind.dialogue.checklist[0].kind;
     expect(validSecretaryOutput("author",withoutKind)).toBe(false);
   });
+  it.each([true,false])("ASK may be not applicable only with voicemail evidence (%s)",vm=>{
+    const {s,t,a}=fixture("Ask whether payment is complete","ask",-1,false);
+    t.secretaryReview!.evidence.voicemail=vm;
+    Object.assign(a.points[0],{status:"не применимо",quote:"",turn:-1});
+    Object.assign(a.dialogue.checklist[0],{answer:"не применимо",closed:false,quote:"",turn:-1});
+    finishSecretaryRun(s,t,"author",JSON.stringify(a),at);
+    expect(t.secretaryReview!.authorValid).toBe(vm);
+  });
 });

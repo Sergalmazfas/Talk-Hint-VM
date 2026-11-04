@@ -88,7 +88,7 @@ export function renderProcessLetter(report: any): { subject: string; body: strin
   const versionLine = v && typeof v === "object"
     ? `Версия кода звонка: ${v.commit ?? "commit неизвестен"}; source ${v.sourceHash ?? "неизвестен"}${v.dirty ? "; рабочая версия с изменениями" : ""}.`
     : "Версия кода звонка: неизвестна (историческая запись без метки).";
-  return { ...rendered, body: `${rendered.body}\n\n${versionLine}${preparationLetterSection(report)}` };
+  return { ...rendered, body: `${rendered.body}\n\n${versionLine}${report.mode === "secretary" ? "" : preparationLetterSection(report)}` };
 }
 function renderProcessLetterContent(report: any): { subject: string; body: string } {
   const reports = Array.isArray(report.action_reports) ? report.action_reports : [];
@@ -96,11 +96,20 @@ function renderProcessLetterContent(report: any): { subject: string; body: strin
     const section = reports.map(actionReportText).join("\n\n");
     if (report.mode === "secretary") return {
       subject: "Катя · рапорт по фактам звонка",
-      body: [...(report.secretary_summary ? [[
-        `Что узнали: ${String(report.secretary_summary.learned).replace(/[\r\n]+/g, " ")}`,
-        `Что пошло не так: ${String(report.secretary_summary.wentWrong).replace(/[\r\n]+/g, " ")}`,
-        `Что сделать: ${String(report.secretary_summary.nextAction).replace(/[\r\n]+/g, " ")}`,
-      ].join("\n")] : []), "РАПОРТ ПО ЗВОНКУ", section,
+      body: [[
+        `Что узнали: ${String(report.secretary_summary?.learned ?? "Независимый разбор ещё не подтверждён.").replace(/[\r\n]+/g, " ")}`,
+        `Что пошло не так: ${String(report.secretary_summary?.wentWrong ?? (reports.flatMap((r: Parameters<typeof actionReportText>[0]) => r.failed).slice(0, 1).join("; ") || "Не проверено.")).replace(/[\r\n]+/g, " ")}`,
+        `Что сделать: ${String(report.secretary_summary?.nextAction ?? (reports.flatMap((r: Parameters<typeof actionReportText>[0]) => r.needsOwner).slice(0, 1).join("; ") || "Открыть защищённый разбор.")).replace(/[\r\n]+/g, " ")}`,
+      ].join("\n"), "РАПОРТ ПО ЗВОНКУ", reports.map((r: Parameters<typeof actionReportText>[0]) => actionReportText(r).split("\n")[0]).join("; "),
+        `Поручение: ${String(reports[0]?.assigned ?? "не сохранено").split("\n")[0].slice(0, 320)}`,
+          "Пункт | тип | закрыт | цитата",
+          ...(report.secretaryReview?.checklist ?? []).map((r: any) =>
+            `${r.index + 1}. ${String(r.item ?? "").replace(/[\r\n]+/g, " ").slice(0, 160)} | ${r.kind === "say" ? "сказать" : r.kind === "ask" ? "спросить" : "не определено"} | ${r.answer === "не применимо" ? "не применимо" : r.closed ? "да" : "нет"} | ${String(r.quote || "—").replace(/[\r\n]+/g, " ").slice(0, 180)}`),
+          "Метрики против журнала:",
+          ...(report.secretaryReview?.metrics?.reviewer?.length ? report.secretaryReview.metrics.reviewer.map((m: any) =>
+            `${m.metric}: ${m.actual ?? "не измерено"} — ${m.status}; ${String(m.reason ?? "").replace(/[\r\n]+/g, " ").slice(0, 180)}`) : ["не измерено / не проверено"]),
+          typeof report.private_report_path === "string" && report.private_report_path.startsWith("/api/admin/call-lab/reports/") && /^[a-f0-9]{64}$/.test(report.private_report_path.split("/").pop()) ?
+            `Полный разбор: ${reportOrigin(report.environment)}${report.private_report_path} (вход владельца)` : "Полный разбор: в закрытой лаборатории владельца.",
         report.secretary_summary ? "Разбор команды не является приёмкой владельцем; техническое соединение само по себе не доказывает выполнение задачи." :
           "AI-оценка качества не выполнялась; техническое соединение не доказывает выполнение задачи.",
         ...productLetterSection(report)].join("\n\n"),

@@ -12,6 +12,8 @@ import { secretaryEndTool, parseSecretaryEndRequest, type SecretaryEndRequest } 
 import { IVR_INSTRUCTIONS } from "./ivr";
 import { selectPhonePrompt } from "./phonePrompt";
 import { SECRETARY_CHECKLIST_POLICY, splitCallChecklist } from "../../shared/callChecklist";
+import { voicemailTurn, voicemailPolicy, voicemailChoice } from "./voicemail";
+import { setTimeout as pause } from "node:timers/promises";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -97,6 +99,8 @@ export class SecretaryConversationEngine {
   };
   readonly instructions: string;
   private ledger = new Map<string, any>();
+  private voicemailInstructions = "";
+  private skipVoicemail = false;
   constructor(owner: string, assignment: string, private stream: EngineStream = streamSecretaryResponse,
     private telephone = false, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = [],
     private telephoneTools?: TelephoneTools,
@@ -105,8 +109,10 @@ export class SecretaryConversationEngine {
       throw Error("Speed experiment is Dev-only and never telephone");
     this.report.personality = personality ? { id: personality.personalityId, name: personality.snapshot.name,
       version: personality.version, mode: personality.mode } : null;
-    const characterName = process.env.NODE_ENV === "development" ? personality?.snapshot.name : undefined;
+    const characterName = personality?.snapshot.name;
     if (telephone) {
+      this.voicemailInstructions = voicemailPolicy(assignment);
+      this.skipVoicemail = voicemailChoice(assignment) === "skip";
       // Legacy free-text tasks gain a quoted checklist at consumption; structured
       // plans already store sayAsk from the preparation step. No fact is removed.
       if (!assignment.startsWith("Owner-approved call plan."))
@@ -197,11 +203,25 @@ export class SecretaryConversationEngine {
   async respond(turns: SpokenTurn[], signal: AbortSignal, emit: (text: string) => void, reminder = false) {
     let preparedEnd: SecretaryEndRequest | undefined;
     const input: any[] = turns.map(t => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content }));
+    const vm = this.telephone && voicemailTurn(turns);
+    if (vm) {
+      this.record("voicemail_announcement");
+      // This is an additional silence grace, NOT evidence of an acoustic beep.
+      // A new Retell turn aborts this wait through the existing response signal.
+      try { await pause(1200, undefined, { signal }); } catch { return; }
+      if (signal.aborted) return;
+      input.push({ role: "developer", content: this.voicemailInstructions });
+      this.record("voicemail_silence_gate_passed");
+    }
     if (this.telephoneTools) {
       const state = await this.telephoneTools.beforeTurn(turns);
       if (signal.aborted) return;
       if (await this.telephoneTools.navigate?.(signal)) return;
       input.push({ role: "developer", content: state });
+    }
+    if (vm && this.skipVoicemail && !this.telephoneTools?.blocksEnd() && !signal.aborted) {
+      this.record("voicemail_skipped");
+      return { reason: "follow_up" as const, farewell: "" };
     }
     if (!this.telephone)
       input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
@@ -241,7 +261,7 @@ export class SecretaryConversationEngine {
         try {
           if (this.telephone && tool.name === "prepare_call_end") {
             if (this.telephoneTools?.blocksEnd()) throw Error("Cannot end during IVR/owner wait");
-            const value = parseSecretaryEndRequest(JSON.parse(tool.arguments));
+            const value = parseSecretaryEndRequest(JSON.parse(tool.arguments), vm);
             if (!value) throw Error("Invalid farewell");
             preparedEnd = value;
             result = { prepared: true, instruction: "Say exactly the supplied farewell now, with no additions. Do not claim the call has ended." };

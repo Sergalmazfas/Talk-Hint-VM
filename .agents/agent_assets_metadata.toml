@@ -3631,3 +3631,17 @@ mtime_ms = 1793817030810
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/7c33d5cf-3e0e-403b-9cd0-94203581621b/58ebbeb9-b3fc-422b-80b8-27f181196b55"
 storage_version_token = "1793817051333822"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "WCMEU6DJztzoMbB2Q0Yim"
+uri = "file://generated-artifacts/Secretary_Voicemail_Reports_Clavdiy.zip"
+type = "unspecified"
+title = "ZIP Клавдию — автоответчик и рапорты"
+description = "Dev-пакет: исходники и diff, результаты четырёх частей тестов, хэши, разбор сохранённых таймингов, proposed-уроки и план утреннего рапорта. Без Publish и новых звонков."
+logical_id = "291a14b1-9efc-4cb0-8a06-856d840cb3b2"
+content_hash = "sha256:807a2920e3551e27bf67075de2a6c5f994d6b67051e20d1a5876b60f464af294"
+size = 515770
+mtime_ms = 1793821512865
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/291a14b1-9efc-4cb0-8a06-856d840cb3b2/2c4f386a-0240-4561-9546-2ee075731584"
+storage_version_token = "1793821623694475"
+content_type = "application/octet-stream"
