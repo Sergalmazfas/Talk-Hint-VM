@@ -3477,3 +3477,17 @@ mtime_ms = 1793766063720
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/fd5b6d69-7130-47a6-9415-291a2779bf55/0f1fe6c5-7f9e-445d-b23a-7db516cdba57"
 storage_version_token = "1793766093338062"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "T_WF0nFv79or4OWpms11a"
+uri = "file://generated-artifacts/Crew_journal_lessons_02-03Nov_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: журнал и уроки за 02–03 ноября"
+description = "12 записей, 37 уроков proposed, 7 ручных сверок ролей, хэши источников r1246 и diff replit.md. Production-запись заблокирована отсутствием узкой операции; агенты не запускались."
+logical_id = "730ec103-46d1-42fb-b348-7ed3a9cfe11a"
+content_hash = "sha256:0afa629e6bc22f14ddba2c6c9f964ad3d37b5a805a4df9a2028f08f11543da90"
+size = 51585
+mtime_ms = 1793766993368
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/730ec103-46d1-42fb-b348-7ed3a9cfe11a/cd86e30c-e526-40e8-9108-7284fb179a77"
+storage_version_token = "1793767007733371"
+content_type = "application/octet-stream"

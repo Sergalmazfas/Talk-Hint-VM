@@ -58,6 +58,16 @@ changing live Katya or funding other providers from this new allowance.
 promotion. Real provider audio with synthetic input is not an iPhone playback
 test or proof of number accuracy with a human caller.
 
+The owner rejected GPT-Live after their bench comparison: «медленнее и хуже
+слышно». Retell remains the selected direction; leave Katya's language and
+voice unchanged and focus on speed.
+
+**Why:** explicit owner decision, not a conclusion inferred from synthetic
+packet-onset measurements.
+
+**How to apply:** do not resume GPT-Live work or propose changing the live
+voice/language without a new owner decision.
+
 Retell may connect a custom LLM and generate its greeting while the web call is still `registered`, before the browser joins.
 
 **Why:** a browser import failed behind the owner-only web boundary, but the already admitted session still consumed an OpenAI greeting request. Provider audio cost was zero at readback; model cost was not.
