@@ -63,7 +63,7 @@ it("B/C use their actual models, keep test-only permissions and start with zero 
   for (const [variant, model] of [["B", "gpt-6.1-sol"], ["C", "gpt-6-sol"]] as const) {
     const e = speedEngine("fixture", "Fictional test: no prices or commitments", variant);
     expect(e.report.model).toBe(model); expect(e.report.testOnly).toBe(true);
-    expect(e.instructions.length).toBeLessThanOrEqual(5000);
+    expect(e.instructions.length).toBeLessThanOrEqual(9000);
     expect((e.report as any).speed.requests).toBe(0);
     expect(e.instructions).toContain("No payments");
   }

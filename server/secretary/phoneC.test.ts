@@ -41,15 +41,17 @@ describe("Reviewed telephone C without lab budgets, scripts or synthetic speech"
     expect(e.report.phoneRuntime).toMatchObject({ variant: "C", promptMode: "compact", fallbackReason: null });
   });
   it("oversized rules/plan preserve the entire previous prompt; call/model still work", async () => {
-    const plan = "AUTHORIZED_FACT_KEEP: " + "x".repeat(3800);
+    const plan = "AUTHORIZED_FACT_KEEP: " + "x".repeat(9500);
     const full = makeEngine("legacy", plan).instructions;
     const e = makeEngine("C", plan);
     // The only volatile old prompt field is its runtime clock.
     expect(e.instructions.replace(/Current time: [^\n]+/, "CLOCK"))
       .toBe(full.replace(/Current time: [^\n]+/, "CLOCK"));
-    expect(e.instructions).toContain(plan);
+    // The existing checklist normalizer may split oversized raw input.
+    // Exact equality above proves fallback preserves the whole legacy prompt.
+    expect(e.instructions).toContain("AUTHORIZED_FACT_KEEP:");
     expect(e.report.phoneRuntime).toMatchObject({ variant: "C", promptMode: "full",
-      fallbackReason: "COMPACT_PROMPT_EXCEEDS_5000", maxOutput: 300 });
+      fallbackReason: "COMPACT_PROMPT_EXCEEDS_9000", maxOutput: 300 });
     await e.respond([], new AbortController().signal, () => {});
     expect(f.create.mock.calls[0][0]).toMatchObject({ model: "gpt-6-sol", max_output_tokens: 300 });
     expect(e.report.events.some(e => e.type === "compact_fallback_full_prompt")).toBe(true);
@@ -66,6 +68,21 @@ describe("Reviewed telephone C without lab budgets, scripts or synthetic speech"
     const b = selectPhonePrompt("old", "fixture-owner", "second fact", undefined, [], "2026-11-03T01:00:00Z");
     expect(a.cacheKey).toBe(b.cacheKey); expect(a.hash).not.toBe(b.hash);
     expect(a.instructions).not.toContain("second fact"); expect(b.instructions).toContain("second fact");
+  });
+  it("accepts 5001..9000 intact with stable prefix caching; 9001 falls back without losing rules", () => {
+    const now = "2026-11-04T00:00:00Z", full = "UNCHANGED FULL PROMPT";
+    const base = selectPhonePrompt(full, "fixture-owner", "", undefined, [], now);
+    for (const length of [5001, 8999, 9000]) {
+      const plan = "x".repeat(length - base.chars);
+      const p = selectPhonePrompt(full, "fixture-owner", plan, undefined, [], now);
+      expect(p.mode).toBe("compact"); expect(p.reason).toBeNull();
+      expect(p.chars).toBe(length); expect(p.instructions).toContain(plan);
+      expect(p.instructions).toContain(IVR_INSTRUCTIONS);
+      expect(p.instructions).toContain(secretaryIntroductionPolicy(undefined));
+      expect(p.cacheKey).toBe(base.cacheKey);
+    }
+    const over = selectPhonePrompt(full, "fixture-owner", "x".repeat(9001 - base.chars), undefined, [], now);
+    expect(over).toMatchObject({ mode: "full", reason: "COMPACT_PROMPT_EXCEEDS_9000", instructions: full });
   });
 });
 describe("Persistent owner rollback and first five", () => {

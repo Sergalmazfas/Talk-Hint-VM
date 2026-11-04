@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { compactSpeedPrompt } from "../secretaryLab/speedExperiment";
+import { compactSpeedPrompt, COMPACT_PROMPT_FALLBACK_REASON } from "../secretaryLab/speedExperiment";
 import { confirmedSecretaryOwnerName } from "./ownerIdentity";
 import type { PersonalityBinding } from "./personalities/types";
 import type { OutgoingContext } from "./personalities/outgoing";
@@ -14,8 +14,8 @@ export function selectPhonePrompt(full: string, owner: string, assignment: strin
       hash: prompt.hash, chars: prompt.chars,
       cacheKey: "katya-C-" + prompt.prefixHash.slice(0, 32) };
   } catch (error) {
-    if (!(error instanceof Error) || !error.message.startsWith("COMPACT_PROMPT_EXCEEDS_5000")) throw error;
-    return { instructions: full, mode: "full" as const, reason: "COMPACT_PROMPT_EXCEEDS_5000",
+    if (!(error instanceof Error) || !error.message.startsWith(COMPACT_PROMPT_FALLBACK_REASON + ":")) throw error;
+    return { instructions: full, mode: "full" as const, reason: COMPACT_PROMPT_FALLBACK_REASON,
       hash: createHash("sha256").update(full).digest("hex"), chars: full.length,
       cacheKey: "katya-C-full-v1" };
   }

@@ -23,7 +23,7 @@ describe("isolated Secretary speed experiment", () => {
     expect(a.instructions.startsWith(a.prefix)).toBe(true);
     expect(a.prefix).not.toContain(context.runtimeUtc);
     expect(a.prefix).not.toContain(context.plan.goal);
-    expect(a.chars).toBeLessThanOrEqual(5000);
+    expect(a.chars).toBeLessThanOrEqual(9000);
     expect(a.instructions).toContain("ask briefly"); // Language behaviour is NOT this experiment.
     expect(a.instructions).toContain("Listen to the whole menu");
     expect(a.instructions).toContain("Only after acceptance or explicit refusal");
@@ -32,8 +32,8 @@ describe("isolated Secretary speed experiment", () => {
     expect(a.instructions).toContain("AI telephone secretary"); // Truthful identity.
   });
   it("refuses oversized facts rather than truncating policy or the plan", () => {
-    expect(() => compactSpeedPrompt({ ...context, plan: { goal: "x".repeat(6000) } }))
-      .toThrow("COMPACT_PROMPT_EXCEEDS_5000");
+    expect(() => compactSpeedPrompt({ ...context, plan: { goal: "x".repeat(9500) } }))
+      .toThrow("COMPACT_PROMPT_EXCEEDS_9000");
     expect(() => compactSpeedPrompt({ ...context, runtimeUtc: "bad" })).toThrow("INVALID_RUNTIME_CLOCK");
   });
   it("does not edit voice, language, backchannel, greeting or the caller's original snapshot", () => {
@@ -88,8 +88,8 @@ describe("isolated Secretary speed experiment", () => {
     await expect(collect(speedStream({ responses: { create } }, "B", [])(request))).rejects.toThrow("SPEED_STREAM_TRUNCATED");
     create.mockClear();
     await expect(collect(speedStream({ responses: { create } }, "B", [])({
-      ...request, instructions: "x".repeat(5001),
-    }))).rejects.toThrow("COMPACT_PROMPT_EXCEEDS_5000");
+      ...request, instructions: "x".repeat(9001),
+    }))).rejects.toThrow("COMPACT_PROMPT_EXCEEDS_9000");
     const abort = new AbortController(); abort.abort();
     await expect(collect(speedStream({ responses: { create } }, "A", [])({
       ...request, signal: abort.signal,

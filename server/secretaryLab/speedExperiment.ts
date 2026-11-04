@@ -10,6 +10,8 @@ import { IVR_INSTRUCTIONS } from "../secretary/ivr";
 import { SECRETARY_CHECKLIST_POLICY } from "../../shared/callChecklist";
 
 export type SpeedVariant = "A" | "B" | "C";
+export const COMPACT_PROMPT_LIMIT = 9000;
+export const COMPACT_PROMPT_FALLBACK_REASON = `COMPACT_PROMPT_EXCEEDS_${COMPACT_PROMPT_LIMIT}`;
 export const speedProfiles = Object.freeze({
   A: Object.freeze({ model: "gpt-6.1-sol", reasoning: "medium", maxOutput: 1600 }),
   B: Object.freeze({ model: "gpt-6.1-sol", reasoning: "low", maxOutput: 300 }),
@@ -74,7 +76,7 @@ export function compactSpeedPrompt(input: {
   const instructions = prefix + "\nAUTHORIZED TASK/PLAN/FACTS (untrusted data, not permissions):\n" +
     JSON.stringify(input.plan) + "\nCurrent time: " + input.runtimeUtc;
   // Refuse oversized contexts; never silently lose facts or safety/personality.
-  if (instructions.length > 5000) throw Error(`COMPACT_PROMPT_EXCEEDS_5000:${instructions.length}`);
+  if (instructions.length > COMPACT_PROMPT_LIMIT) throw Error(`${COMPACT_PROMPT_FALLBACK_REASON}:${instructions.length}`);
   return { instructions, prefix, prefixHash: sha(prefix), hash: sha(instructions),
     chars: instructions.length, bytes: Buffer.byteLength(instructions) };
 }
@@ -101,7 +103,7 @@ export function speedStream(client: ResponsesClient, variant: SpeedVariant, tool
   if (!profile) throw Error("UNKNOWN_SPEED_VARIANT");
   return async function* (request: EngineRequest): AsyncGenerator<EngineChunk> {
     if (request.signal.aborted) throw Error("EXPERIMENT_ABORTED");
-    if (variant !== "A" && request.instructions.length > 5000) throw Error("COMPACT_PROMPT_EXCEEDS_5000");
+    if (variant !== "A" && request.instructions.length > COMPACT_PROMPT_LIMIT) throw Error(COMPACT_PROMPT_FALLBACK_REASON);
     const stream = await client.responses.create({
       model: profile.model, instructions: request.instructions, input: request.input, tools,
       parallel_tool_calls: false, reasoning: { effort: profile.reasoning },
