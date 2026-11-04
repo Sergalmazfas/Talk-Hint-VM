@@ -20,6 +20,50 @@ function ready() {
 const author = JSON.stringify({ points: [{ index: 0, status: "выполнено", quote: "$150", turn: 0, reason: "цена названа" }] });
 const reviewer = JSON.stringify({ verdict: "confirmed", checks: [{ index: 0, quote: "$150", turn: 0, reason: "сверено" }], disagreements: [] });
 describe("Secretary analysis: disabled by default, existing owner scope", () => {
+  it("first five C calls are selected once, keep OFF gates, then queue measured evidence for Leva/Toma", async () => {
+    const s = ready();
+    const company = { documents: Object.entries(characters).map(([roleId, character]) => ({
+      text: JSON.stringify({ visualPassport: { roleId, character } }),
+    })) };
+    const deps: any = { environment: "production", model: async () => company,
+      store: () => ({ read: async () => structuredClone(s), change: async (fn: any) => { const result=fn(s);s.revision++;return result; } }) };
+    const call: any = { user_id: "owner", call_sid: "call-private-id", ended_at: at, lab_mode: "secretary",
+      metadata: { retellPhone: { variant: "C" }, secretaryEngine: {
+        runtime: { variant: "C", promptMode: "compact" },
+        interruption: { restarts: 2, a: 1, b: 1, c: 1, bridges: 1, events: [] },
+      } } };
+    const task: any = { user_id: "owner", call_sid: call.call_sid, instruction: "ask price",
+      transcript_turns: [{ role: "guest", text: "the price is $150" }] };
+    s.control.enabled=false;
+    const off=await reviewSecretaryCall(call,task,"owner","production",new Date(at),deps);
+    expect(off&&!off.pending&&off.failed).toContain("CREW_OFF_OR_HINT_PILOT_ACTIVE");
+    expect(s.tasks).toHaveLength(0); expect(s.secretaryPhoneRollout!.reviews).toHaveLength(1);
+    s.control.enabled=true;
+    expect(await reviewSecretaryCall(call,task,"owner","production",new Date(at),deps)).toEqual({pending:true});
+    const p=s.tasks[0].secretaryReview!;
+    expect(p.evidence.cRollout).toMatchObject({ordinal:1,measurements:{restarts:2,bridges:1}});
+    expect(p.evidence.cRollout!.measurements.endToSoundMedianMs).toBeNull();
+    expect(secretaryInput(s,s.tasks[0],SECRETARY_AGENTS[0].agentId,models[0])).toContain("Тома проверяет это независимо");
+    expect(s.secretaryPhoneRollout!.reviews).toHaveLength(1);
+    await reviewSecretaryCall(call,task,"owner","production",new Date(at),deps);
+    expect(s.tasks).toHaveLength(1);
+    p.status="reported";p.verdict="not_confirmed";
+    await reviewSecretaryCall(call,task,"owner","production",new Date(at),deps);
+    await reviewSecretaryCall(call,task,"owner","production",new Date(at),deps);
+    const logs=s.journal.filter(e=>e.kind==="katya_c_first_five_review_reported");
+    expect(logs).toHaveLength(1);
+    expect(logs[0].detail).toMatchObject({ordinal:1,verdict:"not_confirmed",ownerAcceptance:false});
+  });
+  it("does not claim a C review for another owner, Dev or a legacy call", async () => {
+    const s=ready();
+    const deps:any={environment:"production",store:()=>({read:async()=>s,change:async(fn:any)=>fn(s)}),
+      model:async()=>({documents:[]})};
+    for(const [owner,environment,variant] of [["stranger","production","C"],["owner","development","C"],["owner","production","legacy"]]) {
+      const call:any={user_id:owner,call_sid:"test",ended_at:at,lab_mode:"secretary",metadata:{retellPhone:{variant}}};
+      await reviewSecretaryCall(call,{user_id:owner,call_sid:"test",instruction:"ask price"},"owner",environment,new Date(at),deps);
+    }
+    expect(s.secretaryPhoneRollout).toBeUndefined();
+  });
   it("does not enable or initialize anything by reading an unconfigured state", async () => {
     const s = initialState(); let writes = 0;
     const deps: any = { environment: "production", store: () => ({ read: async () => s, change: async () => writes++ }) };

@@ -20,6 +20,21 @@ afterEach(() => {
   vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers();
 });
 describe("Telephone Retell + the same TalkHint text Engine", () => {
+  it("C is a separate agent with C timing knobs and unchanged voice/languages/security/duration", () => {
+    const origin = "https://dev.example.com";
+    const old = retellPhoneConfiguration(origin), c = retellPhoneConfiguration(origin, "C");
+    expect(c).toMatchObject({ voice_id: old.voice_id, language: old.language, response_engine: old.response_engine,
+      max_call_duration_ms: old.max_call_duration_ms, end_call_after_silence_ms: old.end_call_after_silence_ms,
+      responsiveness: 1, interruption_sensitivity: 0.85, enable_dynamic_responsiveness: true, stt_mode: "fast",
+      enable_backchannel: false, data_storage_setting: old.data_storage_setting,
+      contact_memory_config: old.contact_memory_config });
+    expect(c.agent_name).not.toBe(old.agent_name);
+    expect(verifyRetellPhoneAgent({ ...c, agent_id: "agent_C" }, origin, "C")).toBe("agent_C");
+    for (const changed of [{ voice_id: "other" }, { language: ["en-US"] }, { stt_mode: "accurate" },
+      { enable_dynamic_responsiveness: false }, { interruption_sensitivity: 0.9 }])
+      expect(() => verifyRetellPhoneAgent({ ...c, ...changed, agent_id: "agent_C" }, origin, "C")).toThrow();
+    expect(() => verifyRetellPhoneAgent({ ...c, agent_id: "agent_C" }, origin, "legacy")).toThrow();
+  });
   it("isolates phone configuration from the Dev bench and another backend origin", () => {
     const origin = "https://dev.example.com", config = retellPhoneConfiguration(origin);
     expect(config.voice_id).toBe("retell-Merritt");

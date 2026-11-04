@@ -3,6 +3,14 @@ import { describe, it, expect } from "vitest";
 import { crewControlPage } from "./controlPage";
 import { initialState } from "./domain";
 
+it("exposes the two explicit phone profiles, not a voice/language/test-script control", () => {
+  expect(crewControlPage).toContain('id="phoneC"');
+  expect(crewControlPage).toContain('id="phoneLegacy"');
+  expect(crewControlPage).toContain('"/secretary-phone-variant"');
+  expect(crewControlPage).toContain("PHONE_VARIANT_READBACK_MISMATCH_STOP");
+  expect(crewControlPage).not.toContain("espeak");
+});
+
 // Execute the shipped inline JS and actual event handlers without adding an
 // auth bypass or browser dependency. Network, dialogs and timers are explicit
 // fakes; no provider, production request, paid action or real call is possible.
@@ -103,6 +111,33 @@ async function page(initial = payload()) {
   };
 }
 describe("AI Crew owner pilot buttons — shipped script interactions", () => {
+  it("phone rollback is one action, reads fresh CSRF/revision, POSTs once then rereads", async () => {
+    const p = await page(), fresh = payload();
+    fresh.state.revision = 91; fresh.csrf = "b".repeat(64);
+    p.setAnswer(async (path, method, body) => {
+      if (method !== "POST") return { ok: true, data: structuredClone(fresh) };
+      expect(path).toBe("/api/admin/ai-crew/secretary-phone-variant");
+      expect(body).toEqual({ variant: "legacy", revision: 91 });
+      fresh.state.secretaryPhoneRollout = { variant: "legacy", changedAt: "now", changedBy: "owner", reviews: [] };
+      fresh.state.revision++; return { ok: true, data: { state: fresh.state } };
+    });
+    await p.click("phoneLegacy");
+    const posts = p.calls.filter(c => c.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0].headers["x-crew-csrf"]).toBe("b".repeat(64));
+    expect(p.calls.at(-1)?.method).toBe("GET");
+    expect(p.el("phoneVariantState").textContent).toContain("прежняя Катя");
+    expect(p.el("phoneLegacy").disabled).toBe(true);
+  });
+  it("ambiguous phone switch is not repeated and requires manual state reload", async () => {
+    const p = await page();
+    p.setAnswer(async (_path, method) => method === "POST" ?
+      { ok: false, status: 503, data: { error: "unconfirmed" } } : { ok: true, data: payload() });
+    await p.click("phoneLegacy");
+    expect(p.calls.filter(c => c.method === "POST")).toHaveLength(1);
+    expect(p.el("message").textContent).toContain("Не повторяем");
+    expect(p.el("phoneC").disabled).toBe(true); expect(p.el("phoneLegacy").disabled).toBe(true);
+  });
   it("revokes crew-test with confirmation, fresh CSRF/revision and verified reread, no retry", async () => {
     const p = await page(), fresh = payload();
     fresh.state.revision = 45;

@@ -11,6 +11,7 @@ import type { OutgoingContext } from "../secretary/personalities/outgoing";
 import { speedEngine, speedLab } from "./speedRuntime";
 import type { SpeedVariant } from "./speedExperiment";
 import { CResponseBuffer } from "./cResponseBuffer";
+import { phoneSpeechTiming } from "../secretary/phoneMetrics";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -78,13 +79,15 @@ export class RetellEngineRegistry {
     telephoneTools?: (id: string) => TelephoneTools;
     createEngine?: (owner: string, instruction: string, id: string, personality?: PersonalityBinding) => SecretaryConversationEngine;
     bufferResponses?: (id: string) => boolean;
+    phoneProfile?: (id: string) => "C" | "legacy";
   } = {}) {}
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     const ticket = randomBytes(32).toString("hex");
     if (this.options.phone && this.options.createEngine) throw Error("Lab engine factory cannot enter telephone");
     const engine = this.options.createEngine?.(owner, instruction, id, personality) ??
       new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts,
-        this.options.phone ? this.options.telephoneTools?.(id) : undefined);
+        this.options.phone ? this.options.telephoneTools?.(id) : undefined, undefined,
+        this.options.phone ? this.options.phoneProfile?.(id) : undefined);
     const entry: Entry = { id, ticket, engine,
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false,
       expiresAt: Date.now() + (this.options.phone ? SECRETARY_CALL_LIMIT_MS : 300_000) };
@@ -101,11 +104,19 @@ export class RetellEngineRegistry {
     return { ticket, engine: entry.engine.report, promptHash: createHash("sha256").update(entry.engine.instructions).digest("hex") };
   }
   registered(id: string, callId: string) { const entry = this.entries.get(id); if (entry) entry.callId = callId; }
+  diagnostics(id: string) {
+    const report = this.entries.get(id)?.engine.report;
+    if (!report) return undefined;
+    return structuredClone({ model: report.model, runtime: report.phoneRuntime,
+      usage: report.usage, events: report.events, interruption: (report as any).cInterruption ?? null,
+      playback: (report as any).playback ?? [] });
+  }
   /** Native Retell DTMF on the EXISTING SIP bridge; never redirect Twilio or restart media. */
   pressDigits(id: string, digits: string, signal?: AbortSignal) {
     const entry = this.entries.get(id), ws = entry?.socket;
     if (!this.options.phone || !entry || entry.closed || !ws || ws.readyState !== 1 ||
-      signal?.aborted || !/^[0-9*#]{1,5}$/.test(digits) || ws.bufferedAmount > 256 * 1024)
+      signal?.aborted || (entry.buffer && !entry.buffer.permitsTools()) ||
+      !/^[0-9*#]{1,5}$/.test(digits) || ws.bufferedAmount > 256 * 1024)
       throw Error("Current telephone transport unavailable");
     if (entry.pending !== undefined && signal === entry.abort?.signal) {
       ws.send(JSON.stringify({ response_type: "response", response_id: entry.pending, content: "",
@@ -161,6 +172,7 @@ export class RetellEngineRegistry {
         ws.close(1008, "Invalid transcript"); return;
       }
       const turns = frame.transcript.map((t: any) => ({ role: t.role, content: t.content }));
+      (entry.engine.report as any).playback = phoneSpeechTiming(frame.transcript);
       persisted = persisted.then(() => this.options.onTranscript!(entry.id, turns)).catch(() => {
         ws.close(1011, "Transcript persistence failed");
         this.options.onFailure?.(entry.id);
@@ -183,12 +195,20 @@ export class RetellEngineRegistry {
       entry.epoch++; entry.abort?.abort(); entry.engine.record("response_cancelled");
     };
     let labLimitEnded = false;
-    const buffered = !this.options.phone && process.env.NODE_ENV === "development" &&
-      process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id)
+    const buffered = (this.options.phone ? entry.engine.report.phoneRuntime?.variant === "C" :
+      process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id))
       ? new CResponseBuffer({
         generate: (turns, signal, emit, reminder) => entry.engine.respond(turns, signal, emit, reminder),
-        send, record: event => entry.engine.record(event),
+        send: frame => entry.commandCompleted === (frame as any).response_id ? true : send(frame),
+        record: event => entry.engine.record(event),
+        onGeneration: (controller, id) => {
+          entry.pending = id;
+          // The same signal must guard IVR side effects and stale generations.
+          entry.abort = controller;
+        },
         error: error => {
+          if (this.options.phone) return {
+            message: "Извините, сейчас не удалось получить ответ. Никакие реальные действия не выполнены.", end: false };
           const limited = error instanceof SpeedLimitError;
           if (limited) entry.engine.record("lab_budget_limit_reached");
           return { message: limited ? speedLimitText(error.code) :
@@ -198,7 +218,7 @@ export class RetellEngineRegistry {
     entry.buffer = buffered;
     if (buffered) (entry.engine.report as any).cInterruption = buffered.metrics;
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
-      if (buffered) { buffered.request(id, turns, reminder); return; }
+      if (buffered) { entry.pending = id; buffered.request(id, turns, reminder); return; }
       if (labLimitEnded) {
         send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
         return;

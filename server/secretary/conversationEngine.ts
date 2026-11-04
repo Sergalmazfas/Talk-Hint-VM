@@ -10,6 +10,7 @@ import type { OutgoingContext } from "./personalities/outgoing";
 import type { LabPersonalitySummary } from "../../shared/secretaryLabPersonality";
 import { secretaryEndTool, parseSecretaryEndRequest, type SecretaryEndRequest } from "./callEnding";
 import { IVR_INSTRUCTIONS } from "./ivr";
+import { selectPhonePrompt } from "./phonePrompt";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -51,12 +52,14 @@ export type TelephoneTools = {
 };
 /** The voice provider receives text; our OpenAI account does all model generation. No Retell LLM. */
 export async function* streamSecretaryResponse(request: EngineRequest,
-  options: { reasoning?: "medium" | "low"; tools?: typeof secretaryTestTools } = {}): AsyncGenerator<EngineChunk> {
+  options: { reasoning?: "medium" | "low"; tools?: typeof secretaryTestTools;
+    model?: string; maxOutput?: number; cacheKey?: string } = {}): AsyncGenerator<EngineChunk> {
   const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 25_000 });
   const stream = await client.responses.create({
-    model: SECRETARY_REASONING_MODEL, instructions: request.instructions,
+    model: options.model ?? SECRETARY_REASONING_MODEL, instructions: request.instructions,
     input: request.input, tools: options.tools ?? secretaryTestTools,
-    parallel_tool_calls: false, reasoning: { effort: options.reasoning ?? "medium" }, max_output_tokens: 1600,
+    parallel_tool_calls: false, reasoning: { effort: options.reasoning ?? "medium" }, max_output_tokens: options.maxOutput ?? 1600,
+    ...(options.cacheKey ? { prompt_cache_key: options.cacheKey } : {}),
     stream: true, store: false,
   }, { signal: request.signal });
   let complete = false;
@@ -87,13 +90,15 @@ export class SecretaryConversationEngine {
     context: SECRETARY_TEST_CONTEXT as Record<string, unknown>, actions: [] as TestAction[],
     events: [] as Array<{ type: string; at: string }>, connected: false,
     usage: { requests: 0, measuredRequests: 0, input: 0, cachedInput: 0, output: 0 } as LabTokenUsage,
+    phoneRuntime: null as null | { variant: "C" | "legacy"; promptMode: "compact" | "full";
+      fallbackReason: string | null; promptHash: string; promptChars: number; reasoning: string; maxOutput: number },
   };
   readonly instructions: string;
   private ledger = new Map<string, any>();
   constructor(owner: string, assignment: string, private stream: EngineStream = streamSecretaryResponse,
     private telephone = false, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = [],
     private telephoneTools?: TelephoneTools,
-    labOverride?: { instructions: string; model: string }) {
+    labOverride?: { instructions: string; model: string }, phoneVariant: "C" | "legacy" = "legacy") {
     if (labOverride && (telephone || process.env.NODE_ENV !== "development"))
       throw Error("Speed experiment is Dev-only and never telephone");
     this.report.personality = personality ? { id: personality.personalityId, name: personality.snapshot.name,
@@ -118,6 +123,25 @@ export class SecretaryConversationEngine {
         "After a successful preparation say exactly the supplied farewell, and nothing else. New speech cancels the prepared end. " +
         (telephoneTools ? IVR_INSTRUCTIONS : "") +
         "Current time: " + new Date().toISOString(), personality);
+      if (phoneVariant === "C") {
+        const prompt = selectPhonePrompt(this.instructions, owner, assignment, personality, facts);
+        this.instructions = prompt.instructions;
+        this.report.model = "gpt-6-sol";
+        // Keep dependency-injected streams for offline transport/tool tests.
+        if (this.stream === streamSecretaryResponse)
+          this.stream = request => streamSecretaryResponse(request, { tools: secretaryPhoneTools,
+            model: "gpt-6-sol", reasoning: "low", maxOutput: 300, cacheKey: prompt.cacheKey });
+        this.report.phoneRuntime = { variant: "C", promptMode: prompt.mode,
+          fallbackReason: prompt.reason, promptHash: prompt.hash, promptChars: prompt.chars,
+          reasoning: "low", maxOutput: 300 };
+        if (prompt.reason) this.record("compact_fallback_full_prompt");
+      } else {
+        if (this.stream === streamSecretaryResponse)
+          this.stream = request => streamSecretaryResponse(request, { tools: secretaryPhoneTools, reasoning: "medium" });
+        this.report.phoneRuntime = { variant: "legacy", promptMode: "full", fallbackReason: null,
+          promptHash: createHash("sha256").update(this.instructions).digest("hex"),
+          promptChars: this.instructions.length, reasoning: "medium", maxOutput: 1600 };
+      }
       return;
     }
     this.instructions = applyPersonality(buildSecretaryInstructions(assignment, confirmedSecretaryOwnerName(owner), characterName) + secretaryTestContextPrompt() +

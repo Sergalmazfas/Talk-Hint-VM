@@ -3519,3 +3519,17 @@ mtime_ms = 1793768221829
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/e55f42c4-92f9-4c3e-a54b-43f2fa7aef65/a94c3082-42e6-4600-b2c3-cf59b0dbb311"
 storage_version_token = "1793768241717183"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "-kqdsWD5Y-zPXSkVDY5Mg"
+uri = "file://generated-artifacts/TalkHint_common_journal_books_Katya_C_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: общий пакет — журнал, книжки и Катя C"
+description = "Общий diff и 26 исходников, полный прогон четырьмя шардами, план MCP-записей, откат C/прежняя Катя и контроль первых пяти звонков. Production не изменён."
+logical_id = "9e96e125-a8c9-4123-b80c-1203531945ae"
+content_hash = "sha256:08d105b004bcfec50aa183d1873573460cb8440084e6333e91b389fd872a2113"
+size = 414640
+mtime_ms = 1793769839227
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9e96e125-a8c9-4123-b80c-1203531945ae/5bc47dfe-795b-4906-8d01-cd74ca878a81"
+storage_version_token = "1793769859661213"
+content_type = "application/octet-stream"

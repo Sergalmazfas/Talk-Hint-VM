@@ -41,14 +41,14 @@ export class CResponseBuffer {
   };
   private generation?: {
     controller: AbortController; turns: SpokenTurn[]; text: string; done: boolean;
-    reusable: boolean; bridge: string; firstText: boolean; timer: ReturnType<typeof setTimeout>;
+    reusable: boolean; bridge: string; firstText: boolean; end?: boolean; timer: ReturnType<typeof setTimeout>;
   };
   private target?: { id: number; cursor: number; completed: boolean };
   private paused = false;
   private closed = false;
   private lastId = -1;
   private lastBridge = "";
-  private language?: "ru" | "en";
+  private language?: "ru" | "en" | "es";
   private latest: SpokenTurn[] = [];
   private fatal?: { message: string; end: boolean };
   private phrase?: { key: number; token: boolean; bridged: boolean; eligible: boolean; agents: number; armed?: boolean };
@@ -60,6 +60,7 @@ export class CResponseBuffer {
     send: (frame: object) => unknown;
     error: (error: unknown) => { message: string; end: boolean };
     record: (event: string) => void;
+    onGeneration?: (controller: AbortController, id: number) => void;
   }) {}
   private event(id: number, kind: string, reason: string, from?: number) {
     this.metrics.events.push({ at: new Date().toISOString(), id, kind, reason, phrase: this.phrase?.key, ...(from === undefined ? {} : { from }) });
@@ -72,6 +73,7 @@ export class CResponseBuffer {
     // transmit more old text while the caller's final words are unknown.
     if (userTurn || changed) this.paused = true;
   }
+  permitsTools() { return !this.closed && !this.paused && !!this.generation && !this.generation.controller.signal.aborted; }
   private output(text: string, complete = false, end = false) {
     if (!this.target || this.closed) return;
     this.deps.send({ response_type: "response", response_id: this.target.id, content: text,
@@ -82,7 +84,7 @@ export class CResponseBuffer {
     if (!g || !t || this.paused || this.closed || t.completed) return;
     const text = g.text.slice(t.cursor);
     if (text) { this.output(text); t.cursor = g.text.length; }
-    if (g.done) { this.output("", true); t.completed = true; }
+    if (g.done) { this.output("", true, !!g.end); t.completed = true; }
   }
   private playbackPosition(turns: SpokenTurn[]) {
     const g = this.generation!;
@@ -114,7 +116,8 @@ export class CResponseBuffer {
   }
   private bridge(turns: SpokenTurn[]) {
     const ru = this.language === "ru";
-    const choices = ru ? ["Поняла.", "Хорошо.", "Услышала."] : ["Got it.", "Okay.", "Understood."];
+    const choices = ru ? ["Поняла.", "Хорошо.", "Услышала."] : this.language === "es"
+      ? ["Entendido.", "De acuerdo.", "Comprendido."] : ["Got it.", "Okay.", "Understood."];
     const next = choices[(choices.indexOf(this.lastBridge) + 1) % choices.length];
     this.lastBridge = next; this.metrics.bridges++; this.output(next + " "); return next;
   }
@@ -134,11 +137,13 @@ export class CResponseBuffer {
   request(id: number, turns: SpokenTurn[], reminder = false) {
     if (this.closed || id <= this.lastId) return;
     this.lastId = id; this.metrics.responseEvents++; this.latest = turns;
+    this.event(id, "response_required", "provider_turn_complete");
     if (id > 0) {
       const meaningful = turns.filter(t => t.role === "user" && /[a-zа-яё]/i.test(t.content) &&
         !/unintelligible/i.test(t.content) && !acknowledgements.test(norm(t.content))).at(-1)?.content;
       if (meaningful && (!this.language || tokens(meaningful).length >= 4))
-        this.language = /[а-яё]/i.test(meaningful) ? "ru" : "en";
+        this.language = /[а-яё]/i.test(meaningful) ? "ru" :
+          /(?:hola|gracias|precio|cuánto|mañana|dólares|repite|acuerdo|quiero|necesito)/i.test(meaningful) ? "es" : "en";
     }
     const old = this.generation;
     // A provider can split a single utterance into adjacent transcript entries.
@@ -163,7 +168,8 @@ export class CResponseBuffer {
     }
     this.target = { id, cursor: 0, completed: false };
     this.paused = false;
-    if (this.fatal) { this.output(this.fatal.message, true, true); this.close(); return; }
+    if (this.fatal?.end) { this.output(this.fatal.message, true, true); this.close(); return; }
+    this.fatal = undefined; // A recoverable phone error over interrupted speech is not a terminal hang.
     let decision = old?.reusable && !reminder ? classifyCInterruption(users(old.turns), users(turns)) : undefined;
     if (old?.controller.signal.aborted && decision) decision = {
       kind: decision.kind === "a" ? "b" : decision.kind, reason: decision.reason, regenerate: true,
@@ -196,16 +202,19 @@ export class CResponseBuffer {
     if (decision) this.metrics.restarts++;
     const bridge = "";
     const controller = new AbortController();
-    const g = { controller, turns, text: "", done: false, bridge, firstText: true, reusable: id !== 0 && !reminder,
+    const g = { controller, turns, text: "", done: false, bridge, firstText: true, tokenRecorded: false, reusable: id !== 0 && !reminder,
       timer: setTimeout(() => {
         if (this.generation === g) this.fail(g, Error("C_RESPONSE_TIMEOUT"));
       }, 25_000) };
     g.timer.unref(); this.generation = g; this.metrics.generations++;
+    this.event(id, "generation_started", reminder ? "reminder" : "answer");
+    this.deps.onGeneration?.(controller, id);
     if (id > 0 && !reminder && this.phrase) this.armBridge(this.phrase);
     this.deps.record("response_started");
     void this.deps.generate(turns, controller.signal, text => {
       if (this.generation !== g || controller.signal.aborted || this.closed) return;
       if (g.text.length + text.length > 16_000) { this.fail(g, Error("C_BUFFER_BOUND")); return; }
+      if (!g.tokenRecorded) { this.event(id, "first_token", "model_text_delta"); g.tokenRecorded = true; }
       if (this.phrase) this.phrase.token = true;
       g.text += text;
       if (g.firstText && g.bridge) {
@@ -218,8 +227,9 @@ export class CResponseBuffer {
         g.firstText = false;
       }
       this.flush();
-    }, reminder).then(() => {
+    }, reminder).then(result => {
       if (this.generation !== g || controller.signal.aborted || this.closed) return;
+      if (result) { (g as typeof g & { end?: boolean }).end = true; g.reusable = false; }
       if (g.firstText && g.bridge && norm(g.text) === norm(g.bridge)) g.text = "";
       g.done = true; clearTimeout(g.timer); this.flush(); this.deps.record("response_complete");
     }).catch(error => { if (this.generation === g && !controller.signal.aborted) this.fail(g, error); });

@@ -47,6 +47,7 @@ export type Run = { id: string; taskId: string; agentId: string; eventId: string
   at: string; day?: string; epoch?: number; reserved?: number; cost?: number; usage?: { input_tokens: number; output_tokens: number };
   modelId?: string; completedAt?: string; secretaryMonth?: string };
 export type CrewState = {
+  secretaryPhoneRollout?: import("../secretary/phoneRollout").PhoneRollout;
   hintSeriesCompletion?: HintSeriesCompletion;
   secretarySettings?: SecretarySettings; secretaryBudget?: SecretaryBudget;
   version: 1; revision: number; control: { enabled: boolean; epoch: number; dailyLimitMicroUsd: number; staleHours: number; testSeriesId?: string };

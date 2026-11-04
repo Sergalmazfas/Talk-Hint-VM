@@ -3,6 +3,9 @@ import { recordedCallVersion } from "../codeVersion";
 import { log } from "./domain";
 import type { StateStore } from "./store";
 import { secretaryCharacters, secretaryEvidence, secretaryHash, queueSecretaryReview } from "./secretaryReview";
+import { claimCReview, rolloutState } from "../secretary/phoneRollout";
+import { phoneMetrics } from "../secretary/phoneMetrics";
+import { RetellApi } from "../secretaryLab/retellApi";
 
 type Binding = { store: () => StateStore; model: () => Promise<ProjectModelState>; environment: string };
 let binding: Binding | undefined;
@@ -27,9 +30,17 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       task?.call_sid !== call?.call_sid || !call.ended_at || call.lab_mode !== "secretary")
     return unavailable("SECRETARY_SOURCE_SCOPE_REJECTED");
   const ref = secretaryHash([ownerId, call.call_sid]);
+  const cCall = call.metadata?.retellPhone?.variant === "C";
+  if (cCall && !rolloutState(state).reviews.some(r => r.callRef === ref) &&
+      rolloutState(state).reviews.length < 5) {
+    await store.change(s => { claimCReview(s, ref); });
+    state = await store.read();
+  }
+  const cSelection = rolloutState(state).reviews.find(r => r.callRef === ref);
   let existing = state.tasks.find(t => t.secretaryReview?.callRef === ref);
   const ended = new Date(call.ended_at).getTime();
-  if (!existing && (!cfg.enabled || !Number.isFinite(ended) || ended < Date.parse(cfg.activatedAt))) return null;
+  if (!existing && (!cfg.enabled || !Number.isFinite(ended) || (!cSelection && ended < Date.parse(cfg.activatedAt))))
+    return cSelection ? unavailable("C_REVIEW_PENDING_OWNER_ENABLE_OR_VALID_END") : null;
   if (!existing) {
     if (!cfg.monthlyLimitMicroUsd) return unavailable("SECRETARY_MONTHLY_BUDGET_ZERO");
     if (!state.control.enabled || !state.control.dailyLimitMicroUsd || state.control.testSeriesId)
@@ -41,8 +52,20 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
         recordedCallVersion(call)?.commit ?? "unknown");
       characters = secretaryCharacters(await dependencies.model());
     } catch { return unavailable("SECRETARY_SOURCE_OR_OWNER_CHARACTER_UNAVAILABLE"); }
+    if (cSelection) {
+      const engine = call.metadata.secretaryEngine ?? call.metadata.retellPhone.engine;
+      let measurements = phoneMetrics(engine);
+      const providerId = call.metadata.retellPhone.callId;
+      if (/^call_[A-Za-z0-9_-]{1,110}$/.test(providerId ?? "")) {
+        try { measurements = phoneMetrics(engine, await new RetellApi().request(`/v2/get-call/${providerId}`)); }
+        catch { /* No fabricated audio latency; missing evidence stays explicit. */ }
+      }
+      evidence.cRollout = { ordinal: cSelection.ordinal, measurements };
+    }
     await store.change(s => {
       const queued = queueSecretaryReview(s, ownerId, call.call_sid, evidence, characters, now.toISOString());
+      const selected = rolloutState(s).reviews.find(r => r.callRef === ref);
+      if (selected) selected.taskId = queued.id;
       log(s, "call-lab", "secretary_call_queued", { taskId: queued.id, callRef: ref,
         evidenceHash: queued.secretaryReview!.evidenceHash, ownerAcceptance: false }, now.toISOString());
     });
@@ -91,6 +114,17 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
     }
     return { pending: true };
   }
+  const selected = rolloutState(state).reviews.find(r => r.callRef === ref);
+  if (selected && !selected.reported) await store.change(s => {
+    const current = rolloutState(s).reviews.find(r => r.callRef === ref);
+    if (!current || current.reported) return;
+    current.reported = true;
+    log(s, "secretary-qa", "katya_c_first_five_review_reported", {
+      ordinal: current.ordinal, taskId: existing!.id, verdict: p.verdict ?? "not_confirmed",
+      authorId: p.authorId, reviewId: p.reviewId, summaryId: p.summaryId,
+      measurements: p.evidence.cRollout?.measurements, ownerAcceptance: false,
+    }, now.toISOString());
+  });
   const doc = (id?: string) => state.documents.find(d => d.id === id && d.taskId === existing!.id)?.text;
   // These are proposals/QA, never owner acceptance or evidence that code/product changed.
   let summary: any, author: any, review: any;

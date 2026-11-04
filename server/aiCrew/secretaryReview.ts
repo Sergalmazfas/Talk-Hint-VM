@@ -11,6 +11,7 @@ export const SECRETARY_AGENTS = [
 export type SecretaryEvidence = {
   version: 1; points: string[]; transcript: { speaker: string; text: string }[];
   codeVersion: string; limitations: string[];
+  cRollout?: { ordinal: number; measurements: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics> };
 };
 export type SecretaryReview = {
   ownerId: string; callRef: string; evidence: SecretaryEvidence; evidenceHash: string;
@@ -144,7 +145,11 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
     : index === 1
       ? 'Тома: независимо проверь ВСЕ пункты по исходной расшифровке, а не доверию Лёве. Ответ JSON: {"verdict":"confirmed|not_confirmed","checks":[{"index":0,"quote":"","turn":0,"reason":""}],"disagreements":[],"unverified":[]}. Неверный/неполный разбор не подтверждать.'
       : 'Сева: сведи разбор и независимую проверку. Ответ JSON: {"outcome":"","agreed":[],"remaining":[],"unverified":[]}. Неподтверждённые выводы не объявляй договорённостью. Получатель Мария и письмо владельцу; это не приёмка продукта.';
-  return JSON.stringify({ ownerCharacter: p.characters[agentId], instruction, evidence: p.evidence,
+  return JSON.stringify({ ownerCharacter: p.characters[agentId], instruction: instruction +
+    (p.evidence.cRollout ? " Контроль первых пяти звонков C: разложи задержку по доступным этапам, перезапуски и связки; " +
+      "сверь все числа/суммы после исправлений собеседника. Тома проверяет это независимо по исходным данным. " +
+      "Замеры не выдумывать: TTFT не звук; отсутствие аудио отмечать «не измерено». " +
+      "Результаты включи в reason/recognitionIssues/unverified/disagreements штатного JSON." : ""), evidence: p.evidence,
     ...(index > 0 ? { untrustedAuthor: doc(p.authorId) } : {}),
     ...(index > 1 ? { untrustedReview: doc(p.reviewId), verdict: p.verdict } : {}) });
 }

@@ -21,6 +21,7 @@ import { productionProductRepository } from "../productCrew/production";
 import { TEAM_OWNER } from "../team/plan";
 import { auditStructure } from "./structureAudit";
 import { commandFailure } from "./commandError";
+import { bindPhoneRollout, changePhoneVariant, phoneRolloutInput } from "../secretary/phoneRollout";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 export function registerCrewRoutes(app: Express) {
@@ -37,6 +38,7 @@ export function registerCrewRoutes(app: Express) {
   });
   const readCompany = () => company.read(TEAM_OWNER, "new-country");
   bindSecretaryAutomation({ store, model: readCompany, environment: environment() });
+  bindPhoneRollout(store);
   registerTestMcp(app, { environment: environment(), store, secret: () => process.env.CREW_TEST_KEY,
     evidence: () => readHintEvidence(pool!, TEAM_OWNER),
     models: async () => (await provider.listModels()).map(m => m.id), model: readCompany });
@@ -87,6 +89,20 @@ export function registerCrewRoutes(app: Express) {
       await deployment();
       res.json({ initialized: true, agentsStarted: false });
     } catch { res.status(503).json({ error: "CREW_INITIALIZATION_FAILED" }); }
+  });
+  app.post(api + "/secretary-phone-variant", protect, async (req, res) => {
+    const parsed = phoneRolloutInput.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "INVALID_PHONE_VARIANT_COMMAND" });
+    try {
+      await store().change(s => changePhoneVariant(s, parsed.data, String(req.user!.id)), parsed.data.revision);
+      const state = await store().read();
+      if (state.secretaryPhoneRollout?.variant !== parsed.data.variant)
+        return res.status(409).json({ error: "PHONE_VARIANT_READBACK_MISMATCH_STOP" });
+      res.json({ state, nextCallsOnly: true });
+    } catch (error) {
+      res.status(409).json({ error: error instanceof Error && error.message === "STALE_REVISION"
+        ? "STALE_REVISION" : "PHONE_VARIANT_NOT_CONFIRMED_RELOAD_STATE" });
+    }
   });
   app.get(api + "/models", async (_req, res) => {
     res.set("Cache-Control", "no-store");

@@ -53,6 +53,25 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it("phone rollback requires owner/Origin/CSRF and fresh revision; readback preserves OFF and budgets",async()=>{
+  const path="/secretary-phone-variant", body={variant:"legacy",revision:0};
+  expect((await fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{"Content-Type":"application/json"},
+   body:JSON.stringify(body)})).status).toBe(403);
+  expect((await post(path,body)).status).toBe(403);
+  const token=await csrf();
+  expect((await fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,origin:"https://evil.test","x-crew-csrf":token},
+   body:JSON.stringify(body)})).status).toBe(403);
+  expect((await post(path,{...body,revision:99},token)).status).toBe(409);
+  expect((await post(path,{...body,voice:"other"},token)).status).toBe(400);
+  const response=await post(path,body,token);
+  expect(response.status).toBe(200);
+  expect((await response.json()).state.secretaryPhoneRollout.variant).toBe("legacy");
+  expect(f.state.control).toMatchObject({enabled:false,dailyLimitMicroUsd:0});
+  expect(f.state.agents).toEqual([]);expect(f.message).not.toHaveBeenCalled();
+  const after=await(await fetch(base+"/api/admin/ai-crew",{headers})).json();
+  expect(after.state.revision).toBe(1);
+  expect(after.state.secretaryPhoneRollout.variant).toBe("legacy");
+ });
  it.each(["series","queue","limit","owner","revision"])("rejects local %s blocker before any expensive dependencies",async blocker=>{
   const token=await csrf();
   if(blocker==="series")f.state.control.testSeriesId="approved-series-not-yet-finalized";
