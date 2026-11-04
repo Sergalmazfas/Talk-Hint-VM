@@ -7,6 +7,8 @@ import { SecretaryConversationEngine, type EngineStream, type SpokenTurn, type T
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
 import type { PersonalityBinding } from "../secretary/personalities/types";
 import type { OutgoingContext } from "../secretary/personalities/outgoing";
+import { speedEngine, speedLab } from "./speedRuntime";
+import type { SpeedVariant } from "./speedExperiment";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -16,12 +18,15 @@ export function engineCallbackBase() {
   return `wss://${host}/retell-engine-stream/{{talkhint_engine_ticket}}`;
 }
 export class RetellEngineApi extends RetellApi {
-  constructor(private callback = engineCallbackBase, network?: ConstructorParameters<typeof RetellApi>[0]) { super(network); }
+  constructor(private callback = engineCallbackBase, network?: ConstructorParameters<typeof RetellApi>[0],
+    private speedVariant: "A" | "B" | "C" = "A") { super(network); }
+  private get agentName() { return this.speedVariant === "A" ? RETELL_ENGINE_AGENT : `${RETELL_ENGINE_AGENT} · speed ${this.speedVariant}`; }
   async inspectAgent(id: string) {
     const a = await this.request(`/get-agent/${encodeURIComponent(id)}`);
-    if (a.agent_name !== RETELL_ENGINE_AGENT || a.response_engine?.type !== "custom-llm" ||
+    if (a.agent_name !== this.agentName || a.response_engine?.type !== "custom-llm" ||
         a.response_engine.llm_websocket_url !== this.callback() || a.voice_id !== RETELL_LAB_VOICE ||
-        a.interruption_sensitivity !== 0.9 || a.responsiveness !== 1 || a.enable_backchannel !== false ||
+        a.interruption_sensitivity !== (this.speedVariant === "A" ? 0.9 : 0.85) || a.responsiveness !== 1 || a.enable_backchannel !== false ||
+        (this.speedVariant !== "A" && (a.enable_dynamic_responsiveness !== true || a.stt_mode !== "fast")) ||
         a.max_call_duration_ms !== 300_000 || a.end_call_after_silence_ms !== 300_000 ||
         a.data_storage_setting !== "basic_attributes_only" || a.webhook_events?.length !== 0 ||
         a.contact_memory_config?.enable_read !== false || a.contact_memory_config?.enable_update !== false ||
@@ -29,17 +34,18 @@ export class RetellEngineApi extends RetellApi {
         !Array.isArray(a.language) || ["en-US", "ru-RU", "es-ES"].some(l => !a.language.includes(l))) {
       return fail("Retell + Engine: Custom LLM/голос/настройки не совпадают; автоматической подмены нет");
     }
-    return { id: a.agent_id as string, version: a.version as number, model: RETELL_LAB_MODEL, voice: RETELL_LAB_VOICE };
+    return { id: a.agent_id as string, version: a.version as number, model: this.speedVariant === "C" ? "gpt-6-sol" : RETELL_LAB_MODEL, voice: RETELL_LAB_VOICE };
   }
   async ensureAgent() {
-    const matches = (await this.listAgents()).filter(a => a.agent_name === RETELL_ENGINE_AGENT);
+    const matches = (await this.listAgents()).filter(a => a.agent_name === this.agentName);
     if (matches.length > 1) return fail("Retell + Engine: дублирующиеся агенты");
     if (matches.length) return this.inspectAgent(matches[0].agent_id);
     const a = await this.request("/create-agent", {
-      agent_name: RETELL_ENGINE_AGENT,
+      agent_name: this.agentName,
       response_engine: { type: "custom-llm", llm_websocket_url: this.callback() },
       voice_id: RETELL_LAB_VOICE, language: ["en-US", "ru-RU", "es-ES"],
-      interruption_sensitivity: 0.9, responsiveness: 1, enable_backchannel: false,
+      interruption_sensitivity: this.speedVariant === "A" ? 0.9 : 0.85, responsiveness: 1, enable_backchannel: false,
+      ...(this.speedVariant === "A" ? {} : { enable_dynamic_responsiveness: true, stt_mode: "fast" }),
       data_storage_setting: "basic_attributes_only", max_call_duration_ms: 300_000,
       end_call_after_silence_ms: 300_000, webhook_events: [], fallback_voice_ids: [],
       contact_memory_config: { enable_read: false, enable_update: false },
@@ -67,11 +73,15 @@ export class RetellEngineRegistry {
     onTranscript?: (id: string, turns: SpokenTurn[]) => Promise<void>;
     onFailure?: (id: string) => void;
     telephoneTools?: (id: string) => TelephoneTools;
+    createEngine?: (owner: string, instruction: string, id: string, personality?: PersonalityBinding) => SecretaryConversationEngine;
   } = {}) {}
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     const ticket = randomBytes(32).toString("hex");
-    const entry: Entry = { id, ticket, engine: new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts,
-      this.options.phone ? this.options.telephoneTools?.(id) : undefined),
+    if (this.options.phone && this.options.createEngine) throw Error("Lab engine factory cannot enter telephone");
+    const engine = this.options.createEngine?.(owner, instruction, id, personality) ??
+      new SecretaryConversationEngine(owner, instruction, this.stream, this.options.phone, personality, facts,
+        this.options.phone ? this.options.telephoneTools?.(id) : undefined);
+    const entry: Entry = { id, ticket, engine,
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false,
       expiresAt: Date.now() + (this.options.phone ? SECRETARY_CALL_LIMIT_MS : 300_000) };
     this.entries.set(id, entry); this.tickets.set(ticket, entry);
@@ -267,13 +277,11 @@ async function checkEngine() {
     context: SECRETARY_TEST_CONTEXT, testOnly: true,
   } };
 }
-export const retellEngineRegistry = new RetellEngineRegistry();
-const profile: RetellLabProfile = {
-  agentName: RETELL_ENGINE_AGENT, mode: "retell-engine", check: checkEngine,
-  reserve: (...args) => retellEngineRegistry.reserve(...args),
-  registered: (...args) => retellEngineRegistry.registered(...args),
-  ended: id => retellEngineRegistry.ended(id),
-};
-export const retellEngineLab = new RetellSecretaryLab(new RetellEngineApi(), Date.now,
-  () => process.env.NODE_ENV === "development", profile);
+const speedVariants = new Map<string, SpeedVariant>();
+export const retellEngineRegistry = new RetellEngineRegistry(undefined, {
+  createEngine: (owner, instruction, id, personality) => speedEngine(owner, instruction, speedVariants.get(id) ?? "A", personality),
+});
+export const retellEngineLab = speedLab({ registry: retellEngineRegistry,
+  api: variant => new RetellEngineApi(engineCallbackBase, undefined, variant), check: checkEngine,
+  agentName: RETELL_ENGINE_AGENT, variantsBySession: speedVariants });
 setInterval(() => retellEngineLab.sweep(), 60_000).unref();

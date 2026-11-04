@@ -1,0 +1,157 @@
+import OpenAI from "openai";
+import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
+import { SecretaryConversationEngine, secretaryTestTools, type EngineStream } from "../secretary/conversationEngine";
+import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
+import type { PersonalityBinding } from "../secretary/personalities/types";
+import { SECRETARY_TEST_CONTEXT } from "./testContext";
+import { compactSpeedPrompt, speedProfiles, speedStream, type SpeedVariant } from "./speedExperiment";
+import { SpeedBudget } from "./speedBudget";
+import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
+
+export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding) {
+  if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
+  const profile = speedProfiles[variant];
+  const metrics = { variant, requests: 0, usageRequests: 0, input: 0, output: 0,
+    conservativeModelMicroUsd: 0, requestLog: [] as any[] };
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 25_000 });
+  const adapter = { responses: { create: async (body: any, options: any) => {
+    if (++metrics.requests > 12) throw Error("SPEED_MAX_TWELVE_REQUESTS");
+    if (Buffer.byteLength(body.instructions + JSON.stringify(body.input) + JSON.stringify(body.tools), "utf8") > 20_000)
+      throw Error("SPEED_INPUT_BUDGET_BOUND");
+    const started = performance.now();
+    const log: any = { model: body.model, httpStatus: null, requestId: null, firstTextMs: null,
+      complete: false, outputChars: 0, outputText: "", error: null };
+    metrics.requestLog.push(log);
+    try {
+      const { data, response } = await client.responses.create(body, options).withResponse();
+      log.httpStatus = response.status; log.requestId = response.headers.get("x-request-id");
+      return (async function* () {
+        for await (const event of data as any) {
+          if (event.type === "response.output_text.delta") {
+            log.firstTextMs ??= performance.now() - started; log.outputChars += event.delta.length;
+            log.outputText += event.delta;
+          }
+          const u = event.response?.usage;
+          if (u && ["response.completed", "response.incomplete", "response.failed"].includes(event.type)) {
+            metrics.usageRequests++; metrics.input += u.input_tokens; metrics.output += u.output_tokens;
+            // Deliberately upper-bounds ordinary input AND cache writes, not a bill.
+            metrics.conservativeModelMicroUsd += Math.ceil(u.input_tokens * 5 + u.output_tokens * 10);
+            log.usage = u;
+          }
+          if (event.type === "response.completed") log.complete = true;
+          if (event.type === "response.incomplete") log.error = "OUTPUT_INCOMPLETE";
+          yield event;
+        }
+      })();
+    } catch (e: any) {
+      log.httpStatus = e.status ?? log.httpStatus; log.requestId = e.request_id ?? log.requestId;
+      log.error = e.code ?? "PROVIDER_OR_NETWORK_ERROR"; throw e;
+    }
+  } } };
+  const rawStream = speedStream(adapter, variant, secretaryTestTools);
+  const measured: EngineStream = request => rawStream(request);
+  const compact = variant === "A" ? undefined : compactSpeedPrompt({
+    owner: confirmedSecretaryOwnerName(owner), personality,
+    plan: { instruction, testOnly: true, authorizedTestContext: SECRETARY_TEST_CONTEXT }, runtimeUtc: new Date().toISOString(),
+  });
+  const engine = new SecretaryConversationEngine(owner, instruction, measured, false, personality, [], undefined,
+    compact ? { instructions: compact.instructions, model: profile.model } : undefined);
+  (engine.report as any).speed = metrics;
+  return engine;
+}
+
+/** Multiplexing uses the existing authenticated Dev routes and socket registry. */
+export function speedLab(deps: {
+  registry: RetellEngineRegistry; api: (v: SpeedVariant) => RetellEngineApi; check: () => Promise<object>;
+  agentName: string; variantsBySession: Map<string, SpeedVariant>;
+}) {
+  const budget = new SpeedBudget();
+  const labs = new Map<SpeedVariant, RetellSecretaryLab>();
+  for (const variant of ["A", "B", "C"] as const) {
+    const profile: RetellLabProfile = {
+      agentName: variant === "A" ? deps.agentName : `${deps.agentName} · speed ${variant}`,
+      mode: "retell-engine", check: deps.check,
+      reserve: (owner, instruction, id, personality) => {
+        deps.variantsBySession.set(id, variant);
+        return deps.registry.reserve(owner, instruction, id, personality);
+      },
+      registered: (id, callId) => deps.registry.registered(id, callId),
+      ended: id => deps.registry.ended(id),
+    };
+    labs.set(variant, new RetellSecretaryLab(deps.api(variant), Date.now,
+      () => process.env.NODE_ENV === "development", profile));
+  }
+  const owners = new Map<string, { lab: RetellSecretaryLab; owner: string; requestId: string }>();
+  const variantOf = (value: unknown): SpeedVariant => {
+    if (value === undefined) return "A";
+    if (value !== "A" && value !== "B" && value !== "C") throw Object.assign(Error("SPEED_VARIANT_INVALID"), { status: 400 });
+    return value;
+  };
+  const finish = async (id: string) => {
+    const row = owners.get(id); if (!row) return;
+    const r = row.lab.report(row.owner, id).report;
+    if (r.status !== "ended") return;
+    const m = (r.engine as any)?.speed;
+    const seconds = r.providerDurationSeconds ?? Math.min(300, (Date.parse(r.endedAt!) - Date.parse(r.createdAt)) / 1000 + 5);
+    const debit = m && m.requests <= 12 && m.requests === m.usageRequests
+      ? Math.ceil(m.conservativeModelMicroUsd + Math.max(0, seconds) / 60 * 70_000) : null;
+    await budget.settle(row.requestId, debit);
+  };
+  const find = (owner: string, id: string) => {
+    const row = owners.get(id);
+    if (!row || row.owner !== owner) throw Object.assign(Error("Session not found"), { status: 404 });
+    return row.lab;
+  };
+  class SpeedLab extends RetellSecretaryLab {
+    async readiness(owner: string) {
+      for (const id of Array.from(owners.keys())) await finish(id);
+      const state = await budget.state();
+      return { ...await labs.get("A")!.readiness(owner),
+        speedVariants: (["A", "B", "C"] as const).map(id => ({ id,
+          label: `${id} · ${speedProfiles[id].model} · ${speedProfiles[id].reasoning} · ${speedProfiles[id].maxOutput}` })),
+        speedBudget: { limitUsd: 5, spentUsd: state.spentMicroUsd / 1e6,
+          reservedUsd: state.reservedMicroUsd / 1e6, remainingUsd: state.remainingMicroUsd / 1e6,
+          blocked: Object.values(state.runs).some(r => r.status === "reserved"),
+          accounting: "conservative estimate, not invoice" } };
+    }
+    async create(owner: string, input: any) {
+      const variant = variantOf(input?.speedVariant);
+      if (!input || input.consent !== true || typeof input.instruction !== "string" ||
+        input.instruction.trim().length < 8 || input.instruction.length > 4000 ||
+        !/^[0-9a-f-]{36}$/i.test(input.clientRequestId ?? "") ||
+        Object.keys(input).some(k => !["instruction", "consent", "clientRequestId", "personality", "speedVariant"].includes(k)))
+        throw Object.assign(Error("Invalid speed experiment input"), { status: 400 });
+      for (const id of Array.from(owners.keys())) await finish(id);
+      const lab = labs.get(variant)!;
+      const previous = Array.from(owners).find(([, r]) => r.owner === owner && r.requestId === input.clientRequestId);
+      const { speedVariant: _, ...body } = input;
+      if (previous) {
+        if (previous[1].lab !== lab) throw Object.assign(Error("Request variant conflict"), { status: 409 });
+        return lab.create(owner, body);
+      }
+      try { await budget.reserve(input.clientRequestId, variant); }
+      catch (e: any) { throw Object.assign(e, { status: 409 }); }
+      const priorIds = new Set(lab.reports(owner).map(r => r.id));
+      try {
+        const result = await lab.create(owner, body);
+        owners.set(result.id, { lab, owner, requestId: input.clientRequestId });
+        return result;
+      } catch (e) {
+        const failed = lab.reports(owner).find(r => !priorIds.has(r.id));
+        await budget.settle(input.clientRequestId,
+          failed?.reason === "create_result_unknown" || failed?.status === "stop_failed" ? null : 0);
+        throw e;
+      }
+    }
+    report(owner: string, id: string) { return find(owner, id).report(owner, id); }
+    reports(owner: string) { return Array.from(labs.values()).flatMap(l => l.reports(owner)); }
+    async connected(owner: string, id: string) { return find(owner, id).connected(owner, id); }
+    observe(owner: string, id: string, input: any) { return find(owner, id).observe(owner, id, input); }
+    async stop(owner: string, id: string, reason?: string) {
+      const report = await find(owner, id).stop(owner, id, reason);
+      await finish(id); return report;
+    }
+    sweep() { for (const l of Array.from(labs.values())) l.sweep(); }
+  }
+  return new SpeedLab();
+}

@@ -3,6 +3,12 @@ name: Secretary Lab cost boundaries
 description: Pricing assumptions and scope agreed for the private Dev voice comparison bench.
 ---
 
+Retell may connect a custom LLM and generate its greeting while the web call is still `registered`, before the browser joins.
+
+**Why:** a browser import failed behind the owner-only web boundary, but the already admitted session still consumed an OpenAI greeting request. Provider audio cost was zero at readback; model cost was not.
+
+**How to apply:** authenticate and preflight browser modules/audio before paid admission. `registered` is not evidence of zero spend. Reconcile both provider and external model usage; an unconfirmed stop keeps its reservation and blocks a blind repeat.
+
 Only extend pricing inside the existing Dev Secretary Lab and its common reports
 archive. Do not change voice settings, add Cartesia, touch production/telephony/
 Xcode or publish as part of this work.

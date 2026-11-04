@@ -20,8 +20,24 @@
 .engine-action > span { color:#8a9690; font:8px "DM Mono",monospace; }
 .engine-event { border-left:2px solid #a9cbbb !important; }
 .engine-no-data { margin:0; color:#89948e; font-size:10px; }
+.retell-speed-control { display:grid; gap:9px; margin:12px 0 4px; padding:12px; border:1px solid #e4cfae; border-radius:7px; background:#fbf5e9; }
+.retell-speed-heading { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:7px 12px; }
+.retell-speed-label { color:#4d5548; font-size:11px; font-weight:700; }
+.retell-speed-heading > span:last-child { padding:4px 6px; border-radius:3px; background:#efe2c9; color:#775f38; font:8px "DM Mono",monospace; letter-spacing:.04em; }
+.retell-speed-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.retell-speed-option { display:flex; align-items:center; gap:8px; min-width:0; padding:9px; border:1px solid #d9dfd4; border-radius:5px; background:#f7f8f3; color:#59645b; text-align:left; cursor:pointer; transition:transform .15s ease,opacity .15s ease; }
+.retell-speed-option:hover:not(:disabled) { transform:translateY(-1px); border-color:#a9b9a6; }
+.retell-speed-option.selected { border-color:#597b69; background:#e8f0e9; color:#315b4b; }
+.retell-speed-option:disabled { cursor:not-allowed; opacity:.58; }
+.retell-speed-option strong { display:grid; flex:0 0 23px; width:23px; height:23px; place-items:center; border-radius:4px; background:#e8e9df; font:11px "DM Mono",monospace; }
+.retell-speed-option.selected strong { background:#597b69; color:#fffaf0; }
+.retell-speed-option span { overflow:hidden; font:9px/1.35 "DM Mono",monospace; text-overflow:ellipsis; }
+.retell-speed-control > small { color:#777d70; font-size:9px; line-height:1.5; }
+.retell-speed-control .retell-speed-budget { color:#536c5d; font-family:"DM Mono",monospace; overflow-wrap:anywhere; }
 @media (max-width:560px) {
   .engine-config { padding:11px; }
   .engine-report-meta { grid-template-columns:1fr; gap:4px; }
   .engine-report-meta b { margin-bottom:5px; }
+  .retell-speed-options { grid-template-columns:1fr; }
+  .retell-speed-option { min-height:40px; }
 }

@@ -147,7 +147,8 @@ export class RetellSecretaryLab {
         metrics: { guestTurns: 0, secretaryTurns: 0 } } };
     const engine = this.profile?.reserve(owner, instruction, id, personality);
     if (engine) { s.report.mode = this.profile!.mode; s.report.engine = engine.engine;
-      s.report.personality = labPersonalitySummary(personality); s.report.profileId = "default"; }
+      s.report.model = engine.engine.model;
+      s.report.personality = labPersonalitySummary(personality); s.report.profileId = (engine.engine as any).speed?.variant ?? "default"; }
     if (engine?.promptHash) s.report.promptHash = engine.promptHash;
     this.sessions.set(id, s); this.attempts.set(owner, [...times, this.now()]);
     s.creation = this.admit(s, instructions, engine?.ticket);

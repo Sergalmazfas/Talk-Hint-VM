@@ -48,7 +48,7 @@ describe("isolated Secretary speed experiment", () => {
       expect((draft as any)[key]).toEqual((base as any)[key]);
     expect(draft).not.toHaveProperty("agent_id");
     expect(draft).not.toHaveProperty("version");
-    expect(draft).toMatchObject({ responsiveness: 0.9, interruption_sensitivity: 0.85,
+    expect(draft).toMatchObject({ responsiveness: 1, interruption_sensitivity: 0.85,
       enable_dynamic_responsiveness: true, stt_mode: "fast" });
     expect(() => speedAgentDraft(base, "C", "wss://talkhint.app/production")).toThrow("DEV_CALLBACK_REQUIRED");
     expect(() => speedAgentDraft({ response_engine: { type: "retell-llm" } }, "B",

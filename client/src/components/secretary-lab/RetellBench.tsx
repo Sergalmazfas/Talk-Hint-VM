@@ -20,6 +20,7 @@ type RetellEvent = { type: string; atMs: number; detail?: string };
 type RetellObservation = { atMs: number; outcome: "stopped" | "continued" | "unknown"; note?: string };
 export type RetellReport = {
   cost?: LabRunCost;
+  profileId?: "A" | "B" | "C";
   personality?: { id: string; name: string; version: number; mode: "personal" | "work" } | null;
   id: string;
   callId: string;
@@ -57,6 +58,8 @@ type RetellConfig = {
   limits: { durationSeconds: 300; historyMinutes: 60 };
   keyStatus: string;
   mode?: string;
+  speedVariants?: Array<{ id: "A" | "B" | "C"; label: string }>;
+  speedBudget?: { limitUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number; blocked: boolean };
   engine?: {
     provider?: string;
     model?: string;
@@ -65,6 +68,14 @@ type RetellConfig = {
     testOnly?: boolean;
   };
 };
+
+type SpeedVariant = "A" | "B" | "C";
+
+const SPEED_VARIANTS: Array<{ id: SpeedVariant; fallback: string }> = [
+  { id: "A", fallback: "Базовый" },
+  { id: "B", fallback: "gpt-6.1-sol · low · 300" },
+  { id: "C", fallback: "gpt-6-sol · low · 300" },
+];
 
 function exportReport(report: RetellReport) {
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
@@ -101,12 +112,18 @@ export default function RetellBench({
   const [note, setNote] = useState("");
   const [uncertainCreate, setUncertainCreate] = useState(false);
   const [personality, setPersonality] = useState<PersonalityChoice | null>(null);
+  const [speedVariant, setSpeedVariant] = useState<SpeedVariant>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("speedVariant");
+    return params.get("stand") === "retell-engine" && (fromUrl === "B" || fromUrl === "C") ? fromUrl : "A";
+  });
   const [observationNote, setObservationNote] = useState("");
   const clientRef = useRef<RetellClient | null>(null);
   const sessionRef = useRef<any>(null);
   const reportRef = useRef<RetellReport | null>(null);
   const requestIdRef = useRef<string | null>(null);
   const admissionPersonalityRef = useRef<PersonalityChoice | null | undefined>(undefined);
+  const admissionSpeedVariantRef = useRef<SpeedVariant | null>(null);
   const mountedRef = useRef(false);
   const stoppingRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
@@ -229,7 +246,9 @@ export default function RetellBench({
 
   const start = async (recover = false) => {
     if (isEngine && !recover) admissionPersonalityRef.current = personality ? { ...personality } : null;
+    if (isEngine && !recover) admissionSpeedVariantRef.current = speedVariant;
     const selectedPersonality = isEngine ? admissionPersonalityRef.current : null;
+    const selectedSpeedVariant = isEngine ? admissionSpeedVariantRef.current ?? speedVariant : "A";
     if (!config?.ready || !token || instruction.trim().length < 8 || !consent || startLockRef.current ||
         (reportRef.current && !retellEnded(reportRef.current.status)) || (uncertainCreate && !recover) ||
         (selectedPersonality && !selectedPersonality.mode)) return;
@@ -251,7 +270,7 @@ export default function RetellBench({
       createAttempted = true;
       const created = await labRequest<{ id: string; call: { call_id: string; access_token: string; [key: string]: unknown }; report: RetellReport }>(`${api}/sessions`, token, {
         method: "POST",
-        body: JSON.stringify({ instruction: instruction.trim(), consent: true, clientRequestId: requestIdRef.current, ...(isEngine ? { personality: selectedPersonality } : {}) }),
+        body: JSON.stringify({ instruction: instruction.trim(), consent: true, clientRequestId: requestIdRef.current, ...(isEngine ? { personality: selectedPersonality, speedVariant: selectedSpeedVariant } : {}) }),
       });
       createdId = created.id;
       if (!mountedRef.current) {
@@ -342,6 +361,18 @@ export default function RetellBench({
   const current = report ?? selected;
   const busy = pending || (!!report && !["ended", "failed"].includes(report.status));
   const personalityReady = !personality || !!personality.mode;
+  const changeSpeedVariant = (next: SpeedVariant) => {
+    if (busy || pending || uncertainCreate || next === speedVariant) return;
+    requestIdRef.current = null;
+    admissionSpeedVariantRef.current = null;
+    setSpeedVariant(next);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("stand") === "retell-engine") {
+      if (next === "A") url.searchParams.delete("speedVariant");
+      else url.searchParams.set("speedVariant", next);
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  };
 
   const engineConnected = current?.engine?.connected;
   const reportConnected = current?.monitorStatus === "connected";
@@ -362,6 +393,22 @@ export default function RetellBench({
            <Textarea id="retell-instruction" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} disabled={busy || uncertainCreate} maxLength={1600} className="instruction-input" />
           <div className="field-foot"><span>Совпадает с GPT-стендом · до 1 600 символов</span><span>{instruction.length}/1600</span></div>
            {isEngine && <PersonalityPicker token={token} value={personality} onChange={setPersonality} disabled={busy || pending || uncertainCreate} />}
+            {isEngine && <div className="retell-speed-control">
+              <div className="retell-speed-heading"><span className="retell-speed-label">Экспериментальный speed profile</span><span>DEV ONLY · НЕ ДЛЯ PRODUCTION</span></div>
+              <div className="retell-speed-options" role="group" aria-label="Выбор экспериментального speed profile">
+                {SPEED_VARIANTS.map((variant) => {
+                  const available = config?.speedVariants?.find((item) => item.id === variant.id);
+                  return <button type="button" key={variant.id} className={`retell-speed-option ${speedVariant === variant.id ? "selected" : ""}`} aria-pressed={speedVariant === variant.id} disabled={busy || pending || uncertainCreate} onClick={() => changeSpeedVariant(variant.id)}>
+                    <strong>{variant.id}</strong><span>{available?.label || variant.fallback}</span>
+                  </button>;
+                })}
+              </div>
+              <small>Responsiveness 1 для A, B и C. A — базовый профиль; B — gpt-6.1-sol, low, 300; C — gpt-6-sol, low, 300.</small>
+              {config?.speedBudget && <small className="retell-speed-budget">
+                Серия: ${config.speedBudget.limitUsd.toFixed(2)} · оценка расхода ${config.speedBudget.spentUsd.toFixed(4)} · резерв ${config.speedBudget.reservedUsd.toFixed(2)} · остаток ${config.speedBudget.remainingUsd.toFixed(2)}. Не счёт провайдера.
+                {config.speedBudget.blocked && " Есть незавершённый/неопределённый запрос: новые сессии заблокированы, не повторяйте запуск."}
+              </small>}
+            </div>}
            <div className="retell-config">
              <div><span>МОДЕЛЬ В КОНФИГУРАЦИИ</span><b>{isEngine ? config?.engine?.model || "Не сообщена API" : config?.model || "—"}</b></div>
              <div><span>ГОЛОС RETELL · КОНФИГУРАЦИЯ</span><b>{config?.voice || "—"}</b></div>
@@ -373,7 +420,7 @@ export default function RetellBench({
              <div><span>СОСТОЯНИЕ КЛЮЧА RETELL</span><b>{config?.keyStatus || "Проверяется сервером"}</b></div>
              <div><span>ЛИМИТЫ ПРОГОНА</span><b>{config?.limits.durationSeconds ?? "—"} сек. · история {config?.limits.historyMinutes ?? "—"} мин.</b></div>
              {isEngine && <div><span>ПОДКЛЮЧЕНИЕ В ОТЧЁТЕ</span><b>{engineConnected === undefined ? current?.monitorStatus || "Не измерено" : engineConnected ? "Engine connected" : "Engine disconnected"}</b></div>}
-              {isEngine && current && <RunSummary voiceBundle={current.voice || "Не записан"} profile="Retell default" personality={current.personality} />}
+               {isEngine && current && <RunSummary voiceBundle={current.voice || "Не записан"} profile={current.profileId ? `${current.profileId} · ${SPEED_VARIANTS.find((variant) => variant.id === current.profileId)?.fallback || "экспериментальный"}` : "Профиль не записан"} personality={current.personality} />}
            </div>
            {isEngine && config?.engine && <div className="engine-config" aria-label="TalkHint Engine configuration">
              <div className="engine-config-title"><b>{config.engine.provider || "OpenAI via TalkHint"}</b><span>{config.engine.testOnly ? "TEST ONLY" : "SCOPE NOT REPORTED"}</span></div>

@@ -3407,3 +3407,17 @@ mtime_ms = 1793751026299
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/aef96619-b213-4639-8613-394f1267a181/e91e802d-59d0-47cc-8bc7-4fc1fd4640a9"
 storage_version_token = "1793751039836794"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "tJ4JksichC9BTtlUa2_D3"
+uri = "file://generated-artifacts/secretary-speed-series/Katya_ABC_Dev_results_Clavdiy.zip"
+type = "unspecified"
+title = "Катя: A/B/C — результаты и пакет Клавдию"
+description = "Diff и исходники, 3 успешных разговора на вариант, задержки, usage и бюджет, отзыв одного сбоя B, сводка четырёх финальных шардов. Только Dev; боевой агент не менялся."
+logical_id = "ed68cd17-c058-43d4-b3c6-cfcaa07ae24c"
+content_hash = "sha256:0d2f01fa52703b9cc94d3b487d2fae51efaaadeb1327c74bcb2ab00169637572"
+size = 92394
+mtime_ms = 1793754471238
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ed68cd17-c058-43d4-b3c6-cfcaa07ae24c/08abc41a-0b9a-4543-b229-33097739cbc1"
+storage_version_token = "1793754505405313"
+content_type = "application/octet-stream"
