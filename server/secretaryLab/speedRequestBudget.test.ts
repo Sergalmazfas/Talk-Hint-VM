@@ -55,3 +55,11 @@ it("settlement holds unknown/pending envelopes plus protective audio, never beyo
   expect(speedSettlement({ ...m, requests: 3 }, 120)).toBeNull();
   expect(speedSettlement({ requests: 2, requestBudget: { ...m.requestBudget, totalHeldMicroUsd: 1_000_001 } }, 120)).toBeNull();
 });
+it("C can hold $2 of model requests, but A/B and the series do not inherit an increase", () => {
+  const c = new SpeedRequestBudget(2_000_000);
+  while (c.snapshot().totalHeldMicroUsd < 1_500_000) c.unknown(c.admit(body));
+  expect(c.snapshot().modelEnvelopeMicroUsd).toBe(2_000_000);
+  expect(speedSettlement({ variant: "C", requests: c.snapshot().admitted, requestBudget: c.snapshot() }, 300)).toBeLessThanOrEqual(3_000_000);
+  expect(speedSettlement({ variant: "B", requests: c.snapshot().admitted, requestBudget: c.snapshot() }, 300)).toBeNull();
+  expect(new SpeedRequestBudget().snapshot().modelEnvelopeMicroUsd).toBe(1_000_000);
+});

@@ -38,7 +38,7 @@ it("settles known estimates once and leaves manual testing inside the same total
   const { b } = await budget();
   for (let n = 0; n < 4; n++) {
     await b.reserve(String(n), "C");
-    if (n === 0) await expect(b.settle(String(n), 2_000_001)).rejects.toThrow("SPEED_ACCOUNTING_OUT_OF_BOUNDS");
+    if (n === 0) await expect(b.settle(String(n), 3_000_001)).rejects.toThrow("SPEED_ACCOUNTING_OUT_OF_BOUNDS");
     await b.settle(String(n), 1000);
     await b.settle(String(n), 1000);
   }
@@ -58,11 +58,22 @@ it("concurrent admissions cannot both reserve money", async () => {
   expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
   expect((await b.state()).reservedMicroUsd).toBe(2_000_000);
 });
+it("C reserves $3, preserves legacy $2 unknowns, and never raises the series limit", async () => {
+  const { b, path } = await budget();
+  await b.reserve("new-c", "C");
+  expect((await b.state()).reservedMicroUsd).toBe(3_000_000);
+  await b.settle("new-c", null);
+  const reloaded = await new SpeedBudget(path).state();
+  expect(reloaded.runs["new-c"].spent).toBe(3_000_000);
+  expect(reloaded.limitMicroUsd).toBe(5_000_000);
+  await expect(b.reserve("too-much", "C")).rejects.toThrow("SPEED_SERIES_BUDGET_EXHAUSTED");
+});
 it("new per-request settlement preserves old unknowns and cannot reset or replenish the series", async () => {
   const { b, path } = await budget();
   await b.reserve("legacy", "A"); await b.settle("legacy", null);
   const old = JSON.stringify((await b.state()).runs.legacy);
-  await b.reserve("bounded-new", "C");
+  await expect(b.reserve("bounded-new", "C")).rejects.toThrow("SPEED_SERIES_BUDGET_EXHAUSTED");
+  await b.reserve("bounded-new", "B");
   const ledger = new SpeedRequestBudget();
   for (let i = 0; i < 20; i++)
     ledger.complete(ledger.admit({ instructions: "fixture", max_output_tokens: 300 }), { input_tokens: 10, output_tokens: 10 });

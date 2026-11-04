@@ -8,11 +8,12 @@ import { compactSpeedPrompt, speedProfiles, speedStream, type SpeedVariant } fro
 import { SpeedBudget } from "./speedBudget";
 import { SpeedLimitError, SpeedRequestBudget, speedLimitText, speedSettlement } from "./speedRequestBudget";
 import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
+import { devReportArchive } from "./devReportArchive";
 
 export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
   const profile = speedProfiles[variant];
-  const requestBudget = new SpeedRequestBudget();
+  const requestBudget = new SpeedRequestBudget(variant === "C" ? 2_000_000 : 1_000_000);
   const metrics = { variant, requests: 0, usageRequests: 0, input: 0, output: 0,
     conservativeModelMicroUsd: 0, requestLog: [] as any[], requestBudget: requestBudget.snapshot(),
     limitReason: null as null | { code: string; message: string } };
@@ -31,6 +32,7 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
     metrics.requests++; update(); // Provider attempts, never locally rejected response events.
     const started = performance.now();
     const log: any = { model: body.model, httpStatus: null, requestId: null, firstTextMs: null,
+      startedAt: new Date().toISOString(), firstTextAt: null,
       complete: false, outputChars: 0, outputText: "", error: null };
     metrics.requestLog.push(log);
     try {
@@ -40,6 +42,7 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
         try { for await (const event of data as any) {
           if (event.type === "response.output_text.delta") {
             log.firstTextMs ??= performance.now() - started; log.outputChars += event.delta.length;
+            log.firstTextAt ??= new Date().toISOString();
             log.outputText += event.delta;
           }
           const u = event.response?.usage;
@@ -101,6 +104,26 @@ export function speedLab(deps: {
       () => process.env.NODE_ENV === "development", profile));
   }
   const owners = new Map<string, { lab: RetellSecretaryLab; owner: string; requestId: string }>();
+  const savedAt = new Map<string, number>();
+  const saves = new Map<string, Promise<void>>();
+  const archiveStatus = new Map<string, string>();
+  const archiveReport = (owner: string, report: RetellReport, force = false): Promise<void> => {
+    if (report.profileId !== "C") return Promise.resolve();
+    if (saves.has(report.id)) return force
+      ? saves.get(report.id)!.then(() => archiveReport(owner, report, true))
+      : saves.get(report.id)!;
+    if (!force && Date.now() - (savedAt.get(report.id) ?? 0) < 5000) return Promise.resolve();
+    // Snapshot now: the mutable engine continues receiving deltas during SQL I/O.
+    const snapshot = JSON.parse(JSON.stringify(report));
+    archiveStatus.set(report.id, "pending");
+    const pending = devReportArchive().then(a => a.save(owner, snapshot)).then(() => {
+      savedAt.set(report.id, Date.now()); archiveStatus.set(report.id, "saved");
+    }).catch(() => {
+      archiveStatus.set(report.id, "failed");
+      console.error("[SecretaryLab] DEV_REPORT_ARCHIVE_WRITE_FAILED");
+    }).finally(() => saves.delete(report.id));
+    saves.set(report.id, pending); return pending;
+  };
   const variantOf = (value: unknown): SpeedVariant => {
     if (value === undefined) return "A";
     if (value !== "A" && value !== "B" && value !== "C") throw Object.assign(Error("SPEED_VARIANT_INVALID"), { status: 400 });
@@ -110,6 +133,7 @@ export function speedLab(deps: {
     const row = owners.get(id); if (!row) return;
     const r = row.lab.report(row.owner, id).report;
     if (r.status !== "ended") return;
+    await archiveReport(row.owner, r, true);
     const m = (r.engine as any)?.speed;
     const seconds = r.providerDurationSeconds ?? Math.min(300, (Date.parse(r.endedAt!) - Date.parse(r.createdAt)) / 1000 + 5);
     const debit = m?.requestBudget ? speedSettlement(m, seconds) : m && m.requests <= 12 && m.requests === m.usageRequests
@@ -129,7 +153,11 @@ export function speedLab(deps: {
     async readiness(owner: string) {
       for (const id of Array.from(owners.keys())) await finish(id);
       const state = await budget.state();
-      return { ...await labs.get("A")!.readiness(owner),
+      const stored = await (await devReportArchive()).list(owner);
+      const live = Array.from(labs.values()).flatMap(l => l.reports(owner));
+      const history = Array.from(new Map([...stored, ...live].map(r => [r.id, withLimit(r)])).values())
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      return { ...await labs.get("A")!.readiness(owner), history, persistentCReports: true,
         speedVariants: (["A", "B", "C"] as const).map(id => ({ id,
           label: `${id} · ${speedProfiles[id].model} · ${speedProfiles[id].reasoning} · ${speedProfiles[id].maxOutput}` })),
         speedBudget: { limitUsd: state.limitMicroUsd / 1e6, spentUsd: state.spentMicroUsd / 1e6,
@@ -172,7 +200,12 @@ export function speedLab(deps: {
     }
     report(owner: string, id: string) {
       const result = find(owner, id).report(owner, id);
-      return { ...result, report: withLimit(result.report) };
+      void archiveReport(owner, result.report);
+      return { ...result, report: { ...withLimit(result.report), archiveStatus: archiveStatus.get(id) } };
+    }
+    async archivedReport(owner: string, id: string) {
+      const report = await (await devReportArchive()).get(owner, id);
+      return report ? { report } : undefined;
     }
     reports(owner: string) { return Array.from(labs.values()).flatMap(l => l.reports(owner)).map(withLimit); }
     async connected(owner: string, id: string) { return find(owner, id).connected(owner, id); }
@@ -181,7 +214,11 @@ export function speedLab(deps: {
       await find(owner, id).stop(owner, id, reason);
       await finish(id); return this.report(owner, id).report;
     }
-    sweep() { for (const l of Array.from(labs.values())) l.sweep(); }
+    sweep() {
+      for (const row of Array.from(owners.values()))
+        for (const report of row.lab.reports(row.owner)) void archiveReport(row.owner, report);
+      for (const l of Array.from(labs.values())) l.sweep();
+    }
   }
   return new SpeedLab();
 }

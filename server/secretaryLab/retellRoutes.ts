@@ -19,8 +19,16 @@ export function registerRetellLabRoutes(app: Express, lab: RetellSecretaryLab = 
   app.post(`${base}/sessions`, async (req, res) => {
     try { res.status(201).json(await lab.create(req.user!.id, req.body)); } catch (e) { error(res, e); }
   });
-  app.get(`${base}/sessions/:id`, (req, res) => {
-    try { res.json(lab.report(req.user!.id, req.params.id)); } catch (e) { error(res, e); }
+  app.get(`${base}/sessions/:id`, async (req, res) => {
+    try {
+      try { res.json(lab.report(req.user!.id, req.params.id)); }
+      catch (e: any) {
+        if (e?.status !== 404) throw e;
+        const archived = await lab.archivedReport(req.user!.id, req.params.id);
+        if (!archived) throw e;
+        res.json(archived);
+      }
+    } catch (e) { error(res, e); }
   });
   app.post(`${base}/sessions/:id/connected`, async (req, res) => {
     if (Object.keys(req.body ?? {}).length) return res.status(400).json({ error: "Only an empty body is accepted" });

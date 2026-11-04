@@ -1,7 +1,7 @@
 import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 export type SpeedBudgetState = { limitMicroUsd: number; probeDebitMicroUsd: number;
-  runs: Record<string, { variant: string; reserved: number; spent: number; status: "reserved" | "settled" | "unknown" }> };
+  runs: Record<string, { variant: string; reserved: number; spent: number; admissionMicroUsd?: number; status: "reserved" | "settled" | "unknown" }> };
 const initial = (): SpeedBudgetState => ({ limitMicroUsd: 5_000_000, probeDebitMicroUsd: 100_000, runs: {} });
 /** Owner-approved $5 -> $10 series, persisted across restarts. No reset/refill HTTP method.
  * Crash locks fail closed; they are never removed based on a guessed TTL. */
@@ -13,11 +13,13 @@ export class SpeedBudget {
       if (![5_000_000, 10_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
         throw Error("SPEED_BUDGET_INVALID");
       for (const r of Object.values(s.runs) as any[]) {
+        const cap = r?.admissionMicroUsd ?? 2_000_000;
         if (!r || !["A", "B", "C"].includes(r.variant) || !["reserved", "settled", "unknown"].includes(r.status) ||
           !Number.isSafeInteger(r.reserved) || !Number.isSafeInteger(r.spent) || r.reserved < 0 || r.spent < 0 ||
-          r.reserved + r.spent > 2_000_000 ||
-          (r.status === "reserved" ? r.reserved !== 2_000_000 || r.spent !== 0 : r.reserved !== 0) ||
-          (r.status === "unknown" && r.spent !== 2_000_000)) throw Error("SPEED_BUDGET_INVALID");
+          ![2_000_000, 3_000_000].includes(cap) || (cap === 3_000_000 && r.variant !== "C") ||
+          r.reserved + r.spent > cap ||
+          (r.status === "reserved" ? r.reserved !== cap || r.spent !== 0 : r.reserved !== 0) ||
+          (r.status === "unknown" && r.spent !== cap)) throw Error("SPEED_BUDGET_INVALID");
       }
       return s;
     } catch (e: any) { if (e.code === "ENOENT") return initial(); throw e; }
@@ -56,8 +58,9 @@ export class SpeedBudget {
       // New runtime: <= $1 model envelopes (including unknown/cancelled requests)
       // + $1 protective voice envelope / 5 minutes, enforced before requests.
       // Legacy admissions retain their original accounting; no history repricing.
-      if (used + 2_000_000 > s.limitMicroUsd) throw Error("SPEED_SERIES_BUDGET_EXHAUSTED");
-      s.runs[id] = { variant, reserved: 2_000_000, spent: 0, status: "reserved" };
+      const cap = variant === "C" ? 3_000_000 : 2_000_000;
+      if (used + cap > s.limitMicroUsd) throw Error("SPEED_SERIES_BUDGET_EXHAUSTED");
+      s.runs[id] = { variant, reserved: cap, spent: 0, status: "reserved", ...(cap === 3_000_000 ? { admissionMicroUsd: cap } : {}) };
     });
   }
   settle(id: string, debit: number | null) {

@@ -13,6 +13,9 @@ export function speedLimitText(code: string) {
 }
 type Reservation = { inputBound: number; maxOutput: number; held: number; state: "pending" | "known" | "unknown" };
 export class SpeedRequestBudget {
+  constructor(private envelope = SPEED_MODEL_ENVELOPE) {
+    if (![1_000_000, 2_000_000].includes(envelope)) throw Error("SPEED_ENVELOPE_INVALID");
+  }
   private rows: Reservation[] = [];
   private stopped = false;
   private verifiable = true;
@@ -22,7 +25,7 @@ export class SpeedRequestBudget {
     throw new SpeedLimitError(code);
   }
   snapshot() {
-    return { version: 1, modelEnvelopeMicroUsd: SPEED_MODEL_ENVELOPE,
+    return { version: 1, modelEnvelopeMicroUsd: this.envelope,
       voiceEnvelopeMicroUsd: SPEED_VOICE_ENVELOPE, admitted: this.rows.length, denied: this.denied,
       totalHeldMicroUsd: this.rows.reduce((n, r) => n + r.held, 0),
       unknown: this.rows.filter(r => r.state === "unknown").length,
@@ -39,7 +42,7 @@ export class SpeedRequestBudget {
     if (body.service_tier && body.service_tier !== "default") this.deny("SPEED_SERVICE_TIER_DENIED");
     const inputBound = bytes + 4096;
     const held = inputBound * 5 + body.max_output_tokens * 10;
-    if (this.snapshot().totalHeldMicroUsd + held > SPEED_MODEL_ENVELOPE)
+    if (this.snapshot().totalHeldMicroUsd + held > this.envelope)
       this.deny("SPEED_SESSION_BUDGET_EXHAUSTED");
     const row: Reservation = { inputBound, maxOutput: body.max_output_tokens, held, state: "pending" };
     this.rows.push(row); return row;
@@ -60,11 +63,12 @@ export class SpeedRequestBudget {
 }
 export function speedSettlement(m: any, seconds: number): number | null {
   const b = m?.requestBudget;
-  if (!b || b.version !== 1 || !b.verifiable || b.modelEnvelopeMicroUsd !== SPEED_MODEL_ENVELOPE ||
+  const envelope = m?.variant === "C" ? 2_000_000 : SPEED_MODEL_ENVELOPE;
+  if (!b || b.version !== 1 || !b.verifiable || ![SPEED_MODEL_ENVELOPE, envelope].includes(b.modelEnvelopeMicroUsd) ||
     b.voiceEnvelopeMicroUsd !== SPEED_VOICE_ENVELOPE ||
     !Number.isSafeInteger(b.admitted) || b.admitted < 0 || b.admitted !== m.requests ||
     !Number.isSafeInteger(b.totalHeldMicroUsd) || b.totalHeldMicroUsd < 0 ||
-    b.totalHeldMicroUsd > SPEED_MODEL_ENVELOPE || !Number.isFinite(seconds) || seconds < 0 || seconds > 300)
+    b.totalHeldMicroUsd > b.modelEnvelopeMicroUsd || !Number.isFinite(seconds) || seconds < 0 || seconds > 300)
     return null; // Retain entire admission on crash/corruption/unbounded evidence.
   return Math.ceil(b.totalHeldMicroUsd + seconds / 300 * SPEED_VOICE_ENVELOPE);
 }

@@ -6,8 +6,9 @@ description: Pricing assumptions and scope agreed for the private Dev voice comp
 The owner approved interruption-buffer experiments ONLY in Dev variant C,
 raising the existing series ceiling to $10, without resetting historical costs.
 Voice, language, greeting and Retell's normal yielding to interruptions stay
-unchanged. Ambiguous continuation must be treated as new information; production
-transfer needs a separate explicit owner decision.
+unchanged. Ambiguity must not leak a stale answer, but can require a silent
+regeneration rather than a voiced announcement. Production transfer needs a
+separate explicit owner decision.
 
 **Why:** the owner wants to avoid throwing away an answer on acknowledgements,
 but considers speaking stale facts worse than a conservative regeneration.
@@ -26,6 +27,25 @@ effects that otherwise looked like failed response reuse.
 **How to apply:** use the same validated question audio for before/after,
 separate ASR failures and overlapping sound from clean latency samples, and
 retain failed attempts rather than silently replacing them with successful ones.
+
+Separate “the answer must be regenerated” from “the caller needs a spoken
+bridge”. Budget/rate limits for bridges belong to caller phrases and substantive
+secretary turns, not Retell response IDs.
+
+**Why:** the owner's real conversation exposed repeated ASR requests within the
+same phrase, creating unwanted filler speech and exhausting cancellation holds.
+
+**How to apply:** a benign ASR extension may invalidate generated text silently;
+never make every safe-side cancellation announce itself. The owner approved a
+$2 model envelope for Dev C only, inside the unchanged $10 series ceiling.
+
+The owner explicitly requested automatic permanent Dev C reports in the Dev
+database so phone-based review no longer requires downloading JSON.
+
+**Why:** manually exporting each conversation prevented practical analysis.
+
+**How to apply:** preserve owner isolation and existing production boundaries;
+do not silently change the separate opt-in comparison archive's 30-day retention.
 
 Retell may connect a custom LLM and generate its greeting while the web call is still `registered`, before the browser joins.
 

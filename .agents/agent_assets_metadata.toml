@@ -3449,3 +3449,17 @@ mtime_ms = 1793759548153
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d1178255-11fc-49b6-a10d-f882223aa65d/60ff28e5-2a6c-4393-ae23-2970f3567d33"
 storage_version_token = "1793759575220652"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "bGs4DQ8Ti0iRuRFQhnjOJ"
+uri = "file://generated-artifacts/Katya_Dev_C_quiet_bridges_review.zip"
+type = "unspecified"
+title = "Катя · Dev C: исправления и проверка"
+description = "ZIP Клавдию: diff, исходники, 4 зелёных шарда, бесплатный replay, проверка Dev-хранилища и ограничения голосового теста. Без ключей и частной расшифровки."
+logical_id = "dde2b56c-2c6c-4462-a2e1-5ec0bf8bb4c4"
+content_hash = "sha256:8a604e144bca331aab77d9dd3c8640277fd780b2bfec248f95bcbfa85046ed5b"
+size = 70664
+mtime_ms = 1793763398477
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dde2b56c-2c6c-4462-a2e1-5ec0bf8bb4c4/5aa7b002-2a53-4ae0-8621-f61088992b77"
+storage_version_token = "1793763404184041"
+content_type = "application/octet-stream"

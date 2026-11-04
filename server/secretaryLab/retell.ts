@@ -54,6 +54,7 @@ export interface RetellLabProfile {
 }
 /** Dev-only web sessions. No dialer, phone endpoints, persistent call history, or tools. */
 export class RetellSecretaryLab {
+  async archivedReport(_owner: string, _id: string): Promise<{ report: RetellReport } | undefined> { return undefined; }
   private sessions = new Map<string, Session>();
   private attempts = new Map<string, number[]>();
   private setup?: ReturnType<RetellApi["ensureAgent"]>;

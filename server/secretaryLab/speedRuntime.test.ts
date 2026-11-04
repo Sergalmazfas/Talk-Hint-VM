@@ -49,7 +49,7 @@ it("stream cancellation keeps its envelope; local money refusals never call Open
   expect(m.usageRequests).toBe(0);
   expect(m.requestBudget).toMatchObject({ unknown: m.requests, denied: 1 });
   expect(m.limitReason.code).toBe("SPEED_SESSION_BUDGET_EXHAUSTED");
-  expect(m.requestBudget.totalHeldMicroUsd).toBeLessThanOrEqual(1_000_000);
+  expect(m.requestBudget.totalHeldMicroUsd).toBeLessThanOrEqual(2_000_000);
   expect(m.requestLog.every((r: any) => r.httpStatus === 200 && r.requestId === "fixture-request-id")).toBe(true);
 });
 it("a compact lab override can never affect a telephone engine", () => {
