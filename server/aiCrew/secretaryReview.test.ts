@@ -93,15 +93,15 @@ describe("Secretary analysis: disabled by default, existing owner scope", () => 
     expect(() => secretaryEvidence("goal", Array(151).fill({ text: "a" }), "x")).toThrow();
     expect(() => secretaryEvidence("my medical record", [{ text: "private" }], "x")).toThrow("PRIVATE_SOURCE");
   });
-  it("redacts names, phones, email and addresses while keeping different entities distinct", () => {
+  it("redacts private people/phones/home addresses, preserving public companies and brands", () => {
     const e = secretaryEvidence("ask Michelin price", [
-      { role: "guest", text: "John: email mike@example.com, +1 (760) 237-8845, 123 Main Street. Goodyear is $150" },
-      { role: "guest", text: "Иван сказал: Michelin is $160" }], "abc123");
+      { role: "guest", text: "John: email mike@example.com, +1 (760) 237-8845, my home address is 123 Main Street. Goodyear is $150" },
+      { role: "guest", text: "Иван сказал: Michelin is $160" }], "abc123", ["Иван"]);
     const text = JSON.stringify(e);
-    for (const p of ["John", "Иван", "Michelin", "Goodyear", "mike@example.com", "760", "123 Main"])
+    for (const p of ["John", "Иван", "mike@example.com", "760", "123 Main"])
       expect(text).not.toContain(p);
-    expect(text).toContain("$150"); expect(e.points[0]).toMatch(/ENTITY_/);
-    expect(e.transcript[0].text).not.toContain(e.points[0].match(/\[ENTITY_\d+\]/)![0]);
+    expect(text).toContain("$150"); expect(e.points[0]).toContain("Michelin");
+    expect(text).toContain("Goodyear");
   });
   it("keeps critical business qualifiers and confirmations rather than redacting NEW or Yes as names", () => {
     const e = secretaryEvidence("Ask about a NEW tire", [{ role: "guest", text: "Yes, NEW tires are available Tomorrow" }], "abc123");
@@ -134,7 +134,7 @@ describe("Secretary chain, evidence and budget", () => {
     } };
     const runtime = new CrewRuntime(h.store, provider, "production", () => new Date(at));
     await runtime.tick(); await runtime.tick(); await runtime.tick();
-    expect(calls.map(c => c.max)).toEqual([2000, 4000, 2000]);
+    expect(calls.map(c => c.max)).toEqual([6000, 4000, 2000]);
     expect(calls.map(c => c.model)).toEqual(models);
     const s = h.state(); expect(s.runs.every(r => r.status === "done")).toBe(true);
     expect(s.secretaryBudget!["2026-11"]).toEqual({ spent: 480, reserved: 0, warning: false });

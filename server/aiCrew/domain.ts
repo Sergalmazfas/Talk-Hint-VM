@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { technicalExpectation, expectedResultSchema, type ExpectedResult } from "../../shared/journalExpectation";
 import { closeStalledHintPilot, HINT_AGENTS, pilotReviewComplete, prepareHintPilot, startHintPilot,
   STALLED_PILOT_OUTCOME, type HintPilot } from "./hintPilot";
 import type { HintEvidence } from "./hintEvidence";
@@ -57,7 +58,7 @@ export type CrewState = {
   agents: Agent[]; tasks: Task[]; runs: Run[];
   schedules: { taskId: string; agentId: string; everyMinutes: number; nextAt: string }[];
   budget: Record<string, { spent: number; reserved: number }>;
-  journal: { id: string; at: string; actor: string; kind: string; detail: unknown }[];
+  journal: { id: string; at: string; actor: string; kind: string; detail: unknown; expectedResult?: ExpectedResult }[];
   documents: { id: string; taskId: string; runId: string; agentId: string; at: string; text: string; status: "proposed" }[];
   publications: { taskId: string; commit: string; fixes: string; at: string; actor: string }[];
   probe: { status: "started" | "done" | "unknown"; modelId: string; at: string; usage?: unknown } | null;
@@ -65,8 +66,8 @@ export type CrewState = {
 export const initialState = (): CrewState => ({ version: 1, revision: 0,
   control: { enabled: false, epoch: 0, dailyLimitMicroUsd: 0, staleHours: 24 },
   agents: [], tasks: [], runs: [], schedules: [], budget: {}, journal: [], documents: [], publications: [], probe: null });
-export function log(s: CrewState, actor: string, kind: string, detail: unknown, at: string) {
-  s.journal.push({ id: randomUUID(), at, actor, kind, detail });
+export function log(s: CrewState, actor: string, kind: string, detail: unknown, at: string, expectedResult: ExpectedResult = technicalExpectation) {
+  s.journal.push({ id: randomUUID(), at, actor, kind, detail, expectedResult: expectedResultSchema.parse(expectedResult) });
   const taskId = (detail as any)?.taskId;
   const task = typeof taskId === "string" ? s.tasks.find(t => t.id === taskId) : null;
   if (task && !task.closed) task.steps.at(-1)!.updatedAt = at;

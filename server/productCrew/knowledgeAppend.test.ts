@@ -46,7 +46,9 @@ const entry = () => ({ id: "RETRO-ONE", title: "Разбор", eventDatePrecisio
   eventPeriod: ["2026-11-02", "2026-11-03"], registeredAt: "2026-11-04T01:00:00.000Z",
   actualAuthor: "Replit", classification: "reported_fact", source: "owner", fact: "Факт владельца",
   evidenceRefs: [], targetRoleIds: Object.keys(knowledgeBindings), verification: "По сообщению владельца",
-  productChangeAuthorized: false, newRuntimeExecution: false, before: "Было", learned: "Узнали", next: "Проверить" });
+  productChangeAuthorized: false, newRuntimeExecution: false, before: "Было", learned: "Узнали", next: "Проверить",
+  expectedResult: { text: "Катя ≤ 6 реплик", appliesTo: "secretary_call",
+    metrics: [{ metric: "katya_turns", operator: "lte", value: 6, unit: "turns" }] } });
 const journalArgs = (s: ProjectModelState) => ({ ...common(s),
   documentHash: textHash(get(s, journalDocumentId).text), entries: [entry()] });
 const bindArgs = (s: ProjectModelState, id = role) => ({ ...common(s), roleId: id,
@@ -66,11 +68,20 @@ const lessonArgs = (s: ProjectModelState, id = role) => ({ ...common(s), roleId:
   bookHash: textHash(get(s, knowledgeBindings[id as keyof typeof knowledgeBindings]).text), lessons: [lesson(id)] });
 
 describe("append-only journal and employee knowledge", () => {
+  it("requires expectations only for new records; recording time is server-owned", () => {
+    const s = fixture(), { expectedResult, ...legacy } = entry();
+    expect(inputs.append_journal_entries.safeParse({ ...journalArgs(s), entries: [legacy] }).success).toBe(false);
+    expect(inputs.append_journal_entries.safeParse({ ...journalArgs(s), entries: [{ ...entry(), expectedResultRecordedAt: "2000-01-01T00:00:00Z" }] }).success).toBe(false);
+    const next = apply(s, "append_journal_entries", journalArgs(s));
+    const recorded = JSON.parse(get(next, journalDocumentId).text).crewJournalEntries[0];
+    expect(Number.isFinite(Date.parse(recorded.expectedResultRecordedAt))).toBe(true);
+    expect(recorded.expectedResult).toEqual(expectedResult);
+  });
   it("preserves >50k canonical journal, all unknown keys and old history; MCP returns full text and volumes", async () => {
     const s = fixture(), old = JSON.parse(get(s, journalDocumentId).text);
     const next = apply(s, "append_journal_entries", journalArgs(s));
     const saved = JSON.parse(get(next, journalDocumentId).text);
-    expect(saved).toEqual({ ...old, crewJournalEntries: [entry()] });
+    expect(saved).toEqual({ ...old, crewJournalEntries: [{ ...entry(), expectedResultRecordedAt: expect.any(String) }] });
     expect(next.operatingModel).toEqual(s.operatingModel);
     const r = await new ProductCrewService({ read: async () => next } as ModelRepository)
       .call("owner", "get_document", { documentId: journalDocumentId });
@@ -129,10 +140,11 @@ describe("append-only journal and employee knowledge", () => {
   });
   it("retains manual review provenance in journal supplements and refuses duplicate supplement IDs", () => {
     const s = fixture(), supplement = { id: "REVIEW-ONE", title: "Ручная сверка",
-      text: "Не ответ агента, обязанности не изменены.", status: "proposed", actualAuthor: "Replit", agentExecution: false };
+      text: "Не ответ агента, обязанности не изменены.", status: "proposed", actualAuthor: "Replit", agentExecution: false,
+      expectedResult: entry().expectedResult };
     const args = { ...journalArgs(s), supplements: [supplement] };
     const next = apply(s, "append_journal_entries", args);
-    expect(JSON.parse(get(next, journalDocumentId).text).crewJournalSupplements).toEqual([supplement]);
+    expect(JSON.parse(get(next, journalDocumentId).text).crewJournalSupplements).toEqual([{ ...supplement, expectedResultRecordedAt: expect.any(String) }]);
     expect(() => apply(s, "append_journal_entries", { ...args, supplements: [supplement, supplement] })).toThrow("ID");
   });
   it("refuses oversized output, corrupt arrays, missing profiles, stale profile hash and book collisions", () => {

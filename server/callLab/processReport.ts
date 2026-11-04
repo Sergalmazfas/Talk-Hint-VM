@@ -96,8 +96,13 @@ function renderProcessLetterContent(report: any): { subject: string; body: strin
     const section = reports.map(actionReportText).join("\n\n");
     if (report.mode === "secretary") return {
       subject: "Катя · рапорт по фактам звонка",
-      body: ["РАПОРТ ПО ЗВОНКУ", section,
-        "AI-оценка качества не выполнялась; техническое соединение не доказывает выполнение задачи.",
+      body: [...(report.secretary_summary ? [[
+        `Что узнали: ${String(report.secretary_summary.learned).replace(/[\r\n]+/g, " ")}`,
+        `Что пошло не так: ${String(report.secretary_summary.wentWrong).replace(/[\r\n]+/g, " ")}`,
+        `Что сделать: ${String(report.secretary_summary.nextAction).replace(/[\r\n]+/g, " ")}`,
+      ].join("\n")] : []), "РАПОРТ ПО ЗВОНКУ", section,
+        report.secretary_summary ? "Разбор команды не является приёмкой владельцем; техническое соединение само по себе не доказывает выполнение задачи." :
+          "AI-оценка качества не выполнялась; техническое соединение не доказывает выполнение задачи.",
         ...productLetterSection(report)].join("\n\n"),
     };
     const legacy = renderLegacyProcessLetter(report);

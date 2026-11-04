@@ -3533,3 +3533,31 @@ mtime_ms = 1793769839227
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9e96e125-a8c9-4123-b80c-1203531945ae/5bc47dfe-795b-4906-8d01-cd74ca878a81"
 storage_version_token = "1793769859661213"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "Mk9K8wBkNADNvOwal_NGh"
+uri = "file://generated-artifacts/TalkHint_Secretary_Checklist_Review_Clavdiy.zip"
+type = "unspecified"
+title = "Секретарь: чек-лист и надёжный разбор — ZIP Клавдию"
+description = "Diff и исходники, полный прогон четырьмя шардами, proposed-уроки Лёве и Глебу, исправленное поручение Pilot 208, численная раскладка промпта и ограничения. Без Publish и production-записей."
+logical_id = "8f748f97-848a-45ab-95c2-328a8f33088e"
+content_hash = "sha256:deb3b37b06d5d142e22df8dd4366b4d1f2af57f4bb8ccb2a7dac021c90a1141f"
+size = 300967
+mtime_ms = 1793780775487
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8f748f97-848a-45ab-95c2-328a8f33088e/3453689e-e0e1-43f4-8b20-a800d8ee6a33"
+storage_version_token = "1793780781146949"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "lIlBtgfffFyHhQrH40Yyk"
+uri = "file://generated-artifacts/TalkHint_Secretary_Checklist_Expectations_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию: чек-лист и сверка ожиданий"
+description = "Обновлённый общий пакет: код, diff, числовые ожидания журнала, независимая сверка Лёвы/Томы, полный прогон 4 шардами и proposed-уроки. Production не изменялась, Publish не выполнялся."
+logical_id = "bdb65186-227b-4cba-99f8-a537da3f05d0"
+content_hash = "sha256:697daaa40f6f0dacfe0e22d2d831e75810e4a254c9b83e1b850c6e422723d156"
+size = 396614
+mtime_ms = 1793782291315
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/bdb65186-227b-4cba-99f8-a537da3f05d0/8b894f50-315b-4584-bd67-8956b46324f0"
+storage_version_token = "1793782308419748"
+content_type = "application/octet-stream"

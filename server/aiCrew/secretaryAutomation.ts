@@ -6,6 +6,8 @@ import { secretaryCharacters, secretaryEvidence, secretaryHash, queueSecretaryRe
 import { claimCReview, rolloutState } from "../secretary/phoneRollout";
 import { phoneMetrics } from "../secretary/phoneMetrics";
 import { RetellApi } from "../secretaryLab/retellApi";
+import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
+import { selectCallExpectations, callExpectation } from "./expectations";
 
 type Binding = { store: () => StateStore; model: () => Promise<ProjectModelState>; environment: string };
 let binding: Binding | undefined;
@@ -13,6 +15,7 @@ export function bindSecretaryAutomation(value: Binding) { binding = value; }
 export type SecretaryOutcome = null | { pending: true } | {
   pending: false; succeeded: string[]; failed: string[]; needsOwner: string[];
   taskId?: string; costMicroUsd: number; tokens: { input: number; output: number };
+  summaryTop?: { learned: string; wentWrong: string; nextAction: string };
 };
 /** Runs only for the existing owner-authorized call-lab source and existing mail outbox. */
 export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
@@ -48,9 +51,14 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
     let evidence, characters;
     try {
       if (typeof task.instruction !== "string") throw Error();
+      const identity = confirmedSecretaryOwnerName(ownerId);
+      const ownerNames = [identity?.en, identity?.ruGenitive].filter((s): s is string => !!s)
+        .flatMap(s => [s, ...s.split(/\s+/)]);
       evidence = secretaryEvidence(task.instruction, task.transcript_turns,
-        recordedCallVersion(call)?.commit ?? "unknown");
-      characters = secretaryCharacters(await dependencies.model());
+        recordedCallVersion(call)?.commit ?? "unknown", ownerNames);
+      const model = await dependencies.model();
+      characters = secretaryCharacters(model);
+      evidence.expectations = selectCallExpectations(model, call.started_at);
     } catch { return unavailable("SECRETARY_SOURCE_OR_OWNER_CHARACTER_UNAVAILABLE"); }
     if (cSelection) {
       const engine = call.metadata.secretaryEngine ?? call.metadata.retellPhone.engine;
@@ -67,7 +75,11 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       const selected = rolloutState(s).reviews.find(r => r.callRef === ref);
       if (selected) selected.taskId = queued.id;
       log(s, "call-lab", "secretary_call_queued", { taskId: queued.id, callRef: ref,
-        evidenceHash: queued.secretaryReview!.evidenceHash, ownerAcceptance: false }, now.toISOString());
+        evidenceHash: queued.secretaryReview!.evidenceHash, ownerAcceptance: false,
+        expectationSnapshot: evidence.expectations }, now.toISOString(), callExpectation(evidence.expectations));
+      log(s, "production-server", "preparation_assessment_proposed", { taskId: queued.id,
+        recipient: "P.PREP", preparedBy: "deterministic checklist audit, not an AI Gleb run",
+        assessment: evidence.preparation, status: "proposed", ownerAcceptance: false }, now.toISOString());
     });
     return { pending: true };
   }
@@ -123,7 +135,8 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       ordinal: current.ordinal, taskId: existing!.id, verdict: p.verdict ?? "not_confirmed",
       authorId: p.authorId, reviewId: p.reviewId, summaryId: p.summaryId,
       measurements: p.evidence.cRollout?.measurements, ownerAcceptance: false,
-    }, now.toISOString());
+      expectations: p.evidence.expectations,
+    }, now.toISOString(), callExpectation(p.evidence.expectations));
   });
   const doc = (id?: string) => state.documents.find(d => d.id === id && d.taskId === existing!.id)?.text;
   // These are proposals/QA, never owner acceptance or evidence that code/product changed.
@@ -131,18 +144,39 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
   try { summary = JSON.parse(doc(p.summaryId) ?? "null"); } catch {}
   try { author = JSON.parse(doc(p.authorId) ?? "null"); } catch {}
   try { review = JSON.parse(doc(p.reviewId) ?? "null"); } catch {}
+  const future = (text: unknown) => /(?:звонк[а-я]*|calls?)\s*2\s*[-–—]\s*5/i.test(String(text));
+  const gaps = (items: any) => Array.isArray(items) ? items.filter(x => !future(x)) : [];
   const summaryText = p.error || !summary ? "Формат сводки не подтверждён"
-    : `${summary.outcome}; договорено: ${p.verdict === "confirmed" ? JSON.stringify(summary.agreed) : "не подтверждено"}; осталось: ${JSON.stringify(summary.remaining)}; не проверено: ${JSON.stringify(summary.unverified)}`;
+    : `${summary.outcome}; договорено: ${p.verdict === "confirmed" ? JSON.stringify(summary.agreed) : "не подтверждено"}; осталось: ${JSON.stringify(gaps(summary.remaining))}; не проверено: ${JSON.stringify(gaps(summary.unverified))}`;
+  const brief = (value: unknown, fallback: string) => typeof value === "string" && value.trim() && !future(value) ?
+    value.replace(/[\r\n]+/g, " ").slice(0, 300) : fallback;
   return { pending: false, ...cost,
+    summaryTop: {
+      learned: brief(summary?.learned, p.verdict === "confirmed" ? summary?.outcome ?? "Разбор завершён" : "Результаты требуют проверки: разбор не подтверждён"),
+      wentWrong: brief(p.error ?? (p.verdict !== "confirmed" ? "Тома не подтвердила разбор Лёвы" : summary?.wentWrong), "Подтверждённых проблем не отмечено"),
+      nextAction: brief(summary?.nextAction, "Проверить расхождения по расшифровке; не менять продукт без решения владельца"),
+    },
     succeeded: [`Лёва: запрос разбора выполнен; ${p.authorValid ? "ссылки на цитаты проверены" : "формат/доказательства не подтверждены"}`,
       ...(p.authorValid ? author.points.map((r: any) => `Пункт ${r.index + 1}: ${r.status}; цитата ${r.turn}: ${r.quote ?? "не проверено"}; ${r.reason}`) : []),
       `Тома: ${p.verdict === "confirmed" ? "разбор подтверждён" : "разбор не подтверждён"}; другая модель, не приёмка продукта`,
-      `Тома — расхождения: ${JSON.stringify(review?.disagreements ?? ["формат не подтверждён"])}`,
+      `Тома — расхождения: ${JSON.stringify(gaps(review?.disagreements ?? ["формат не подтверждён"]))}`,
+      `Манера — Лёва: ${JSON.stringify(author?.manners ?? "не измерено")}; Тома: ${JSON.stringify(review?.manners ?? "не проверено")}`,
+      `Ожидание из журнала: ${JSON.stringify(p.evidence.expectations ?? "не зафиксировано до звонка")}`,
+      ...(p.evidence.expectations?.targets.length ?
+        [`Ожидание → факт → сошлось/не сошлось/почему: Лёва ${JSON.stringify(author?.expectationChecks ?? [])}; Тома ${JSON.stringify(review?.expectationChecks ?? [])}`] :
+        [`Сверка ожидания: не проверено — нет доступного числового ожидания, зафиксированного до звонка (${p.evidence.expectations?.status ?? "старая запись без снимка"}). Порог не выдумывался.`]),
+      `Пункт → ответ → закрыт: ${JSON.stringify(author?.dialogue?.checklist ?? "не проверено")}`,
+      `Реплики Кати / лишние: ${author?.dialogue?.katyaTurns ?? "не измерено"} / ${author?.dialogue?.excessTurns ?? "не измерено"}`,
+      `Идеальная короткая версия (гипотеза): ${JSON.stringify(author?.dialogue?.ideal ?? [])}; независимая версия Томы: ${JSON.stringify(review?.dialogue ?? "не проверено")}`,
+      `Предложения Лёвы/Севы, принимает только владелец: ${JSON.stringify([...(author?.proposals ?? []), ...(summary?.proposals ?? [])])}`,
+      ...(p.evidence.cRollout ? [`Наблюдение C: звонок ${p.evidence.cRollout.ordinal}/5. ` +
+        (p.evidence.cRollout.ordinal < 5 ? `Следующие звонки ${p.evidence.cRollout.ordinal + 1}–5 — будущие наблюдения, не пробел данных текущего звонка.` :
+          "Пять наблюдений собраны; качество каждого проверяется отдельно.")] : []),
       `Сева → Мария и владелец (предложение, не приёмка): ${summaryText}`,
       `Стоимость разбора: $${(spent / 1e6).toFixed(6)}; токены вход/выход: ${tokens.input}/${tokens.output}`,
       `Бюджет Секретаря за месяц: $${((monthly?.spent ?? 0) / 1e6).toFixed(6)} / $${(cfg.monthlyLimitMicroUsd / 1e6).toFixed(2)}`],
     failed: [...(p.verdict !== "confirmed" ? ["Выводы не подтверждены независимой проверкой"] : []),
-      `Язык начала (оценка по тексту): ${author?.openingLanguage ?? "не измерено"}; ошибки распознавания/не проверено: ${JSON.stringify(author?.recognitionIssues ?? [])} / ${JSON.stringify(author?.unverified ?? [])}`,
+      `Язык начала (оценка по тексту): ${author?.openingLanguage ?? "не измерено"}; ошибки распознавания/не проверено: ${JSON.stringify(author?.recognitionIssues ?? [])} / ${JSON.stringify(gaps(author?.unverified))}`,
       "Аудио, акцент и длительность пауз этим текстовым разбором не проверены",
       ...(p.error ? [p.error] : []),
       ...(warning ? ["Достигнуто 80% месячного лимита отдела, включая unknown"] : [])],

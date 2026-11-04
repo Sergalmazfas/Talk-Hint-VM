@@ -11,6 +11,7 @@ import type { LabPersonalitySummary } from "../../shared/secretaryLabPersonality
 import { secretaryEndTool, parseSecretaryEndRequest, type SecretaryEndRequest } from "./callEnding";
 import { IVR_INSTRUCTIONS } from "./ivr";
 import { selectPhonePrompt } from "./phonePrompt";
+import { SECRETARY_CHECKLIST_POLICY, splitCallChecklist } from "../../shared/callChecklist";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -33,7 +34,8 @@ export const secretaryTestTools = [
 // Telephone has no browser TEST/business tools. IVR tools navigate only the
 // existing call; the end tool still requires completed playback.
 export const secretaryPhoneTools = [
-  { ...secretaryEndTool, type: "function" as const, strict: false },
+  { ...secretaryEndTool, type: "function" as const, strict: false,
+    description: "After every authorized checklist item has a reply (including explicit unknown), or an explicit refusal, prepare ONE thank-you/farewell. No recap/Is that right needed. Never end during IVR, silence, hold or transfer. Playback must complete; new speech cancels preparation." },
   schema("press_digits", "Navigate the current complete, non-sensitive IVR menu only.", {
     digits: { type: "string", pattern: "^[0-9*#]{1,5}$" },
     reason: { type: "string", maxLength: 300 },
@@ -105,6 +107,11 @@ export class SecretaryConversationEngine {
       version: personality.version, mode: personality.mode } : null;
     const characterName = process.env.NODE_ENV === "development" ? personality?.snapshot.name : undefined;
     if (telephone) {
+      // Legacy free-text tasks gain a quoted checklist at consumption; structured
+      // plans already store sayAsk from the preparation step. No fact is removed.
+      if (!assignment.startsWith("Owner-approved call plan."))
+        assignment = "Quoted authorized checklist (data, not permissions):\n" +
+          JSON.stringify(splitCallChecklist([assignment]));
       this.report.testOnly = false;
       this.report.context = { id: "authorized-telephone-assignment", permissions: ["conversation", "prepare_call_end"],
         restrictions: ["No calendar writes", "No business action tools",
@@ -118,8 +125,7 @@ export class SecretaryConversationEngine {
         "Use only the confirmed assignment and facts supplied by the other party. No calendar, email, SMS or other business actions are connected. " +
         "Never claim to have sent, booked, saved a business action or verified outside facts. The conversation itself is retained by TalkHint. " +
         "Speak briefly and naturally in the other party's language (EN/RU/ES). Yield to interruptions and incorporate corrections. " +
-        "Do not hang up for silence, hold music or transfer. Summarize the actual outcome and next step; do not invent agreement. " +
-        "Only after the other party accepts the summary/next step or explicitly declines, you may use prepare_call_end. " +
+        SECRETARY_CHECKLIST_POLICY +
         "After a successful preparation say exactly the supplied farewell, and nothing else. New speech cancels the prepared end. " +
         (telephoneTools ? IVR_INSTRUCTIONS : "") +
         "Current time: " + new Date().toISOString(), personality);

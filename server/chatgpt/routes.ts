@@ -15,7 +15,8 @@ import { callApprovalResource, hostUiSupport, LEGACY_CALL_APPROVAL_RESOURCES, ui
 import { packagedSecretarySkills, secretaryInstructions, TALKHINT_MCP_VERSION, TALKHINT_PLUGIN_VERSION, TALKHINT_CONNECTION_TITLE } from "./pluginWorkflow";
 import { actionsExchange } from "./actionsOAuth";
 import { talkHintActionsSchema, registerActionOperations, CALL_PLAN_OPENAPI } from "./actionsSchema";
-import { callPlanSchema, secretaryInstruction } from "../../shared/callPlan";
+import { callPlanSchema, checklistCallPlan, secretaryInstruction } from "../../shared/callPlan";
+import { splitCallChecklist } from "../../shared/callChecklist";
 
 export interface IntegrationConfig {
   enabled: boolean; origin: string; clientId: string; redirectUri: string;
@@ -457,6 +458,7 @@ export function registerChatGPTIntegration(
     if (args.includeTranscript) need(claims, "calls:transcript");
     switch (name) {
       case "save_hint_plan": {
+        args.plan = checklistCallPlan(args.plan);
         if (config.actions ? claims.sub !== config.actions.ownerId : !await backend.isCallPlanOwner?.(claims.sub))
           return fail(403, "Owner call preparation access required");
         if (args.plan.executor !== "hint") return fail(400, "Hint executor required");
@@ -465,6 +467,7 @@ export function registerChatGPTIntegration(
           note: "Saved for the next matching outgoing Hint call, expires in 24 hours. No call started." };
       }
       case "prepare_secretary_plan": {
+        args.plan = checklistCallPlan(args.plan);
         if (config.actions ? claims.sub !== config.actions.ownerId : !await backend.isCallPlanOwner?.(claims.sub))
           return fail(403, "Owner call preparation access required");
         const instruction = secretaryInstruction(args.plan);
@@ -504,6 +507,9 @@ export function registerChatGPTIntegration(
         return finalCallResult(await backend.task(claims.sub, id, true));
       }
       case "prepare_call": {
+        // Same approval and permissions; store free-text tasks as short lines.
+        if (typeof args.instruction === "string")
+          args.instruction = splitCallChecklist([args.instruction]).join("\n");
         const { recipient, ...nativeArgs } = args;
         const requested = CALL_INPUT.parse(nativeArgs);
         const call = CALL.parse(backend.prepare ? await backend.prepare(claims.sub, requested) : requested);

@@ -59,6 +59,7 @@
 - [Secretary Lab boundary](secretary-lab-boundary.md) — central admin bench uses the actual agent/voice; simulated transport never proves PSTN or iPhone reliability.
 - [Secretary voice policy](secretary-voice-policy.md) — Retell + Engine approved for the native phone pilot/default; GPT selectable; preserve old attempts and separate Translator/Copilot.
 - [Катя C: перенос](katya-c-rollout-approval.md) — владелец разрешил телефонный C; Merritt/языки/IVR неизменны, полный промпт при >5000, откат и проверка пяти звонков.
+- [Секретарь: чек-лист и proposed](secretary-checklist-policy.md) — короткие вопросы и закрытие unknown; Глеб/Лёва/Сева предлагают, только владелец принимает.
 - [Secretary IVR autonomy](secretary-ivr-autonomy.md) — каждое меню отдельно; manager по цели, help-push не блокирует; предел пяти цифр сохранять, разговор и характер не менять.
 - [Secretary personalities](secretary-personality-direction.md) — structure-first catalog; owner/number assignments, no auto-Katya, character separate from facts, permissions and voices.
 - [Отдел «Секретарь»](secretary-department-structure.md) — Мария → Сева → Лёва/Тома/каталог; имена proposed; общие инженер, дежурный и HR, без копии Кати.

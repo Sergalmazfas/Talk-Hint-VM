@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
-import { callPlanSchema, type CallPlan } from "../../shared/callPlan";
+import { callPlanSchema, checklistCallPlan, type CallPlan } from "../../shared/callPlan";
 
 export const planHash = (plan: CallPlan) => createHash("sha256").update(JSON.stringify(callPlanSchema.parse(plan))).digest("hex");
 export const PLAN_TTL_MS = 24 * 60 * 60_000;
@@ -36,7 +36,7 @@ export class CallPlanStore {
     finally { c.release(); }
   }
   async save(owner: string, requestId: string, raw: unknown) {
-    const plan = callPlanSchema.parse(raw);
+    const plan = checklistCallPlan(callPlanSchema.parse(raw));
     if (plan.executor !== "hint") throw Object.assign(new Error("Hint executor required"), { status: 400 });
     const hash = planHash(plan);
     return this.transaction(owner, async c => {

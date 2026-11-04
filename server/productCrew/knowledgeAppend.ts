@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ModelCommand, ProjectModelState, ModelDocument } from "../../shared/projectModel";
 import { ModelError } from "../projectModel/modelError";
 import { documentTextLimit } from "../projectModel/documentVolumes";
+import { expectedResultSchema } from "../../shared/journalExpectation";
 
 export const journalDocumentId = "DOC-TALKHINT-IMPROVEMENT-JOURNAL";
 export const knowledgeBindings = {
@@ -29,6 +30,7 @@ export const journalEntrySchema = z.object({
   targetRoleIds: z.array(roleId).min(1).max(7), verification: text(),
   productChangeAuthorized: z.literal(false), newRuntimeExecution: z.literal(false),
   before: text(), learned: text(), next: text(),
+  expectedResult: expectedResultSchema,
 }).strict();
 export const knowledgeLessonSchema = z.object({
   id: text(160), roleId, name: text(160), status: z.literal("proposed"),
@@ -43,7 +45,7 @@ export const knowledgeAppendInputs = {
     entries: z.array(journalEntrySchema).min(1).max(20),
     supplements: z.array(z.object({ id: text(160), title: text(240),
       text: text(12000), status: z.literal("proposed"), actualAuthor: z.literal("Replit"),
-      agentExecution: z.literal(false) }).strict()).min(1).max(10).optional() }).strict(),
+      agentExecution: z.literal(false), expectedResult: expectedResultSchema }).strict()).min(1).max(10).optional() }).strict(),
   append_knowledge_lessons: z.object({ ...base, roleId, bookHash: digest,
     lessons: z.array(knowledgeLessonSchema).min(1).max(20) }).strict(),
   bind_employee_knowledge_book: z.object({ ...base, roleId, profileHash: digest,
@@ -99,8 +101,9 @@ export function knowledgeAppendCommands(state: ProjectModelState, name: keyof ty
     const a = knowledgeAppendInputs[name].parse(raw);
     const doc = checkedDocument(state, journalDocumentId, a.documentHash), value = parse(doc);
     if (value.format !== "talkhint.improvement-journal") fail(409, "Неизвестный формат журнала.");
-    let next = append(value, "crewJournalEntries", a.entries);
-    if (a.supplements) next = append(next, "crewJournalSupplements", a.supplements);
+    const recordedAt = new Date().toISOString();
+    let next = append(value, "crewJournalEntries", a.entries.map(e => ({ ...e, expectedResultRecordedAt: recordedAt })));
+    if (a.supplements) next = append(next, "crewJournalSupplements", a.supplements.map(e => ({ ...e, expectedResultRecordedAt: recordedAt })));
     commands.push(save(doc, next));
     return { commands, roleId: "head-product", targetId: "head-product" };
   }

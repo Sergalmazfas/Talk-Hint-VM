@@ -7,6 +7,7 @@ import { crewDiagnostic } from "./dispatcher";
 import { enforceTestSafety, validGrant, unknownTestRun, stopTest, TEST_ACTOR } from "./testGrant";
 import { isSupersededChargedUnknown } from "./failedPilot";
 import { finishSecretaryRun, secretaryInput, secretaryReserve, secretarySettle } from "./secretaryReview";
+import { secretaryOutputSchema } from "./secretaryOutput";
 
 export class CrewRuntime {
   private active = new Map<string, AbortController>();
@@ -65,12 +66,18 @@ export class CrewRuntime {
           log(s, agent.agentId, "secretary_input_too_large", { taskId: task.id, runId: run.id }, at);
           return null;
         }
-        const maxTokens = agent.agentId === "secretary-qa" ? 4000 : hintMaxOutput(agent.agentId);
+        const canComplete = !!task.secretaryReview && agent.agentId === "secretary-lab-engineer";
+        const maxTokens = canComplete ? 6000 : agent.agentId === "secretary-qa" ? 4000 : hintMaxOutput(agent.agentId);
+        const schema = task.secretaryReview ? secretaryOutputSchema(task.secretaryReview.status) : undefined;
         // No tools, images or caching. Thinking (required by Opus 5.5) and
         // visible text share maxTokens and the same billed output rate.
         // Conservative UTF-8 byte bound + framing; owner-frozen rates.
-        const reserve = (Buffer.byteLength(input + CREW_SYSTEM, "utf8") + 4096) * agent.inputMicroUsdPerToken +
-          maxTokens * agent.outputMicroUsdPerToken;
+        const requestBound = Buffer.byteLength(input + CREW_SYSTEM, "utf8") +
+          (schema ? Buffer.byteLength(JSON.stringify(schema), "utf8") : 0) + 4096;
+        // Reserve BOTH known requests before the first: completion adds at most
+        // 64k bytes of serialized partial + 4096 framing, never an unbounded retry.
+        const reserve = (requestBound * (canComplete ? 2 : 1) + (canComplete ? 64000 + 4096 : 0)) *
+          agent.inputMicroUsdPerToken + maxTokens * (canComplete ? 3 : 1) * agent.outputMicroUsdPerToken;
         if (!Number.isSafeInteger(reserve) || reserve <= 0) throw Error("UNPRICED_AGENT");
         const day = at.slice(0, 10), b = s.budget[day] ??= { spent: 0, reserved: 0 };
         if (series && s.testGrant!.spent + s.testGrant!.reserved + reserve > s.testGrant!.limit) {
@@ -99,7 +106,8 @@ export class CrewRuntime {
           modelId: agent.modelId, ...(series ? { testSeriesId: series, startedAt: at } : {}) });
         log(s, series ? TEST_ACTOR : agent.agentId, "run_reserved", { runId: run.id, taskId: run.taskId,
           agentId: agent.agentId, day, reserve, modelId: agent.modelId, maxOutputTokens: maxTokens }, at);
-        return { run: structuredClone(run), agent: { ...agent }, input, maxTokens };
+        if (task.secretaryReview) task.secretaryReview.outputVersion = 2;
+        return { run: structuredClone(run), agent: { ...agent }, input, maxTokens, schema, canComplete };
       });
       if (!claimed) return;
       const controller = new AbortController();
@@ -132,9 +140,36 @@ export class CrewRuntime {
             (claimed.run.secretaryMonth && !gate.secretarySettings?.enabled) ||
             (claimed.run.testSeriesId && !validGrant(gate, +this.now()))) throw Error("STOPPED");
         stage = "provider";
-        const result = await this.provider.message(claimed.agent.modelId, claimed.input, claimed.maxTokens, controller.signal);
+        let result = await this.provider.message(claimed.agent.modelId, claimed.input, claimed.maxTokens, controller.signal,
+          claimed.schema ? { schema: claimed.schema } : undefined);
         observedHttp = result.http;
         if (observedHttp) await recordResponse(observedHttp, "response_received");
+        if (claimed.canComplete && result.stopReason === "max_tokens" && result.model === claimed.agent.modelId &&
+            Buffer.byteLength(JSON.stringify({ partial: result.text }), "utf8") <= 63000) {
+          const fresh = await this.store.read();
+          if (!fresh.control.enabled || fresh.control.epoch !== claimed.run.epoch ||
+              !fresh.secretarySettings?.enabled || controller.signal.aborted ||
+              fresh.runs.find(r => r.id === claimed.run.id)?.status !== "running") throw Error("STOPPED");
+          await this.store.change(s => log(s, claimed.agent.agentId, "secretary_output_completion_requested",
+            { runId: claimed.run.id, attempt: 2, reason: "max_tokens", firstUsage: result.usage }, this.now().toISOString()));
+          stage = "completion";
+          const completed = await this.provider.message(claimed.agent.modelId, claimed.input, claimed.maxTokens * 2,
+            controller.signal, { schema: claimed.schema!, partial: result.text }).catch(async error => {
+              // The first request was already paid. Even an explicit 4xx on
+              // completion must not refund the whole run as a zero-cost reject.
+              const http = error instanceof CrewProviderError ?
+                error.http : { httpStatus: null, requestId: null };
+              observedHttp = http;
+              await recordResponse(http, "completion_unconfirmed");
+              throw new CrewProviderError("completion_unconfirmed", http);
+            });
+          observedHttp = completed.http;
+          if (observedHttp) await recordResponse(observedHttp, "completion_response_received");
+          result = { ...completed, usage: {
+            input_tokens: result.usage.input_tokens + completed.usage.input_tokens,
+            output_tokens: result.usage.output_tokens + completed.usage.output_tokens,
+          } };
+        }
         stage = "settlement";
         await this.store.change(s => {
           const run = s.runs.find(r => r.id === claimed.run.id)!;
@@ -161,7 +196,7 @@ export class CrewRuntime {
           if (cost > run.reserved!) { s.control.enabled = false; s.control.epoch++; run.status = "discarded"; }
           if (run.status === "done") {
             const doc = { id: randomUUID(), taskId: run.taskId, runId: run.id, agentId: run.agentId,
-              at: run.completedAt, text: result.text.slice(0, 16000), status: "proposed" as const };
+              at: run.completedAt, text: run.secretaryMonth ? result.text : result.text.slice(0, 16000), status: "proposed" as const };
             s.documents.push(doc);
             const task = s.tasks.find(t => t.id === run.taskId);
             if (task && !task.closed && task.phase === "analysis") {
@@ -171,7 +206,13 @@ export class CrewRuntime {
                   run.status = "discarded"; task.secretaryReview.status = "blocked";
                   task.secretaryReview.error = "MODEL_ID_MISMATCH";
                   doc.text = "MODEL_ID_MISMATCH: результат не подтверждён";
-                } else finishSecretaryRun(s, task, doc.id, doc.text, run.completedAt);
+                } else {
+                  if (result.stopReason === "max_tokens" || result.stopReason === "refusal")
+                    task.secretaryReview.error = result.stopReason === "max_tokens" ?
+                      "OUTPUT_TRUNCATED_UNVERIFIED" : "PROVIDER_REFUSAL_UNVERIFIED";
+                  finishSecretaryRun(s, task, doc.id,
+                    ["max_tokens", "refusal"].includes(result.stopReason ?? "") ? "null" : doc.text, run.completedAt);
+                }
                 log(s, run.agentId, "secretary_review_handoff", { taskId: task.id,
                   documentId: doc.id, status: task.secretaryReview.status, ownerAcceptance: false }, run.completedAt);
               } else if (task.hintPilot) {

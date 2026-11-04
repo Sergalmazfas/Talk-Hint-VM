@@ -207,6 +207,7 @@ export async function hintLabTick(pool: Pool, dependencies: {
             break processClaim; // Continue draining unrelated mail; no preliminary/duplicate report.
           }
           if (review) {
+            notice.secretary_summary = review.summaryTop;
             const action = r ?? { id: `secretary-crew:${job.key}`, role: "SECRETARY" as const,
               at: new Date(call.ended_at).toISOString(), assigned: "Разобрать завершённый звонок по поручению",
               outcome: "partial" as const, succeeded: [], failed: [], needsOwner: [], source: `ai_crew:${review.taskId ?? "unavailable"}` };

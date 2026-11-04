@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type { CrewState, Task } from "./domain";
 import type { ProjectModelState } from "../../shared/projectModel";
 import { HINT_AGENTS } from "./hintPilot";
+import { validSecretaryOutput } from "./secretaryOutput";
+import { callPlanSchema } from "../../shared/callPlan";
+import { splitCallChecklist } from "../../shared/callChecklist";
+import { validExpectationChecks, type ExpectationSnapshot } from "./expectations";
 
 export const SECRETARY_AGENTS = [
   { ...HINT_AGENTS[0], agentId: "secretary-lab-engineer" },
@@ -11,7 +15,10 @@ export const SECRETARY_AGENTS = [
 export type SecretaryEvidence = {
   version: 1; points: string[]; transcript: { speaker: string; text: string }[];
   codeVersion: string; limitations: string[];
+  expectations?: ExpectationSnapshot;
   cRollout?: { ordinal: number; measurements: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics> };
+  preparation?: { source: "structured" | "free-text"; originalItems: number; checklistItems: number; paragraphExpanded: boolean;
+    proposedChecklist: string[]; status: "proposed"; acceptor: "owner" };
 };
 export type SecretaryReview = {
   ownerId: string; callRef: string; evidence: SecretaryEvidence; evidenceHash: string;
@@ -19,6 +26,7 @@ export type SecretaryReview = {
   status: "author" | "review" | "summary" | "reported" | "blocked";
   authorId?: string; reviewId?: string; summaryId?: string;
   verdict?: "confirmed" | "not_confirmed"; authorValid?: boolean; error?: string;
+  outputVersion?: 2;
 };
 export type SecretarySettings = { ownerId: string; enabled: boolean; activatedAt: string;
   monthlyLimitMicroUsd: number };
@@ -45,14 +53,13 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
     for (const name of names.filter(n => n.trim().length > 1).sort((a, b) => b.length - a.length))
       s = s.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "giu"), alias);
     return s.replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, alias)
-      .replace(/(?:https?:\/\/|www\.)[^\s]+/gi, alias)
       .replace(/(?<!\d)(?:\+?\d[\s().-]*){7,}(?!\d)/g, alias)
-      .replace(new RegExp("\\b(?:my name is|this is|speaking with|i am|i'm)\\s+[\\p{L}'-]+(?:\\s+[\\p{L}'-]+)?", "giu"), "[INTRODUCTION]")
-      .replace(new RegExp("меня зовут\\s+[\\p{L}'-]+(?:\\s+[\\p{L}'-]+)?", "giu"), "[INTRODUCTION]")
-      .replace(new RegExp("\\b(?:ask for|speak to|talk to|his name is|her name is|thanks)\\s+[\\p{L}'-]+", "giu"), "[NAME_REFERENCE]")
-      .replace(new RegExp("\\b\\d{1,6}\\s+(?:[\\p{L}.-]+\\s+){1,4}(?:street|st|avenue|ave|road|rd|lane|ln|drive|dr|blvd|court|ct)\\b", "giu"), alias)
-      .replace(new RegExp("(?<![\\p{L}_\\[])(?:\\p{Lu}\\p{Ll}+|\\p{Lu}{2,})(?![\\p{L}_\\]])", "gu"),
-        match => businessWords.has(match.toLowerCase()) ? match : alias(match));
+      .replace(new RegExp("(?:(?:[Mm]y name is|[Tt]his is|[Ss]peaking with|[Ii] am|[Ii]['’]m|[Мм]еня зовут|[Aa]sk for|[Ss]peak to|[Tt]alk to|[Hh]is name is|[Hh]er name is)\\s+)([\\p{Lu}][\\p{L}'-]*(?:\\s+[\\p{Lu}][\\p{L}'-]*)?)", "gu"),
+        (whole, person) => /^(?:Pilot(?:FlyingJ)?|Flying|Michelin|Goodyear|TA|Travel|NEW|USED|Yes|No)\b/i.test(person) ? whole :
+          businessWords.has(person.toLowerCase()) ? whole : whole.replace(person, alias(person)))
+      .replace(new RegExp("(^|[.!?]\\s+)([\\p{Lu}][\\p{Ll}]+):", "gu"),
+        (whole, prefix, person) => businessWords.has(person.toLowerCase()) ? whole : prefix + alias(person) + ":")
+      .replace(new RegExp("(?:my home address is|my personal address is|i live at|мой домашний адрес|я живу)\\s*[:—-]?\\s*[^\\n.!?]+", "giu"), alias);
   };
   if (!goal.trim() || goal.length > 4000 || !Array.isArray(transcript) ||
       transcript.length === 0 || transcript.length > 150) throw Error("SECRETARY_SOURCE_UNAVAILABLE");
@@ -65,10 +72,19 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
       : /^(user|caller|guest|human|собеседник)$/i.test(t.speaker ?? t.role ?? "") ? "guest" : "unknown";
     return { speaker, text: redact(t.text) };
   });
-  const points = redact(goal).split(/\n+|(?<=[.!?;])\s+/).map(s => s.trim()).filter(Boolean);
+  let items = [goal], source: "structured" | "free-text" = "free-text";
+  if (goal.startsWith("Owner-approved call plan.")) {
+    try {
+      const plan = callPlanSchema.parse(JSON.parse(goal.slice(goal.indexOf("\n") + 1)));
+      items = plan.sayAsk.length ? plan.sayAsk : [plan.goal]; source = "structured";
+    } catch { throw Error("SECRETARY_SOURCE_UNAVAILABLE"); }
+  }
+  const points = splitCallChecklist(items).map(redact);
   if (points.length > 20 || Buffer.byteLength(JSON.stringify(turns), "utf8") > 24000)
     throw Error("SECRETARY_SOURCE_TOO_LARGE");
   return { version: 1, points, transcript: turns, codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
+    preparation: { source, originalItems: items.length, checklistItems: points.length, paragraphExpanded: points.length > items.length,
+      proposedChecklist: points, status: "proposed", acceptor: "owner" },
     limitations: ["PII redacted; compare only the supplied excerpt", "No audio proof of pauses, accent or recognition errors",
       "Unknown names/private facts cannot be certified absent by regex; source must be an explicitly approved business-call excerpt"] };
 }
@@ -146,6 +162,28 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
       ? 'Тома: независимо проверь ВСЕ пункты по исходной расшифровке, а не доверию Лёве. Ответ JSON: {"verdict":"confirmed|not_confirmed","checks":[{"index":0,"quote":"","turn":0,"reason":""}],"disagreements":[],"unverified":[]}. Неверный/неполный разбор не подтверждать.'
       : 'Сева: сведи разбор и независимую проверку. Ответ JSON: {"outcome":"","agreed":[],"remaining":[],"unverified":[]}. Неподтверждённые выводы не объявляй договорённостью. Получатель Мария и письмо владельцу; это не приёмка продукта.';
   return JSON.stringify({ ownerCharacter: p.characters[agentId], instruction: instruction +
+    (index < 2 ? " expectationChecks: для КАЖДОЙ цели из evidence.expectations.targets вернуть {entryId,metric,actual:number|null," +
+    "status:сошлось|не сошлось|не проверено,reason}. Точный факт сравнить с operator/value/unit из журнала. " +
+    "Тома независимо пересчитывает показатели, а не копирует Лёву. Неизвестный показатель — null/не проверено с причиной. " +
+    "Нет заранее записанного ожидания — пустой список, цифры не выдумывать. Неуспех ожидания НЕ означает, что сам разбор неверен. " :
+    " Сева: в трёх строках сводки отличать подтверждённый разбор от достижения числовых целей. " +
+    "Если ожидание не сошлось или не проверено — явно указать это и причину; не писать «всё выполнено». ") +
+    " dialogue: checklist[{index,answer,closed,quote,turn}], katyaTurns, excessTurns, hypothetical=true, " +
+    "ideal[{speaker:secretary|guest,text,sourceTurns:[индексы]}]. Для каждого пункта: точный ответ и закрыт ли он; " +
+    "«не знаю» закрывает вопрос как unknown, но НЕ означает успех поручения. " +
+    "katyaTurns — фактическое число реплик secretary в выдержке; excessTurns — доказуемо лишние. " +
+    "ideal — только гипотетическая короткая версия, guest.text должен дословно встречаться в sourceTurns. " +
+    "Тома независимо пересчитывает и проверяет достижимость идеальной версии. " +
+    "Лёва и Сева могут предложить до 5 конкретных правил: proposals[{status:proposed,acceptor:owner," +
+    "target:katya_checklist|preparation,rule,before,after}]. Это предложения, не внедрение. " +
+    "Не предлагать изменения начала/приветствия, голоса, языка, IVR или безопасности. " +
+    " Оцени манеру: manners — шесть отдельных измерений repeat_questions (повторы вопросов), multi_questions " +
+    "(максимум вопросов в одной реплике), repeat_intro (повтор вступления), recap_words (число слов итогового пересказа), " +
+    "thank_you, got_it (число лишних/повторных благодарностей и связок). Каждый: kind, value (целое либо null если не измерено), " +
+    "quote, turn, reason. Тома пересчитывает по исходным репликам, сверяет цитаты и указывает расхождения. " +
+    "Если value>0 — обязательна точная цитата и индекс; нулевой результат тоже объясни; null не равен нулю. " +
+    "Сева: добавь learned / wentWrong / nextAction — три короткие строки владельцу. " +
+    "Будущие звонки 2–5 — последующее наблюдение, НЕ недостающие данные этого звонка; не включать их в unverified." +
     (p.evidence.cRollout ? " Контроль первых пяти звонков C: разложи задержку по доступным этапам, перезапуски и связки; " +
       "сверь все числа/суммы после исправлений собеседника. Тома проверяет это независимо по исходным данным. " +
       "Замеры не выдумывать: TTFT не звук; отсутствие аудио отмечать «не измерено». " +
@@ -163,21 +201,49 @@ function citationsValid(rows: any, p: SecretaryReview, allowUnverified = true) {
 export function finishSecretaryRun(s: CrewState, task: Task, documentId: string, text: string, at: string) {
   const p = task.secretaryReview!;
   let result: any; try { result = JSON.parse(text); } catch { result = null; }
+  const formatValid = p.outputVersion !== 2 || validSecretaryOutput(p.status, result);
+  const expectationsValid = p.outputVersion !== 2 || p.status === "summary" ||
+    validExpectationChecks(p.evidence.expectations, result, p.evidence.transcript.filter(t => t.speaker === "secretary").length);
+  const mannerEvidence = p.outputVersion !== 2 || (Array.isArray(result?.manners) &&
+    result.manners.every((m: any) => m && (m.value === null || m.value === 0 ||
+      typeof m.quote === "string" && m.quote.trim() && Number.isInteger(m.turn) &&
+      p.evidence.transcript[m.turn]?.text.includes(m.quote))));
+  const d = result?.dialogue;
+  const dialogueValid = p.outputVersion !== 2 || p.status === "summary" || !!d &&
+    d.katyaTurns === p.evidence.transcript.filter(t => t.speaker === "secretary").length &&
+    d.excessTurns <= d.katyaTurns && Array.isArray(d.checklist) &&
+    d.checklist.length === p.evidence.points.length && new Set(d.checklist.map((r: any) => r.index)).size === d.checklist.length &&
+    d.checklist.every((r: any) => r && Number.isInteger(r.index) && r.index >= 0 && r.index < p.evidence.points.length &&
+      (!r.closed || typeof r.quote === "string" && r.quote.trim() && p.evidence.transcript[r.turn]?.text.includes(r.quote))) &&
+    Array.isArray(d.ideal) && d.ideal.every((r: any) => r && Array.isArray(r.sourceTurns) &&
+      r.sourceTurns.every((i: number) => Number.isInteger(i) && !!p.evidence.transcript[i]) &&
+      (r.speaker !== "guest" || r.sourceTurns.some((i: number) => p.evidence.transcript[i]?.text.includes(r.text))));
   if (p.status === "author") {
     p.authorId = documentId;
-    p.authorValid = citationsValid(result?.points, p) &&
+    p.authorValid = formatValid && expectationsValid && mannerEvidence && dialogueValid && citationsValid(result?.points, p) &&
       result.points.every((r: any) => ["выполнено", "частично", "нет", "не проверено"].includes(r.status));
     p.status = "review"; enqueue(s, task, 1, at);
   } else if (p.status === "review") {
     p.reviewId = documentId;
-    p.verdict = p.authorValid && result?.verdict === "confirmed" && citationsValid(result?.checks, p, false) &&
+    const author = s.documents.find(d => d.id === p.authorId && d.taskId === task.id);
+    let sameFacts = true;
+    if (p.outputVersion === 2 && p.evidence.expectations?.targets.length) {
+      try {
+        const a = JSON.parse(author?.text ?? "null");
+        sameFacts = p.evidence.expectations.targets.every(t => {
+          const find = (v: any) => v?.expectationChecks?.find((r: any) => r.entryId === t.entryId && r.metric === t.metric);
+          return find(a)?.actual === find(result)?.actual && find(a)?.status === find(result)?.status;
+        });
+      } catch { sameFacts = false; }
+    }
+    p.verdict = formatValid && expectationsValid && sameFacts && mannerEvidence && dialogueValid && p.authorValid && result?.verdict === "confirmed" && citationsValid(result?.checks, p, false) &&
       Array.isArray(result.disagreements) && result.disagreements.length === 0
       ? "confirmed" : "not_confirmed";
     p.status = "summary"; enqueue(s, task, 2, at);
   } else if (p.status === "summary") {
     p.summaryId = documentId; p.status = "reported";
     task.steps.at(-1)!.holder = "head-product";
-    if (!result || typeof result.outcome !== "string" || !Array.isArray(result.agreed) ||
+    if (!formatValid || !result || typeof result.outcome !== "string" || !Array.isArray(result.agreed) ||
         !Array.isArray(result.remaining) || !Array.isArray(result.unverified)) p.error = "SUMMARY_FORMAT_UNVERIFIED";
   } else throw Error("SECRETARY_STATE_CHANGED");
 }
