@@ -76,6 +76,30 @@ it("the fixed $30 -> $40 top-up preserves unknowns, unblocks the $3 C reserve, a
   expect((await b.state()).reservedMicroUsd).toBe(3_000_000);
   await expect(b.reserve("parallel", "C")).rejects.toThrow("SPEED_SESSION_ACTIVE_OR_UNKNOWN");
 });
+it("manual rehearsals ignore monetary exhaustion, keep historical unknowns, and never invent a $3 debit", async () => {
+  const { b, path } = await budget();
+  vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "");
+  await b.approveTenDollarSeries(); await b.approveThirtyDollarSeries();
+  for (let i = 0; i < 9; i++) { await b.reserve(`legacy-${i}`, "C"); await b.settle(`legacy-${i}`, null); }
+  const before = await b.state();
+  await expect(b.reserve("still-blocked-on-old-stand", "C")).rejects.toThrow("SPEED_SERIES_BUDGET_EXHAUSTED");
+  await b.reserveTimed("rehearsal", "C", "voice");
+  const active = await b.state();
+  expect(active.runs.rehearsal).toMatchObject({ reserved: 0, spent: 0, durationLimitMs: 180_000, policy: "timed-rehearsal" });
+  await b.reserveTimed("review", "C", "review"); // Reading/review does not prevent a voice transition.
+  await expect(b.reserveTimed("parallel", "C", "voice")).rejects.toThrow("REHEARSAL_SESSION_ACTIVE_OR_UNKNOWN");
+  await b.settle("rehearsal", null);
+  await b.reserveTimed("next", "C", "voice");
+  await b.settle("next", 1200);
+  const after = await new SpeedBudget(path).state();
+  for (const [id, row] of Object.entries(before.runs)) expect(after.runs[id]).toEqual(row);
+  expect(after.runs.rehearsal).toMatchObject({ status: "unknown", spent: 0, costUnknown: true });
+  expect(after.spentMicroUsd).toBe(before.spentMicroUsd + 1200);
+  expect(after.limitMicroUsd).toBe(before.limitMicroUsd);
+  await expect(b.reserveTimed("rehearsal", "C", "voice")).rejects.toThrow("SPEED_REQUEST_ALREADY_RESERVED_NO_RETRY");
+  vi.stubEnv("NODE_ENV", "production");
+  expect(() => b.reserveTimed("prod", "C", "voice")).toThrow("SPEED_DEV_ONLY");
+});
 it("$40 top-up refuses production, deployment and unexpected previous limits", async () => {
   const { b } = await budget();
   vi.stubEnv("NODE_ENV", "production");

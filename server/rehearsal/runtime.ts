@@ -3,7 +3,7 @@ import type { RehearsalScene, RehearsalResult } from "../../shared/rehearsal";
 import { RetellSecretaryLab, type RetellLabProfile, type RetellReport } from "../secretaryLab/retell";
 import { RetellEngineApi, retellEngineRegistry, engineCallbackBase } from "../secretaryLab/retellEngine";
 import { speedEngine, speedSeriesBudget } from "../secretaryLab/speedRuntime";
-import { speedSettlement } from "../secretaryLab/speedRequestBudget";
+import { speedSettlement, timedRehearsalSettlement } from "../secretaryLab/speedRequestBudget";
 import { rehearsalBindings } from "../secretaryLab/rehearsalBinding";
 import { defaultRehearsalScenes, rehearsalCodeHash, rehearsalInstruction, rehearsalVersions, sceneFromInput, sceneFromText, type FrozenVersion } from "./catalog";
 import { RehearsalStore, requireRehearsalDev, type SavedRehearsal } from "./store";
@@ -36,7 +36,8 @@ export class RehearsalRuntime {
       !process.env.ANTHROPIC_API_KEY) throw Error("REHEARSAL_PROVIDER_NOT_CONFIGURED"); }
     catch { reason = "Для репетиции нужны закрытый App Storage и Retell/OpenAI/Anthropic в Secrets. Платный запуск заблокирован."; }
     return { ready: !reason, reason, settings, versions: rehearsalVersions(), scenes: [...defaultRehearsalScenes(), ...saved.scenes],
-      history: saved.history, budget: { limitUsd: b.limitMicroUsd / 1e6, spentUsd: b.spentMicroUsd / 1e6,
+      history: saved.history, budget: { enforcement: "duration", durationSeconds: 180,
+        unknownCostRuns: b.unknownCostRuns ?? 0, limitUsd: b.limitMicroUsd / 1e6, spentUsd: b.spentMicroUsd / 1e6,
         reservedUsd: b.reservedMicroUsd / 1e6, remainingUsd: b.remainingMicroUsd / 1e6 } };
   }
   async saveScene(owner: string, input: unknown) {
@@ -60,14 +61,14 @@ export class RehearsalRuntime {
     const api = new RetellEngineApi(engineCallbackBase, undefined, version.speed, version.hash.slice(0, 20));
     const profile: RetellLabProfile = {
       agentName: `TalkHint Rehearsal DEV · ${version.hash.slice(0, 20)}`, mode: "rehearsal",
-      durationMs: version.speed === "C" ? 600_000 : 300_000,
+      durationMs: 180_000,
       waitingAudio: (id, active, speaking) => retellEngineRegistry.waitingAudio(id, active, speaking),
       waitingPlaybackEnded: id => retellEngineRegistry.waitingPlaybackEnded(id),
       check: async () => ({ mode: "rehearsal" }),
       reserve: (who, instruction, id) => {
         rehearsalBindings.set(id, { waiting: version.waiting, buffered: version.speed === "C", manners: version.manners,
           create: (w, text) => speedEngine(w, text, version.speed, personality, {
-            productionRules: version.productionRules, waiting: version.waiting, manners: version.manners, noLoop: version.noLoop,
+            productionRules: version.productionRules, waiting: version.waiting, manners: version.manners, noLoop: version.noLoop, timed: true,
           }) });
         return retellEngineRegistry.reserve(who, instruction, id);
       },
@@ -96,7 +97,7 @@ export class RehearsalRuntime {
       if (!scene || !version?.available) failure("REHEARSAL_SELECTION_CHANGED", 400);
       if (input.sceneHash !== scene.hash || input.versionHash !== version.hash) failure("REHEARSAL_SNAPSHOT_CHANGED_RELOAD");
       const { lab, api, selection } = await this.lab(owner, scene, version);
-      await this.budget.reserve(input.clientRequestId, version.speed); // shared ledger, no new allowance
+      await this.budget.reserveTimed(input.clientRequestId, version.speed, "voice");
       let admitted = false;
       try {
         const created = await lab.create(owner, { instruction: rehearsalInstruction(scene), consent: true,
@@ -140,7 +141,8 @@ export class RehearsalRuntime {
       if (fresh.status === "ended") {
         const metrics = (fresh.engine as any)?.speed;
         const seconds = fresh.providerDurationSeconds ?? Math.max(0, (Date.parse(fresh.endedAt!) - Date.parse(fresh.createdAt)) / 1000 + 5);
-        await this.settle(live.row.requestId, metrics?.requestBudget ? speedSettlement(metrics, seconds) : null);
+        await this.settle(live.row.requestId, metrics?.requestBudget?.policy === "time-only"
+          ? timedRehearsalSettlement(metrics, seconds) : metrics?.requestBudget ? speedSettlement(metrics, seconds) : null);
       }
       await this.store.save(owner, live.row);
       return { report: live.row.report };
@@ -218,7 +220,7 @@ export class RehearsalRuntime {
     if (row.report.rehearsal.review.status !== "not_started") return { report: row.report };
     if (row.report.status !== "ended" || !row.report.turns.length) failure("REHEARSAL_REVIEW_NEEDS_ENDED_TRANSCRIPT");
     const requestId = randomUUID();
-    try { await this.budget.reserve(requestId, "C"); } // separate review envelope, SAME total series ceiling
+    try { await this.budget.reserveTimed(requestId, "C", "review"); }
     catch {
       row.report.rehearsal.review = { status: "failed", error: "REHEARSAL_REVIEW_BUDGET_UNAVAILABLE_NO_REQUEST_SENT" };
       await this.store.save(owner, row);

@@ -22,7 +22,7 @@ describe("rehearsal admission, persistence and bounded review", () => {
       }) };
     audio = { ready: vi.fn().mockResolvedValue(undefined), capture: vi.fn().mockResolvedValue(undefined) };
     budget = { state: vi.fn().mockResolvedValue({ limitMicroUsd: 30e6, spentMicroUsd: 0, reservedMicroUsd: 0, remainingMicroUsd: 30e6 }),
-      reserve: vi.fn().mockResolvedValue(undefined), settle: vi.fn().mockResolvedValue(undefined) };
+      reserveTimed: vi.fn().mockResolvedValue(undefined), settle: vi.fn().mockResolvedValue(undefined) };
     runtime = new RehearsalRuntime(store, audio, budget);
     lab = { reports: vi.fn(() => []), create: vi.fn(async (_owner, body) => ({
       id: "s", call: { access_token: "ephemeral-sdk-only" }, report: { id: "s", callId: "web-owned", status: "connecting",
@@ -38,17 +38,17 @@ describe("rehearsal admission, persistence and bounded review", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
   it.each(["model", "phoneNumber", "tools", "publish"])("refuses extra capability %s before admission", async field => {
     await expect(runtime.create("owner", { ...input, [field]: "injected" })).rejects.toThrow();
-    expect(budget.reserve).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
+    expect(budget.reserveTimed).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
   });
   it("refuses stale scene/version snapshots and missing recording consent before budget", async () => {
     await expect(runtime.create("owner", { ...input, sceneHash: "old" })).rejects.toThrow("SNAPSHOT_CHANGED");
     await expect(runtime.create("owner", { ...input, recordingConsent: false })).rejects.toThrow("CONFIRMATION_REQUIRED");
-    expect(budget.reserve).not.toHaveBeenCalled();
+    expect(budget.reserveTimed).not.toHaveBeenCalled();
   });
   it("requires saved owner recording consent before reserving money, including after revocation", async () => {
     store.settings.mockResolvedValue({ recordingConsent: false });
     await expect(runtime.create("owner", input)).rejects.toThrow("RECORDING_CONSENT_REQUIRED");
-    expect(budget.reserve).not.toHaveBeenCalled();
+    expect(budget.reserveTimed).not.toHaveBeenCalled();
     expect(lab.create).not.toHaveBeenCalled();
   });
   it("saves one-time recording settings only, without provider calls", async () => {
@@ -57,31 +57,31 @@ describe("rehearsal admission, persistence and bounded review", () => {
     expect(await runtime.saveSettings("owner", { recordingConsent: false })).toEqual({ settings: { recordingConsent: false } });
     for (const value of [{}, { recordingConsent: "true" }, { recordingConsent: true, model: "x" }])
       await expect(runtime.saveSettings("owner", value)).rejects.toThrow("INVALID_REHEARSAL_SETTINGS");
-    expect(budget.reserve).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
+    expect(budget.reserveTimed).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
   });
   it("prepares a pasted assignment into a saved Secretary scene before admission", async () => {
     const result = await runtime.saveScene("owner", { text: "Ask total price. Do not pay." });
     expect(result.scene.plan.executor).toBe("secretary");
     expect(result.scene.plan.sayAsk).toEqual(["Ask total price.", "Do not pay."]);
     expect(store.save).toHaveBeenCalledWith("owner", expect.objectContaining({ id: result.scene.id, kind: "rehearsal-scene" }));
-    expect(budget.reserve).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
+    expect(budget.reserveTimed).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
   });
   it("storage must be accessible BEFORE any paid admission", async () => {
     audio.ready.mockRejectedValue(Error("missing"));
     await expect(runtime.create("owner", input)).rejects.toThrow("NOT_READY");
-    expect(budget.reserve).not.toHaveBeenCalled();
+    expect(budget.reserveTimed).not.toHaveBeenCalled();
   });
-  it("uses the SAME series budget, persists snapshots but never the SDK credential", async () => {
+  it("uses time-only admission, persists snapshots but never the SDK credential", async () => {
     const result = await runtime.create("owner", input);
-    expect(budget.reserve).toHaveBeenCalledWith(input.clientRequestId, "C");
+    expect(budget.reserveTimed).toHaveBeenCalledWith(input.clientRequestId, "C", "voice");
     expect(result.call.access_token).toBe("ephemeral-sdk-only");
     expect(JSON.stringify(rows.get("s"))).not.toContain("ephemeral-sdk-only");
     expect(rows.get("s").report.rehearsal.scene.hash).toBe(input.sceneHash);
     expect(rows.get("s").report.rehearsal.version.hash).toBe(input.versionHash);
   });
-  it("budget exhaustion cannot start voice or a model", async () => {
-    budget.reserve.mockRejectedValue(Error("SPEED_SERIES_BUDGET_EXHAUSTED"));
-    await expect(runtime.create("owner", input)).rejects.toThrow("BUDGET_EXHAUSTED");
+  it("a failed time-only ledger write cannot start voice or a model", async () => {
+    budget.reserveTimed.mockRejectedValue(Error("SPEED_BUDGET_BUSY_OR_CRASH_LOCK"));
+    await expect(runtime.create("owner", input)).rejects.toThrow("SPEED_BUDGET_BUSY_OR_CRASH_LOCK");
     expect(lab.create).not.toHaveBeenCalled(); expect(reviewRehearsal).not.toHaveBeenCalled();
   });
   it("stops an admitted web call once if persistence fails, with conservative debit and no retry", async () => {
@@ -118,7 +118,7 @@ describe("rehearsal admission, persistence and bounded review", () => {
     await runtime.analyse("owner", "saved"); expect(reviewRehearsal).not.toHaveBeenCalled();
   });
   it("insufficient review budget is explicit, not an infinite pending state or paid attempt", async () => {
-    ended(); budget.reserve.mockRejectedValue(Error("SPEED_SERIES_BUDGET_EXHAUSTED"));
+    ended(); budget.reserveTimed.mockRejectedValue(Error("SPEED_BUDGET_BUSY_OR_CRASH_LOCK"));
     const result = await runtime.analyse("owner", "saved");
     expect(result.report.rehearsal.review.status).toBe("failed");
     expect(reviewRehearsal).not.toHaveBeenCalled();

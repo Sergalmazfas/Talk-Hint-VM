@@ -263,6 +263,21 @@ describe("Retell Custom LLM streaming, cancellation and lifecycle", () => {
   });
 });
 describe("Separate Custom LLM agent and existing session guard", () => {
+  it("the rehearsal provider enforces 180 seconds independently of browser or server timers", async () => {
+    const api = new RetellEngineApi(() => "wss://test.replit.dev/custom", undefined, "C", "timed-rehearsal-fixture");
+    vi.spyOn(api, "listAgents").mockResolvedValue([]);
+    const request = vi.spyOn(api, "request").mockImplementation(async (path, body) => {
+      if (path === "/create-agent") return { agent_id: "rehearsal" };
+      if (path === "/get-agent/rehearsal") return { agent_id: "rehearsal", version: 0,
+        ...request.mock.calls.find(c => c[0] === "/create-agent")![1] as any };
+      throw Error("Unexpected API");
+    });
+    await api.ensureAgent();
+    expect(request.mock.calls.find(c => c[0] === "/create-agent")![1]).toMatchObject({
+      max_call_duration_ms: 180_000, end_call_after_silence_ms: 180_000,
+      voice_id: "retell-Merritt", responsiveness: 1,
+    });
+  });
   it("has a distinct response engine, exact comparable voice/settings and no managed LLM creation", async () => {
     const api = new RetellEngineApi(() => "wss://test.replit.dev/retell-engine-stream/{{talkhint_engine_ticket}}");
     vi.spyOn(api, "listAgents").mockResolvedValue([{ agent_id: "managed", agent_name: "TalkHint Secretary Lab — Retell Dev" }]);

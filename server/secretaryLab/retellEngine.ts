@@ -31,7 +31,7 @@ export class RetellEngineApi extends RetellApi {
     private speedVariant: "A" | "B" | "C" = "A", private rehearsalHash?: string) { super(network); }
   private get agentName() { return this.rehearsalHash ? `TalkHint Rehearsal DEV · ${this.rehearsalHash}` : this.speedVariant === "A" ? RETELL_ENGINE_AGENT :
     `${RETELL_ENGINE_AGENT} · speed ${this.speedVariant}${this.speedVariant === "C" ? WAITING_DEV_SUFFIX : ""}`; }
-  private get durationMs() { return this.speedVariant === "C" ? WAITING_DEV_DURATION_MS : 300_000; }
+  private get durationMs() { return this.rehearsalHash ? 180_000 : this.speedVariant === "C" ? WAITING_DEV_DURATION_MS : 300_000; }
   async inspectAgent(id: string) {
     const a = await this.request(`/get-agent/${encodeURIComponent(id)}`);
     if (a.agent_name !== this.agentName || a.response_engine?.type !== "custom-llm" ||

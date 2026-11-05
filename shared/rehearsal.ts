@@ -15,5 +15,6 @@ export type RehearsalResult = { id: string; status: string; createdAt: string; e
 export type RehearsalSnapshot = { ready: boolean; reason?: string; csrf: string;
   settings: { recordingConsent: boolean };
   versions: RehearsalVersion[]; scenes: RehearsalScene[]; history: RehearsalResult[];
-  budget: { limitUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number } };
+  budget: { limitUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number;
+    enforcement?: "duration"; durationSeconds?: number; unknownCostRuns?: number } };
 export const REHEARSAL_API = "/api/admin/rehearsal";

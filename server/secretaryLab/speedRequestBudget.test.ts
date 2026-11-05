@@ -1,3 +1,15 @@
+import { timedRehearsalSettlement } from "./speedRequestBudget";
+
+it("time-only requests keep usage accounting but do not stop after a dollar envelope", () => {
+  const ledger = new SpeedRequestBudget(null);
+  for (let i = 0; i < 40; i++) {
+    const row = ledger.admit({ instructions: "x".repeat(30_000), max_output_tokens: 300 });
+    ledger.unknown(row);
+  }
+  expect(ledger.snapshot()).toMatchObject({ admitted: 40, denied: 0, modelEnvelopeMicroUsd: null, policy: "time-only", unknown: 40 });
+  expect(ledger.snapshot().totalHeldMicroUsd).toBeGreaterThan(2_000_000);
+  expect(timedRehearsalSettlement({ requests: 40, requestBudget: ledger.snapshot() }, 60)).toBeNull();
+});
 import { expect, it } from "vitest";
 import { SpeedRequestBudget, SpeedLimitError, speedSettlement, SPEED_MODEL_ENVELOPE } from "./speedRequestBudget";
 const body = { instructions: "test", input: [], tools: [], max_output_tokens: 300 };

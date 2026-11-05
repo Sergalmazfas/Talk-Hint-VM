@@ -3,6 +3,22 @@ name: Secretary Lab cost boundaries
 description: Pricing assumptions and scope agreed for the private Dev voice comparison bench.
 ---
 
+Для ручных тестов на `/admin/rehearsal` владелец заменил денежные блокировки
+ограничением **3 минуты на разговор**: «Убери ограничение по деньгам вообще…
+Три минуты на тест максимальный». Это касается обеих версий репетиции,
+не production, не автономных агентов и не отдельных платных серий.
+Учёт расходов и история сохраняются; unknown не является ни доказанным
+нулевым расходом, ни разрешением повторить неизвестный запрос.
+
+**Why:** защитные денежные резервы неоднократно мешали коротким ручным
+проверкам и воспринимались как реальные списания; владельцу нужен понятный
+предел по длительности вместо очередного пополнения.
+
+**How to apply:** не возвращать денежный допуск в ручную репетицию под видом
+защиты. Ограничивать длительность на сервере и стороне голосового провайдера,
+включая потерю страницы/перезапуск. Отделять оценки и старые защитные
+списания от счетов провайдеров. Запуск Replit платных автотестов этим не разрешён.
+
 The owner approved interruption-buffer experiments ONLY in Dev variant C,
 initially raising the existing series ceiling to $10, without resetting historical costs.
 Voice, language, greeting and Retell's normal yielding to interruptions stay

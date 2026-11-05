@@ -3813,3 +3813,17 @@ mtime_ms = 1793904375211
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1c2c7be4-db94-4ff2-8386-fbc1e298baff/7d51ca3a-3159-42f4-955d-cacf4c3b5123"
 storage_version_token = "1793904385260558"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "f7cN8AIMrETdOQoCzFxlV"
+uri = "file://generated-artifacts/rehearsal-three-minute/Rehearsal_3min_No_Money_Gate_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию — репетиция до 3 минут"
+description = "Без денежного допуска в ручной репетиции; исправлен отказ полного промпта, из-за которого Dev молчала. 3905 тестов passed, 0 failed, 44 штатных skipped; история учёта сохранена."
+logical_id = "d37a7200-dec4-49c3-ba3a-bc7ad9a6cb36"
+content_hash = "sha256:62698d23d52e4a72d125928980841c2f6b043888c888f00d61ccb2cbdf1c3822"
+size = 232153
+mtime_ms = 1793905397874
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d37a7200-dec4-49c3-ba3a-bc7ad9a6cb36/67aa4de1-b1db-40e2-8f88-8f6abac72c30"
+storage_version_token = "1793905415040043"
+content_type = "application/octet-stream"

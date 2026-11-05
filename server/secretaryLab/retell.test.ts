@@ -180,6 +180,22 @@ describe("Retell web Secretary bench — never PSTN", () => {
     expect(lab.report("alice", id).report.status).toBe("ended");
     expect(calls.filter(x => x.path === "/v3/create-web-call")).toHaveLength(1);
   });
+  it("a rehearsal stops at three minutes on the server even when the browser never connects", async () => {
+    vi.useFakeTimers();
+    const timed = new RetellSecretaryLab(api, () => now, () => true, {
+      agentName: "timed-rehearsal", mode: "rehearsal", durationMs: 180_000,
+      check: async () => ({}),
+      reserve: () => ({ ticket: "fixture-ticket", engine: {} as any }),
+      registered: () => {}, ended: () => {},
+    });
+    labs.push(timed);
+    const { id } = await timed.create("alice", input());
+    await vi.advanceTimersByTimeAsync(179_999);
+    expect(calls.filter(c => c.path === "/v2/stop-call/web-call")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls.filter(c => c.path === "/v2/stop-call/web-call")).toHaveLength(1);
+    expect(timed.report("alice", id).report.reason).toBe("duration_limit");
+  });
   it("has a five-minute bound, browser-loss stop and one-hour report expiration", async () => {
     vi.useFakeTimers();
     const { id } = await lab.create("alice", input());

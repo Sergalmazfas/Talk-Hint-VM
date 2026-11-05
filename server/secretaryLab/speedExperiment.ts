@@ -98,12 +98,15 @@ export function speedAgentDraft(base: Record<string, any>, variant: SpeedVariant
 
 type ResponsesClient = { responses: { create(body: any, options: any): Promise<AsyncIterable<any>> } };
 /** The caller must explicitly supply its SDK client, policy snapshot and tools. */
-export function speedStream(client: ResponsesClient, variant: SpeedVariant, tools: readonly unknown[]): EngineStream {
+export function speedStream(client: ResponsesClient, variant: SpeedVariant, tools: readonly unknown[],
+  allowRehearsalFullPrompt = false): EngineStream {
   const profile = speedProfiles[variant];
   if (!profile) throw Error("UNKNOWN_SPEED_VARIANT");
+  if (allowRehearsalFullPrompt && (variant !== "C" || process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1"))
+    throw Error("REHEARSAL_FULL_PROMPT_DEV_ONLY");
   return async function* (request: EngineRequest): AsyncGenerator<EngineChunk> {
     if (request.signal.aborted) throw Error("EXPERIMENT_ABORTED");
-    if (variant !== "A" && request.instructions.length > COMPACT_PROMPT_LIMIT) throw Error(COMPACT_PROMPT_FALLBACK_REASON);
+    if (!allowRehearsalFullPrompt && variant !== "A" && request.instructions.length > COMPACT_PROMPT_LIMIT) throw Error(COMPACT_PROMPT_FALLBACK_REASON);
     const stream = await client.responses.create({
       model: profile.model, instructions: request.instructions, input: request.input, tools,
       parallel_tool_calls: false, reasoning: { effort: profile.reasoning },

@@ -500,11 +500,19 @@ export default function RehearsalPage() {
             {rehearsalVersionReason(selectedVersion) && <p>{rehearsalVersionReason(selectedVersion)}</p>}
           </div>}
           <div className="budget-strip" aria-label="Бюджет серии">
-            <div><span>Остаток</span><strong>{money(snapshot.budget.remainingUsd)}</strong></div>
-            <div><span>Лимит</span><b>{money(snapshot.budget.limitUsd)}</b></div>
-            <div><span>Потрачено</span><b>{money(snapshot.budget.spentUsd)}</b></div>
-            <div><span>В резерве</span><b>{money(snapshot.budget.reservedUsd)}</b></div>
+            {snapshot.budget.enforcement === "duration" ? <>
+              <div><span>Максимум на тест</span><strong>3 минуты</strong></div>
+              <div><span>Лимит в долларах</span><b>Нет</b></div>
+              <div><span>Учтено, оценка*</span><b>{money(snapshot.budget.spentUsd)}</b></div>
+              <div><span>Расход неизвестен*</span><b>{snapshot.budget.unknownCostRuns ?? 0} запусков</b></div>
+            </> : <>
+              <div><span>Остаток</span><strong>{money(snapshot.budget.remainingUsd)}</strong></div>
+              <div><span>Лимит</span><b>{money(snapshot.budget.limitUsd)}</b></div>
+              <div><span>Потрачено</span><b>{money(snapshot.budget.spentUsd)}</b></div>
+              <div><span>В резерве</span><b>{money(snapshot.budget.reservedUsd)}</b></div>
+            </>}
           </div>
+          {snapshot.budget.enforcement === "duration" && <p>*Оценки и неизвестные расходы, не счёт провайдеров. Исторические защитные списания сохранены. Через 3 минуты звонок завершится автоматически.</p>}
         </section>
         <section className="drawer-section">
           <h3>Сохранённые поручения</h3>

@@ -13,8 +13,8 @@ export function speedLimitText(code: string) {
 }
 type Reservation = { inputBound: number; maxOutput: number; held: number; state: "pending" | "known" | "unknown" };
 export class SpeedRequestBudget {
-  constructor(private envelope = SPEED_MODEL_ENVELOPE) {
-    if (![1_000_000, 2_000_000].includes(envelope)) throw Error("SPEED_ENVELOPE_INVALID");
+  constructor(private envelope: number | null = SPEED_MODEL_ENVELOPE) {
+    if (envelope !== null && ![1_000_000, 2_000_000].includes(envelope)) throw Error("SPEED_ENVELOPE_INVALID");
   }
   private rows: Reservation[] = [];
   private stopped = false;
@@ -25,7 +25,7 @@ export class SpeedRequestBudget {
     throw new SpeedLimitError(code);
   }
   snapshot() {
-    return { version: 1, modelEnvelopeMicroUsd: this.envelope,
+    return { version: 1, modelEnvelopeMicroUsd: this.envelope, policy: this.envelope === null ? "time-only" : "money",
       voiceEnvelopeMicroUsd: SPEED_VOICE_ENVELOPE, admitted: this.rows.length, denied: this.denied,
       totalHeldMicroUsd: this.rows.reduce((n, r) => n + r.held, 0),
       unknown: this.rows.filter(r => r.state === "unknown").length,
@@ -34,7 +34,7 @@ export class SpeedRequestBudget {
   admit(body: any) {
     if (this.stopped) this.deny("SPEED_SESSION_BUDGET_EXHAUSTED");
     const bytes = Buffer.byteLength(JSON.stringify(body), "utf8");
-    if (bytes > 20_000 || !Number.isSafeInteger(body.max_output_tokens) ||
+    if (bytes > (this.envelope === null ? 200_000 : 20_000) || !Number.isSafeInteger(body.max_output_tokens) ||
       body.max_output_tokens < 1 || body.max_output_tokens > 1600)
       this.deny("SPEED_INPUT_BUDGET_BOUND");
     // UTF-8 byte bound + generous protocol framing margin. All input, including
@@ -42,7 +42,7 @@ export class SpeedRequestBudget {
     if (body.service_tier && body.service_tier !== "default") this.deny("SPEED_SERVICE_TIER_DENIED");
     const inputBound = bytes + 4096;
     const held = inputBound * 5 + body.max_output_tokens * 10;
-    if (this.snapshot().totalHeldMicroUsd + held > this.envelope)
+    if (this.envelope !== null && this.snapshot().totalHeldMicroUsd + held > this.envelope)
       this.deny("SPEED_SESSION_BUDGET_EXHAUSTED");
     const row: Reservation = { inputBound, maxOutput: body.max_output_tokens, held, state: "pending" };
     this.rows.push(row); return row;
@@ -60,6 +60,14 @@ export class SpeedRequestBudget {
   unknown(row: Reservation) {
     if (row.state === "pending") row.state = "unknown"; // Never refund missing/cancelled usage.
   }
+}
+/** Conservative estimate only; unknown/cancelled usage stays explicitly unpriced, not a fictitious $3 charge. */
+export function timedRehearsalSettlement(m: any, seconds: number): number | null {
+  const b = m?.requestBudget;
+  if (b?.policy !== "time-only" || !b.verifiable || b.unknown || b.pending ||
+      b.admitted !== m.requests || !Number.isSafeInteger(b.totalHeldMicroUsd) || b.totalHeldMicroUsd < 0 ||
+      !Number.isFinite(seconds) || seconds < 0 || seconds > 180) return null;
+  return Math.ceil(b.totalHeldMicroUsd + seconds / 300 * SPEED_VOICE_ENVELOPE);
 }
 export function speedSettlement(m: any, seconds: number): number | null {
   const b = m?.requestBudget;

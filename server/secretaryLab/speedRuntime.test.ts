@@ -65,6 +65,19 @@ it("rejects mixing the prompt-only variant with waiting/manners or non-C profile
       { productionRules: false, waiting: true, noLoop: true })).toThrow("DEV_REHEARSAL_C_NO_LOOP_ONLY");
   }
 });
+it("reproduces the silent rehearsal full-prompt fallback and now streams without a money envelope", async () => {
+  setup(); network.create.mockImplementation(() => response());
+  const e = speedEngine("fixture", "Owner supplied full plan. " + "Trusted condition. ".repeat(800), "C", undefined,
+    { productionRules: true, waiting: false, noLoop: true, timed: true });
+  expect(e.instructions.length).toBeGreaterThan(9000);
+  expect(e.report.events.some(event => event.type === "compact_fallback_full_prompt")).toBe(true);
+  const emit = vi.fn();
+  await e.respond([{ role: "user", content: "Hello, tire service." }], new AbortController().signal, emit);
+  expect(network.create).toHaveBeenCalledTimes(1);
+  expect(emit).toHaveBeenCalledWith("Hello");
+  expect((e.report as any).speed.requestBudget).toMatchObject({ modelEnvelopeMicroUsd: null, policy: "time-only", denied: 0 });
+  expect(network.create.mock.calls[0][0]).toMatchObject({ model: "gpt-6-sol", max_output_tokens: 300, stream: true });
+});
 it("reproduces a long multi-turn call: the thirteenth provider request succeeds without paid traffic", async () => {
   network.create.mockImplementation(() => response());
   const e = setup();

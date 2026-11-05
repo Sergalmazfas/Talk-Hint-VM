@@ -1,7 +1,9 @@
 import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 export type SpeedBudgetState = { limitMicroUsd: number; probeDebitMicroUsd: number;
-  runs: Record<string, { variant: string; reserved: number; spent: number; admissionMicroUsd?: number; status: "reserved" | "settled" | "unknown" }> };
+  runs: Record<string, { variant: string; reserved: number; spent: number; admissionMicroUsd?: number;
+    policy?: "timed-rehearsal"; kind?: "voice" | "review"; durationLimitMs?: number; costUnknown?: boolean;
+    status: "reserved" | "settled" | "unknown" }> };
 const initial = (): SpeedBudgetState => ({ limitMicroUsd: 5_000_000, probeDebitMicroUsd: 100_000, runs: {} });
 /** Owner-approved $5 -> $10 -> $30 -> $40 series, persisted across restarts. No reset/refill HTTP method.
  * Crash locks fail closed; they are never removed based on a guessed TTL. */
@@ -13,6 +15,16 @@ export class SpeedBudget {
       if (![5_000_000, 10_000_000, 30_000_000, 40_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
         throw Error("SPEED_BUDGET_INVALID");
       for (const r of Object.values(s.runs) as any[]) {
+        if (r?.policy === "timed-rehearsal") {
+          if (!["A", "B", "C"].includes(r.variant) || !["voice", "review"].includes(r.kind) ||
+              r.durationLimitMs !== 180_000 || r.reserved !== 0 || r.admissionMicroUsd !== undefined ||
+              !["reserved", "settled", "unknown"].includes(r.status) ||
+              !Number.isSafeInteger(r.spent) || r.spent < 0 ||
+              r.costUnknown !== (r.status === "unknown") ||
+              (r.status !== "settled" && r.spent !== 0)) throw Error("SPEED_BUDGET_INVALID");
+          continue;
+        }
+        if (r?.policy !== undefined) throw Error("SPEED_BUDGET_INVALID");
         const cap = r?.admissionMicroUsd ?? 2_000_000;
         if (!r || !["A", "B", "C"].includes(r.variant) || !["reserved", "settled", "unknown"].includes(r.status) ||
           !Number.isSafeInteger(r.reserved) || !Number.isSafeInteger(r.spent) || r.reserved < 0 || r.spent < 0 ||
@@ -55,7 +67,8 @@ export class SpeedBudget {
     const s = await this.load();
     const spent = s.probeDebitMicroUsd + Object.values(s.runs).reduce((n, r) => n + r.spent, 0);
     const reserved = Object.values(s.runs).reduce((n, r) => n + r.reserved, 0);
-    return { ...s, spentMicroUsd: spent, reservedMicroUsd: reserved, remainingMicroUsd: s.limitMicroUsd - spent - reserved };
+    return { ...s, spentMicroUsd: spent, reservedMicroUsd: reserved, remainingMicroUsd: s.limitMicroUsd - spent - reserved,
+      unknownCostRuns: Object.values(s.runs).filter(r => r.status === "unknown").length };
   }
   private async change(fn: (s: SpeedBudgetState) => void) {
     await mkdir(dirname(this.path), { recursive: true });
@@ -84,10 +97,32 @@ export class SpeedBudget {
       s.runs[id] = { variant, reserved: cap, spent: 0, status: "reserved", ...(cap === 3_000_000 ? { admissionMicroUsd: cap } : {}) };
     });
   }
+  /** Manual rehearsal only: time replaces monetary admission; historical rows are untouched. */
+  reserveTimed(id: string, variant: string, kind: "voice" | "review") {
+    if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1")
+      throw Error("SPEED_DEV_ONLY");
+    return this.change(s => {
+      if (!["A", "B", "C"].includes(variant) || !["voice", "review"].includes(kind))
+        throw Error("REHEARSAL_TIMED_POLICY_INVALID");
+      if (s.runs[id]) throw Error("SPEED_REQUEST_ALREADY_RESERVED_NO_RETRY");
+      if (kind === "voice" && Object.values(s.runs).some(r =>
+        r.policy === "timed-rehearsal" && r.kind === "voice" && r.status === "reserved"))
+        throw Error("REHEARSAL_SESSION_ACTIVE_OR_UNKNOWN");
+      s.runs[id] = { variant, reserved: 0, spent: 0, status: "reserved",
+        policy: "timed-rehearsal", kind, durationLimitMs: 180_000, costUnknown: false };
+    });
+  }
   settle(id: string, debit: number | null) {
     return this.change(s => {
       const r = s.runs[id];
       if (!r || r.status !== "reserved") return;
+      if (r.policy === "timed-rehearsal") {
+        if (debit !== null && (!Number.isSafeInteger(debit) || debit < 0))
+          throw Error("SPEED_ACCOUNTING_OUT_OF_BOUNDS");
+        r.spent = debit ?? 0; r.status = debit === null ? "unknown" : "settled";
+        r.costUnknown = debit === null;
+        return;
+      }
       if (debit !== null && (!Number.isSafeInteger(debit) || debit < 0 || debit > r.reserved))
         throw Error("SPEED_ACCOUNTING_OUT_OF_BOUNDS");
       r.spent = debit === null ? r.reserved : debit;

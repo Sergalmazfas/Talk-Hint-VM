@@ -15,10 +15,10 @@ import { C_NO_LOOP_POLICY, C_NO_LOOP_POLICY_HASH, withCNoLoopRule } from "../reh
 import { waitingPlanSelection } from "../../shared/secretaryWaitingPlans";
 
 export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding,
-  rehearsal?: { productionRules: boolean; waiting: boolean; manners?: boolean; noLoop?: boolean }) {
+  rehearsal?: { productionRules: boolean; waiting: boolean; manners?: boolean; noLoop?: boolean; timed?: boolean }) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
   const profile = speedProfiles[variant];
-  const requestBudget = new SpeedRequestBudget(variant === "C" ? 2_000_000 : 1_000_000);
+  const requestBudget = new SpeedRequestBudget(rehearsal?.timed ? null : variant === "C" ? 2_000_000 : 1_000_000);
   const metrics = { variant, requests: 0, usageRequests: 0, input: 0, output: 0,
     conservativeModelMicroUsd: 0, requestLog: [] as any[], requestBudget: requestBudget.snapshot(),
     limitReason: null as null | { code: string; message: string } };
@@ -72,7 +72,8 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
       requestBudget.unknown(reservation); limit(e); throw e;
     }
   } } };
-  const rawStream = speedStream(adapter, variant, rehearsal?.productionRules ? secretaryPhoneTools : secretaryTestTools);
+  const rawStream = speedStream(adapter, variant, rehearsal?.productionRules ? secretaryPhoneTools : secretaryTestTools,
+    rehearsal?.productionRules === true);
   if (rehearsal?.manners && (rehearsal.productionRules || !rehearsal.waiting || variant !== "C" ||
       process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1"))
     throw Error("DEV_REHEARSAL_MANNERS_ONLY");
