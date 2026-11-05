@@ -1,10 +1,11 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { RehearsalVersion } from "@shared/rehearsal";
-import { RehearsalComposer, assignmentPresets } from "./rehearsal-composer";
+import { RehearsalComposer, assignmentPresets, rehearsalAssignmentPresets } from "./rehearsal-composer";
+import { defaultRehearsalScenes, sceneFromText } from "../../../server/rehearsal/catalog";
 
 const versions: RehearsalVersion[] = [
   { id: "production-C", label: "Как в бою (C)", source: "production-profile-code", hash: "prod-hash", available: true, productionVerified: false },
@@ -43,11 +44,36 @@ describe("owner rehearsal composer", () => {
 
   it("uses the owner's real truck rehearsal subjects, not invented car-sale scenes", () => {
     expect(Object.keys(assignmentPresets)).toEqual(["Шины", "Парковка", "Мойка"]);
-    expect(assignmentPresets.Шины).toContain("295/75R22.5");
-    expect(assignmentPresets.Шины).toContain("$400");
+    const presets = rehearsalAssignmentPresets(defaultRehearsalScenes());
+    expect(presets.Шины).toContain("295/75R22.5");
+    expect(presets.Шины).toContain("$400");
     expect(assignmentPresets.Парковка).toContain("тягача на одну ночь");
     expect(assignmentPresets.Мойка).toContain("тягача и трейлера");
-    for (const text of Object.values(assignmentPresets)) expect(text).toMatch(/не платить/i);
+    for (const text of [presets.Парковка, presets.Мойка]) expect(text).toMatch(/не платить/i);
+    expect(presets.Шины).toContain("No payment");
+  });
+  it("the Tires button sends the exact authenticated plan through the real preparation parser, with no stale quote-only text", () => {
+    const scenes = defaultRehearsalScenes(), onAssignmentChange = vi.fn();
+    const tree = RehearsalComposer({
+      scenes, assignment: "", onAssignmentChange, versionId: "dev-C", versions,
+      selectedVersion: versions[1], onVersionChange: () => {}, consentGranted: true,
+      readyToStart: true, pending: false, busy: false, active: null, uncertain: false,
+      onStart: () => {}, onStop: () => {}, onOpenMore: () => {},
+    });
+    const row = (tree.props.children as any[]).find(node => node?.props?.["aria-label"] === "Примеры поручений");
+    const button = row.props.children.find((node: any) => node.key === "Шины");
+    expect(button.props.disabled).toBe(false);
+    button.props.onClick();
+    const text = onAssignmentChange.mock.calls[0][0];
+    const submitted = sceneFromText("submitted", { text });
+    expect(submitted.plan).toEqual(scenes[0].plan);
+    for (const phrase of ["TODAY", "two hours", "$400", "one hour", "British Petroleum", "96257"])
+      expect(text).toContain(phrase);
+    const phone = scenes[0].plan.expectedQuestions.find(q => q.q === "Booking phone number?")!.answer!;
+    expect(submitted.plan.ownerFacts.join(" ")).toContain(phone.replace(/\.$/, ""));
+    expect(text).not.toContain("Не бронировать, не заказывать");
+    expect(assignmentPresets.Шины).toBe("");
+    expect(rehearsalAssignmentPresets([]).Шины).toBe("");
   });
 
   it("keeps the main mobile viewport bounded and lets the assignment field scroll internally", () => {

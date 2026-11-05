@@ -1,15 +1,21 @@
 import React from "react";
 import { CircleStop, LoaderCircle, Play, ShieldCheck } from "lucide-react";
-import type { RehearsalResult, RehearsalVersion } from "@shared/rehearsal";
+import type { RehearsalResult, RehearsalScene, RehearsalVersion } from "@shared/rehearsal";
 import { canStartRehearsalVersion, isRehearsalCallEnded, rehearsalVersionReason } from "@/lib/rehearsal-helpers";
 
 export const assignmentPresets = {
-  Шины: "Узнай о новой шине для трейлера 295/75R22.5, правая задняя внутренняя, бюджет до $400. Спроси наличие. Спроси бренд и полную цену с установкой и налогами. Спроси ближайшее время установки. Не бронировать, не заказывать, не платить.",
+  // Supplied by the authenticated snapshot, never a second stale plan or a private phone in a JS bundle.
+  Шины: "",
   Парковка: "Узнай о парковке для тягача на одну ночь. Спроси наличие мест. Спроси цену и разрешённое время въезда и выезда. Спроси, нужна ли бронь. Дата пока неизвестна, не выдумывать. Не бронировать и не платить.",
   Мойка: "Узнай о мойке тягача и трейлера. Спроси, моют ли тягач и трейлер. Спроси полную цену. Спроси часы работы и время ожидания. Не бронировать и не платить.",
 };
+export function rehearsalAssignmentPresets(scenes: readonly RehearsalScene[]) {
+  const tires = scenes.find(scene => scene.id === "trailer-tire");
+  return { ...assignmentPresets, Шины: tires ? JSON.stringify(tires.plan) : "" };
+}
 
 type RehearsalComposerProps = {
+  scenes?: RehearsalScene[];
   assignment: string;
   onAssignmentChange: (value: string) => void;
   versionId: string;
@@ -33,7 +39,7 @@ export function RehearsalComposer(props: RehearsalComposerProps) {
   return <section className="main-card">
     <div className="main-heading"><div><p className="overline">СЕКРЕТАРЬ · DEV</p><h1>Репетиция <em>Кати</em></h1></div></div>
     <div className="preset-row" aria-label="Примеры поручений">
-      {Object.entries(assignmentPresets).map(([label, text]) => <button key={label} type="button" onClick={() => usePreset(text)}>{label}</button>)}
+      {Object.entries(rehearsalAssignmentPresets(props.scenes ?? [])).map(([label, text]) => <button key={label} type="button" disabled={!text} onClick={() => usePreset(text)}>{label}</button>)}
     </div>
     <label className="assignment-label" htmlFor="assignment">Вставь поручение</label>
     <textarea id="assignment" className="assignment-input" value={props.assignment} onChange={(event) => props.onAssignmentChange(event.target.value)} placeholder={"Напиши своими словами или вставь план из ChatGPT.\nНапример: позвони продавцу, узнай цену и когда удобно посмотреть…"} />

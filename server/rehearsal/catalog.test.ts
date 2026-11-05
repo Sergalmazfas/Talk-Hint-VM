@@ -27,17 +27,19 @@ describe("rehearsal immutable plans and isolated profiles", () => {
     const scene = defaultRehearsalScenes().find(s => s.id === "trailer-tire")!;
     const text = JSON.stringify(scene.plan);
     expect(scene.title).toBe("Шины · приезд через 2 часа");
-    expect(scene.plan.ownerFacts).toContain("Sergey is ready to arrive two hours from this conversation.");
-    expect(scene.plan.ownerFacts).toContain("Maximum waiting time after arrival: one hour.");
-    expect(scene.plan.expectedQuestions).toContainEqual({ q: "When can Sergey arrive?", answer: "In two hours." });
-    expect(scene.plan.goal).toContain("Arrange an installation appointment");
-    for (const phrase of ["price of the tires", "installation price", "total price", "open in two hours",
-      "receive Sergey", "how long", "at most one hour", "exact appointment time and address",
-      "do not book", "Opening 24/7 does not prove", "unconfirmed", "ask whether a discount",
-      "Reconfirm the discounted total", "Only if the confirmed all-in price is at most $400"])
+    expect(scene.plan.ownerFacts.join(" ")).toContain("already en route");
+    expect(scene.plan.ownerFacts.join(" ")).toContain("Maximum wait AFTER arrival: one hour");
+    expect(scene.plan.expectedQuestions).toContainEqual({ q: "What day and when can Sergey arrive?", answer: "Today, in two hours. He is already en route." });
+    expect(scene.plan.goal).toContain("Book a simulated installation TODAY");
+    for (const phrase of ["tire price", "installation price", "total price", "open TODAY in two hours",
+      "receive Sergey", "waiting time AFTER arrival", "at most one hour", "exact appointment time and address",
+      "do not book", "24/7 opening is not a free slot", "unconfirmed", "ask whether a discount",
+      "confirm the discounted total", "total at most $400"])
       expect(scene.plan.sayAsk.join("\n")).toContain(phrase);
-    expect(text).not.toMatch(/No price ceiling|right rear inner|Do not book, order or pay|Report the seller's answers only/);
-    expect(scene.plan.ownerFacts).toContain("Maximum all-in budget: $400 for the new tires and installation, including taxes and fees. Never agree to a higher total.");
+    expect(text).not.toMatch(/No price ceiling|Do not book, order or pay|Report the seller's answers only/);
+    expect(scene.plan.ownerFacts.join(" ")).toContain("Maximum all-in total: $400");
+    expect(scene.plan.ownerFacts.join(" ")).toContain("British Petroleum ONLY; no substitutions");
+    expect(scene.plan.sayAsk.join(" ")).toContain("or end with 'I will clarify the day'");
     expect(scene.plan.expectedQuestions).toContainEqual({ q: "What is the budget?", answer: "At most $400 total, including new tires, installation, taxes and fees." });
     expect(scene.plan.targetPhone).toBeUndefined();
     expect(scene.plan.disclosurePolicy.forbidden.join(" ")).toContain("Agreement to a total over $400");

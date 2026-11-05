@@ -457,6 +457,7 @@ export default function RehearsalPage() {
       {!loading && snapshot && <>
         {!snapshot.ready && <div className="stand-unavailable"><ShieldCheck size={19} /><div><strong>Репетиция сейчас недоступна</strong><p>{snapshot.reason || "Сервер не сообщил причину."}</p></div></div>}
         <RehearsalComposer
+          scenes={snapshot.scenes}
           assignment={assignment}
           onAssignmentChange={setAssignment}
           versionId={versionId}
