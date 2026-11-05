@@ -32,7 +32,7 @@ it.each([true, false])("completed-question handoff is wired only to the selected
   vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "");
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   rehearsalBindings.set("test-session", {
-    waiting: false, buffered: true, advanceCompletedTurn: enabled,
+    waiting: false, buffered: true, advanceCompletedTurn: enabled, retellStreaming: enabled,
     create: () => { throw Error("Unused fixture factory"); },
   });
   try {
@@ -58,7 +58,7 @@ it.each([true, false])("completed-question handoff is wired only to the selected
 it("a telephone C buffer cannot inherit the rehearsal handoff flag", () => {
   vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "");
   const id = "telephone-scope-fixture";
-  rehearsalBindings.set(id, { waiting: false, buffered: true, advanceCompletedTurn: true,
+  rehearsalBindings.set(id, { waiting: false, buffered: true, advanceCompletedTurn: true, retellStreaming: true,
     create: () => { throw Error("Never enter the telephone path"); } });
   try {
     const registry = new RetellEngineRegistry(undefined, { phone: true, phoneProfile: () => "C" });
@@ -69,6 +69,7 @@ it("a telephone C buffer cannot inherit the rehearsal handoff flag", () => {
     const entry = (registry as any).entries.get(id);
     expect(entry.buffer).toBeDefined();
     expect(entry.buffer.deps.advanceCompletedTurn).toBe(false);
+    expect(entry.buffer.deps.retellStreaming).toBe(false);
   } finally { rehearsalBindings.delete(id); }
 });
 it("only the opted-in Dev registry preserves a generation across caller updates and ack response ids", async () => {

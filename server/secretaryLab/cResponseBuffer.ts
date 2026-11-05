@@ -44,8 +44,9 @@ export class CResponseBuffer {
     controller: AbortController; turns: SpokenTurn[]; text: string; done: boolean;
     reusable: boolean; bridge: string; firstText: boolean; end?: boolean; timer: ReturnType<typeof setTimeout>;
   };
-  private target?: { id: number; cursor: number; completed: boolean };
+  private target?: { id: number; cursor: number; completed: boolean; sentText?: string; sentenceSent?: boolean };
   private paused = false;
+  private awaitingProviderTurn = false;
   private closed = false;
   private lastId = -1;
   private lastBridge = "";
@@ -68,6 +69,7 @@ export class CResponseBuffer {
     discardOnInterruption?: boolean;
     interruptionActive?: () => boolean;
     advanceCompletedTurn?: boolean;
+    retellStreaming?: boolean;
   }) {}
   private event(id: number, kind: string, reason: string, from?: number) {
     this.metrics.events.push({ at: new Date().toISOString(), id, kind, reason, phrase: this.phrase?.key, ...(from === undefined ? {} : { from }) });
@@ -78,6 +80,14 @@ export class CResponseBuffer {
     const semanticChange = norm(users(this.latest)) !== norm(users(turns));
     const duplicateOpening = protectInitialPhoneGreeting && norm(users(this.latest)) === norm(users(turns));
     this.latest = turns; this.metrics.updates++;
+    if (this.deps.retellStreaming) {
+      // update_only is not a cancellation or a replacement response request.
+      // Retell controls audible turn-taking and discards superseded response IDs.
+      // Keep streaming the current ID; block side effects/bridges until Retell
+      // requests a response for the updated caller context.
+      if (userTurn || semanticChange) this.awaitingProviderTurn = true;
+      return;
+    }
     if (this.deps.discardOnInterruption) {
       // New rehearsal only: no stale prefix may be resumed after real speech.
       // A repeated/case-only ASR snapshot is not itself proof of interruption.
@@ -95,17 +105,38 @@ export class CResponseBuffer {
     // and all subsequent / Dev buffer semantics are unchanged.
     if ((userTurn || changed) && !duplicateOpening) this.paused = true;
   }
-  permitsTools() { return !this.closed && !this.paused && !!this.generation && !this.generation.controller.signal.aborted; }
-  private output(text: string, complete = false, end = false) {
+  permitsTools() { return !this.closed && !this.paused && !this.awaitingProviderTurn && !!this.generation && !this.generation.controller.signal.aborted; }
+  private output(text: string, complete = false, end = false, substantive = false) {
     if (!this.target || this.closed) return;
-    this.deps.send({ response_type: "response", response_id: this.target.id, content: text,
-      content_complete: complete, ...(end ? { end_call: true } : {}) });
+    const sent = this.deps.send({ response_type: "response", response_id: this.target.id, content: text,
+      content_complete: complete, ...(end && !this.awaitingProviderTurn ? { end_call: true } : {}) });
+    // Diagnostics only, AFTER sending. Never buffer a sentence on our server.
+    // Exclude acknowledgement bridges from substantive-response measurements.
+    if (this.deps.retellStreaming && sent !== false) {
+      const t = this.target;
+      if (substantive && text) {
+        if (!t.sentText) this.event(t.id, "first_text_sent", "websocket_send");
+        t.sentText = (t.sentText ?? "") + text;
+        // A trailing decimal point is ambiguous until another chunk arrives.
+        if (!t.sentenceSent && /[!?…](?=\s|$)|\.(?=\s)|(?<!\d)\.(?=$)/.test(t.sentText)) {
+          t.sentenceSent = true;
+          this.event(t.id, "first_sentence_sent", "text_terminator_observed");
+        }
+      }
+      if (complete) {
+        if (t.sentText && !t.sentenceSent) {
+          t.sentenceSent = true;
+          this.event(t.id, "first_sentence_sent", "content_complete");
+        }
+        this.event(t.id, "response_closed", "content_complete");
+      }
+    }
   }
   private flush() {
     const g = this.generation, t = this.target;
     if (!g || !t || this.paused || this.closed || t.completed) return;
     const text = g.text.slice(t.cursor);
-    if (text) { this.output(text); t.cursor = g.text.length; }
+    if (text) { this.output(text, false, false, true); t.cursor = g.text.length; }
     if (g.done) { this.output("", true, !!g.end); t.completed = true; }
   }
   private playbackPosition(turns: SpokenTurn[]) {
@@ -148,7 +179,7 @@ export class CResponseBuffer {
     phrase.armed = true;
     this.bridgeTimer = setTimeout(() => {
       const g = this.generation;
-      if (this.closed || this.paused || this.deps.bridgeAllowed?.(this.latest) === false ||
+      if (this.closed || this.paused || this.awaitingProviderTurn || this.deps.bridgeAllowed?.(this.latest) === false ||
         voicemailTurn(this.latest) || this.phrase !== phrase || phrase.token || phrase.bridged ||
         !phrase.eligible || !g || this.deps.providerHasText?.(g.controller.signal) || g.done ||
         g.controller.signal.aborted || phrase.agents - this.lastBridgeAgent < 3) return;
@@ -192,9 +223,15 @@ export class CResponseBuffer {
     }
     this.target = { id, cursor: 0, completed: false };
     this.paused = false;
+    this.awaitingProviderTurn = false;
     if (this.fatal?.end) { this.output(this.fatal.message, true, true); this.close(); return; }
     this.fatal = undefined; // A recoverable phone error over interrupted speech is not a terminal hang.
     let decision = old?.reusable && !reminder ? classifyCInterruption(users(old.turns), users(turns)) : undefined;
+    // A fully played previous turn cannot need ASR-burst coalescing. Preserve
+    // the old coalescer for partial/in-flight speech, but start real new turns now.
+    const played = this.deps.retellStreaming && old?.reusable &&
+      (old.done || /[?？]\s*$/.test(old.text)) ? this.playbackPosition(turns) : null;
+    const finishedPreviousTurn = played !== null && !!old && !old.text.slice(played).trim();
     if (old && this.deps.discardOnInterruption && norm(users(old.turns)) !== norm(users(turns)))
       decision = { kind: "c", reason: "dev_interrupted_answer_discarded", regenerate: true };
     if (old?.controller.signal.aborted && decision) decision = {
@@ -273,7 +310,7 @@ export class CResponseBuffer {
     };
     // Coalesce response_required bursts. Abort obsolete facts immediately, but
     // don't admit a paid replacement for every ASR delta.
-    if (decision?.regenerate) {
+    if (decision?.regenerate && !finishedPreviousTurn) {
       this.restartTimer = setTimeout(start, 150); this.restartTimer.unref();
     } else start();
   }
@@ -281,10 +318,17 @@ export class CResponseBuffer {
     clearTimeout(g.timer); g.controller.abort(); g.reusable = false;
     const result = this.deps.error(error);
     // Never emit an error over the caller; keep the failed generation unusable.
-    if (this.paused) this.fatal = result;
-    else { this.output(result.message, true, result.end); if (this.target) this.target.completed = true; }
+    if (this.paused || this.awaitingProviderTurn) {
+      this.fatal = result;
+      if (this.deps.retellStreaming && !this.paused) {
+        // Close the current protocol response without speaking an error or
+        // hanging up over the caller. Surface the failure on the next request.
+        this.output("", true);
+        if (this.target) this.target.completed = true;
+      }
+    } else { this.output(result.message, true, result.end); if (this.target) this.target.completed = true; }
     this.deps.record("c_response_failed");
-    if (result.end && !this.paused) this.close();
+    if (result.end && !this.paused && !this.awaitingProviderTurn) this.close();
   }
   /** Explicit Dev waiting gate: discard stale text and timers, but allow a later fresh request. */
   suspendForWaiting() {

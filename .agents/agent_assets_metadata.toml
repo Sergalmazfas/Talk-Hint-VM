@@ -3869,3 +3869,17 @@ mtime_ms = 1793909002138
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a3e55413-9626-49f2-b7f4-9393adb059d7/33a886b7-35d3-451f-acb5-e5483ef78461"
 storage_version_token = "1793909033171678"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "4T9lFqiskNAtX6_3HMlZp"
+uri = "file://generated-artifacts/katya-retell-streaming/Katya_New_Dev_Retell_Streaming.zip"
+type = "unspecified"
+title = "Катя — Retell streaming, New Dev"
+description = "Сверка со спецификацией, diff и исходники, 236 проверок, тайминг одной реальной реплики, отдельное offline до/после и ограничения измерений. Production и голос не менялись."
+logical_id = "dfbcdaa1-a831-46f5-90e4-bdaf0d03504d"
+content_hash = "sha256:49765530b7a3148ef252e7cb56912d1c7df212f2434625db5b0e23b0510bfd00"
+size = 54823
+mtime_ms = 1793910493693
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dfbcdaa1-a831-46f5-90e4-bdaf0d03504d/c9f036a0-e936-4f62-ad2b-2d2f5e45fc99"
+storage_version_token = "1793910550416728"
+content_type = "application/octet-stream"
