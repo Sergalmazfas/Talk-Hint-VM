@@ -255,7 +255,8 @@ export class RetellEngineRegistry {
       ? new CResponseBuffer({
         ...(!this.options.phone && rehearsalBindings.get(entry.id)?.manners ? {
           bridgeAllowed: (turns: SpokenTurn[]) => !devQuestion(turns),
-          providerHasText: devProviderHasText, firstTextReason: "dev_complete_reply_ready_for_tts",
+          providerHasText: devProviderHasText, firstTextReason: "dev_streaming_text_delta",
+          discardOnInterruption: true, interruptionActive: () => entry.waiting?.callerAudioActive ?? true,
         } : {}),
         generate: (turns, signal, emit, reminder) => entry.engine.respond(turns, signal, emit, reminder),
         send: frame => entry.commandCompleted === (frame as any).response_id ? true : send(frame),

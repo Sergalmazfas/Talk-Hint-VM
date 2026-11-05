@@ -96,6 +96,24 @@ it("New Dev rehearsal wire replays 1:26 and 1:50, ignores colleague speech and a
   expect(ws.sent.filter(x => x.content === "Конечно, жду.")).toHaveLength(2);
   expect(ws.sent.some(x => /Got it|New,|New tires,/.test(x.content ?? ""))).toBe(false);
 });
+it("New Dev rejects colleague speech BEFORE model generation and stays silent during its continuation", async () => {
+  vi.useFakeTimers(); vi.stubEnv("NODE_ENV", "development");
+  const { ws, requests, registry } = fixture({}, true, undefined, true);
+  registry.waitingAudio("session", true, false);
+  const transcript = [{ role: "user", content: "John, check the new tires." }];
+  ws.frame({ interaction_type: "response_required", response_id: 1, transcript });
+  transcript.push({ role: "user", content: "New tires" });
+  ws.frame({ interaction_type: "update_only", turntaking: "user_turn", transcript });
+  await vi.advanceTimersByTimeAsync(2000);
+  registry.waitingAudio("session", true, false);
+  expect(requests).toHaveLength(0);
+  expect(ws.sent.filter(x => x.content)).toHaveLength(0);
+  registry.waitingAudio("session", false, false);
+  transcript.push({ role: "user", content: "Кать, ты меня слышишь?" });
+  ws.frame({ interaction_type: "response_required", response_id: 2, transcript });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(requests).toHaveLength(1);
+});
 describe("waiting gate on actual Custom LLM wire", () => {
   it("one sec suppresses response/reminders/bridges; one check; explicit return reaches the model", async () => {
     vi.stubEnv("NODE_ENV", "development"); vi.useFakeTimers();

@@ -117,13 +117,17 @@ export class DevWaitingPolicy {
       return;
     }
     const activeAudio = this.strict && this.activity?.active && this.now() - this.activity.at <= 3000;
-    if (this.wait && completed && addressedReturn(text) && !activeAudio) {
+    if (this.wait && completed && !activeAudio &&
+        (addressedReturn(text) || (this.strict && this.wait.kind === "silence"))) {
       this.event("returned"); this.wait = undefined; this.shortTurn = undefined;
     } else if (this.wait && !colleagueSpeech(text) && key.length <= 100 && key.split(" ").length <= 12) {
       if (this.shortTurn?.identity !== identity) this.shortTurn = { identity, at: this.now() };
     } else this.shortTurn = undefined;
   }
   get awaitingPause() { return !!this.shortTurn && !!this.wait && !this.ended; }
+  get callerAudioActive(): boolean | undefined {
+    return this.activity && this.now() - this.activity.at <= 3000 ? this.activity.active : undefined;
+  }
   takeAcknowledgement(): WaitingAction | undefined {
     if (!this.wait?.ackPending || this.wait.ackReadyAt === undefined || this.ended ||
         this.speaking || this.agentSpeaking) return;

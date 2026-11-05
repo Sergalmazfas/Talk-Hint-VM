@@ -35,7 +35,7 @@ describe("new rehearsal C manners: deterministic and no paid calls", () => {
     expect(cleanDevReply("The total is $207.57. New tires,", false, [])).toBe("The total is $207.57.");
     expect(cleanDevReply("The total is $207.57,", false, [])).toBe("");
   });
-  it("buffers the actual chunk stream and never exposes an abandoned prefix", async () => {
+  it("streams the first delta before completion and never emits MORE text after cancellation", async () => {
     let release!: () => void;
     const gate = new Promise<void>(r => release = r);
     const signal = new AbortController();
@@ -43,16 +43,12 @@ describe("new rehearsal C manners: deterministic and no paid calls", () => {
       yield { type: "text", text: "New," }; await gate;
       yield { type: "text", text: " tires?" }; yield { type: "complete", output: [], tools: [] };
     };
-    const actual: EngineChunk[] = [];
-    const running = (async () => {
-      for await (const c of devMannersStream(stream)({ instructions: "", input: [], signal: signal.signal })) actual.push(c);
-    })();
-    await Promise.resolve(); await Promise.resolve();
-    expect(actual).toEqual([]);
-    signal.abort(); release(); await running;
-    expect(actual).toEqual([]);
+    const iterator = devMannersStream(stream)({ instructions: "", input: [], signal: signal.signal });
+    expect(await iterator.next()).toEqual({ done: false, value: { type: "text", text: "New," } });
+    signal.abort(); release();
+    expect((await iterator.next()).done).toBe(true);
   });
-  it("preserves usage/tools and emits only a complete answer, never partial Got it", async () => {
+  it("preserves usage/tools, strips only a bounded Got it prefix, and streams the content", async () => {
     const stream: EngineStream = async function* () {
       yield { type: "text", text: "Got" };
       yield { type: "usage", input: 20, cachedInput: 10, output: 8 };
@@ -108,7 +104,7 @@ describe("new rehearsal C manners: deterministic and no paid calls", () => {
       dev.b.close(); baseline.b.close();
     } finally { vi.useRealTimers(); }
   });
-  it("a raw token inside the reply buffer still cancels the 600ms bridge, without falsely counting TTS readiness as raw TTFT", async () => {
+  it("a raw token streams immediately, cancels the bridge, and is not held until completion", async () => {
     vi.useFakeTimers();
     let release!: () => void;
     const gate = new Promise<void>(r => release = r);
@@ -123,17 +119,96 @@ describe("new rehearsal C manners: deterministic and no paid calls", () => {
         for await (const c of devMannersStream(stream)({ signal, input: turns, instructions: "" }))
           if (c.type === "text") emit(c.text);
       },
-      providerHasText: devProviderHasText, firstTextReason: "dev_complete_reply_ready_for_tts",
+      providerHasText: devProviderHasText, firstTextReason: "dev_streaming_text_delta",
       send: frame => sent.push(frame), record: () => {}, error: () => ({ message: "", end: false }),
     });
     try {
       b.request(1, [{ role: "user", content: "We have new tires" }]);
       b.request(2, [{ role: "user", content: "No, we have used tires for $150" }]);
       await vi.advanceTimersByTimeAsync(900);
-      expect(b.metrics.bridges).toBe(0); expect(sent.filter(x => x.content)).toHaveLength(0);
+      expect(b.metrics.bridges).toBe(0);
+      expect(sent.filter(x => x.content).map(x => x.content)).toEqual(["The price "]);
       release(); await vi.advanceTimersByTimeAsync(0);
-      expect(sent.filter(x => x.content).map(x => x.content)).toEqual(["The price is $150."]);
-      expect(b.metrics.events.find(x => x.kind === "first_token")?.reason).toBe("dev_complete_reply_ready_for_tts");
+      expect(sent.filter(x => x.content).map(x => x.content).join("")).toBe("The price is $150.");
+      expect(b.metrics.events.find(x => x.kind === "first_token")?.reason).toBe("dev_streaming_text_delta");
     } finally { release(); b.close(); vi.useRealTimers(); }
+  });
+  it("does not impose the 1.2s return timer on ordinary dialogue; keeps it for an explicit warehouse wait", () => {
+    let now = 0;
+    const p = new DevWaitingPolicy(() => now, { colleague: devColleagueSpeech });
+    p.afterAnswer(); p.audio(false);
+    p.observe("Да, на ночь сто пятьдесят долларов", false, true);
+    expect(p.waiting).toBe(false);
+    p.observe("Секунду, на складе посмотрю", false, true);
+    p.takeAcknowledgement(); p.observe("Новые есть", false, true);
+    expect(p.waiting).toBe(true);
+    p.audio(false); now = 1199; p.audio(false); expect(p.tick()).toBeUndefined();
+    now = 1200; p.audio(false); expect(p.tick()?.resume).toBe(true);
+  });
+  it.each([
+    { text: "Got it. The price is $207.57.", heard: [], question: true, expected: "The price is $207.57." },
+    { text: "Got it the total is $207.57.", heard: [], question: true, expected: "the total is $207.57." },
+    { text: "Thank you. Thank you. Goodbye! Bye.", heard: [], question: false, expected: "Thank you.Goodbye!" },
+    { text: "Thank you. Goodbye!", heard: ["Thank you. Goodbye!"], question: false, expected: "" },
+    { text: "Thanks for checking. It costs $150.", heard: ["Goodbye!"], question: false, expected: "Thanks for checking. It costs $150." },
+  ])("runtime streaming manners preserve style without full-answer buffering: $text", async ({ text, heard, question, expected }) => {
+    const stream: EngineStream = async function* () {
+      // Worst-case token fragmentation.
+      for (const c of text) yield { type: "text", text: c };
+      yield { type: "complete", output: [], tools: [] };
+    };
+    let actual = "";
+    for await (const c of devMannersStream(stream)({ signal: new AbortController().signal,
+      instructions: "", input: [...heard.map(content => ({ role: "assistant", content })),
+        { role: "user", content: question ? "How much?" : "Okay" }] }))
+      if (c.type === "text") actual += c.text;
+    expect(actual).toBe(expected);
+  });
+  it("matches the baseline first-text time on the same model stream, without waiting for completion", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = async (dev: boolean) => {
+        const start = Date.now(); let first: number | undefined, complete = false;
+        const source: EngineStream = async function* () {
+          await new Promise(r => setTimeout(r, 20));
+          yield { type: "text", text: "The price " };
+          await new Promise(r => setTimeout(r, 2000));
+          yield { type: "text", text: "is $150." };
+          yield { type: "complete", output: [], tools: [] };
+        };
+        const work = (async () => {
+          for await (const c of (dev ? devMannersStream(source) : source)({
+            signal: new AbortController().signal, instructions: "", input: [] })) {
+            if (c.type === "text" && first === undefined) first = Date.now() - start;
+            if (c.type === "complete") complete = true;
+          }
+        })();
+        await vi.advanceTimersByTimeAsync(20);
+        expect(first).toBe(20); expect(complete).toBe(false);
+        await vi.advanceTimersByTimeAsync(2000); await work;
+        return first;
+      };
+      expect(await run(true)).toBe(await run(false));
+    } finally { vi.useRealTimers(); }
+  });
+  it("discards an interrupted answer even for an acknowledgement; late chunks cannot leak or resume", async () => {
+    vi.useFakeTimers();
+    const sent: any[] = []; const signals: AbortSignal[] = [];
+    let oldEmit: ((s: string) => void) | undefined;
+    const b = new CResponseBuffer({
+      discardOnInterruption: true, interruptionActive: () => true,
+      generate: async (_turns, signal, emit) => { signals.push(signal); oldEmit ??= emit; await new Promise(() => {}); },
+      send: frame => sent.push(frame), record: () => {}, error: () => ({ message: "", end: false }),
+    });
+    try {
+      b.request(1, [{ role: "user", content: "The price is $300" }]);
+      b.update([{ role: "user", content: "The price is $300" }], true);
+      expect(signals[0].aborted).toBe(true);
+      oldEmit!("Old price is $300."); expect(sent.filter(x => x.content)).toHaveLength(0);
+      b.request(2, [{ role: "user", content: "The price is $300" }, { role: "user", content: "mhm" }]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.metrics.reused).toBe(0); expect(signals).toHaveLength(2);
+      oldEmit!("Wrong continued answer."); expect(sent.filter(x => x.content)).toHaveLength(0);
+    } finally { b.close(); vi.useRealTimers(); }
   });
 });

@@ -65,6 +65,8 @@ export class CResponseBuffer {
     bridgeAllowed?: (turns: SpokenTurn[]) => boolean;
     providerHasText?: (signal: AbortSignal) => boolean;
     firstTextReason?: string;
+    discardOnInterruption?: boolean;
+    interruptionActive?: () => boolean;
   }) {}
   private event(id: number, kind: string, reason: string, from?: number) {
     this.metrics.events.push({ at: new Date().toISOString(), id, kind, reason, phrase: this.phrase?.key, ...(from === undefined ? {} : { from }) });
@@ -72,8 +74,18 @@ export class CResponseBuffer {
   }
   update(turns: SpokenTurn[], userTurn: boolean, protectInitialPhoneGreeting = false) {
     const changed = users(this.latest) !== users(turns);
+    const semanticChange = norm(users(this.latest)) !== norm(users(turns));
     const duplicateOpening = protectInitialPhoneGreeting && norm(users(this.latest)) === norm(users(turns));
     this.latest = turns; this.metrics.updates++;
+    if (this.deps.discardOnInterruption) {
+      // New rehearsal only: no stale prefix may be resumed after real speech.
+      // A repeated/case-only ASR snapshot is not itself proof of interruption.
+      if (semanticChange || (userTurn && (this.deps.interruptionActive?.() ?? true))) {
+        this.event(this.target?.id ?? this.lastId, "discarded", "dev_interruption");
+        this.suspendForWaiting();
+      }
+      return;
+    }
     // Retell still stops playback; only the model generation survives. Never
     // transmit more old text while the caller's final words are unknown.
     // Opt-in for telephone opening only. Retell can repeat the SAME completed
@@ -182,6 +194,8 @@ export class CResponseBuffer {
     if (this.fatal?.end) { this.output(this.fatal.message, true, true); this.close(); return; }
     this.fatal = undefined; // A recoverable phone error over interrupted speech is not a terminal hang.
     let decision = old?.reusable && !reminder ? classifyCInterruption(users(old.turns), users(turns)) : undefined;
+    if (old && this.deps.discardOnInterruption && norm(users(old.turns)) !== norm(users(turns)))
+      decision = { kind: "c", reason: "dev_interrupted_answer_discarded", regenerate: true };
     if (old?.controller.signal.aborted && decision) decision = {
       kind: decision.kind === "a" ? "b" : decision.kind, reason: decision.reason, regenerate: true,
     };

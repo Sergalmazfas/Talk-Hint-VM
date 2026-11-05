@@ -3771,3 +3771,17 @@ mtime_ms = 1793856980566
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9c923200-14eb-4a54-96f5-81f8c740df2e/3b5b5d0e-3aa1-4d2a-9044-1c2e2e22f93a"
 storage_version_token = "1793856988561586"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "E_Vr_yhLhXKauhqFdlal1"
+uri = "file://generated-artifacts/rehearsal-streaming-review/Katya_New_Dev_Streaming_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию — стриминг «Новой (Dev)»"
+description = "Diff и исходники, 4 зелёных шарда, сравнение сохранённых репетиций по аудио, расчёт задержек и ограничения проверки. Production не менялся."
+logical_id = "4d0e0272-d795-40e4-81d6-8ebc12247f4e"
+content_hash = "sha256:ef8521a6830f0ba834565d41f01b2c86f097c2fd0e663121e6bfc9db571ef3a7"
+size = 210056
+mtime_ms = 1793858850518
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4d0e0272-d795-40e4-81d6-8ebc12247f4e/82a9d4d2-9c78-4bd0-ac1b-6c72150db910"
+storage_version_token = "1793858866393095"
+content_type = "application/octet-stream"

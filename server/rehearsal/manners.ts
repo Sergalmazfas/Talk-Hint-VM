@@ -62,25 +62,78 @@ export function cleanDevReply(text: string, question: boolean, heard: string[]):
   return value;
 }
 
-/** Buffer a bounded reply to completion, never speak an abandoned generation's prefix.
- * This adds model-completion wait before speech in this Dev experiment; no speed claim.
- * Actual usage chunks pass through unchanged; no automatic retry or extra paid request.
+/** Only ambiguous banned prefixes are held (at most 32 characters), never a
+ * sentence or full reply. Ordinary first tokens pass in the same iteration.
+ * Interruption/addressing safety belongs BEFORE generation, in the transport.
  */
+class StreamingManners {
+  private pending = "";
+  private emitted = "";
+  private boundary = true;
+  private stripping = false;
+  constructor(private question: boolean, private heard: string[]) {}
+  private banned() {
+    const closing = this.heard.some(t => /\b(?:goodbye|bye)\b|до свидания|всего доброго/i.test(t));
+    const thanks = /(?:^|[.!?]\s*)(?:thank you|thanks|спасибо)/i.test(this.emitted);
+    const bye = /(?:^|[.!?]\s*)(?:goodbye|bye|до свидания|всего доброго)/i.test(this.emitted);
+    return [
+      ...(this.question && !this.emitted.trim() ? ["got it"] : []),
+      ...(this.heard.some(t => unknown.test(t)) ? ["i don't know", "he didn't mention", "she didn't mention", "он не уточнил", "она не уточнила"] : []),
+      ...(closing || thanks ? ["thank you", "thanks", "спасибо"] : []),
+      ...(closing || bye ? ["goodbye", "bye", "до свидания", "всего доброго"] : []),
+    ];
+  }
+  push(text: string, final = false) {
+    let out = "";
+    const emit = (value: string) => {
+      out += value; this.emitted += value;
+      const last = value.at(-1);
+      if (last && !/\s/.test(last)) this.boundary = /[.!?]/.test(last);
+    };
+    for (const char of text) {
+      if (this.stripping && /[\s.!,:;—-]/.test(char)) continue;
+      this.stripping = false;
+      if (!this.boundary) { emit(char); continue; }
+      this.pending += char;
+      const probe = this.pending.trimStart().toLowerCase();
+      const bans = this.banned();
+      if (this.pending.length <= 32 && bans.some(b => probe.trimEnd() === b)) continue;
+      const matched = bans.find(b => probe.startsWith(b) && (b === "got it"
+        ? /^[\s.!?,:;—-]/.test(probe.slice(b.length))
+        : /^[.!?,:;—-]/.test(probe.slice(b.length).trimStart())));
+      if (matched) {
+        const remainder = this.pending.trimStart().slice(matched.length).replace(/^[\s.!,:;—-]+/, "");
+        this.pending = ""; this.stripping = !remainder;
+        if (remainder) emit(remainder);
+      } else if (probe && (this.pending.length > 32 || !bans.some(b => b.startsWith(probe)))) {
+        emit(this.pending); this.pending = "";
+      }
+    }
+    if (final && this.pending) {
+      if (!this.banned().includes(this.pending.trim().toLowerCase())) emit(this.pending);
+      this.pending = "";
+    }
+    return out;
+  }
+}
 export function devMannersStream(stream: EngineStream): EngineStream {
   return async function* (request) {
-    let text = "";
+    let chars = 0;
     const heard = request.input.filter(t => t.role === "assistant").map(t => typeof t.content === "string" ? t.content : "");
     const users: SpokenTurn[] = request.input.filter(t => t.role === "user").map(t => ({
       role: "user", content: typeof t.content === "string" ? t.content : "",
     }));
+    const filter = new StreamingManners(devQuestion(users), heard);
     for await (const chunk of stream(request)) {
       if (request.signal.aborted) return;
       if (chunk.type === "text") {
         if (chunk.text.trim()) providerTextSeen.add(request.signal);
-        text += chunk.text;
-        if (text.length > 16000) throw Error("DEV_REHEARSAL_REPLY_TOO_LONG");
+        chars += chunk.text.length;
+        if (chars > 16000) throw Error("DEV_REHEARSAL_REPLY_TOO_LONG");
+        const text = filter.push(chunk.text);
+        if (text) yield { type: "text" as const, text };
       } else if (chunk.type === "complete") {
-        const reply = cleanDevReply(text, devQuestion(users), heard);
+        const reply = filter.push("", true);
         if (reply) yield { type: "text" as const, text: reply };
         yield chunk;
       } else yield chunk;
