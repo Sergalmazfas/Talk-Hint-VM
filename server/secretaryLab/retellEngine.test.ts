@@ -8,6 +8,7 @@ import { RetellSecretaryLab, type RetellLabProfile } from "./retell";
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
 import { randomUUID } from "node:crypto";
 import { SpeedLimitError, speedLimitMessage } from "./speedRequestBudget";
+import { rehearsalBindings } from "./rehearsalBinding";
 const wait = () => new Promise<void>(resolve => setImmediate(resolve));
 const turn = [{ role: "user" as const, content: "Hello, please take a message" }];
 const done = { type: "complete" as const, output: [], tools: [] };
@@ -27,6 +28,49 @@ function fixture(stream: EngineStream, buffered = false) {
   const ws = new Socket(); registry.attach(ws as any, path);
   return { registry, path, ws, r };
 }
+it.each([true, false])("completed-question handoff is wired only to the selected New Dev binding (enabled=%s)", async enabled => {
+  vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  rehearsalBindings.set("test-session", {
+    waiting: false, buffered: true, advanceCompletedTurn: enabled,
+    create: () => { throw Error("Unused fixture factory"); },
+  });
+  try {
+    let calls = 0;
+    const question = "Is the total $400 including tax?";
+    const { ws, r } = fixture(async function* () {
+      yield { type: "text", text: ++calls === 1 ? question : "Can you take the truck in two hours?" };
+      yield done;
+    }, true);
+    ws.frame({ interaction_type: "response_required", response_id: 1, transcript: turn });
+    await wait(); await wait();
+    ws.frame({ interaction_type: "response_required", response_id: 2,
+      transcript: [...turn, { role: "agent", content: question }, { role: "user", content: "Yes." }] });
+    await vi.advanceTimersByTimeAsync(160); await wait(); await wait();
+    expect(calls).toBe(enabled ? 2 : 1);
+    expect(ws.sent.filter(f => f.response_id === 2).map(f => f.content).join(""))
+      .toBe(enabled ? "Can you take the truck in two hours?" : "");
+    expect(r.engine.events.some(e => e.type === "c_completed_response_new_turn")).toBe(enabled);
+  } finally {
+    rehearsalBindings.delete("test-session"); vi.useRealTimers();
+  }
+});
+it("a telephone C buffer cannot inherit the rehearsal handoff flag", () => {
+  vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "");
+  const id = "telephone-scope-fixture";
+  rehearsalBindings.set(id, { waiting: false, buffered: true, advanceCompletedTurn: true,
+    create: () => { throw Error("Never enter the telephone path"); } });
+  try {
+    const registry = new RetellEngineRegistry(undefined, { phone: true, phoneProfile: () => "C" });
+    registryList.push(registry);
+    const r = registry.reserve("owner", "Ask about the total price", id);
+    registry.registered(id, "CA_scope_fixture");
+    registry.attach(new Socket() as any, `/retell-phone-engine/${r.ticket}/CA_scope_fixture`);
+    const entry = (registry as any).entries.get(id);
+    expect(entry.buffer).toBeDefined();
+    expect(entry.buffer.deps.advanceCompletedTurn).toBe(false);
+  } finally { rehearsalBindings.delete(id); }
+});
 it("only the opted-in Dev registry preserves a generation across caller updates and ack response ids", async () => {
   vi.stubEnv("NODE_ENV", "development");
   let release!: () => void;

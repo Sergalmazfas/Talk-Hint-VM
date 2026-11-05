@@ -3,4 +3,5 @@ import type { SecretaryConversationEngine } from "../secretary/conversationEngin
 export const rehearsalBindings = new Map<string, {
   create(owner: string, instruction: string): SecretaryConversationEngine;
   waiting: boolean; buffered: boolean; manners?: boolean;
+  advanceCompletedTurn?: boolean;
 }>();

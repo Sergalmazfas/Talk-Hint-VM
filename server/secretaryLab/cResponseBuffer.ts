@@ -67,6 +67,7 @@ export class CResponseBuffer {
     firstTextReason?: string;
     discardOnInterruption?: boolean;
     interruptionActive?: () => boolean;
+    advanceCompletedTurn?: boolean;
   }) {}
   private event(id: number, kind: string, reason: string, from?: number) {
     this.metrics.events.push({ at: new Date().toISOString(), id, kind, reason, phrase: this.phrase?.key, ...(from === undefined ? {} : { from }) });
@@ -201,7 +202,13 @@ export class CResponseBuffer {
     };
     if (decision && decision.kind !== "c" && !decision.regenerate) {
       const position = this.playbackPosition(turns);
-      if (position !== null) {
+      // Generation completion is not playback completion: a fully generated
+      // answer may still be speaking. Only hand off when the played prefix
+      // exhausted it (or its finished question) AND the caller added content.
+      const completedNewTurn = this.deps.advanceCompletedTurn && position !== null &&
+        (old!.done || /[?？]\s*$/.test(old!.text)) &&
+        !old!.text.slice(position).trim() && decision.reason !== "unchanged_context";
+      if (position !== null && !completedNewTurn) {
         this.metrics[decision.kind]++; this.metrics.reused++;
         this.target.cursor = position;
         this.event(id, decision.kind, decision.reason, position);
@@ -211,8 +218,13 @@ export class CResponseBuffer {
         // always receives the latest full provider transcript.
         this.flush(); return;
       }
-      this.metrics.ambiguousPlayback++;
-      decision = { kind: "b", reason: "unverified_playback_silent_restart", regenerate: true };
+      if (completedNewTurn) {
+        decision = { kind: "b", reason: "completed_response_new_turn", regenerate: true };
+        this.deps.record("c_completed_response_new_turn");
+      } else {
+        this.metrics.ambiguousPlayback++;
+        decision = { kind: "b", reason: "unverified_playback_silent_restart", regenerate: true };
+      }
     }
     if (decision) {
       this.metrics[decision.kind]++;

@@ -67,6 +67,7 @@ export class RehearsalRuntime {
       check: async () => ({ mode: "rehearsal" }),
       reserve: (who, instruction, id) => {
         rehearsalBindings.set(id, { waiting: version.waiting, buffered: version.speed === "C", manners: version.manners,
+          advanceCompletedTurn: version.id === "dev-C",
           create: (w, text) => speedEngine(w, text, version.speed, personality, {
             productionRules: version.productionRules, waiting: version.waiting, manners: version.manners, noLoop: version.noLoop, timed: true,
           }) });

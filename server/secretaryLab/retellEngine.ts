@@ -253,6 +253,8 @@ export class RetellEngineRegistry {
     let buffered = (this.options.phone ? entry.engine.report.phoneRuntime?.variant === "C" :
       process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id))
       ? new CResponseBuffer({
+        advanceCompletedTurn: !this.options.phone && process.env.NODE_ENV === "development" &&
+          process.env.REPLIT_DEPLOYMENT !== "1" && rehearsalBindings.get(entry.id)?.advanceCompletedTurn === true,
         ...(!this.options.phone && rehearsalBindings.get(entry.id)?.manners ? {
           bridgeAllowed: (turns: SpokenTurn[]) => !devQuestion(turns),
           providerHasText: devProviderHasText, firstTextReason: "dev_streaming_text_delta",

@@ -3855,3 +3855,17 @@ mtime_ms = 1793908262814
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d01f84f6-2083-479a-aea9-c5d1ed8f098c/a1213f3c-4fbd-4a6d-aa11-7a9aa421a294"
 storage_version_token = "1793908268876858"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "0MTtIbV9FbnZoP9be3HQZ"
+uri = "file://generated-artifacts/dev-completed-turn-fix/Dev_Completed_Question_Answer_Fix.zip"
+type = "unspecified"
+title = "Dev — исправление ответа после Yes/No"
+description = "Diff, исходники, offline replay и результаты: 122/122 теста. Только Новая Dev; C-контроль, production, голос, модель и таймеры не менялись."
+logical_id = "a3e55413-9626-49f2-b7f4-9393adb059d7"
+content_hash = "sha256:94b3b4f70d5f0ab55603e7d833c205dbedc6e3850b3ab6d2c69936f8ee03b3a2"
+size = 41348
+mtime_ms = 1793909002138
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a3e55413-9626-49f2-b7f4-9393adb059d7/33a886b7-35d3-451f-acb5-e5483ef78461"
+storage_version_token = "1793909033171678"
+content_type = "application/octet-stream"
