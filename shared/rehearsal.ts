@@ -13,6 +13,7 @@ export type RehearsalResult = { id: string; status: string; createdAt: string; e
     recordingConsent: true; codeVersion: string };
 };
 export type RehearsalSnapshot = { ready: boolean; reason?: string; csrf: string;
+  settings: { recordingConsent: boolean };
   versions: RehearsalVersion[]; scenes: RehearsalScene[]; history: RehearsalResult[];
   budget: { limitUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number } };
 export const REHEARSAL_API = "/api/admin/rehearsal";

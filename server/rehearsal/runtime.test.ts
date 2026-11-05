@@ -13,6 +13,8 @@ describe("rehearsal admission, persistence and bounded review", () => {
     for (const key of ["RETELL_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]) vi.stubEnv(key, "fixture");
     rows = new Map();
     store = { list: vi.fn(async () => ({ scenes: [], history: [] })),
+      settings: vi.fn(async () => ({ recordingConsent: true })),
+      saveSettings: vi.fn(async (_owner, recordingConsent) => ({ recordingConsent })),
       save: vi.fn(async (_owner, row) => { rows.set(row.id, structuredClone(row)); }),
       get: vi.fn(async (owner, id) => {
         if (owner !== "owner" || !rows.has(id)) throw Object.assign(Error("REHEARSAL_NOT_FOUND"), { status: 404 });
@@ -42,6 +44,27 @@ describe("rehearsal admission, persistence and bounded review", () => {
     await expect(runtime.create("owner", { ...input, sceneHash: "old" })).rejects.toThrow("SNAPSHOT_CHANGED");
     await expect(runtime.create("owner", { ...input, recordingConsent: false })).rejects.toThrow("CONFIRMATION_REQUIRED");
     expect(budget.reserve).not.toHaveBeenCalled();
+  });
+  it("requires saved owner recording consent before reserving money, including after revocation", async () => {
+    store.settings.mockResolvedValue({ recordingConsent: false });
+    await expect(runtime.create("owner", input)).rejects.toThrow("RECORDING_CONSENT_REQUIRED");
+    expect(budget.reserve).not.toHaveBeenCalled();
+    expect(lab.create).not.toHaveBeenCalled();
+  });
+  it("saves one-time recording settings only, without provider calls", async () => {
+    expect(await runtime.saveSettings("owner", { recordingConsent: true })).toEqual({ settings: { recordingConsent: true } });
+    expect(store.saveSettings).toHaveBeenCalledWith("owner", true);
+    expect(await runtime.saveSettings("owner", { recordingConsent: false })).toEqual({ settings: { recordingConsent: false } });
+    for (const value of [{}, { recordingConsent: "true" }, { recordingConsent: true, model: "x" }])
+      await expect(runtime.saveSettings("owner", value)).rejects.toThrow("INVALID_REHEARSAL_SETTINGS");
+    expect(budget.reserve).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
+  });
+  it("prepares a pasted assignment into a saved Secretary scene before admission", async () => {
+    const result = await runtime.saveScene("owner", { text: "Ask total price. Do not pay." });
+    expect(result.scene.plan.executor).toBe("secretary");
+    expect(result.scene.plan.sayAsk).toEqual(["Ask total price.", "Do not pay."]);
+    expect(store.save).toHaveBeenCalledWith("owner", expect.objectContaining({ id: result.scene.id, kind: "rehearsal-scene" }));
+    expect(budget.reserve).not.toHaveBeenCalled(); expect(lab.create).not.toHaveBeenCalled();
   });
   it("storage must be accessible BEFORE any paid admission", async () => {
     audio.ready.mockRejectedValue(Error("missing"));

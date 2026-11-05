@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { devReportArchive } from "../secretaryLab/devReportArchive";
 import type { RehearsalResult, RehearsalScene } from "../../shared/rehearsal";
 export type SavedRehearsal = { id: string; kind: "rehearsal"; requestId: string;
@@ -9,7 +10,24 @@ export function requireRehearsalDev() {
 }
 export class RehearsalStore {
   private writes = new Map<string, Promise<void>>();
-  async save(owner: string, row: SavedRehearsal | (RehearsalScene & { kind: "rehearsal-scene" })) {
+  private settingsId(owner: string) {
+    return "rehearsal-settings-" + createHash("sha256").update(owner).digest("hex");
+  }
+  async settings(owner: string) {
+    requireRehearsalDev();
+    const row: any = await (await devReportArchive()).get(owner, this.settingsId(owner));
+    if (row && row.kind !== "rehearsal-settings") throw Error("REHEARSAL_SETTINGS_FORMAT");
+    return { recordingConsent: row?.recordingConsent === true };
+  }
+  async saveSettings(owner: string, recordingConsent: boolean) {
+    await this.save(owner, { id: this.settingsId(owner), kind: "rehearsal-settings",
+      recordingConsent, updatedAt: new Date().toISOString() });
+    const saved = await this.settings(owner);
+    if (saved.recordingConsent !== recordingConsent) throw Error("REHEARSAL_SETTINGS_READBACK_MISMATCH");
+    return saved;
+  }
+  async save(owner: string, row: SavedRehearsal | (RehearsalScene & { kind: "rehearsal-scene" }) |
+      { id: string; kind: "rehearsal-settings"; recordingConsent: boolean; updatedAt: string }) {
     requireRehearsalDev();
     const key = owner + ":" + row.id, snapshot = structuredClone(row);
     const write = (this.writes.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => {

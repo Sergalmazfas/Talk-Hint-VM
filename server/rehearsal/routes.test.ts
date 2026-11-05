@@ -13,6 +13,7 @@ describe("rehearsal owner boundary and no blind starts", () => {
     runtime = { snapshot: vi.fn().mockResolvedValue({ scenes: [], versions: [], history: [], ready: true }),
       create: vi.fn().mockResolvedValue({ id: "s", report: { status: "connecting" } }),
       analyse: vi.fn().mockResolvedValue({ report: {} }), saveScene: vi.fn(), waiting: vi.fn(), get: vi.fn(),
+      saveSettings: vi.fn().mockResolvedValue({ settings: { recordingConsent: true } }),
       readAudio: vi.fn().mockResolvedValue({ bytes: Buffer.from("private"), type: "audio/wav" }) };
     app = express(); registerRehearsalRoutes(app, runtime);
   });
@@ -50,5 +51,20 @@ describe("rehearsal owner boundary and no blind starts", () => {
     const result = await post().send({});
     expect(result.status).toBe(503); expect(result.body.error).toBe("MODEL_USAGE_UNKNOWN");
     expect(runtime.analyse).toHaveBeenCalledTimes(1);
+  });
+  it("protects permanent recording settings with owner login, Origin and CSRF", async () => {
+    const base = "/api/admin/rehearsal";
+    expect((await request(app).post(base + "/settings").send({ recordingConsent: true })).status).toBe(401);
+    const state = await request(app).get(base).set("Authorization", "Bearer owner");
+    const post = () => request(app).post(base + "/settings").set("Authorization", "Bearer owner");
+    expect((await post().send({ recordingConsent: true })).status).toBe(403);
+    expect((await post().set("X-Rehearsal-CSRF", state.body.csrf).set("Origin", "https://evil.example")
+      .send({ recordingConsent: true })).status).toBe(403);
+    expect(runtime.saveSettings).not.toHaveBeenCalled();
+    const saved = await post().set("X-Rehearsal-CSRF", state.body.csrf).set("Origin", "https://stand.replit.dev")
+      .send({ recordingConsent: true });
+    expect(saved.status).toBe(200);
+    expect(saved.body).toEqual({ settings: { recordingConsent: true } });
+    expect(runtime.saveSettings).toHaveBeenCalledWith("owner", { recordingConsent: true });
   });
 });

@@ -3,6 +3,17 @@ name: Secretary Lab boundary
 description: Why the admin conversation bench reuses the Secretary and what it does not prove.
 ---
 
+Репетиция владельца — только Секретарь (Катя), без Hint-подсказок. Владелец
+играет продавца, а Катя — дозвонившегося секретаря. Основной сценарий владельца
+на телефоне: вставить поручение, выбрать версию и начать разговор; технические
+формы и сравнение вторичны, а согласие на запись не запрашивается каждый раз.
+
+**Why:** владелец отдельно потребовал переделать стенд под свой сценарий, а не
+под техническую форму полигона.
+
+**How to apply:** упрощать вход, не удаляя историю и не подменяя выбранную
+версию; это не разрешение менять боевую Катю.
+
 ElevenLabs latency profiles must remain local to its Dev adapter; keep other working benches unchanged, preserve the original profile and compare the same model before combining changes.
 
 **Why:** The owner explicitly requires preserving the other working benches. Lower reasoning in a named ElevenLabs experiment is not permission to change the global Secretary default.

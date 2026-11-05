@@ -5,7 +5,7 @@ import { RetellEngineApi, retellEngineRegistry, engineCallbackBase } from "../se
 import { speedEngine, speedSeriesBudget } from "../secretaryLab/speedRuntime";
 import { speedSettlement } from "../secretaryLab/speedRequestBudget";
 import { rehearsalBindings } from "../secretaryLab/rehearsalBinding";
-import { defaultRehearsalScenes, rehearsalCodeHash, rehearsalInstruction, rehearsalVersions, sceneFromInput, type FrozenVersion } from "./catalog";
+import { defaultRehearsalScenes, rehearsalCodeHash, rehearsalInstruction, rehearsalVersions, sceneFromInput, sceneFromText, type FrozenVersion } from "./catalog";
 import { RehearsalStore, requireRehearsalDev, type SavedRehearsal } from "./store";
 import { RehearsalAudio } from "./audio";
 import { reviewRehearsal } from "./review";
@@ -30,19 +30,26 @@ export class RehearsalRuntime {
   }
   async snapshot(owner: string) {
     requireRehearsalDev();
-    const saved = await this.store.list(owner), b = await this.budget.state();
+    const saved = await this.store.list(owner), b = await this.budget.state(), settings = await this.store.settings(owner);
     let reason: string | undefined;
     try { await this.audio.ready(); if (!process.env.RETELL_API_KEY || !process.env.OPENAI_API_KEY ||
       !process.env.ANTHROPIC_API_KEY) throw Error("REHEARSAL_PROVIDER_NOT_CONFIGURED"); }
     catch { reason = "Для репетиции нужны закрытый App Storage и Retell/OpenAI/Anthropic в Secrets. Платный запуск заблокирован."; }
-    return { ready: !reason, reason, versions: rehearsalVersions(), scenes: [...defaultRehearsalScenes(), ...saved.scenes],
+    return { ready: !reason, reason, settings, versions: rehearsalVersions(), scenes: [...defaultRehearsalScenes(), ...saved.scenes],
       history: saved.history, budget: { limitUsd: b.limitMicroUsd / 1e6, spentUsd: b.spentMicroUsd / 1e6,
         reservedUsd: b.reservedMicroUsd / 1e6, remainingUsd: b.remainingMicroUsd / 1e6 } };
   }
   async saveScene(owner: string, input: unknown) {
     requireRehearsalDev();
-    const scene = sceneFromInput(randomUUID(), input);
+    const scene = input && typeof input === "object" && "text" in input
+      ? sceneFromText(randomUUID(), input) : sceneFromInput(randomUUID(), input);
     await this.store.save(owner, { ...scene, kind: "rehearsal-scene" }); return { scene };
+  }
+  async saveSettings(owner: string, input: any) {
+    requireRehearsalDev();
+    if (!input || Object.keys(input).length !== 1 || typeof input.recordingConsent !== "boolean")
+      failure("INVALID_REHEARSAL_SETTINGS", 400);
+    return { settings: await this.store.saveSettings(owner, input.recordingConsent) };
   }
   private async lab(owner: string, scene: RehearsalScene, version: FrozenVersion) {
     const catalog = await listPersonalities("Катя", undefined, 100);
@@ -83,6 +90,7 @@ export class RehearsalRuntime {
     try {
       const snapshot = await this.snapshot(owner);
       if (!snapshot.ready) failure("REHEARSAL_NOT_READY");
+      if (!snapshot.settings.recordingConsent) failure("REHEARSAL_RECORDING_CONSENT_REQUIRED", 403);
       const scene = snapshot.scenes.find(s => s.id === input.sceneId);
       const version = rehearsalVersions().find(v => v.id === input.versionId);
       if (!scene || !version?.available) failure("REHEARSAL_SELECTION_CHANGED", 400);

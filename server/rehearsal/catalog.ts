@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { callPlanSchema } from "../../shared/callPlan";
+import { callPlanSchema, checklistCallPlan, legacySecretaryTextPlan } from "../../shared/callPlan";
 import type { RehearsalScene, RehearsalVersion } from "../../shared/rehearsal";
 import { WAITING_LAB_PLANS } from "../../shared/secretaryWaitingPlans";
 import { compactSpeedPrompt } from "../secretaryLab/speedExperiment";
@@ -60,6 +60,39 @@ export function sceneFromInput(id: string, input: unknown): RehearsalScene {
   const scene = { id, title: value.title.trim(), plan, hash: rehearsalHash(plan) };
   if (rehearsalInstruction(scene).length > 4000) throw Object.assign(Error("REHEARSAL_PLAN_TOO_LONG"), { status: 400 });
   return scene;
+}
+/** Deterministic prepare_call compatibility; no paid model, no invented facts/phone. */
+export function sceneFromText(id: string, input: unknown): RehearsalScene {
+  const value = input as any;
+  if (!value || Object.keys(value).length !== 1 || typeof value.text !== "string" ||
+      !value.text.trim() || value.text.length > 12000)
+    throw Object.assign(Error("INVALID_REHEARSAL_TEXT"), { status: 400 });
+  let text = value.text.trim();
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i.exec(text);
+  if (fenced) text = fenced[1].trim();
+  if (text.startsWith("Owner-approved call plan.")) {
+    const newline = text.indexOf("\n");
+    if (newline < 0) throw Object.assign(Error("INVALID_REHEARSAL_PLAN_JSON"), { status: 400 });
+    text = text.slice(newline + 1).trim();
+  }
+  let plan;
+  if (/^[{[]/.test(text)) {
+    let decoded: any;
+    try { decoded = JSON.parse(text); }
+    catch { throw Object.assign(Error("INVALID_REHEARSAL_PLAN_JSON"), { status: 400 }); }
+    const candidate = decoded?.plan ?? decoded?.callPlan ?? decoded;
+    // A ChatGPT telephone plan may contain its real recipient. It is data only:
+    // discard the dialing target, never dial it and never invent a replacement.
+    const parsed = callPlanSchema.parse(candidate);
+    if (parsed.executor !== "secretary")
+      throw Object.assign(Error("REHEARSAL_SECRETARY_ONLY"), { status: 400 });
+    const { targetPhone: _phone, ...webPlan } = parsed;
+    plan = checklistCallPlan(webPlan);
+  } else {
+    plan = legacySecretaryTextPlan(text);
+  }
+  const title = plan.goal.length > 85 ? plan.goal.slice(0, 82) + "…" : plan.goal;
+  return sceneFromInput(id, { title, plan });
 }
 export const defaultRehearsalScenes = (): RehearsalScene[] => [
   ...WAITING_LAB_PLANS.map(p => ({ id: p.id, title: p.label, plan: structuredClone(p.plan), hash: rehearsalHash(p.plan) })),

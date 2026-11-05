@@ -3743,3 +3743,17 @@ mtime_ms = 1793851288129
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9e91fb58-eb8a-4b27-a9f8-fda0e14da42a/ea3494ea-e02c-48ed-b593-453676e54eb5"
 storage_version_token = "1793851315949534"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "WOClr4RkkxicPR7E4oXGr"
+uri = "file://generated-artifacts/rehearsal-mobile-review/Katya_Rehearsal_Mobile_Clavdiy.zip"
+type = "unspecified"
+title = "ZIP Клавдию — экран репетиции Кати"
+description = "Код и diff, одноразовое согласие, подготовка текста на сервере, мобильные снимки и полный прогон: 3856 passed, 44 skipped, 0 failed. Только Dev, без звонков и Publish."
+logical_id = "32412182-14b2-456c-bd7a-53955ca3d15e"
+content_hash = "sha256:803f110196862fed81e06569f70bc497fbaee92c95f3cf01ce70b1191a560c8a"
+size = 165565
+mtime_ms = 1793854655113
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/32412182-14b2-456c-bd7a-53955ca3d15e/d96d103e-e552-4d9d-8f97-dea6d0225d00"
+storage_version_token = "1793854669764582"
+content_type = "application/octet-stream"

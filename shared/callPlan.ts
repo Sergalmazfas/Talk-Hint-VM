@@ -75,6 +75,11 @@ export function legacySecretaryPlan(instruction: string, targetPhone: string): C
   if (saved) return checklistCallPlan(saved);
   if (instruction.startsWith("Owner-approved call plan."))
     throw Object.assign(new Error("Malformed structured plan; use prepare_secretary_plan"), { status: 400 });
+  return callPlanSchema.parse({ ...legacySecretaryTextPlan(instruction), targetPhone });
+}
+
+/** Shared lossless preparation for text; web rehearsals have no telephone target. */
+export function legacySecretaryTextPlan(instruction: string): CallPlan {
   const pieces = splitCallChecklist([instruction]);
   // Do not turn a complete thought into arbitrary fragments to fit the schema.
   if (pieces.some(piece => piece.length > 500))
@@ -90,7 +95,7 @@ export function legacySecretaryPlan(instruction: string, targetPhone: string): C
     // items still take precedence. This grants no tools/payment permissions.
     disclosurePolicy: { allowed: items.filter(s => !forbidden.includes(s)), forbidden },
     // Existing telephone default, not inferred from the language of the task.
-    language: "en", executor: "secretary", targetPhone,
+    language: "en", executor: "secretary",
   });
 }
 

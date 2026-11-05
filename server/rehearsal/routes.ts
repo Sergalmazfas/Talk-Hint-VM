@@ -38,6 +38,7 @@ export function registerRehearsalRoutes(app: Express, runtime = new RehearsalRun
     res.json({ ...await runtime.snapshot(req.user!.id), csrf: entry.token });
   }));
   app.post(`${base}/scenes`, handler(async (req, res) => { res.status(201).json(await runtime.saveScene(req.user!.id, req.body)); }));
+  app.post(`${base}/settings`, handler(async (req, res) => { res.json(await runtime.saveSettings(req.user!.id, req.body)); }));
   app.post(`${base}/sessions`, handler(async (req, res) => { res.status(201).json(await runtime.create(req.user!.id, req.body)); }));
   app.get(`${base}/sessions/:id`, handler(async (req, res) => { res.json(await runtime.get(req.user!.id, req.params.id)); }));
   for (const name of ["connected", "stop", "captureAudio", "analyse"] as const) {
