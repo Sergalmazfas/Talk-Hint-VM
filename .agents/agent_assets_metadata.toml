@@ -3967,3 +3967,17 @@ mtime_ms = 1793921031891
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6212c40a-0ad8-46de-a8d8-fe09f43a76db/553c5928-7401-426b-9d7b-03a79e38d647"
 storage_version_token = "1793921042455402"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "iTGYdZ41cov4p5dupP3yo"
+uri = "file://docs/talkhint-chat-architecture.md"
+type = "text"
+title = "TalkHint Chat — итоговая архитектура на согласование"
+description = "16 разделов: схема, существующие компоненты, долговременная память, версии и удаление, общие инструменты, восстановление, Gmail/поиск/геолокация, этапы и сценарии. Проверены 22 пути к исходникам и макетам. Без внедрения и финансовых расчётов."
+logical_id = "9bf0a2b3-b9d1-4e44-a17c-3f3d997c8dce"
+content_hash = "sha256:4418e7eca0fa6823ba6476728bfbfd3f207800688cf93078de40ee95f4f4aab6"
+size = 52003
+mtime_ms = 1793921345855
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9bf0a2b3-b9d1-4e44-a17c-3f3d997c8dce/5bd19bc3-b9bb-447a-9ddc-f4d78a780666"
+storage_version_token = "1793921382591871"
+content_type = "text/markdown"
