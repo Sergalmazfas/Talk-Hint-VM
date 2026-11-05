@@ -3827,3 +3827,17 @@ mtime_ms = 1793905397874
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d37a7200-dec4-49c3-ba3a-bc7ad9a6cb36/67aa4de1-b1db-40e2-8f88-8f6abac72c30"
 storage_version_token = "1793905415040043"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "0n3Pd3MG4xEzDnv9Foteh"
+uri = "file://generated-artifacts/rehearsal-c-dev-diagnosis/Katya_C_Dev_Diagnosis.html"
+type = "html"
+title = "Катя — диагностика задержек C и Dev"
+description = "Сравнение двух сохранённых репетиций, причина пропуска Yes, согласованные тайминги по этапам и план минимальных изменений с рисками. Код и настройки не изменены; новых платных прогонов нет."
+logical_id = "735f566b-f4ae-477d-8ff4-f6a10b1c295a"
+content_hash = "sha256:e314088b2caa2db190d06b3365dc672e6e93076606d4f3b4b4d8d20e2d4b588a"
+size = 18295
+mtime_ms = 1793907657877
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/735f566b-f4ae-477d-8ff4-f6a10b1c295a/792c2065-213c-4bbc-8d17-e3df102ee769"
+storage_version_token = "1793907666863867"
+content_type = "text/html"
