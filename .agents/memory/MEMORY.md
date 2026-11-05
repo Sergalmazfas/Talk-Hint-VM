@@ -64,7 +64,8 @@
 - [Secretary IVR autonomy](secretary-ivr-autonomy.md) — каждое меню отдельно; manager по цели, help-push не блокирует; предел пяти цифр сохранять, разговор и характер не менять.
 - [Secretary personalities](secretary-personality-direction.md) — structure-first catalog; owner/number assignments, no auto-Katya, character separate from facts, permissions and voices.
 - [Отдел «Секретарь»](secretary-department-structure.md) — Мария → Сева → Лёва/Тома/каталог; имена proposed; общие инженер, дежурный и HR, без копии Кати.
-- [ChatGPT Secretary boundaries](chatgpt-secretary-boundaries.md) — official ChatGPT only; no replacement chat, no SMS, incoming AI handoff requires separate approval.
+- [ChatGPT Secretary boundaries](chatgpt-secretary-boundaries.md) — внешний плагин: официальный ChatGPT, без SMS; встроенный чат — отдельное новое направление.
+- [Чат в центре TalkHint](native-chat-product-direction.md) — четыре макета владельца: карточка, Hint/Секретарь, отчёты, календарь, почта и геопоиск; сначала функциональный дизайн.
 - [OpenAI plugin review](openai-plugin-review.md) — retain OAuth despite upstream portable-schema conflict; local package checks are not portal acceptance.
 - [Personal GPT Actions](chatgpt-actions-constraints.md) — confidential OAuth distinct from MCP; Plus new-GPT restrictions and mobile use require current official checks.
 - [ChatGPT widget recovery](chatgpt-widget-recovery.md) — host state and historical results are task locators only; refetch under current OAuth, never persist capabilities or auto-resume audio.

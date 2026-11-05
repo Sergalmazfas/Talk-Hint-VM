@@ -3,6 +3,13 @@ name: ChatGPT Secretary boundaries
 description: User-approved integration scope and safety boundaries for official ChatGPT access to Secretary.
 ---
 
+Scope: the rules below describe the external ChatGPT integration, not a
+permanent prohibition on a native TalkHint chat. The owner's later design
+direction explicitly includes an in-app chat; see
+[Чат как центр будущего TalkHint](native-chat-product-direction.md).
+That design request does not authorize changing plugin permissions, live
+calls or production.
+
 Use official ChatGPT as a command/result surface for the existing TalkHint
 Secretary, not a replacement chat application or a new iOS interface. Keep
 Secretary, Twilio, the existing database and native call reception intact.
