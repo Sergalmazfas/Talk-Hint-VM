@@ -23,6 +23,48 @@ it("the explicit Dev-only $10 decision preserves every previous debit and surviv
   vi.stubEnv("NODE_ENV", "production");
   expect(() => b.approveTenDollarSeries()).toThrow("SPEED_DEV_ONLY");
 });
+it("the one-time +$20 decision removes exhaustion without repricing history or changing C reserve", async () => {
+  const { b, path } = await budget();
+  vi.stubEnv("NODE_ENV", "development");
+  await b.approveTenDollarSeries();
+  await b.reserve("legacy", "A"); await b.settle("legacy", null);
+  await b.reserve("unknown-c", "C"); await b.settle("unknown-c", null);
+  await b.reserve("settled-c", "C"); await b.settle("settled-c", 3_000_000);
+  await expect(b.reserve("blocked", "C")).rejects.toThrow("SPEED_SERIES_BUDGET_EXHAUSTED");
+  const before = await b.state();
+  await b.approveThirtyDollarSeries(); await b.approveThirtyDollarSeries();
+  await b.approveTenDollarSeries(); // Old operator scripts cannot downgrade the new decision.
+  const after = await new SpeedBudget(path).state();
+  expect(after.limitMicroUsd).toBe(30_000_000);
+  expect(after.remainingMicroUsd).toBe(before.remainingMicroUsd + 20_000_000);
+  expect(after.runs).toEqual(before.runs);
+  expect(after.spentMicroUsd).toBe(before.spentMicroUsd);
+  expect(after.probeDebitMicroUsd).toBe(before.probeDebitMicroUsd);
+  await b.reserve("new-c", "C");
+  expect((await b.state()).runs["new-c"]).toEqual({
+    variant: "C", reserved: 3_000_000, spent: 0, status: "reserved", admissionMicroUsd: 3_000_000,
+  });
+});
+it("top-up preserves an active reservation and cannot create a parallel session", async () => {
+  const { b } = await budget(); vi.stubEnv("NODE_ENV", "development");
+  await b.approveTenDollarSeries(); await b.reserve("active", "C");
+  const before = await b.state(); await b.approveThirtyDollarSeries();
+  expect((await b.state()).runs).toEqual(before.runs);
+  expect((await b.state()).reservedMicroUsd).toBe(3_000_000);
+  await expect(b.reserve("parallel", "C")).rejects.toThrow("SPEED_SESSION_ACTIVE_OR_UNKNOWN");
+});
+it("top-up is Dev-only and fails closed on an unexpected previous ceiling", async () => {
+  const { b, path } = await budget();
+  vi.stubEnv("NODE_ENV", "production");
+  expect(() => b.approveThirtyDollarSeries()).toThrow("SPEED_DEV_ONLY");
+  vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "1");
+  expect(() => b.approveThirtyDollarSeries()).toThrow("SPEED_DEV_ONLY");
+  vi.stubEnv("REPLIT_DEPLOYMENT", "");
+  await expect(b.approveThirtyDollarSeries()).rejects.toThrow("SPEED_TOPUP_EXPECTED_TEN_DOLLAR_SERIES");
+  expect((await b.state()).limitMicroUsd).toBe(5_000_000);
+  await writeFile(path, JSON.stringify({ limitMicroUsd: 20_000_000, probeDebitMicroUsd: 100_000, runs: {} }));
+  await expect(b.approveThirtyDollarSeries()).rejects.toThrow("SPEED_BUDGET_INVALID");
+});
 it("persists the fixed total across restarts, counts probes and never repeats an unknown request", async () => {
   const { b, path } = await budget();
   await b.reserve("one", "A");

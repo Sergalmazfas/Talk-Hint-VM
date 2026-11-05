@@ -4,7 +4,7 @@ description: Pricing assumptions and scope agreed for the private Dev voice comp
 ---
 
 The owner approved interruption-buffer experiments ONLY in Dev variant C,
-raising the existing series ceiling to $10, without resetting historical costs.
+initially raising the existing series ceiling to $10, without resetting historical costs.
 Voice, language, greeting and Retell's normal yielding to interruptions stay
 unchanged. Ambiguity must not leak a stale answer, but can require a silent
 regeneration rather than a voiced announcement. Production transfer needs a
@@ -16,6 +16,18 @@ but considers speaking stale facts worse than a conservative regeneration.
 **How to apply:** keep old/new runs distinguishable, preserve unknown-request
 reserves, and never describe a passed event simulation as proof of audible
 resumption or production readiness.
+
+For the waiting-rules test, the owner approved **an additional $20** for the
+existing Retell Dev C series ($10 → $30), not a replacement $20 ceiling and not
+funding for the separate rejected GPT-Live series. Keep the per-session reserve
+unchanged and never reprice, reset or repeat historical runs.
+
+**Why:** «SPEED_SERIES_BUDGET_EXHAUSTED» prevented the owner from starting the
+waiting test; this is an explicit top-up, not an automatic refill.
+
+**How to apply:** preserve the same series/history, apply the fixed decision
+idempotently, and report the remaining balance. No production promotion or
+permission for an agent to spend on new calls follows from this top-up.
 
 Valid PCM is not evidence that Retell understood a synthetic caller. Local
 robotic speech can become “unintelligible”; a short ASR fragment can also look
@@ -37,7 +49,8 @@ same phrase, creating unwanted filler speech and exhausting cancellation holds.
 
 **How to apply:** a benign ASR extension may invalidate generated text silently;
 never make every safe-side cancellation announce itself. The owner approved a
-$2 model envelope for Dev C only, inside the unchanged $10 series ceiling.
+$2 model envelope for Dev C only, inside the then-$10 series ceiling (later
+explicitly topped up as noted above).
 
 The owner explicitly requested automatic permanent Dev C reports in the Dev
 database so phone-based review no longer requires downloading JSON.

@@ -3,14 +3,14 @@ import { dirname } from "node:path";
 export type SpeedBudgetState = { limitMicroUsd: number; probeDebitMicroUsd: number;
   runs: Record<string, { variant: string; reserved: number; spent: number; admissionMicroUsd?: number; status: "reserved" | "settled" | "unknown" }> };
 const initial = (): SpeedBudgetState => ({ limitMicroUsd: 5_000_000, probeDebitMicroUsd: 100_000, runs: {} });
-/** Owner-approved $5 -> $10 series, persisted across restarts. No reset/refill HTTP method.
+/** Owner-approved $5 -> $10 -> $30 series, persisted across restarts. No reset/refill HTTP method.
  * Crash locks fail closed; they are never removed based on a guessed TTL. */
 export class SpeedBudget {
   constructor(private path = "generated-artifacts/secretary-speed-series/runtime-budget.json") {}
   private async load(): Promise<SpeedBudgetState> {
     try {
       const s = JSON.parse(await readFile(this.path, "utf8"));
-      if (![5_000_000, 10_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
+      if (![5_000_000, 10_000_000, 30_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
         throw Error("SPEED_BUDGET_INVALID");
       for (const r of Object.values(s.runs) as any[]) {
         const cap = r?.admissionMicroUsd ?? 2_000_000;
@@ -28,7 +28,18 @@ export class SpeedBudget {
   approveTenDollarSeries() {
     if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1")
       throw Error("SPEED_DEV_ONLY");
-    return this.change(s => { s.limitMicroUsd = 10_000_000; });
+    return this.change(s => { s.limitMicroUsd = Math.max(s.limitMicroUsd, 10_000_000); });
+  }
+  /** This owner's one-time +$20 decision: $10 -> $30, never an additive retry.
+   * No run, reserve, settlement or historical price is changed. */
+  approveThirtyDollarSeries() {
+    if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1")
+      throw Error("SPEED_DEV_ONLY");
+    return this.change(s => {
+      if (s.limitMicroUsd !== 10_000_000 && s.limitMicroUsd !== 30_000_000)
+        throw Error("SPEED_TOPUP_EXPECTED_TEN_DOLLAR_SERIES");
+      s.limitMicroUsd = 30_000_000;
+    });
   }
   async state() {
     const s = await this.load();
@@ -52,7 +63,7 @@ export class SpeedBudget {
       if (s.runs[id]) throw Error("SPEED_REQUEST_ALREADY_RESERVED_NO_RETRY");
       if (Object.values(s.runs).some(r => r.status === "reserved")) throw Error("SPEED_SESSION_ACTIVE_OR_UNKNOWN");
       // The automated runner limits its sample count to four. The owner's
-      // separately requested manual voice test shares this same $5 ceiling,
+      // separately requested manual voice test shares the persisted series ceiling,
       // but is not disabled just because automation used its sample slots.
       const used = s.probeDebitMicroUsd + Object.values(s.runs).reduce((n, r) => n + r.spent + r.reserved, 0);
       // New runtime: <= $1 model envelopes (including unknown/cancelled requests)
