@@ -3785,3 +3785,17 @@ mtime_ms = 1793858850518
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4d0e0272-d795-40e4-81d6-8ebc12247f4e/82a9d4d2-9c78-4bd0-ac1b-6c72150db910"
 storage_version_token = "1793858866393095"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "gJr4pC9GyCOno6c4ACfMu"
+uri = "file://generated-artifacts/katya-c-baseline/Katya_Fast_C_No_Loop_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию — итоговый пакет быстрой C"
+description = "Добавлен честный результат монолитной проверки: два старых теста по тайм-ауту; затем оба файла прошли 50/50 без изменений. Полный набор зелёный в четырёх шардах: 3895 passed, 44 штатных skipped."
+logical_id = "45bdc4c3-a0c8-428b-84d5-286f3f29483f"
+content_hash = "sha256:d99cdb61798be92d522eff2dcedea59cdc58224eb598d133374ba8942520fc36"
+size = 218601
+mtime_ms = 1793902295903
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/45bdc4c3-a0c8-428b-84d5-286f3f29483f/0dd277d3-552a-43b2-8458-9c2e12778870"
+storage_version_token = "1793902307928168"
+content_type = "application/octet-stream"

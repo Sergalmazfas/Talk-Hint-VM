@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultRehearsalScenes, rehearsalInstruction, rehearsalVersions, sceneFromInput, sceneFromText } from "./catalog";
 import { legacySecretaryPlan } from "../../shared/callPlan";
 import { requireRehearsalDev } from "./store";
+import { WAITING_LAB_PLANS } from "../../shared/secretaryWaitingPlans";
 describe("rehearsal immutable plans and isolated profiles", () => {
   it("has tires, overnight parking and washing with explicit plans", () => {
     const scenes = defaultRehearsalScenes();
@@ -21,6 +22,41 @@ describe("rehearsal immutable plans and isolated profiles", () => {
     const scene = sceneFromInput("s", { title: "Owner scenario", plan: { ...base, sayAsk: [item] } });
     expect(scene.plan.sayAsk).toEqual([item]);
     expect(defaultRehearsalScenes()[0].plan.sayAsk).not.toEqual([item]);
+  });
+  it("gives the tires rehearsal arrival/wait facts, a $400 all-in limit and conditional appointment authorization", () => {
+    const scene = defaultRehearsalScenes().find(s => s.id === "trailer-tire")!;
+    const text = JSON.stringify(scene.plan);
+    expect(scene.title).toBe("Шины · приезд через 2 часа");
+    expect(scene.plan.ownerFacts).toContain("Sergey is ready to arrive two hours from this conversation.");
+    expect(scene.plan.ownerFacts).toContain("Maximum waiting time after arrival: one hour.");
+    expect(scene.plan.expectedQuestions).toContainEqual({ q: "When can Sergey arrive?", answer: "In two hours." });
+    expect(scene.plan.goal).toContain("Arrange an installation appointment");
+    for (const phrase of ["price of the tires", "installation price", "total price", "open in two hours",
+      "receive Sergey", "how long", "at most one hour", "exact appointment time and address",
+      "do not book", "Opening 24/7 does not prove", "unconfirmed", "ask whether a discount",
+      "Reconfirm the discounted total", "Only if the confirmed all-in price is at most $400"])
+      expect(scene.plan.sayAsk.join("\n")).toContain(phrase);
+    expect(text).not.toMatch(/No price ceiling|right rear inner|Do not book, order or pay|Report the seller's answers only/);
+    expect(scene.plan.ownerFacts).toContain("Maximum all-in budget: $400 for the new tires and installation, including taxes and fees. Never agree to a higher total.");
+    expect(scene.plan.expectedQuestions).toContainEqual({ q: "What is the budget?", answer: "At most $400 total, including new tires, installation, taxes and fees." });
+    expect(scene.plan.targetPhone).toBeUndefined();
+    expect(scene.plan.disclosurePolicy.forbidden.join(" ")).toContain("Agreement to a total over $400");
+    expect(rehearsalInstruction(scene)).toContain("Any agreement is only simulated.");
+    expect(rehearsalInstruction(scene).length).toBeLessThanOrEqual(4000);
+  });
+  it("preserves parking, washing and the separate waiting stand's tire plan", () => {
+    const scenes = defaultRehearsalScenes();
+    const parking = WAITING_LAB_PLANS.find(p => p.id === "overnight-parking")!;
+    expect(scenes[1]).toMatchObject({ id: parking.id, title: parking.label, plan: parking.plan });
+    expect(scenes[2].plan).toEqual({
+      goal: "Ask about washing one tractor and trailer. No booking or payment.",
+      ownerFacts: ["One tractor and one trailer"], sayAsk: ["Ask if truck and trailer washing is available.",
+        "Ask for the total price.", "Ask about waiting time and opening hours."],
+      expectedQuestions: [], unknowns: ["Price", "Availability", "Arrival time"],
+      disclosurePolicy: { allowed: ["Vehicle type"], forbidden: ["Payment details", "Private contact information"] },
+      language: "en", executor: "secretary", voicemail: "skip",
+    });
+    expect(WAITING_LAB_PLANS[0].plan.goal).toContain("maximum $400");
   });
   it("prepares pasted free text exactly like legacy prepare_call, without a phone or model", () => {
     const text = "Ask about a new trailer tire 295/75R22.5. Ask total price. Do not book or pay.";
@@ -55,10 +91,12 @@ describe("rehearsal immutable plans and isolated profiles", () => {
   });
   it("pins profiles without claiming a code snapshot verifies production", () => {
     const versions = rehearsalVersions();
-    expect(versions.map(v => v.id)).toEqual(["production-C", "dev-C", "saved-A"]);
+    expect(versions.map(v => v.id)).toEqual(["production-C", "dev-C", "saved-dev-waiting", "saved-A"]);
     expect(versions[0].productionVerified).toBe(false);
-    expect(versions[0].waiting).toBe(false); expect(versions[1].waiting).toBe(true);
-    expect(new Set(versions.map(v => v.hash)).size).toBe(3);
+    expect(versions[0].waiting).toBe(false);
+    expect(versions[1]).toMatchObject({ waiting: false, manners: false, noLoop: true, productionRules: true });
+    expect(versions[2]).toMatchObject({ waiting: true, manners: true, noLoop: false, productionRules: false });
+    expect(new Set(versions.map(v => v.hash)).size).toBe(4);
     expect(rehearsalVersions()).toEqual(versions);
   });
   it.each(["production", "test"])("rejects environment %s", mode => {

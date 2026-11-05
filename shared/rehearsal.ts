@@ -1,6 +1,6 @@
 import type { CallPlan } from "./callPlan";
 export type RehearsalVersion = { id: string; label: string; source: string; hash: string;
-  available: boolean; reason?: string; productionVerified: boolean };
+  available: boolean; reason?: string; productionVerified: boolean; waiting?: boolean };
 export type RehearsalScene = { id: string; title: string; plan: CallPlan; hash: string };
 export type RehearsalReview = { status: "not_started" | "running" | "completed" | "failed" | "unknown";
   leva?: unknown; toma?: unknown; error?: string; costMicroUsd?: number; usage?: unknown };

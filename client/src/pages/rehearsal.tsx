@@ -304,7 +304,7 @@ export default function RehearsalPage() {
           onAgentStopTalking: () => {
             agentSpeakingRef.current = false;
             const currentId = createdIdRef.current;
-            if (currentId && selectedVersion.id === "dev-C") void csrfRequest(`${REHEARSAL_API}/sessions/${encodeURIComponent(currentId)}/waiting-audio`, { method: "POST", body: JSON.stringify({ event: "playback_ended" }) }).catch(() => undefined);
+            if (currentId && selectedVersion.waiting) void csrfRequest(`${REHEARSAL_API}/sessions/${encodeURIComponent(currentId)}/waiting-audio`, { method: "POST", body: JSON.stringify({ event: "playback_ended" }) }).catch(() => undefined);
           },
           onStatus: (status) => {
             if (status === "live" && !connectedRef.current) {
@@ -328,7 +328,7 @@ export default function RehearsalPage() {
         if (!stoppingRef.current) void stopSession("SDK завершил подключение с ошибкой.");
       });
       if (stream) {
-        if (selectedVersion.id === "dev-C") waitingStopRef.current = await watchWaitingMicrophone(stream, onWaiting);
+        if (selectedVersion.waiting) waitingStopRef.current = await watchWaitingMicrophone(stream, onWaiting);
         stream = null;
       }
       if (mountedRef.current) {
@@ -488,6 +488,12 @@ export default function RehearsalPage() {
         </section>
         <section className="drawer-section">
           <h3>Версии и бюджет</h3>
+          <label>Сохранённые варианты
+            <select aria-label="Сохранённые варианты Кати" value={versionId} disabled={busy}
+              onChange={event => setVersionId(event.target.value)}>
+              {snapshot.versions.map(version => <option key={version.id} value={version.id} disabled={!version.available}>{version.label}</option>)}
+            </select>
+          </label>
           {selectedVersion && <div className="drawer-version">
             <strong>{selectedVersion.label}</strong><span>{selectedVersion.source}</span><code>{selectedVersion.hash}</code>
             {rehearsalVersionReason(selectedVersion) && <p>{rehearsalVersionReason(selectedVersion)}</p>}

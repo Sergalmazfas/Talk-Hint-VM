@@ -3,7 +3,8 @@ const network = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("openai", () => ({ default: class { responses = { create: network.create }; } }));
 import { SecretaryConversationEngine } from "../secretary/conversationEngine";
 import { speedEngine } from "./speedRuntime";
-afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
+import { C_NO_LOOP_POLICY } from "../rehearsal/cNoLoop";
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 it("refuses experimental engines outside Dev and in a deployment", () => {
   vi.stubEnv("NODE_ENV", "production");
   expect(() => speedEngine("fixture-owner", "Fictional test only", "B")).toThrow("SPEED_DEV_ONLY");
@@ -39,6 +40,31 @@ function response(broken = false) {
     })(),
   }) };
 }
+it("new C uses baseline phone-profile request parameters with only the declared developer policy added", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
+  setup(); network.create.mockImplementation(() => response());
+  const baseline = speedEngine("fixture", "Owner-approved call plan. Ask price, no booking.", "C", undefined,
+    { productionRules: true, waiting: false });
+  const next = speedEngine("fixture", "Owner-approved call plan. Ask price, no booking.", "C", undefined,
+    { productionRules: true, waiting: false, noLoop: true });
+  expect(next.instructions).toBe(baseline.instructions);
+  expect(next.instructions).not.toContain("DEV WAITING RULES");
+  expect(next.instructions).not.toContain("DEV-C REHEARSAL MANNERS");
+  for (const e of [baseline, next])
+    await e.respond([{ role: "user", content: "Hello, truck service." }], new AbortController().signal, () => {});
+  const [before, after] = network.create.mock.calls.map(call => call[0]);
+  expect(after).toEqual({ ...before, input: [...before.input, { role: "developer", content: C_NO_LOOP_POLICY }] });
+  expect(after).toMatchObject({ model: "gpt-6-sol", reasoning: { effort: "low" }, max_output_tokens: 300, stream: true });
+  expect((next.report as any).rehearsalPolicy.placement).toBe("developer-input-per-request");
+  expect((baseline.report as any).rehearsalPolicy).toBeUndefined();
+});
+it("rejects mixing the prompt-only variant with waiting/manners or non-C profiles", () => {
+  setup();
+  for (const variant of ["A", "B", "C"] as const) {
+    expect(() => speedEngine("fixture", "Fictional", variant, undefined,
+      { productionRules: false, waiting: true, noLoop: true })).toThrow("DEV_REHEARSAL_C_NO_LOOP_ONLY");
+  }
+});
 it("reproduces a long multi-turn call: the thirteenth provider request succeeds without paid traffic", async () => {
   network.create.mockImplementation(() => response());
   const e = setup();

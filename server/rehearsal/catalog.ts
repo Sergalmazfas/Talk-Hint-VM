@@ -8,6 +8,7 @@ import { compactSpeedPrompt } from "../secretaryLab/speedExperiment";
 import { WAITING_DEV_INSTRUCTIONS } from "../secretaryLab/waitingPolicy";
 import { buildSecretaryInstructions } from "../secretary/agent";
 import { DEV_C_MANNERS } from "./manners";
+import { C_NO_LOOP_POLICY_HASH } from "./cNoLoop";
 export const rehearsalHash = (v: unknown): string => createHash("sha256").update(JSON.stringify(v)).digest("hex");
 let sourceStamp: string | undefined;
 export function rehearsalCodeHash(): string {
@@ -29,17 +30,20 @@ export function rehearsalCodeHash(): string {
 }
 export const rehearsalVersions = () => [
   { id: "production-C", label: "Боевая C · снимок кода", source: "production-profile-code", waiting: false,
-    productionRules: true, speed: "C" as const, productionVerified: false,
+    productionRules: true, speed: "C" as const, productionVerified: false, manners: false, noLoop: false,
     reason: "Снимок боевого профиля из этой сборки. Совпадение с опубликованной версией и PSTN не проверено." },
-  { id: "dev-C", label: "Текущая Dev C · ожидание", source: "development", waiting: true,
-    productionRules: false, speed: "C" as const, productionVerified: false },
+  { id: "dev-C", label: "Новая Dev · C без зацикливания", source: "development", waiting: false,
+    productionRules: true, speed: "C" as const, productionVerified: false, manners: false, noLoop: true },
+  { id: "saved-dev-waiting", label: "Прежняя Dev · ожидание (эксперимент)", source: "saved-profile", waiting: true,
+    productionRules: false, speed: "C" as const, productionVerified: false, manners: true, noLoop: false },
   { id: "saved-A", label: "Прежняя · A", source: "saved-profile", waiting: false,
-    productionRules: false, speed: "A" as const, productionVerified: false },
+    productionRules: false, speed: "A" as const, productionVerified: false, manners: false, noLoop: false },
 ].map(v => ({ ...v, available: true,
   hash: rehearsalHash({ ...v, voice: "retell-Merritt", responsiveness: 1, maxOutput: v.speed === "C" ? 300 : null,
     reasoning: v.speed === "C" ? "low" : "medium", compact: compactSpeedPrompt.toString(),
     full: buildSecretaryInstructions.toString(), renderer: rehearsalInstruction.toString(), source: rehearsalCodeHash(),
-    waitingRules: v.waiting ? WAITING_DEV_INSTRUCTIONS : null, manners: v.id === "dev-C" ? DEV_C_MANNERS : null }) }));
+    waitingRules: v.waiting ? WAITING_DEV_INSTRUCTIONS : null, manners: v.manners ? DEV_C_MANNERS : null,
+    noLoopPolicyHash: v.noLoop ? C_NO_LOOP_POLICY_HASH : null }) }));
 export type FrozenVersion = ReturnType<typeof rehearsalVersions>[number];
 export function rehearsalInstruction(scene: RehearsalScene): string {
   // The dialer's secretaryInstruction intentionally requires a target phone.
@@ -96,7 +100,40 @@ export function sceneFromText(id: string, input: unknown): RehearsalScene {
   return sceneFromInput(id, { title, plan });
 }
 export const defaultRehearsalScenes = (): RehearsalScene[] => [
-  ...WAITING_LAB_PLANS.map(p => ({ id: p.id, title: p.label, plan: structuredClone(p.plan), hash: rehearsalHash(p.plan) })),
+  sceneFromInput("trailer-tire", { title: "Шины · приезд через 2 часа", plan: {
+    goal: "Arrange an installation appointment for new trailer tires 295/75R22.5 only if the all-in price is at most $400, the shop can receive Sergey in two hours and the wait after arrival is at most one hour. This is a simulated appointment only.",
+    ownerFacts: ["New trailer tires, size 295/75R22.5.",
+      "Sergey is ready to arrive two hours from this conversation.",
+      "Maximum waiting time after arrival: one hour.",
+      "Sergey authorizes agreeing to an installation appointment if these conditions are confirmed.",
+      "Maximum all-in budget: $400 for the new tires and installation, including taxes and fees. Never agree to a higher total."],
+    sayAsk: ["Ask if new trailer tires 295/75R22.5 are available.",
+      "Ask the price of the tires.", "Ask the installation price.",
+      "Confirm the total price, including any taxes and fees.",
+      "Ask if the shop will be open in two hours.",
+      "Ask if the shop can receive Sergey for installation in two hours.",
+      "Ask how long he will wait after arrival.",
+      "If the total exceeds $400, ask whether a discount can bring the all-in price to $400 or less. Reconfirm the discounted total, including installation, taxes and fees. If not, do not book.",
+      "Only if the confirmed all-in price is at most $400, tires are available, arrival in two hours is possible and waiting is at most one hour, agree to a simulated installation appointment. No payment.",
+      "Obtain the shop's confirmation of the exact appointment time and address; do not claim a confirmed booking before this.",
+      "If the all-in price cannot be reduced to at most $400, tires are unavailable, arrival cannot be accommodated or waiting exceeds one hour, do not book; state the reason and finish politely.",
+      "Do not ask again for known arrival or waiting limits, or repeat questions already answered. Opening 24/7 does not prove a free installation slot. Never invent availability.",
+      "If an essential condition remains unknown, report it honestly as unconfirmed, not a successful booking. End politely."],
+    expectedQuestions: [
+      { q: "When can Sergey arrive?", answer: "In two hours." },
+      { q: "How long can Sergey wait after arrival?", answer: "No more than one hour." },
+      { q: "What size and type of tires?", answer: "New trailer tires, 295/75R22.5." },
+      { q: "What is the budget?", answer: "At most $400 total, including new tires, installation, taxes and fees." },
+    ],
+    unknowns: ["Actual stock, tire and installation prices, total quote, opening hours, installation availability, wait and address must be confirmed by the shop."],
+    disclosurePolicy: { allowed: ["Tire requirements, all-in budget $400, arrival in two hours, maximum wait of one hour, simulated appointment authorization."],
+      forbidden: ["Payment credentials or private contact details.", "Invented prices or appointment availability.",
+        "Agreement to a total over $400 or any payment.", "Agreement to waiting more than one hour.",
+        "Claiming an appointment is confirmed without the shop's confirmation."] },
+    language: "en", executor: "secretary", voicemail: "skip",
+  } }),
+  ...WAITING_LAB_PLANS.filter(p => p.id !== "trailer-tire")
+    .map(p => ({ id: p.id, title: p.label, plan: structuredClone(p.plan), hash: rehearsalHash(p.plan) })),
   sceneFromInput("truck-wash", { title: "Мойка тягача и трейлера", plan: {
     goal: "Ask about washing one tractor and trailer. No booking or payment.",
     ownerFacts: ["One tractor and one trailer"], sayAsk: ["Ask if truck and trailer washing is available.",

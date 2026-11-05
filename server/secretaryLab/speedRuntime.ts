@@ -11,10 +11,11 @@ import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
 import { devReportArchive } from "./devReportArchive";
 import { WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX, WAITING_DEV_INSTRUCTIONS } from "./waitingPolicy";
 import { DEV_C_MANNERS, devMannersStream } from "../rehearsal/manners";
+import { C_NO_LOOP_POLICY, C_NO_LOOP_POLICY_HASH, withCNoLoopRule } from "../rehearsal/cNoLoop";
 import { waitingPlanSelection } from "../../shared/secretaryWaitingPlans";
 
 export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding,
-  rehearsal?: { productionRules: boolean; waiting: boolean; manners?: boolean }) {
+  rehearsal?: { productionRules: boolean; waiting: boolean; manners?: boolean; noLoop?: boolean }) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
   const profile = speedProfiles[variant];
   const requestBudget = new SpeedRequestBudget(variant === "C" ? 2_000_000 : 1_000_000);
@@ -75,7 +76,10 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
   if (rehearsal?.manners && (rehearsal.productionRules || !rehearsal.waiting || variant !== "C" ||
       process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1"))
     throw Error("DEV_REHEARSAL_MANNERS_ONLY");
-  const measured: EngineStream = rehearsal?.manners ? devMannersStream(rawStream) : request => rawStream(request);
+  if (rehearsal?.noLoop && (variant !== "C" || !rehearsal.productionRules || rehearsal.waiting || rehearsal.manners))
+    throw Error("DEV_REHEARSAL_C_NO_LOOP_ONLY");
+  const measured: EngineStream = rehearsal?.noLoop ? withCNoLoopRule(rawStream) :
+    rehearsal?.manners ? devMannersStream(rawStream) : request => rawStream(request);
   const compact = variant === "A" || rehearsal?.productionRules ? undefined : compactSpeedPrompt({
     owner: confirmedSecretaryOwnerName(owner), personality,
     plan: { instruction, testOnly: true, authorizedTestContext: SECRETARY_TEST_CONTEXT },
@@ -93,6 +97,10 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
       ...(Array.isArray(engine.report.context.restrictions) ? engine.report.context.restrictions : []),
       "DEV rehearsal: no PSTN, real tools, notifications or product changes",
     ] };
+    if (rehearsal.noLoop) (engine.report as any).rehearsalPolicy = {
+      status: "experiment", placement: "developer-input-per-request",
+      hash: C_NO_LOOP_POLICY_HASH, text: C_NO_LOOP_POLICY,
+    };
   }
   (engine.report as any).speed = metrics;
   return engine;
