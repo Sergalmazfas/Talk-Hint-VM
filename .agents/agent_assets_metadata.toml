@@ -3715,3 +3715,17 @@ mtime_ms = 1793840175230
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/10064ad2-bbfc-4472-a626-ce2995470f5b/fc83038f-4353-4b35-8803-9386fda9725a"
 storage_version_token = "1793840190983119"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "1i9AANQNFo6f7KBxBsnvs"
+uri = "file://generated-artifacts/Katya_Waiting_Dev_C_Clavdiy.zip"
+type = "unspecified"
+title = "Клавдию — ожидание Кати, только Dev C"
+description = "Diff и исходники, 4 зелёных шарда: 3768 passed / 0 failed / 44 skipped; 43 новых теста, proposed-нормы и уроки, ограничения голосовой проверки. Production не менялся."
+logical_id = "06b8b3c8-8531-495a-a337-5771c56f2824"
+content_hash = "sha256:5f57a53e1a6505c70b88ad6aa861f697b9b3e80e57cf16e9f94c8b0e9a3001e1"
+size = 109387
+mtime_ms = 1793845492710
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/06b8b3c8-8531-495a-a337-5771c56f2824/efbc6787-b84f-4fe1-a36d-c5792e8402a8"
+storage_version_token = "1793845500913665"
+content_type = "application/octet-stream"

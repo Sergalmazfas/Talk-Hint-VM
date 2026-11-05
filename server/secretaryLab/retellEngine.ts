@@ -14,6 +14,8 @@ import { CResponseBuffer } from "./cResponseBuffer";
 import { phoneSpeechTiming } from "../secretary/phoneMetrics";
 import { voicemailTurn } from "../secretary/voicemail";
 import { PhoneLineGuard, type NoHumanReason } from "../secretary/phoneLineGuard";
+import { DevWaitingPolicy, WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX } from "./waitingPolicy";
+import { waitingAudit } from "./waitingAudit";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -25,14 +27,16 @@ export function engineCallbackBase() {
 export class RetellEngineApi extends RetellApi {
   constructor(private callback = engineCallbackBase, network?: ConstructorParameters<typeof RetellApi>[0],
     private speedVariant: "A" | "B" | "C" = "A") { super(network); }
-  private get agentName() { return this.speedVariant === "A" ? RETELL_ENGINE_AGENT : `${RETELL_ENGINE_AGENT} · speed ${this.speedVariant}`; }
+  private get agentName() { return this.speedVariant === "A" ? RETELL_ENGINE_AGENT :
+    `${RETELL_ENGINE_AGENT} · speed ${this.speedVariant}${this.speedVariant === "C" ? WAITING_DEV_SUFFIX : ""}`; }
+  private get durationMs() { return this.speedVariant === "C" ? WAITING_DEV_DURATION_MS : 300_000; }
   async inspectAgent(id: string) {
     const a = await this.request(`/get-agent/${encodeURIComponent(id)}`);
     if (a.agent_name !== this.agentName || a.response_engine?.type !== "custom-llm" ||
         a.response_engine.llm_websocket_url !== this.callback() || a.voice_id !== RETELL_LAB_VOICE ||
         a.interruption_sensitivity !== (this.speedVariant === "A" ? 0.9 : 0.85) || a.responsiveness !== 1 || a.enable_backchannel !== false ||
         (this.speedVariant !== "A" && (a.enable_dynamic_responsiveness !== true || a.stt_mode !== "fast")) ||
-        a.max_call_duration_ms !== 300_000 || a.end_call_after_silence_ms !== 300_000 ||
+        a.max_call_duration_ms !== this.durationMs || a.end_call_after_silence_ms !== this.durationMs ||
         a.data_storage_setting !== "basic_attributes_only" || a.webhook_events?.length !== 0 ||
         a.contact_memory_config?.enable_read !== false || a.contact_memory_config?.enable_update !== false ||
         a.pre_session_tools?.length || a.post_session_tools?.length || a.fallback_voice_ids?.length ||
@@ -51,8 +55,8 @@ export class RetellEngineApi extends RetellApi {
       voice_id: RETELL_LAB_VOICE, language: ["en-US", "ru-RU", "es-ES"],
       interruption_sensitivity: this.speedVariant === "A" ? 0.9 : 0.85, responsiveness: 1, enable_backchannel: false,
       ...(this.speedVariant === "A" ? {} : { enable_dynamic_responsiveness: true, stt_mode: "fast" }),
-      data_storage_setting: "basic_attributes_only", max_call_duration_ms: 300_000,
-      end_call_after_silence_ms: 300_000, webhook_events: [], fallback_voice_ids: [],
+      data_storage_setting: "basic_attributes_only", max_call_duration_ms: this.durationMs,
+      end_call_after_silence_ms: this.durationMs, webhook_events: [], fallback_voice_ids: [],
       contact_memory_config: { enable_read: false, enable_update: false },
     });
     if (typeof a.agent_id !== "string") return fail("Retell + Engine: создание Custom LLM агента не подтверждено");
@@ -70,7 +74,14 @@ type Entry = {
   phoneGreetingSent?: boolean;
   voicemailMessageSent?: boolean;
   noHumanEnded?: boolean;
+  waiting?: DevWaitingPolicy;
+  waitingTimer?: ReturnType<typeof setInterval>;
 };
+function refreshWaitingReport(entry: Entry) {
+  if (entry.waiting) (entry.engine.report as any).waiting = {
+    ...entry.waiting.snapshot, audit: waitingAudit(entry.waiting.events),
+  };
+}
 /** Per-session high-entropy capability, not an owner bearer token or permanent Retell key.
  * Retell's Custom LLM socket has no signature/auth header. Never log these URL paths. */
 export class RetellEngineRegistry {
@@ -87,6 +98,7 @@ export class RetellEngineRegistry {
     createEngine?: (owner: string, instruction: string, id: string, personality?: PersonalityBinding) => SecretaryConversationEngine;
     bufferResponses?: (id: string) => boolean;
     phoneProfile?: (id: string) => "C" | "legacy";
+    waitingRules?: (id: string) => boolean;
   } = {}) {}
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
     const ticket = randomBytes(32).toString("hex");
@@ -98,6 +110,12 @@ export class RetellEngineRegistry {
     const entry: Entry = { id, ticket, engine,
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false,
       expiresAt: Date.now() + (this.options.phone ? SECRETARY_CALL_LIMIT_MS : 300_000) };
+    if (!this.options.phone && process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" &&
+      this.options.waitingRules?.(id)) {
+      entry.waiting = new DevWaitingPolicy();
+      entry.expiresAt = Date.now() + WAITING_DEV_DURATION_MS;
+      refreshWaitingReport(entry);
+    }
     this.entries.set(id, entry); this.tickets.set(ticket, entry);
     if (this.options.phone) {
       const expiry = setTimeout(() => {
@@ -111,6 +129,20 @@ export class RetellEngineRegistry {
     return { ticket, engine: entry.engine.report, promptHash: createHash("sha256").update(entry.engine.instructions).digest("hex") };
   }
   registered(id: string, callId: string) { const entry = this.entries.get(id); if (entry) entry.callId = callId; }
+  waitingAudio(id: string, active: boolean, agentSpeaking: boolean) {
+    const entry = this.entries.get(id);
+    if (this.options.phone || process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1" ||
+      !entry?.waiting || entry.closed) throw Object.assign(Error("WAITING_DEV_C_ONLY"), { status: 404 });
+    entry.waiting.audio(active, agentSpeaking);
+    refreshWaitingReport(entry);
+  }
+  waitingPlaybackEnded(id: string) {
+    const entry = this.entries.get(id);
+    if (this.options.phone || process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1" ||
+      !entry?.waiting || entry.closed) throw Object.assign(Error("WAITING_DEV_C_ONLY"), { status: 404 });
+    entry.waiting.playbackEnded();
+    refreshWaitingReport(entry);
+  }
   diagnostics(id: string) {
     const report = this.entries.get(id)?.engine.report;
     if (!report) return undefined;
@@ -139,7 +171,7 @@ export class RetellEngineRegistry {
   }
   ended(id: string) {
     const entry = this.entries.get(id); if (!entry) return;
-    entry.closed = true; entry.lineGuard?.close(); entry.buffer?.close(); entry.abort?.abort(); entry.engine.report.connected = false;
+    entry.closed = true; clearInterval(entry.waitingTimer); entry.lineGuard?.close(); entry.buffer?.close(); entry.abort?.abort(); entry.engine.report.connected = false;
     entry.socket?.close(1000, "Test ended"); this.entries.delete(id); this.tickets.delete(entry.ticket);
     this.pendingWrites.delete(id);
   }
@@ -238,8 +270,37 @@ export class RetellEngineRegistry {
       }) : undefined;
     entry.buffer = buffered;
     if (buffered) (entry.engine.report as any).cInterruption = buffered.metrics;
+    clearInterval(entry.waitingTimer);
+    if (entry.waiting) {
+      entry.waitingTimer = setInterval(() => {
+        if (entry.closed || entry.socket !== ws || ws.readyState !== 1) return;
+        const action = entry.waiting!.tick();
+        refreshWaitingReport(entry);
+        if (!action) return;
+        buffered?.suspendForWaiting(); abort(); entry.pending = undefined;
+        send({ response_type: "agent_interrupt", interrupt_id: (entry.interruptSequence = (entry.interruptSequence ?? 0) + 1),
+          content: action.text, content_complete: true, ...(action.end ? { end_call: true } : {}) });
+        entry.engine.record(action.end ? "dev_waiting_expired" : "dev_waiting_probe");
+      }, 250);
+      entry.waitingTimer.unref();
+    }
+    const waitingInput = (turns: SpokenTurn[], speaking: boolean, complete: boolean) => {
+      const users = turns.filter(t => t.role === "user");
+      const last = users.at(-1);
+      if (last) entry.waiting?.observe(last.content, speaking, complete, `${users.length}:${last.content}`);
+      refreshWaitingReport(entry);
+      if (entry.waiting?.waiting) {
+        buffered?.suspendForWaiting(); abort();
+        return true;
+      }
+      return false;
+    };
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
       if (entry.noHumanEnded) return;
+      if (entry.waiting?.waiting) {
+        send({ response_type: "response", response_id: id, content: "", content_complete: true });
+        return;
+      }
       const vm = this.options.phone && (voicemailTurn(turns) || entry.lineGuard?.voicemail);
       if (vm && buffered) { buffered.close(); buffered = undefined; entry.buffer = undefined; }
       if (vm && entry.voicemailMessageSent) {
@@ -349,6 +410,7 @@ export class RetellEngineRegistry {
             frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
               typeof t.content !== "string" || t.content.length > 4000)) { ws.close(1008, "Invalid transcript"); return; }
         heardOpening(frame.transcript);
+        const waiting = entry.waiting && waitingInput(frame.transcript, frame.turntaking === "user_turn", false);
         if (this.options.phone && Array.isArray(frame.transcript)) {
           const turns = frame.transcript.filter((t: any) => ["agent", "user"].includes(t?.role) && typeof t.content === "string");
           const last = [...turns].reverse().find((t: any) => t.role === "user");
@@ -357,7 +419,7 @@ export class RetellEngineRegistry {
             buffered.close(); buffered = undefined; entry.buffer = undefined; abort();
           }
         }
-        if (buffered) {
+        if (buffered && !waiting) {
           if (!Array.isArray(frame.transcript) || frame.transcript.length > 300 ||
             frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
               typeof t.content !== "string" || t.content.length > 4000)) { ws.close(1008, "Invalid transcript"); return; }
@@ -377,6 +439,7 @@ export class RetellEngineRegistry {
         ws.close(1008, "Invalid response request"); return;
       }
       heardOpening(frame.transcript);
+      if (entry.waiting) waitingInput(frame.transcript, false, frame.interaction_type === "response_required");
       if (this.options.phone) {
         const last = [...frame.transcript].reverse().find((t: any) => t.role === "user");
         if (last) entry.lineGuard?.observe(last.content, entry.engine.opening.permit(frame.transcript), true);
@@ -387,6 +450,7 @@ export class RetellEngineRegistry {
     const close = () => {
       if (openingTimer) clearTimeout(openingTimer);
       if (entry.socket !== ws) return;
+      clearInterval(entry.waitingTimer);
       buffered?.close();
       abort(); entry.socket = undefined; entry.engine.report.connected = false;
       entry.engine.record("custom_llm_disconnected");
@@ -422,6 +486,7 @@ export const speedBufferModes = new Map<string, boolean>();
 export const retellEngineRegistry = new RetellEngineRegistry(undefined, {
   createEngine: (owner, instruction, id, personality) => speedEngine(owner, instruction, speedVariants.get(id) ?? "A", personality),
   bufferResponses: id => speedVariants.get(id) === "C" && speedBufferModes.get(id) !== false,
+  waitingRules: id => speedVariants.get(id) === "C",
 });
 export const retellEngineLab = speedLab({ registry: retellEngineRegistry,
   api: variant => new RetellEngineApi(engineCallbackBase, undefined, variant), check: checkEngine,

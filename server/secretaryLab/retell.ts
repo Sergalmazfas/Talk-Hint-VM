@@ -47,6 +47,9 @@ export function retellSecretaryInstructions(owner: string, instruction: string) 
 }
 export interface RetellLabProfile {
   agentName: string; mode: string;
+  durationMs?: number;
+  waitingAudio?: (id: string, active: boolean, agentSpeaking: boolean) => void;
+  waitingPlaybackEnded?: (id: string) => void;
   check(): Promise<object>;
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding): { ticket: string; engine: SecretaryConversationEngine["report"]; promptHash?: string };
   registered(id: string, callId: string): void;
@@ -97,7 +100,7 @@ export class RetellSecretaryLab {
   async readiness(owner: string) {
     this.dev(); this.prune();
     const base = { model: RETELL_LAB_MODEL, voice: RETELL_LAB_VOICE,
-      limits: { durationSeconds: 300, historyMinutes: 60 },
+      limits: { durationSeconds: (this.profile?.durationMs ?? 300_000) / 1000, historyMinutes: 60 },
       history: Array.from(this.sessions.values()).filter(s => s.owner === owner).map(s => this.priced(s)).reverse() };
     try {
       const extra = await this.profile?.check();
@@ -178,7 +181,7 @@ export class RetellSecretaryLab {
       // Do not expose dynamic variables/callback capability if provider echoes them.
       s.call = Object.fromEntries(["call_id", "access_token", "transport", "ice_servers", "expires_at"].map(k => [k, call[k]]));
       this.event(s, "web_session_registered");
-      s.timer = setTimeout(() => { void this.stop(s.owner, s.report.id, "duration_limit").catch(() => {}); }, 300_000);
+      s.timer = setTimeout(() => { void this.stop(s.owner, s.report.id, "duration_limit").catch(() => {}); }, this.profile?.durationMs ?? 300_000);
       s.timer.unref?.();
       return { id: s.report.id, call: s.call, report: this.priced(s) };
     } catch (e) {
@@ -286,6 +289,21 @@ export class RetellSecretaryLab {
     s.report.turns.sort((a, b) => a.atMs - b.atMs);
     s.report.metrics = { guestTurns: s.report.turns.filter(t => t.role === "guest").length,
       secretaryTurns: s.report.turns.filter(t => t.role === "secretary").length };
+  }
+  waitingAudio(owner: string, id: string, input: unknown) {
+    const s = this.get(owner, id);
+    if (terminal(s) || !this.profile?.waitingAudio) fail(404, "WAITING_DEV_C_ONLY");
+    const body = input as any;
+    if (body && Object.keys(body).join(",") === "event" && body.event === "playback_ended") {
+      if (!this.profile?.waitingPlaybackEnded) fail(404, "WAITING_DEV_C_ONLY");
+      this.profile!.waitingPlaybackEnded!(id);
+      return { ok: true };
+    }
+    if (!body || Object.keys(body).sort().join(",") !== "active,agentSpeaking" ||
+      typeof body.active !== "boolean" || typeof body.agentSpeaking !== "boolean")
+      fail(400, "Invalid waiting audio signal");
+    this.profile!.waitingAudio!(id, body.active, body.agentSpeaking);
+    return { ok: true };
   }
   observe(owner: string, id: string, input: any) {
     const s = this.get(owner, id);

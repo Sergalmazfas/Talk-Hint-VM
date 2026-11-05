@@ -255,6 +255,12 @@ export class CResponseBuffer {
     this.deps.record("c_response_failed");
     if (result.end && !this.paused) this.close();
   }
+  /** Explicit Dev waiting gate: discard stale text and timers, but allow a later fresh request. */
+  suspendForWaiting() {
+    clearTimeout(this.bridgeTimer); clearTimeout(this.restartTimer);
+    if (this.generation) { clearTimeout(this.generation.timer); this.generation.controller.abort(); }
+    this.generation = undefined; this.target = undefined; this.paused = true;
+  }
   close() {
     this.closed = true;
     clearTimeout(this.bridgeTimer); clearTimeout(this.restartTimer);

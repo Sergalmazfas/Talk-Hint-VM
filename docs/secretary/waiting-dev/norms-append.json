@@ -1,0 +1,25 @@
+{
+  "target": "Паспорт норм Секретаря",
+  "operation": "append_only",
+  "status": "proposed",
+  "scope": "dev_retell_engine_C",
+  "enabledInProduction": false,
+  "productionWritten": false,
+  "ownerRoleId": "secretary-project-head",
+  "planFromRoleId": "head-product",
+  "hold": [
+    {"id": "waiting_unnecessary_checks", "target": 0, "unit": "count", "definition": "0 лишних проверок во время ожидания; единственная разрешённая проверка только после срока и при доказанной тишине."},
+    {"id": "waiting_interruptions", "target": 0, "unit": "count", "definition": "0 перебиваний во время ожидания, фонового разговора, работы или музыки. До аудиопроверки факт не измерен."}
+  ],
+  "review": {
+    "author": "secretary-lab-engineer",
+    "checker": "secretary-qa",
+    "acceptor": "owner",
+    "fields": ["тип ожидания", "длительность", "число проверок", "перебивания", "соблюдение правил 1–5", "доказательства", "что не проверено"]
+  },
+  "journal": {
+    "status": "proposed",
+    "expectedResult": "0 лишних проверок; 0 перебиваний; ≤1 проверка за короткое ожидание; 0 проверок за ожидание склада/второй линии/музыки до 300 с.",
+    "fact": "Не измерено: звонки не запускались."
+  }
+}

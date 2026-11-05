@@ -37,6 +37,9 @@ export function registerRetellLabRoutes(app: Express, lab: RetellSecretaryLab = 
   app.post(`${base}/sessions/:id/observations`, (req, res) => {
     try { res.json(lab.observe(req.user!.id, req.params.id, req.body)); } catch (e) { error(res, e); }
   });
+  app.post(`${base}/sessions/:id/waiting-audio`, (req, res) => {
+    try { res.json(lab.waitingAudio(req.user!.id, req.params.id, req.body)); } catch (e) { error(res, e); }
+  });
   app.delete(`${base}/sessions/:id`, async (req, res) => {
     if (Object.keys(req.body ?? {}).length) return res.status(400).json({ error: "Only an empty body is accepted" });
     try { res.json({ report: await lab.stop(req.user!.id, req.params.id) }); } catch (e) { error(res, e); }

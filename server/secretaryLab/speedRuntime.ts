@@ -9,6 +9,7 @@ import { SpeedBudget } from "./speedBudget";
 import { SpeedLimitError, SpeedRequestBudget, speedLimitText, speedSettlement } from "./speedRequestBudget";
 import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
 import { devReportArchive } from "./devReportArchive";
+import { WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX, WAITING_DEV_INSTRUCTIONS } from "./waitingPolicy";
 
 export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
@@ -74,7 +75,7 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
     plan: { instruction, testOnly: true, authorizedTestContext: SECRETARY_TEST_CONTEXT }, runtimeUtc: new Date().toISOString(),
   });
   const engine = new SecretaryConversationEngine(owner, instruction, measured, false, personality, [], undefined,
-    compact ? { instructions: compact.instructions, model: profile.model } : undefined);
+    compact ? { instructions: compact.instructions + (variant === "C" ? WAITING_DEV_INSTRUCTIONS : ""), model: profile.model } : undefined);
   (engine.report as any).speed = metrics;
   return engine;
 }
@@ -90,7 +91,11 @@ export function speedLab(deps: {
   const labs = new Map<SpeedVariant, RetellSecretaryLab>();
   for (const variant of ["A", "B", "C"] as const) {
     const profile: RetellLabProfile = {
-      agentName: variant === "A" ? deps.agentName : `${deps.agentName} · speed ${variant}`,
+      agentName: variant === "A" ? deps.agentName :
+        `${deps.agentName} · speed ${variant}${variant === "C" ? WAITING_DEV_SUFFIX : ""}`,
+      ...(variant === "C" ? { durationMs: WAITING_DEV_DURATION_MS,
+        waitingAudio: (id: string, active: boolean, speaking: boolean) => deps.registry.waitingAudio(id, active, speaking),
+        waitingPlaybackEnded: (id: string) => deps.registry.waitingPlaybackEnded(id) } : {}),
       mode: "retell-engine", check: deps.check,
       reserve: (owner, instruction, id, personality) => {
         deps.variantsBySession.set(id, variant);
@@ -135,7 +140,8 @@ export function speedLab(deps: {
     if (r.status !== "ended") return;
     await archiveReport(row.owner, r, true);
     const m = (r.engine as any)?.speed;
-    const seconds = r.providerDurationSeconds ?? Math.min(300, (Date.parse(r.endedAt!) - Date.parse(r.createdAt)) / 1000 + 5);
+    const seconds = r.providerDurationSeconds ?? Math.min(r.profileId === "C" ? WAITING_DEV_DURATION_MS / 1000 : 300,
+      (Date.parse(r.endedAt!) - Date.parse(r.createdAt)) / 1000 + 5);
     const debit = m?.requestBudget ? speedSettlement(m, seconds) : m && m.requests <= 12 && m.requests === m.usageRequests
       ? Math.ceil(m.conservativeModelMicroUsd + Math.max(0, seconds) / 60 * 70_000) : null;
     await budget.settle(row.requestId, debit);
@@ -209,6 +215,7 @@ export function speedLab(deps: {
     }
     reports(owner: string) { return Array.from(labs.values()).flatMap(l => l.reports(owner)).map(withLimit); }
     async connected(owner: string, id: string) { return find(owner, id).connected(owner, id); }
+    waitingAudio(owner: string, id: string, input: unknown) { return find(owner, id).waitingAudio(owner, id, input); }
     observe(owner: string, id: string, input: any) { return find(owner, id).observe(owner, id, input); }
     async stop(owner: string, id: string, reason?: string) {
       await find(owner, id).stop(owner, id, reason);

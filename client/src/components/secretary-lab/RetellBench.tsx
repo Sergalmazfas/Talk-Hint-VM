@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatLabTime, labRequest } from "@/lib/secretary-lab";
 import { savedRetellAdmission, retellEnded, retellError as friendlyError } from "@/lib/secretary-lab-retell";
 import { retellStandApi } from "@/lib/secretary-lab-modes";
+import { watchWaitingMicrophone } from "@/lib/secretary-lab-waiting-audio";
 import PersonalityPicker, { type PersonalityChoice } from "./PersonalityPicker";
 import { RunSummary } from "./RunSummary";
 import "./retell-engine.css";
@@ -130,6 +131,8 @@ export default function RetellBench({
   const pollTimerRef = useRef<number | null>(null);
   const connectedSentRef = useRef(false);
   const startLockRef = useRef(false);
+  const waitingAudioStopRef = useRef<(() => void) | null>(null);
+  const agentSpeakingRef = useRef(false);
   const pollEpochRef = useRef(0);
   const callbackRef = useRef(onActiveChange);
   callbackRef.current = onActiveChange;
@@ -153,6 +156,7 @@ export default function RetellBench({
     void loadConfig();
     return () => {
       mountedRef.current = false;
+      waitingAudioStopRef.current?.(); waitingAudioStopRef.current = null;
       pollEpochRef.current++;
       if (pollTimerRef.current !== null) window.clearTimeout(pollTimerRef.current);
       const session = sessionRef.current;
@@ -182,6 +186,7 @@ export default function RetellBench({
         if (!mountedRef.current || stopped || epoch !== pollEpochRef.current) return;
         acceptReport(result.report);
         if (["ended", "failed"].includes(result.report.status)) {
+          waitingAudioStopRef.current?.(); waitingAudioStopRef.current = null;
           stoppingRef.current = true;
           await sessionRef.current?.end().catch(() => undefined);
           sessionRef.current = null;
@@ -215,6 +220,7 @@ export default function RetellBench({
     stoppingRef.current = true;
     markBusy(true);
     setError("");
+    waitingAudioStopRef.current?.(); waitingAudioStopRef.current = null;
     const sdkSession = sessionRef.current;
     const sdkEnd = sdkSession ? sdkSession.end().catch((cause: unknown) => {
       throw new Error(`SDK не подтвердил остановку: ${friendlyError(cause)}`);
@@ -263,10 +269,26 @@ export default function RetellBench({
     let createAttempted = false;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Микрофон недоступен. Откройте страницу в браузере с разрешением микрофона.");
-      preflight = await navigator.mediaDevices.getUserMedia({ audio: true });
-      preflight.getTracks().forEach((track) => track.stop());
+      preflight = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: true, noiseSuppression: !(isEngine && selectedSpeedVariant === "C"),
+        autoGainControl: !(isEngine && selectedSpeedVariant === "C"),
+      } });
+      if (isEngine && selectedSpeedVariant === "C") {
+        waitingAudioStopRef.current?.();
+        agentSpeakingRef.current = false;
+        waitingAudioStopRef.current = await watchWaitingMicrophone(preflight, async active => {
+          if (!createdId || !mountedRef.current) return;
+          await labRequest(`${api}/sessions/${encodeURIComponent(createdId)}/waiting-audio`, token, {
+            method: "POST", body: JSON.stringify({ active, agentSpeaking: agentSpeakingRef.current }),
+          });
+        });
+      } else preflight.getTracks().forEach((track) => track.stop());
       preflight = null;
 
+      if (!mountedRef.current) {
+        waitingAudioStopRef.current?.(); waitingAudioStopRef.current = null;
+        return;
+      }
       if (!requestIdRef.current) requestIdRef.current = crypto.randomUUID();
       createAttempted = true;
       const created = await labRequest<{ id: string; call: { call_id: string; access_token: string; [key: string]: unknown }; report: RetellReport }>(`${api}/sessions`, token, {
@@ -288,6 +310,14 @@ export default function RetellBench({
         agent_id: config.agentId || "server-managed",
         transcript: false,
         hooks: {
+          onAgentStartTalking: () => { agentSpeakingRef.current = true; },
+          onAgentStopTalking: () => {
+            agentSpeakingRef.current = false;
+            if (isEngine && selectedSpeedVariant === "C")
+              void labRequest(`${api}/sessions/${encodeURIComponent(created.id)}/waiting-audio`, token, {
+                method: "POST", body: JSON.stringify({ event: "playback_ended" }),
+              }).catch(() => { /* Missing evidence never licenses a silence probe. */ });
+          },
           onStatus: (status) => {
             if (!mountedRef.current) return;
             if (status === "live" && !connectedSentRef.current) {
@@ -310,6 +340,7 @@ export default function RetellBench({
       pollSession(created.id);
       setNote("Подключение начато. Источник транскрипта — только серверный снимок.");
     } catch (cause) {
+      waitingAudioStopRef.current?.(); waitingAudioStopRef.current = null;
       preflight?.getTracks().forEach((track) => track.stop());
       if (mountedRef.current) {
         setError(friendlyError(cause));
