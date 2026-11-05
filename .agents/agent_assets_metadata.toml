@@ -3841,3 +3841,17 @@ mtime_ms = 1793907657877
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/735f566b-f4ae-477d-8ff4-f6a10b1c295a/792c2065-213c-4bbc-8d17-e3df102ee769"
 storage_version_token = "1793907666863867"
 content_type = "text/html"
+
+[[outputs]]
+id = "Esmg3LLFBM-8Hflro2SeH"
+uri = "file://generated-artifacts/rehearsal-c-dev-diagnosis/Katya_C_Dev_Diagnosis.zip"
+type = "unspecified"
+title = "Скачать ZIP — диагностика Кати C и Dev"
+description = "Отчёт в HTML и текстовом формате: причины задержек, сравнение двух репетиций, подтверждение по логам и план минимальных исправлений с рисками."
+logical_id = "d01f84f6-2083-479a-aea9-c5d1ed8f098c"
+content_hash = "sha256:c142a40e407d7d4929c7ab168f00b5556174952671761c14ec3e1b60b98fb6d8"
+size = 14502
+mtime_ms = 1793908262814
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d01f84f6-2083-479a-aea9-c5d1ed8f098c/a1213f3c-4fbd-4a6d-aa11-7a9aa421a294"
+storage_version_token = "1793908268876858"
+content_type = "application/octet-stream"
