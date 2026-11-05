@@ -3981,3 +3981,17 @@ mtime_ms = 1793921345855
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9bf0a2b3-b9d1-4e44-a17c-3f3d997c8dce/5bd19bc3-b9bb-447a-9ddc-f4d78a780666"
 storage_version_token = "1793921382591871"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "vmLUzCUZB-16sPaBuJBBn"
+uri = "file://generated-artifacts/talkhint-chat-architecture/TalkHint_Chat_Architecture.zip"
+type = "unspecified"
+title = "Скачать ZIP — архитектура TalkHint Chat"
+description = "Итоговый документ из 16 разделов, четыре исходных макета, README и контрольные суммы. Размер 5,6 МБ. Целостность архива проверена."
+logical_id = "9daf735e-dd30-4e05-8b59-37ff8d01ee65"
+content_hash = "sha256:027946265e0631a9cb61b42d39bffc59be92fd9deeb936560a18ee0e9b45bc94"
+size = 5633357
+mtime_ms = 1793921692083
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9daf735e-dd30-4e05-8b59-37ff8d01ee65/24825ae6-8d67-487a-973a-6fe2eb7123c0"
+storage_version_token = "1793921697354724"
+content_type = "application/octet-stream"
