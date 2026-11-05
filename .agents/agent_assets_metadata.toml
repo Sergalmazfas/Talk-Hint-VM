@@ -3883,3 +3883,17 @@ mtime_ms = 1793910493693
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dfbcdaa1-a831-46f5-90e4-bdaf0d03504d/c9f036a0-e936-4f62-ad2b-2d2f5e45fc99"
 storage_version_token = "1793910550416728"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "pLN3-FKYuG3o0Agn92lR7"
+uri = "file://generated-artifacts/katya-streaming-team-log/Katya_Journal_Procedure_Lessons_r1322.zip"
+type = "unspecified"
+title = "Журнал и уроки Кати — подтверждённые записи r1322"
+description = "Две записи журнала, процедура проверки, уроки Лёве и Томе, UUID/hash/revision и квитанции. Урок Севе не подтверждён; повтор не выполнялся. Без переключения production."
+logical_id = "c443f599-a4b3-40dc-a57d-626c1b70d421"
+content_hash = "sha256:4aa83933cd20c7838fe66781bf99b2136aca61a7a6498c616f49328b1175bb5b"
+size = 10214
+mtime_ms = 1793912023806
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c443f599-a4b3-40dc-a57d-626c1b70d421/a782a840-b7e8-41ca-aa13-569d5cf9e278"
+storage_version_token = "1793912030404465"
+content_type = "application/octet-stream"
