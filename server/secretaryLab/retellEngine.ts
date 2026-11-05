@@ -17,6 +17,7 @@ import { PhoneLineGuard, type NoHumanReason } from "../secretary/phoneLineGuard"
 import { DevWaitingPolicy, WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX } from "./waitingPolicy";
 import { waitingAudit } from "./waitingAudit";
 import { rehearsalBindings } from "./rehearsalBinding";
+import { devColleagueSpeech, devQuestion, devProviderHasText } from "../rehearsal/manners";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -113,7 +114,7 @@ export class RetellEngineRegistry {
       expiresAt: Date.now() + (this.options.phone ? SECRETARY_CALL_LIMIT_MS : 300_000) };
     if (!this.options.phone && process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" &&
       this.options.waitingRules?.(id)) {
-      entry.waiting = new DevWaitingPolicy();
+      entry.waiting = new DevWaitingPolicy(Date.now, rehearsalBindings.get(id)?.manners ? { colleague: devColleagueSpeech } : undefined);
       entry.expiresAt = Date.now() + WAITING_DEV_DURATION_MS;
       refreshWaitingReport(entry);
     }
@@ -252,6 +253,10 @@ export class RetellEngineRegistry {
     let buffered = (this.options.phone ? entry.engine.report.phoneRuntime?.variant === "C" :
       process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id))
       ? new CResponseBuffer({
+        ...(!this.options.phone && rehearsalBindings.get(entry.id)?.manners ? {
+          bridgeAllowed: (turns: SpokenTurn[]) => !devQuestion(turns),
+          providerHasText: devProviderHasText, firstTextReason: "dev_complete_reply_ready_for_tts",
+        } : {}),
         generate: (turns, signal, emit, reminder) => entry.engine.respond(turns, signal, emit, reminder),
         send: frame => entry.commandCompleted === (frame as any).response_id ? true : send(frame),
         record: event => entry.engine.record(event),

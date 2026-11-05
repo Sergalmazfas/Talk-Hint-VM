@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RetellEngineRegistry } from "./retellEngine";
 import { rehearsalBindings } from "./rehearsalBinding";
 import { RetellSecretaryLab } from "./retell";
-import type { EngineRequest } from "../secretary/conversationEngine";
+import type { EngineRequest, EngineStream } from "../secretary/conversationEngine";
+import { devMannersStream } from "../rehearsal/manners";
 
 class Socket extends EventEmitter {
   readyState = 1; bufferedAmount = 0; sent: any[] = [];
@@ -12,14 +13,18 @@ class Socket extends EventEmitter {
   frame(frame: object) { this.emit("message", Buffer.from(JSON.stringify(frame)), false); }
 }
 const registries: RetellEngineRegistry[] = [];
-function fixture(options: { phone?: boolean; waitingRules?: () => boolean } = {}, buffered = true, gate?: Promise<void>) {
+function fixture(options: { phone?: boolean; waitingRules?: () => boolean } = {}, buffered = true, gate?: Promise<void>, manners = false) {
   const requests: EngineRequest[] = [];
-  const registry = new RetellEngineRegistry(async function* (req) {
+  const stream: EngineStream = async function* (req) {
     requests.push(req);
     if (gate) await gate;
     yield { type: "text", text: "The test answer." };
     yield { type: "complete", output: [], tools: [] };
-  }, { bufferResponses: () => buffered, waitingRules: () => true, ...options });
+  };
+  if (manners) rehearsalBindings.set("session", { waiting: true, buffered, manners: true,
+    create: () => { throw Error("fixture registry supplies its engine"); } });
+  const registry = new RetellEngineRegistry(manners ? devMannersStream(stream) : stream,
+    { bufferResponses: () => buffered, waitingRules: () => true, ...options });
   registries.push(registry);
   const r = registry.reserve("test-owner", "Take a test message", "session");
   registry.registered("session", "call_1");
@@ -64,7 +69,33 @@ it("wire replay answers Кать at 1:26 and Здесь at 1:50 after separate w
   expect(ws.sent.filter(x => x.content === "Конечно, жду.")).toHaveLength(2);
 });
 const speech = (s: string) => ({ role: "user", content: s });
-afterEach(() => { registries.splice(0).forEach(r => r.dispose()); vi.unstubAllEnvs(); vi.useRealTimers(); });
+afterEach(() => { registries.splice(0).forEach(r => r.dispose()); rehearsalBindings.delete("session"); vi.unstubAllEnvs(); vi.useRealTimers(); });
+it("New Dev rehearsal wire replays 1:26 and 1:50, ignores colleague speech and answers both addresses", async () => {
+  vi.useFakeTimers(); vi.setSystemTime(0); vi.stubEnv("NODE_ENV", "development");
+  const { ws, requests, registry } = fixture({}, true, undefined, true);
+  const transcript: any[] = [];
+  const turn = async (id: number, at: number, text: string) => {
+    await vi.advanceTimersByTimeAsync(at - Date.now());
+    transcript.push({ role: "user", content: text });
+    ws.frame({ interaction_type: "response_required", response_id: id, transcript: [...transcript] });
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  await turn(1, 77_720, "Секунду подожди, пожалуйста, я сейчас вернусь. Посмотрю на складе есть или нет, хорошо?");
+  registry.waitingPlaybackEnded("session");
+  await turn(2, 80_000, "John, check the new tires.");
+  expect(requests).toHaveLength(0);
+  await turn(3, 86_690, "Кать, ты меня слышишь?");
+  expect(requests).toHaveLength(1);
+  expect(ws.sent.filter(x => x.content === "The test answer.")).toHaveLength(1);
+  await turn(4, 98_630, "Да, подожди минуту, я сейчас на складе посмотрю, хорошо?");
+  registry.waitingPlaybackEnded("session");
+  await turn(5, 110_860, "Здесь?");
+  await vi.advanceTimersByTimeAsync(200);
+  expect(requests).toHaveLength(2);
+  expect(ws.sent.filter(x => x.content === "The test answer.")).toHaveLength(2);
+  expect(ws.sent.filter(x => x.content === "Конечно, жду.")).toHaveLength(2);
+  expect(ws.sent.some(x => /Got it|New,|New tires,/.test(x.content ?? ""))).toBe(false);
+});
 describe("waiting gate on actual Custom LLM wire", () => {
   it("one sec suppresses response/reminders/bridges; one check; explicit return reaches the model", async () => {
     vi.stubEnv("NODE_ENV", "development"); vi.useFakeTimers();

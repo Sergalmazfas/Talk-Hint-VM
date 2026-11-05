@@ -63,7 +63,7 @@ export class DevWaitingPolicy {
   private speaking = false;
   private agentSpeaking = false;
   private ended = false;
-  constructor(private now = Date.now) {}
+  constructor(private now = Date.now, private strict?: { colleague: (text: string) => boolean }) {}
   private event(type: WaitingEvent["type"]) {
     if (!this.wait) return;
     this.events.push({ type, kind: this.wait.kind, atMs: this.now(),
@@ -94,7 +94,7 @@ export class DevWaitingPolicy {
     if (/[а-яё]{3,}/i.test(text)) this.language = "ru";
     else if (/\b(hola|precio|gracias|almacén|compruebo)\b/i.test(text)) this.language = "es";
     else if (/[a-z]{3}/i.test(text)) this.language = "en";
-    if (colleagueSpeech(text)) {
+    if (colleagueSpeech(text) || this.strict?.colleague(text)) {
       this.shortTurn = undefined;
       if (!this.wait) {
         this.wait = { kind: "background", since: this.now(), probes: 0 };
@@ -116,7 +116,8 @@ export class DevWaitingPolicy {
       if (completed && this.wait?.ackPending) this.wait.ackReadyAt ??= this.now();
       return;
     }
-    if (this.wait && completed && addressedReturn(text)) {
+    const activeAudio = this.strict && this.activity?.active && this.now() - this.activity.at <= 3000;
+    if (this.wait && completed && addressedReturn(text) && !activeAudio) {
       this.event("returned"); this.wait = undefined; this.shortTurn = undefined;
     } else if (this.wait && !colleagueSpeech(text) && key.length <= 100 && key.split(" ").length <= 12) {
       if (this.shortTurn?.identity !== identity) this.shortTurn = { identity, at: this.now() };
@@ -126,6 +127,7 @@ export class DevWaitingPolicy {
   takeAcknowledgement(): WaitingAction | undefined {
     if (!this.wait?.ackPending || this.wait.ackReadyAt === undefined || this.ended ||
         this.speaking || this.agentSpeaking) return;
+    if (this.strict && this.activity?.active && this.now() - this.activity.at <= 3000) return;
     this.wait.ackPending = false; this.event("acknowledged");
     return { text: this.language === "ru" ? "Конечно, жду." : this.language === "es" ?
       "Claro, espero." : "Sure, take your time.", end: false, kind: this.wait.kind,

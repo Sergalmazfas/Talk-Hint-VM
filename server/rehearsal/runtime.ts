@@ -65,9 +65,9 @@ export class RehearsalRuntime {
       waitingPlaybackEnded: id => retellEngineRegistry.waitingPlaybackEnded(id),
       check: async () => ({ mode: "rehearsal" }),
       reserve: (who, instruction, id) => {
-        rehearsalBindings.set(id, { waiting: version.waiting, buffered: version.speed === "C",
+        rehearsalBindings.set(id, { waiting: version.waiting, buffered: version.speed === "C", manners: version.id === "dev-C",
           create: (w, text) => speedEngine(w, text, version.speed, personality, {
-            productionRules: version.productionRules, waiting: version.waiting,
+            productionRules: version.productionRules, waiting: version.waiting, manners: version.id === "dev-C",
           }) });
         return retellEngineRegistry.reserve(who, instruction, id);
       },

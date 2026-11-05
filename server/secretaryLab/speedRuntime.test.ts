@@ -15,6 +15,20 @@ function setup() {
   vi.stubEnv("OPENAI_API_KEY", "unit-test-placeholder-not-a-credential");
   return speedEngine("fixture", "Fictional test: clarify the goal only", "C");
 }
+it("injects manners only for New Dev rehearsal; ordinary C and production-profile snapshot remain unchanged", () => {
+  setup();
+  const plain = speedEngine("fixture", "Fictional test", "C");
+  const next = speedEngine("fixture", "Fictional test", "C", undefined,
+    { productionRules: false, waiting: true, manners: true });
+  const previous = speedEngine("fixture", "Fictional test", "C", undefined,
+    { productionRules: true, waiting: false });
+  expect(next.instructions).toContain("DEV-C REHEARSAL MANNERS");
+  expect(plain.instructions).not.toContain("DEV-C REHEARSAL MANNERS");
+  expect(previous.instructions).not.toContain("DEV-C REHEARSAL MANNERS");
+  expect(() => speedEngine("fixture", "Fictional", "C", undefined,
+    { productionRules: true, waiting: false, manners: true })).toThrow("DEV_REHEARSAL_MANNERS_ONLY");
+  expect(network.create).not.toHaveBeenCalled();
+});
 function response(broken = false) {
   return { withResponse: async () => ({
     response: new Response(null, { status: 200, headers: { "x-request-id": "fixture-request-id" } }),

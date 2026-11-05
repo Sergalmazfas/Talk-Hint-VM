@@ -7,6 +7,7 @@ import { WAITING_LAB_PLANS } from "../../shared/secretaryWaitingPlans";
 import { compactSpeedPrompt } from "../secretaryLab/speedExperiment";
 import { WAITING_DEV_INSTRUCTIONS } from "../secretaryLab/waitingPolicy";
 import { buildSecretaryInstructions } from "../secretary/agent";
+import { DEV_C_MANNERS } from "./manners";
 export const rehearsalHash = (v: unknown): string => createHash("sha256").update(JSON.stringify(v)).digest("hex");
 let sourceStamp: string | undefined;
 export function rehearsalCodeHash(): string {
@@ -38,7 +39,7 @@ export const rehearsalVersions = () => [
   hash: rehearsalHash({ ...v, voice: "retell-Merritt", responsiveness: 1, maxOutput: v.speed === "C" ? 300 : null,
     reasoning: v.speed === "C" ? "low" : "medium", compact: compactSpeedPrompt.toString(),
     full: buildSecretaryInstructions.toString(), renderer: rehearsalInstruction.toString(), source: rehearsalCodeHash(),
-    waitingRules: v.waiting ? WAITING_DEV_INSTRUCTIONS : null }) }));
+    waitingRules: v.waiting ? WAITING_DEV_INSTRUCTIONS : null, manners: v.id === "dev-C" ? DEV_C_MANNERS : null }) }));
 export type FrozenVersion = ReturnType<typeof rehearsalVersions>[number];
 export function rehearsalInstruction(scene: RehearsalScene): string {
   // The dialer's secretaryInstruction intentionally requires a target phone.

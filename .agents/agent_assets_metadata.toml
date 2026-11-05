@@ -3757,3 +3757,17 @@ mtime_ms = 1793854655113
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/32412182-14b2-456c-bd7a-53955ca3d15e/d96d103e-e552-4d9d-8f97-dea6d0225d00"
 storage_version_token = "1793854669764582"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "hSk-e7tIhH2SI2TUpmEq6"
+uri = "file://generated-artifacts/rehearsal-manners-review/Katya_New_Dev_Manners_Clavdiy.zip"
+type = "unspecified"
+title = "Катя — манера в Новой Dev: ZIP Клавдию"
+description = "Точечный diff, код, replay обращений 1:26 и 1:50, полный прогон: 3877 passed, 44 штатных skip, 0 ошибок; ограничения проверки и proposed-уроки."
+logical_id = "9c923200-14eb-4a54-96f5-81f8c740df2e"
+content_hash = "sha256:72f91f22ce12c5e1f7e9cd2669234942df4c0b5ec251c8eb9ea474788ef44236"
+size = 80300
+mtime_ms = 1793856980566
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9c923200-14eb-4a54-96f5-81f8c740df2e/3b5b5d0e-3aa1-4d2a-9044-1c2e2e22f93a"
+storage_version_token = "1793856988561586"
+content_type = "application/octet-stream"

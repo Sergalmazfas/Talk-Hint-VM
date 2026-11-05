@@ -10,10 +10,11 @@ import { SpeedLimitError, SpeedRequestBudget, speedLimitText, speedSettlement } 
 import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
 import { devReportArchive } from "./devReportArchive";
 import { WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX, WAITING_DEV_INSTRUCTIONS } from "./waitingPolicy";
+import { DEV_C_MANNERS, devMannersStream } from "../rehearsal/manners";
 import { waitingPlanSelection } from "../../shared/secretaryWaitingPlans";
 
 export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding,
-  rehearsal?: { productionRules: boolean; waiting: boolean }) {
+  rehearsal?: { productionRules: boolean; waiting: boolean; manners?: boolean }) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
   const profile = speedProfiles[variant];
   const requestBudget = new SpeedRequestBudget(variant === "C" ? 2_000_000 : 1_000_000);
@@ -71,7 +72,10 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
     }
   } } };
   const rawStream = speedStream(adapter, variant, rehearsal?.productionRules ? secretaryPhoneTools : secretaryTestTools);
-  const measured: EngineStream = request => rawStream(request);
+  if (rehearsal?.manners && (rehearsal.productionRules || !rehearsal.waiting || variant !== "C" ||
+      process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1"))
+    throw Error("DEV_REHEARSAL_MANNERS_ONLY");
+  const measured: EngineStream = rehearsal?.manners ? devMannersStream(rawStream) : request => rawStream(request);
   const compact = variant === "A" || rehearsal?.productionRules ? undefined : compactSpeedPrompt({
     owner: confirmedSecretaryOwnerName(owner), personality,
     plan: { instruction, testOnly: true, authorizedTestContext: SECRETARY_TEST_CONTEXT },
@@ -80,7 +84,8 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
   const engine = rehearsal?.productionRules
     ? new SecretaryConversationEngine(owner, instruction, measured, true, personality, [], undefined, undefined, "C")
     : new SecretaryConversationEngine(owner, instruction, measured, false, personality, [], undefined,
-      compact ? { instructions: compact.instructions + (variant === "C" && (rehearsal?.waiting ?? true) ? WAITING_DEV_INSTRUCTIONS : ""),
+      compact ? { instructions: compact.instructions + (variant === "C" && (rehearsal?.waiting ?? true) ? WAITING_DEV_INSTRUCTIONS : "") +
+          (rehearsal?.manners ? DEV_C_MANNERS : ""),
         model: profile.model } : undefined);
   if (rehearsal) {
     engine.report.testOnly = true;

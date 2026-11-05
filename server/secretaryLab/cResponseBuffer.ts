@@ -62,6 +62,9 @@ export class CResponseBuffer {
     error: (error: unknown) => { message: string; end: boolean };
     record: (event: string) => void;
     onGeneration?: (controller: AbortController, id: number) => void;
+    bridgeAllowed?: (turns: SpokenTurn[]) => boolean;
+    providerHasText?: (signal: AbortSignal) => boolean;
+    firstTextReason?: string;
   }) {}
   private event(id: number, kind: string, reason: string, from?: number) {
     this.metrics.events.push({ at: new Date().toISOString(), id, kind, reason, phrase: this.phrase?.key, ...(from === undefined ? {} : { from }) });
@@ -132,8 +135,10 @@ export class CResponseBuffer {
     phrase.armed = true;
     this.bridgeTimer = setTimeout(() => {
       const g = this.generation;
-      if (this.closed || this.paused || voicemailTurn(this.latest) || this.phrase !== phrase || phrase.token || phrase.bridged ||
-        !phrase.eligible || !g || g.done || g.controller.signal.aborted || phrase.agents - this.lastBridgeAgent < 3) return;
+      if (this.closed || this.paused || this.deps.bridgeAllowed?.(this.latest) === false ||
+        voicemailTurn(this.latest) || this.phrase !== phrase || phrase.token || phrase.bridged ||
+        !phrase.eligible || !g || this.deps.providerHasText?.(g.controller.signal) || g.done ||
+        g.controller.signal.aborted || phrase.agents - this.lastBridgeAgent < 3) return;
       g.bridge = this.bridge(this.latest); phrase.bridged = true; this.lastBridgeAgent = phrase.agents;
       this.event(this.target!.id, "bridge", g.bridge);
       this.deps.record("c_delayed_bridge");
@@ -220,7 +225,7 @@ export class CResponseBuffer {
     void this.deps.generate(turns, controller.signal, text => {
       if (this.generation !== g || controller.signal.aborted || this.closed) return;
       if (g.text.length + text.length > 16_000) { this.fail(g, Error("C_BUFFER_BOUND")); return; }
-      if (!g.tokenRecorded) { this.event(id, "first_token", "model_text_delta"); g.tokenRecorded = true; }
+      if (!g.tokenRecorded) { this.event(id, "first_token", this.deps.firstTextReason ?? "model_text_delta"); g.tokenRecorded = true; }
       if (this.phrase) this.phrase.token = true;
       g.text += text;
       if (g.firstText && g.bridge) {
