@@ -144,6 +144,15 @@ export const retellPhoneRegistry = new RetellEngineRegistry(undefined, {
     phoneProfile: id => phoneProfiles.get(id) ?? "legacy",
     telephoneTools: resolvedPhoneIvrTools,
     onTranscript: saveTranscript,
+    onNoHuman: async (id, reason) => {
+      // DB identity survives native app restart; never trust an app-supplied SID.
+      const task = await (await import("./tasks")).getSecretaryTaskById(id);
+      if (!task || task.voiceProvider !== "retell" || !task.callSid || !active.includes(task.status as any)) return;
+      await db.update(calls).set({ metadata: sql`coalesce(${calls.metadata}, '{}'::jsonb) ||
+        ${JSON.stringify({ secretaryLineEnd: { reason, at: new Date().toISOString() } })}::jsonb` })
+        .where(and(eq(calls.callSid, task.callSid), eq(calls.userId, task.userId)));
+      await (await import("./dialer")).hangupSecretaryCall(task.callSid);
+    },
     onFailure: id => { void failPhone(id).catch(() => console.error("[Secretary Retell] Failure cleanup could not complete")); },
   });
 async function failPhone(id: string) {

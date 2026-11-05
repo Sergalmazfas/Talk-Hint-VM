@@ -467,6 +467,13 @@ describe("Secretary owner-scoped routes", () => {
     }
     expect(hangupSecretaryCall).not.toHaveBeenCalled();
   });
+  it("End after app/server route reconstruction uses durable owned task SID, not a monitoring session", async () => {
+    const restarted = app();
+    const result = await request(restarted).post("/api/secretary/tasks/task-1/hangup").set("x-test-user-id", "owner-a");
+    expect(result.status).toBe(200);
+    expect(mocks.getSecretaryTaskById).toHaveBeenCalledWith("task-1");
+    expect(hangupSecretaryCall).toHaveBeenCalledExactlyOnceWith("CA0123456789abcdef0123456789abcdef");
+  });
 
   it("does not hand a live task to the retry queue", async () => {
     mocks.retrySecretaryTask.mockResolvedValue(undefined);

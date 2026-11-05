@@ -1,6 +1,6 @@
 import { SECRETARY_CALL_LIMIT_MS } from "./limits";
 import { displaySecretaryInstruction } from "../../shared/callPlan";
-import { voicemailMessageLeft } from "./voicemail";
+import { voicemailMessageLeft, voicemailWasSkipped } from "./voicemail";
 import { deliverSecretaryNotificationOnce } from "./notificationAttempt";
 import { summarizeSecretaryReport } from "./summary";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -153,7 +153,9 @@ export function isSecretaryCallingWindow(date: Date): boolean {
 }
 
 export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport {
-  const messageLeft = task.status === "completed" && voicemailMessageLeft(task.instruction,
+  const skippedVm = task.status === "completed" && voicemailWasSkipped(task.instruction,
+    Array.isArray(task.transcriptTurns) ? task.transcriptTurns as any : []);
+  const messageLeft = task.status === "completed" && task.outcome !== "not_reached" && voicemailMessageLeft(task.instruction,
     Array.isArray(task.transcriptTurns) ? task.transcriptTurns as any : []);
   return {
     id: task.id,
@@ -162,8 +164,8 @@ export function toSecretaryTaskReport(task: SecretaryTask): SecretaryTaskReport 
     phoneNumber: task.phoneNumber,
     instruction: displaySecretaryInstruction(task.instruction, task.phoneNumber),
     status: task.status,
-    outcome: messageLeft ? "message_left" : task.outcome as SecretaryOutcome | null,
-    summary: messageLeft && !task.summary?.startsWith("Оставлено сообщение.")
+    outcome: skippedVm ? "not_reached" : messageLeft ? "message_left" : task.outcome as SecretaryOutcome | null,
+    summary: skippedVm ? "Не дозвонились: автоответчик, voicemail=skip. Это не провал Кати." : messageLeft && !task.summary?.startsWith("Оставлено сообщение.")
       ? `Оставлено сообщение. ${task.summary ?? ""}` : task.summary,
     verifiedFacts: Array.isArray(task.verifiedFacts) ? task.verifiedFacts as string[] : [],
     nextStep: task.nextStep,
@@ -852,10 +854,20 @@ async function settleSecretaryFinalization(taskId: string, callSid: string): Pro
   if (!claimed) return getSecretaryTaskById(taskId);
   // A missing websocket close is settled after the bounded grace period, but
   // incomplete media must never produce a confident success report.
-  const report = claimed.streamEndedAt
+  const [line] = await db.select({ metadata: calls.metadata }).from(calls)
+    .where(and(eq(calls.callSid, callSid), eq(calls.userId, claimed.userId))).limit(1);
+  const lineReason = (line?.metadata as any)?.secretaryLineEnd?.reason;
+  const notReached = ["voicemail_skip", "no_human_20s"].includes(lineReason) ||
+    voicemailWasSkipped(claimed.instruction, Array.isArray(claimed.transcriptTurns) ? claimed.transcriptTurns as any : []);
+  const report = notReached ? {
+    outcome: "not_reached" as const, summary: lineReason === "no_human_20s"
+      ? "Не дозвонились: 20 секунд без живого ответа и прогресса меню."
+      : "Не дозвонились: автоответчик, voicemail=skip. Это не провал Кати.",
+    verifiedFacts: [] as string[], nextStep: "Новый звонок — только по решению владельца.",
+  } : claimed.streamEndedAt
     ? await summarizeSecretaryTranscript(claimed)
     : validateSecretaryReport(null, claimed.transcript ?? "");
-  if (claimed.streamEndedAt && voicemailMessageLeft(claimed.instruction,
+  if (!notReached && claimed.streamEndedAt && voicemailMessageLeft(claimed.instruction,
       Array.isArray(claimed.transcriptTurns) ? claimed.transcriptTurns as any : [])) {
     report.outcome = "message_left";
     report.summary = `Оставлено сообщение. ${report.summary}`;

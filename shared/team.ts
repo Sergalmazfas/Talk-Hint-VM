@@ -22,7 +22,7 @@ export interface TeamMember {
   hats?: { id: string; title: string; status: string; history?: { at: string; text: string }[] }[];
   actionReports?: {
     id: string; at: string; role: string; assigned: string;
-    outcome: "completed" | "partial" | "not_completed" | "message_left";
+    outcome: "completed" | "partial" | "not_completed" | "message_left" | "not_reached";
     succeeded: string[]; failed: string[]; needsOwner: string[]; source: string;
   }[];
 }

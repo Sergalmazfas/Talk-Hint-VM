@@ -764,6 +764,7 @@ function ActionReportCard({ report }: { report: TeamActionReport }) {
     partial: "Частично",
     message_left: "Оставлено сообщение",
     not_completed: "Не выполнено",
+    not_reached: "Не дозвонились",
   };
   return <article className="rounded-xl border border-[#e2e9df] bg-[#fbfcf8] p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1009,6 +1010,7 @@ function ReportActivityRow({ report, member, onSelect }: { report: TeamActionRep
     partial: "Частично",
     message_left: "Оставлено сообщение",
     not_completed: "Не выполнено",
+    not_reached: "Не дозвонились",
   };
   return <li className="relative py-4 pl-7 before:absolute before:left-[7px] before:top-0 before:h-full before:w-px before:bg-[#e4ebe1] first:before:top-5 last:before:h-5">
     <span className="absolute left-0 top-[21px] h-[15px] w-[15px] rounded-full border-[4px] border-[#fafbf7] bg-[#7773a9] ring-1 ring-[#deddee]" />

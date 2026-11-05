@@ -6,7 +6,7 @@ import { validSecretaryOutput } from "./secretaryOutput";
 import { callPlanSchema } from "../../shared/callPlan";
 import { splitCallChecklist, checklistItemKind, type ChecklistItemKind } from "../../shared/callChecklist";
 import { validExpectationChecks, type ExpectationSnapshot } from "./expectations";
-import { voicemailAnnouncement } from "../secretary/voicemail";
+import { voicemailAnnouncement, voicemailWasSkipped } from "../secretary/voicemail";
 import { machineOpening, type openingTiming } from "../secretary/opening";
 
 export const SECRETARY_AGENTS = [
@@ -18,6 +18,7 @@ export type SecretaryEvidence = {
   version: 1; points: string[]; transcript: { speaker: string; text: string }[];
   pointKinds?: ChecklistItemKind[];
   voicemail?: boolean;
+  voicemailSkipped?: boolean;
   openingReviewRequired?: boolean;
   openingTiming?: ReturnType<typeof openingTiming>;
   measurements?: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics>;
@@ -104,6 +105,7 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
     throw Error("SECRETARY_SOURCE_TOO_LARGE");
   return { version: 1, points, pointKinds: rawPoints.map(p => prohibitions.includes(p) ? "prohibition" : checklistItemKind(p)), transcript: turns,
     voicemail: voicemailAnnouncement([...turns].reverse().find(t => t.speaker === "guest")?.text ?? ""),
+    voicemailSkipped: voicemailWasSkipped(goal, turns),
     codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
     preparation: { source, originalItems: items.length, checklistItems: points.length, paragraphExpanded: points.length > items.length,
       proposedChecklist: points, status: "proposed", acceptor: "owner" },
@@ -198,6 +200,7 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
     "prohibition = «запрет»: отдельно от сказать/спросить. Закрыт = не нарушен за весь наблюдаемый звонок. " +
     "Проверь ВСЮ расшифровку, не выдумывай отсутствие внешних действий. При неполных данных — не проверено/closed=false. " +
     "Если нарушения нет: quote пустая, turn=-1, reason/answer объясняет проверку; если есть — точная цитата нарушения. " +
+    "Если evidence.voicemailSkipped=true: исход — «не дозвонились: автоответчик, skip», НЕ провал Кати. Невыполнение разговора с человеком не равно ошибке сотрудника; отдельно проверяй соблюдение skip. " +
     "Начало звонка ОБЯЗАТЕЛЬНО независимо проверить Лёве и Томе: opening={answeredBy:human|recording_ivr|voicemail|silence|unknown, " +
     "firstSpeaker:secretary|guest|unknown,spokeOverRecording:boolean|null,quote,turn,reason}. " +
     "Thank you for calling / press / para español / calls may be recorded = запись, не человек. " +

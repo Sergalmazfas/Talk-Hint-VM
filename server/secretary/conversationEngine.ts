@@ -202,12 +202,18 @@ export class SecretaryConversationEngine {
     this.report.actions.push({ id, name, args, result, status }); this.record("test_action_committed");
     return result;
   }
-  async respond(turns: SpokenTurn[], signal: AbortSignal, emit: (text: string) => void, reminder = false) {
+  get skipsVoicemail() { return this.skipVoicemail; }
+  async respond(turns: SpokenTurn[], signal: AbortSignal, emit: (text: string) => void, reminder = false, voicemailContext = false) {
     let preparedEnd: SecretaryEndRequest | undefined;
     const input: any[] = turns.map(t => ({ role: t.role === "agent" ? "assistant" : "user", content: t.content }));
-    const vm = this.telephone && voicemailTurn(turns);
+    const vm = this.telephone && (voicemailContext || voicemailTurn(turns));
     if (vm) {
       this.record("voicemail_announcement");
+      // Voicemail is NOT an IVR menu. Its skip decision precedes menu/hold locks.
+      if (this.skipVoicemail && !signal.aborted) {
+        this.record("voicemail_skipped");
+        return { reason: "follow_up" as const, farewell: "" };
+      }
       // This is an additional silence grace, NOT evidence of an acoustic beep.
       // A new Retell turn aborts this wait through the existing response signal.
       try { await pause(1200, undefined, { signal }); } catch { return; }
@@ -215,7 +221,7 @@ export class SecretaryConversationEngine {
       input.push({ role: "developer", content: this.voicemailInstructions });
       this.record("voicemail_silence_gate_passed");
     }
-    if (this.telephoneTools) {
+    if (this.telephoneTools && !vm) {
       const state = await this.telephoneTools.beforeTurn(turns);
       if (signal.aborted) return;
       if (await this.telephoneTools.navigate?.(signal)) return;
@@ -229,10 +235,6 @@ export class SecretaryConversationEngine {
     if (openingToolOnly) input.push({ role: "developer", content:
       "Still in recorded IVR: silently select the existing permitted IVR tool only. No introduction, filler or speech. Do not end the call." });
     if (this.telephone) input.push({ role: "developer", content: PHONE_OPENING_POLICY });
-    if (vm && this.skipVoicemail && !this.telephoneTools?.blocksEnd() && !signal.aborted) {
-      this.record("voicemail_skipped");
-      return { reason: "follow_up" as const, farewell: "" };
-    }
     if (!this.telephone)
       input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
     if (reminder) input.push({ role: "developer", content: "Briefly check if the caller is still there; do not invent a request or end for silence." });
@@ -259,9 +261,14 @@ export class SecretaryConversationEngine {
       }
       if (signal.aborted) return;
       if (!completion) throw new Error("Engine stream did not complete");
+      if (vm && spoken.trim() && completion.tools.length) {
+        // A spoken voicemail is the single message, never a preamble to another.
+        return { reason: "follow_up" as const, farewell: spoken.trim() };
+      }
       if (!completion.tools.length) {
         // Never attach end_call to a different/unfinished response.
         if (preparedEnd && spoken.trim() === preparedEnd.farewell) return preparedEnd;
+        if (vm && spoken.trim()) return { reason: "follow_up" as const, farewell: spoken.trim() };
         return;
       }
       input.push(...completion.output);
@@ -270,7 +277,7 @@ export class SecretaryConversationEngine {
         let result: any;
         try {
           if (this.telephone && tool.name === "prepare_call_end") {
-            if (this.telephoneTools?.blocksEnd()) throw Error("Cannot end during IVR/owner wait");
+            if (!vm && this.telephoneTools?.blocksEnd()) throw Error("Cannot end during IVR/owner wait");
             const value = parseSecretaryEndRequest(JSON.parse(tool.arguments), vm);
             if (!value) throw Error("Invalid farewell");
             preparedEnd = value;

@@ -13,6 +13,7 @@ import type { SpeedVariant } from "./speedExperiment";
 import { CResponseBuffer } from "./cResponseBuffer";
 import { phoneSpeechTiming } from "../secretary/phoneMetrics";
 import { voicemailTurn } from "../secretary/voicemail";
+import { PhoneLineGuard, type NoHumanReason } from "../secretary/phoneLineGuard";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -65,6 +66,9 @@ type Entry = {
   pending?: number;
   commandCompleted?: number; interruptSequence?: number;
   buffer?: CResponseBuffer;
+  lineGuard?: PhoneLineGuard;
+  voicemailMessageSent?: boolean;
+  noHumanEnded?: boolean;
 };
 /** Per-session high-entropy capability, not an owner bearer token or permanent Retell key.
  * Retell's Custom LLM socket has no signature/auth header. Never log these URL paths. */
@@ -77,6 +81,7 @@ export class RetellEngineRegistry {
     phone?: boolean;
     onTranscript?: (id: string, turns: SpokenTurn[]) => Promise<void>;
     onFailure?: (id: string) => void;
+    onNoHuman?: (id: string, reason: NoHumanReason) => Promise<void>;
     telephoneTools?: (id: string) => TelephoneTools;
     createEngine?: (owner: string, instruction: string, id: string, personality?: PersonalityBinding) => SecretaryConversationEngine;
     bufferResponses?: (id: string) => boolean;
@@ -113,7 +118,7 @@ export class RetellEngineRegistry {
       playback: (report as any).playback ?? [] });
   }
   /** Native Retell DTMF on the EXISTING SIP bridge; never redirect Twilio or restart media. */
-  pressDigits(id: string, digits: string, signal?: AbortSignal) {
+  pressDigits(id: string, digits: string, signal?: AbortSignal, menuHash?: string) {
     const entry = this.entries.get(id), ws = entry?.socket;
     if (!this.options.phone || !entry || entry.closed || !ws || ws.readyState !== 1 ||
       signal?.aborted || (entry.buffer && !entry.buffer.permitsTools()) ||
@@ -129,10 +134,11 @@ export class RetellEngineRegistry {
       ws.send(JSON.stringify({ response_type: "agent_interrupt", interrupt_id: entry.interruptSequence,
         content: "", content_complete: true, digit_to_press: digits }));
     }
+    if (menuHash) entry.lineGuard?.progress(menuHash); // Same menu/ASR or repeat digit is not progress.
   }
   ended(id: string) {
     const entry = this.entries.get(id); if (!entry) return;
-    entry.closed = true; entry.buffer?.close(); entry.abort?.abort(); entry.engine.report.connected = false;
+    entry.closed = true; entry.lineGuard?.close(); entry.buffer?.close(); entry.abort?.abort(); entry.engine.report.connected = false;
     entry.socket?.close(1000, "Test ended"); this.entries.delete(id); this.tickets.delete(entry.ticket);
     this.pendingWrites.delete(id);
   }
@@ -206,7 +212,7 @@ export class RetellEngineRegistry {
       entry.epoch++; entry.abort?.abort(); entry.engine.record("response_cancelled");
     };
     let labLimitEnded = false;
-    const buffered = (this.options.phone ? entry.engine.report.phoneRuntime?.variant === "C" :
+    let buffered = (this.options.phone ? entry.engine.report.phoneRuntime?.variant === "C" :
       process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id))
       ? new CResponseBuffer({
         generate: (turns, signal, emit, reminder) => entry.engine.respond(turns, signal, emit, reminder),
@@ -229,9 +235,16 @@ export class RetellEngineRegistry {
     entry.buffer = buffered;
     if (buffered) (entry.engine.report as any).cInterruption = buffered.metrics;
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
+      if (entry.noHumanEnded) return;
+      const vm = this.options.phone && (voicemailTurn(turns) || entry.lineGuard?.voicemail);
+      if (vm && buffered) { buffered.close(); buffered = undefined; entry.buffer = undefined; }
+      if (vm && entry.voicemailMessageSent) {
+        send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
+        return;
+      }
       // Silent opening/IVR must never acquire the C buffer's filler timer.
       const openingSilent = this.options.phone && !entry.engine.opening.permit(turns) && !voicemailTurn(turns);
-      if (buffered && !openingSilent) { entry.pending = id; buffered.request(id, turns, reminder); return; }
+      if (buffered && !openingSilent && !vm) { entry.pending = id; buffered.request(id, turns, reminder); return; }
       if (labLimitEnded) {
         send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
         return;
@@ -255,7 +268,7 @@ export class RetellEngineRegistry {
       entry.engine.record("response_started");
       void entry.engine.respond(turns, controller.signal, text => {
         if (current() && !controller.signal.aborted) send({ response_type: "response", response_id: id, content: text, content_complete: false });
-      }, reminder).then(end => {
+      }, reminder, !!vm).then(end => {
         endCall = !!(this.options.phone && end && current() && !controller.signal.aborted);
       }).catch((error: unknown) => {
         if (current() && !controller.signal.aborted) {
@@ -272,6 +285,10 @@ export class RetellEngineRegistry {
         }
       }).finally(() => {
         clearTimeout(timeout);
+        if (current() && endCall && vm) {
+          entry.voicemailMessageSent = true;
+          if (!entry.engine.skipsVoicemail) entry.lineGuard?.close();
+        }
         // Interrupted/old responses never resume; a timeout still closes the CURRENT response.
         if (current()) { entry.pending = undefined; if (entry.commandCompleted !== id) send({ response_type: "response", response_id: id, content: "", content_complete: true,
           ...(endCall ? { end_call: true } : {}) }); entry.engine.record("response_complete"); }
@@ -293,6 +310,18 @@ export class RetellEngineRegistry {
         if (!entry.introduced) {
           entry.introduced = true;
           if (this.options.phone) {
+            entry.lineGuard ??= new PhoneLineGuard(entry.engine.skipsVoicemail, reason => {
+              if (entry.closed || entry.noHumanEnded) return;
+              entry.noHumanEnded = true;
+              buffered?.close(); abort();
+              entry.engine.record(reason);
+              send({ response_type: "agent_interrupt", interrupt_id: (entry.interruptSequence = (entry.interruptSequence ?? 0) + 1),
+                content: "", content_complete: true, end_call: true });
+              // Durable task/SID lookup on the server also ends the actual PSTN leg.
+              void this.flush(entry.id).then(() => this.options.onNoHuman?.(entry.id, reason)).catch(() => {
+                entry.engine.record("no_human_hangup_failed");
+              });
+            });
             entry.engine.record("opening_listening");
             openingTimer = setTimeout(() => {
               openingTimer = undefined;
@@ -307,7 +336,18 @@ export class RetellEngineRegistry {
         return;
       }
       if (frame.interaction_type === "update_only") {
+        if (!Array.isArray(frame.transcript) || frame.transcript.length > 300 ||
+            frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
+              typeof t.content !== "string" || t.content.length > 4000)) { ws.close(1008, "Invalid transcript"); return; }
         heardOpening(frame.transcript);
+        if (this.options.phone && Array.isArray(frame.transcript)) {
+          const turns = frame.transcript.filter((t: any) => ["agent", "user"].includes(t?.role) && typeof t.content === "string");
+          const last = [...turns].reverse().find((t: any) => t.role === "user");
+          if (last) entry.lineGuard?.observe(last.content, entry.engine.opening.permit(turns));
+          if (entry.lineGuard?.voicemail && buffered) {
+            buffered.close(); buffered = undefined; entry.buffer = undefined; abort();
+          }
+        }
         if (buffered) {
           if (!Array.isArray(frame.transcript) || frame.transcript.length > 300 ||
             frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
@@ -325,6 +365,10 @@ export class RetellEngineRegistry {
         ws.close(1008, "Invalid response request"); return;
       }
       heardOpening(frame.transcript);
+      if (this.options.phone) {
+        const last = [...frame.transcript].reverse().find((t: any) => t.role === "user");
+        if (last) entry.lineGuard?.observe(last.content, entry.engine.opening.permit(frame.transcript), true);
+      }
       reply(frame.response_id, frame.transcript.map((t: any) => ({ role: t.role, content: t.content })), frame.interaction_type === "reminder_required");
       transcript(frame);
     });

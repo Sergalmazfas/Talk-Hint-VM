@@ -3687,3 +3687,17 @@ mtime_ms = 1793832979412
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f06fe3ae-a33f-437c-ae83-b6a310602bc2/2a924f04-168a-4fde-8957-42083cc38675"
 storage_version_token = "1793832985725911"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "ZDllqSBPx4Y76QKsT5S96"
+uri = "file://generated-artifacts/RD_voicemail_Clavdiy_Dev.zip"
+type = "unspecified"
+title = "R&D Truck — автоответчик и завершение вызова"
+description = "Диагностика, Dev-diff, тесты четырьмя шардами, проверка серверного End call и proposed-уроки. Без новых звонков и Publish."
+logical_id = "1daa8f11-8abc-4545-9036-039f12259cb1"
+content_hash = "sha256:ec17362a1ac4d167b8d3ba9509ef3ba9572ed1e6397e7e7b4fb3fa7f532c1e07"
+size = 107657
+mtime_ms = 1793838769536
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1daa8f11-8abc-4545-9036-039f12259cb1/605fe774-bd3b-4087-991b-dff5b369ec50"
+storage_version_token = "1793838781332470"
+content_type = "application/octet-stream"

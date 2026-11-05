@@ -61,7 +61,7 @@ async function context(id: string) {
         send: async (digits, signal) => {
           await activeTask(id);
           if (signal?.aborted) throw Error("Interrupted");
-          (await import("./retellPhone")).retellPhoneRegistry.pressDigits(id, digits, signal);
+          (await import("./retellPhone")).retellPhoneRegistry.pressDigits(id, digits, signal, controller.status().menuHash);
         },
         record: event => record(id, event),
         notify: async menu => {

@@ -28,20 +28,19 @@ describe("Voicemail owner decisions, evidence and reporting",()=>{
     expect(voicemailAnnouncement("")).toBe(false);
     expect(voicemailAnnouncement(announcement)).toBe(true);
   });
-  it("skip is silent, waits for the gate, never calls a model",async()=>{
+  it("skip is silent and immediate, without a silence/IVR gate or model",async()=>{
     vi.useFakeTimers();
     const stream=vi.fn(async function*(){yield{type:"complete" as const,output:[],tools:[]};});
     const engine=new SecretaryConversationEngine("fixture",instruction("skip"),stream,true);
     const emit=vi.fn();let ended=false;
     const pending=engine.respond([{role:"user",content:announcement}],new AbortController().signal,emit).then(v=>{ended=true;return v;});
-    await vi.advanceTimersByTimeAsync(1199);expect(ended).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
     expect(await pending).toEqual({reason:"follow_up",farewell:""});
+    expect(ended).toBe(true);
     expect(stream).not.toHaveBeenCalled();expect(emit).not.toHaveBeenCalled();
   });
   it("interruption aborts the voicemail gate without speech or end",async()=>{
     vi.useFakeTimers();const controller=new AbortController(),stream=vi.fn(async function*(){});
-    const engine=new SecretaryConversationEngine("fixture",instruction("skip"),stream,true),emit=vi.fn();
+    const engine=new SecretaryConversationEngine("fixture",instruction("leave"),stream,true),emit=vi.fn();
     const pending=engine.respond([{role:"user",content:announcement}],controller.signal,emit);
     controller.abort();expect(await pending).toBeUndefined();expect(emit).not.toHaveBeenCalled();
   });
