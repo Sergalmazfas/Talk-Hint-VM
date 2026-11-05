@@ -18,6 +18,7 @@ import { DevWaitingPolicy, WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX } from ".
 import { waitingAudit } from "./waitingAudit";
 import { rehearsalBindings } from "./rehearsalBinding";
 import { devColleagueSpeech, devQuestion, devProviderHasText } from "../rehearsal/manners";
+import type { PhoneConversationVersion } from "../secretary/phoneRollout";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -72,6 +73,7 @@ type Entry = {
   pending?: number;
   commandCompleted?: number; interruptSequence?: number;
   buffer?: CResponseBuffer;
+  phoneConversationVersion?: PhoneConversationVersion;
   lineGuard?: PhoneLineGuard;
   phoneGreetingSent?: boolean;
   voicemailMessageSent?: boolean;
@@ -100,6 +102,7 @@ export class RetellEngineRegistry {
     createEngine?: (owner: string, instruction: string, id: string, personality?: PersonalityBinding) => SecretaryConversationEngine;
     bufferResponses?: (id: string) => boolean;
     phoneProfile?: (id: string) => "C" | "legacy";
+    phoneConversationVersion?: (id: string) => PhoneConversationVersion;
     waitingRules?: (id: string) => boolean;
   } = {}) {}
   reserve(owner: string, instruction: string, id: string, personality?: PersonalityBinding, facts: OutgoingContext["cards"] = []) {
@@ -112,6 +115,11 @@ export class RetellEngineRegistry {
     const entry: Entry = { id, ticket, engine,
       responseId: -1, epoch: 0, handled: new Set(), introduced: false, closed: false,
       expiresAt: Date.now() + (this.options.phone ? SECRETARY_CALL_LIMIT_MS : 300_000) };
+    if (this.options.phone && engine.report.phoneRuntime?.variant === "C") {
+      // Freeze at admission: rollback affects the NEXT call, never an active one.
+      entry.phoneConversationVersion = this.options.phoneConversationVersion?.(id) ?? "C-reserve";
+      engine.configurePhoneConversation(entry.phoneConversationVersion);
+    }
     if (!this.options.phone && process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" &&
       this.options.waitingRules?.(id)) {
       entry.waiting = new DevWaitingPolicy(Date.now, rehearsalBindings.get(id)?.manners ? { colleague: devColleagueSpeech } : undefined);
@@ -253,10 +261,12 @@ export class RetellEngineRegistry {
     let buffered = (this.options.phone ? entry.engine.report.phoneRuntime?.variant === "C" :
       process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" && this.options.bufferResponses?.(entry.id))
       ? new CResponseBuffer({
-        advanceCompletedTurn: !this.options.phone && process.env.NODE_ENV === "development" &&
-          process.env.REPLIT_DEPLOYMENT !== "1" && rehearsalBindings.get(entry.id)?.advanceCompletedTurn === true,
-        retellStreaming: !this.options.phone && process.env.NODE_ENV === "development" &&
-          process.env.REPLIT_DEPLOYMENT !== "1" && rehearsalBindings.get(entry.id)?.retellStreaming === true,
+        advanceCompletedTurn: this.options.phone ? entry.phoneConversationVersion === "streaming-v1" :
+          process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" &&
+          rehearsalBindings.get(entry.id)?.advanceCompletedTurn === true,
+        retellStreaming: this.options.phone ? entry.phoneConversationVersion === "streaming-v1" :
+          process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1" &&
+          rehearsalBindings.get(entry.id)?.retellStreaming === true,
         ...(!this.options.phone && rehearsalBindings.get(entry.id)?.manners ? {
           bridgeAllowed: (turns: SpokenTurn[]) => !devQuestion(turns),
           providerHasText: devProviderHasText, firstTextReason: "dev_streaming_text_delta",

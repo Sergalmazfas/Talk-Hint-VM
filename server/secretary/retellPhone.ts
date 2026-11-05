@@ -14,7 +14,7 @@ import { resolveOutgoingPersonality } from "./personalities/store";
 import { validateOutgoingSnapshot } from "./personalities/outgoing";
 import { resolvedPhoneIvrTools, endPhoneIvr, observePhoneIvr } from "./ivrPhone";
 import { mergeIvrTranscript } from "./ivrSelection";
-import { selectedPhoneVariant, type PhoneVariant } from "./phoneRollout";
+import { selectedPhoneVariant, selectedPhoneConfiguration, type PhoneVariant, type PhoneConversationVersion } from "./phoneRollout";
 
 export const RETELL_PHONE_AGENT = "TalkHint Secretary — Telephone + Engine";
 export const retellPhoneApi = new RetellApi();
@@ -25,6 +25,7 @@ const writes = new Map<string, Promise<void>>();
 const verified = new Map<string, { id: string; version: number; until: number }>();
 const preparing = new Map<string, Promise<string>>();
 const phoneProfiles = new Map<string, PhoneVariant>();
+const phoneConversationVersions = new Map<string, PhoneConversationVersion>();
 const configKey = (origin: string, variant: PhoneVariant) => origin + "|" + variant;
 
 /** Isolated phone agent, never the browser bench agent or a number-level route. */
@@ -142,6 +143,7 @@ async function saveTranscript(taskId: string, turns: SpokenTurn[]) {
 export const retellPhoneRegistry = new RetellEngineRegistry(undefined, {
     phone: true,
     phoneProfile: id => phoneProfiles.get(id) ?? "legacy",
+    phoneConversationVersion: id => phoneConversationVersions.get(id) ?? "C-reserve",
     telephoneTools: resolvedPhoneIvrTools,
     onTranscript: saveTranscript,
     onNoHuman: async (id, reason) => {
@@ -180,7 +182,7 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
     if (!task || task.voiceProvider !== "retell") throw new Error("Retell call identity mismatch");
     const existing = registered.get(taskId);
     if (existing) return existing.sip;
-    const variant = await selectedPhoneVariant();
+    const { variant, conversationVersion } = await selectedPhoneConfiguration();
     const agentId = await requireRetellPhone(origin, variant);
     const reservation = { state: "registering", taskId };
     const reserved = await db.update(calls).set({
@@ -196,6 +198,7 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
     const personality = context ? context.personality ?? undefined :
       await resolveOutgoingPersonality(task.userId, history?.fromNumber ?? "");
     phoneProfiles.set(taskId, variant);
+    phoneConversationVersions.set(taskId, conversationVersion);
     const entry = retellPhoneRegistry.reserve(task.userId, task.instruction, taskId, personality, context?.cards);
     try {
       const call = await retellPhoneApi.request("/v2/register-phone-call", {
@@ -211,6 +214,7 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
           retellPhone: { state: "registered", taskId, callId: call.call_id, agentId,
             model: variant === "C" ? "gpt-6-sol" : "gpt-6.1-sol", voice: "retell-Merritt", variant,
             reasoning: variant === "C" ? "low" : "medium",
+            conversationVersion: variant === "C" ? conversationVersion : "legacy",
             engine: retellPhoneRegistry.diagnostics(taskId),
             environment: process.env.NODE_ENV === "development" ? "development" : "production",
             personality: personality ? { id: personality.personalityId, version: personality.version, mode: personality.mode } : null },
@@ -220,7 +224,9 @@ export function registerRetellPhone(taskId: string, callSid: string, origin: str
       const sip = `sip:${call.call_id}@sip.retellai.com;transport=tls`;
       registered.set(taskId, { callId: call.call_id, callSid, sip });
       return sip;
-    } catch (error) { retellPhoneRegistry.ended(taskId); phoneProfiles.delete(taskId); throw error; }
+    } catch (error) {
+      retellPhoneRegistry.ended(taskId); phoneProfiles.delete(taskId); phoneConversationVersions.delete(taskId); throw error;
+    }
   })();
   admissions.set(taskId, work);
   return work;
@@ -236,6 +242,7 @@ export async function endRetellPhone(taskId: string) {
   } finally {
     retellPhoneRegistry.ended(taskId);
     admissions.delete(taskId); registered.delete(taskId); writes.delete(taskId); phoneProfiles.delete(taskId);
+    phoneConversationVersions.delete(taskId);
     endPhoneIvr(taskId);
   }
 }

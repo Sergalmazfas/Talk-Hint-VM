@@ -111,6 +111,43 @@ async function page(initial = payload()) {
   };
 }
 describe("AI Crew owner pilot buttons — shipped script interactions", () => {
+  it("exact reserve C rollback keeps C model, fresh CSRF/revision, one POST and readback", async () => {
+    const p = await page(), fresh = payload();
+    fresh.state.revision = 92; fresh.csrf = "b".repeat(64);
+    p.setAnswer(async (_path, method, body) => {
+      if (method !== "POST") return { ok: true, data: structuredClone(fresh) };
+      expect(body).toEqual({ variant: "C", conversationVersion: "C-reserve", revision: 92 });
+      fresh.state.secretaryPhoneRollout = { variant: "C", conversationVersion: "C-reserve",
+        changedAt: "now", changedBy: "owner", reviews: [] };
+      fresh.state.revision++; return { ok: true, data: { state: fresh.state } };
+    });
+    await p.click("phoneReserve");
+    const posts = p.calls.filter(c => c.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0].headers["x-crew-csrf"]).toBe("b".repeat(64));
+    expect(p.calls.at(-1)?.method).toBe("GET");
+    expect(p.el("phoneVariantState").textContent).toContain("C-reserve");
+    expect(p.el("phoneReserve").disabled).toBe(true);
+  });
+  it("does not send reserve rollback when owner declines confirmation", async () => {
+    const p = await page(); p.setConfirm(false);
+    await p.click("phoneReserve");
+    expect(p.calls.filter(c => c.method === "POST")).toHaveLength(0);
+  });
+  it("a reserve-version readback mismatch is shown and never retried", async () => {
+    const p = await page(), fresh = payload();
+    p.setAnswer(async (_path, method) => {
+      if (method === "POST") {
+        fresh.state.secretaryPhoneRollout = { variant: "C", conversationVersion: "streaming-v1",
+          changedAt: "now", changedBy: "owner", reviews: [] };
+        fresh.state.revision++;
+      }
+      return { ok: true, data: structuredClone(fresh) };
+    });
+    await p.click("phoneReserve");
+    expect(p.calls.filter(c => c.method === "POST")).toHaveLength(1);
+    expect(p.el("message").textContent).toContain("PHONE_VARIANT_READBACK_MISMATCH_STOP");
+  });
   it("phone rollback is one action, reads fresh CSRF/revision, POSTs once then rereads", async () => {
     const p = await page(), fresh = payload();
     fresh.state.revision = 91; fresh.csrf = "b".repeat(64);

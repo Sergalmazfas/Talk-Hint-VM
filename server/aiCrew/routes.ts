@@ -21,7 +21,7 @@ import { productionProductRepository } from "../productCrew/production";
 import { TEAM_OWNER } from "../team/plan";
 import { auditStructure } from "./structureAudit";
 import { commandFailure } from "./commandError";
-import { bindPhoneRollout, changePhoneVariant, phoneRolloutInput } from "../secretary/phoneRollout";
+import { bindPhoneRollout, changePhoneVariant, phoneRolloutInput, rolloutState } from "../secretary/phoneRollout";
 
 const environment = () => process.env.NODE_ENV === "production" ? "production" : "development";
 export function registerCrewRoutes(app: Express) {
@@ -39,6 +39,13 @@ export function registerCrewRoutes(app: Express) {
   const readCompany = () => company.read(TEAM_OWNER, "new-country");
   bindSecretaryAutomation({ store, model: readCompany, environment: environment() });
   bindPhoneRollout(store);
+  // Read-only deployment evidence. No agent/model/Retell call and no initialization.
+  void store().read().then(state => {
+    const phone = rolloutState(state);
+    console.info("[Secretary phone release]", {
+      phone: { variant: phone.variant, conversationVersion: phone.conversationVersion }, codeVersion: codeVersion(),
+    });
+  }).catch(() => console.info("[Secretary phone release] controls unavailable; previous Katya fallback remains active"));
   registerTestMcp(app, { environment: environment(), store, secret: () => process.env.CREW_TEST_KEY,
     evidence: () => readHintEvidence(pool!, TEAM_OWNER),
     models: async () => (await provider.listModels()).map(m => m.id), model: readCompany });
@@ -79,7 +86,8 @@ export function registerCrewRoutes(app: Express) {
       try { state = await store().read(); }
       catch { state = initialState(); initialized = false; }
       res.json({ initialized, environment: environment(), state, stale: staleTasks(state, Date.now()),
-        codeVersion: codeVersion(), keyConfigured: !!process.env.ANTHROPIC_API_KEY, csrf: token,
+        codeVersion: codeVersion(), phoneConversation: rolloutState(state),
+        keyConfigured: !!process.env.ANTHROPIC_API_KEY, csrf: token,
         notice: "Disabled and zero budget by default. Model recommendations in employee profiles are not activation." });
     } catch { res.status(503).json({ error: "CREW_STATUS_UNAVAILABLE" }); }
   });
@@ -96,7 +104,8 @@ export function registerCrewRoutes(app: Express) {
     try {
       await store().change(s => changePhoneVariant(s, parsed.data, String(req.user!.id)), parsed.data.revision);
       const state = await store().read();
-      if (state.secretaryPhoneRollout?.variant !== parsed.data.variant)
+      if (state.secretaryPhoneRollout?.variant !== parsed.data.variant ||
+        parsed.data.conversationVersion && rolloutState(state).conversationVersion !== parsed.data.conversationVersion)
         return res.status(409).json({ error: "PHONE_VARIANT_READBACK_MISMATCH_STOP" });
       res.json({ state, nextCallsOnly: true });
     } catch (error) {

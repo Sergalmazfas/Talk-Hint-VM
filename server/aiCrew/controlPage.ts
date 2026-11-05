@@ -37,7 +37,10 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
  <p class="hint">C: gpt-6-sol, low, 300 токенов, буфер ответов. Прежняя Катя: gpt-6.1-sol, medium.
  Голос Merritt, языки, приветствие, план и IVR сохраняются. Текущий звонок не переключается.
  Первые 5 завершённых звонков C: разбор Лёвы и независимая проверка Томы в рамках включённого отдела и его лимитов.</p>
- <div class="bar"><button id="phoneC">Включить C</button><button id="phoneLegacy">Вернуть прежнюю Катю</button></div></article>
+ <p class="hint">Улучшенная C: проверенный на репетиции streaming и короткие ответы.
+ Резервная C: та же модель, голос и настройки Retell, прежние механизмы разговора.
+ Боевой лимит — прежние 10 минут; 180 секунд относятся только к репетиции.</p>
+ <div class="bar"><button id="phoneC">Улучшенная C</button><button id="phoneReserve">Вернуть резервную C</button><button id="phoneLegacy">Вернуть прежнюю Катю</button></div></article>
 <section class="grid">
 <article class="panel span12"><h2>Секретарь · автоматический разбор</h2>
 <p class="hint">По умолчанию OFF. Только новые звонки владельца: Лёва (Sonnet 5.5) → Тома (Opus 5.5) → Сева (Sonnet 5.5) → Мария и одно письмо владельцу. Только предложения; Катя и её настройки не меняются. Месячный расход и unknown-резервы сохраняются при перезапуске.</p>
@@ -80,10 +83,13 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:12px/1.5 ui-monosp
     $("crewStructureDetails").open=false;
   }
   function render(data){
-    var phone=data.state.secretaryPhoneRollout||{variant:"C",reviews:[]};
-    $("phoneVariantState").textContent="Следующие звонки: "+(phone.variant==="C"?"C":"прежняя Катя")+
+    var phone=data.phoneConversation||data.state.secretaryPhoneRollout||{variant:"C",reviews:[]};
+    var conversation=phone.conversationVersion||"streaming-v1";
+    $("phoneVariantState").textContent="Следующие звонки: "+(phone.variant==="C"?
+      (conversation==="streaming-v1"?"Улучшенная C · streaming-v1":"Резервная C · C-reserve"):"прежняя Катя")+
       ". Разбор первых пяти: "+phone.reviews.filter(function(r){return r.reported}).length+"/5.";
-    $("phoneC").disabled=!data.initialized||phone.variant==="C";
+    $("phoneC").disabled=!data.initialized||phone.variant==="C"&&conversation==="streaming-v1";
+    $("phoneReserve").disabled=!data.initialized||phone.variant==="C"&&conversation==="C-reserve";
     $("phoneLegacy").disabled=!data.initialized||phone.variant==="legacy";
     payload=data; csrf=typeof data.csrf==="string"?data.csrf:"";
     var state=data.state||{}, control=state.control||{};
@@ -269,21 +275,28 @@ async function post(path,body,success){if(busy)return;busy=true;setMessage("Ож
     }catch(e){if(attempted)pilotBlocked=true;setMessage("СТОП. "+e.message+". Запись не повторялась.","error")}
     finally{secretaryBusy=false}
   }
-  async function phoneVariant(variant){
-    if(busy)return; busy=true;$("phoneC").disabled=true;$("phoneLegacy").disabled=true;
+  async function phoneVariant(variant,conversationVersion){
+    if(busy)return;
+    if(!window.confirm("Вы уверены? Изменить версию Кати только для следующих звонков?"))return;
+    busy=true;$("phoneC").disabled=true;$("phoneReserve").disabled=true;$("phoneLegacy").disabled=true;
     try{
       var fresh=await request("",{method:"GET"});
       if(!fresh.initialized)throw Error("CREW_NOT_INITIALIZED");
       csrf=fresh.csrf;
-      await request("/secretary-phone-variant",{method:"POST",body:JSON.stringify({variant:variant,revision:fresh.state.revision})});
+      var command={variant:variant,revision:fresh.state.revision};
+      if(conversationVersion)command.conversationVersion=conversationVersion;
+      await request("/secretary-phone-variant",{method:"POST",body:JSON.stringify(command)});
       var after=await request("",{method:"GET"});
       if(!after.state.secretaryPhoneRollout||after.state.secretaryPhoneRollout.variant!==variant||
+         conversationVersion&&after.state.secretaryPhoneRollout.conversationVersion!==conversationVersion||
          after.state.revision<=fresh.state.revision)throw Error("PHONE_VARIANT_READBACK_MISMATCH_STOP");
-      render(after);setMessage("Сохранено и перечитано: "+(variant==="C"?"C":"прежняя Катя")+". Только следующие звонки.","good");
+      render(after);setMessage("Сохранено и перечитано: "+(variant==="C"?
+        (conversationVersion==="C-reserve"?"резервная C":"улучшенная C"):"прежняя Катя")+". Только следующие звонки.","good");
     }catch(e){setMessage(e.message+". Не повторяем команду автоматически; обновите состояние.","error")}
     finally{busy=false}
   }
-  $("phoneC").addEventListener("click",function(){phoneVariant("C")});
+  $("phoneC").addEventListener("click",function(){phoneVariant("C","streaming-v1")});
+  $("phoneReserve").addEventListener("click",function(){phoneVariant("C","C-reserve")});
   $("phoneLegacy").addEventListener("click",function(){phoneVariant("legacy")});
   $("secretaryEnable").addEventListener("click",function(){secretaryControl(true)});
   $("secretaryDisable").addEventListener("click",function(){secretaryControl(false)});

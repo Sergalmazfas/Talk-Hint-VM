@@ -15,6 +15,7 @@ import { selectPhonePrompt } from "./phonePrompt";
 import { SECRETARY_CHECKLIST_POLICY, splitCallChecklist } from "../../shared/callChecklist";
 import { voicemailTurn, voicemailPolicy, voicemailChoice } from "./voicemail";
 import { setTimeout as pause } from "node:timers/promises";
+import { withPhoneCNoLoop } from "./cNoLoop";
 
 export type SpokenTurn = { role: "agent" | "user"; content: string };
 export type EngineChunk = { type: "text"; text: string } |
@@ -96,10 +97,16 @@ export class SecretaryConversationEngine {
     context: SECRETARY_TEST_CONTEXT as Record<string, unknown>, actions: [] as TestAction[],
     events: [] as Array<{ type: string; at: string }>, connected: false,
     usage: { requests: 0, measuredRequests: 0, input: 0, cachedInput: 0, output: 0 } as LabTokenUsage,
-    phoneRuntime: null as null | { variant: "C" | "legacy"; promptMode: "compact" | "full";
+    phoneRuntime: null as null | { variant: "C" | "legacy"; conversationVersion?: import("./phoneRollout").PhoneConversationVersion; promptMode: "compact" | "full";
       fallbackReason: string | null; promptHash: string; promptChars: number; reasoning: string; maxOutput: number },
   };
   readonly instructions: string;
+  configurePhoneConversation(version: import("./phoneRollout").PhoneConversationVersion) {
+    const runtime = this.report.phoneRuntime;
+    if (runtime?.variant !== "C" || runtime.conversationVersion) throw Error("PHONE_CONVERSATION_ALREADY_FIXED_OR_NOT_C");
+    runtime.conversationVersion = version;
+    if (version === "streaming-v1") this.stream = withPhoneCNoLoop(this.stream);
+  }
   private ledger = new Map<string, any>();
   private voicemailInstructions = "";
   private skipVoicemail = false;

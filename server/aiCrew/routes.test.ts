@@ -53,6 +53,24 @@ afterEach(async()=>{vi.unstubAllEnvs();await new Promise<void>(r=>server.close((
 async function csrf(){return (await(await fetch(base+"/api/admin/ai-crew",{headers})).json()).csrf}
 const post=(path:string,body:any,token="")=>fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{...headers,"x-crew-csrf":token},body:JSON.stringify(body)});
 describe("AI Crew owner boundary",()=>{
+ it("publishes the effective engine version and rolls back to EXACT C without changing model controls",async()=>{
+  const initial=await(await fetch(base+"/api/admin/ai-crew",{headers})).json();
+  expect(initial.phoneConversation).toMatchObject({variant:"C",conversationVersion:"streaming-v1"});
+  const before=structuredClone(f.state);
+  const body={variant:"C",conversationVersion:"C-reserve",revision:0};
+  expect((await post("/secretary-phone-variant",body)).status).toBe(403);
+  const token=await csrf();
+  const changed=await post("/secretary-phone-variant",body,token);
+  expect(changed.status).toBe(200);
+  expect((await changed.json()).state.secretaryPhoneRollout).toMatchObject({variant:"C",conversationVersion:"C-reserve"});
+  const after=await(await fetch(base+"/api/admin/ai-crew",{headers})).json();
+  expect(after.phoneConversation).toMatchObject({variant:"C",conversationVersion:"C-reserve"});
+  expect(f.state.control).toEqual(before.control);
+  expect(f.state.agents).toEqual(before.agents);
+  expect(f.state.tasks).toEqual(before.tasks);
+  expect(f.message).not.toHaveBeenCalled();
+  expect((await post("/secretary-phone-variant",{variant:"C",conversationVersion:"streaming-v1",revision:0},token)).status).toBe(409);
+ });
  it("phone rollback requires owner/Origin/CSRF and fresh revision; readback preserves OFF and budgets",async()=>{
   const path="/secretary-phone-variant", body={variant:"legacy",revision:0};
   expect((await fetch(base+"/api/admin/ai-crew"+path,{method:"POST",headers:{"Content-Type":"application/json"},

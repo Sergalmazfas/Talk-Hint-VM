@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { PHONE_C_NO_LOOP_POLICY } from "./cNoLoop";
+import { C_NO_LOOP_POLICY } from "../rehearsal/cNoLoop";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const f = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("openai", () => ({ default: class { responses = { create: f.create }; } }));
@@ -24,6 +26,30 @@ afterEach(() => { registries.splice(0).forEach(r => r.dispose()); vi.useRealTime
 const makeEngine = (variant: "C" | "legacy", assignment = "Ask about parking.") =>
   new SecretaryConversationEngine("fixture-owner", assignment, undefined, true, undefined, [], undefined, undefined, variant);
 describe("Reviewed telephone C without lab budgets, scripts or synthetic speech", () => {
+  it("promotes the exact accepted no-loop body without a rehearsal marker or different model/tools", async () => {
+    expect(PHONE_C_NO_LOOP_POLICY.split("\n").slice(1).join("\n"))
+      .toBe(C_NO_LOOP_POLICY.split("\n").slice(1).join("\n"));
+    const e = makeEngine("C", "Budget $400. Arrive in two hours. Never pay.");
+    e.configurePhoneConversation("streaming-v1");
+    const chunks: string[] = [];
+    await e.respond([{ role: "user", content: "We work 24/7; what day would you arrive?" }],
+      new AbortController().signal, text => chunks.push(text));
+    const body = f.create.mock.calls[0][0];
+    expect(body).toMatchObject({ model: "gpt-6-sol", reasoning: { effort: "low" },
+      max_output_tokens: 300, stream: true, store: false });
+    expect(body.prompt_cache_key).toMatch(/^katya-C-/);
+    expect(body.input.some((x: any) => x.role === "developer" && x.content === PHONE_C_NO_LOOP_POLICY)).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("DEV REHEARSAL");
+    expect(body.instructions).toContain("$400");
+    expect(body.instructions).toContain(IVR_INSTRUCTIONS);
+    expect(chunks.join("")).toBe("Ready.");
+    expect(() => e.configurePhoneConversation("C-reserve")).toThrow("ALREADY_FIXED");
+    f.create.mockClear();
+    const reserve = makeEngine("C");
+    reserve.configurePhoneConversation("C-reserve");
+    await reserve.respond([{ role: "user", content: "Hello" }], new AbortController().signal, () => {});
+    expect(JSON.stringify(f.create.mock.calls[0][0].input)).not.toContain(PHONE_C_NO_LOOP_POLICY);
+  });
   it("uses the exact C request, real phone tools and a stable cache prefix", async () => {
     const e = makeEngine("C"), text: string[] = [];
     await e.respond([{ role: "user", content: "Hello" }], new AbortController().signal, t => text.push(t));

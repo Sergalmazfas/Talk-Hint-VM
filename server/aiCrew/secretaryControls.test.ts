@@ -8,7 +8,7 @@ function fixture(options: { confirmed?: boolean; wrongReadback?: boolean; ambigu
     crewControlPage.indexOf('$("modelSelect").addEventListener'));
   const calls: any[] = [], messages: string[] = [], elements: Record<string, any> = {};
   for (const [id, value] of Object.entries({ secretaryMonthly: "20", secretaryDaily: "1",
-    secretaryEnable: "", secretaryDisable: "", phoneC: "", phoneLegacy: "" }))
+    secretaryEnable: "", secretaryDisable: "", phoneC: "", phoneReserve: "", phoneLegacy: "" }))
     elements[id] = { value, addEventListener: (_: string, listener: any) => { elements[id].listener = listener; } };
   const before = initialState(), after = structuredClone(before);
   after.revision = before.revision + 1; after.control.enabled = true; after.control.dailyLimitMicroUsd = 1e6;

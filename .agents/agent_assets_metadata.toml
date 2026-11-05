@@ -3897,3 +3897,31 @@ mtime_ms = 1793912023806
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c443f599-a4b3-40dc-a57d-626c1b70d421/a782a840-b7e8-41ca-aa13-569d5cf9e278"
 storage_version_token = "1793912030404465"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "WkftpwxNKOivOIQu4ixpE"
+uri = "file://generated-artifacts/katya-production-streaming/Katya_Previous_C_Source_Reserve.zip"
+type = "unspecified"
+title = "Прежняя боевая C — резерв до переноса"
+description = "Зафиксированные исходники и SHA-256 до переноса. Для оперативного отката после Publish будет кнопка «Вернуть резервную C» без смены модели и голоса."
+logical_id = "dc11f44d-b82f-4f9d-a434-8ffd09401b44"
+content_hash = "sha256:6c445bc555e694d19fff6bbac426aaa2eed71f580a488f4304cd879a29152798"
+size = 34839
+mtime_ms = 1793913297468
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dc11f44d-b82f-4f9d-a434-8ffd09401b44/9bab17b2-b635-4876-b20c-52be128bfa49"
+storage_version_token = "1793914542725952"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "IJZrX3K0Uu0vQggrTLrfY"
+uri = "file://generated-artifacts/katya-production-streaming/Katya_Production_Streaming_v1_Review.zip"
+type = "unspecified"
+title = "Катя — перенос улучшенной C, проверенный пакет"
+description = "Diff, исходники, резерв прежней C, полный прогон 399 файлов: 3944 passed / 0 failed / 44 skip, TypeScript и сборка. Подтверждение урока Севе r1324, схема без миграций и план проверки после Publish. Production ещё не переключён."
+logical_id = "4808c975-d689-413c-b413-54a9d0d7f690"
+content_hash = "sha256:b3a89b4922af1de3c1a395d8e4ff83d20ce7334fdcce6e3f6c8f4d76faa635a3"
+size = 252138
+mtime_ms = 1793914680890
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4808c975-d689-413c-b413-54a9d0d7f690/7d985f00-ea7e-43e2-91d1-5e91db986f5a"
+storage_version_token = "1793914703334974"
+content_type = "application/octet-stream"
