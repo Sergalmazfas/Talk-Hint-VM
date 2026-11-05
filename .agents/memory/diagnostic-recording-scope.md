@@ -13,6 +13,15 @@ An administrative diagnostic flag is not participant consent. Unverified partici
 
 ## Owner's laboratory direction
 
+Owner requirement: «Должны все разговоры записываться у меня на телефоне».
+
+**Why:** the owner stated the intended product behaviour, not that this
+capability already works.
+
+**How to apply:** distinguish audio available to play in the iPhone app from a
+local offline audio copy before scoping implementation. This does not override
+the participant-consent boundary above.
+
 The owner wants his own test calls to supply audio to the corresponding Hint
 and Translator laboratories, beginning with Hint, rather than enabling
 recording for ordinary product users. He requested no spoken announcement
