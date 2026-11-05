@@ -3,14 +3,14 @@ import { dirname } from "node:path";
 export type SpeedBudgetState = { limitMicroUsd: number; probeDebitMicroUsd: number;
   runs: Record<string, { variant: string; reserved: number; spent: number; admissionMicroUsd?: number; status: "reserved" | "settled" | "unknown" }> };
 const initial = (): SpeedBudgetState => ({ limitMicroUsd: 5_000_000, probeDebitMicroUsd: 100_000, runs: {} });
-/** Owner-approved $5 -> $10 -> $30 series, persisted across restarts. No reset/refill HTTP method.
+/** Owner-approved $5 -> $10 -> $30 -> $40 series, persisted across restarts. No reset/refill HTTP method.
  * Crash locks fail closed; they are never removed based on a guessed TTL. */
 export class SpeedBudget {
   constructor(private path = "generated-artifacts/secretary-speed-series/runtime-budget.json") {}
   private async load(): Promise<SpeedBudgetState> {
     try {
       const s = JSON.parse(await readFile(this.path, "utf8"));
-      if (![5_000_000, 10_000_000, 30_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
+      if (![5_000_000, 10_000_000, 30_000_000, 40_000_000].includes(s.limitMicroUsd) || s.probeDebitMicroUsd !== 100_000 || !s.runs || typeof s.runs !== "object")
         throw Error("SPEED_BUDGET_INVALID");
       for (const r of Object.values(s.runs) as any[]) {
         const cap = r?.admissionMicroUsd ?? 2_000_000;
@@ -39,6 +39,16 @@ export class SpeedBudget {
       if (s.limitMicroUsd !== 10_000_000 && s.limitMicroUsd !== 30_000_000)
         throw Error("SPEED_TOPUP_EXPECTED_TEN_DOLLAR_SERIES");
       s.limitMicroUsd = 30_000_000;
+    });
+  }
+  /** Owner-approved +$10: fixed $30 -> $40, idempotent, never resets history. */
+  approveFortyDollarSeries() {
+    if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1")
+      throw Error("SPEED_DEV_ONLY");
+    return this.change(s => {
+      if (s.limitMicroUsd !== 30_000_000 && s.limitMicroUsd !== 40_000_000)
+        throw Error("SPEED_TOPUP_EXPECTED_THIRTY_DOLLAR_SERIES");
+      s.limitMicroUsd = 40_000_000;
     });
   }
   async state() {

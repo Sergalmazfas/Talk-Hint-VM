@@ -3799,3 +3799,17 @@ mtime_ms = 1793902295903
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/45bdc4c3-a0c8-428b-84d5-286f3f29483f/0dd277d3-552a-43b2-8458-9c2e12778870"
 storage_version_token = "1793902307928168"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "7y7HUQLrGDBgao1Qc4jtu"
+uri = "file://generated-artifacts/secretary-speed-series/Series_40_Owner_Topup_Review.zip"
+type = "unspecified"
+title = "Клавдию — лимит стенда $40"
+description = "Фиксированное пополнение $30 → $40; история сохранена, readback с хэшами, 38 тестов и TypeScript прошли. Новые разговоры не запускались."
+logical_id = "1c2c7be4-db94-4ff2-8386-fbc1e298baff"
+content_hash = "sha256:b2f04829d65519ff33791a78c602b765836b0c776842bfc1fea2a137c08de42a"
+size = 7435
+mtime_ms = 1793904375211
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1c2c7be4-db94-4ff2-8386-fbc1e298baff/7d51ca3a-3159-42f4-955d-cacf4c3b5123"
+storage_version_token = "1793904385260558"
+content_type = "application/octet-stream"

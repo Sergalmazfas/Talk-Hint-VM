@@ -53,6 +53,39 @@ it("top-up preserves an active reservation and cannot create a parallel session"
   expect((await b.state()).reservedMicroUsd).toBe(3_000_000);
   await expect(b.reserve("parallel", "C")).rejects.toThrow("SPEED_SESSION_ACTIVE_OR_UNKNOWN");
 });
+it("the fixed $30 -> $40 top-up preserves unknowns, unblocks the $3 C reserve, and is idempotent after reload", async () => {
+  const { b, path } = await budget();
+  vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "");
+  await b.approveTenDollarSeries(); await b.approveThirtyDollarSeries();
+  for (let i = 0; i < 9; i++) { await b.reserve(`old-${i}`, "C"); await b.settle(`old-${i}`, null); }
+  await expect(b.reserve("blocked", "C")).rejects.toThrow("SPEED_SERIES_BUDGET_EXHAUSTED");
+  const before = await b.state();
+  await b.approveFortyDollarSeries();
+  await new SpeedBudget(path).approveFortyDollarSeries();
+  await b.approveTenDollarSeries();
+  const after = await new SpeedBudget(path).state();
+  expect(after.limitMicroUsd).toBe(40_000_000);
+  expect(after.remainingMicroUsd).toBe(before.remainingMicroUsd + 10_000_000);
+  expect(after.spentMicroUsd).toBe(before.spentMicroUsd);
+  expect(after.runs).toEqual(before.runs);
+  expect(after.probeDebitMicroUsd).toBe(before.probeDebitMicroUsd);
+  expect(after.runs.blocked).toBeUndefined();
+  await b.reserve("owner-next", "C");
+  expect((await b.state()).runs["owner-next"]).toMatchObject({ reserved: 3_000_000, spent: 0, status: "reserved" });
+  await b.approveFortyDollarSeries();
+  expect((await b.state()).reservedMicroUsd).toBe(3_000_000);
+  await expect(b.reserve("parallel", "C")).rejects.toThrow("SPEED_SESSION_ACTIVE_OR_UNKNOWN");
+});
+it("$40 top-up refuses production, deployment and unexpected previous limits", async () => {
+  const { b } = await budget();
+  vi.stubEnv("NODE_ENV", "production");
+  expect(() => b.approveFortyDollarSeries()).toThrow("SPEED_DEV_ONLY");
+  vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("REPLIT_DEPLOYMENT", "1");
+  expect(() => b.approveFortyDollarSeries()).toThrow("SPEED_DEV_ONLY");
+  vi.stubEnv("REPLIT_DEPLOYMENT", "");
+  await expect(b.approveFortyDollarSeries()).rejects.toThrow("SPEED_TOPUP_EXPECTED_THIRTY_DOLLAR_SERIES");
+  expect((await b.state()).limitMicroUsd).toBe(5_000_000);
+});
 it("top-up is Dev-only and fails closed on an unexpected previous ceiling", async () => {
   const { b, path } = await budget();
   vi.stubEnv("NODE_ENV", "production");
