@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { stopActiveCopilotSessions } from "./copilotFreeze";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -381,6 +382,7 @@ app.use(createRequestLoggingMiddleware(log));
     stopWriteHealthAlerter();
     stopAirAtomaRetryWorker();
     stopHintLab();
+    stopActiveCopilotSessions();
     
     // Close HTTP server (stop accepting new connections)
     httpServer.close((err) => {

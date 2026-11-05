@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import express from "express";
 import { createServer } from "http";
 import request from "supertest";
+// This suite tests routing/ownership, not call-plan binding. Its first browser
+// request otherwise cold-imports the real runtime (and provider singletons)
+// inside a 5s HTTP assertion despite using a fake DB. Keep it hermetic.
+vi.mock("../callPlans/runtime", () => ({
+  callPlans: async () => ({ bind: vi.fn(async () => undefined) }),
+}));
 
 // ---------------------------------------------------------------------------
 // Shared in-memory store + fake drizzle `db` (hoisted so vi.mock can use it).
@@ -437,6 +443,18 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     (setCallOwner as any).mockClear();
   });
 
+  it("rejects an old Copilot client without Dial, media or ordinary-call fallback", async () => {
+    const res = await request(app).post("/twilio/voice").type("form").send({
+      From: `client:user-${OWNER}`, To: "+15559998888", CallSid: CALL_SID, CopilotMode: "v1",
+    });
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("Copilot is unavailable");
+    expect(res.text).toContain("<Hangup");
+    expect(res.text).not.toContain("<Dial");
+    expect(res.text).not.toContain("<Stream");
+    expect(setCallOwner).not.toHaveBeenCalled();
+  });
+
   it("registers the call owner for a browser outbound call so hints route to that user", async () => {
     // Browser outbound: From is the signed client identity, To is the dialed PSTN number.
     const res = await request(app)
@@ -627,5 +645,25 @@ describe("/twilio/voice outbound call ownership (regression)", () => {
     expect(noKey.text).toContain("Cartesia voice clone is not ready or voice synthesis is not configured");
     expect(noKey.text).toContain("<Hangup");
     expect(noKey.text).not.toContain("<Stream");
+  });
+});
+
+describe("Frozen incoming Copilot admission", () => {
+  it("rejects acceptance with 410 without changing the pending call", async () => {
+    seedPendingCall({ userId: OWNER, status: "ringing", clientType: "browser" });
+    const before = structuredClone(h.store.rows);
+    const res = await request(app).post("/api/call/accept")
+      .set("x-test-user-id", OWNER).send({ callSid: CALL_SID, clientType: "ios_copilot" });
+    expect(res.status).toBe(410);
+    expect(res.body.error).toBe("COPILOT_DISABLED");
+    expect(h.store.rows).toEqual(before);
+  });
+  it("never bridges a previously accepted Copilot call as ordinary voice", async () => {
+    seedPendingCall({ userId: OWNER, status: "accepted", clientType: "ios_copilot" });
+    const res = await request(app).post(`/api/twilio/hold?callSid=${CALL_SID}&userId=${OWNER}`);
+    expect(res.text).toContain("Copilot is unavailable");
+    expect(res.text).toContain("<Hangup");
+    expect(res.text).not.toContain("<Dial");
+    expect(res.text).not.toContain("<Stream");
   });
 });

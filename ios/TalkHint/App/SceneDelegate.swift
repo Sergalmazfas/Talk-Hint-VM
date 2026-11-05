@@ -66,7 +66,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
-    /// Builds the main tab bar shown after login (Hint / Translator / Copilot /
+    /// Builds the main tab bar shown after login (Hint / Translator /
     /// Secretary / History). Settings opens from the gear on the Hint screen.
     ///
     /// The first tab is FUNCTIONALLY the same Calls flow (dialer, recents,
@@ -74,7 +74,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     /// The Tutor tab was replaced by Translator; TutorViewController and the
     /// backend /tutor page are intentionally left in the codebase (no UI entry
     /// points, no refactoring — see task #274 scope).
-    private func makeMainTabController() -> UITabBarController {
+    // Internal for hosted navigation regression tests; not an additional UI entry.
+    func makeMainTabController() -> UITabBarController {
         let tabController = UITabBarController()
         tabController.tabBar.tintColor = Theme.green
 
@@ -88,10 +89,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
-        let copilot = HomeViewController(mode: .copilot)
-        copilot.tabBarItem = UITabBarItem(
-            title: NSLocalizedString("tab.copilot", comment: ""),
-            image: UIImage(systemName: "mic.circle"), tag: 2)
+        // Copilot's implementation/settings remain archived; no UI entry.
 
         let secretary = HomeViewController(secretary: true)
         secretary.tabBarItem = UITabBarItem(
@@ -102,13 +100,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         history.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 4)
 
-        tabController.viewControllers = [
-            UINavigationController(rootViewController: calls),
-            UINavigationController(rootViewController: translator),
-            UINavigationController(rootViewController: copilot),
-            UINavigationController(rootViewController: secretary),
-            UINavigationController(rootViewController: history),
-        ]
+        let roots: [UIViewController] = [calls, translator, secretary, history]
+        tabController.viewControllers = roots.map { root in
+            let navigation = UINavigationController(rootViewController: root)
+            navigation.tabBarItem = root.tabBarItem
+            return navigation
+        }
         return tabController
     }
 

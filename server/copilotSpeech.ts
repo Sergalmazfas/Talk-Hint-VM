@@ -1,4 +1,5 @@
 import type { Express, Request, Response as ExpressResponse, NextFunction } from "express";
+import { copilotEnabled, COPILOT_DISABLED, COPILOT_UNAVAILABLE, registerCopilotCleanup } from "./copilotFreeze";
 import { authMiddleware } from "./auth";
 import { lookupAuthorizedCopilotCall } from "./copilotStream";
 import { consumeVerifiedCopilotReply, isLatinCopilotReply } from "./copilotVerifiedReplies";
@@ -71,7 +72,11 @@ async function boundedAudio(response: globalThis.Response): Promise<Buffer> {
 }
 
 export function registerCopilotSpeechRoute(app: Express) {
-  app.post("/api/copilot/clone-speech", bearerAuth, async (req, res) => {
+  app.post("/api/copilot/clone-speech", (_req, res, next) => {
+    if (!copilotEnabled()) return res.status(410).set("Cache-Control", "no-store")
+      .json({ error: COPILOT_DISABLED, message: COPILOT_UNAVAILABLE });
+    next();
+  }, bearerAuth, async (req, res) => {
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
@@ -128,6 +133,11 @@ export function registerCopilotSpeechRoute(app: Express) {
     }
 
     const controller = new AbortController();
+    const unregister = registerCopilotCleanup(() => {
+      controller.abort();
+      if (!res.headersSent) res.status(410).json({ error: COPILOT_DISABLED });
+      else res.destroy();
+    });
     let timedOut = false;
     const abortOnDisconnect = () => {
       if (!res.writableEnded) controller.abort();
@@ -167,6 +177,7 @@ export function registerCopilotSpeechRoute(app: Express) {
         }
       }
     } finally {
+      unregister();
       clearTimeout(timeout);
       req.removeListener("aborted", abortOnDisconnect);
       res.removeListener("close", abortOnDisconnect);

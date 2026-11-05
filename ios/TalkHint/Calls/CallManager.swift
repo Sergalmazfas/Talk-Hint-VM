@@ -53,6 +53,7 @@ final class CallManager: NSObject {
         case translator
         case copilot
     }
+    nonisolated static let copilotAvailable = false
 
     private struct CallSession {
         let uuid: UUID
@@ -168,6 +169,10 @@ final class CallManager: NSObject {
     @discardableResult
     func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
+        guard mode != .copilot || Self.copilotAvailable else {
+            postOutgoingCallState(.failed, uuid: uuid)
+            return uuid
+        }
         prepareAudioDevice(for: mode)
         // Snapshot before CallKit/Twilio starts. Later Settings changes apply
         // to the next call, including owner clone speech in Copilot.
@@ -373,15 +378,8 @@ final class CallManager: NSObject {
     }
 
     private static func selectedIncomingMode() -> CallMode {
-        let scene = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        var root = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController
-            ?? scene?.windows.first?.rootViewController
-        while let presented = root?.presentedViewController { root = presented }
-        let tab = (root as? UITabBarController) ?? root?.tabBarController
-        return tab?.selectedIndex == 2 ? .copilot : .hint
+        // Incoming calls never infer media/privacy mode from a tab position.
+        return .hint
     }
 }
 

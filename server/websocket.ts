@@ -1,3 +1,4 @@
+import { copilotEnabled, rejectCopilotSocket } from "./copilotFreeze";
 import { WebSocketServer, WebSocket } from "ws";
 import { stripHintWrapper, parseGuestTranslation, guestTranslationTokenLimit } from "./hintText";
 import { upgradeElevenAudio } from "./secretaryLab/elevenAudioUpgrade";
@@ -901,6 +902,11 @@ export function setupWebSocket(server: Server) {
       return;
     }
 
+    // Dev-only Translator Realtime Spike stand. Uses its own per-boot page
+    if ((pathname === "/copilot-stream" || pathname === "/copilot-bench-stream") && !copilotEnabled()) {
+      wss.handleUpgrade(request, socket, head, ws => rejectCopilotSocket(ws));
+      return;
+    }
     // Dev-only Translator Realtime Spike stand. Uses its own per-boot page
     // token (not a user session); hard-rejected in production.
     if (pathname === "/translator-spike-stream" || pathname === "/copilot-bench-stream") {

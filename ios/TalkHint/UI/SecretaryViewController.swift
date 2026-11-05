@@ -1207,10 +1207,9 @@ private final class SecretaryTaskDetailViewController: UIViewController {
     @objc private func openHistoryTranscript() {
         guard let callId = task.callId,
               let tabs = tabBarController,
-              tabs.viewControllers?.indices.contains(4) == true,
-              let navigation = tabs.viewControllers?[4] as? UINavigationController,
+              let navigation = tabs.viewControllers?.first(where: { $0.tabBarItem.tag == 4 }) as? UINavigationController,
               let history = navigation.viewControllers.first as? CallHistoryViewController else { return }
-        tabs.selectedIndex = 4
+        tabs.selectedViewController = navigation
         navigation.popToRootViewController(animated: false)
         history.openCallTranscript(identifier: callId)
     }

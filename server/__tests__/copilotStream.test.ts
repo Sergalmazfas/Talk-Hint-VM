@@ -1,3 +1,7 @@
+// Frozen production entry is covered by copilotFreeze.test; preserve archived implementation regressions.
+vi.mock("../copilotFreeze", async (original) => ({
+  ...await original<typeof import("../copilotFreeze")>(), copilotEnabled: () => true,
+}));
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { RealtimeTranslationSession } from "../translation/provider";

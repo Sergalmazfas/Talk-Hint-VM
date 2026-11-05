@@ -1,3 +1,4 @@
+import { copilotEnabled, COPILOT_UNAVAILABLE } from "../copilotFreeze";
 // Translator Realtime Spike — dev-only developer test stand.
 //
 // Purpose: prove realtime voice translation capability on an isolated bench
@@ -521,6 +522,7 @@ export function handleTranslatorSpikeStream(ws: WebSocket) {
 
 export function registerTranslatorSpike(app: Express) {
   app.get("/translator-spike/copilot", (_req, res) => {
+    if (!copilotEnabled()) return res.status(410).set("Cache-Control", "no-store").send(COPILOT_UNAVAILABLE);
     if (!isSpikeEnabled()) return res.status(404).send("Not found");
     res.setHeader("Cache-Control", "no-store");
     res.type("html").send(buildCopilotBenchPage(SPIKE_TOKEN));
@@ -651,7 +653,7 @@ function buildSpikePageHtml(): string {
 </head>
 <body>
 <h1>Translator Realtime Spike — Run #2 stand</h1>
-<p><a href="/translator-spike/copilot">Open Copilot translation comparison →</a></p>
+<!-- Copilot comparison entry frozen; retained implementation is not exposed. -->
 <div class="sub">Continuous open-mic, server VAD. Use headphones — the translated voice will otherwise feed back into the mic. Dev-only stand; no telephony, no iOS. Changing a selector while live cleanly restarts the session.</div>
 <div class="row">
   <label>Provider <select id="providerSel"><option value="openai-realtime" selected>Current realtime translator</option><option value="openai-realtime-translate">OpenAI gpt-realtime-translate</option></select></label>

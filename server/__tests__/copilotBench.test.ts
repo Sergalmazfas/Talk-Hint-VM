@@ -1,3 +1,6 @@
+vi.mock("../copilotFreeze", async (original) => ({
+  ...await original<typeof import("../copilotFreeze")>(), copilotEnabled: () => true,
+}));
 import { describe, it, expect, vi } from "vitest";
 import { Script } from "node:vm";
 import { OpenAIRealtimeTranslationSession } from "../translation/openaiRealtimeTranslator";

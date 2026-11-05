@@ -1,3 +1,7 @@
+// Exercise retained implementation in isolation, never enabling the production feature.
+vi.mock("../copilotFreeze", async (original) => ({
+  ...await original<typeof import("../copilotFreeze")>(), copilotEnabled: () => true,
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import request from "supertest";

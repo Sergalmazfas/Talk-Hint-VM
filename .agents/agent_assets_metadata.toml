@@ -3925,3 +3925,31 @@ mtime_ms = 1793914680890
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4808c975-d689-413c-b413-54a9d0d7f690/7d985f00-ea7e-43e2-91d1-5e91db986f5a"
 storage_version_token = "1793914703334974"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "M2cO4qKra8Sp8cha1wk9t"
+uri = "file://generated-artifacts/copilot-freeze/Copilot_Before_Freeze.zip"
+type = "unspecified"
+title = "Copilot — резерв исходников до отключения"
+description = "149 записей, исходный commit f0878cf. Код Copilot и связанные iOS/серверные файлы сохранены. Данные БД и Secrets не экспортировались и не менялись. Полный исходный проект закреплён локальным Git-тегом."
+logical_id = "62e92488-ba0a-4b75-8337-3e8364e01a20"
+content_hash = "sha256:efe33612f91330fdc8343e4c92baf46ea407bc87bbacd5fd14a43655031ac46b"
+size = 538598
+mtime_ms = 1793918398888
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/62e92488-ba0a-4b75-8337-3e8364e01a20/c22cac2e-e115-4e4f-93f8-1591d0c239d5"
+storage_version_token = "1793919576429781"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "s5NeGdzpHRMNs1WDykTso"
+uri = "file://generated-artifacts/copilot-freeze/Copilot_Freeze_Review_And_Rollback.zip"
+type = "unspecified"
+title = "Copilot — отключение, проверки и резерв для отката"
+description = "Diff и исходники, резерв 149 файлов, полный прогон 4 шардов: 3952 passed / 0 failed / 44 skip; 53 Python-проверки iOS, подтверждение HTTP/WS-отказов в Dev. Внутри MAC_HANDOFF.md и два новых XCTest: на Mac ещё не выполнены. Production и установленный iPhone не обновлялись."
+logical_id = "3b643c17-c3a9-4e47-97d6-467ec1072f29"
+content_hash = "sha256:8783f4a864aa2a6e73eddbdeadea73506abf60324507ac23286f77f2da1c39ea"
+size = 937190
+mtime_ms = 1793919612176
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/3b643c17-c3a9-4e47-97d6-467ec1072f29/d4f1aea6-6146-4f2f-9ac5-40ba77074c60"
+storage_version_token = "1793919631163728"
+content_type = "application/octet-stream"

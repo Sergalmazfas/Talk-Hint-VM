@@ -54,6 +54,11 @@ final class CopilotStream: NSObject, URLSessionWebSocketDelegate {
     }
 
     func start() {
+        guard CallManager.copilotAvailable else {
+            fail(NSError(domain: "Copilot", code: 410,
+                         userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("copilot.disabled", comment: "")]))
+            return
+        }
         guard state == .idle, let token = SessionStore.shared.token else {
             fail(nil)
             return

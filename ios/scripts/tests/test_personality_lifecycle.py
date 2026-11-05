@@ -69,7 +69,10 @@ class PersonalityLifecycleGuards(unittest.TestCase):
         self.assertIn("presenter.presentedViewController == nil", dismiss)
         save = body(self.tests, "private func save(_ screen:")
         self.assertIn("writes == before + 1", save)
-        self.assertIn("Date().addingTimeInterval(4)", self.tests)
+        # The hosted helper was already refactored to a configurable deadline;
+        # preserve both the original default and real timeout enforcement.
+        self.assertIn("timeout: TimeInterval = 4", self.tests)
+        self.assertIn("Date().addingTimeInterval(timeout)", self.tests)
 
     def test_timeout_reports_callsite_and_sanitized_fixture_requests(self):
         wait = body(self.tests, "private func waitUntil(")

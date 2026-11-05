@@ -1,3 +1,4 @@
+import { copilotEnabled, COPILOT_DISABLED, COPILOT_UNAVAILABLE } from "./copilotFreeze";
 import { SECRETARY_CALL_LIMIT_SECONDS } from "./secretary/limits";
 import type { Express } from "express";
 import { registerCallProfileRoutes } from "./callProfiles/routes";
@@ -1102,6 +1103,9 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
 
   // Call accept/reject endpoints for push notification flow
   app.post("/api/call/accept", authMiddleware, async (req, res) => {
+    if (!copilotEnabled() && req.body?.clientType === "ios_copilot") {
+      return res.status(410).json({ error: COPILOT_DISABLED, message: COPILOT_UNAVAILABLE });
+    }
     try {
       const user = (req as any).user;
       const { callSid } = req.body;
@@ -1220,6 +1224,11 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
       console.log(`[Hold] Call ${callSid} status: ${pendingCall.status}, expired: ${isExpired}`);
       
       if (pendingCall.status === "accepted") {
+        if (!copilotEnabled() && pendingCall.clientType === "ios_copilot") {
+          twimlResponse.say("Copilot is unavailable. Please use the updated application.");
+          twimlResponse.hangup();
+          return res.type("text/xml").send(twimlResponse.toString());
+        }
         const host = req.get("host") || "talkhint.app";
         const streamUrl = `wss://${host}/twilio-stream`;
         const copilotCall = pendingCall.clientType === "ios_copilot";
@@ -1439,6 +1448,12 @@ Return JSON: {"en": "phrase IN ENGLISH 5-10 words", "translation": "same phrase 
     // select this routing mode.
     const copilotParam = String(req.body.CopilotMode || req.query.CopilotMode || "");
     const copilotRequested = copilotParam.length > 0;
+    if (!copilotEnabled() && copilotRequested) {
+      const unavailable = new twilio.twiml.VoiceResponse();
+      unavailable.say("Copilot is unavailable. No outgoing call was placed.");
+      unavailable.hangup();
+      return res.type("text/xml").send(unavailable.toString());
+    }
     
     const timestamp = new Date().toISOString();
     console.log(`[TwiML Voice] ===== CALL ${callSid} @ ${timestamp} =====`);

@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import { copilotEnabled, rejectCopilotSocket, registerCopilotCleanup } from "./copilotFreeze";
 import { openaiRealtimeTranslationProvider } from "./translation/openaiRealtimeTranslator";
 import type { RealtimeTranslationSession, TranslationEvent } from "./translation/provider";
 import { storage } from "./storage";
@@ -89,6 +90,7 @@ function validBase64(value: unknown): value is string {
 }
 
 export function createCopilotStream(ws: WebSocket, _userId: string, authorize = lookupAuthorizedCopilotCall): void {
+  if (!copilotEnabled()) { rejectCopilotSocket(ws); return; }
   if (activeUsers.has(_userId)) {
     fail(ws, "concurrency", "A Copilot session is already active");
     ws.close();
@@ -134,6 +136,7 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
   const shutdown = () => {
     if (closed) return;
     closed = true;
+    unregister();
     activeUsers.delete(_userId);
     pendingText.forEach(pending => clearTimeout(pending.timeout));
     pendingText.clear();
@@ -149,6 +152,10 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
       try { session?.cancel(); } catch {}
     }
   };
+  const unregister = registerCopilotCleanup(() => {
+    shutdown();
+    rejectCopilotSocket(ws);
+  });
   const sourceUnavailable = () => {
     if (closed) return;
     // Never publish a plausible-looking translation with no attributable
@@ -380,6 +387,10 @@ export function createCopilotStream(ws: WebSocket, _userId: string, authorize = 
         if (results[0].status === "fulfilled") guest = results[0].value;
         if (results[1].status === "fulfilled") privateSession = results[1].value;
         if (results[2].status === "fulfilled") owner = results[2].value;
+        if (closed) {
+          for (const session of [guest, privateSession, owner]) session?.cancel();
+          return;
+        }
         if (!guest || !privateSession || (wantsConversationFeed && !owner)) throw new Error("provider session startup failed");
         sessions.guest = guest; sessions.private = privateSession; sessions.owner = owner;
         guest.onEvent(ev => event("guest", ev)); privateSession.onEvent(ev => event("private", ev));

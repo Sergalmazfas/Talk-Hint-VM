@@ -1,3 +1,4 @@
+import { copilotEnabled, rejectCopilotSocket, registerCopilotCleanup } from "../copilotFreeze";
 // Dev-only, isolated recorded-audio comparison. Never attaches to a phone call.
 import type WebSocket from "ws";
 import { openaiRealtimeTranslationProvider } from "./openaiRealtimeTranslator";
@@ -38,9 +39,15 @@ export function copilotBenchConfig(candidate: BenchCandidate, direction: BenchDi
 const MAX_AUDIO_BYTES = 24_000 * 2 * 20; // 20 seconds; never accept unbounded paid input.
 
 export function handleCopilotBenchStream(ws: WebSocket): void {
+  if (!copilotEnabled()) { rejectCopilotSocket(ws); return; }
   let session: RealtimeTranslationSession | undefined;
   let opening = false;
   let closed = false;
+  const unregister = registerCopilotCleanup(() => {
+    closed = true;
+    session?.cancel();
+    rejectCopilotSocket(ws);
+  });
   let bytes = 0;
   const send = (obj: object) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj));
@@ -90,6 +97,7 @@ export function handleCopilotBenchStream(ws: WebSocket): void {
   });
   ws.on("close", () => {
     closed = true;
+    unregister();
     session?.cancel();
   });
 }
