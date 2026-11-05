@@ -857,10 +857,12 @@ async function settleSecretaryFinalization(taskId: string, callSid: string): Pro
   const [line] = await db.select({ metadata: calls.metadata }).from(calls)
     .where(and(eq(calls.callSid, callSid), eq(calls.userId, claimed.userId))).limit(1);
   const lineReason = (line?.metadata as any)?.secretaryLineEnd?.reason;
-  const notReached = ["voicemail_skip", "no_human_20s"].includes(lineReason) ||
+  const notReached = ["voicemail_skip", "no_human_20s", "no_speech_45s"].includes(lineReason) ||
     voicemailWasSkipped(claimed.instruction, Array.isArray(claimed.transcriptTurns) ? claimed.transcriptTurns as any : []);
   const report = notReached ? {
-    outcome: "not_reached" as const, summary: lineReason === "no_human_20s"
+    outcome: "not_reached" as const, summary: lineReason === "no_speech_45s"
+      ? "Не дозвонились: 45 секунд от соединения без первой речи на линии."
+      : lineReason === "no_human_20s"
       ? "Не дозвонились: 20 секунд без живого ответа и прогресса меню."
       : "Не дозвонились: автоответчик, voicemail=skip. Это не провал Кати.",
     verifiedFacts: [] as string[], nextStep: "Новый звонок — только по решению владельца.",

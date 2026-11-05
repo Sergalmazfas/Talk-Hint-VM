@@ -67,12 +67,17 @@ export class CResponseBuffer {
     this.metrics.events.push({ at: new Date().toISOString(), id, kind, reason, phrase: this.phrase?.key, ...(from === undefined ? {} : { from }) });
     if (this.metrics.events.length > 200) this.metrics.events.shift();
   }
-  update(turns: SpokenTurn[], userTurn: boolean) {
+  update(turns: SpokenTurn[], userTurn: boolean, protectInitialPhoneGreeting = false) {
     const changed = users(this.latest) !== users(turns);
+    const duplicateOpening = protectInitialPhoneGreeting && norm(users(this.latest)) === norm(users(turns));
     this.latest = turns; this.metrics.updates++;
     // Retell still stops playback; only the model generation survives. Never
     // transmit more old text while the caller's final words are unknown.
-    if (userTurn || changed) this.paused = true;
+    // Opt-in for telephone opening only. Retell can repeat the SAME completed
+    // ASR as user_turn without issuing another response_required. This must not
+    // hold an unsaid greeting forever. New speech still pauses; native barge-in
+    // and all subsequent / Dev buffer semantics are unchanged.
+    if ((userTurn || changed) && !duplicateOpening) this.paused = true;
   }
   permitsTools() { return !this.closed && !this.paused && !!this.generation && !this.generation.controller.signal.aborted; }
   private output(text: string, complete = false, end = false) {

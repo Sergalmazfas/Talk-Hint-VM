@@ -21,7 +21,7 @@ export function secretaryActionReport(call: any, task: any): TeamActionReport | 
   const failed: string[] = [];
   const messageLeft = voicemailMessageLeft(task.instruction ?? "", Array.isArray(task.transcript_turns) ? task.transcript_turns : []);
   const notReached = voicemailWasSkipped(task.instruction ?? "", Array.isArray(task.transcript_turns) ? task.transcript_turns : []) ||
-    ["voicemail_skip", "no_human_20s"].includes(call.metadata?.secretaryLineEnd?.reason);
+    ["voicemail_skip", "no_human_20s", "no_speech_45s"].includes(call.metadata?.secretaryLineEnd?.reason);
   if (notReached) succeeded.push("Не дозвонились: автоответчик/нет живого ответа. Это не провал Кати.");
   if (messageLeft) succeeded.push("Оставлено сообщение; получение и согласие не подтверждены.");
   const connected = task.dial_started_at && (["connected", "completed"].includes(task.provider_status) ||

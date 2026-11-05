@@ -51,7 +51,7 @@ describe("Phone voicemail / no-human guard — no real calls", () => {
     expect(end).toHaveBeenCalledExactlyOnceWith("voicemail_skip");
     await vi.advanceTimersByTimeAsync(30000); expect(end).toHaveBeenCalledTimes(1);
   });
-  it("20s silence/recording expires; an actual digit renews the window, ASR does not", async () => {
+  it("20s starts at first speech, a new menu renews the window, ASR does not", async () => {
     vi.useFakeTimers(); const end = vi.fn(); const g = new PhoneLineGuard(false, end);
     await vi.advanceTimersByTimeAsync(15000); g.progress("new-menu");
     g.observe("Thank you for calling. Press 1.", false);
@@ -59,6 +59,21 @@ describe("Phone voicemail / no-human guard — no real calls", () => {
     await vi.advanceTimersByTimeAsync(19999); expect(end).not.toHaveBeenCalled();
     g.observe("Thank you for calling. Press 1.", false);
     await vi.advanceTimersByTimeAsync(1); expect(end).toHaveBeenCalledExactlyOnceWith("no_human_20s");
+  });
+  it("ringing lasts 45s, empty transcripts and menu commands do not extend it", async () => {
+    vi.useFakeTimers(); const end=vi.fn(); const g=new PhoneLineGuard(false,end);
+    await vi.advanceTimersByTimeAsync(20000); expect(end).not.toHaveBeenCalled();
+    g.observe("  ",false);g.progress("no-speech-is-not-progress");
+    await vi.advanceTimersByTimeAsync(24999); expect(end).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);expect(end).toHaveBeenCalledExactlyOnceWith("no_speech_45s");
+  });
+  it("Flying J: first recording at 25s gets its full 20s, not a disconnect at 20s", async () => {
+    vi.useFakeTimers(); const end=vi.fn(); const g=new PhoneLineGuard(false,end);
+    await vi.advanceTimersByTimeAsync(25000);expect(end).not.toHaveBeenCalled();
+    g.observe("Thank you for calling J. Toss",false);
+    await vi.advanceTimersByTimeAsync(19999);expect(end).not.toHaveBeenCalled();
+    g.observe("Thank you for calling J. Toss",false);
+    await vi.advanceTimersByTimeAsync(1);expect(end).toHaveBeenCalledExactlyOnceWith("no_human_20s");
   });
   it("human answer disarms no-human watchdog, and a human returning cancels skip", async () => {
     vi.useFakeTimers(); const end = vi.fn(); const g = new PhoneLineGuard(true, end);

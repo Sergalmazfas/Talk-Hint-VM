@@ -2,31 +2,26 @@ import { voicemailAnnouncement } from "./voicemail";
 type Turn = { role: "agent" | "user"; content: string };
 export const machineOpening = (text: string) =>
   /(?:thank you |thanks )?for calling|press\s+(?:\d|one|two|three|four)|para espa[ñn]ol|your call is important|calls? may be recorded|please (?:hold|wait)|благодарим за звонок|нажмите|звонок.*запис|оставайтесь на линии/i.test(text);
-const humanOpening = (text: string) =>
+export const humanOpening = (text: string) =>
   /\bthis is\s+[a-z]+|\b(?:speaking|how (?:can|may) I help|hello|hi there|good morning|good afternoon)\b|здравствуйте|добрый день|слушаю/i.test(text);
 
-/** Session-local gate. A bare "Thank you" cannot turn an announcement into a human.
- * No acoustic claims are inferred from text. Voicemail retains its existing policy. */
+/** Partial ASR is not a completed greeting. Only explicit recording evidence
+ * keeps a completed turn silent; a company-only / ambiguous greeting may speak. */
 export class PhoneOpeningGate {
   live = false;
   heardSpeech = false;
   probed = false;
-  private machine = false;
-  permit(turns: Turn[]): boolean {
+  permit(turns: Turn[], final = true): boolean {
     if (this.live) return true;
     const guest = turns.filter(t => t.role === "user" && t.content.trim());
     this.heardSpeech ||= guest.length > 0;
     const last = guest.at(-1)?.content ?? "";
     if (!last) return false;
     if (voicemailAnnouncement(last)) return true;
-    if (machineOpening(last)) { this.machine = true; return false; }
-    if (/^(?:thank(?: you)?|thanks|спасибо)[.! ]*$/i.test(last.trim())) {
-      this.machine = true; return false;
-    }
-    if (humanOpening(last) || !this.machine && !/^(?:thank you|thanks|спасибо)[.! ]*$/i.test(last.trim())) {
-      this.live = true; return true;
-    }
-    return false;
+    if (machineOpening(last)) return false;
+    if (!final) return false;
+    this.live = true;
+    return true;
   }
   probe(): string | undefined {
     if (this.heardSpeech || this.probed || this.live) return;
@@ -36,7 +31,9 @@ export class PhoneOpeningGate {
 }
 export const PHONE_OPENING_POLICY = `Opening: wait for the other party's first speech. Never speak over a recorded announcement or IVR.
 "Thank you for calling", "press", "para español", "your call is important" and "calls may be recorded" are recordings, NOT human greetings.
-Listen and navigate IVR using the existing tools; wait for a live person. A bare "Thank you" is not proof of a person.
+Listen and navigate IVR using the existing tools. Only explicit IVR/voicemail evidence is a reason to remain silent.
+A completed short greeting, "hello", company name, or unclear greeting without those markers is enough: introduce yourself immediately, do not wait for a personal name.
+Partial ASR such as "Thank you" must finish before deciding; it may become "Thank you for calling".
 When a human greets you (e.g. "Flying J, this is Denise"), give the trusted introduction ONCE; never repeat it.
 The transport handles an initial silence probe; do not generate another introduction or "are you still there?" while waiting for a human.`;
 

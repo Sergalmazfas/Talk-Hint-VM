@@ -3701,3 +3701,17 @@ mtime_ms = 1793838769536
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/1daa8f11-8abc-4545-9036-039f12259cb1/605fe774-bd3b-4087-991b-dff5b369ec50"
 storage_version_token = "1793838781332470"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "M_iYLHlp1P5Nmp3NkQVwJ"
+uri = "file://generated-artifacts/Katya_Opening_and_RD_Voicemail_Clavdiy.zip"
+type = "unspecified"
+title = "Катя — начало звонка + R&D voicemail: общий пакет"
+description = "Для Клавдия: таймеры 45/20 с, срочный фикс Anytime, replay Pilot/Flying J/R&D/Anytime, сохранение C-буфера, оба diff и полный зелёный прогон тестов."
+logical_id = "10064ad2-bbfc-4472-a626-ce2995470f5b"
+content_hash = "sha256:3ac9d2a4a7ca4055e6363f4431738917a3eb96583f9085f78b0b92e69b84f483"
+size = 139878
+mtime_ms = 1793840175230
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/10064ad2-bbfc-4472-a626-ce2995470f5b/fc83038f-4353-4b35-8803-9386fda9725a"
+storage_version_token = "1793840190983119"
+content_type = "application/octet-stream"

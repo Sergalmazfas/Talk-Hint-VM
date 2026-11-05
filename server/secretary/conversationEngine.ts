@@ -235,6 +235,10 @@ export class SecretaryConversationEngine {
     if (openingToolOnly) input.push({ role: "developer", content:
       "Still in recorded IVR: silently select the existing permitted IVR tool only. No introduction, filler or speech. Do not end the call." });
     if (this.telephone) input.push({ role: "developer", content: PHONE_OPENING_POLICY });
+    if (this.telephone && !vm && !openingToolOnly &&
+        !turns.some(t => t.role === "agent" && t.content.trim() && t.content.trim() !== "Hi, hello?"))
+      input.push({ role: "developer", content:
+        "The completed first speech has no explicit recording/IVR/voicemail markers. Give the trusted introduction NOW, once, including for a company-only or unclear greeting. Do not wait for a personal name or stay silent. Do not invent who answered; preserve all disclosure and safety rules." });
     if (!this.telephone)
       input.push({ role: "developer", content: "Current TEST action ledger: " + JSON.stringify(this.report.actions) });
     if (reminder) input.push({ role: "developer", content: "Briefly check if the caller is still there; do not invent a request or end for silence." });

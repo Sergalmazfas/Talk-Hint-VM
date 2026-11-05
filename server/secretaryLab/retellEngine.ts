@@ -67,6 +67,7 @@ type Entry = {
   commandCompleted?: number; interruptSequence?: number;
   buffer?: CResponseBuffer;
   lineGuard?: PhoneLineGuard;
+  phoneGreetingSent?: boolean;
   voicemailMessageSent?: boolean;
   noHumanEnded?: boolean;
 };
@@ -199,6 +200,9 @@ export class RetellEngineRegistry {
       ws.send(JSON.stringify(frame)); return true;
     };
     let openingTimer: ReturnType<typeof setTimeout> | undefined;
+    let firstGreetingSpeech: string | undefined;
+    const speechKey = (turns: SpokenTurn[]) => turns.filter(t => t.role === "user")
+      .map(t => t.content).join(" ").toLowerCase().replace(new RegExp("[^\\p{L}\\p{N}]+", "gu"), " ").trim();
     const heardOpening = (turns: any) => {
       if (!this.options.phone || !Array.isArray(turns) ||
         !turns.some(t => t?.role === "user" && t.content?.trim())) return;
@@ -244,6 +248,7 @@ export class RetellEngineRegistry {
       }
       // Silent opening/IVR must never acquire the C buffer's filler timer.
       const openingSilent = this.options.phone && !entry.engine.opening.permit(turns) && !voicemailTurn(turns);
+      const firstGreeting = this.options.phone && !entry.phoneGreetingSent && !openingSilent && !vm;
       if (buffered && !openingSilent && !vm) { entry.pending = id; buffered.request(id, turns, reminder); return; }
       if (labLimitEnded) {
         send({ response_type: "response", response_id: id, content: "", content_complete: true, end_call: true });
@@ -254,6 +259,7 @@ export class RetellEngineRegistry {
         return;
       }
       abort(); entry.responseId = id; entry.handled.add(id);
+      firstGreetingSpeech = firstGreeting ? speechKey(turns) : undefined;
       entry.pending = id;
       const epoch = entry.epoch, controller = new AbortController(); entry.abort = controller;
       let endCall = false;
@@ -267,7 +273,10 @@ export class RetellEngineRegistry {
       }, 25_000); timeout.unref();
       entry.engine.record("response_started");
       void entry.engine.respond(turns, controller.signal, text => {
-        if (current() && !controller.signal.aborted) send({ response_type: "response", response_id: id, content: text, content_complete: false });
+        if (current() && !controller.signal.aborted) {
+          if (send({ response_type: "response", response_id: id, content: text, content_complete: false }) && firstGreeting && text.trim())
+            entry.phoneGreetingSent = true;
+        }
       }, reminder, !!vm).then(end => {
         endCall = !!(this.options.phone && end && current() && !controller.signal.aborted);
       }).catch((error: unknown) => {
@@ -290,7 +299,7 @@ export class RetellEngineRegistry {
           if (!entry.engine.skipsVoicemail) entry.lineGuard?.close();
         }
         // Interrupted/old responses never resume; a timeout still closes the CURRENT response.
-        if (current()) { entry.pending = undefined; if (entry.commandCompleted !== id) send({ response_type: "response", response_id: id, content: "", content_complete: true,
+        if (current()) { firstGreetingSpeech = undefined; entry.pending = undefined; if (entry.commandCompleted !== id) send({ response_type: "response", response_id: id, content: "", content_complete: true,
           ...(endCall ? { end_call: true } : {}) }); entry.engine.record("response_complete"); }
       });
     };
@@ -343,7 +352,7 @@ export class RetellEngineRegistry {
         if (this.options.phone && Array.isArray(frame.transcript)) {
           const turns = frame.transcript.filter((t: any) => ["agent", "user"].includes(t?.role) && typeof t.content === "string");
           const last = [...turns].reverse().find((t: any) => t.role === "user");
-          if (last) entry.lineGuard?.observe(last.content, entry.engine.opening.permit(turns));
+          if (last) entry.lineGuard?.observe(last.content, entry.engine.opening.permit(turns, false));
           if (entry.lineGuard?.voicemail && buffered) {
             buffered.close(); buffered = undefined; entry.buffer = undefined; abort();
           }
@@ -352,10 +361,13 @@ export class RetellEngineRegistry {
           if (!Array.isArray(frame.transcript) || frame.transcript.length > 300 ||
             frame.transcript.some((t: any) => !["agent", "user"].includes(t?.role) ||
               typeof t.content !== "string" || t.content.length > 4000)) { ws.close(1008, "Invalid transcript"); return; }
-          buffered.update(frame.transcript, frame.turntaking === "user_turn");
+          buffered.update(frame.transcript, frame.turntaking === "user_turn",
+            !!this.options.phone && !frame.transcript.some((t: SpokenTurn) =>
+              t.role === "agent" && t.content.trim() && t.content.trim() !== "Hi, hello?"));
         }
         transcript(frame);
-        if (!buffered && frame.turntaking === "user_turn") abort();
+        if (frame.turntaking === "user_turn" && (firstGreetingSpeech !== undefined
+          ? firstGreetingSpeech !== speechKey(frame.transcript) : !buffered)) abort();
         return;
       }
       if (!["response_required", "reminder_required"].includes(frame.interaction_type)) return;

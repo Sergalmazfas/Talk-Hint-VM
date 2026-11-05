@@ -29,7 +29,8 @@ describe("Owner-approved listen-first telephone opening", () => {
   it("does not treat fragmented Thank you / for calling as a human", () => {
     const g = new PhoneOpeningGate();
     expect(g.permit([])).toBe(false);
-    for (const t of ["Thank you", "for calling Flying J, Tulsa", "press 1", "para español", "your call is important", "calls may be recorded"])
+    expect(g.permit(turn("Thank you"), false)).toBe(false);
+    for (const t of ["for calling Flying J, Tulsa", "press 1", "para español", "your call is important", "calls may be recorded"])
       expect(g.permit(turn(t))).toBe(false);
     expect(g.permit(turn("Flying J, this is Denise"))).toBe(true);
     expect(g.permit(turn("The price is 150"))).toBe(true);
@@ -53,7 +54,7 @@ describe("Owner-approved listen-first telephone opening", () => {
     });
     const e = new SecretaryConversationEngine("owner", "Ask about parking", stream, true);
     const emit = vi.fn(), signal = new AbortController().signal;
-    for (const content of ["Thank you", "Thank you for calling Flying J", "for calling Flying J, Tulsa"])
+    for (const content of ["Thank you for calling Flying J", "for calling Flying J, Tulsa"])
       await e.respond(turn(content), signal, emit);
     expect(stream).not.toHaveBeenCalled(); expect(emit).not.toHaveBeenCalled();
     await e.respond(turn("Flying J, this is Denise"), signal, emit);
