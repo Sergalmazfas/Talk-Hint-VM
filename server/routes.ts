@@ -450,6 +450,10 @@ export async function registerRoutes(
   const { retellEngineLab } = await import("./secretaryLab/retellEngine");
   const { registerRetellLabRoutes } = await import("./secretaryLab/retellRoutes");
   registerRetellLabRoutes(app, retellEngineLab, "/api/admin/secretary-lab/retell-engine");
+  if (process.env.NODE_ENV === "development" && process.env.REPLIT_DEPLOYMENT !== "1") {
+    const { registerRehearsalRoutes } = await import("./rehearsal/routes");
+    registerRehearsalRoutes(app);
+  }
   if (process.env.NODE_ENV === "development") {
     const { registerComparisonRoutes } = await import("./secretaryLab/comparisonRoutes");
     const { PgComparisonRepository } = await import("./secretaryLab/comparisonStore");

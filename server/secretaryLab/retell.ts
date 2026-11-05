@@ -26,6 +26,7 @@ export interface RetellReport {
   cost?: LabRunCost;
   ttsModel?: string;
   profileId?: string;
+  waitingPlan?: { id: string; source: "dev-preset"; fictional: true; plan: import("../../shared/callPlan").CallPlan };
   labLimit?: { code: string; message: string };
   personality?: LabPersonalitySummary | null;
   audioConnectedAt?: string;
@@ -158,6 +159,12 @@ export class RetellSecretaryLab {
     this.sessions.set(id, s); this.attempts.set(owner, [...times, this.now()]);
     s.creation = this.admit(s, instructions, engine?.ticket);
     try { return await s.creation; } finally { s.creation = undefined; }
+  }
+  bindWaitingPlan(owner: string, id: string, plan: NonNullable<RetellReport["waitingPlan"]>) {
+    this.dev();
+    const s = this.get(owner, id);
+    if (!this.profile?.waitingAudio || terminal(s)) fail(409, "WAITING_DEV_C_ONLY");
+    s.report.waitingPlan = JSON.parse(JSON.stringify(plan));
   }
   private async admit(s: Session, instructions: string, ticket?: string) {
     let submitting = false;

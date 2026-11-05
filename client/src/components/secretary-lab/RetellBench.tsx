@@ -9,6 +9,7 @@ import { formatLabTime, labRequest } from "@/lib/secretary-lab";
 import { savedRetellAdmission, retellEnded, retellError as friendlyError } from "@/lib/secretary-lab-retell";
 import { retellStandApi } from "@/lib/secretary-lab-modes";
 import { watchWaitingMicrophone } from "@/lib/secretary-lab-waiting-audio";
+import { WAITING_LAB_PLANS, waitingPlanInstruction } from "../../../../shared/secretaryWaitingPlans";
 import PersonalityPicker, { type PersonalityChoice } from "./PersonalityPicker";
 import { RunSummary } from "./RunSummary";
 import "./retell-engine.css";
@@ -293,7 +294,11 @@ export default function RetellBench({
       createAttempted = true;
       const created = await labRequest<{ id: string; call: { call_id: string; access_token: string; [key: string]: unknown }; report: RetellReport }>(`${api}/sessions`, token, {
         method: "POST",
-        body: JSON.stringify({ instruction: instruction.trim(), consent: true, clientRequestId: requestIdRef.current, ...(isEngine ? { personality: selectedPersonality, speedVariant: selectedSpeedVariant } : {}) }),
+        body: JSON.stringify({ instruction: instruction.trim(), consent: true, clientRequestId: requestIdRef.current, ...(isEngine ? {
+          personality: selectedPersonality, speedVariant: selectedSpeedVariant,
+          ...(selectedSpeedVariant === "C" && WAITING_LAB_PLANS.some(p => waitingPlanInstruction(p.plan) === instruction.trim()) ?
+            { waitingPlanId: WAITING_LAB_PLANS.find(p => waitingPlanInstruction(p.plan) === instruction.trim())!.id } : {}),
+        } : {}) }),
       });
       createdId = created.id;
       if (!mountedRef.current) {
@@ -422,6 +427,17 @@ export default function RetellBench({
         <article className="retell-panel">
           <div className="retell-panel-title"><span>01 / НАСТРОЙКА</span><strong>{isEngine ? "Retell voice + TalkHint reasoning" : "Тот же секретарь, другой runtime"}</strong></div>
           <label className="field-label" htmlFor="retell-instruction">Общая инструкция секретарю</label>
+          {isEngine && speedVariant === "C" && <>
+            <label className="field-label" htmlFor="waiting-plan">Готовое поручение · только Dev C</label>
+            <select id="waiting-plan" className="instruction-input" disabled={busy || pending || uncertainCreate}
+              value={WAITING_LAB_PLANS.find(p => waitingPlanInstruction(p.plan) === instruction)?.id ?? ""}
+              onChange={e => { const p = WAITING_LAB_PLANS.find(p => p.id === e.target.value);
+                if (p) onInstructionChange(waitingPlanInstruction(p.plan)); }}>
+              <option value="">Своё поручение — текст ниже</option>
+              {WAITING_LAB_PLANS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+            <small>Выберите поручение до запуска. Оно попадёт в контекст и отчёт. Никаких реальных заказов или оплаты.</small>
+          </>}
            <Textarea id="retell-instruction" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} disabled={busy || uncertainCreate} maxLength={1600} className="instruction-input" />
           <div className="field-foot"><span>Совпадает с GPT-стендом · до 1 600 символов</span><span>{instruction.length}/1600</span></div>
            {isEngine && <PersonalityPicker token={token} value={personality} onChange={setPersonality} disabled={busy || pending || uncertainCreate} />}

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { RetellSecretaryLab, type RetellLabProfile, type RetellReport } from "./retell";
-import { SecretaryConversationEngine, secretaryTestTools, type EngineStream } from "../secretary/conversationEngine";
+import { SecretaryConversationEngine, secretaryTestTools, secretaryPhoneTools, type EngineStream } from "../secretary/conversationEngine";
 import { confirmedSecretaryOwnerName } from "../secretary/ownerIdentity";
 import type { PersonalityBinding } from "../secretary/personalities/types";
 import { SECRETARY_TEST_CONTEXT } from "./testContext";
@@ -10,8 +10,10 @@ import { SpeedLimitError, SpeedRequestBudget, speedLimitText, speedSettlement } 
 import type { RetellEngineApi, RetellEngineRegistry } from "./retellEngine";
 import { devReportArchive } from "./devReportArchive";
 import { WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX, WAITING_DEV_INSTRUCTIONS } from "./waitingPolicy";
+import { waitingPlanSelection } from "../../shared/secretaryWaitingPlans";
 
-export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding) {
+export function speedEngine(owner: string, instruction: string, variant: SpeedVariant, personality?: PersonalityBinding,
+  rehearsal?: { productionRules: boolean; waiting: boolean }) {
   if (process.env.NODE_ENV !== "development" || process.env.REPLIT_DEPLOYMENT === "1") throw Error("SPEED_DEV_ONLY");
   const profile = speedProfiles[variant];
   const requestBudget = new SpeedRequestBudget(variant === "C" ? 2_000_000 : 1_000_000);
@@ -68,25 +70,37 @@ export function speedEngine(owner: string, instruction: string, variant: SpeedVa
       requestBudget.unknown(reservation); limit(e); throw e;
     }
   } } };
-  const rawStream = speedStream(adapter, variant, secretaryTestTools);
+  const rawStream = speedStream(adapter, variant, rehearsal?.productionRules ? secretaryPhoneTools : secretaryTestTools);
   const measured: EngineStream = request => rawStream(request);
-  const compact = variant === "A" ? undefined : compactSpeedPrompt({
+  const compact = variant === "A" || rehearsal?.productionRules ? undefined : compactSpeedPrompt({
     owner: confirmedSecretaryOwnerName(owner), personality,
-    plan: { instruction, testOnly: true, authorizedTestContext: SECRETARY_TEST_CONTEXT }, runtimeUtc: new Date().toISOString(),
+    plan: { instruction, testOnly: true, authorizedTestContext: SECRETARY_TEST_CONTEXT },
+    telephone: rehearsal?.productionRules, runtimeUtc: new Date().toISOString(),
   });
-  const engine = new SecretaryConversationEngine(owner, instruction, measured, false, personality, [], undefined,
-    compact ? { instructions: compact.instructions + (variant === "C" ? WAITING_DEV_INSTRUCTIONS : ""), model: profile.model } : undefined);
+  const engine = rehearsal?.productionRules
+    ? new SecretaryConversationEngine(owner, instruction, measured, true, personality, [], undefined, undefined, "C")
+    : new SecretaryConversationEngine(owner, instruction, measured, false, personality, [], undefined,
+      compact ? { instructions: compact.instructions + (variant === "C" && (rehearsal?.waiting ?? true) ? WAITING_DEV_INSTRUCTIONS : ""),
+        model: profile.model } : undefined);
+  if (rehearsal) {
+    engine.report.testOnly = true;
+    engine.report.context = { ...engine.report.context, restrictions: [
+      ...(Array.isArray(engine.report.context.restrictions) ? engine.report.context.restrictions : []),
+      "DEV rehearsal: no PSTN, real tools, notifications or product changes",
+    ] };
+  }
   (engine.report as any).speed = metrics;
   return engine;
 }
 
 /** Multiplexing uses the existing authenticated Dev routes and socket registry. */
+export const speedSeriesBudget = new SpeedBudget();
 export function speedLab(deps: {
   registry: RetellEngineRegistry; api: (v: SpeedVariant) => RetellEngineApi; check: () => Promise<object>;
   agentName: string; variantsBySession: Map<string, SpeedVariant>;
   bufferModesBySession?: Map<string, boolean>;
 }) {
-  const budget = new SpeedBudget();
+  const budget = speedSeriesBudget;
   const bufferModeByOwner = new Map<string, boolean>();
   const labs = new Map<SpeedVariant, RetellSecretaryLab>();
   for (const variant of ["A", "B", "C"] as const) {
@@ -177,12 +191,13 @@ export function speedLab(deps: {
         input.instruction.trim().length < 8 || input.instruction.length > 4000 ||
         !/^[0-9a-f-]{36}$/i.test(input.clientRequestId ?? "") ||
         (input.responseBuffer !== undefined && (variant !== "C" || typeof input.responseBuffer !== "boolean")) ||
-        Object.keys(input).some(k => !["instruction", "consent", "clientRequestId", "personality", "speedVariant", "responseBuffer"].includes(k)))
+        Object.keys(input).some(k => !["instruction", "consent", "clientRequestId", "personality", "speedVariant", "responseBuffer", "waitingPlanId"].includes(k)))
         throw Object.assign(Error("Invalid speed experiment input"), { status: 400 });
+      const waitingPlan = waitingPlanSelection(variant, input.instruction, input.waitingPlanId);
       for (const id of Array.from(owners.keys())) await finish(id);
       const lab = labs.get(variant)!;
       const previous = Array.from(owners).find(([, r]) => r.owner === owner && r.requestId === input.clientRequestId);
-      const { speedVariant: _, responseBuffer: __, ...body } = input;
+      const { speedVariant: _, responseBuffer: __, waitingPlanId: ___, ...body } = input;
       if (previous) {
         if (previous[1].lab !== lab) throw Object.assign(Error("Request variant conflict"), { status: 409 });
         return lab.create(owner, body);
@@ -193,6 +208,10 @@ export function speedLab(deps: {
       bufferModeByOwner.set(owner, input.responseBuffer !== false);
       try {
         const result = await lab.create(owner, body);
+        if (waitingPlan) {
+          result.report.waitingPlan = waitingPlan;
+          lab.bindWaitingPlan(owner, result.id, waitingPlan);
+        }
         owners.set(result.id, { lab, owner, requestId: input.clientRequestId });
         return result;
       } catch (e) {

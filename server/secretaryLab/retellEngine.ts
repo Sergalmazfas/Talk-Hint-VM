@@ -16,6 +16,7 @@ import { voicemailTurn } from "../secretary/voicemail";
 import { PhoneLineGuard, type NoHumanReason } from "../secretary/phoneLineGuard";
 import { DevWaitingPolicy, WAITING_DEV_DURATION_MS, WAITING_DEV_SUFFIX } from "./waitingPolicy";
 import { waitingAudit } from "./waitingAudit";
+import { rehearsalBindings } from "./rehearsalBinding";
 
 export const RETELL_ENGINE_AGENT = "TalkHint Secretary Lab — Retell + Engine Dev";
 const fail = (text: string): never => { throw new RetellApiError(409, text); };
@@ -26,8 +27,8 @@ export function engineCallbackBase() {
 }
 export class RetellEngineApi extends RetellApi {
   constructor(private callback = engineCallbackBase, network?: ConstructorParameters<typeof RetellApi>[0],
-    private speedVariant: "A" | "B" | "C" = "A") { super(network); }
-  private get agentName() { return this.speedVariant === "A" ? RETELL_ENGINE_AGENT :
+    private speedVariant: "A" | "B" | "C" = "A", private rehearsalHash?: string) { super(network); }
+  private get agentName() { return this.rehearsalHash ? `TalkHint Rehearsal DEV · ${this.rehearsalHash}` : this.speedVariant === "A" ? RETELL_ENGINE_AGENT :
     `${RETELL_ENGINE_AGENT} · speed ${this.speedVariant}${this.speedVariant === "C" ? WAITING_DEV_SUFFIX : ""}`; }
   private get durationMs() { return this.speedVariant === "C" ? WAITING_DEV_DURATION_MS : 300_000; }
   async inspectAgent(id: string) {
@@ -37,7 +38,7 @@ export class RetellEngineApi extends RetellApi {
         a.interruption_sensitivity !== (this.speedVariant === "A" ? 0.9 : 0.85) || a.responsiveness !== 1 || a.enable_backchannel !== false ||
         (this.speedVariant !== "A" && (a.enable_dynamic_responsiveness !== true || a.stt_mode !== "fast")) ||
         a.max_call_duration_ms !== this.durationMs || a.end_call_after_silence_ms !== this.durationMs ||
-        a.data_storage_setting !== "basic_attributes_only" || a.webhook_events?.length !== 0 ||
+        a.data_storage_setting !== (this.rehearsalHash ? "everything" : "basic_attributes_only") || a.webhook_events?.length !== 0 ||
         a.contact_memory_config?.enable_read !== false || a.contact_memory_config?.enable_update !== false ||
         a.pre_session_tools?.length || a.post_session_tools?.length || a.fallback_voice_ids?.length ||
         !Array.isArray(a.language) || ["en-US", "ru-RU", "es-ES"].some(l => !a.language.includes(l))) {
@@ -55,7 +56,7 @@ export class RetellEngineApi extends RetellApi {
       voice_id: RETELL_LAB_VOICE, language: ["en-US", "ru-RU", "es-ES"],
       interruption_sensitivity: this.speedVariant === "A" ? 0.9 : 0.85, responsiveness: 1, enable_backchannel: false,
       ...(this.speedVariant === "A" ? {} : { enable_dynamic_responsiveness: true, stt_mode: "fast" }),
-      data_storage_setting: "basic_attributes_only", max_call_duration_ms: this.durationMs,
+      data_storage_setting: this.rehearsalHash ? "everything" : "basic_attributes_only", max_call_duration_ms: this.durationMs,
       end_call_after_silence_ms: this.durationMs, webhook_events: [], fallback_voice_ids: [],
       contact_memory_config: { enable_read: false, enable_update: false },
     });
@@ -270,6 +271,7 @@ export class RetellEngineRegistry {
       }) : undefined;
     entry.buffer = buffered;
     if (buffered) (entry.engine.report as any).cInterruption = buffered.metrics;
+    let waitingReply: { id: number; turns: SpokenTurn[] } | undefined;
     clearInterval(entry.waitingTimer);
     if (entry.waiting) {
       entry.waitingTimer = setInterval(() => {
@@ -277,10 +279,16 @@ export class RetellEngineRegistry {
         const action = entry.waiting!.tick();
         refreshWaitingReport(entry);
         if (!action) return;
+        if (action.resume && waitingReply) {
+          const pending = waitingReply; waitingReply = undefined;
+          reply(pending.id, pending.turns); return;
+        }
+        waitingReply = undefined;
         buffered?.suspendForWaiting(); abort(); entry.pending = undefined;
         send({ response_type: "agent_interrupt", interrupt_id: (entry.interruptSequence = (entry.interruptSequence ?? 0) + 1),
           content: action.text, content_complete: true, ...(action.end ? { end_call: true } : {}) });
-        entry.engine.record(action.end ? "dev_waiting_expired" : "dev_waiting_probe");
+        entry.engine.record(action.end ? "dev_waiting_expired" : action.acknowledgement ?
+          "dev_waiting_acknowledged" : action.resume ? "dev_waiting_resumed" : "dev_waiting_probe");
       }, 250);
       entry.waitingTimer.unref();
     }
@@ -290,14 +298,33 @@ export class RetellEngineRegistry {
       if (last) entry.waiting?.observe(last.content, speaking, complete, `${users.length}:${last.content}`);
       refreshWaitingReport(entry);
       if (entry.waiting?.waiting) {
+        if (waitingReply) {
+          if (entry.waiting.awaitingPause) waitingReply.turns = turns;
+          else waitingReply = undefined;
+        }
         buffered?.suspendForWaiting(); abort();
         return true;
       }
+      waitingReply = undefined;
       return false;
     };
     const reply = (id: number, turns: SpokenTurn[], reminder = false) => {
+      if (rehearsalBindings.has(entry.id) && !turns.some(t => t.role === "user")) {
+        send({ response_type: "response", response_id: id, content: "", content_complete: true });
+        return;
+      }
       if (entry.noHumanEnded) return;
       if (entry.waiting?.waiting) {
+        const acknowledgement = !reminder && entry.waiting.takeAcknowledgement();
+        if (acknowledgement) {
+          waitingReply = undefined;
+          send({ response_type: "response", response_id: id, content: acknowledgement.text, content_complete: true });
+          entry.engine.record("dev_waiting_acknowledged"); refreshWaitingReport(entry);
+          return;
+        }
+        if (entry.waiting.awaitingPause) {
+          waitingReply = { id, turns }; return;
+        }
         send({ response_type: "response", response_id: id, content: "", content_complete: true });
         return;
       }
@@ -379,6 +406,10 @@ export class RetellEngineRegistry {
           frame.call?.call_type !== (this.options.phone ? "phone_call" : "web_call")) { ws.close(1008, "Registered call identity required"); return; }
         if (!entry.introduced) {
           entry.introduced = true;
+          if (rehearsalBindings.has(entry.id)) {
+            entry.engine.record("rehearsal_listen_first");
+            return;
+          }
           if (this.options.phone) {
             entry.lineGuard ??= new PhoneLineGuard(entry.engine.skipsVoicemail, reason => {
               if (entry.closed || entry.noHumanEnded) return;
@@ -484,9 +515,10 @@ async function checkEngine() {
 const speedVariants = new Map<string, SpeedVariant>();
 export const speedBufferModes = new Map<string, boolean>();
 export const retellEngineRegistry = new RetellEngineRegistry(undefined, {
-  createEngine: (owner, instruction, id, personality) => speedEngine(owner, instruction, speedVariants.get(id) ?? "A", personality),
-  bufferResponses: id => speedVariants.get(id) === "C" && speedBufferModes.get(id) !== false,
-  waitingRules: id => speedVariants.get(id) === "C",
+  createEngine: (owner, instruction, id, personality) => rehearsalBindings.get(id)?.create(owner, instruction) ??
+    speedEngine(owner, instruction, speedVariants.get(id) ?? "A", personality),
+  bufferResponses: id => rehearsalBindings.get(id)?.buffered ?? (speedVariants.get(id) === "C" && speedBufferModes.get(id) !== false),
+  waitingRules: id => rehearsalBindings.get(id)?.waiting ?? (speedVariants.get(id) === "C"),
 });
 export const retellEngineLab = speedLab({ registry: retellEngineRegistry,
   api: variant => new RetellEngineApi(engineCallbackBase, undefined, variant), check: checkEngine,

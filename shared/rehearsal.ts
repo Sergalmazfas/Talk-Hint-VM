@@ -1,0 +1,18 @@
+import type { CallPlan } from "./callPlan";
+export type RehearsalVersion = { id: string; label: string; source: string; hash: string;
+  available: boolean; reason?: string; productionVerified: boolean };
+export type RehearsalScene = { id: string; title: string; plan: CallPlan; hash: string };
+export type RehearsalReview = { status: "not_started" | "running" | "completed" | "failed" | "unknown";
+  leva?: unknown; toma?: unknown; error?: string; costMicroUsd?: number; usage?: unknown };
+export type RehearsalResult = { id: string; status: string; createdAt: string; endedAt?: string;
+  instruction: string; reason?: string; model: string; voice: string;
+  turns: Array<{ id: string; role: "guest" | "secretary"; text: string; atMs: number }>;
+  engine?: Record<string, any>;
+  rehearsal: { scene: RehearsalScene; version: RehearsalVersion; review: RehearsalReview;
+    audio: { status: "pending" | "ready" | "failed"; url?: string; reason?: string };
+    recordingConsent: true; codeVersion: string };
+};
+export type RehearsalSnapshot = { ready: boolean; reason?: string; csrf: string;
+  versions: RehearsalVersion[]; scenes: RehearsalScene[]; history: RehearsalResult[];
+  budget: { limitUsd: number; spentUsd: number; reservedUsd: number; remainingUsd: number } };
+export const REHEARSAL_API = "/api/admin/rehearsal";

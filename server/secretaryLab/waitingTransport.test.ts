@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RetellEngineRegistry } from "./retellEngine";
+import { rehearsalBindings } from "./rehearsalBinding";
 import { RetellSecretaryLab } from "./retell";
 import type { EngineRequest } from "../secretary/conversationEngine";
 
@@ -26,6 +27,42 @@ function fixture(options: { phone?: boolean; waitingRules?: () => boolean } = {}
   registry.attach(ws as any, `/${options.phone ? "retell-phone-engine" : "retell-engine-stream"}/${r.ticket}/call_1`);
   return { registry, ws, requests, report: r.engine as any };
 }
+it("rehearsal is listen-first over a WEB call; an empty opening cannot start voice/model", async () => {
+  vi.useFakeTimers();
+  vi.stubEnv("NODE_ENV", "development");
+  const { ws, requests } = fixture({ waitingRules: () => false }, false);
+  rehearsalBindings.set("session", { create: () => { throw Error("not used"); }, waiting: false, buffered: false });
+  try {
+    ws.frame({ interaction_type: "call_details", call: { call_id: "call_1", call_type: "web_call" } });
+    ws.frame({ interaction_type: "response_required", response_id: 1, transcript: [] });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(requests).toHaveLength(0); expect(ws.sent.filter(x => x.content)).toHaveLength(0);
+    ws.frame({ interaction_type: "response_required", response_id: 2, transcript: [{ role: "user", content: "Hello, truck service." }] });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requests).toHaveLength(1); expect(ws.sent.some(x => x.content === "The test answer.")).toBe(true);
+  } finally { rehearsalBindings.delete("session"); }
+});
+it("wire replay answers Кать at 1:26 and Здесь at 1:50 after separate waiting acknowledgements", async () => {
+  vi.useFakeTimers();
+  vi.stubEnv("NODE_ENV", "development");
+  const { ws, requests, registry } = fixture({}, false);
+  const transcript: any[] = [];
+  const turn = async (id: number, content: string) => {
+    transcript.push({ role: "user", content });
+    ws.frame({ interaction_type: "response_required", response_id: id, transcript: [...transcript] });
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  await vi.advanceTimersByTimeAsync(77_720);
+  await turn(1, "Секунду подожди, пожалуйста, я сейчас вернусь. Посмотрю на складе есть или нет, хорошо?");
+  registry.waitingPlaybackEnded("session");
+  await vi.advanceTimersByTimeAsync(8_970); await turn(2, "Кать, ты меня слышишь?");
+  expect(requests).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(11_940); await turn(3, "Да, подожди минуту, я сейчас на складе посмотрю, хорошо?");
+  registry.waitingPlaybackEnded("session");
+  await vi.advanceTimersByTimeAsync(12_230); await turn(4, "Здесь?");
+  expect(requests).toHaveLength(2);
+  expect(ws.sent.filter(x => x.content === "Конечно, жду.")).toHaveLength(2);
+});
 const speech = (s: string) => ({ role: "user", content: s });
 afterEach(() => { registries.splice(0).forEach(r => r.dispose()); vi.unstubAllEnvs(); vi.useRealTimers(); });
 describe("waiting gate on actual Custom LLM wire", () => {
@@ -37,7 +74,7 @@ describe("waiting gate on actual Custom LLM wire", () => {
     ws.frame({ interaction_type: "reminder_required", response_id: 2, transcript });
     await vi.advanceTimersByTimeAsync(59_999);
     expect(requests).toHaveLength(0);
-    expect(ws.sent.filter(f => f.content)).toHaveLength(0);
+    expect(ws.sent.filter(f => f.content).map(f => f.content)).toEqual(["Sure, take your time."]);
     registry.waitingAudio("session", false, false);
     await vi.advanceTimersByTimeAsync(501);
     expect(ws.sent.filter(f => f.content === "Still there?")).toHaveLength(1);
@@ -62,7 +99,7 @@ describe("waiting gate on actual Custom LLM wire", () => {
     ws.frame({ interaction_type: "response_required", response_id: 2,
       transcript: [speech("let me check the warehouse"), speech("Tell the colleague to bring a box")] });
     expect(requests).toHaveLength(0);
-    expect(ws.sent.some(f => f.content)).toBe(false);
+    expect(ws.sent.filter(f => f.content).map(f => f.content)).toEqual(["Sure, take your time."]);
     await vi.advanceTimersByTimeAsync(180_000);
     expect(ws.sent.filter(f => f.end_call)).toHaveLength(1);
     expect(ws.sent.at(-1).content).toBe("I'll let him know and call back later.");

@@ -3729,3 +3729,17 @@ mtime_ms = 1793845492710
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/06b8b3c8-8531-495a-a337-5771c56f2824/efbc6787-b84f-4fe1-a36d-c5792e8402a8"
 storage_version_token = "1793845500913665"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "mYyYJghpi3rjlx-CtL6Iv"
+uri = "file://generated-artifacts/rehearsal-review/Katya_Rehearsal_Dev_Clavdiy.zip"
+type = "unspecified"
+title = "ZIP Клавдию — Репетиция Кати"
+description = "Dev-код, diff, проверки четырёх шардов, ограничения и proposed-уроки. 3837 тестов прошли, 44 штатно пропущены. Без звонков и Publish."
+logical_id = "9e91fb58-eb8a-4b27-a9f8-fda0e14da42a"
+content_hash = "sha256:ee047465b6ff798e4a22a1384386b44f02122ba605936d97bb14535a1fc1e197"
+size = 180846
+mtime_ms = 1793851288129
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9e91fb58-eb8a-4b27-a9f8-fda0e14da42a/ea3494ea-e02c-48ed-b593-453676e54eb5"
+storage_version_token = "1793851315949534"
+content_type = "application/octet-stream"

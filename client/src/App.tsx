@@ -19,6 +19,7 @@ import ProjectModel from "@/pages/project-model";
 import CompanyPreview from "@/pages/company-preview";
 import TeamPage from "@/pages/team";
 import SecretaryLab from "@/pages/secretary-lab";
+import Rehearsal from "@/pages/rehearsal";
 import VoiceLab from "@/pages/voice-lab";
 import ProductCrewKey from "@/pages/product-crew-key";
 
@@ -107,6 +108,7 @@ function AdminRoutes() {
         {import.meta.env.DEV && <Route path="/company-preview" component={CompanyPreview} />}
         <Route path="/voice-lab" component={VoiceLab} />
         <Route path="/secretary-lab" component={SecretaryLab} />
+        {import.meta.env.DEV && <Route path="/rehearsal" component={Rehearsal} />}
         <Route component={NotFound} />
       </Switch>
     </AdminGate>
