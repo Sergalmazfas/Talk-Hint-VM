@@ -4471,3 +4471,17 @@ mtime_ms = 1793932028918
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6d54568a-4e00-445b-b4ad-5c7e8b4cea45/a6870aa2-c623-4299-93d1-53f1e5b8aaeb"
 storage_version_token = "1793932041017052"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "G8lFQ_J09rDnOP-QWizMo"
+uri = "file://generated-artifacts/chat-exact-reference/owner-chat-original-crop.png"
+type = "image"
+title = "Ваш исходный рисунок — экран чата"
+description = "Вырезан второй экран из вашего изображения с четырьмя экранами. Без перерисовки и изменения элементов."
+logical_id = "efe0ff81-a5d9-44bd-9958-16cef3a75ac6"
+content_hash = "sha256:836c928ed8d4cc158c958c332d16a6aa3a1be7b682f9df4f97ee9dac8e19aaa4"
+size = 221574
+mtime_ms = 1793933542042
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/efe0ff81-a5d9-44bd-9958-16cef3a75ac6/7e81cc3a-4ca6-44f8-99a9-b1031b3e3436"
+storage_version_token = "1793933573942607"
+content_type = "image/png"
