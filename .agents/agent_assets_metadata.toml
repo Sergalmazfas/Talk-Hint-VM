@@ -4023,3 +4023,73 @@ mtime_ms = 1793923534762
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a2dd6065-196f-4057-8ab9-bde78fa5f215/f709d889-833a-4f31-a6d5-a74d8268a623"
 storage_version_token = "1793923699001351"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "iXOmcraVKPbpx8MZ8Rot2"
+uri = "file://generated-artifacts/chat-1a-design/comparison.png"
+type = "image"
+title = "Сверка: UIKit → ваши макеты → предложение"
+description = "Действующее приложение сверено по исходникам. Справа — концепт, не скриншот iPhone."
+logical_id = "6ec54fce-3f20-4b0f-ba92-0d030ad255b8"
+content_hash = "sha256:1d8b5b1da38712d6be7c37edba855523a00cee43b34a2a57310b1db75eb90091"
+size = 394064
+mtime_ms = 1793924730482
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6ec54fce-3f20-4b0f-ba92-0d030ad255b8/8864b314-c581-49e0-b083-c7a7f1843846"
+storage_version_token = "1793924771392314"
+content_type = "image/png"
+
+[[outputs]]
+id = "VG7NygaIGizrUuvadM5sc"
+uri = "file://generated-artifacts/chat-1a-design/contact-sheet-core.png"
+type = "image"
+title = "Chat: пустой экран, диалог, меню и тема"
+description = "Статичные концепты для визуального согласования. Не HTML-демо и не проверенный iOS-клиент."
+logical_id = "8310311e-5d45-405e-96eb-e2e4d4c7c01e"
+content_hash = "sha256:3a3a8e2f0ee82047caaae4a2c4c635a593c6fe92b03a3c4fa940f3d09f0526cb"
+size = 120081
+mtime_ms = 1793924725942
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/8310311e-5d45-405e-96eb-e2e4d4c7c01e/ded50f40-85d0-4490-b10b-97fc97c021f8"
+storage_version_token = "1793924772128579"
+content_type = "image/png"
+
+[[outputs]]
+id = "eplu8bhEfXtFySBSjQugR"
+uri = "file://generated-artifacts/chat-1a-design/contact-sheet-states.png"
+type = "image"
+title = "Ввод: клавиатура, голос и вложения"
+description = "Примеры EN/ES/RU: запись → распознавание → редактирование; загрузка и ошибка файла. Концепты."
+logical_id = "127c69d9-2270-43bf-a149-8d2a15cd9f21"
+content_hash = "sha256:14664c23e73b0ce824ea0a2ac7d01836c21d60525eb9dd34c14a614db301d1dc"
+size = 139171
+mtime_ms = 1793924726138
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/127c69d9-2270-43bf-a149-8d2a15cd9f21/5f271420-8f73-4a39-939c-d0c79dcb0427"
+storage_version_token = "1793924772889821"
+content_type = "image/png"
+
+[[outputs]]
+id = "7gjKk5kBPcScwM_dFkHmK"
+uri = "file://generated-artifacts/chat-1a-design/TalkHint_Chat_1A_Design_Approval.zip"
+type = "unspecified"
+title = "Скачать ZIP: дизайн Chat 1A на согласование"
+description = "12 крупных концептов, 2 обзорных листа, сравнение, аудит отличий и четыре исходных макета владельца. 6,9 МБ. Без изменений приложения."
+logical_id = "cb0623fe-ca74-4fa9-9392-60ed95b5c41d"
+content_hash = "sha256:d70aa84c3421fb51462e8b9b8bd76e791f6f8cbf3bce42a5c6fe99e178ed7988"
+size = 6913634
+mtime_ms = 1793924763870
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/cb0623fe-ca74-4fa9-9392-60ed95b5c41d/040f4546-6acb-40bd-8ff1-9673f3d0efd6"
+storage_version_token = "1793924773994348"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "SvwbGslcsE6twkDHf4u6A"
+uri = "file://docs/chat-1a/DESIGN_AUDIT.md"
+type = "text"
+title = "Аудит отличий и вопросы владельцу"
+description = "Конкретные пути исходников, сравнение с макетами, ограничения без Xcode и три решения по дизайну."
+logical_id = "f3a58501-9efe-409c-b9f1-8af9e66da96a"
+content_hash = "sha256:167e040a32659c31b6c3d3a48b62dca5197f6d0102bf1dcc5c3a23933eeb3d51"
+size = 11145
+mtime_ms = 1793924499810
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f3a58501-9efe-409c-b9f1-8af9e66da96a/44ee2fb4-802e-42aa-a59d-2dbd2c7156bb"
+storage_version_token = "1793924774574736"
+content_type = "text/markdown"
