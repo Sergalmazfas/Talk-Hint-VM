@@ -3,6 +3,7 @@ configs:
   Debug: debug
   Release: release
   NativeValidation: debug
+  ChatPreview: debug
 options:
   bundleIdPrefix: app.talkhint
   deploymentTarget:
@@ -19,6 +20,8 @@ settings:
   configs:
     NativeValidation:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_NATIVE_VALIDATION"
+    ChatPreview:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_PREVIEW"
 packages:
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
@@ -57,6 +60,12 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TalkHint.app/TalkHint"
         BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
+  TalkHintChatPreview:
+    build:
+      targets:
+        TalkHint: all
+    run:
+      config: ChatPreview
   TalkHintValidation:
     build:
       targets:

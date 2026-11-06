@@ -5,6 +5,49 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatApprovedScreenTests": (
+        "testApprovedTypographyIsOptInAndReadable",
+        "testFullscreenHasBackButNoDrawerOrTabs",
+        "testSeparateOrbAndLargeControlsFitSmallScreen",
+        "testNativeLightAndDarkScreenshots",
+        "testRecordingAndRecognitionUseExistingBarWithoutAudio",
+        "testKeyboardEditingScreenshotAndDraftRemainEditable",
+    ),
+    "ChatNavigationTests": (
+        "testEntryInterceptsWithoutChangingPhoneTab",
+        "testFullscreenChatIsRetainedAcrossExitAndReopen",
+        "testBackAndDrawerUseDifferentActions",
+        "testDrawerOpensExistingSettingsAndNativeBackReturns",
+        "testDraftAndReadingPositionSurviveExitAndReopen",
+        "testExternalTabSelectionDoesNotDismissCallOverlay",
+        "testCompactDrawerScrollsAndFutureDestinationsAreDisabled",
+    ),
+    "ChatDictationTests": (
+        "testPermissionAndRecordingAreSingleFlight",
+        "testDeniedOrCancelledPermissionCannotStartLate",
+        "testStopAndRetryCannotDuplicateActiveRecognition",
+        "testRecognitionOnlyProducesEditableTextNotSend",
+        "testExistingDraftIsNotOverwritten",
+        "testSelectedTextAndUTF16AreHandled",
+        "testSilencePreservesCaptureAndRequiresExplicitRetry",
+        "testErrorDoesNotAutomaticallyRetry",
+        "testCancelMakesLateNetworkResultInert",
+        "testDifferentOwnerConversationOrDraftRevisionCannotReceiveResult",
+        "testDraftAndAttachmentRestoreIsOwnerAndOriginScoped",
+        "testBarCancelStopAndRetryAreSeparateWithoutAudio",
+        "testOrbStaysDisabledAndComposerHasSeparateMicrophone",
+    ),
+    "ChatAPITests": (
+        "testSendUsesAuthenticatedContractAndStableClientRequestId",
+        "testAttachmentInfoEnvelopeMatchesServerShape",
+        "testOwnerMismatchStopsBeforeTransport",
+    ),
+    "ChatOutboxTests": (
+        "testSessionScopeNeverAuthorizesAnotherOrMissingOwner",
+        "testOutboxIsOwnerAndOriginScopedAndKeepsIdempotencyKey",
+        "testMergeUpdatesExistingAndOrdersBySequence",
+        "testMergeReconcilesCanonicalLowercaseClientRequestId",
+    ),
     "HintDtmfTests": (
         "testAllTwelveKeysDispatchExactlyOnce",
         "testInvalidAndDisconnectedDigitsNeverDispatch",
