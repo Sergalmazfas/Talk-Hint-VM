@@ -37,11 +37,30 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var pendingCreationPreservesDraft = false
     private var hasMoreMessages = false
     private var isLoadingOlder = false
-    private var drafts: [String: String] = [:]
     private var attachmentRetry: (name: String, mime: String, data: Data, requestId: UUID)?
     private var isUploadingAttachment = false
     private var previewURL: URL?
     private var recordingLimitTask: Task<Void, Never>?
+    private var recognitionTask: Task<Void, Never>?
+    private var meterTimer: Timer?
+    private var dictation = ChatDictationState()
+    private let dictationBar = ChatDictationBar()
+    private let inputControls = UIStackView()
+    private let orbButton = UIButton(type: .system)
+    private var composerHeight: NSLayoutConstraint?
+    private var draftRevision = 0
+    private var hasRestoredComposer = false
+    private var pendingDictationAudio: Data?
+    private var heardAudio = false
+    private var dictationStartedAt: Date?
+    private var observers: [NSObjectProtocol] = []
+
+    private var draftText: String {
+        composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : (composer.text ?? "")
+    }
+    private var dictationContext: ChatDictationState.Context {
+        .init(ownerId: sessionScope.ownerId ?? "", conversationId: currentConversation?.id, draftRevision: draftRevision)
+    }
 
     override init(nibName nibNameOrNil: String? = nil, bundle nibBundleOrNil: Bundle? = nil) {
         let owner = SessionStore.shared.userId
@@ -68,10 +87,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 0.985, green: 0.988, blue: 0.982, alpha: 1)
+        view.backgroundColor = .systemBackground
         navigationItem.title = nil
         build()
         configureOwner()
+        for name in [UIApplication.didEnterBackgroundNotification, AVAudioSession.interruptionNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in
+                    self?.cancelDictation()
+                    self?.persistDraft()
+                }
+            })
+        }
     }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -81,7 +108,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         pollTask?.cancel()
-        stopRecording(discard: true)
+        cancelDictation()
+        persistDraft()
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateComposerControls()
+    }
+    deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        meterTimer?.invalidate()
+        recognitionTask?.cancel()
+        recordingLimitTask?.cancel()
     }
     private func configureOwner() {
         guard let owner = sessionScope.ownerId else { return }
@@ -94,7 +132,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         topTitle.text = NSLocalizedString("tab.chat", comment: "")
         topTitle.font = .preferredFont(forTextStyle: .headline)
         topTitle.adjustsFontForContentSizeCategory = true
-        topTitle.textColor = UIColor(red: 0.12, green: 0.19, blue: 0.15, alpha: 1)
+        topTitle.textColor = .label
         let headerStack = UIStackView(arrangedSubviews: [menu, topTitle, new])
         headerStack.axis = .horizontal; headerStack.alignment = .center
         headerStack.distribution = .equalSpacing
@@ -103,7 +141,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         view.addSubview(header)
         header.translatesAutoresizingMaskIntoConstraints = false
 
-        messagesStack.axis = .vertical; messagesStack.spacing = 18
+        messagesStack.axis = .vertical; messagesStack.spacing = 12
         messagesStack.alignment = .fill
         scroll.delegate = self
         scroll.keyboardDismissMode = .interactive
@@ -111,21 +149,21 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         view.addSubview(scroll)
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
         statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = UIColor(red: 0.42, green: 0.46, blue: 0.43, alpha: 1)
+        statusLabel.textColor = .secondaryLabel
         statusLabel.numberOfLines = 0
         statusLabel.textAlignment = .center
         retryButton.setTitle(NSLocalizedString("chat.retry", comment: ""), for: .normal)
         retryButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
         retryButton.isHidden = true
         retryButton.addTarget(self, action: #selector(retryLoad), for: .touchUpInside)
-        let statusRow = UIStackView(arrangedSubviews: [statusLabel, retryButton])
+        let statusRow = UIStackView(arrangedSubviews: [statusLabel, removeAttachmentButton, retryButton])
         statusRow.axis = .horizontal; statusRow.alignment = .center; statusRow.spacing = 8
         view.addSubview(statusRow); statusRow.translatesAutoresizingMaskIntoConstraints = false
 
         let inputCard = UIView()
-        inputCard.backgroundColor = .white
+        inputCard.backgroundColor = .secondarySystemBackground
         inputCard.layer.cornerRadius = 22
-        inputCard.layer.borderColor = UIColor(red: 0.87, green: 0.9, blue: 0.86, alpha: 1).cgColor
+        inputCard.layer.borderColor = UIColor.separator.cgColor
         inputCard.layer.borderWidth = 1
         composer.font = .preferredFont(forTextStyle: .body)
         composer.adjustsFontForContentSizeCategory = true
@@ -134,10 +172,15 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composer.backgroundColor = .clear
         composer.text = NSLocalizedString("chat.message.placeholder", comment: "")
         composer.textColor = UIColor.secondaryLabel
-        composer.textContainerInset = UIEdgeInsets(top: 13, left: 12, bottom: 8, right: 12)
-        inputCard.addSubview(composer); composer.translatesAutoresizingMaskIntoConstraints = false
-        fileButton = iconButton("paperclip", title: NSLocalizedString("chat.attach", comment: ""), action: #selector(pickFile))
-        voiceButton = iconButton("waveform", title: NSLocalizedString("chat.voice", comment: ""), action: #selector(toggleRecording))
+        composer.textContainerInset = UIEdgeInsets(top: 11, left: 2, bottom: 10, right: 2)
+        composer.translatesAutoresizingMaskIntoConstraints = false
+        fileButton = iconButton("plus", title: NSLocalizedString("chat.attach", comment: ""), action: #selector(pickFile))
+        voiceButton = iconButton("mic", title: NSLocalizedString("chat.voice", comment: ""), action: #selector(toggleRecording))
+        for button in [fileButton, voiceButton] {
+            button.setTitle(nil, for: .normal)
+            button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        }
         removeAttachmentButton.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
         removeAttachmentButton.tintColor = .secondaryLabel
         removeAttachmentButton.accessibilityLabel = NSLocalizedString("chat.removeAttachment", comment: "")
@@ -145,11 +188,43 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         removeAttachmentButton.addTarget(self, action: #selector(removeLastAttachment), for: .touchUpInside)
         sendButton.setImage(UIImage(systemName: "arrow.up"), for: .normal)
         sendButton.tintColor = .white; sendButton.backgroundColor = UIColor(red: 0.23, green: 0.55, blue: 0.38, alpha: 1)
-        sendButton.layer.cornerRadius = 20; sendButton.addTarget(self, action: #selector(send), for: .touchUpInside)
+        sendButton.layer.cornerRadius = 22; sendButton.addTarget(self, action: #selector(send), for: .touchUpInside)
         sendButton.accessibilityLabel = NSLocalizedString("chat.send", comment: "")
-        let controls = UIStackView(arrangedSubviews: [fileButton, voiceButton, removeAttachmentButton, UIView(), sendButton])
-        controls.axis = .horizontal; controls.alignment = .center; controls.spacing = 8
-        inputCard.addSubview(controls); controls.translatesAutoresizingMaskIntoConstraints = false
+        orbButton.setImage(UIImage(systemName: "waveform"), for: .normal)
+        orbButton.backgroundColor = .black
+        orbButton.tintColor = .white
+        orbButton.layer.cornerRadius = 22
+        orbButton.layer.borderWidth = 1
+        orbButton.layer.borderColor = UIColor.gray.cgColor
+        orbButton.isEnabled = false
+        orbButton.accessibilityLabel = NSLocalizedString("chat.orb.unavailable", comment: "")
+        orbButton.accessibilityHint = NSLocalizedString("chat.orb.hint", comment: "")
+        orbButton.setImage(UIImage(systemName: "waveform"), for: .disabled)
+        let orbCaption = UILabel()
+        orbCaption.text = NSLocalizedString("chat.orb.unavailable", comment: "")
+        orbCaption.font = .preferredFont(forTextStyle: .caption2)
+        orbCaption.adjustsFontForContentSizeCategory = true
+        orbCaption.textColor = .secondaryLabel
+        orbCaption.numberOfLines = 0
+        orbCaption.textAlignment = .center
+        let orb = UIStackView(arrangedSubviews: [orbButton, orbCaption])
+        orb.axis = .vertical; orb.alignment = .center; orb.spacing = 2
+        orb.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        orbButton.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        orbButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        let composerItems: [UIView] = [fileButton, composer, voiceButton, sendButton, orb]
+        composerItems.forEach { inputControls.addArrangedSubview($0) }
+        inputControls.axis = .horizontal; inputControls.alignment = .center; inputControls.spacing = 2
+        composer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let inputStack = UIStackView(arrangedSubviews: [inputControls, dictationBar])
+        inputStack.axis = .vertical
+        inputCard.addSubview(inputStack); inputStack.translatesAutoresizingMaskIntoConstraints = false
+        dictationBar.isHidden = true
+        dictationBar.onCancel = { [weak self] in self?.cancelDictation() }
+        dictationBar.onStop = { [weak self] in self?.stopRecording(discard: false) }
+        dictationBar.onRetry = { [weak self] in self?.transcribeDictation() }
+        composerHeight = composer.heightAnchor.constraint(equalToConstant: 44)
+        composerHeight?.isActive = true
         view.addSubview(inputCard); inputCard.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
@@ -170,21 +245,17 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             inputCard.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
             inputCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
             inputCard.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
-            composer.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 2),
-            composer.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 4),
-            composer.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -4),
-            composer.heightAnchor.constraint(greaterThanOrEqualToConstant: 45),
-            composer.heightAnchor.constraint(lessThanOrEqualToConstant: 120),
-            controls.topAnchor.constraint(equalTo: composer.bottomAnchor, constant: 3),
-            controls.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 12),
-            controls.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -12),
-            controls.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -9),
-            sendButton.widthAnchor.constraint(equalToConstant: 40), sendButton.heightAnchor.constraint(equalToConstant: 40),
+            inputStack.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 6),
+            inputStack.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 6),
+            inputStack.trailingAnchor.constraint(equalTo: inputCard.trailingAnchor, constant: -6),
+            inputStack.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -6),
+            sendButton.widthAnchor.constraint(equalToConstant: 44), sendButton.heightAnchor.constraint(equalToConstant: 44),
             messagesStack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
             messagesStack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
             messagesStack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
         ])
         statusLabel.text = NSLocalizedString("chat.disclaimer", comment: "")
+        updateComposerControls()
         renderMessages()
     }
     private func iconButton(_ symbol: String, title: String, action: Selector) -> UIButton {
@@ -207,6 +278,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             guard isCurrentOwner else { return }
             fileButton.isEnabled = (capabilities?.attachments.available ?? false) && attachments.count < 3
             voiceButton.isEnabled = capabilities?.voice.available ?? true
+            updateComposerControls()
             conversations = try await recent
             guard isCurrentOwner else { return }
             if let selected = outbox?.selectedConversationId,
@@ -225,13 +297,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         hasMoreMessages = false
         renderMessages()
         topTitle.text = NSLocalizedString("chat.title", comment: "")
+        restoreDraft()
     }
     @objc private func newChat() {
         guard isCurrentOwner else { return }
+        cancelDictation()
+        persistDraft()
         createNewChat(preservingDraft: false)
     }
     private func createNewChat(preservingDraft: Bool) {
         let draft = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text
+        let draftAttachments = attachments
+        let originDraftKey = currentConversation?.id ?? "_new"
         guard let outbox, !isCreatingConversation, !isUploadingAttachment else { return }
         isCreatingConversation = true
         pendingCreationPreservesDraft = preservingDraft
@@ -246,9 +323,17 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 retryButton.isHidden = true
                 if !conversations.contains(where: { $0.id == conversation.id }) { conversations.insert(conversation, at: 0) }
                 await open(conversation)
-                if isCurrentOwner, preservingDraft, !draft.isEmpty {
+                if isCurrentOwner, preservingDraft, currentConversation?.id == conversation.id {
                     composer.text = draft
                     composer.textColor = .label
+                    attachments = draftAttachments
+                    draftRevision += 1
+                    renderAttachmentStatus()
+                    if originDraftKey != conversation.id {
+                        var saved = outbox.composerDrafts
+                        saved.removeValue(forKey: originDraftKey)
+                        outbox.composerDrafts = saved
+                    }
                 }
             } catch {
                 if isCurrentOwner {
@@ -270,22 +355,15 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             return
         }
         if currentConversation?.id != conversation.id {
+            cancelDictation()
+            persistDraft()
             attachmentRetry = nil
             fileButton.isEnabled = (capabilities?.attachments.available ?? false) && attachments.count < 3
             retryButton.isHidden = true
         }
-        if let old = currentConversation {
-            let oldDraft = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text
-            drafts[old.id] = oldDraft
-        }
-        if currentConversation?.id != conversation.id {
-            let restoredDraft = drafts[conversation.id] ?? ""
-            if currentConversation != nil { attachments = [] }
-            composer.text = restoredDraft.isEmpty ? NSLocalizedString("chat.message.placeholder", comment: "") : restoredDraft
-            composer.textColor = restoredDraft.isEmpty ? .secondaryLabel : .label
-            renderAttachmentStatus()
-        }
+        let changedConversation = currentConversation?.id != conversation.id
         currentConversation = conversation
+        if changedConversation { draftRevision += 1; restoreDraft() }
         outbox?.selectedConversationId = conversation.id
         topTitle.text = displayTitle(conversation)
         do {
@@ -305,7 +383,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     @objc private func toggleDrawer() {
         if let drawer { UIView.animate(withDuration: 0.22, animations: { drawer.transform = CGAffineTransform(translationX: -320, y: 0); drawer.alpha = 0 }) { _ in drawer.removeFromSuperview(); self.drawer = nil }; return }
-        let panel = UIView(); panel.backgroundColor = UIColor(red: 0.98, green: 0.98, blue: 0.96, alpha: 0.99)
+        let panel = UIView(); panel.backgroundColor = .secondarySystemBackground
         panel.layer.cornerRadius = 20
         let list = UIStackView(); list.axis = .vertical; list.spacing = 6
         let title = UILabel(); title.text = NSLocalizedString("chat.recent", comment: ""); title.font = .preferredFont(forTextStyle: .title2)
@@ -376,14 +454,19 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         if messages.isEmpty {
             let welcome = UILabel(); welcome.text = NSLocalizedString("chat.welcome", comment: "")
             welcome.font = .preferredFont(forTextStyle: .title2); welcome.numberOfLines = 0; welcome.textAlignment = .center
-            welcome.textColor = UIColor(red: 0.28, green: 0.35, blue: 0.3, alpha: 1)
+            welcome.textColor = .label
             messagesStack.addArrangedSubview(UIView()); messagesStack.addArrangedSubview(welcome); return
         }
         for message in messages {
             let bubble = UIView()
             bubble.layer.cornerRadius = 18; bubble.layer.masksToBounds = true
             let isUser = message.role == "user"
-            bubble.backgroundColor = isUser ? UIColor(red: 0.88, green: 0.94, blue: 0.88, alpha: 1) : UIColor(red: 0.94, green: 0.92, blue: 0.98, alpha: 1)
+            bubble.backgroundColor = UIColor { traits in
+                if traits.userInterfaceStyle == .dark {
+                    return isUser ? UIColor(red: 0.12, green: 0.25, blue: 0.18, alpha: 1) : UIColor(red: 0.23, green: 0.19, blue: 0.32, alpha: 1)
+                }
+                return isUser ? UIColor(red: 0.88, green: 0.94, blue: 0.88, alpha: 1) : UIColor(red: 0.94, green: 0.92, blue: 0.98, alpha: 1)
+            }
             let content = UIStackView()
             content.axis = .vertical; content.spacing = 7
             content.translatesAutoresizingMaskIntoConstraints = false
@@ -476,7 +559,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         }
     }
     @objc private func send() {
-        guard isCurrentOwner else { return }
+        guard isCurrentOwner, !dictation.isBusy else { return }
         let text = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!text.isEmpty || !attachments.isEmpty), !isSending,
               !isUploadingAttachment, attachmentRetry == nil else { return }
@@ -490,7 +573,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composer.text = ""; composer.textColor = .label
         attachments.forEach { attachmentCache[$0.id] = $0 }
         attachments = []
-        drafts[conversation.id] = ""
+        draftRevision += 1
+        persistDraft()
         renderAttachmentStatus()
         Task {
             do {
@@ -518,6 +602,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 }
             }
             isSending = false
+            updateComposerControls()
         }
     }
     private func recoverOutbox() async {
@@ -546,12 +631,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         renderMessages()
     }
     private func retrySend(_ id: UUID) {
-        guard !isSending, let outbox, let item = outbox.pendingSends.first(where: { $0.id == id }) else { return }
+        guard !dictation.isBusy, !isSending, let outbox, let item = outbox.pendingSends.first(where: { $0.id == id }) else { return }
         guard currentConversation?.id == item.conversationId else { return }
         isSending = true
         outbox.setState(.sending, for: id)
         Task {
-            defer { isSending = false }
+            defer { isSending = false; updateComposerControls() }
             do {
                 let result = try await api.sendChatMessage(conversationId: item.conversationId, requestId: item.id,
                     text: item.text, attachmentIds: item.attachmentIds, language: item.language)
@@ -591,11 +676,17 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     func textViewDidBeginEditing(_ textView: UITextView) {
         if textView.text == NSLocalizedString("chat.message.placeholder", comment: "") { textView.text = ""; textView.textColor = .label }
     }
+    func textViewDidChange(_ textView: UITextView) {
+        hasRestoredComposer = true
+        draftRevision += 1
+        persistDraft()
+        updateComposerControls()
+    }
     func textViewDidEndEditing(_ textView: UITextView) {
         if textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { textView.text = NSLocalizedString("chat.message.placeholder", comment: ""); textView.textColor = .secondaryLabel }
     }
     @objc private func pickFile() {
-        guard isCurrentOwner else { return }
+        guard isCurrentOwner, !dictation.isBusy else { return }
         guard attachments.count < 3 else {
             statusLabel.text = NSLocalizedString("chat.file.limit", comment: "")
             return
@@ -605,9 +696,22 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             uploadAttachment(name: pending.name, mime: pending.mime, data: pending.data, requestId: pending.requestId)
             return
         }
-        let types: [UTType] = [.plainText, .png, .jpeg, .pdf]
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
-        picker.delegate = self; present(picker, animated: true)
+        let menu = UIAlertController(title: NSLocalizedString("chat.attach", comment: ""), message: NSLocalizedString("chat.attach.sourcesNote", comment: ""), preferredStyle: .actionSheet)
+        for key in ["chat.attach.camera", "chat.attach.photos"] {
+            let action = UIAlertAction(title: NSLocalizedString(key, comment: "") + " — " + NSLocalizedString("chat.attach.notAvailable", comment: ""), style: .default, handler: nil)
+            action.isEnabled = false
+            menu.addAction(action)
+        }
+        menu.addAction(UIAlertAction(title: NSLocalizedString("chat.attach.files", comment: ""), style: .default) { [weak self] _ in
+            guard let self, self.isCurrentOwner, !self.dictation.isBusy else { return }
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.plainText, .png, .jpeg, .pdf], asCopy: true)
+            picker.delegate = self
+            self.present(picker, animated: true)
+        })
+        menu.addAction(UIAlertAction(title: NSLocalizedString("chat.dictation.cancel", comment: ""), style: .cancel))
+        menu.popoverPresentationController?.sourceView = fileButton
+        menu.popoverPresentationController?.sourceRect = fileButton.bounds
+        present(menu, animated: true)
     }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard isCurrentOwner else { return }
@@ -700,6 +804,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         statusLabel.text = attachments.isEmpty
             ? NSLocalizedString("chat.disclaimer", comment: "")
             : attachments.map { "\($0.name) · " + NSLocalizedString("chat.file.ready", comment: "") }.joined(separator: "   ")
+        persistDraft()
+        updateComposerControls()
     }
     private func loadAttachmentMetadata(in messages: [ChatMessage], conversationId: String) {
         let ids = Set(messages.flatMap(\.attachmentIds)).filter { attachmentCache[$0] == nil }
@@ -766,8 +872,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         renderAttachmentStatus()
     }
     @objc private func toggleRecording() {
-        guard isCurrentOwner else { return }
-        if recorder?.isRecording == true { stopRecording(discard: false); return }
+        guard isCurrentOwner, !dictation.isBusy, !isSending, !isCreatingConversation, !isUploadingAttachment,
+              capabilities?.voice.available != false else { return }
         let audioSession = AVAudioSession.sharedInstance()
         guard !CallManager.shared.hasPhoneAudioSession,
               !audioSession.isOtherAudioPlaying,
@@ -775,14 +881,36 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             statusLabel.text = NSLocalizedString("chat.voice.call_busy", comment: "")
             return
         }
+        let text = draftText
+        let selection = text.isEmpty ? NSRange(location: 0, length: 0) : composer.selectedRange
+        guard let id = dictation.begin(context: dictationContext, text: text, selection: selection) else { return }
+        persistDraft()
+        composer.resignFirstResponder()
+        updateDictationUI()
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] allowed in
-            DispatchQueue.main.async { guard let self else { return }; if allowed { self.startRecording() } else { self.statusLabel.text = NSLocalizedString("chat.voice.permission", comment: "") } }
+            DispatchQueue.main.async {
+                guard let self, self.isCurrentOwner, self.viewIfLoaded?.window != nil,
+                      self.dictation.capture?.context == self.dictationContext,
+                      self.dictation.capture?.id == id else { return }
+                if allowed, self.dictation.allow(id) {
+                    self.startRecording()
+                } else {
+                    self.cancelDictation()
+                    let alert = UIAlertController(title: NSLocalizedString("chat.voice.permission", comment: ""), message: nil, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: NSLocalizedString("chat.dictation.settings", comment: ""), style: .default) { _ in
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    })
+                    alert.addAction(UIAlertAction(title: NSLocalizedString("chat.dictation.cancel", comment: ""), style: .cancel))
+                    self.present(alert, animated: true)
+                }
+            }
         }
     }
     private func startRecording() {
         let audioSession = AVAudioSession.sharedInstance()
         guard isCurrentOwner, !CallManager.shared.hasPhoneAudioSession,
               !audioSession.isOtherAudioPlaying, !audioSession.secondaryAudioShouldBeSilencedHint else {
+            cancelDictation()
             statusLabel.text = NSLocalizedString("chat.voice.call_busy", comment: "")
             return
         }
@@ -794,12 +922,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             previousAudioOptions = session.categoryOptions
             try session.setCategory(.record, mode: .default)
             try session.setActive(true)
+            recordingURL = url
             recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue])
+            recorder?.isMeteringEnabled = true
             guard recorder?.record() == true else { throw APIError.decoding }
-            recordingURL = url; voiceButton.tintColor = .systemRed
-            voiceButton.setImage(UIImage(systemName: "stop.fill"), for: .normal)
-            voiceButton.accessibilityLabel = NSLocalizedString("chat.voice.stop", comment: "")
+            heardAudio = false
+            dictationStartedAt = Date()
+            meterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.sampleDictationLevel() }
+            }
+            if let meterTimer { RunLoop.main.add(meterTimer, forMode: .common) }
             statusLabel.text = NSLocalizedString("chat.voice.recording", comment: "")
+            updateDictationUI()
             recordingLimitTask?.cancel()
             recordingLimitTask = Task { [weak self] in
                 for _ in 0..<120 {
@@ -817,34 +951,134 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 self.statusLabel.text = NSLocalizedString("chat.voice.limit", comment: "")
             }
         } catch {
+            cancelDictation()
             statusLabel.text = NSLocalizedString("chat.voice.error", comment: "")
-            recorder?.stop()
-            recorder = nil
-            recordingURL = nil
-            restoreAudioSession()
         }
     }
     private func stopRecording(discard: Bool) {
+        if discard { cancelDictation(); return }
         guard let recorder else { return }
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
+        meterTimer?.invalidate(); meterTimer = nil
         recorder.stop(); self.recorder = nil
-        voiceButton.tintColor = UIColor(red: 0.2, green: 0.36, blue: 0.27, alpha: 1)
-        voiceButton.setImage(UIImage(systemName: "waveform"), for: .normal)
-        voiceButton.accessibilityLabel = NSLocalizedString("chat.voice", comment: "")
         let url = recordingURL; recordingURL = nil
         restoreAudioSession()
-        guard !discard, let url, let data = try? Data(contentsOf: url) else { return }
-        Task {
+        defer { if let url { try? FileManager.default.removeItem(at: url) } }
+        guard heardAudio else {
+            cancelDictation()
+            statusLabel.text = NSLocalizedString("chat.dictation.noSpeech", comment: "")
+            return
+        }
+        guard let url, let data = try? Data(contentsOf: url), !data.isEmpty else {
+            cancelDictation()
+            statusLabel.text = NSLocalizedString("chat.voice.error", comment: "")
+            return
+        }
+        pendingDictationAudio = data
+        transcribeDictation()
+    }
+    private func sampleDictationLevel() {
+        guard let recorder, recorder.isRecording else { return }
+        guard isCurrentOwner, !CallManager.shared.hasPhoneAudioSession else {
+            cancelDictation()
+            statusLabel.text = NSLocalizedString("chat.voice.call_busy", comment: "")
+            return
+        }
+        recorder.updateMeters()
+        let db = recorder.averagePower(forChannel: 0)
+        if db > -60 { heardAudio = true }
+        dictationBar.update(level: min(1, max(0, (db + 60) / 60)))
+        dictationBar.configure(mode: .recording, elapsed: Date().timeIntervalSince(dictationStartedAt ?? Date()))
+    }
+    private func transcribeDictation() {
+        guard isCurrentOwner, let data = pendingDictationAudio,
+              dictation.capture?.context == dictationContext,
+              let attempt = dictation.recognize() else { return }
+        recognitionTask?.cancel()
+        updateDictationUI()
+        statusLabel.text = NSLocalizedString("chat.dictation.recognizing", comment: "")
+        recognitionTask = Task { [weak self] in
+            guard let self else { return }
             do {
+                try Task.checkCancellation()
                 let transcript = try await api.prepareTranscribe(audio: data, mimeType: "audio/m4a")
-                guard isCurrentOwner else { return }
-                composer.text = transcript; composer.textColor = .label; composer.becomeFirstResponder()
-            } catch { if isCurrentOwner { statusLabel.text = NSLocalizedString("chat.voice.error", comment: "") } }
-            try? FileManager.default.removeItem(at: url)
+                try Task.checkCancellation()
+                guard isCurrentOwner, dictation.accepts(attempt, context: dictationContext) else { return }
+                guard let result = dictation.finish(attempt, context: dictationContext, transcript: transcript) else {
+                    cancelDictation()
+                    statusLabel.text = NSLocalizedString("chat.dictation.noSpeech", comment: "")
+                    return
+                }
+                pendingDictationAudio = nil
+                composer.text = result.text
+                composer.textColor = .label
+                composer.selectedRange = NSRange(location: result.caret, length: 0)
+                draftRevision += 1
+                persistDraft()
+                updateDictationUI()
+                statusLabel.text = NSLocalizedString("chat.dictation.review", comment: "")
+                composer.becomeFirstResponder()
+            } catch {
+                guard !Task.isCancelled, isCurrentOwner, dictation.accepts(attempt, context: dictationContext) else { return }
+                dictation.fail(attempt)
+                updateDictationUI()
+                statusLabel.text = NSLocalizedString("chat.voice.error", comment: "")
+            }
         }
     }
+    private func cancelDictation() {
+        recognitionTask?.cancel(); recognitionTask = nil
+        recordingLimitTask?.cancel(); recordingLimitTask = nil
+        meterTimer?.invalidate(); meterTimer = nil
+        recorder?.stop(); recorder = nil
+        if let recordingURL { try? FileManager.default.removeItem(at: recordingURL) }
+        recordingURL = nil
+        pendingDictationAudio = nil
+        dictationStartedAt = nil
+        dictation.cancel()
+        restoreAudioSession()
+        updateDictationUI()
+        if isViewLoaded { renderAttachmentStatus() }
+    }
+    private func updateDictationUI() {
+        inputControls.isHidden = dictation.isBusy
+        dictationBar.isHidden = !dictation.isBusy
+        switch dictation.phase {
+        case .permission: dictationBar.configure(mode: .permission)
+        case .recording: dictationBar.configure(mode: .recording, elapsed: Date().timeIntervalSince(dictationStartedAt ?? Date()))
+        case .failed: dictationBar.configure(mode: .failed)
+        default: dictationBar.configure(mode: .recognizing)
+        }
+        updateComposerControls()
+    }
+    private func updateComposerControls() {
+        sendButton.isHidden = draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty
+        sendButton.isEnabled = isCurrentOwner && !dictation.isBusy && !isSending && !isUploadingAttachment && attachmentRetry == nil
+        voiceButton.isEnabled = isCurrentOwner && !dictation.isBusy && !isSending && !isUploadingAttachment && capabilities?.voice.available != false
+        if composer.bounds.width > 0 {
+            let height = min(120, max(44, composer.sizeThatFits(CGSize(width: composer.bounds.width, height: .greatestFiniteMagnitude)).height))
+            if abs((composerHeight?.constant ?? 0) - height) > 0.5 { composerHeight?.constant = height }
+        }
+    }
+    private func persistDraft() {
+        guard hasRestoredComposer, isCurrentOwner, let outbox else { return }
+        var saved = outbox.composerDrafts
+        saved[currentConversation?.id ?? "_new"] = ChatComposerDraft(text: draftText, attachments: attachments)
+        outbox.composerDrafts = saved
+    }
+    private func restoreDraft() {
+        let saved = outbox?.composerDrafts[currentConversation?.id ?? "_new"]
+        composer.text = saved?.text.isEmpty == false ? saved?.text : NSLocalizedString("chat.message.placeholder", comment: "")
+        composer.textColor = saved?.text.isEmpty == false ? .label : .secondaryLabel
+        attachments = saved?.attachments ?? []
+        hasRestoredComposer = true
+        for attachment in attachments { attachmentCache[attachment.id] = attachment }
+        renderAttachmentStatus()
+    }
     private func restoreAudioSession() {
+        // Never deactivate another feature's audio when no recording was begun.
+        guard previousAudioCategory != nil else { return }
         let session = AVAudioSession.sharedInstance()
         if !CallManager.shared.hasPhoneAudioSession {
             try? session.setActive(false, options: .notifyOthersOnDeactivation)

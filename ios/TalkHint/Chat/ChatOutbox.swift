@@ -18,6 +18,11 @@ struct ChatPendingSend: Codable, Equatable, Identifiable {
     enum State: String, Codable { case pending, sending, uncertain, failed }
 }
 
+struct ChatComposerDraft: Codable, Equatable {
+    var text: String
+    var attachments: [ChatAttachment]
+}
+
 /// Persisted Chat state is namespaced by owner and API origin. No credentials
 /// are stored here. Pending items remain isolated if the owner signs out.
 final class ChatOutbox {
@@ -32,6 +37,17 @@ final class ChatOutbox {
     private var sendsKey: String { prefix + "outbox" }
     private var selectionKey: String { prefix + "selected" }
     private var conversationRequestKey: String { prefix + "conversation-request" }
+    private var draftsKey: String { prefix + "drafts" }
+    var composerDrafts: [String: ChatComposerDraft] {
+        get {
+            guard let data = defaults.data(forKey: draftsKey) else { return [:] }
+            return (try? JSONDecoder().decode([String: ChatComposerDraft].self, from: data)) ?? [:]
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: draftsKey)
+        }
+    }
     var selectedConversationId: String? {
         get { defaults.string(forKey: selectionKey) }
         set { if let newValue { defaults.set(newValue, forKey: selectionKey) } else { defaults.removeObject(forKey: selectionKey) } }
@@ -71,6 +87,7 @@ final class ChatOutbox {
         defaults.removeObject(forKey: sendsKey)
         defaults.removeObject(forKey: selectionKey)
         defaults.removeObject(forKey: conversationRequestKey)
+        defaults.removeObject(forKey: draftsKey)
     }
 
     /// Stable merge by server message id and sequence. Polls cannot duplicate rows.

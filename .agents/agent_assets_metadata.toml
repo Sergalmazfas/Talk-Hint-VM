@@ -4331,3 +4331,73 @@ mtime_ms = 1793928148875
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4783c9f7-9c69-47c3-b182-283acebbb423/a9f2eae2-54a1-411e-a049-297753349833"
 storage_version_token = "1793928783004563"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "8EIGer486Bq5LApBr39f6"
+uri = "file://generated-artifacts/chat-dictation-dev/01-idle-mic-disabled-orb.png"
+type = "image"
+title = "Обновлённый чат — микрофон и будущий Voice Orb"
+description = "Крупный концепт: отдельные кнопки, Voice Orb недоступен. Не скриншот запущенного iOS-клиента."
+logical_id = "ff4aeb19-5c70-45ac-8bdb-f81205017990"
+content_hash = "sha256:a924dff087cc47a525789611b351066ff8c3c22262a6dd2eaef37d173b863075"
+size = 165733
+mtime_ms = 1793929505427
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ff4aeb19-5c70-45ac-8bdb-f81205017990/d9e73c88-5019-4d1c-aa11-cf8045dd6c87"
+storage_version_token = "1793929692359829"
+content_type = "image/png"
+
+[[outputs]]
+id = "swtTK0-2pffwYW08MyGFk"
+uri = "file://generated-artifacts/chat-dictation-dev/02-recording.png"
+type = "image"
+title = "Диктовка — запись с полосой"
+description = "Концепт записи: отмена, уровень, время и стоп. В Swift полоса подключена к AVAudioRecorder metering; на iPhone ещё не проверено."
+logical_id = "87ff04a7-86b7-4696-8a69-b2711fa74fc1"
+content_hash = "sha256:97f728c04a7d9dba00165526d2c80ed0d5559e5647ca448c3df67c18bf05eac8"
+size = 164760
+mtime_ms = 1793929505631
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/87ff04a7-86b7-4696-8a69-b2711fa74fc1/df1c6169-d363-4c95-8dfc-5233426cc2d1"
+storage_version_token = "1793929693045073"
+content_type = "image/png"
+
+[[outputs]]
+id = "P5_qesqPZPHsxM915YTaT"
+uri = "file://generated-artifacts/chat-dictation-dev/04-editable-draft.png"
+type = "image"
+title = "Проверка текста и отправка"
+description = "Концепт: текст можно исправить, отправка только стрелкой; микрофон и недоступный Orb раздельны."
+logical_id = "d0eaa106-9e2d-432e-85ec-e17f102fb534"
+content_hash = "sha256:f9b6e114a59b1a88c496d53c77404b4ce61e08d95835aa03ea5f6c4f0b560991"
+size = 172065
+mtime_ms = 1793929506027
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/d0eaa106-9e2d-432e-85ec-e17f102fb534/1de3ea0f-c21f-47e0-8bf4-7a599e625f61"
+storage_version_token = "1793929693702478"
+content_type = "image/png"
+
+[[outputs]]
+id = "ck2XbYpTFAP06zhzCeG-9"
+uri = "file://generated-artifacts/chat-dictation-dev/05-recording-dark.png"
+type = "image"
+title = "Диктовка — тёмная тема"
+description = "Крупный концепт тёмной темы, не результат UIKit runtime-проверки."
+logical_id = "c8208376-eedf-401c-ada1-2f7a72799ce7"
+content_hash = "sha256:7081e3e5918ad1bbeb6fa7ce7a0ac1027bc84940981964ad7e99bc784e03d4c5"
+size = 127776
+mtime_ms = 1793929506243
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/c8208376-eedf-401c-ada1-2f7a72799ce7/7cd718f7-3bb1-493d-a086-ea0d3aee7431"
+storage_version_token = "1793929694447439"
+content_type = "image/png"
+
+[[outputs]]
+id = "HQ2gb9jS-K097KrGAa3FF"
+uri = "file://generated-artifacts/chat-dictation-dev/TalkHint_Dictation_Dev_Handoff.zip"
+type = "unspecified"
+title = "Скачать пакет Dev для Mac / Xcode"
+description = "Изменения, 6 крупных экранов, отчёт, тесты и инструкция проверки. ZIP 1 МБ. Native-сборка здесь не выполнена."
+logical_id = "ce02c134-1ec0-4686-891e-44b552990fc2"
+content_hash = "sha256:cea229c0c3407615f4dde7c4d3c909edadb466403010f263a3f16879e7c40400"
+size = 1034613
+mtime_ms = 1793929682774
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ce02c134-1ec0-4686-891e-44b552990fc2/c08be876-6df2-4d2f-bc9c-0e874089203c"
+storage_version_token = "1793929695257248"
+content_type = "application/octet-stream"

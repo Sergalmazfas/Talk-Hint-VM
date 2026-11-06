@@ -5,6 +5,21 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatDictationTests": (
+        "testPermissionAndRecordingAreSingleFlight",
+        "testDeniedOrCancelledPermissionCannotStartLate",
+        "testStopAndRetryCannotDuplicateActiveRecognition",
+        "testRecognitionOnlyProducesEditableTextNotSend",
+        "testExistingDraftIsNotOverwritten",
+        "testSelectedTextAndUTF16AreHandled",
+        "testSilencePreservesCaptureAndRequiresExplicitRetry",
+        "testErrorDoesNotAutomaticallyRetry",
+        "testCancelMakesLateNetworkResultInert",
+        "testDifferentOwnerConversationOrDraftRevisionCannotReceiveResult",
+        "testDraftAndAttachmentRestoreIsOwnerAndOriginScoped",
+        "testBarCancelStopAndRetryAreSeparateWithoutAudio",
+        "testOrbStaysDisabledAndComposerHasSeparateMicrophone",
+    ),
     "HintDtmfTests": (
         "testAllTwelveKeysDispatchExactlyOnce",
         "testInvalidAndDisconnectedDigitsNeverDispatch",
