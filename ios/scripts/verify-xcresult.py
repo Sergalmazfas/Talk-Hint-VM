@@ -5,6 +5,14 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatApprovedScreenTests": (
+        "testApprovedTypographyIsOptInAndReadable",
+        "testFullscreenHasBackButNoDrawerOrTabs",
+        "testSeparateOrbAndLargeControlsFitSmallScreen",
+        "testNativeLightAndDarkScreenshots",
+        "testRecordingAndRecognitionUseExistingBarWithoutAudio",
+        "testKeyboardEditingScreenshotAndDraftRemainEditable",
+    ),
     "ChatNavigationTests": (
         "testEntryInterceptsWithoutChangingPhoneTab",
         "testFullscreenChatIsRetainedAcrossExitAndReopen",

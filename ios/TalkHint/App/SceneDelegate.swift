@@ -16,6 +16,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = UIViewController()
         window.makeKeyAndVisible()
         return
+        #elseif TALKHINT_CHAT_PREVIEW
+        // Separate native design preview, not a change to working navigation.
+        window.rootViewController = ChatApprovedPreviewHost()
+        window.makeKeyAndVisible()
+        return
         #else
         let loggedIn = SessionStore.shared.isLoggedIn
         print("[SceneDelegate] preparing \(loggedIn ? "main tabs" : "login")")
@@ -45,7 +50,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        #if !TALKHINT_NATIVE_VALIDATION
+        #if !TALKHINT_NATIVE_VALIDATION && !TALKHINT_CHAT_PREVIEW
         print("[SceneDelegate] active")
         _ = SecretaryNotificationRouter.openPendingIfPossible()
         #endif

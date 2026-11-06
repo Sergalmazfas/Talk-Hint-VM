@@ -4485,3 +4485,17 @@ mtime_ms = 1793933542042
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/efe0ff81-a5d9-44bd-9958-16cef3a75ac6/7e81cc3a-4ca6-44f8-99a9-b1031b3e3436"
 storage_version_token = "1793933573942607"
 content_type = "image/png"
+
+[[outputs]]
+id = "t-TJqZNvseVBlJ6ENl8Se"
+uri = "file://generated-artifacts/chat-approved-screen/TalkHint_Approved_Chat_iOS_Dev.zip"
+type = "unspecified"
+title = "TalkHint — утверждённый экран Chat для Xcode"
+description = "Скачать Dev-пакет: полный существующий iOS-проект, отдельная схема TalkHintChatPreview, исходный образец IMG_4200, параметры UI, тесты и инструкция Mac. 645 КБ. Нативная сборка здесь не выполнена."
+logical_id = "51d09d33-a92a-426e-ac47-47163e074197"
+content_hash = "sha256:a97706a5fa79f0220a3bb9d7785c718e8d860ad1e1978cf28c2a1be5974d6ea9"
+size = 644831
+mtime_ms = 1793934877230
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/51d09d33-a92a-426e-ac47-47163e074197/009287a5-fbf8-4d47-8e0e-8809fc7b8fec"
+storage_version_token = "1793934890168813"
+content_type = "application/octet-stream"

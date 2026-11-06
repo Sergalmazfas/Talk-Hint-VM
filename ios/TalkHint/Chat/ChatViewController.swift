@@ -7,6 +7,7 @@ import QuickLook
 final class ChatViewController: UIViewController, UITextViewDelegate, UIDocumentPickerDelegate,
                                UIScrollViewDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
     var onClose: (() -> Void)?
+    private let appearance: ChatScreenAppearance
     private let api: APIClient
     private let sessionScope: ChatSessionScope
     private var currentOwnerId: () -> String? = { SessionStore.shared.userId }
@@ -50,6 +51,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private let inputControls = UIStackView()
     private let orbButton = UIButton(type: .system)
     private var composerHeight: NSLayoutConstraint?
+    private weak var referenceComposerCard: UIView?
+    private weak var referenceMoreButton: UIButton?
     private var draftRevision = 0
     private var hasRestoredComposer = false
     private var pendingDictationAudio: Data?
@@ -60,6 +63,32 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var savedScrollPosition: CGPoint?
     private var pendingScrollRestore: CGPoint?
     private var resumeTask: Task<Void, Never>?
+    #if DEBUG
+    var onOfflinePreviewLoaded: (() -> Void)?
+    private(set) var offlinePreviewReady = false
+
+    /// Visual state fixture only; never requests microphone permission or STT.
+    func applyOfflinePreviewState(_ state: ChatApprovedPreview.State) {
+        guard appearance.isApprovedReference else { return }
+        if state == .editing {
+            composer.text = NSLocalizedString("chat.preview.message.1", comment: "")
+            composer.textColor = .label
+            updateComposerControls()
+            composer.becomeFirstResponder()
+        } else if state == .recording || state == .recognizing {
+            guard let id = dictation.begin(context: dictationContext, text: draftText,
+                                           selection: NSRange(location: 0, length: 0)),
+                  dictation.allow(id) else { return }
+            if state == .recognizing { _ = dictation.recognize() }
+            updateDictationUI()
+            if state == .recording {
+                // Fixed fixture amplitude, not claimed to be microphone data.
+                dictationBar.update(level: 0.65)
+                dictationBar.configure(mode: .recording, elapsed: 4)
+            }
+        }
+    }
+    #endif
 
     private var draftText: String {
         composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : (composer.text ?? "")
@@ -69,19 +98,23 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
 
     override init(nibName nibNameOrNil: String? = nil, bundle nibBundleOrNil: Bundle? = nil) {
+        appearance = .existing
         let owner = SessionStore.shared.userId
         sessionScope = ChatSessionScope(ownerId: owner)
         api = Self.makeChatClient(scope: ChatSessionScope(ownerId: owner), token: SessionStore.shared.token)
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
     }
     required init?(coder: NSCoder) {
+        appearance = .existing
         let owner = SessionStore.shared.userId
         sessionScope = ChatSessionScope(ownerId: owner)
         api = Self.makeChatClient(scope: ChatSessionScope(ownerId: owner), token: SessionStore.shared.token)
         super.init(coder: coder)
     }
     /// Fixture transport and isolated draft store for offline native checks.
-    init(api: APIClient, ownerId: String, currentOwnerId: @escaping () -> String?, draftStore: ChatOutbox) {
+    init(api: APIClient, ownerId: String, currentOwnerId: @escaping () -> String?, draftStore: ChatOutbox,
+         appearance: ChatScreenAppearance = .existing) {
+        self.appearance = appearance
         self.api = api
         self.sessionScope = ChatSessionScope(ownerId: ownerId)
         self.currentOwnerId = currentOwnerId
@@ -141,6 +174,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             pendingScrollRestore = nil
         }
     }
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard appearance.isApprovedReference,
+              previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        referenceComposerCard?.layer.borderColor = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+        for (button, symbol) in [(fileButton, "plus"), (voiceButton, "mic")] {
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .regular))?.withTintColor(
+                UIColor.label.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal), for: .disabled)
+        }
+        referenceMoreButton?.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .semibold))?.withTintColor(
+            UIColor.label.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal), for: .disabled)
+    }
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
         meterTimer?.invalidate()
@@ -159,19 +204,61 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         back.accessibilityIdentifier = "chat-back"
         let menu = iconButton("line.3.horizontal", title: NSLocalizedString("chat.menu", comment: ""), action: #selector(toggleDrawer))
         menu.accessibilityIdentifier = "chat-menu"
+        if appearance.isApprovedReference {
+            // Match the reference's more glyph, without implementing a menu.
+            menu.removeTarget(self, action: #selector(toggleDrawer), for: .touchUpInside)
+            menu.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+            menu.setImage(UIImage(systemName: "ellipsis"), for: .disabled)
+            menu.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .semibold))?.withTintColor(.label, renderingMode: .alwaysOriginal), for: .disabled)
+            referenceMoreButton = menu
+            menu.isEnabled = false
+            menu.accessibilityIdentifier = "chat-more-unavailable"
+            menu.accessibilityLabel = NSLocalizedString("chat.more.unavailable", comment: "")
+            menu.accessibilityHint = NSLocalizedString("chat.more.hint", comment: "")
+        }
         for button in [back, menu] {
             button.setTitle(nil, for: .normal)
             button.widthAnchor.constraint(equalToConstant: 44).isActive = true
             button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         }
         topTitle.text = NSLocalizedString("tab.chat", comment: "")
-        topTitle.font = .preferredFont(forTextStyle: .headline)
+        topTitle.font = appearance.titleFont
         topTitle.adjustsFontForContentSizeCategory = true
         topTitle.textColor = .label
         let headerStack = UIStackView(arrangedSubviews: [back, topTitle, menu])
         headerStack.axis = .horizontal; headerStack.alignment = .center
         headerStack.distribution = .fill
         headerStack.spacing = 8
+        if appearance.isApprovedReference {
+            topTitle.text = NSLocalizedString("chat.screen.title", comment: "")
+            topTitle.textAlignment = .center
+            let folder = UIImageView(image: UIImage(systemName: "folder", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)))
+            folder.tintColor = .label
+            folder.contentMode = .scaleAspectFit
+            folder.setContentHuggingPriority(.required, for: .horizontal)
+            folder.isAccessibilityElement = false
+            headerStack.removeArrangedSubview(topTitle)
+            topTitle.removeFromSuperview()
+            let titleGroup = UIStackView(arrangedSubviews: [folder, topTitle])
+            titleGroup.alignment = .center
+            titleGroup.spacing = 8
+            headerStack.insertArrangedSubview(titleGroup, at: 1)
+            let leadingSpace = UIView(), trailingSpace = UIView()
+            titleGroup.insertArrangedSubview(leadingSpace, at: 0)
+            titleGroup.addArrangedSubview(trailingSpace)
+            leadingSpace.widthAnchor.constraint(equalTo: trailingSpace.widthAnchor).isActive = true
+            folder.widthAnchor.constraint(equalToConstant: 20).isActive = true
+            for button in [back, menu] {
+                button.tintColor = .label
+                button.backgroundColor = .systemBackground
+                button.layer.cornerRadius = 22
+                button.layer.shadowColor = UIColor.black.cgColor
+                button.layer.shadowOpacity = 0.07
+                button.layer.shadowRadius = 4
+                button.layer.shadowOffset = CGSize(width: 0, height: 1)
+                button.setPreferredSymbolConfiguration(.init(pointSize: 23, weight: .semibold), forImageIn: .normal)
+            }
+        }
         topTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         topTitle.lineBreakMode = .byTruncatingTail
         headerStack.translatesAutoresizingMaskIntoConstraints = false
@@ -179,8 +266,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         view.addSubview(header)
         header.translatesAutoresizingMaskIntoConstraints = false
 
-        messagesStack.axis = .vertical; messagesStack.spacing = 12
+        messagesStack.axis = .vertical; messagesStack.spacing = appearance.messageSpacing
         messagesStack.alignment = .fill
+        if appearance.isApprovedReference { messagesStack.translatesAutoresizingMaskIntoConstraints = false }
         scroll.delegate = self
         scroll.accessibilityIdentifier = "chat-messages"
         scroll.keyboardDismissMode = .interactive
@@ -200,11 +288,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         view.addSubview(statusRow); statusRow.translatesAutoresizingMaskIntoConstraints = false
 
         let inputCard = UIView()
-        inputCard.backgroundColor = .secondarySystemBackground
-        inputCard.layer.cornerRadius = 22
+        if appearance.isApprovedReference { referenceComposerCard = inputCard }
+        inputCard.backgroundColor = appearance.isApprovedReference ? .systemBackground : .secondarySystemBackground
+        inputCard.layer.cornerRadius = appearance.isApprovedReference ? 28 : 22
         inputCard.layer.borderColor = UIColor.separator.cgColor
-        inputCard.layer.borderWidth = 1
-        composer.font = .preferredFont(forTextStyle: .body)
+        inputCard.layer.borderWidth = appearance.isApprovedReference ? 0.5 : 1
+        composer.font = appearance.composerFont
         composer.adjustsFontForContentSizeCategory = true
         composer.delegate = self
         composer.accessibilityLabel = NSLocalizedString("chat.message.placeholder", comment: "")
@@ -220,7 +309,15 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             button.setTitle(nil, for: .normal)
             button.widthAnchor.constraint(equalToConstant: 44).isActive = true
             button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            if appearance.isApprovedReference {
+                button.tintColor = .label
+                button.setPreferredSymbolConfiguration(.init(pointSize: 24, weight: .regular), forImageIn: .normal)
+                let symbol = button === fileButton ? "plus" : "mic"
+                button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .regular))?.withTintColor(.label, renderingMode: .alwaysOriginal), for: .disabled)
+            }
         }
+        fileButton.accessibilityIdentifier = "chat-attachment"
+        voiceButton.accessibilityIdentifier = "chat-dictation"
         removeAttachmentButton.setImage(UIImage(systemName: "xmark.circle"), for: .normal)
         removeAttachmentButton.tintColor = .secondaryLabel
         removeAttachmentButton.accessibilityLabel = NSLocalizedString("chat.removeAttachment", comment: "")
@@ -233,13 +330,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         orbButton.setImage(UIImage(systemName: "waveform"), for: .normal)
         orbButton.backgroundColor = .black
         orbButton.tintColor = .white
-        orbButton.layer.cornerRadius = 22
+        orbButton.layer.cornerRadius = appearance.orbSize / 2
         orbButton.layer.borderWidth = 1
         orbButton.layer.borderColor = UIColor.gray.cgColor
         orbButton.isEnabled = false
+        orbButton.accessibilityIdentifier = "chat-orb-unavailable"
         orbButton.accessibilityLabel = NSLocalizedString("chat.orb.unavailable", comment: "")
         orbButton.accessibilityHint = NSLocalizedString("chat.orb.hint", comment: "")
         orbButton.setImage(UIImage(systemName: "waveform"), for: .disabled)
+        if appearance.isApprovedReference {
+            orbButton.setImage(UIImage(systemName: "waveform", withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold))?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .disabled)
+            orbButton.layer.borderWidth = 0
+        }
         let orbCaption = UILabel()
         orbCaption.text = NSLocalizedString("chat.orb.unavailable", comment: "")
         orbCaption.font = .preferredFont(forTextStyle: .caption2)
@@ -249,10 +351,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         orbCaption.textAlignment = .center
         let orb = UIStackView(arrangedSubviews: [orbButton, orbCaption])
         orb.axis = .vertical; orb.alignment = .center; orb.spacing = 2
-        orb.widthAnchor.constraint(equalToConstant: 58).isActive = true
-        orbButton.widthAnchor.constraint(equalToConstant: 44).isActive = true
-        orbButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
-        let composerItems: [UIView] = [fileButton, composer, voiceButton, sendButton, orb]
+        orb.widthAnchor.constraint(equalToConstant: appearance.isApprovedReference ? 48 : 58).isActive = true
+        orbCaption.isHidden = appearance.isApprovedReference
+        orbButton.widthAnchor.constraint(equalToConstant: appearance.orbSize).isActive = true
+        orbButton.heightAnchor.constraint(equalToConstant: appearance.orbSize).isActive = true
+        let composerItems: [UIView] = appearance.isApprovedReference
+            ? [fileButton, composer, voiceButton, sendButton]
+            : [fileButton, composer, voiceButton, sendButton, orb]
         composerItems.forEach { inputControls.addArrangedSubview($0) }
         inputControls.axis = .horizontal; inputControls.alignment = .center; inputControls.spacing = 2
         composer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -266,6 +371,20 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composerHeight = composer.heightAnchor.constraint(equalToConstant: 44)
         composerHeight?.isActive = true
         view.addSubview(inputCard); inputCard.translatesAutoresizingMaskIntoConstraints = false
+        // In the approved reference, the black Orb is OUTSIDE the input capsule.
+        // It remains disabled; there is no voice-mode engine or transition.
+        let inputTrailing: NSLayoutConstraint
+        if appearance.isApprovedReference {
+            view.addSubview(orb)
+            orb.translatesAutoresizingMaskIntoConstraints = false
+            inputTrailing = inputCard.trailingAnchor.constraint(equalTo: orb.leadingAnchor, constant: -10)
+            NSLayoutConstraint.activate([
+                orb.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+                orb.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -4),
+            ])
+        } else {
+            inputTrailing = inputCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14)
+        }
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -276,14 +395,14 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             headerStack.topAnchor.constraint(equalTo: header.topAnchor),
             headerStack.bottomAnchor.constraint(equalTo: header.bottomAnchor),
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
-            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
-            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
+            scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: appearance.isApprovedReference ? 16 : 18),
+            scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: appearance.isApprovedReference ? -16 : -18),
             scroll.bottomAnchor.constraint(equalTo: statusRow.topAnchor, constant: -6),
             statusRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             statusRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
             statusRow.bottomAnchor.constraint(equalTo: inputCard.topAnchor, constant: -8),
-            inputCard.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 14),
-            inputCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
+            inputCard.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: appearance.isApprovedReference ? 16 : 14),
+            inputTrailing,
             inputCard.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
             inputStack.topAnchor.constraint(equalTo: inputCard.topAnchor, constant: 6),
             inputStack.leadingAnchor.constraint(equalTo: inputCard.leadingAnchor, constant: 6),
@@ -294,9 +413,19 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             messagesStack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
             messagesStack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
         ])
-        statusLabel.text = NSLocalizedString("chat.disclaimer", comment: "")
+        if appearance.isApprovedReference {
+            NSLayoutConstraint.activate([
+                messagesStack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+                messagesStack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            ])
+        }
+        statusLabel.text = appearance.isApprovedReference ? nil : NSLocalizedString("chat.disclaimer", comment: "")
         updateComposerControls()
         renderMessages()
+    }
+    private func updateHeaderTitle(_ title: String) {
+        topTitle.text = appearance.isApprovedReference ? NSLocalizedString("chat.screen.title", comment: "") : title
+        topTitle.accessibilityValue = appearance.isApprovedReference ? title : nil
     }
     private func iconButton(_ symbol: String, title: String, action: Selector) -> UIButton {
         let button = UIButton(type: .system)
@@ -330,6 +459,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             } else {
                 showWelcome()
             }
+            #if DEBUG
+            onOfflinePreviewLoaded?()
+            offlinePreviewReady = onOfflinePreviewLoaded != nil
+            #endif
         } catch { if !Task.isCancelled, isCurrentOwner { showError(error) } }
     }
     private func refreshVisibleConversation() async {
@@ -361,7 +494,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         messages = []
         hasMoreMessages = false
         renderMessages()
-        topTitle.text = NSLocalizedString("chat.title", comment: "")
+        updateHeaderTitle(NSLocalizedString("chat.title", comment: ""))
         restoreDraft()
     }
     @objc private func newChat() {
@@ -431,7 +564,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         currentConversation = conversation
         if changedConversation { draftRevision += 1; restoreDraft() }
         outbox?.selectedConversationId = conversation.id
-        topTitle.text = displayTitle(conversation)
+        updateHeaderTitle(displayTitle(conversation))
         do {
             let page = try await api.chatMessages(conversationId: conversation.id)
             guard isCurrentOwner, currentConversation?.id == conversation.id else { return }
@@ -585,30 +718,49 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             welcome.textColor = .label
             messagesStack.addArrangedSubview(UIView()); messagesStack.addArrangedSubview(welcome); return
         }
+        if appearance.isApprovedReference {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let date = formatter.date(from: messages[0].createdAt) ?? ISO8601DateFormatter().date(from: messages[0].createdAt)
+            if let date {
+                let dateLabel = UILabel()
+                let local = DateFormatter()
+                local.locale = Locale(identifier: Bundle.main.preferredLocalizations.first ?? Locale.current.identifier)
+                local.doesRelativeDateFormatting = true
+                local.dateStyle = .medium
+                local.timeStyle = .short
+                dateLabel.text = local.string(from: date)
+                dateLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: .systemFont(ofSize: 13))
+                dateLabel.adjustsFontForContentSizeCategory = true
+                dateLabel.textColor = .secondaryLabel
+                dateLabel.textAlignment = .center
+                dateLabel.accessibilityIdentifier = "chat-date"
+                messagesStack.addArrangedSubview(dateLabel)
+            }
+        }
         for message in messages {
             let bubble = UIView()
-            bubble.layer.cornerRadius = 18; bubble.layer.masksToBounds = true
+            bubble.layer.cornerRadius = appearance.bubbleRadius; bubble.layer.masksToBounds = true
+            bubble.layer.cornerCurve = .continuous
             let isUser = message.role == "user"
-            bubble.backgroundColor = UIColor { traits in
-                if traits.userInterfaceStyle == .dark {
-                    return isUser ? UIColor(red: 0.12, green: 0.25, blue: 0.18, alpha: 1) : UIColor(red: 0.23, green: 0.19, blue: 0.32, alpha: 1)
-                }
-                return isUser ? UIColor(red: 0.88, green: 0.94, blue: 0.88, alpha: 1) : UIColor(red: 0.94, green: 0.92, blue: 0.98, alpha: 1)
-            }
+            bubble.backgroundColor = appearance.bubbleColor(isUser: isUser)
             let content = UIStackView()
             content.axis = .vertical; content.spacing = 7
             content.translatesAutoresizingMaskIntoConstraints = false
             bubble.addSubview(content)
             NSLayoutConstraint.activate([
-                content.topAnchor.constraint(equalTo: bubble.topAnchor, constant: 12),
-                content.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: 14),
-                content.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -14),
-                content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -12),
-                bubble.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor, multiplier: 0.82),
+                content.topAnchor.constraint(equalTo: bubble.topAnchor, constant: appearance.bubbleVerticalInset),
+                content.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: appearance.bubbleInset),
+                content.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -appearance.bubbleInset),
+                content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -appearance.bubbleVerticalInset),
+                bubble.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor,
+                                              multiplier: appearance.maxBubbleWidth(isUser: isUser, isFinal: message.id == messages.last?.id)),
             ])
             if !message.text.isEmpty {
                 let text = UILabel()
-                text.text = message.text; text.font = .preferredFont(forTextStyle: .body)
+                text.text = message.text; text.font = appearance.messageFont
+                text.textColor = .label
+                text.accessibilityIdentifier = "chat-message-text"
                 text.adjustsFontForContentSizeCategory = true; text.numberOfLines = 0
                 content.addArrangedSubview(text)
             }
@@ -633,7 +785,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 content.addArrangedSubview(file)
             }
             let row = UIStackView(arrangedSubviews: isUser ? [UIView(), bubble] : [bubble, UIView()])
-            row.axis = .horizontal; row.alignment = .top; row.spacing = 32
+            row.axis = .horizontal; row.alignment = .top; row.spacing = appearance.isApprovedReference ? 12 : 32
             messagesStack.addArrangedSubview(row)
             if message.role == "assistant", message.status == "queued" || message.status == "generating" {
                 let progress = UILabel()
@@ -930,7 +1082,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         fileButton.isEnabled = (capabilities?.attachments.available ?? false)
             && attachments.count < 3 && !isUploadingAttachment && attachmentRetry == nil
         statusLabel.text = attachments.isEmpty
-            ? NSLocalizedString("chat.disclaimer", comment: "")
+            ? (appearance.isApprovedReference ? nil : NSLocalizedString("chat.disclaimer", comment: ""))
             : attachments.map { "\($0.name) · " + NSLocalizedString("chat.file.ready", comment: "") }.joined(separator: "   ")
         persistDraft()
         updateComposerControls()

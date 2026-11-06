@@ -5,8 +5,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("[AppDelegate] launch started")
-        #if TALKHINT_NATIVE_VALIDATION
-        // Hosted unit tests do not register pushes or initialize a phone provider.
+        #if TALKHINT_NATIVE_VALIDATION || TALKHINT_CHAT_PREVIEW
+        // Offline native tests/approved-screen preview never register pushes
+        // or initialize a phone provider.
         return true
         #else
         // Initialize CallKit before any push can arrive.
