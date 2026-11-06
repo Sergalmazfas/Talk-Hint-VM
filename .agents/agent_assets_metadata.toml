@@ -4219,3 +4219,115 @@ mtime_ms = 1793925805817
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/58ba5683-7bd7-497a-adf4-d917bb575a1e/f847c4c8-58d0-4068-b4fa-a464a9796d80"
 storage_version_token = "1793926496289170"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "-kuLA-W6fvxY37acS4acf"
+uri = "file://generated-artifacts/chat-dictation-design/01-idle-en-light.png"
+type = "image"
+title = "Диктовка 1 — обычный ввод"
+description = "Микрофон в компактном поле. Концепт TalkHint, не iOS-скриншот."
+logical_id = "a7d4499c-531d-403f-8ed5-6a286ab5293e"
+content_hash = "sha256:7a8eece57302ceca99beb1f72adfc779b6eee3658a58c6d31bc32517ef255d9d"
+size = 161281
+mtime_ms = 1793928739551
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a7d4499c-531d-403f-8ed5-6a286ab5293e/d32a107f-731c-486c-b194-f70be541df59"
+storage_version_token = "1793928777951126"
+content_type = "image/png"
+
+[[outputs]]
+id = "gUq2Uu3fQQ9M0Hu2Noyhq"
+uri = "file://generated-artifacts/chat-dictation-design/03-recording-en-light.png"
+type = "image"
+title = "Диктовка 2 — запись с волной"
+description = "Крестик отменяет, квадрат останавливает. Нижние вкладки сохраняются."
+logical_id = "b5108470-61c6-45b4-b290-d353b3adb978"
+content_hash = "sha256:bf475e90480d0090ff925c017e1669e2a617123811f6e9652772143c65439431"
+size = 173573
+mtime_ms = 1793928740015
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/b5108470-61c6-45b4-b290-d353b3adb978/bba34abe-28c1-4c44-b8c5-56b32f6c2edb"
+storage_version_token = "1793928778782559"
+content_type = "image/png"
+
+[[outputs]]
+id = "LhuQxqkHBkCDOfXjquy5z"
+uri = "file://generated-artifacts/chat-dictation-design/04-recognizing-en-light.png"
+type = "image"
+title = "Диктовка 3 — распознавание"
+description = "Видимое ожидание и отмена, без автоматической отправки."
+logical_id = "f2845193-f1de-4a6a-a4bd-71510cc64686"
+content_hash = "sha256:b6f5a50fdac1a46a74c0f338c9dab22e1c0da4a850e13cb15fc723342f27e840"
+size = 168650
+mtime_ms = 1793928740207
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/f2845193-f1de-4a6a-a4bd-71510cc64686/7febb133-41ee-4b22-9c6b-2edebc7b5b04"
+storage_version_token = "1793928779418332"
+content_type = "image/png"
+
+[[outputs]]
+id = "XqPr10DySlmpFKrcsU0dN"
+uri = "file://generated-artifacts/chat-dictation-design/05-recognized-draft-en-light.png"
+type = "image"
+title = "Диктовка 4 — проверить и отправить"
+description = "Распознанный текст можно исправить. Отправка — отдельной стрелкой."
+logical_id = "9d488137-99e9-41c8-b087-3dc65cbae7c2"
+content_hash = "sha256:b388b4053fa4183d9c2d9fa1ae2fb01bab2333e8400c7e898f9c506605b1d0a7"
+size = 190541
+mtime_ms = 1793928740407
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9d488137-99e9-41c8-b087-3dc65cbae7c2/5f9b835b-3c67-4ba7-8c29-22c6ff1893ac"
+storage_version_token = "1793928780209159"
+content_type = "image/png"
+
+[[outputs]]
+id = "01XcYHt8xnfsJ7voJZZdO"
+uri = "file://generated-artifacts/chat-dictation-design/synthetic-waveform-demo.gif"
+type = "image"
+title = "Демо движения волны"
+description = "Синтетическая анимация: микрофон не записывается, реакция настоящего iOS-клиента не проверена."
+logical_id = "4a4190c7-a70d-4519-81ea-d56cf5e2c427"
+content_hash = "sha256:676118569dba28358987f21611cfb566918cc2d8c09e4e5d06eb25067cdb0481"
+size = 206605
+mtime_ms = 1793928744939
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4a4190c7-a70d-4519-81ea-d56cf5e2c427/e50d7889-9ef1-46d4-b9e4-ee9bf77bf33c"
+storage_version_token = "1793928780937548"
+content_type = "image/gif"
+
+[[outputs]]
+id = "D1OrbsPfauSPEhyShZuUV"
+uri = "file://generated-artifacts/chat-dictation-design/UX_TRANSITIONS_RU.png"
+type = "image"
+title = "Схема переходов и ошибок"
+description = "Запись, отмена, распознавание, правка, отправка; сохранность исходного черновика."
+logical_id = "91284711-e287-47bb-a928-e30e5276c355"
+content_hash = "sha256:7b0c28a1d18f2a9fd809b1204388b2e797b412983a9015d44b1b02f8d2c41757"
+size = 149131
+mtime_ms = 1793928745471
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/91284711-e287-47bb-a928-e30e5276c355/078bff20-4767-41ac-816b-06e60ff4d7e8"
+storage_version_token = "1793928781575167"
+content_type = "image/png"
+
+[[outputs]]
+id = "eNOw2SA7gaIuhjqwYa3CN"
+uri = "file://generated-artifacts/chat-dictation-design/TalkHint_Dictation_Design_and_Plan.zip"
+type = "unspecified"
+title = "Скачать ZIP — микрофон: дизайн и план"
+description = "15 крупных экранов, светлая/тёмная темы, EN/ES/RU, ошибки, клавиатура и вложения; GIF, схема, сверка с кодом и план. 4,9 МБ. На утверждение, без реализации."
+logical_id = "0e365bd8-6747-4681-97e9-49849a674066"
+content_hash = "sha256:9d5feaf27ed51309fa649a57ccd9120ea3596c3122a6635600ea055382f16505"
+size = 4896865
+mtime_ms = 1793928748171
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/0e365bd8-6747-4681-97e9-49849a674066/44016ad5-67f6-4d36-b15b-1dd60e45b09a"
+storage_version_token = "1793928782480692"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "dAFkBdgGVKLs7I6VSiX8z"
+uri = "file://docs/chat-1a/DICTATION_DESIGN_PLAN.md"
+type = "text"
+title = "План диктовки: отличия, переходы и безопасность"
+description = "Наблюдаемое на референсах отдельно от предложений. Безопасная реализация и будущие проверки, требующие отдельного разрешения."
+logical_id = "4783c9f7-9c69-47c3-b182-283acebbb423"
+content_hash = "sha256:917c29e26fd07428dcfca458d7e1dbec34d291338444ffb46ebab243ab2d19f5"
+size = 16135
+mtime_ms = 1793928148875
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/4783c9f7-9c69-47c3-b182-283acebbb423/a9f2eae2-54a1-411e-a049-297753349833"
+storage_version_token = "1793928783004563"
+content_type = "text/markdown"
