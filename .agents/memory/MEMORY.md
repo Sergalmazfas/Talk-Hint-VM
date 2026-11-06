@@ -66,6 +66,7 @@
 - [Отдел «Секретарь»](secretary-department-structure.md) — Мария → Сева → Лёва/Тома/каталог; имена proposed; общие инженер, дежурный и HR, без копии Кати.
 - [ChatGPT Secretary boundaries](chatgpt-secretary-boundaries.md) — внешний плагин: официальный ChatGPT, без SMS; встроенный чат — отдельное новое направление.
 - [Чат в центре TalkHint](native-chat-product-direction.md) — четыре макета владельца: карточка, Hint/Секретарь, отчёты, календарь, почта и геопоиск; сначала функциональный дизайн.
+- [Chat 1A: граница](chat-foundation-scope.md) — разрешена только основа iOS-чата; следующие этапы после согласования, без изменения боевых звонков и автоматического Publish.
 - [OpenAI plugin review](openai-plugin-review.md) — retain OAuth despite upstream portable-schema conflict; local package checks are not portal acceptance.
 - [Personal GPT Actions](chatgpt-actions-constraints.md) — confidential OAuth distinct from MCP; Plus new-GPT restrictions and mobile use require current official checks.
 - [ChatGPT widget recovery](chatgpt-widget-recovery.md) — host state and historical results are task locators only; refetch under current OAuth, never persist capabilities or auto-resume audio.

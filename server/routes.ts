@@ -568,6 +568,8 @@ load();
   });
 
   const { registerPreparedHintPlans } = await import("./callPlans/routes");
+  const { registerChat1A } = await import("./chat/routes");
+  registerChat1A(app, authMiddleware);
   registerPreparedHintPlans(app, authMiddleware, async () => {
     const { callPlans } = await import("./callPlans/runtime");
     return callPlans();

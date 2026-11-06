@@ -3,6 +3,7 @@ import { pgTable, text, varchar, timestamp, jsonb, boolean, integer, index, uniq
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 export { callLabControls, callLabJobs, callLabOutbox } from "./callLabSchema";
+export { chatConversations, chatMessages, chatAttachments } from "./chatSchema";
 
 // Separate runtime journal; no edits to the production/new-country model.
 // New rows are explicitly initialized OFF / zero budget by owner readiness.

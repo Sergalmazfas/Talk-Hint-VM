@@ -4,12 +4,13 @@ import UIKit
 
 @MainActor
 final class CopilotFreezeNavigationTests: XCTestCase {
-    func testFourVisibleTabsPreserveStableIdentifiersAndNoCopilot() throws {
+    func testFiveVisibleTabsPreserveStableIdentifiersAndNoCopilot() throws {
         let tabs = SceneDelegate().makeMainTabController()
         let controllers = try XCTUnwrap(tabs.viewControllers)
-        XCTAssertEqual(controllers.count, 4)
-        XCTAssertEqual(controllers.map { $0.tabBarItem.tag }, [0, 1, 3, 4])
-        XCTAssertFalse(controllers.contains { $0.tabBarItem.tag == 2 })
+        XCTAssertEqual(controllers.count, 5)
+        XCTAssertEqual(controllers.map { $0.tabBarItem.tag }, [0, 1, 2, 3, 4])
+        XCTAssertTrue((controllers[2] as? UINavigationController)?.viewControllers.first is ChatViewController)
+        XCTAssertEqual(tabs.selectedIndex, 2)
         XCTAssertFalse(CallManager.copilotAvailable)
         for controller in controllers {
             let navigation = try XCTUnwrap(controller as? UINavigationController)
@@ -23,10 +24,10 @@ final class CopilotFreezeNavigationTests: XCTestCase {
         let secretary = try XCTUnwrap(controllers.first { $0.tabBarItem.tag == 3 } as? UINavigationController)
         let history = try XCTUnwrap(controllers.first { $0.tabBarItem.tag == 4 } as? UINavigationController)
         tabs.selectedViewController = secretary
-        XCTAssertEqual(tabs.selectedIndex, 2)
+        XCTAssertEqual(tabs.selectedIndex, 3)
         XCTAssertTrue(secretary.viewControllers.first is HomeViewController)
         tabs.selectedViewController = history
-        XCTAssertEqual(tabs.selectedIndex, 3)
+        XCTAssertEqual(tabs.selectedIndex, 4)
         XCTAssertTrue(history.viewControllers.first is CallHistoryViewController)
     }
 }

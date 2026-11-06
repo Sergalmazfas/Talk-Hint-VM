@@ -3995,3 +3995,31 @@ mtime_ms = 1793921692083
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/9daf735e-dd30-4e05-8b59-37ff8d01ee65/24825ae6-8d67-487a-973a-6fe2eb7123c0"
 storage_version_token = "1793921697354724"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "DiblSMb7ciHcm3wCjyZsz"
+uri = "file://generated-artifacts/chat-1a/TalkHint_Chat_1A_Dev_Review.zip"
+type = "unspecified"
+title = "Chat 1A — ZIP для проверки"
+description = "Dev-код и patch, архитектура и четыре макета, результаты проверок, скриншот, инструкция для Xcode и proposed-уроки. 5,8 МБ. ZIP и соответствие patch текущим файлам проверены. Без Publish."
+logical_id = "5346e199-2c72-4907-9566-7921185970ce"
+content_hash = "sha256:e51530325de880fe9ef18f2696428bab89aa7d3a954d4db1d38fe710068b4ad0"
+size = 5780083
+mtime_ms = 1793923663494
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/5346e199-2c72-4907-9566-7921185970ce/2e11fc07-f033-4e44-a424-19e025e0b919"
+storage_version_token = "1793923698121440"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "3KG_G8uOb2cHf31wa-aet"
+uri = "file://docs/chat-1a/IMPLEMENTATION.md"
+type = "text"
+title = "Chat 1A — сделано, проверки и ограничения"
+description = "Краткий технический отчёт: API, PostgreSQL, настоящий текстовый AI, вложения, восстановление; что ещё требует Xcode/iPhone-проверки и согласования владельца."
+logical_id = "a2dd6065-196f-4057-8ab9-bde78fa5f215"
+content_hash = "sha256:f48e17339e90709e6d6c13a55a99bae46bc3cb3ae24b5e59e2048460ad4aeb7d"
+size = 13356
+mtime_ms = 1793923534762
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/a2dd6065-196f-4057-8ab9-bde78fa5f215/f709d889-833a-4f31-a6d5-a74d8268a623"
+storage_version_token = "1793923699001351"
+content_type = "text/markdown"

@@ -30,5 +30,6 @@ export const modules: ModuleMap = {
   "./components/mockups/tutor-v4/Thinking.tsx": () => import("../components/mockups/tutor-v4/Thinking.tsx"),
   "./components/mockups/tutor-v4/TranslateLoading.tsx": () => import("../components/mockups/tutor-v4/TranslateLoading.tsx"),
   "./components/mockups/tutor-v4/TranslateOpen.tsx": () => import("../components/mockups/tutor-v4/TranslateOpen.tsx"),
-  "./components/mockups/tutor-v4/UserCommitted.tsx": () => import("../components/mockups/tutor-v4/UserCommitted.tsx")
+  "./components/mockups/tutor-v4/UserCommitted.tsx": () => import("../components/mockups/tutor-v4/UserCommitted.tsx"),
+  "./components/mockups/talkhint-chat/ChatFoundation.tsx": () => import("../components/mockups/talkhint-chat/ChatFoundation.tsx")
 };

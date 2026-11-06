@@ -66,7 +66,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
-    /// Builds the main tab bar shown after login (Hint / Translator /
+    /// Builds the main tab bar shown after login (Hint / Translator / Chat /
     /// Secretary / History). Settings opens from the gear on the Hint screen.
     ///
     /// The first tab is FUNCTIONALLY the same Calls flow (dialer, recents,
@@ -89,7 +89,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
-        // Copilot's implementation/settings remain archived; no UI entry.
+        let chat = ChatViewController()
+        chat.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("tab.chat", comment: ""),
+            image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 2)
 
         let secretary = HomeViewController(secretary: true)
         secretary.tabBarItem = UITabBarItem(
@@ -100,11 +103,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         history.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 4)
 
-        let roots: [UIViewController] = [calls, translator, secretary, history]
+        let roots: [UIViewController] = [calls, translator, chat, secretary, history]
         tabController.viewControllers = roots.map { root in
             let navigation = UINavigationController(rootViewController: root)
             navigation.tabBarItem = root.tabBarItem
             return navigation
+        }
+        // Ordinary launches start in Chat. Select by root-controller type so
+        // inserting a tab never shifts call or Secretary routing assumptions.
+        if let chatTab = tabController.viewControllers?.first(where: {
+            ($0 as? UINavigationController)?.viewControllers.first is ChatViewController
+        }) {
+            tabController.selectedViewController = chatTab
         }
         return tabController
     }
