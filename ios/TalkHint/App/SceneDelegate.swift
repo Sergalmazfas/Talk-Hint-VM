@@ -67,7 +67,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     /// Builds the main tab bar shown after login (Hint / Translator / Chat /
-    /// Secretary / History). Settings opens from the gear on the Hint screen.
+    /// Secretary / History). Chat opens a retained full-screen stack; Settings
+    /// remains available from Hint and also from the chat drawer.
     ///
     /// The first tab is FUNCTIONALLY the same Calls flow (dialer, recents,
     /// live-hint calls) — only its user-facing name/icon changed to "Hint".
@@ -76,7 +77,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     /// points, no refactoring — see task #274 scope).
     // Internal for hosted navigation regression tests; not an additional UI entry.
     func makeMainTabController() -> UITabBarController {
-        let tabController = UITabBarController()
+        let tabController = TalkHintTabBarController()
         tabController.tabBar.tintColor = Theme.green
 
         let calls = HomeViewController()
@@ -89,7 +90,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
-        let chat = ChatViewController()
+        let chat = ChatEntryViewController()
         chat.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.chat", comment: ""),
             image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 2)
@@ -109,13 +110,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             navigation.tabBarItem = root.tabBarItem
             return navigation
         }
-        // Ordinary launches start in Chat. Select by root-controller type so
-        // inserting a tab never shifts call or Secretary routing assumptions.
-        if let chatTab = tabController.viewControllers?.first(where: {
-            ($0 as? UINavigationController)?.viewControllers.first is ChatViewController
-        }) {
-            tabController.selectedViewController = chatTab
-        }
+        // Preserve the original phone/Hint launch. Chat is an intercepted entry,
+        // not a selected tab containing a second bottom navigation bar.
         return tabController
     }
 

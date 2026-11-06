@@ -4401,3 +4401,73 @@ mtime_ms = 1793929682774
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ce02c134-1ec0-4686-891e-44b552990fc2/c08be876-6df2-4d2f-bc9c-0e874089203c"
 storage_version_token = "1793929695257248"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "hm0eNwuwAuvmWsWLUY_i8"
+uri = "file://generated-artifacts/chat-navigation-dev/01-chat-fullscreen.png"
+type = "image"
+title = "Chat — отдельный полноэкранный экран"
+description = "Крупный концепт новой навигации: назад слева, меню отдельно справа, без нижних вкладок. Не UIKit runtime-скриншот."
+logical_id = "ab7f1048-10e2-45f9-b28b-1257fa05c328"
+content_hash = "sha256:acf928cbefc904dd4fb3bf9e641831ef3b6c7cd94a11bedd66611cf6b1373eec"
+size = 72583
+mtime_ms = 1793931520223
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ab7f1048-10e2-45f9-b28b-1257fa05c328/fa50e9e3-4442-4bb3-bdf4-6e1b78424389"
+storage_version_token = "1793932037777237"
+content_type = "image/png"
+
+[[outputs]]
+id = "6s2u7Kn7Gs_SADljilTae"
+uri = "file://generated-artifacts/chat-navigation-dev/02-chat-navigation-drawer.png"
+type = "image"
+title = "Chat — боковое меню"
+description = "Крупный концепт: история, неактивные будущие разделы и вход в существующие настройки."
+logical_id = "dfe63ac8-0e88-44c5-a910-4bf0fffc06d3"
+content_hash = "sha256:69011a76bab171cd46306032a8da0fcb9a2e2fc6f7af16c12ed53d3b8e926c9c"
+size = 77546
+mtime_ms = 1793931520399
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/dfe63ac8-0e88-44c5-a910-4bf0fffc06d3/689a75a5-2423-4a15-937d-76eeb18e4d0f"
+storage_version_token = "1793932038500489"
+content_type = "image/png"
+
+[[outputs]]
+id = "v6egCO5fB7n69Koop4SQp"
+uri = "file://generated-artifacts/chat-navigation-dev/03-chat-recording.png"
+type = "image"
+title = "Chat — диктовка без нижней панели"
+description = "Концепт: прежняя диктовка в полноэкранной компоновке. Реальный микрофон здесь не тестировался."
+logical_id = "ab2aabbf-ec32-4472-a515-cbef37b748b8"
+content_hash = "sha256:a509b88981fce534a35cd369a8ef2b2349c1ecf7804d8a99ef050f6800e36c1d"
+size = 70693
+mtime_ms = 1793931520535
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/ab2aabbf-ec32-4472-a515-cbef37b748b8/39fcaf2a-ad49-4b24-b6ec-8de54a85b5e2"
+storage_version_token = "1793932039318154"
+content_type = "image/png"
+
+[[outputs]]
+id = "c6lrcdVRs9ceqScezeHcH"
+uri = "file://generated-artifacts/chat-navigation-dev/04-chat-dark-appearance.png"
+type = "image"
+title = "Chat — тёмная тема"
+description = "Крупный концепт тёмной темы; требуется нативная проверка на Mac/iPhone."
+logical_id = "76c6dd58-8abc-4513-aa5f-69aed49ce787"
+content_hash = "sha256:8bdff3305e840c938b9aa0c6704350a99512cc1efff29ce8d7391c4847c34cef"
+size = 72648
+mtime_ms = 1793931520663
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/76c6dd58-8abc-4513-aa5f-69aed49ce787/b883b975-7931-4e4a-8cf2-6fc5c8ea8969"
+storage_version_token = "1793932040050698"
+content_type = "image/png"
+
+[[outputs]]
+id = "ngDv3pYGH6NbxSdkLawcG"
+uri = "file://generated-artifacts/chat-navigation-dev/TalkHint_Chat_Navigation_Dev.zip"
+type = "unspecified"
+title = "Скачать Dev-пакет навигации для Mac"
+description = "Патч, исходники, 4 крупных концепта, отчёт, тесты и инструкция Xcode. ZIP около 380 КБ. Native-сборка не выполнена."
+logical_id = "6d54568a-4e00-445b-b4ad-5c7e8b4cea45"
+content_hash = "sha256:d2b411141647888b72a7e2a3f1a54ef690ac7919e1d7b1f4361b67fba17616dd"
+size = 380382
+mtime_ms = 1793932028918
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/6d54568a-4e00-445b-b4ad-5c7e8b4cea45/a6870aa2-c623-4299-93d1-53f1e5b8aaeb"
+storage_version_token = "1793932041017052"
+content_type = "application/octet-stream"

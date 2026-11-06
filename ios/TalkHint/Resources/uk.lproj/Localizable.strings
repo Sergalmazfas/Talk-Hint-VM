@@ -547,6 +547,12 @@
 "chat.removeAttachment" = "Видалити останнє вкладення";
 "chat.attachment.label" = "Відкрити вкладення";
 "chat.settings" = "Налаштування";
+"chat.back" = "Назад до TalkHint";
+"chat.menu" = "Відкрити меню чату";
+"chat.contacts" = "Контакти";
+"chat.futureNote" = "Розділи нижче поки не підключені до чату.";
+"chat.help" = "Допомога";
+"chat.about" = "Про застосунок";
 "chat.voice.call_busy" = "Голосове введення недоступне під час дзвінка.";
 "chat.voice.permission" = "Дозвольте доступ до мікрофона для запису повідомлення.";
 "chat.voice.recording" = "Триває запис. Зупиніть і перевірте текст перед надсиланням.";

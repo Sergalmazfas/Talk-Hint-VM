@@ -547,6 +547,12 @@
 "chat.removeAttachment" = "Quitar el último archivo";
 "chat.attachment.label" = "Abrir archivo adjunto";
 "chat.settings" = "Ajustes";
+"chat.back" = "Volver a TalkHint";
+"chat.menu" = "Abrir menú del chat";
+"chat.contacts" = "Contactos";
+"chat.futureNote" = "Las secciones siguientes aún no están conectadas al chat.";
+"chat.help" = "Ayuda";
+"chat.about" = "Acerca de";
 "chat.voice.call_busy" = "La voz no está disponible durante una llamada.";
 "chat.voice.permission" = "Permite el acceso al micrófono para grabar un mensaje.";
 "chat.voice.recording" = "Grabando. Detén la grabación y revisa el texto antes de enviar.";

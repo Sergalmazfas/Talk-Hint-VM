@@ -5,6 +5,19 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatNavigationTests": (
+        "testEntryInterceptsWithoutChangingPhoneTab",
+        "testFullscreenChatIsRetainedAcrossExitAndReopen",
+        "testBackAndDrawerUseDifferentActions",
+        "testDrawerOpensExistingSettingsAndNativeBackReturns",
+        "testDraftAndReadingPositionSurviveExitAndReopen",
+        "testExternalTabSelectionDoesNotDismissCallOverlay",
+        "testCompactDrawerScrollsAndFutureDestinationsAreDisabled",
+    ),
+    "CopilotFreezeNavigationTests": (
+        "testFiveVisibleTabsPreserveStableIdentifiersAndNoCopilot",
+        "testSecretaryAndHistoryCanBeSelectedByIdentityAfterRemoval",
+    ),
     "ChatDictationTests": (
         "testPermissionAndRecordingAreSingleFlight",
         "testDeniedOrCancelledPermissionCannotStartLate",

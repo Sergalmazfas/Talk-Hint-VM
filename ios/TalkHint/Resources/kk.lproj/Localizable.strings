@@ -547,6 +547,12 @@
 "chat.removeAttachment" = "Соңғы тіркемені жою";
 "chat.attachment.label" = "Тіркемені ашу";
 "chat.settings" = "Параметрлер";
+"chat.back" = "TalkHint-ке оралу";
+"chat.menu" = "Чат мәзірін ашу";
+"chat.contacts" = "Контактілер";
+"chat.futureNote" = "Төмендегі бөлімдер чатқа әлі қосылмаған.";
+"chat.help" = "Көмек";
+"chat.about" = "Қолданба туралы";
 "chat.voice.call_busy" = "Қоңырау кезінде дауыспен енгізу қолжетімсіз.";
 "chat.voice.permission" = "Хабарлама жазу үшін микрофонға рұқсат беріңіз.";
 "chat.voice.recording" = "Жазылып жатыр. Тоқтатып, жібермес бұрын мәтінді тексеріңіз.";

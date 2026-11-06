@@ -9,8 +9,8 @@ final class CopilotFreezeNavigationTests: XCTestCase {
         let controllers = try XCTUnwrap(tabs.viewControllers)
         XCTAssertEqual(controllers.count, 5)
         XCTAssertEqual(controllers.map { $0.tabBarItem.tag }, [0, 1, 2, 3, 4])
-        XCTAssertTrue((controllers[2] as? UINavigationController)?.viewControllers.first is ChatViewController)
-        XCTAssertEqual(tabs.selectedIndex, 2)
+        XCTAssertTrue((controllers[2] as? UINavigationController)?.viewControllers.first is ChatEntryViewController)
+        XCTAssertEqual(tabs.selectedIndex, 0)
         XCTAssertFalse(CallManager.copilotAvailable)
         for controller in controllers {
             let navigation = try XCTUnwrap(controller as? UINavigationController)
