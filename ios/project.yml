@@ -39,6 +39,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.talkhint
         PRODUCT_NAME: TalkHint
+        TALKHINT_OAUTH_SCHEME: talkhint
         INFOPLIST_FILE: TalkHint/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: TalkHint/TalkHint.entitlements
@@ -50,6 +51,7 @@ targets:
         ChatLiveDev:
           PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.chatdev
           PRODUCT_NAME: TalkHintChatDev
+          TALKHINT_OAUTH_SCHEME: talkhint-chatdev
     dependencies:
       - package: TwilioVoice
         product: TwilioVoice
