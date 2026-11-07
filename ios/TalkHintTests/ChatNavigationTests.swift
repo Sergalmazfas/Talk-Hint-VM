@@ -68,7 +68,30 @@ final class ChatNavigationTests: XCTestCase {
     private func button(_ id: String, in view: UIView) throws -> UIButton {
         try XCTUnwrap(descendants(view, as: UIButton.self).first { $0.accessibilityIdentifier == id })
     }
-    private func settle() async throws { try await Task.sleep(nanoseconds: 100_000_000) }
+    // Wait for the real UIKit event instead of a fixed pause: on a cold simulator the first
+    // full-screen presentation can take well over a second. Upper bound only.
+    private func waitUntil(_ what: String, timeout: TimeInterval = 4,
+                           _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else { XCTFail("Timed out waiting for \(what)"); throw URLError(.timedOut) }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+    private func chatShown(_ tabs: TalkHintTabBarController) async throws {
+        try await waitUntil("chat presentation to finish") {
+            guard let navigation = tabs.retainedChatNavigation else { return false }
+            return tabs.presentedViewController === navigation && !navigation.isBeingPresented &&
+                navigation.transitionCoordinator == nil &&
+                navigation.viewControllers.first?.viewIfLoaded?.window != nil
+        }
+    }
+    private func chatHidden(_ tabs: TalkHintTabBarController) async throws {
+        try await waitUntil("chat dismissal to finish") {
+            tabs.presentedViewController == nil && tabs.transitionCoordinator == nil &&
+                tabs.retainedChatNavigation?.isBeingDismissed != true
+        }
+    }
 
     func testEntryInterceptsWithoutChangingPhoneTab() async throws {
         let (tabs, _) = try fixture()
@@ -77,19 +100,20 @@ final class ChatNavigationTests: XCTestCase {
         XCTAssertFalse(tabs.tabBarController(tabs, shouldSelect: entry))
         XCTAssertTrue(tabs.selectedViewController === origin)
         XCTAssertEqual(tabs.selectedIndex, 0)
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await chatShown(tabs)
         tabs.closeChat(animated: false)
     }
     func testFullscreenChatIsRetainedAcrossExitAndReopen() async throws {
         let (tabs, chat) = try fixture()
         tabs.openChat(animated: false)
+        try await chatShown(tabs)
         let destination = try XCTUnwrap(tabs.retainedChatNavigation)
         XCTAssertEqual(destination.modalPresentationStyle, .fullScreen)
         XCTAssertTrue(destination.viewControllers.first === chat)
         XCTAssertNil(chat.tabBarController)
         XCTAssertFalse(destination.view.subviews.contains { $0 is UITabBar })
         tabs.closeChat(animated: false)
-        try await settle()
+        try await chatHidden(tabs)
         tabs.openChat(animated: false)
         XCTAssertTrue(tabs.retainedChatNavigation === destination)
         XCTAssertEqual(tabs.selectedIndex, 0)
@@ -97,51 +121,60 @@ final class ChatNavigationTests: XCTestCase {
     func testBackAndDrawerUseDifferentActions() async throws {
         let (tabs, chat) = try fixture()
         tabs.openChat(animated: false)
-        try await settle()
+        try await chatShown(tabs)
         try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
         XCTAssertTrue(chat.view.subviews.contains { $0.accessibilityIdentifier == "chat-drawer" })
         XCTAssertTrue(tabs.presentedViewController === tabs.retainedChatNavigation)
         try button("chat-back", in: chat.view).sendActions(for: .touchUpInside)
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await chatHidden(tabs)
         XCTAssertNil(tabs.presentedViewController)
         XCTAssertEqual(tabs.selectedIndex, 0)
     }
     func testDrawerOpensExistingSettingsAndNativeBackReturns() async throws {
         let (tabs, chat) = try fixture()
         tabs.openChat(animated: false)
-        try await settle()
+        try await chatShown(tabs)
         try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
         try button("chat-settings", in: chat.view).sendActions(for: .touchUpInside)
         let navigation = try XCTUnwrap(tabs.retainedChatNavigation)
         XCTAssertTrue(navigation.topViewController is SettingsViewController)
         XCTAssertEqual(navigation.viewControllers.count, 2)
+        let settings = try XCTUnwrap(navigation.topViewController)
+        // The animated push has no transition coordinator until UIKit starts it, so wait
+        // until the chat leaves the window; a pop issued mid-push is deferred by UIKit.
+        try await waitUntil("Settings push to finish") { chat.viewIfLoaded?.window == nil && navigation.transitionCoordinator == nil }
         XCTAssertFalse(navigation.isNavigationBarHidden)
-        try await Task.sleep(nanoseconds: 500_000_000)
         navigation.popViewController(animated: false)
         XCTAssertTrue(navigation.topViewController === chat)
+        try await waitUntil("pop back to chat to finish") { settings.viewIfLoaded?.window == nil && chat.viewIfLoaded?.window != nil && navigation.transitionCoordinator == nil }
         XCTAssertTrue(navigation.isNavigationBarHidden)
     }
     func testDraftAndReadingPositionSurviveExitAndReopen() async throws {
         let (tabs, chat) = try fixture()
         tabs.openChat(animated: false)
-        try await settle()
+        try await chatShown(tabs)
         let composer = try XCTUnwrap(descendants(chat.view, as: UITextView.self).first)
         composer.text = "Do not lose this unfinished text"
         chat.textViewDidChange(composer)
         let scroll = try XCTUnwrap(descendants(chat.view, as: UIScrollView.self).first { $0.accessibilityIdentifier == "chat-messages" })
-        chat.view.layoutIfNeeded()
+        // The transcript arrives through the async offline load started on appearance.
+        try await waitUntil("offline transcript to render") {
+            chat.view.layoutIfNeeded()
+            return scroll.contentSize.height > 1000
+        }
         XCTAssertGreaterThan(scroll.contentSize.height, 1000)
         scroll.setContentOffset(CGPoint(x: 0, y: 250), animated: false)
         tabs.closeChat(animated: false)
-        try await settle()
+        try await chatHidden(tabs)
         tabs.openChat(animated: false)
-        try await settle()
+        try await chatShown(tabs)
         XCTAssertEqual(composer.text, "Do not lose this unfinished text")
         XCTAssertEqual(scroll.contentOffset.y, 250, accuracy: 2)
     }
     func testExternalTabSelectionDoesNotDismissCallOverlay() async throws {
         let (tabs, _) = try fixture()
         tabs.openChat(animated: false)
+        try await chatShown(tabs)
         let destination = try XCTUnwrap(tabs.retainedChatNavigation)
         let phoneOverlay = UIViewController() // no call or phone engine
         phoneOverlay.modalPresentationStyle = .fullScreen
@@ -150,14 +183,14 @@ final class ChatNavigationTests: XCTestCase {
         XCTAssertTrue(destination.presentedViewController === phoneOverlay)
         XCTAssertTrue(tabs.presentedViewController === destination)
         phoneOverlay.dismiss(animated: false)
-        try await settle()
+        try await chatHidden(tabs)
         XCTAssertNil(tabs.presentedViewController)
         XCTAssertEqual(tabs.selectedIndex, 3)
     }
     func testCompactDrawerScrollsAndFutureDestinationsAreDisabled() async throws {
         let (tabs, chat) = try fixture()
         tabs.openChat(animated: false)
-        try await settle()
+        try await chatShown(tabs)
         try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
         let drawer = try XCTUnwrap(chat.view.subviews.first { $0.accessibilityIdentifier == "chat-drawer" })
         XCTAssertFalse(descendants(drawer, as: UIScrollView.self).isEmpty)

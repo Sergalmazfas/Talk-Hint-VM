@@ -41,6 +41,11 @@ final class LoginViewController: UIViewController {
         googleButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         googleButton.addTarget(self, action: #selector(googleTapped), for: .touchUpInside)
         googleButton.accessibilityIdentifier = "button-google-login"
+        #if TALKHINT_CHAT_LIVE_DEV
+        // The existing talkhint:// OAuth callback belongs to the working app.
+        // A separately installed Dev client must not compete for that callback.
+        googleButton.isHidden = true
+        #endif
 
         statusLabel.numberOfLines = 0
         statusLabel.textColor = .systemRed

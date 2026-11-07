@@ -4,6 +4,7 @@ configs:
   Release: release
   NativeValidation: debug
   ChatPreview: debug
+  ChatLiveDev: debug
 options:
   bundleIdPrefix: app.talkhint
   deploymentTarget:
@@ -22,6 +23,8 @@ settings:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_NATIVE_VALIDATION"
     ChatPreview:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_PREVIEW"
+    ChatLiveDev:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_LIVE_DEV"
 packages:
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
@@ -43,6 +46,10 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_BITCODE: NO
         SWIFT_OBJC_BRIDGING_HEADER: TalkHint/TalkHint-Bridging-Header.h
+      configs:
+        ChatLiveDev:
+          PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.chatdev
+          PRODUCT_NAME: TalkHintChatDev
     dependencies:
       - package: TwilioVoice
         product: TwilioVoice
@@ -60,6 +67,14 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TalkHint.app/TalkHint"
         BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
+  TalkHintChatLiveDev:
+    build:
+      targets:
+        TalkHint: all
+    run:
+      config: ChatLiveDev
+      environmentVariables:
+        TALKHINT_API_BASE_URL: https://e62acc35-f5e5-43be-91ea-c3ad7b36be85-00-3l7jbsd7n4zci.janeway.replit.dev
   TalkHintChatPreview:
     build:
       targets:
