@@ -5,7 +5,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication,
                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         print("[AppDelegate] launch started")
-        #if TALKHINT_NATIVE_VALIDATION || TALKHINT_CHAT_PREVIEW
+        #if TALKHINT_NATIVE_VALIDATION || TALKHINT_CHAT_PREVIEW || TALKHINT_CHAT_LIVE_DEV
         // Offline tests/approved-screen preview do not start phone or push services.
         return true
         #else

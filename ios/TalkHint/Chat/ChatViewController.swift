@@ -111,7 +111,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         api = Self.makeChatClient(scope: ChatSessionScope(ownerId: owner), token: SessionStore.shared.token)
         super.init(coder: coder)
     }
-    /// Fixture transport and isolated draft store for offline native checks.
+    /// Injected transport/store, used by offline checks and the isolated live Dev scheme.
     init(api: APIClient, ownerId: String, currentOwnerId: @escaping () -> String?, draftStore: ChatOutbox,
          appearance: ChatScreenAppearance = .existing) {
         self.appearance = appearance
@@ -128,6 +128,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             return token
         })
     }
+    #if TALKHINT_CHAT_LIVE_DEV
+    static func liveApprovedScreen() -> ChatViewController? {
+        guard let owner = SessionStore.shared.userId, SessionStore.shared.isLoggedIn else { return nil }
+        let scope = ChatSessionScope(ownerId: owner)
+        return ChatViewController(api: makeChatClient(scope: scope, token: SessionStore.shared.token),
+                                  ownerId: owner, currentOwnerId: { SessionStore.shared.userId },
+                                  draftStore: ChatOutbox(owner: owner, origin: AppConfig.baseURL.absoluteString),
+                                  appearance: .approvedReference)
+    }
+    #endif
     private var isCurrentOwner: Bool {
         sessionScope.permits(currentUserId: currentOwnerId())
     }
@@ -268,7 +278,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
 
         messagesStack.axis = .vertical; messagesStack.spacing = appearance.messageSpacing
         messagesStack.alignment = .fill
-        if appearance.isApprovedReference { messagesStack.translatesAutoresizingMaskIntoConstraints = false }
+        // Both appearances size the transcript with Auto Layout; with an autoresizing mask
+        // the stack never defined the scroll content size, so the existing chat could not scroll.
+        messagesStack.translatesAutoresizingMaskIntoConstraints = false
         scroll.delegate = self
         scroll.accessibilityIdentifier = "chat-messages"
         scroll.keyboardDismissMode = .interactive
@@ -412,13 +424,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             messagesStack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
             messagesStack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
             messagesStack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
+            messagesStack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            messagesStack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
         ])
-        if appearance.isApprovedReference {
-            NSLayoutConstraint.activate([
-                messagesStack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
-                messagesStack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
-            ])
-        }
         statusLabel.text = appearance.isApprovedReference ? nil : NSLocalizedString("chat.disclaimer", comment: "")
         updateComposerControls()
         renderMessages()
@@ -561,8 +569,25 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             retryButton.isHidden = true
         }
         let changedConversation = currentConversation?.id != conversation.id
+        // Text typed while the first conversation was still loading belongs to "_new";
+        // keep it on screen instead of replacing it with the placeholder.
+        let unopenedDraft = currentConversation == nil && hasRestoredComposer ? (text: draftText, files: attachments) : nil
         currentConversation = conversation
-        if changedConversation { draftRevision += 1; restoreDraft() }
+        if changedConversation {
+            draftRevision += 1
+            restoreDraft()
+            if let unopenedDraft, !unopenedDraft.text.isEmpty || !unopenedDraft.files.isEmpty,
+               draftText.isEmpty, attachments.isEmpty, let outbox {
+                composer.text = unopenedDraft.text.isEmpty ? NSLocalizedString("chat.message.placeholder", comment: "") : unopenedDraft.text
+                composer.textColor = unopenedDraft.text.isEmpty ? .secondaryLabel : .label
+                attachments = unopenedDraft.files
+                renderAttachmentStatus()
+                persistDraft()
+                var saved = outbox.composerDrafts
+                saved.removeValue(forKey: "_new")
+                outbox.composerDrafts = saved
+            }
+        }
         outbox?.selectedConversationId = conversation.id
         updateHeaderTitle(displayTitle(conversation))
         do {
@@ -753,8 +778,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 content.leadingAnchor.constraint(equalTo: bubble.leadingAnchor, constant: appearance.bubbleInset),
                 content.trailingAnchor.constraint(equalTo: bubble.trailingAnchor, constant: -appearance.bubbleInset),
                 content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -appearance.bubbleVerticalInset),
-                bubble.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor,
-                                              multiplier: appearance.maxBubbleWidth(isUser: isUser, isFinal: message.id == messages.last?.id)),
             ])
             if !message.text.isEmpty {
                 let text = UILabel()
@@ -787,6 +810,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             let row = UIStackView(arrangedSubviews: isUser ? [UIView(), bubble] : [bubble, UIView()])
             row.axis = .horizontal; row.alignment = .top; row.spacing = appearance.isApprovedReference ? 12 : 32
             messagesStack.addArrangedSubview(row)
+            // The bubble and the scroll view only share an ancestor once the row is in the
+            // stack; activating this earlier throws NSGenericException ("no common ancestor").
+            bubble.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor,
+                                          multiplier: appearance.maxBubbleWidth(isUser: isUser, isFinal: message.id == messages.last?.id)).isActive = true
             if message.role == "assistant", message.status == "queued" || message.status == "generating" {
                 let progress = UILabel()
                 progress.text = NSLocalizedString(message.status == "queued" ? "chat.reply.queued" : "chat.reply.generating", comment: "")

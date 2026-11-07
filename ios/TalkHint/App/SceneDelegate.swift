@@ -21,6 +21,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = ChatApprovedPreviewHost()
         window.makeKeyAndVisible()
         return
+        #elseif TALKHINT_CHAT_LIVE_DEV
+        // Real chat API with normal login, but no telephony, push registration or main-tab changes.
+        _ = AppConfig.baseURL // Validate the Dev-only origin before reading a saved session.
+        showLiveChat(loggedIn: SessionStore.shared.isLoggedIn)
+        window.makeKeyAndVisible()
+        return
         #else
         let loggedIn = SessionStore.shared.isLoggedIn
         print("[SceneDelegate] preparing \(loggedIn ? "main tabs" : "login")")
@@ -50,7 +56,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidBecomeActive(_ scene: UIScene) {
-        #if !TALKHINT_NATIVE_VALIDATION && !TALKHINT_CHAT_PREVIEW
+        #if !TALKHINT_NATIVE_VALIDATION && !TALKHINT_CHAT_PREVIEW && !TALKHINT_CHAT_LIVE_DEV
         print("[SceneDelegate] active")
         _ = SecretaryNotificationRouter.openPendingIfPossible()
         #endif
@@ -70,6 +76,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             window?.rootViewController = UINavigationController(rootViewController: login)
         }
     }
+
+    #if TALKHINT_CHAT_LIVE_DEV
+    private func showLiveChat(loggedIn: Bool) {
+        if loggedIn, let chat = ChatViewController.liveApprovedScreen() {
+            chat.onClose = { [weak self] in self?.showLiveChat(loggedIn: false) }
+            window?.rootViewController = ChatNavigationController(chat: chat)
+        } else {
+            let login = LoginViewController()
+            login.onLoggedIn = { [weak self] in self?.showLiveChat(loggedIn: true) }
+            window?.rootViewController = UINavigationController(rootViewController: login)
+        }
+    }
+    #endif
 
     /// Builds the main tab bar shown after login (Hint / Translator / Copilot /
     /// Secretary / History). Settings opens from the gear on the Hint screen.

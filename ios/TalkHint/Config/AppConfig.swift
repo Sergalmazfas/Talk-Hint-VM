@@ -6,6 +6,18 @@ enum AppConfig {
     #if TALKHINT_NATIVE_VALIDATION
     // Reserved .invalid domain: hosted XCTest must never reach the live backend.
     static let baseURL = URL(string: "https://talkhint-native-tests.invalid")!
+    #elseif TALKHINT_CHAT_LIVE_DEV
+    // Fail closed: this separately installed Dev client must never fall back to production.
+    static let baseURL: URL = {
+        guard let raw = ProcessInfo.processInfo.environment["TALKHINT_API_BASE_URL"],
+              let url = URL(string: raw), url.scheme == "https",
+              let host = url.host, host.hasSuffix(".replit.dev"),
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+              url.path.isEmpty || url.path == "/" else {
+            preconditionFailure("ChatLiveDev requires an explicit HTTPS .replit.dev origin")
+        }
+        return url
+    }()
     #else
     static let baseURL: URL = {
         #if DEBUG
