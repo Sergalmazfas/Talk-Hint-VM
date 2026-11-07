@@ -1,6 +1,12 @@
 import Foundation
 
 enum AppConfig {
+    #if TALKHINT_CHAT_LIVE_DEV
+    static let oauthCallbackScheme = "talkhint-chatdev"
+    #else
+    static let oauthCallbackScheme = "talkhint"
+    #endif
+
     /// Base URL of the TalkHint backend (the published Reserved VM app).
     /// No trailing slash. Change this to your server before building.
     #if TALKHINT_NATIVE_VALIDATION

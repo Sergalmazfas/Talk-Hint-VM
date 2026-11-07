@@ -8,6 +8,7 @@ import memoize from "memoizee";
 import connectPgSimple from "connect-pg-simple";
 import { authStorage } from "./storage";
 import { mayEnterAdminWeb } from "../../adminIdentity";
+import { nativeChatDevRequested, nativeReturnScheme } from "./nativeChatDev";
 
 // Create PG session store class at module scope
 const PgSession = connectPgSimple(session);
@@ -162,6 +163,7 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
   app.get("/api/login", (req, res, next) => {
+    delete (req.session as any).chatDevOAuth;
     res.clearCookie("ios_oauth");
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
@@ -174,6 +176,14 @@ export async function setupAuth(app: Express) {
   // short-lived cookie so /api/callback knows to return the session token to
   // the app via the `talkhint://` custom scheme instead of the web `/?token=`.
   app.get("/api/login/ios", (req, res, next) => {
+    // Bind the fixed Dev return target to the OIDC browser session, not a callback
+    // query or a client-supplied redirect. Production rejects this entry option.
+    delete (req.session as any).chatDevOAuth;
+    try {
+      (req.session as any).chatDevOAuth = nativeChatDevRequested(req.query.client, process.env.NODE_ENV);
+    } catch {
+      return res.status(400).json({ error: "NATIVE_DEV_LOGIN_UNAVAILABLE" });
+    }
     res.cookie("ios_oauth", "1", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -189,16 +199,20 @@ export async function setupAuth(app: Express) {
 
   app.get("/api/callback", (req, res, next) => {
     ensureStrategy(req.hostname);
+    // Capture before Passport rotates the session; consume the marker once.
+    const nativeScheme = nativeReturnScheme((req.session as any).chatDevOAuth, process.env.NODE_ENV);
+    const isChatDev = nativeScheme === "talkhint-chatdev";
+    delete (req.session as any).chatDevOAuth;
 
     // If this login was started from the iOS app, return results to the app's
     // custom scheme so ASWebAuthenticationSession can capture them.
-    const wantsIos = (req.headers.cookie || "")
+    const wantsIos = isChatDev || (req.headers.cookie || "")
       .split(";")
       .some((c) => c.trim() === "ios_oauth=1");
     const failRedirect = (reason: string) => {
       if (wantsIos) {
         res.clearCookie("ios_oauth");
-        return res.redirect(`talkhint://auth?error=${reason}`);
+        return res.redirect(`${nativeScheme}://auth?error=${encodeURIComponent(reason)}`);
       }
       return res.redirect(`/admin/login?error=${reason}`);
     };
@@ -244,7 +258,7 @@ export async function setupAuth(app: Express) {
           
           if (wantsIos) {
             res.clearCookie("ios_oauth");
-            return res.redirect(`talkhint://auth?token=${token}`);
+            return res.redirect(`${nativeScheme}://auth?token=${encodeURIComponent(token)}`);
           }
           res.redirect(`/admin?token=${token}`);
         } catch (error) {

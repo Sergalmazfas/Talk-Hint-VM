@@ -112,7 +112,14 @@ final class APIClient {
     /// URL that starts the Replit OIDC ("Continue with Google") flow for the
     /// native app. /api/callback returns to the `talkhint://` scheme.
     var googleLoginURL: URL? {
-        AppConfig.baseURL.appendingPathComponent("/api/login/ios")
+        #if TALKHINT_CHAT_LIVE_DEV
+        var components = URLComponents(url: AppConfig.baseURL.appendingPathComponent("/api/login/ios"),
+                                       resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "client", value: "chatdev")]
+        return components?.url
+        #else
+        return AppConfig.baseURL.appendingPathComponent("/api/login/ios")
+        #endif
     }
 
     struct MeResult { let userId: String; let email: String }

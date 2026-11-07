@@ -41,11 +41,6 @@ final class LoginViewController: UIViewController {
         googleButton.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         googleButton.addTarget(self, action: #selector(googleTapped), for: .touchUpInside)
         googleButton.accessibilityIdentifier = "button-google-login"
-        #if TALKHINT_CHAT_LIVE_DEV
-        // The existing talkhint:// OAuth callback belongs to the working app.
-        // A separately installed Dev client must not compete for that callback.
-        googleButton.isHidden = true
-        #endif
 
         statusLabel.numberOfLines = 0
         statusLabel.textColor = .systemRed
@@ -98,7 +93,7 @@ final class LoginViewController: UIViewController {
 
         setLoading(true)
 
-        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: "talkhint") { [weak self] callbackURL, error in
+        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: AppConfig.oauthCallbackScheme) { [weak self] callbackURL, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -111,6 +106,8 @@ final class LoginViewController: UIViewController {
             }
 
             guard let callbackURL = callbackURL,
+                  callbackURL.scheme == AppConfig.oauthCallbackScheme,
+                  callbackURL.host == "auth",
                   let comps = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
                 self.setLoading(false)
                 self.statusLabel.text = NSLocalizedString("login.error.google_failed", comment: "")
