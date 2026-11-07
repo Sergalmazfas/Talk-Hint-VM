@@ -6,6 +6,25 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class LiveChatDevSourceContracts(unittest.TestCase):
+    def test_google_dev_callback_is_isolated_and_button_is_available(self):
+        import plistlib
+        config = (ROOT / "ios/TalkHint/Config/AppConfig.swift").read_text()
+        api = (ROOT / "ios/TalkHint/Networking/APIClient.swift").read_text()
+        login = (ROOT / "ios/TalkHint/UI/LoginViewController.swift").read_text()
+        project = (ROOT / "ios/project.yml").read_text()
+        plist = plistlib.loads((ROOT / "ios/TalkHint/Info.plist").read_bytes())
+        self.assertIn('oauthCallbackScheme = "talkhint-chatdev"', config)
+        self.assertIn('oauthCallbackScheme = "talkhint"', config)
+        self.assertIn('URLQueryItem(name: "client", value: "chatdev")', api)
+        self.assertIn("callbackURLScheme: AppConfig.oauthCallbackScheme", login)
+        self.assertIn("callbackURL.scheme == AppConfig.oauthCallbackScheme", login)
+        self.assertIn('callbackURL.host == "auth"', login)
+        self.assertNotIn("googleButton.isHidden = true", login)
+        self.assertEqual(plist["CFBundleURLTypes"][0]["CFBundleURLSchemes"],
+                         ["$(TALKHINT_OAUTH_SCHEME)"])
+        self.assertIn("TALKHINT_OAUTH_SCHEME: talkhint-chatdev", project)
+        self.assertIn("TALKHINT_OAUTH_SCHEME: talkhint\n", project)
+
     def test_explicit_dev_origin_never_falls_back_to_production(self):
         config = (ROOT / "ios/TalkHint/Config/AppConfig.swift").read_text()
         live = config.split("#elseif TALKHINT_CHAT_LIVE_DEV", 1)[1].split("#else", 1)[0]
