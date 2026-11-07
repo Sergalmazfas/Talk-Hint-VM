@@ -10,7 +10,6 @@ export const modules: ModuleMap = {
   "./components/mockups/ios-calls/PrepareConfirm.tsx": () => import("../components/mockups/ios-calls/PrepareConfirm.tsx"),
   "./components/mockups/ios-calls/PrepareListening.tsx": () => import("../components/mockups/ios-calls/PrepareListening.tsx"),
   "./components/mockups/ios-calls/PrepareSheetStart.tsx": () => import("../components/mockups/ios-calls/PrepareSheetStart.tsx"),
-  "./components/mockups/talkhint-chat/ChatFoundation.tsx": () => import("../components/mockups/talkhint-chat/ChatFoundation.tsx"),
   "./components/mockups/tutor-v4/AttachInChat.tsx": () => import("../components/mockups/tutor-v4/AttachInChat.tsx"),
   "./components/mockups/tutor-v4/AttachMenu.tsx": () => import("../components/mockups/tutor-v4/AttachMenu.tsx"),
   "./components/mockups/tutor-v4/Dialog.tsx": () => import("../components/mockups/tutor-v4/Dialog.tsx"),
@@ -31,5 +30,6 @@ export const modules: ModuleMap = {
   "./components/mockups/tutor-v4/Thinking.tsx": () => import("../components/mockups/tutor-v4/Thinking.tsx"),
   "./components/mockups/tutor-v4/TranslateLoading.tsx": () => import("../components/mockups/tutor-v4/TranslateLoading.tsx"),
   "./components/mockups/tutor-v4/TranslateOpen.tsx": () => import("../components/mockups/tutor-v4/TranslateOpen.tsx"),
-  "./components/mockups/tutor-v4/UserCommitted.tsx": () => import("../components/mockups/tutor-v4/UserCommitted.tsx")
+  "./components/mockups/tutor-v4/UserCommitted.tsx": () => import("../components/mockups/tutor-v4/UserCommitted.tsx"),
+  "./components/mockups/talkhint-chat/ChatFoundation.tsx": () => import("../components/mockups/talkhint-chat/ChatFoundation.tsx")
 };
