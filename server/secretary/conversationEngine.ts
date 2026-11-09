@@ -53,6 +53,8 @@ export const secretaryPhoneTools = [
 export type TelephoneTools = {
   beforeTurn: (turns: SpokenTurn[]) => Promise<string>;
   navigate?: (signal: AbortSignal) => Promise<boolean>;
+  needsChoice?: () => boolean;
+  fallback?: (signal: AbortSignal) => Promise<boolean>;
   execute: (name: string, args: string, signal: AbortSignal) => Promise<any>;
   blocksEnd: () => boolean;
 };
@@ -235,7 +237,8 @@ export class SecretaryConversationEngine {
       input.push({ role: "developer", content: state });
     }
     const openingToolOnly = this.telephone && !vm && !this.opening.permit(turns);
-    if (openingToolOnly && !(this.telephoneTools?.blocksEnd() && !this.telephoneTools.navigate)) {
+    if (openingToolOnly && !(this.telephoneTools?.needsChoice?.() ??
+      (this.telephoneTools?.blocksEnd() && !this.telephoneTools.navigate))) {
       this.record("opening_wait_recording_or_human");
       return;
     }
@@ -254,6 +257,7 @@ export class SecretaryConversationEngine {
       let completion: Extract<EngineChunk, { type: "complete" }> | undefined;
       this.report.usage.requests++;
       let measured = false;
+      try {
       for await (const chunk of this.stream({ instructions: this.instructions, input, signal })) {
         if (chunk.type === "usage") {
           if (!measured && [chunk.input, chunk.cachedInput, chunk.output].every(n => Number.isSafeInteger(n) && n >= 0) &&
@@ -270,13 +274,24 @@ export class SecretaryConversationEngine {
         if (chunk.type === "text") { spoken += chunk.text; if (!openingToolOnly) emit(chunk.text); }
         else completion = chunk;
       }
+      } catch (error) {
+        if (openingToolOnly && !signal.aborted && await this.telephoneTools?.fallback?.(signal)) return;
+        throw error;
+      }
       if (signal.aborted) return;
-      if (!completion) throw new Error("Engine stream did not complete");
+      if (!completion) {
+        if (openingToolOnly && await this.telephoneTools?.fallback?.(signal)) return;
+        throw new Error("Engine stream did not complete");
+      }
       if (vm && spoken.trim() && completion.tools.length) {
         // A spoken voicemail is the single message, never a preamble to another.
         return { reason: "follow_up" as const, farewell: spoken.trim() };
       }
       if (!completion.tools.length) {
+        if (openingToolOnly) {
+          await this.telephoneTools?.fallback?.(signal);
+          return;
+        }
         // Never attach end_call to a different/unfinished response.
         if (preparedEnd && spoken.trim() === preparedEnd.farewell) return preparedEnd;
         if (vm && spoken.trim()) return { reason: "follow_up" as const, farewell: spoken.trim() };
@@ -306,6 +321,7 @@ export class SecretaryConversationEngine {
         input.push({ type: "function_call_output", call_id: tool.call_id, output: JSON.stringify(result) });
       }
     }
+    if (!signal.aborted && openingToolOnly && await this.telephoneTools?.fallback?.(signal)) return;
     if (!signal.aborted) throw new Error("Engine tool loop limit");
   }
 }

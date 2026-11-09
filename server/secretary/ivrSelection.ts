@@ -27,13 +27,38 @@ export function chooseMenuOption(menu: string, goal: string) {
     const option = options.find(o => pattern.test(o.label));
     return option && { digits: option.digits, reason };
   };
-  const parking = /park|reserv|book|парков|стоян|бронир/i.test(goal);
-  const repair = /tire|repair|service|шины|шин|ремонт|сервис/i.test(goal);
-  const roadside = /roadside|emergency|обочин|дорог/i.test(goal);
-  return (parking ? pick(/park|reserv|book/i, "exact_parking_or_reservation_option") : undefined)
-    ?? (roadside ? pick(/roadside|emergency/i, "goal_roadside_assistance") : undefined)
-    ?? (repair && !parking ? pick(/(?:parts|shop|truck|tire).*(?:service|repair)|service advisor|tire|repair/i, "goal_truck_service") : undefined)
-    ?? pick(/general manager/i, "no_exact_option_general_manager")
+  // Prefer the objective, not incidental facts or "do not reserve/pay" constraints.
+  let objective = goal;
+  try {
+    const plan = JSON.parse(goal.slice(goal.indexOf("{")));
+    if (typeof plan.goal === "string" && plan.goal.trim()) objective = plan.goal;
+  } catch { /* Legacy free-text instructions remain supported. */ }
+  objective = objective.split(/\b(?:do not|don't|never)\b|не (?:бронировать|платить|покупать)/i)[0];
+  const groups = [
+    ["parts", "part", "spares", "spare", "запчасти", "запчастей"],
+    ["tires", "tire", "tyres", "tyre", "шины", "шин", "шину"],
+    ["service", "repair", "repairs", "maintenance", "ремонт", "сервис"],
+    ["sales", "sale", "продажи", "продаж"],
+    ["billing", "invoice", "invoices", "accounts", "бухгалтерия", "счёт", "счет"],
+    ["dispatch", "dispatcher", "диспетчер", "диспетчерская"],
+    ["parking", "park", "reservation", "reservations", "book", "парковка", "парковку", "парковки", "стоянка", "бронирование"],
+    ["roadside", "emergency", "эвакуация"],
+  ];
+  const ignored = new Set("a an the for to of and or in at on by with from call reach speak talk department please find ask about today thank you calling i we need want this that is are".split(" "));
+  const tokens = (text: string) => new Set((text.toLowerCase().match(new RegExp("[\\p{L}\\p{N}]+", "gu")) ?? [])
+    .filter(t => t.length > 2 && !ignored.has(t)));
+  const wanted = tokens(objective);
+  const ranked = options.map(option => {
+    const label = tokens(option.label);
+    let score = Array.from(wanted).filter(t => label.has(t)).length;
+    for (const group of groups)
+      if (group.some(t => wanted.has(t)) && group.some(t => label.has(t))) score += 3;
+    return { ...option, score };
+  }).sort((a, b) => b.score - a.score);
+  if (ranked[0]?.score > 0 && ranked[0].score > (ranked[1]?.score ?? 0))
+    return { digits: ranked[0].digits, reason: "authorized_goal_matches_heard_option" };
+  if (ranked[0]?.score > 0) return undefined; // A tie needs model interpretation.
+  return pick(/general manager/i, "no_exact_option_general_manager")
     ?? pick(/\bmanager\b/i, "no_exact_option_manager")
     ?? pick(/operator|representative|human|person/i, "no_exact_option_human")
     ?? pick(/repeat|replay/i, "repeat_current_menu");

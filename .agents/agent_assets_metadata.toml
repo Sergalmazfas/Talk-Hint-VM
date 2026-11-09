@@ -4499,3 +4499,17 @@ mtime_ms = 1793934877230
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/51d09d33-a92a-426e-ac47-47163e074197/009287a5-fbf8-4d47-8e0e-8809fc7b8fec"
 storage_version_token = "1793934890168813"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "hgBdsIUyCJzMp3rRqKk7F"
+uri = "file://generated-artifacts/TalkHint_FleetPride_IVR_Dev_Clavdiy_2026-11-09.zip"
+type = "unspecified"
+title = "FleetPride IVR — Dev-пакет Клавдию"
+description = "Исправления, патч, 22 новых offline-проверки, полный gate: 4016 passed / 0 failed / 52 skipped. Отчёт, логи и два proposed-урока. Production не изменён."
+logical_id = "44cc5ad9-656d-4850-b2d5-4e0b2c875897"
+content_hash = "sha256:d20e4350fd1ac0546cf1c785d091781c5e971fbb1ed0005ea5e691221030db16"
+size = 328829
+mtime_ms = 1794244046820
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:e62acc35-f5e5-43be-91ea-c3ad7b36be85/44cc5ad9-656d-4850-b2d5-4e0b2c875897/93e0f969-c579-4f51-a7c7-719dbb945455"
+storage_version_token = "1794244069280824"
+content_type = "application/octet-stream"

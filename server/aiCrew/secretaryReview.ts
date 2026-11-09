@@ -22,6 +22,11 @@ export type SecretaryEvidence = {
   openingReviewRequired?: boolean;
   openingTiming?: ReturnType<typeof openingTiming>;
   measurements?: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics>;
+  ivrNavigation?: {
+    source: "calls.metadata.secretaryIvr.events"; status: "recorded" | "no_events_recorded"; omitted: number;
+    events: { kind: string; at: string; digits: string | null; heard: string; result: string;
+      afterTurn: number | null; sentAt: string | null; reason: string }[];
+  };
   codeVersion: string; limitations: string[];
   expectations?: ExpectationSnapshot;
   cRollout?: { ordinal: number; measurements: ReturnType<typeof import("../secretary/phoneMetrics").phoneMetrics> };
@@ -48,7 +53,7 @@ export const secretaryHash = (v: unknown) => createHash("sha256").update(JSON.st
 
 /** Deliberately conservative: reject unsupported text shapes; never send raw task objects. */
 export function secretaryEvidence(goal: string, transcript: unknown, codeVersion: string,
-  names: string[] = [], ownerNames: string[] = []): SecretaryEvidence {
+  names: string[] = [], ownerNames: string[] = [], ivrEvents?: unknown): SecretaryEvidence {
   const aliases = new Map<string, string>();
   const businessWords = new Set(("yes no okay ok new used available availability price tomorrow today tire tires " +
     "trailer truck wire wires installation tax taxes warranty cash card dollars usd am pm fuel restaurant parking " +
@@ -103,7 +108,22 @@ export function secretaryEvidence(goal: string, transcript: unknown, codeVersion
   const points = rawPoints.map(redact);
   if (points.length > 40 || Buffer.byteLength(JSON.stringify(turns), "utf8") > 24000)
     throw Error("SECRETARY_SOURCE_TOO_LARGE");
-  return { version: 1, points, pointKinds: rawPoints.map(p => prohibitions.includes(p) ? "prohibition" : checklistItemKind(p)), transcript: turns,
+  const audit = Array.isArray(ivrEvents) ? ivrEvents.filter(e => e && typeof e === "object" &&
+    ["press", "observed", "help", "reached", "push_failed"].includes(e.kind) &&
+    typeof e.at === "string" && Number.isFinite(Date.parse(e.at))) : [];
+  const ivrNavigation: SecretaryEvidence["ivrNavigation"] = {
+    source: "calls.metadata.secretaryIvr.events", status: audit.length ? "recorded" : "no_events_recorded",
+    omitted: Math.max(0, audit.length - 60),
+    events: audit.slice(-60).map(e => ({
+      kind: e.kind, at: e.at, digits: typeof e.digits === "string" && /^[0-9*#]{1,5}$/.test(e.digits) ? e.digits : null,
+      heard: redact(String(e.heard ?? "").slice(0, 600)), result: redact(String(e.result ?? "").slice(0, 120)),
+      reason: redact(String(e.reason ?? "").slice(0, 300)),
+      afterTurn: Number.isInteger(e.afterTurn) && e.afterTurn >= 0 ? e.afterTurn : null,
+      sentAt: typeof e.sentAt === "string" && Number.isFinite(Date.parse(e.sentAt)) ? e.sentAt : null,
+    })),
+  };
+  return { version: 1, ...(ivrEvents !== undefined ? { ivrNavigation } : {}),
+    points, pointKinds: rawPoints.map(p => prohibitions.includes(p) ? "prohibition" : checklistItemKind(p)), transcript: turns,
     voicemail: voicemailAnnouncement([...turns].reverse().find(t => t.speaker === "guest")?.text ?? ""),
     voicemailSkipped: voicemailWasSkipped(goal, turns),
     codeVersion: /^[a-zA-Z0-9._:+-]{1,120}$/.test(codeVersion) ? codeVersion : "unknown",
@@ -206,6 +226,12 @@ export function secretaryInput(s: CrewState, task: Task, agentId: string, modelI
     "Thank you for calling / press / para español / calls may be recorded = запись, не человек. " +
     "Кто говорил первым и наложение — по evidence.openingTiming (word clocks), при отсутствии — по порядку исходных реплик. Наложение звука без времён не проверено, null, НЕ false. " +
     "В reason укажи, говорила ли Катя до окончания записи по доступным данным и что не проверено; Тома отражает пропуск в disagreements. " +
+    "IVR/DTMF ОБЯЗАТЕЛЬНО независимо проверить по evidence.ivrNavigation: какая цифра, at/sentAt, " +
+    "после какого heard меню и afterTurn, result. afterTurn — индекс исходного Retell-снимка, не номер строки выдержки. " +
+    "Это реальные события инструмента, не речь Кати. " +
+    "dispatch_pending не доказывает отправку; command_sent_destination_acceptance_unknown доказывает только отправку команды, " +
+    "НЕ приём меню или соединение с человеком. Отсутствие событий отметить отдельно, не скрывать за «данных нет» " +
+    "и не приравнивать его к успешному нажатию. При omitted>0 явно отметить неполноту. Вывод включить в reason/unverified/disagreements. " +
     "Сам вопрос Кати не закрывает ask; повтор факта собеседником не закрывает say. " +
     "unknown/смешанный пункт не закрывать, указать неопределённость. Состав/границы/порядок исходных пунктов не менять. " +
     " dialogue: checklist[{index,kind,answer,closed,quote,turn}], katyaTurns, excessTurns, hypothetical=true, " +

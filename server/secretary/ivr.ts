@@ -69,6 +69,7 @@ export class SecretaryIvr {
   private actionable = false;
   private dispatchedHash = "";
   private helpHash = "";
+  private observedHash = "";
   constructor(private io: IvrIO, private remembered: MenuStep[] = [], private goal = "") {}
   private event(kind: IvrEvent["kind"], result: string, digits?: string): IvrEvent {
     return { id: `ivr:${++this.sequence}`, at: new Date().toISOString(), kind,
@@ -126,11 +127,28 @@ export class SecretaryIvr {
   }
   /** Called only for a provider response_required turn, never partial transcript updates. */
   async navigate(signal: AbortSignal) {
-    if (!this.active || !this.actionable || this.waiting || this.pending || this.repeat || sensitive.test(this.menu) ||
-      /(?:\.{3}|…)\s*$/.test(this.menu)) return false;
+    if (signal.aborted) throw Error("Stale IVR action");
+    if (!this.needsChoice()) return false;
+    if (this.observedHash !== this.hash) {
+      await this.io.record({ ...this.event("observed", "complete_menu_ready_for_selection"),
+        afterTurn: this.turns.length - 1 });
+      this.observedHash = this.hash;
+    }
     const choice = chooseMenuOption(this.menu, this.goal);
     if (!choice) return false;
     await this.press(choice.digits, this.hash, signal, false, choice.reason);
+    return true;
+  }
+  needsChoice() {
+    return this.active && this.actionable && !this.waiting && !this.pending && !this.repeat &&
+      !sensitive.test(this.menu) && !/(?:\.{3}|…)\s*$/.test(this.menu);
+  }
+  /** Only after model selection has produced no usable action. Never retries ambiguous dispatches. */
+  async fallback(signal: AbortSignal) {
+    if (!this.needsChoice() || signal.aborted) return false;
+    const operator = chooseMenuOption(this.menu, "operator representative");
+    const digits = operator?.digits ?? "0";
+    await this.press(digits, this.hash, signal, false, "no_matching_option_operator_zero");
     return true;
   }
   context() {
@@ -187,6 +205,8 @@ export class SecretaryIvr {
           const choice = chooseMenuOption(this.menu, this.goal);
           if (choice && this.actionable && !this.repeat && !sensitive.test(this.menu))
             return this.dispatch(choice.digits, this.hash, signal, false, `help_${this.helpDelivery}:${choice.reason}`);
+          if (this.needsChoice())
+            return this.dispatch("0", this.hash, signal, false, "no_matching_option_operator_zero");
           // No invented digit; immediate audible fallback instead of waiting on another model call.
           await this.io.record({ ...this.event("help", "audible_fallback_no_safe_digit"),
             reason: `help_${this.helpDelivery}_no_safe_current_option` });
@@ -216,7 +236,8 @@ export class SecretaryIvr {
       if (this.pending) throw Error("Awaiting the menu response; no duplicate dispatch");
       if (typeof digits !== "string" || !/^[0-9*#]{1,5}$/.test(digits) || sensitive.test(this.menu))
         throw Error("Only non-sensitive menu digits allowed");
-      const zeroFallback = digits === "0" && this.repeat && this.representativeSpoken;
+      const zeroFallback = digits === "0" && ((this.repeat && this.representativeSpoken) ||
+        (reason === "no_matching_option_operator_zero" && !this.repeat));
       if (!menuChoices(this.menu).includes(digits) && !zeroFallback) throw Error("Digit not offered by this menu");
       if (this.waiting && !owner) throw Error("Waiting for owner choice");
       const used = this.hash === this.dispatchedHash ? this.presses : 0;

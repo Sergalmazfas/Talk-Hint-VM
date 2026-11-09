@@ -71,6 +71,7 @@ type Entry = {
   socket?: WebSocket; abort?: AbortController; responseId: number; epoch: number;
   handled: Set<number>; introduced: boolean; closed: boolean; expiresAt: number;
   pending?: number;
+  directIvrResponse?: { id: number; signal: AbortSignal };
   commandCompleted?: number; interruptSequence?: number;
   buffer?: CResponseBuffer;
   phoneConversationVersion?: PhoneConversationVersion;
@@ -163,8 +164,12 @@ export class RetellEngineRegistry {
   /** Native Retell DTMF on the EXISTING SIP bridge; never redirect Twilio or restart media. */
   pressDigits(id: string, digits: string, signal?: AbortSignal, menuHash?: string) {
     const entry = this.entries.get(id), ws = entry?.socket;
+    // A silent IVR response intentionally bypasses the conversational C buffer.
+    // Permit only its exact still-current response/signal, never a stale generation.
+    const directIvr = signal && entry?.directIvrResponse?.signal === signal &&
+      entry.directIvrResponse.id === entry.pending && entry.abort?.signal === signal;
     if (!this.options.phone || !entry || entry.closed || !ws || ws.readyState !== 1 ||
-      signal?.aborted || (entry.buffer && !entry.buffer.permitsTools()) ||
+      signal?.aborted || (entry.buffer && !entry.buffer.permitsTools() && !directIvr) ||
       !/^[0-9*#]{1,5}$/.test(digits) || ws.bufferedAmount > 256 * 1024)
       throw Error("Current telephone transport unavailable");
     if (entry.pending !== undefined && signal === entry.abort?.signal) {
@@ -370,6 +375,7 @@ export class RetellEngineRegistry {
       firstGreetingSpeech = firstGreeting ? speechKey(turns) : undefined;
       entry.pending = id;
       const epoch = entry.epoch, controller = new AbortController(); entry.abort = controller;
+      entry.directIvrResponse = openingSilent ? { id, signal: controller.signal } : undefined;
       let endCall = false;
       const current = () => !entry.closed && entry.socket === ws && epoch === entry.epoch;
       const timeout = setTimeout(() => {

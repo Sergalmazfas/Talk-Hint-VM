@@ -1,5 +1,6 @@
 import { voicemailAnnouncement } from "./voicemail";
 import { humanOpening, machineOpening } from "./opening";
+import { menuChoices } from "./ivr";
 export type NoHumanReason = "voicemail_skip" | "no_human_20s" | "no_speech_45s";
 /** Per telephone connection, not per app session. ASR repetition is not progress. */
 export class PhoneLineGuard {
@@ -8,12 +9,14 @@ export class PhoneLineGuard {
   private finished = false;
   private menus = new Set<string>();
   private heardSpeech = false;
+  private attemptedMenu = false;
   voicemail = false;
   constructor(private skip: boolean, private end: (reason: NoHumanReason) => void) {
     this.arm("no_speech_45s", 45_000);
   }
   progress(menu: string) {
     if (!this.heardSpeech || !menu || this.menus.has(menu)) return;
+    this.attemptedMenu = true;
     this.menus.add(menu);
     this.arm();
   }
@@ -27,6 +30,12 @@ export class PhoneLineGuard {
     if (this.finished) return;
     if (!text.trim()) return; // Empty transcript / ringing is not first speech.
     if (!this.heardSpeech) { this.heardSpeech = true; this.arm(); }
+    // A recognized menu must get its first navigation attempt before the
+    // no-human countdown. The existing overall telephone limit still applies.
+    if (!this.attemptedMenu && menuChoices(text).length) {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = undefined;
+    }
     if (voicemailAnnouncement(text)) {
       if (!this.voicemail && !this.timer) this.arm();
       this.voicemail = true;

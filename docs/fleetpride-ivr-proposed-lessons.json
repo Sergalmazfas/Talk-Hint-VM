@@ -1,0 +1,36 @@
+{
+  "status": "proposed",
+  "proposer": "Нина",
+  "actualAuthor": "Replit",
+  "acceptor": "owner",
+  "bookWriteStatus": "не записан",
+  "lessons": [
+    {
+      "roleId": "secretary-lab-engineer",
+      "title": "IVR: проверять всю цепочку от цели до отправленной цифры",
+      "status": "proposed",
+      "whatHappened": "FleetPride: меню «parts — 1, service — 2» распознано, но Катя не выбрала цифру. Автоматический выбор не понимал parts, модель не получала управление, затем срабатывал no_human_20s. Полный offline replay дополнительно выявил блокировку тихого DTMF разговорным буфером C.",
+      "whatLearned": "Правильная расшифровка и правильный выбор в отдельной функции ещё не доказывают отправку команды. Нужна проверка всей цепочки на текущей версии C.",
+      "nextTime": "Проверять цель → услышанное меню → выбор → актуальный response_id/signal → digit_to_press → аудит. В разбор включать цифру, время, исходное меню и результат отправки; отсутствие аудита отмечать явно.",
+      "expectedResult": {
+        "offlineFleetPrideDigit": 1,
+        "spokenRepliesOverMenu": 0,
+        "duplicateDispatches": 0,
+        "staleGenerationDispatches": 0
+      }
+    },
+    {
+      "roleId": "secretary-qa",
+      "title": "IVR: команда отправлена не означает, что отдел ответил",
+      "status": "proposed",
+      "whatHappened": "В разборе FleetPride подтверждено лишь наличие записи IVR; данных для проверки DTMF команда не получила. Запрос повторить звонок не устанавливал техническую причину.",
+      "whatLearned": "Нужно независимо сверять первичный аудит инструмента. dispatch_pending не доказывает отправку, command_sent_destination_acceptance_unknown не доказывает принятие цифры или соединение.",
+      "nextTime": "Сверять цифры, at/sentAt, heard, afterTurn и result с исходным меню. Проверять C-reserve и streaming-v1, отменённые ответы, неполное меню и предохранитель до первого нажатия. Не требовать платного повтора, если причину можно доказать offline.",
+      "expectedResult": {
+        "unsupportedDestinationAcceptanceClaims": 0,
+        "omittedAvailableDtmfEvidence": 0,
+        "automaticPaidVerificationCalls": 0
+      }
+    }
+  ]
+}

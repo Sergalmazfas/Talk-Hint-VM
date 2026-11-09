@@ -86,6 +86,8 @@ export function resolvedPhoneIvrTools(id: string): TelephoneTools {
   return {
     beforeTurn: async turns => { resolved = (await context(id)).controller; await resolved.observe(turns); return resolved.context(); },
     navigate: signal => resolved!.navigate(signal),
+    needsChoice: () => resolved?.needsChoice() ?? false,
+    fallback: signal => resolved!.fallback(signal),
     execute: async (name, args, signal) => {
       resolved = (await context(id)).controller; return resolved.tool(name, args, signal);
     },

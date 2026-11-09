@@ -68,7 +68,7 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
       const ownerNames = [identity?.en, identity?.ruGenitive].filter((s): s is string => !!s)
         .flatMap(s => [s, ...s.split(/\s+/)]);
       evidence = secretaryEvidence(task.instruction, task.transcript_turns,
-        recordedCallVersion(call)?.commit ?? "unknown", [], ownerNames);
+        recordedCallVersion(call)?.commit ?? "unknown", [], ownerNames, call.metadata?.secretaryIvr?.events ?? []);
       evidence.openingReviewRequired = true;
       evidence.openingTiming = openingTiming(evidence.transcript,
         (call.metadata?.secretaryEngine ?? call.metadata?.retellPhone?.engine)?.playback);
@@ -204,6 +204,7 @@ export async function reviewSecretaryCall(call: any, task: any, ownerId: string,
         [`Ожидание → факт → сошлось/не сошлось/почему: Лёва ${JSON.stringify(author?.expectationChecks ?? [])}; Тома ${JSON.stringify(review?.expectationChecks ?? [])}`] :
         [`Сверка ожидания: не проверено — нет доступного числового ожидания, зафиксированного до звонка (${p.evidence.expectations?.status ?? "старая запись без снимка"}). Порог не выдумывался.`]),
       `Начало — Лёва: ${JSON.stringify(author?.opening ?? "не проверено")}; Тома: ${JSON.stringify(review?.opening ?? "не проверено")}`,
+      `IVR/DTMF — цифра, время отправки, исходное меню, afterTurn и результат (не доказательство принятия меню): ${JSON.stringify(p.evidence.ivrNavigation ?? "старая запись без снимка событий")}`,
       `Пункт → тип (say=сказать, ask=спросить, prohibition=запрет, unknown=не определено) → ответ/произнесено → закрыт: ${JSON.stringify(author?.dialogue?.checklist ?? "не проверено")}`,
       `Реплики Кати / лишние: ${author?.dialogue?.katyaTurns ?? "не измерено"} / ${author?.dialogue?.excessTurns ?? "не измерено"}`,
       `Идеальная короткая версия (гипотеза): ${JSON.stringify(author?.dialogue?.ideal ?? [])}; независимая версия Томы: ${JSON.stringify(review?.dialogue ?? "не проверено")}`,
