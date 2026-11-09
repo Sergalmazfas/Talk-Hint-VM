@@ -39,12 +39,15 @@ final class ChatApprovedScreenTests: XCTestCase {
     }
     private func loaded(_ chat: ChatViewController) async throws {
         let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline {
+        // Check again after every wake-up: the fixture renders on the main actor, so a
+        // stalled main thread can finish it while this loop sleeps past the deadline.
+        while true {
             if chat.offlinePreviewReady,
                all(chat.view, UILabel.self).contains(where: { $0.accessibilityIdentifier == "chat-message-text" }) {
                 chat.view.layoutIfNeeded()
                 return
             }
+            guard Date() < deadline else { break }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTFail("Local fixture did not render before deadline")
