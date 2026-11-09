@@ -22,7 +22,7 @@ class ApprovedChatSourceContracts(unittest.TestCase):
         self.assertIn("appearance = .existing", self.chat)
         self.assertIn("appearance: ChatScreenAppearance = .existing", self.chat)
         self.assertIn("appearance: .approvedReference", self.preview)
-        tabs = self.scene.split("func makeMainTabController()", 1)[1]
+        tabs = self.scene.split("func makeMainTabController(", 1)[1]
         self.assertNotIn("approvedReference", tabs)
         self.assertNotIn("ChatApprovedPreview", tabs)
         self.assertIn("#elseif TALKHINT_CHAT_PREVIEW", self.scene)

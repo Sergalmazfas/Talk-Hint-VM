@@ -381,6 +381,8 @@ final class CallManager: NSObject {
             ?? scene?.windows.first?.rootViewController
         while let presented = root?.presentedViewController { root = presented }
         let tab = (root as? UITabBarController) ?? root?.tabBarController
+        // The central entry in the Dev app is Chat, never a Copilot audio mode.
+        if tab is TalkHintTabBarController { return .hint }
         return tab?.selectedIndex == 2 ? .copilot : .hint
     }
 }
