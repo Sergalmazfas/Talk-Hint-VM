@@ -16,6 +16,69 @@ struct ChatConversation: Codable, Identifiable, Equatable {
     var updatedAt: String
 }
 
+struct CallPlanExpectedQuestion: Codable, Equatable {
+    let q: String
+    let answer: String?
+
+    private enum CodingKeys: String, CodingKey { case q, answer }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        q = try container.decode(String.self, forKey: .q)
+        answer = try container.decodeIfPresent(String.self, forKey: .answer)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(q, forKey: .q)
+        try container.encode(answer, forKey: .answer)
+    }
+}
+
+struct ChatCallPlan: Codable, Equatable {
+    let goal: String
+    let ownerFacts: [String]
+    let sayAsk: [String]
+    let expectedQuestions: [CallPlanExpectedQuestion]
+    let unknowns: [String]
+    let disclosurePolicy: DisclosurePolicy
+    let language: String
+    let executor: String
+    let targetPhone: String?
+    let voicemail: String?
+
+    struct DisclosurePolicy: Codable, Equatable {
+        let allowed: [String]
+        let forbidden: [String]
+    }
+}
+
+struct ChatMessageAction: Codable, Equatable {
+    struct Result: Codable, Equatable {
+        let id: String?
+        let status: String?
+        let expiresAt: String?
+
+        init(id: String? = nil, status: String? = nil, expiresAt: String? = nil) {
+            self.id = id
+            self.status = status
+            self.expiresAt = expiresAt
+        }
+    }
+
+    let plan: ChatCallPlan
+    let planHash: String
+    var status: String
+    var result: Result?
+
+    init(plan: ChatCallPlan, planHash: String, status: String, result: Result? = nil) {
+        self.plan = plan
+        self.planHash = planHash
+        self.status = status
+        self.result = result
+    }
+}
+
 struct ChatMessage: Codable, Identifiable, Equatable {
     let id: String
     let conversationId: String
@@ -27,6 +90,34 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let attachmentIds: [String]
     let createdAt: String
     let errorCode: String?
+    var action: ChatMessageAction?
+
+    init(id: String, conversationId: String, sequence: Int, role: String, text: String, status: String,
+         clientRequestId: String?, attachmentIds: [String], createdAt: String, errorCode: String?,
+         action: ChatMessageAction? = nil) {
+        self.id = id
+        self.conversationId = conversationId
+        self.sequence = sequence
+        self.role = role
+        self.text = text
+        self.status = status
+        self.clientRequestId = clientRequestId
+        self.attachmentIds = attachmentIds
+        self.createdAt = createdAt
+        self.errorCode = errorCode
+        self.action = action
+    }
+}
+
+struct ChatPlanConfirmation: Decodable {
+    struct Review: Decodable {
+        let phoneNumber: String
+        let instruction: String
+        let confirmationToken: String
+    }
+    let message: ChatMessage
+    let dialed: Bool
+    let review: Review?
 }
 
 struct ChatAttachment: Codable, Identifiable, Equatable {
@@ -86,6 +177,12 @@ extension APIClient {
         let result = try JSONDecoder().decode([String: ChatMessage].self, from: data)
         guard let message = result["message"] else { throw APIError.decoding }
         return message
+    }
+
+    func confirmChatPlan(conversationId: String, messageId: String, planHash: String) async throws -> ChatPlanConfirmation {
+        let data = try await request("/api/chat-v1/conversations/\(conversationId)/messages/\(messageId)/confirm-plan",
+                                     method: "POST", json: ["planHash": planHash], authenticated: true)
+        return try JSONDecoder().decode(ChatPlanConfirmation.self, from: data)
     }
 
     func uploadChatAttachment(requestId: UUID, name: String, mimeType: String, data fileData: Data) async throws -> ChatAttachment {

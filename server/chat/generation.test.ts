@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ChatService } from "./service";
 import { ChatError } from "./contracts";
+import { proposedPlan } from "./plans";
 
 const repo = () => ({
   claim: vi.fn().mockResolvedValue(true),
@@ -11,6 +12,21 @@ const repo = () => ({
   save: vi.fn().mockResolvedValue(undefined),
 });
 describe("Chat 1A generation persistence", () => {
+  it("stores a proposal in the completed reply without saving Hint or issuing a Secretary token", async () => {
+    const r = repo();
+    const action = proposedPlan({ goal: "Ask price", ownerFacts: [], sayAsk: ["Ask price"],
+      expectedQuestions: [], unknowns: [], disclosurePolicy: { allowed: [], forbidden: ["Do not pay"] },
+      language: "en", executor: "hint" });
+    const backend = { saveHint: vi.fn(), reviewSecretary: vi.fn() };
+    const provider = { available: () => true, generate: async function* () {
+      yield { text: "Please review" }; yield { action }; yield { complete: true };
+    } };
+    await (new ChatService(r as any, provider, {} as any, backend) as any).run("alice", "chat", "reply", 1, []);
+    expect(r.save).toHaveBeenLastCalledWith("alice", "reply", "Please review", "complete", null,
+      expect.objectContaining({ action }));
+    expect(backend.saveHint).not.toHaveBeenCalled();
+    expect(backend.reviewSecretary).not.toHaveBeenCalled();
+  });
   it("persists partial output, completion and provider evidence; excludes future messages", async () => {
     const r = repo();
     const provider = { available: () => true, generate: vi.fn(async function* () {

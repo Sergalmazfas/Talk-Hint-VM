@@ -5,7 +5,8 @@ import QuickLook
 
 @MainActor
 final class ChatViewController: UIViewController, UITextViewDelegate, UIDocumentPickerDelegate,
-                               UIScrollViewDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+                               UIScrollViewDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate,
+                               UIGestureRecognizerDelegate {
     var onClose: (() -> Void)?
     private let appearance: ChatScreenAppearance
     private let api: APIClient
@@ -42,6 +43,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var isLoadingOlder = false
     private var attachmentRetry: (name: String, mime: String, data: Data, requestId: UUID)?
     private var isUploadingAttachment = false
+    private var confirmingPlanMessageIDs = Set<String>()
     private var previewURL: URL?
     private var previewFiles: [ObjectIdentifier: URL] = [:]
     private var recordingLimitTask: Task<Void, Never>?
@@ -283,6 +285,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         scroll.delegate = self
         scroll.accessibilityIdentifier = "chat-messages"
         scroll.keyboardDismissMode = .interactive
+        let messageTap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboardFromMessageSpace))
+        messageTap.cancelsTouchesInView = false
+        messageTap.delegate = self
+        scroll.addGestureRecognizer(messageTap)
         scroll.addSubview(messagesStack); scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
@@ -307,6 +313,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composer.font = appearance.composerFont
         composer.adjustsFontForContentSizeCategory = true
         composer.delegate = self
+        let keyboardToolbar = UIToolbar()
+        keyboardToolbar.sizeToFit()
+        let keyboardDoneButton = UIBarButtonItem(title: NSLocalizedString("chat.keyboard.done", comment: ""),
+                                                 style: .done, target: self, action: #selector(dismissKeyboard))
+        keyboardDoneButton.accessibilityLabel = NSLocalizedString("chat.keyboard.done", comment: "")
+        keyboardToolbar.items = [
+            UIBarButtonItem.flexibleSpace(),
+            keyboardDoneButton,
+        ]
+        composer.inputAccessoryView = keyboardToolbar
         composer.accessibilityLabel = NSLocalizedString("chat.message.placeholder", comment: "")
         composer.accessibilityIdentifier = "chat-composer"
         composer.backgroundColor = .clear
@@ -820,6 +836,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 progress.textColor = UIColor(red: 0.48, green: 0.52, blue: 0.48, alpha: 1)
                 messagesStack.addArrangedSubview(progress)
             }
+            if message.role == "assistant", isCompleteAssistantMessage(message), let action = message.action {
+                messagesStack.addArrangedSubview(callPlanCard(for: message, action: action))
+            }
             if ["failed", "interrupted"].contains(message.status) {
                 let label = UILabel(); label.text = NSLocalizedString("chat.reply.incomplete", comment: "")
                 label.textColor = .secondaryLabel; label.font = .preferredFont(forTextStyle: .caption1)
@@ -839,6 +858,226 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 self.scroll.scrollRectToVisible(CGRect(x: 0, y: self.scroll.contentSize.height - 1, width: 1, height: 1), animated: true)
             }
         }
+    }
+
+    private func isCompleteAssistantMessage(_ message: ChatMessage) -> Bool {
+        message.status == "complete"
+    }
+
+    private func callPlanCard(for message: ChatMessage, action: ChatMessageAction) -> UIView {
+        let card = UIView()
+        card.backgroundColor = .secondarySystemBackground
+        card.layer.cornerRadius = 16
+        card.layer.borderWidth = 1
+        card.layer.borderColor = UIColor.separator.cgColor
+        let content = UIStackView()
+        content.axis = .vertical
+        content.spacing = 9
+        content.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: card.topAnchor, constant: 14),
+            content.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
+            content.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14),
+            content.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14),
+        ])
+
+        let title = UILabel()
+        title.text = NSLocalizedString("chat.plan.title", comment: "")
+        title.font = .preferredFont(forTextStyle: .headline)
+        title.adjustsFontForContentSizeCategory = true
+        content.addArrangedSubview(title)
+        let state = UILabel()
+        state.text = NSLocalizedString(action.status == "confirmed"
+                                      ? "chat.plan.status.confirmed" : "chat.plan.status.proposed", comment: "")
+        state.font = .preferredFont(forTextStyle: .caption1)
+        state.textColor = .secondaryLabel
+        state.adjustsFontForContentSizeCategory = true
+        content.addArrangedSubview(state)
+        addPlanSection(NSLocalizedString("chat.plan.goal", comment: ""), values: [action.plan.goal], to: content)
+        addPlanSection(NSLocalizedString("chat.plan.checklist", comment: ""),
+                       values: action.plan.sayAsk.enumerated().map { "\($0.offset + 1). \($0.element)" },
+                       to: content)
+        addPlanSection(NSLocalizedString("chat.plan.facts", comment: ""), values: action.plan.ownerFacts, to: content)
+        addPlanSection(NSLocalizedString("chat.plan.allowed", comment: ""),
+                       values: action.plan.disclosurePolicy.allowed, to: content)
+        addPlanSection(NSLocalizedString("chat.plan.forbidden", comment: ""),
+                       values: action.plan.disclosurePolicy.forbidden, to: content)
+        addPlanSection(NSLocalizedString("chat.plan.unknowns", comment: ""), values: action.plan.unknowns, to: content)
+        let expected = action.plan.expectedQuestions.map {
+            "\($0.q) — \($0.answer.flatMap { $0.isEmpty ? nil : $0 } ?? NSLocalizedString("chat.plan.unknownAnswer", comment: ""))"
+        }
+        addPlanSection(NSLocalizedString("chat.plan.expected", comment: ""), values: expected, to: content)
+        addPlanSection(NSLocalizedString("chat.plan.language", comment: ""),
+                       values: [NSLocalizedString("chat.plan.language.\(action.plan.language)", comment: "")], to: content)
+        addPlanSection(NSLocalizedString("chat.plan.executor", comment: ""),
+                       values: [NSLocalizedString(action.plan.executor == "hint"
+                                                 ? "chat.plan.executor.hint" : "chat.plan.executor.secretary", comment: "")],
+                       to: content)
+        addPlanSection(NSLocalizedString("chat.plan.phone", comment: ""),
+                       values: [action.plan.targetPhone ?? NSLocalizedString("chat.plan.notProvided", comment: "")], to: content)
+        addPlanSection(NSLocalizedString("chat.plan.voicemail", comment: ""),
+                       values: [action.plan.voicemail.map {
+                           NSLocalizedString("chat.plan.voicemail.\($0)", comment: "")
+                       } ?? NSLocalizedString("chat.plan.notProvided", comment: "")], to: content)
+
+        let button = UIButton(type: .system)
+        let isHint = action.plan.executor == "hint"
+        let savedHint = isHint && action.status == "confirmed"
+        button.setTitle(NSLocalizedString(savedHint ? "chat.plan.saved" :
+                                            (isHint ? "chat.plan.saveHint" : "chat.plan.reviewSecretary"), comment: ""),
+                        for: .normal)
+        button.contentHorizontalAlignment = .leading
+        button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+        button.titleLabel?.numberOfLines = 0
+        button.titleLabel?.lineBreakMode = .byWordWrapping
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.accessibilityIdentifier = "chat-plan-action-\(message.id)"
+        button.isEnabled = !savedHint && !confirmingPlanMessageIDs.contains(message.id)
+        button.alpha = button.isEnabled ? 1 : 0.65
+        button.addAction(UIAction { [weak self] _ in self?.reviewPlan(message: message) }, for: .touchUpInside)
+        content.addArrangedSubview(button)
+        return card
+    }
+
+    private func addPlanSection(_ heading: String, values: [String], to stack: UIStackView) {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.adjustsFontForContentSizeCategory = true
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.textColor = .secondaryLabel
+        let body = values.isEmpty ? NSLocalizedString("chat.plan.none", comment: "") : values.joined(separator: "\n")
+        label.text = "\(heading)\n\(body)"
+        stack.addArrangedSubview(label)
+    }
+
+    private func reviewPlan(message: ChatMessage) {
+        guard isCurrentOwner, currentConversation?.id == message.conversationId,
+              let action = message.action, ["proposed", "confirmed"].contains(action.status),
+              !confirmingPlanMessageIDs.contains(message.id) else { return }
+        if action.plan.executor == "secretary", navigationController == nil {
+            showPlanError(NSLocalizedString("chat.plan.navigationUnavailable", comment: ""))
+            return
+        }
+        let alert = UIAlertController(title: NSLocalizedString("chat.plan.confirm.title", comment: ""),
+                                      message: String(format: NSLocalizedString("chat.plan.confirm.message", comment: ""),
+                                                      planReviewSummary(action.plan)),
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("chat.plan.confirm.action", comment: ""), style: .default) {
+            [weak self] _ in self?.confirmPlan(message: message, planHash: action.planHash)
+        })
+        present(alert, animated: true)
+    }
+
+    private func planReviewSummary(_ plan: ChatCallPlan) -> String {
+        [
+            NSLocalizedString("chat.plan.goal", comment: "") + ": \(plan.goal)",
+            NSLocalizedString("chat.plan.checklist", comment: "") + ": " + plan.sayAsk.joined(separator: "; "),
+            NSLocalizedString("chat.plan.facts", comment: "") + ": " + plan.ownerFacts.joined(separator: "; "),
+            NSLocalizedString("chat.plan.allowed", comment: "") + ": " + plan.disclosurePolicy.allowed.joined(separator: "; "),
+            NSLocalizedString("chat.plan.forbidden", comment: "") + ": " + plan.disclosurePolicy.forbidden.joined(separator: "; "),
+            NSLocalizedString("chat.plan.unknowns", comment: "") + ": " + plan.unknowns.joined(separator: "; "),
+            NSLocalizedString("chat.plan.expected", comment: "") + ": " + plan.expectedQuestions.map {
+                "\($0.q) — \($0.answer ?? NSLocalizedString("chat.plan.unknownAnswer", comment: ""))"
+            }.joined(separator: "; "),
+            NSLocalizedString("chat.plan.language", comment: "") + ": " +
+                NSLocalizedString("chat.plan.language.\(plan.language)", comment: ""),
+            NSLocalizedString("chat.plan.executor", comment: "") + ": " +
+                NSLocalizedString(plan.executor == "hint" ? "chat.plan.executor.hint" : "chat.plan.executor.secretary", comment: ""),
+            NSLocalizedString("chat.plan.phone", comment: "") + ": " + (plan.targetPhone ?? NSLocalizedString("chat.plan.notProvided", comment: "")),
+            NSLocalizedString("chat.plan.voicemail", comment: "") + ": " + (plan.voicemail ?? NSLocalizedString("chat.plan.notProvided", comment: "")),
+        ].joined(separator: "\n")
+    }
+
+    private func confirmPlan(message: ChatMessage, planHash: String) {
+        guard isCurrentOwner, currentConversation?.id == message.conversationId,
+              let current = messages.first(where: { $0.id == message.id }),
+              !confirmingPlanMessageIDs.contains(message.id) else { return }
+        guard let currentAction = current.action, currentAction.planHash == planHash else {
+            showPlanError(NSLocalizedString("chat.plan.stale", comment: ""))
+            return
+        }
+        confirmingPlanMessageIDs.insert(message.id)
+        renderMessages()
+        Task {
+            defer {
+                confirmingPlanMessageIDs.remove(message.id)
+                if isCurrentOwner, currentConversation?.id == message.conversationId { renderMessages() }
+            }
+            do {
+                let result = try await api.confirmChatPlan(conversationId: message.conversationId,
+                                                           messageId: message.id, planHash: planHash)
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                guard let index = messages.firstIndex(where: { $0.id == message.id }),
+                      messages[index].action?.planHash == planHash,
+                      result.message.id == message.id,
+                      result.message.conversationId == message.conversationId,
+                      result.message.action?.planHash == planHash else {
+                    showPlanError(NSLocalizedString("chat.plan.requestFailed", comment: ""))
+                    return
+                }
+                guard result.dialed == false else {
+                    showPlanError(NSLocalizedString("chat.plan.unexpectedDial", comment: ""))
+                    return
+                }
+                messages[index] = result.message
+                renderMessages()
+                if currentAction.plan.executor == "secretary" {
+                    guard let review = result.review else {
+                        showPlanError(NSLocalizedString("chat.plan.reviewUnavailable", comment: ""))
+                        return
+                    }
+                    guard viewIfLoaded?.window != nil, let navigationController else {
+                        showPlanError(NSLocalizedString("chat.plan.navigationUnavailable", comment: ""))
+                        return
+                    }
+                    navigationController.pushViewController(
+                        SecretaryTaskReviewViewController(phoneNumber: review.phoneNumber,
+                                                           instruction: review.instruction,
+                                                           confirmationToken: review.confirmationToken,
+                                                           displayInstruction: planReviewSummary(currentAction.plan)),
+                        animated: true)
+                }
+            } catch {
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                if let apiError = error as? APIError, case .http(_, let detail) = apiError,
+                   ["PLAN_STALE", "PLAN_CHANGED"].contains(detail) {
+                    showPlanError(NSLocalizedString("chat.plan.stale", comment: ""))
+                } else {
+                    showPlanError(NSLocalizedString("chat.plan.requestFailed", comment: ""))
+                }
+            }
+        }
+    }
+
+    private func showPlanError(_ message: String) {
+        guard isCurrentOwner else { return }
+        let alert = UIAlertController(title: NSLocalizedString("common.error", comment: ""),
+                                      message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+        present(alert, animated: true)
+    }
+
+    @objc private func dismissKeyboard() {
+        guard !dictation.isBusy else { return }
+        persistDraft()
+        composer.resignFirstResponder()
+    }
+
+    @objc private func dismissKeyboardFromMessageSpace() {
+        guard composer.isFirstResponder, !dictation.isBusy else { return }
+        persistDraft()
+        composer.resignFirstResponder()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var hitView: UIView? = touch.view
+        while let candidate = hitView, candidate !== scroll {
+            if candidate is UIControl || candidate is UITextView || candidate is UITextField { return false }
+            hitView = candidate.superview
+        }
+        return hitView === scroll || hitView?.isDescendant(of: scroll) == true
     }
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView.panGestureRecognizer.state == .changed,

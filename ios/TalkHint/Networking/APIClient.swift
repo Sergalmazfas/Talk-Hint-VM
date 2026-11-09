@@ -1093,7 +1093,13 @@ final class APIClient {
                    obj["code"] as? String == "SECRETARY_COOLDOWN" {
                     throw APIError.secretaryCooldown(max(1, obj["retryAfterSeconds"] as? Int ?? 1))
                 }
-                message = (obj["error"] as? String) ?? ""
+                if path.hasSuffix("/confirm-plan"),
+                   let code = obj["code"] as? String,
+                   ["PLAN_STALE", "PLAN_CHANGED"].contains(code) {
+                    message = code
+                } else {
+                    message = (obj["error"] as? String) ?? ""
+                }
             }
             throw APIError.http(http.statusCode, message)
         }

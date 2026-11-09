@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import { ChatError, hash, type MessageInput, type Message, type Attachment } from "./contracts";
+import { proposedPlan, type ChatPlanAction } from "./plans";
 
 function camel(row: any): any {
   return Object.fromEntries(Object.entries(row).map(([k, v]) => [
@@ -96,13 +97,40 @@ export class ChatRepository {
     return !!r.rowCount;
   }
   async save(user: string, id: string, text: string, status: string, errorCode: string | null = null,
-    evidence: { model?: string; requestId?: string; usage?: unknown } = {}) {
+    evidence: { model?: string; requestId?: string; usage?: unknown; action?: ChatPlanAction } = {}) {
     const r = await this.pool.query(`UPDATE chat_messages SET text=$3,status=$4,error_code=$5,updated_at=now(),
-      model=COALESCE($6,model),provider_request_id=COALESCE($7,provider_request_id),usage=COALESCE($8::jsonb,usage)
+      model=COALESCE($6,model),provider_request_id=COALESCE($7,provider_request_id),usage=COALESCE($8::jsonb,usage),
+      action=COALESCE($9::jsonb,action)
       WHERE id=$1 AND user_id=$2 AND status IN ('queued','generating') AND lease_until>now() RETURNING id`,
       [id, user, text, status, errorCode, evidence.model || null, evidence.requestId || null,
-      evidence.usage ? JSON.stringify(evidence.usage) : null]);
+      evidence.usage ? JSON.stringify(evidence.usage) : null,
+      evidence.action ? JSON.stringify(evidence.action) : null]);
     if (!r.rowCount) throw new ChatError("GENERATION_LEASE_LOST");
+  }
+  async confirmPlan(user: string, conversation: string, message: string, expectedHash: string,
+    apply: (action: ChatPlanAction) => Promise<ChatPlanAction["result"]>) {
+    return this.transaction(async c => {
+      // Same lock as accept: a correction and confirmation cannot pass each other.
+      await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,92731))", [user]);
+      const row = (await c.query(`SELECT * FROM chat_messages
+        WHERE user_id=$1 AND conversation_id=$2 AND id=$3 FOR UPDATE`, [user, conversation, message])).rows[0];
+      if (!row) throw new ChatError("NOT_FOUND", 404);
+      if (row.role !== "assistant" || row.status !== "complete" || !row.action)
+        throw new ChatError("PLAN_NOT_READY");
+      const checked = proposedPlan(row.action.plan);
+      if (checked.planHash !== expectedHash || row.action.planHash !== expectedHash)
+        throw new ChatError("PLAN_CHANGED");
+      const later = await c.query(`SELECT id FROM chat_messages WHERE user_id=$1
+        AND conversation_id=$2 AND sequence>$3 AND role='user' LIMIT 1`, [user, conversation, row.sequence]);
+      if (later.rowCount) throw new ChatError("PLAN_STALE");
+      if (row.action.status !== "confirmed") {
+        const result = await apply(checked);
+        row.action = { ...checked, status: "confirmed", result };
+        await c.query("UPDATE chat_messages SET action=$3::jsonb,updated_at=now() WHERE user_id=$1 AND id=$2",
+          [user, message, JSON.stringify(row.action)]);
+      }
+      return camel(row) as Message;
+    });
   }
   async attachment(user: string, id: string): Promise<Attachment> {
     const r = await this.pool.query("SELECT * FROM chat_attachments WHERE id=$1 AND user_id=$2", [id, user]);

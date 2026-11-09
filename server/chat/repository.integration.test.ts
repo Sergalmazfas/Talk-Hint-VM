@@ -7,6 +7,7 @@ import { ChatService } from "./service";
 import { chatRouter } from "./routes";
 import express from "express";
 import request from "supertest";
+import { proposedPlan } from "./plans";
 
 // Explicit opt-in, development DB only; never imported via server/db legacy initialization.
 describe.skipIf(process.env.CHAT_DB_TESTS !== "1")("Chat 1A PostgreSQL durability and concurrency", () => {
@@ -62,6 +63,47 @@ describe.skipIf(process.env.CHAT_DB_TESTS !== "1")("Chat 1A PostgreSQL durabilit
     const c = await repo.create(owner, randomUUID());
     await expect(repo.accept(owner, c.id, input(), false)).rejects.toThrow("MODEL_UNAVAILABLE");
     expect((await repo.messages(owner, c.id)).messages).toEqual([]);
+  });
+  it("persists a proposed plan, confirms once across races/restart, rejects wrong owner/hash and later corrections", async () => {
+    const c = await repo.create(owner, randomUUID());
+    const sent = await repo.accept(owner, c.id, input("Prepare a Hint call"), true);
+    const action = proposedPlan({ goal: "Ask total price, maximum $400", ownerFacts: [],
+      sayAsk: ["Ask total price"], expectedQuestions: [{ q: "Number?", answer: null }], unknowns: [],
+      disclosurePolicy: { allowed: [], forbidden: ["Do not pay"] }, language: "en", executor: "hint" });
+    await repo.claim(owner, sent.reply.id);
+    await repo.save(owner, sent.reply.id, "Please review", "complete", null, { action });
+    const fresh = new ChatRepository(pool);
+    expect((await fresh.one(owner, c.id, sent.reply.id)).action).toEqual(action);
+    let saves = 0;
+    const apply = async () => { saves++; return { id: "existing-plan-store", status: "pending" }; };
+    await expect(fresh.confirmPlan(other, c.id, sent.reply.id, action.planHash, apply)).rejects.toThrow("NOT_FOUND");
+    await expect(fresh.confirmPlan(owner, c.id, sent.reply.id, "0".repeat(64), apply)).rejects.toThrow("PLAN_CHANGED");
+    const confirmed = await Promise.all(Array.from({ length: 3 }, () =>
+      fresh.confirmPlan(owner, c.id, sent.reply.id, action.planHash, apply)));
+    expect(saves).toBe(1);
+    expect(confirmed.every(m => m.action?.status === "confirmed")).toBe(true);
+    await new ChatRepository(pool).confirmPlan(owner, c.id, sent.reply.id, action.planHash, apply);
+    expect(saves).toBe(1);
+    const correction = await repo.accept(owner, c.id, input("Correction: maximum $350"), true);
+    await expect(fresh.confirmPlan(owner, c.id, sent.reply.id, action.planHash, apply)).rejects.toThrow("PLAN_STALE");
+    expect(saves).toBe(1);
+    await repo.claim(owner, correction.reply.id);
+    await repo.save(owner, correction.reply.id, "Updated price", "complete");
+  });
+  it("rolls back a failed confirmation without losing its proposal; retry uses the same message", async () => {
+    const c = await repo.create(owner, randomUUID());
+    const sent = await repo.accept(owner, c.id, input("Prepare another plan"), true);
+    const action = proposedPlan({ goal: "Ask availability", ownerFacts: [], sayAsk: ["Ask availability"],
+      expectedQuestions: [], unknowns: [], disclosurePolicy: { allowed: [], forbidden: [] },
+      language: "en", executor: "hint" });
+    await repo.claim(owner, sent.reply.id);
+    await repo.save(owner, sent.reply.id, "Review", "complete", null, { action });
+    await expect(repo.confirmPlan(owner, c.id, sent.reply.id, action.planHash, async () => {
+      throw new Error("fixture unavailable");
+    })).rejects.toThrow("fixture unavailable");
+    expect((await repo.one(owner, c.id, sent.reply.id)).action?.status).toBe("proposed");
+    await expect(repo.confirmPlan(owner, c.id, sent.reply.id, action.planHash, async () => ({ status: "pending" })))
+      .resolves.toMatchObject({ action: { status: "confirmed" } });
   });
   it("prevents another user's attachment from entering model context", async () => {
     const a = await repo.attachmentIntent(owner, randomUUID(), { name: "private.txt", size: 3, mimeType: "text/plain",

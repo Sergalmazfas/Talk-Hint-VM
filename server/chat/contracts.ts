@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import type { ChatPlanAction } from "./plans";
 
 export class ChatError extends Error {
   constructor(public code: string, public status = 409) { super(code); }
@@ -26,6 +27,7 @@ export type Message = {
   id: string; userId: string; conversationId: string; sequence: number;
   clientRequestId: string; role: string; text: string; status: string;
   attachmentIds: string[]; createdAt: string; errorCode?: string | null;
+  action?: ChatPlanAction | null;
 };
 export type Attachment = {
   id: string; name: string; mimeType: string; size: number; status: string;

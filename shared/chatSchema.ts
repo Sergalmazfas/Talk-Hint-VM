@@ -34,6 +34,8 @@ export const chatMessages = pgTable("chat_messages", {
   providerRequestId: text("provider_request_id"),
   model: text("model"),
   usage: jsonb("usage"),
+  // Proposal only. Confirmation is an authenticated, separately reviewed action.
+  action: jsonb("action").$type<import("../server/chat/plans").ChatPlanAction>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, t => [

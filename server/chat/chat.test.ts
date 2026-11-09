@@ -32,7 +32,7 @@ describe("Chat 1A input and isolation boundary", () => {
     const bounded = limitedHistory(messages as any);
     expect(bounded.length).toBe(18);
     expect(bounded.every(x => x.status === "complete")).toBe(true);
-    expect(CHAT_INSTRUCTIONS).toContain("NO tools");
+    expect(CHAT_INSTRUCTIONS).toContain("It never saves, approves, schedules or dials");
   });
   const app = (user = "owner", svc: any = {}) => {
     const a = express(); a.use(express.json());

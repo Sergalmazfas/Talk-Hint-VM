@@ -1,6 +1,7 @@
 import { Router, type Express, type Request, type RequestHandler } from "express";
 import { ChatError, createConversation, sendMessage, uploadAttachment, requestId, publicAttachment } from "./contracts";
 import type { ChatService } from "./service";
+import { z } from "zod";
 
 function owner(req: Request): string {
   const user = req.user as any;
@@ -57,6 +58,10 @@ export function chatRouter(auth: RequestHandler, service: () => Promise<ChatServ
   r.post("/conversations/:id/messages", handle(async (req, svc, user, res) => {
     const result = await svc.send(user, requestId.parse(req.params.id), sendMessage.parse(req.body));
     res.status(result.created ? 202 : 200).json({ message: result.message, reply: result.reply });
+  }));
+  r.post("/conversations/:id/messages/:messageId/confirm-plan", handle(async (req, svc, user, res) => {
+    const body = z.object({ planHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(req.body);
+    res.json(await svc.confirmPlan(user, requestId.parse(req.params.id), requestId.parse(req.params.messageId), body.planHash));
   }));
   r.post("/attachments", handle(async (req, svc, user, res) => res.json(await svc.upload(user, uploadAttachment.parse(req.body)))));
   r.get("/attachments/:id/info", handle(async (req, svc, user, res) => {

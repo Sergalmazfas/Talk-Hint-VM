@@ -4,9 +4,23 @@ import { ChatError, attachmentBytes, safeName, hash, publicAttachment,
   type AttachmentInput, type MessageInput } from "./contracts";
 import { type ChatRepository } from "./repository";
 import { CHAT_MODEL, type ChatProvider, type LoadedAttachment } from "./provider";
+import { nativePlanBackend, type ChatPlanBackend, type ChatPlanAction } from "./plans";
 
 export class ChatService {
-  constructor(public repo: ChatRepository, public provider: ChatProvider, private objects = new Client()) {}
+  constructor(public repo: ChatRepository, public provider: ChatProvider, private objects = new Client(),
+    private planBackend: ChatPlanBackend = nativePlanBackend) {}
+  async confirmPlan(user: string, conversation: string, messageId: string, planHash: string) {
+    const message = await this.repo.confirmPlan(user, conversation, messageId, planHash, async action => {
+      return action.plan.executor === "hint"
+        ? await this.planBackend.saveHint(user, messageId, action.plan)
+        : { status: "ready_for_review" };
+    });
+    const action = message.action!;
+    // Capability is generated only for this explicit click; never stored in messages/history.
+    const review = action.plan.executor === "secretary"
+      ? await this.planBackend.reviewSecretary(user, action.plan) : undefined;
+    return { message, dialed: false, ...(review ? { review } : {}) };
+  }
   async storageReady() {
     try { return (await this.objects.list({ prefix: "talkhint-chat/", maxResults: 1 })).ok; }
     catch { return false; }
@@ -62,7 +76,7 @@ export class ChatService {
     const deadline = setTimeout(() => abort.abort(), 85_000);
     deadline.unref();
     let text = "", complete = false, lastSave = 0;
-    const evidence: { model: string; requestId?: string; usage?: unknown } = { model: CHAT_MODEL };
+    const evidence: { model: string; requestId?: string; usage?: unknown; action?: ChatPlanAction } = { model: CHAT_MODEL };
     try {
       const history = (await this.repo.messages(user, conversation)).messages.filter(m => m.sequence <= userSequence);
       const loaded: LoadedAttachment[] = [];
@@ -70,6 +84,7 @@ export class ChatService {
       for await (const event of this.provider.generate(history, loaded, abort.signal)) {
         if (event.requestId) evidence.requestId = event.requestId;
         if (event.usage) evidence.usage = event.usage;
+        if (event.action) evidence.action = event.action;
         if (event.text) text += event.text;
         if (text.length > 20_000) throw new ChatError("MODEL_RESPONSE_TOO_LARGE", 502);
         if (event.complete) complete = true;
