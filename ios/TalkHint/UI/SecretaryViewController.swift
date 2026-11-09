@@ -584,6 +584,7 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
 final class SecretaryTaskReviewViewController: UIViewController {
     private let phoneNumber: String
     private let instruction: String
+    private let displayInstruction: String?
     private let confirmationToken: String
     private let phoneField = UITextField()
     private let startButton = UIButton(type: .system)
@@ -597,9 +598,10 @@ final class SecretaryTaskReviewViewController: UIViewController {
     private var activeDraft: SessionStore.SecretaryCallDraft?
 
     init(phoneNumber: String, instruction: String, confirmationToken: String,
-         api: APIClient = .shared) {
+         api: APIClient = .shared, displayInstruction: String? = nil) {
         self.phoneNumber = phoneNumber
         self.instruction = instruction
+        self.displayInstruction = displayInstruction
         self.confirmationToken = confirmationToken
         self.api = api
         super.init(nibName: nil, bundle: nil)
@@ -655,7 +657,7 @@ final class SecretaryTaskReviewViewController: UIViewController {
         stack.addArrangedSubview(sectionLabel("secretary.instruction.label"))
 
         let instructionCard = UILabel()
-        instructionCard.text = instruction
+        instructionCard.text = displayInstruction ?? instruction
         instructionCard.font = .preferredFont(forTextStyle: .body)
         instructionCard.numberOfLines = 0
         instructionCard.backgroundColor = Theme.purpleBg
