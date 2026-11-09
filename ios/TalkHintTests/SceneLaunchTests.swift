@@ -5,6 +5,11 @@ import UIKit
 @MainActor
 final class SceneLaunchTests: XCTestCase {
     func testLoggedInRootLoadsCallsScreen() {
+        // The root now requires a session that is readable from the real Keychain.
+        SessionStore.shared.clear()
+        defer { SessionStore.shared.clear() }
+        XCTAssertTrue(SessionStore.shared.save(token: "native-fixture", userId: "scene-launch-owner",
+                                               email: "fixture@example.invalid"))
         let sceneDelegate = SceneDelegate()
         sceneDelegate.window = UIWindow(frame: UIScreen.main.bounds)
 
@@ -23,5 +28,17 @@ final class SceneLaunchTests: XCTestCase {
         }
         home.loadViewIfNeeded()
         XCTAssertEqual(home.view.backgroundColor, .systemBackground)
+    }
+
+    func testLoggedInFlagWithoutStoredSessionShowsLogin() {
+        SessionStore.shared.clear()
+        defer { SessionStore.shared.clear() }
+        let sceneDelegate = SceneDelegate()
+        sceneDelegate.window = UIWindow(frame: UIScreen.main.bounds)
+
+        sceneDelegate.showRoot(loggedIn: true)
+
+        let navigation = sceneDelegate.window?.rootViewController as? UINavigationController
+        XCTAssertTrue(navigation?.topViewController is LoginViewController)
     }
 }
