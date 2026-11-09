@@ -5,6 +5,7 @@ configs:
   NativeValidation: debug
   ChatPreview: debug
   ChatLiveDev: debug
+  AppDev: debug
 options:
   bundleIdPrefix: app.talkhint
   deploymentTarget:
@@ -25,6 +26,8 @@ settings:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_PREVIEW"
     ChatLiveDev:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_LIVE_DEV"
+    AppDev:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_LIVE_DEV TALKHINT_APP_DEV"
 packages:
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
@@ -52,6 +55,10 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.chatdev
           PRODUCT_NAME: TalkHintChatDev
           TALKHINT_OAUTH_SCHEME: talkhint-chatdev
+        AppDev:
+          PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.chatdev
+          PRODUCT_NAME: TalkHintAppDev
+          TALKHINT_OAUTH_SCHEME: talkhint-chatdev
     dependencies:
       - package: TwilioVoice
         product: TwilioVoice
@@ -69,6 +76,14 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TalkHint.app/TalkHint"
         BUNDLE_LOADER: "$(TEST_HOST)"
 schemes:
+  TalkHintAppDev:
+    build:
+      targets:
+        TalkHint: all
+    run:
+      config: AppDev
+      environmentVariables:
+        TALKHINT_API_BASE_URL: https://e62acc35-f5e5-43be-91ea-c3ad7b36be85-00-3l7jbsd7n4zci.janeway.replit.dev
   TalkHintChatLiveDev:
     build:
       targets:

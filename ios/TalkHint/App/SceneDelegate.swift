@@ -24,7 +24,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #elseif TALKHINT_CHAT_LIVE_DEV
         // Real chat API with normal login, but no telephony, push registration or main-tab changes.
         _ = AppConfig.baseURL // Validate the Dev-only origin before reading a saved session.
+        #if TALKHINT_APP_DEV
+        showAppDev(loggedIn: SessionStore.shared.isLoggedIn)
+        #else
         showLiveChat(loggedIn: SessionStore.shared.isLoggedIn)
+        #endif
         window.makeKeyAndVisible()
         return
         #else
@@ -78,6 +82,21 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     #if TALKHINT_CHAT_LIVE_DEV
+    private func showAppDev(loggedIn: Bool) {
+        if loggedIn {
+            window?.rootViewController = makeMainTabController(chatFactory: {
+                guard let chat = ChatViewController.liveApprovedScreen() else {
+                    preconditionFailure("AppDev chat requires the authenticated Dev owner")
+                }
+                return chat
+            })
+        } else {
+            let login = LoginViewController()
+            login.onLoggedIn = { [weak self] in self?.showAppDev(loggedIn: true) }
+            window?.rootViewController = UINavigationController(rootViewController: login)
+        }
+    }
+
     private func showLiveChat(loggedIn: Bool) {
         if loggedIn, let chat = ChatViewController.liveApprovedScreen() {
             chat.onClose = { [weak self] in self?.showLiveChat(loggedIn: false) }
@@ -98,8 +117,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     /// The Tutor tab was replaced by Translator; TutorViewController and the
     /// backend /tutor page are intentionally left in the codebase (no UI entry
     /// points, no refactoring — see task #274 scope).
-    private func makeMainTabController() -> UITabBarController {
-        let tabController = UITabBarController()
+    func makeMainTabController(chatFactory: (() -> UIViewController)? = nil) -> UITabBarController {
+        let tabController: UITabBarController
+        if let chatFactory = chatFactory {
+            tabController = TalkHintTabBarController(chatFactory: chatFactory)
+        } else {
+            tabController = UITabBarController()
+        }
         tabController.tabBar.tintColor = Theme.green
 
         let calls = HomeViewController()
@@ -112,10 +136,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
-        let copilot = HomeViewController(mode: .copilot)
-        copilot.tabBarItem = UITabBarItem(
-            title: NSLocalizedString("tab.copilot", comment: ""),
-            image: UIImage(systemName: "mic.circle"), tag: 2)
+        let central: UIViewController
+        if chatFactory != nil {
+            central = ChatEntryViewController()
+            central.tabBarItem = UITabBarItem(
+                title: NSLocalizedString("tab.chat", comment: ""),
+                image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 2)
+        } else {
+            central = HomeViewController(mode: .copilot)
+            central.tabBarItem = UITabBarItem(
+                title: NSLocalizedString("tab.copilot", comment: ""),
+                image: UIImage(systemName: "mic.circle"), tag: 2)
+        }
 
         let secretary = HomeViewController(secretary: true)
         secretary.tabBarItem = UITabBarItem(
@@ -129,7 +161,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         tabController.viewControllers = [
             UINavigationController(rootViewController: calls),
             UINavigationController(rootViewController: translator),
-            UINavigationController(rootViewController: copilot),
+            UINavigationController(rootViewController: central),
             UINavigationController(rootViewController: secretary),
             UINavigationController(rootViewController: history),
         ]
