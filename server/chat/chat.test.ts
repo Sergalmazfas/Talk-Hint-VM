@@ -14,7 +14,8 @@ describe("Chat 1A input and isolation boundary", () => {
     const base = { clientRequestId: uuid(), text: "Hello" };
     expect(sendMessage.safeParse({ ...base, userId: "other" }).success).toBe(false);
     expect(sendMessage.safeParse({ ...base, text: "" }).success).toBe(false);
-    expect(sendMessage.safeParse({ ...base, text: "a".repeat(8001) }).success).toBe(false);
+    expect(sendMessage.safeParse({ ...base, text: "a".repeat(9000) }).success).toBe(true);
+    expect(sendMessage.safeParse({ ...base, text: "a".repeat(16001) }).success).toBe(false);
   });
   it.each(["image/jpeg", "image/png", "application/pdf"])("checks signature not just claimed %s", mimeType => {
     expect(() => attachmentBytes({ clientRequestId: uuid(), name: "x", mimeType: mimeType as any,

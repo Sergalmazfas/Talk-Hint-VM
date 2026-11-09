@@ -10,6 +10,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     var onClose: (() -> Void)?
     private let appearance: ChatScreenAppearance
     private let api: APIClient
+    private lazy var phoneContext = ChatPhoneContextCollector()
     private let sessionScope: ChatSessionScope
     private var currentOwnerId: () -> String? = { SessionStore.shared.userId }
     private let scroll = UIScrollView()
@@ -802,6 +803,59 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 text.adjustsFontForContentSizeCategory = true; text.numberOfLines = 0
                 content.addArrangedSubview(text)
             }
+            if let event = message.event {
+                let details = UIButton(type: .system)
+                details.setTitle(NSLocalizedString("chat.result.details", comment: ""), for: .normal)
+                details.contentHorizontalAlignment = .leading
+                details.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+                details.addAction(UIAction { [weak self] _ in
+                    guard let self, self.isCurrentOwner else { return }
+                    Task {
+                        do {
+                            let text = try await self.api.chatResultDetails(path: event.sourcePath)
+                            guard self.isCurrentOwner else { return }
+                            let screen = UIViewController()
+                            screen.title = NSLocalizedString("chat.result.details", comment: "")
+                            let body = UITextView()
+                            body.isEditable = false
+                            body.font = .preferredFont(forTextStyle: .body)
+                            body.text = text
+                            body.backgroundColor = .systemBackground
+                            screen.view = body
+                            self.navigationController?.pushViewController(screen, animated: true)
+                        } catch { self.showError(error) }
+                    }
+                }, for: .touchUpInside)
+                content.addArrangedSubview(details)
+                if event.kind == "call_result" {
+                    let followup = UIButton(type: .system)
+                    followup.setTitle(NSLocalizedString("chat.result.followup", comment: ""), for: .normal)
+                    followup.contentHorizontalAlignment = .leading
+                    followup.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+                    followup.addAction(UIAction { [weak self] _ in
+                        guard let self, self.isCurrentOwner else { return }
+                        let alert = UIAlertController(title: NSLocalizedString("chat.result.followup", comment: ""),
+                                                      message: NSLocalizedString("chat.result.notCalendar", comment: ""),
+                                                      preferredStyle: .alert)
+                        alert.addTextField { $0.text = message.text.components(separatedBy: "\n").last }
+                        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+                        alert.addAction(UIAlertAction(title: NSLocalizedString("chat.result.save", comment: ""), style: .default) { [weak self] _ in
+                            guard let self, let text = alert.textFields?.first?.text, !text.isEmpty else { return }
+                            Task {
+                                do {
+                                    try await self.api.saveChatFollowup(conversationId: message.conversationId, taskId: event.taskId, text: text)
+                                    let page = try await self.api.chatMessages(conversationId: message.conversationId)
+                                    guard self.isCurrentOwner, self.currentConversation?.id == message.conversationId else { return }
+                                    self.messages = ChatOutbox.merge(self.messages, page.messages)
+                                    self.renderMessages()
+                                } catch { self.showError(error) }
+                            }
+                        })
+                        self.present(alert, animated: true)
+                    }, for: .touchUpInside)
+                    content.addArrangedSubview(followup)
+                }
+            }
             if !isUser, message.status == "queued" || message.status == "generating" {
                 let progress = UILabel()
                 progress.text = NSLocalizedString(message.status == "queued" ? "chat.reply.queued" : "chat.reply.generating", comment: "")
@@ -1123,8 +1177,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         renderAttachmentStatus()
         Task {
             do {
+                let context = ChatPhoneContextCollector.isRelevant(text) ? await phoneContext.collect() : nil
+                guard isCurrentOwner else { isSending = false; return }
+                outbox.setContext(context, for: pending.id)
                 let pair = try await api.sendChatMessage(conversationId: conversation.id, requestId: pending.id,
-                                                         text: text, attachmentIds: pending.attachmentIds, language: pending.language)
+                                                         text: text, attachmentIds: pending.attachmentIds, language: pending.language, context: context)
                 guard isCurrentOwner else { isSending = false; return }
                 if currentConversation?.id == conversation.id {
                     messages = ChatOutbox.merge(messages, [pair.message] + (pair.reply.map { [$0] } ?? []))
@@ -1184,7 +1241,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             defer { isSending = false; updateComposerControls() }
             do {
                 let result = try await api.sendChatMessage(conversationId: item.conversationId, requestId: item.id,
-                    text: item.text, attachmentIds: item.attachmentIds, language: item.language)
+                    text: item.text, attachmentIds: item.attachmentIds, language: item.language, context: item.context)
                 guard isCurrentOwner else { return }
                 outbox.remove(item.id)
                 if currentConversation?.id == item.conversationId {
@@ -1201,11 +1258,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private func updatePolling() {
         pollTask?.cancel()
-        guard messages.contains(where: { $0.status == "queued" || $0.status == "generating" }),
-              let conversation = currentConversation else { return }
+        guard let conversation = currentConversation else { return }
         pollTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let generating = messages.contains(where: { $0.status == "queued" || $0.status == "generating" })
+                try? await Task.sleep(nanoseconds: generating ? 1_000_000_000 : 5_000_000_000)
                 guard !Task.isCancelled else { break }
                 do {
                     let page = try await api.chatMessages(conversationId: conversation.id)
@@ -1213,7 +1270,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                         messages = ChatOutbox.merge(messages, page.messages); renderMessages()
                         loadAttachmentMetadata(in: page.messages, conversationId: conversation.id)
                     }
-                    if !messages.contains(where: { $0.status == "queued" || $0.status == "generating" }) { break }
+                    guard isCurrentOwner, currentConversation?.id == conversation.id else { break }
                 } catch { if isCurrentOwner { statusLabel.text = NSLocalizedString("chat.error.network", comment: "") } }
             }
         }

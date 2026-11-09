@@ -218,6 +218,12 @@ export async function hintLabTick(pool: Pool, dependencies: {
             notice.codeVersion = recordedCallVersion(call);
             // Maria is the descriptive recipient; do not silently run an extra product-model request.
             await store.finish(job.key, null, notice);
+            // Existing analysis only; no new agents/model/mail sends. Chat read
+            // also reconciles this durable report if delivery is interrupted.
+            if (task) {
+              try { await (await import("../chat/results")).syncStoredChatResults(pool, task.id); }
+              catch { console.warn("[Chat] crew report delivery pending reconciliation"); }
+            }
             await store.note(job.key, "secretary:crew_report_saved");
             break processClaim;
           }

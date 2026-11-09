@@ -7,7 +7,7 @@ export type ChatPlanAction = {
   plan: CallPlan;
   planHash: string;
   status: "proposed" | "confirmed";
-  result?: { id?: string; status?: string; expiresAt?: string };
+  result?: { id?: string; status?: string; expiresAt?: string; taskId?: string };
 };
 export function proposedPlan(raw: unknown): ChatPlanAction {
   const parsed = callPlanSchema.safeParse(raw);
@@ -26,7 +26,7 @@ export function proposedPlan(raw: unknown): ChatPlanAction {
 
 export interface ChatPlanBackend {
   saveHint(owner: string, requestId: string, plan: CallPlan): Promise<ChatPlanAction["result"]>;
-  reviewSecretary(owner: string, plan: CallPlan): Promise<{
+  reviewSecretary(owner: string, plan: CallPlan, source?: { conversationId: string; messageId: string }): Promise<{
     phoneNumber: string; instruction: string; confirmationToken: string;
   }>;
 }
@@ -37,10 +37,10 @@ export const nativePlanBackend: ChatPlanBackend = {
     const result = await (await callPlans()).save(owner, requestId, plan);
     return { id: result.id, status: result.status, expiresAt: new Date(result.expiresAt).toISOString() };
   },
-  async reviewSecretary(owner, plan) {
+  async reviewSecretary(owner, plan, source) {
     const instruction = secretaryInstruction(plan);
     const { signSecretaryConfirmation } = await import("../secretary/confirmation");
     return { phoneNumber: plan.targetPhone!, instruction,
-      confirmationToken: signSecretaryConfirmation(owner, instruction) };
+      confirmationToken: signSecretaryConfirmation(owner, instruction, source) };
   },
 };

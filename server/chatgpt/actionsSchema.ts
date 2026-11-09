@@ -83,7 +83,7 @@ export function talkHintActionsSchema(origin: string, outbound = false) {
       requestBody: { required: true, content: { "application/json": { schema: {
         type: "object", additionalProperties: false, required: ["phoneNumber", "instruction", "clientRequestId"],
         properties: { phoneNumber: { type: "string", pattern: "^\\+1[2-9]\\d{9}$" },
-          instruction: { type: "string", minLength: 1, maxLength: 2000 },
+          instruction: { type: "string", minLength: 1, maxLength: 16000 },
           clientRequestId: { type: "string", format: "uuid" } },
       } } } }, responses: { "200": response("Draft and protected approval_url; no call placed", {
         type: "object", required: ["confirmation", "approval_url", "status"], additionalProperties: true,

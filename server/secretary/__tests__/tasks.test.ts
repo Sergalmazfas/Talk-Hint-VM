@@ -89,7 +89,9 @@ describe("Secretary task safety and reporting", () => {
     expect(containsForbiddenSecretarySecret("The full card number is 4111 1111 1111 1111")).toBe(true);
     expect(containsForbiddenSecretarySecret("My CVV is 123")).toBe(true);
     expect(containsForbiddenSecretarySecret("Give them the one-time code 482901")).toBe(true);
-    expect(validateSecretaryInstruction("x".repeat(2_001))).toBeNull();
+    expect(validateSecretaryInstruction("x".repeat(2_001))).toHaveLength(2_001);
+    expect(validateSecretaryInstruction("x".repeat(16_000))).toHaveLength(16_000);
+    expect(validateSecretaryInstruction("x".repeat(16_001))).toBeNull();
   });
 
   it("fails closed for missing or ungrounded reports", () => {

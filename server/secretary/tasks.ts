@@ -14,7 +14,7 @@ import { SecretaryPreDialError } from "./dialErrors";
 export const SECRETARY_MAX_TASK_ATTEMPTS = 2;
 export const SECRETARY_MAX_QUEUED_ATTEMPTS_PER_24H = 3;
 export const SECRETARY_LIVE_COOLDOWN_MS = 3_000;
-export const SECRETARY_MAX_INSTRUCTION_CHARS = 2_000;
+export const SECRETARY_MAX_INSTRUCTION_CHARS = 16_000;
 export const SECRETARY_MAX_TRANSCRIPT_CHARS = 40_000;
 const TASK_START_TIMEOUT_MS = 2 * 60_000;
 // Keep the existing three-minute callback/reconciliation margin beyond the call limit.

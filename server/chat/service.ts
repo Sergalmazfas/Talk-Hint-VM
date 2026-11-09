@@ -5,8 +5,12 @@ import { ChatError, attachmentBytes, safeName, hash, publicAttachment,
 import { type ChatRepository } from "./repository";
 import { CHAT_MODEL, type ChatProvider, type LoadedAttachment } from "./provider";
 import { nativePlanBackend, type ChatPlanBackend, type ChatPlanAction } from "./plans";
+import { GooglePlacesSearch } from "./places";
+import type { PhoneContext } from "./context";
+import type { ChatResults } from "./results";
 
 export class ChatService {
+  results?: ChatResults;
   constructor(public repo: ChatRepository, public provider: ChatProvider, private objects = new Client(),
     private planBackend: ChatPlanBackend = nativePlanBackend) {}
   async confirmPlan(user: string, conversation: string, messageId: string, planHash: string) {
@@ -18,7 +22,7 @@ export class ChatService {
     const action = message.action!;
     // Capability is generated only for this explicit click; never stored in messages/history.
     const review = action.plan.executor === "secretary"
-      ? await this.planBackend.reviewSecretary(user, action.plan) : undefined;
+      ? await this.planBackend.reviewSecretary(user, action.plan, { conversationId: conversation, messageId }) : undefined;
     return { message, dialed: false, ...(review ? { review } : {}) };
   }
   async storageReady() {
@@ -27,6 +31,7 @@ export class ChatService {
   }
   async capabilities() {
     return { ai: { available: this.provider.available(), model: CHAT_MODEL },
+      places: { available: new GooglePlacesSearch().available(), provider: "Google Maps", pricesVerified: false },
       voice: { available: !!process.env.OPENAI_API_KEY },
       attachments: { available: await this.storageReady(), maxBytes: 2 * 1024 * 1024,
         mimeTypes: ["text/plain", "image/png", "image/jpeg", "application/pdf"] } };
@@ -61,16 +66,16 @@ export class ChatService {
     if (!result.ok) throw new ChatError("ATTACHMENTS_UNAVAILABLE", 503);
     return { attachment, bytes: result.value[0] };
   }
-  async send(user: string, conversation: string, input: MessageInput) {
+  async send(user: string, conversation: string, input: MessageInput, admin = false) {
     const result = await this.repo.accept(user, conversation, input, this.provider.available());
     if (result.created) {
       // Independent of the HTTP socket: losing connection does NOT cancel or duplicate work.
-      void this.run(user, conversation, result.reply.id, result.message.sequence, input.attachmentIds)
+      void this.run(user, conversation, result.reply.id, result.message.sequence, input.attachmentIds, input.context, admin)
         .catch(() => console.error("[Chat1A] background persistence unavailable; lease will expire"));
     }
     return result;
   }
-  private async run(user: string, conversation: string, reply: string, userSequence: number, ids: string[]) {
+  private async run(user: string, conversation: string, reply: string, userSequence: number, ids: string[], context?: PhoneContext, admin = false) {
     if (!await this.repo.claim(user, reply)) return;
     const abort = new AbortController();
     const deadline = setTimeout(() => abort.abort(), 85_000);
@@ -78,12 +83,26 @@ export class ChatService {
     let text = "", complete = false, lastSave = 0;
     const evidence: { model: string; requestId?: string; usage?: unknown; action?: ChatPlanAction } = { model: CHAT_MODEL };
     try {
-      const history = (await this.repo.messages(user, conversation)).messages.filter(m => m.sequence <= userSequence);
+      const history = (await this.repo.messages(user, conversation, undefined, admin)).messages.filter(m => m.sequence <= userSequence);
       const loaded: LoadedAttachment[] = [];
       for (const id of ids) loaded.push(await this.download(user, id));
-      for await (const event of this.provider.generate(history, loaded, abort.signal)) {
+      let savedReview: unknown;
+      const reviewEvent = admin ? [...history].reverse().find(m => m.event?.kind === "crew_result") : undefined;
+      if (reviewEvent?.event && this.results) {
+        const report = await this.results.crewDetails(user, conversation, reviewEvent.event.taskId);
+        savedReview = { summary: report.secretary_summary, review: report.secretaryReview };
+      }
+      for await (const event of this.provider.generate(history, loaded, abort.signal, context, savedReview)) {
         if (event.requestId) evidence.requestId = event.requestId;
-        if (event.usage) evidence.usage = event.usage;
+        if (event.usage) {
+          // Multiple tool rounds are separately billable; retain all usage, not just the last round.
+          const usage = event.usage as any;
+          const totals: any = evidence.usage ?? { input_tokens: 0, output_tokens: 0, total_tokens: 0, rounds: [] };
+          for (const field of ["input_tokens", "output_tokens", "total_tokens"])
+            totals[field] += typeof usage[field] === "number" ? usage[field] : 0;
+          totals.rounds.push({ requestId: evidence.requestId, usage });
+          evidence.usage = totals;
+        }
         if (event.action) evidence.action = event.action;
         if (event.text) text += event.text;
         if (text.length > 20_000) throw new ChatError("MODEL_RESPONSE_TOO_LARGE", 502);

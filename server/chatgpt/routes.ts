@@ -29,7 +29,7 @@ export interface IntegrationConfig {
 }
 const CALL = z.object({
   phoneNumber: z.string().regex(/^\+1[2-9]\d{9}$/),
-  instruction: z.string().trim().min(1).max(2000),
+  instruction: z.string().trim().min(1).max(16000),
   clientRequestId: z.string().uuid(),
   voiceProvider: z.enum(["openai", "retell", "elevenlabs", "cartesia"]).default("openai"),
   translationLanguage: z.enum(["ru", "es"]).default("ru"),
@@ -82,7 +82,7 @@ const TOOL_INPUTS: Record<Tool, object> = {
     recipient: { type: "string", minLength: 1, maxLength: 200,
       description: "Recipient name supplied by the owner, never inferred from phone number." },
     phoneNumber: { type: "string", pattern: "^\\+1[2-9]\\d{9}$" },
-    instruction: { type: "string", minLength: 1, maxLength: 2000 },
+    instruction: { type: "string", minLength: 1, maxLength: 16000 },
     clientRequestId: { type: "string", format: "uuid" },
     voiceProvider: { type: "string", enum: ["openai", "retell"],
       description: "Use the owner's saved Secretary default. The server resolves and displays the actual provider, outgoing line and personality before approval. Do not select a replacement if unavailable." },

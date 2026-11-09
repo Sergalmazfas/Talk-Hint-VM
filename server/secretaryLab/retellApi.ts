@@ -54,15 +54,18 @@ export class RetellApi {
   async listAgents() {
     const items: any[] = [];
     let pagination_key: string | undefined;
+    const seen = new Set<string>();
     for (let page = 0; page < 20; page++) {
-      const data = await this.request("/v2/list-agents", {
-        filter_criteria: { channel: { type: "string", op: "eq", value: "voice" } },
-        limit: 100, ...(pagination_key ? { pagination_key } : {}),
+      const params = new URLSearchParams({ limit: "100", ...(pagination_key ? { pagination_key } : {}) });
+      const data = await this.request(`/v2/list-agents?${params}`, {
+        filter_criteria: { channel: { op: "eq", value: "voice" } },
       });
-      if (!Array.isArray(data.items)) throw new RetellApiError(503, "Retell: несовместимый формат списка агентов");
+      if (!Array.isArray(data.items) || typeof data.has_more !== "boolean")
+        throw new RetellApiError(503, "Retell: несовместимый формат списка агентов");
       items.push(...data.items);
       if (!data.has_more) return items;
-      if (!data.pagination_key || data.pagination_key === pagination_key) break;
+      if (typeof data.pagination_key !== "string" || !data.pagination_key || seen.has(data.pagination_key)) break;
+      seen.add(data.pagination_key);
       pagination_key = data.pagination_key;
     }
     throw new RetellApiError(503, "Retell: неполный список агентов; создание дубликата запрещено");

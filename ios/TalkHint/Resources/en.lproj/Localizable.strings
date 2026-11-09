@@ -1,4 +1,8 @@
 "copilot.disabled" = "Copilot is unavailable.";
+"chat.result.details" = "Open saved source";
+"chat.result.followup" = "Save follow-up task";
+"chat.result.notCalendar" = "Saved in this chat only. No calendar event or reminder will be created.";
+"chat.result.save" = "Save";
 "prepare.saved.title" = "Call plans from ChatGPT";
 "prepare.saved.refresh" = "Refresh plans";
 "prepare.saved.loading" = "Loading saved plans…";

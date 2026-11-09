@@ -1,4 +1,8 @@
 "copilot.disabled" = "Copilot қолжетімсіз.";
+"chat.result.details" = "Сақталған дереккөзді ашу";
+"chat.result.followup" = "Кейінгі тапсырманы сақтау";
+"chat.result.notCalendar" = "Тек осы чатта сақталады. Күнтізбе оқиғасы мен еске салғыш жасалмайды.";
+"chat.result.save" = "Сақтау";
 "prepare.saved.title" = "ChatGPT қоңырау жоспарлары";
 "prepare.saved.refresh" = "Жоспарларды жаңарту";
 "prepare.saved.loading" = "Сақталған жоспарлар жүктелуде…";

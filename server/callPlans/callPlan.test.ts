@@ -40,7 +40,9 @@ describe("unified owner call plan", () => {
     expect(secretaryPlanFromInstruction(secretaryInstruction(p), "+12025550124")).toBeNull();
     expect(secretaryPlanFromInstruction("Normal legacy instruction", p.targetPhone)).toBeNull();
     expect(() => secretaryInstruction(fixturePlan)).toThrow();
-    expect(() => secretaryInstruction({ ...p, ownerFacts: Array(10).fill("x".repeat(500)) })).toThrow("2000");
+    const long = secretaryInstruction({ ...p, ownerFacts: Array(10).fill("x".repeat(500)) });
+    expect(long.length).toBeGreaterThan(2000);
+    expect(secretaryPlanFromInstruction(long, p.targetPhone)?.ownerFacts).toHaveLength(10);
   });
   it("does not claim semantic usefulness, invent speakers, or count unknown answers", () => {
     const snapshot = { id: "plan", hash: planHash(fixturePlan), plan: fixturePlan };

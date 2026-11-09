@@ -8,6 +8,11 @@ function camel(row: any): any {
     k.replace(/_([a-z])/g, (_, a) => a.toUpperCase()), v instanceof Date ? v.toISOString() : v,
   ]));
 }
+function publicMessage(row: any): Message {
+  const { usage, input_hash, lease_until, provider_request_id, ...visible } = row;
+  return { ...camel(visible), ...(usage?.event ? { event: usage.event } : {}),
+    ...(usage?.context ? { context: usage.context } : {}) };
+}
 export class ChatRepository {
   constructor(private pool: Pool) {}
   private async transaction<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
@@ -34,7 +39,7 @@ export class ChatRepository {
     return { conversations: result.rows.slice(0, 100).map(camel),
       nextCursor: result.rows.length > 100 ? result.rows[99].id : null };
   }
-  async messages(user: string, conversation: string, before?: number) {
+  async messages(user: string, conversation: string, before?: number, admin = false) {
     const owns = await this.pool.query("SELECT id FROM chat_conversations WHERE id=$1 AND user_id=$2", [conversation, user]);
     if (!owns.rowCount) throw new ChatError("NOT_FOUND", 404);
     // Never restart paid work after a process loss, even when a UI reconnects.
@@ -42,18 +47,20 @@ export class ChatRepository {
       updated_at=now() WHERE user_id=$1 AND conversation_id=$2
       AND status IN ('queued','generating') AND lease_until < now()`, [user, conversation]);
     const result = await this.pool.query(`SELECT * FROM chat_messages WHERE user_id=$1 AND conversation_id=$2
-      AND ($3::integer IS NULL OR sequence < $3) ORDER BY sequence DESC LIMIT 101`, [user, conversation, before || null]);
-    return { messages: result.rows.slice(0, 100).reverse().map(camel) as Message[], hasMore: result.rows.length > 100 };
+      AND ($3::integer IS NULL OR sequence < $3)
+      AND ($4::boolean OR COALESCE(usage->>'visibility','user')<>'admin')
+      ORDER BY sequence DESC LIMIT 101`, [user, conversation, before || null, admin]);
+    return { messages: result.rows.slice(0, 100).reverse().map(publicMessage), hasMore: result.rows.length > 100 };
   }
-  async one(user: string, conversation: string, id: string): Promise<Message> {
+  async one(user: string, conversation: string, id: string, admin = false): Promise<Message> {
     await this.messages(user, conversation);
     const r = await this.pool.query("SELECT * FROM chat_messages WHERE user_id=$1 AND conversation_id=$2 AND id=$3",
       [user, conversation, id]);
-    if (!r.rowCount) throw new ChatError("NOT_FOUND", 404);
-    return camel(r.rows[0]);
+    if (!r.rowCount || (!admin && r.rows[0].usage?.visibility === "admin")) throw new ChatError("NOT_FOUND", 404);
+    return publicMessage(r.rows[0]);
   }
   async accept(user: string, conversation: string, input: MessageInput, available: boolean) {
-    const fingerprint = hash([input.text, input.attachmentIds, input.language]);
+    const fingerprint = hash([input.text, input.attachmentIds, input.language, ...(input.context ? [input.context] : [])]);
     return this.transaction(async c => {
       // Serializes per owner, including sends to different conversations.
       await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,92731))", [user]);
@@ -80,11 +87,12 @@ export class ChatRepository {
       }
       const sequence = conv.rows[0].next_sequence;
       const result = await c.query(`INSERT INTO chat_messages
-        (id,user_id,conversation_id,sequence,client_request_id,input_hash,role,text,status,attachment_ids,lease_until)
-        VALUES ($1,$2,$3,$4,$5,$6,'user',$7,'complete',$8::jsonb,NULL),
-        ($9,$2,$3,$10,$5,$6,'assistant','','queued','[]'::jsonb,now()+interval '120 seconds')
+        (id,user_id,conversation_id,sequence,client_request_id,input_hash,role,text,status,attachment_ids,lease_until,usage)
+        VALUES ($1,$2,$3,$4,$5,$6,'user',$7,'complete',$8::jsonb,NULL,$11::jsonb),
+        ($9,$2,$3,$10,$5,$6,'assistant','','queued','[]'::jsonb,now()+interval '120 seconds',NULL)
         RETURNING *`, [randomUUID(), user, conversation, sequence, input.clientRequestId, fingerprint,
-        input.text, JSON.stringify(input.attachmentIds), randomUUID(), sequence + 1]);
+        input.text, JSON.stringify(input.attachmentIds), randomUUID(), sequence + 1,
+        JSON.stringify({ language: input.language, ...(input.context ? { context: input.context } : {}) })]);
       await c.query(`UPDATE chat_conversations SET next_sequence=next_sequence+2,updated_at=now(),
         title=CASE WHEN next_sequence=1 AND title='New chat' THEN $3 ELSE title END WHERE id=$1 AND user_id=$2`,
         [conversation, user, (input.text || "Attachment").replace(/\s+/g, " ").slice(0, 70)]);

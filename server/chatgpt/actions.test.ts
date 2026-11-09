@@ -422,13 +422,16 @@ describe("owner Actions call preparation", () => {
       .send({ confirmation: result.body.confirmation })).status).toBe(403);
     expect(mockDial).not.toHaveBeenCalled();
   });
-  it("does not truncate a too-long Secretary plan or accept a missing number", async () => {
+  it("preserves a long Secretary plan but rejects a missing number or schema overflow", async () => {
     const access = await token("calls:read secretary:start");
     for (const p of [{ ...plan, executor: "secretary" },
-      { ...plan, executor: "secretary", targetPhone: "+12025550123", ownerFacts: Array(10).fill("x".repeat(500)) }]) {
+      { ...plan, executor: "secretary", targetPhone: "+12025550123", ownerFacts: Array(21).fill("x".repeat(500)) }]) {
       expect((await request(app).post(`${api}/secretary-plan`).auth(access, { type: "bearer" })
         .send({ plan: p, clientRequestId: randomUUID() })).status).toBe(400);
     }
+    const long = { ...plan, executor: "secretary", targetPhone: "+12025550123", ownerFacts: Array(10).fill("x".repeat(500)) };
+    expect((await request(app).post(`${api}/secretary-plan`).auth(access, { type: "bearer" })
+      .send({ plan: long, clientRequestId: randomUUID() })).status).toBe(200);
     expect(mockDial).not.toHaveBeenCalled();
   });
   it("does not expose the new write operations in the read-only integration stage", async () => {

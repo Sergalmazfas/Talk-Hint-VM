@@ -11,15 +11,16 @@ function signature(payload: string): Buffer {
 // Issued only after a Secretary PREPARE goal was explicitly confirmed. The
 // token binds the owner and exact reviewed assignment to the task POST, not to
 // the owner's Hint goal. It expires shortly after the review step.
-export function signSecretaryConfirmation(userId: string, instruction: string): string {
+export function signSecretaryConfirmation(userId: string, instruction: string,
+  chatSource?: { conversationId: string; messageId: string }): string {
   const payload = Buffer.from(JSON.stringify({
-    userId, instruction: instruction.trim(), issuedAt: Date.now(),
+    userId, instruction: instruction.trim(), issuedAt: Date.now(), ...(chatSource ? { chatSource } : {}),
   })).toString("base64url");
   return `${payload}.${signature(payload).toString("base64url")}`;
 }
 
 export function verifySecretaryConfirmation(token: unknown, userId: string, instruction: string): boolean {
-  if (typeof token !== "string" || token.length > 4096) return false;
+  if (typeof token !== "string" || token.length > 100000) return false;
   const [payload, encodedSignature, extra] = token.split(".");
   if (!payload || !encodedSignature || extra) return false;
   try {
@@ -33,4 +34,12 @@ export function verifySecretaryConfirmation(token: unknown, userId: string, inst
   } catch {
     return false;
   }
+}
+
+export function confirmedChatSource(token: unknown, userId: string, instruction: string) {
+  if (!verifySecretaryConfirmation(token, userId, instruction)) return undefined;
+  const source = JSON.parse(Buffer.from((token as string).split(".")[0], "base64url").toString()).chatSource;
+  const uuid = /^[a-f0-9-]{36}$/i;
+  return source && uuid.test(source.conversationId) && uuid.test(source.messageId)
+    ? { conversationId: source.conversationId as string, messageId: source.messageId as string } : undefined;
 }

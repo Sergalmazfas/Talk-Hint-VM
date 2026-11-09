@@ -2,6 +2,8 @@ import { Router, type Express, type Request, type RequestHandler } from "express
 import { ChatError, createConversation, sendMessage, uploadAttachment, requestId, publicAttachment } from "./contracts";
 import type { ChatService } from "./service";
 import { z } from "zod";
+import { isBenchmarkAdmin } from "../benchmark/adminGate";
+import { ChatResults } from "./results";
 
 function owner(req: Request): string {
   const user = req.user as any;
@@ -50,14 +52,29 @@ export function chatRouter(auth: RequestHandler, service: () => Promise<ChatServ
     const id = requestId.parse(req.params.id);
     const before = req.query.beforeSequence === undefined ? undefined : Number(req.query.beforeSequence);
     if (before !== undefined && (!Number.isSafeInteger(before) || before <= 0)) throw new ChatError("INVALID_CURSOR", 400);
-    res.json(await svc.repo.messages(user, id, before));
+    const admin = isBenchmarkAdmin((req.user as any)?.email);
+    await svc.results?.sync(user, id, admin);
+    res.json(await svc.repo.messages(user, id, before, admin));
   }));
   r.get("/conversations/:id/messages/:messageId", handle(async (req, svc, user, res) => {
-    res.json({ message: await svc.repo.one(user, requestId.parse(req.params.id), requestId.parse(req.params.messageId)) });
+    res.json({ message: await svc.repo.one(user, requestId.parse(req.params.id), requestId.parse(req.params.messageId),
+      isBenchmarkAdmin((req.user as any)?.email)) });
   }));
   r.post("/conversations/:id/messages", handle(async (req, svc, user, res) => {
-    const result = await svc.send(user, requestId.parse(req.params.id), sendMessage.parse(req.body));
+    const result = await svc.send(user, requestId.parse(req.params.id), sendMessage.parse(req.body),
+      isBenchmarkAdmin((req.user as any)?.email));
     res.status(result.created ? 202 : 200).json({ message: result.message, reply: result.reply });
+  }));
+  r.get("/conversations/:id/crew-results/:taskId", handle(async (req, svc, user, res) => {
+    if (!isBenchmarkAdmin((req.user as any)?.email)) throw new ChatError("NOT_FOUND", 404);
+    if (!svc.results) throw new ChatError("CHAT_STORAGE_UNAVAILABLE", 503);
+    res.json(await svc.results.crewDetails(user, requestId.parse(req.params.id), requestId.parse(req.params.taskId)));
+  }));
+  r.post("/conversations/:id/followups", handle(async (req, svc, user, res) => {
+    const body = z.object({ taskId: requestId, text: z.string().trim().min(1).max(1000) }).strict().parse(req.body);
+    if (!svc.results) throw new ChatError("CHAT_STORAGE_UNAVAILABLE", 503);
+    await svc.results.followup(user, requestId.parse(req.params.id), body.taskId, body.text);
+    res.json({ saved: true, calendarCreated: false });
   }));
   r.post("/conversations/:id/messages/:messageId/confirm-plan", handle(async (req, svc, user, res) => {
     const body = z.object({ planHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(req.body);
@@ -85,7 +102,9 @@ export function registerChat1A(app: Express, auth: RequestHandler) {
     const [{ ChatRepository }, { ChatService }, { ResponsesChatProvider }] = await Promise.all([
       import("./repository"), import("./service"), import("./provider"),
     ]);
-    return new ChatService(new ChatRepository(pool), new ResponsesChatProvider());
+    const service = new ChatService(new ChatRepository(pool), new ResponsesChatProvider());
+    service.results = new ChatResults(pool);
+    return service;
   };
   app.use("/api/chat-v1", chatRouter(auth, () => runtime ??= load().catch(e => { runtime = undefined; throw e; })));
 }

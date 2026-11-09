@@ -58,6 +58,7 @@ struct ChatMessageAction: Codable, Equatable {
         let id: String?
         let status: String?
         let expiresAt: String?
+        var taskId: String? = nil
 
         init(id: String? = nil, status: String? = nil, expiresAt: String? = nil) {
             self.id = id
@@ -80,6 +81,11 @@ struct ChatMessageAction: Codable, Equatable {
 }
 
 struct ChatMessage: Codable, Identifiable, Equatable {
+    struct Event: Codable, Equatable {
+        let kind: String
+        let sourcePath: String
+        let taskId: String
+    }
     let id: String
     let conversationId: String
     let sequence: Int
@@ -91,6 +97,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let createdAt: String
     let errorCode: String?
     var action: ChatMessageAction?
+    var event: Event? = nil
 
     init(id: String, conversationId: String, sequence: Int, role: String, text: String, status: String,
          clientRequestId: String?, attachmentIds: [String], createdAt: String, errorCode: String?,
@@ -163,12 +170,29 @@ extension APIClient {
     }
 
     func sendChatMessage(conversationId: String, requestId: UUID, text: String,
-                         attachmentIds: [String], language: String) async throws -> ChatMessagePair {
-        let body: [String: Any] = ["clientRequestId": requestId.uuidString.lowercased(), "text": text,
+                         attachmentIds: [String], language: String, context: ChatPhoneContext? = nil) async throws -> ChatMessagePair {
+        var body: [String: Any] = ["clientRequestId": requestId.uuidString.lowercased(), "text": text,
                                    "attachmentIds": attachmentIds, "language": language]
+        if let context {
+            body["context"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context))
+        }
         let data = try await request("/api/chat-v1/conversations/\(conversationId)/messages",
                                      method: "POST", json: body, authenticated: true)
         return try JSONDecoder().decode(ChatMessagePair.self, from: data)
+    }
+    func chatResultDetails(path: String) async throws -> String {
+        // Only same-origin authenticated endpoints built by this server.
+        guard path.hasPrefix("/api/secretary/tasks/") || path.hasPrefix("/api/chat-v1/conversations/"),
+              !path.contains(".."), !path.contains("://") else { throw APIError.decoding }
+        let data = try await request(path, method: "GET", json: nil, authenticated: true)
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let formatted = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: formatted, encoding: .utf8) else { throw APIError.decoding }
+        return text
+    }
+    func saveChatFollowup(conversationId: String, taskId: String, text: String) async throws {
+        _ = try await request("/api/chat-v1/conversations/\(conversationId)/followups", method: "POST",
+                              json: ["taskId": taskId, "text": text], authenticated: true)
     }
 
     func chatMessage(conversationId: String, messageId: String) async throws -> ChatMessage {

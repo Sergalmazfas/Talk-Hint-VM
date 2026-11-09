@@ -1,4 +1,8 @@
 "copilot.disabled" = "Copilot недоступен.";
+"chat.result.details" = "Открыть сохранённый источник";
+"chat.result.followup" = "Сохранить задачу на потом";
+"chat.result.notCalendar" = "Только запись в этом чате. Событие календаря и напоминание не создаются.";
+"chat.result.save" = "Сохранить";
 "prepare.saved.title" = "Планы звонков из ChatGPT";
 "prepare.saved.refresh" = "Обновить планы";
 "prepare.saved.loading" = "Загружаем сохранённые планы…";

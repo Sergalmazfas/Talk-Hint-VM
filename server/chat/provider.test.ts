@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({ create: vi.fn(), options: vi.fn() }));
 vi.mock("openai", () => ({ default: class {
   responses = { create: mocks.create };
@@ -9,6 +9,7 @@ const planFixture = { goal: "Ask price", ownerFacts: [], sayAsk: ["Ask price"],
   expectedQuestions: [], unknowns: [], disclosurePolicy: { allowed: [], forbidden: ["Do not pay"] },
   language: "en", executor: "hint" };
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
+beforeEach(() => { vi.stubEnv("GOOGLE_SERVICE_ACCOUNT_JSON", ""); vi.stubEnv("GOOGLE_MAPS_API_KEY", ""); });
 describe("Chat 1A real transport contract (network mocked)", () => {
   it("uses verified Responses model, disables retries/storage and permits only a proposal tool", async () => {
     vi.stubEnv("OPENAI_API_KEY", "unit-test-not-a-credential");
@@ -59,5 +60,49 @@ describe("Chat 1A real transport contract (network mocked)", () => {
     const run = async () => { for await (const _ of new ResponsesChatProvider().generate([], [], new AbortController().signal)) {} };
     await expect(run()).rejects.toThrow("INVALID_PLAN_PROPOSAL");
     expect(mocks.create).toHaveBeenCalledOnce();
+  });
+  it("continues a read-only place-search tool round, keeps sourced results and never dials", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "unit-test-not-a-credential");
+    const search = vi.fn(async () => ({ source: "Google Maps", places: [{ name: "Fixture", phone: "+14055550123", price: null }] }));
+    mocks.create.mockReturnValueOnce({ withResponse: async () => ({ request_id: "search-round",
+      data: (async function* () {
+        const item = { type: "function_call", name: "search_places", call_id: "search1",
+          arguments: JSON.stringify({ query: "Fontaine parts", city: "Springfield", route: "I-44 E", highwayOnly: true }) };
+        yield { type: "response.output_item.done", item };
+        yield { type: "response.completed", response: { output: [item], usage: { input_tokens: 10, output_tokens: 5 } } };
+      })() }) });
+    mocks.create.mockReturnValueOnce({ withResponse: async () => ({ request_id: "reply-round",
+      data: (async function* () {
+        yield { type: "response.output_text.delta", delta: "Fixture — price needs a call." };
+        yield { type: "response.completed", response: { usage: { input_tokens: 20, output_tokens: 8 } } };
+      })() }) });
+    const events = [];
+    for await (const event of new ResponsesChatProvider({ available: () => true, search }).generate(
+      [{ role: "user", text: "Find parts", status: "complete" } as any], [], new AbortController().signal)) events.push(event);
+    expect(search).toHaveBeenCalledOnce();
+    expect(mocks.create).toHaveBeenCalledTimes(2);
+    expect(mocks.create.mock.calls[1][0].input).toContainEqual(expect.objectContaining({ type: "function_call_output",
+      output: expect.stringContaining('"price":null') }));
+    expect(events.filter(e => e.usage)).toHaveLength(2);
+    expect(events.at(-1)?.complete).toBe(true);
+    expect(mocks.create.mock.calls.flatMap(c => c[0].tools.map(t => t.name))).not.toContain("start_call");
+  });
+  it("removes the search tool after a failed external lookup; no blind retry", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "unit-test-not-a-credential");
+    const search = vi.fn(async () => { throw Error("provider body not for the model"); });
+    mocks.create.mockReturnValueOnce({ withResponse: async () => ({
+      data: (async function* () {
+        const item = { type: "function_call", name: "search_places", call_id: "search1", arguments: '{"query":"parts","city":"Tulsa"}' };
+        yield { type: "response.output_item.done", item };
+        yield { type: "response.completed", response: { output: [item] } };
+      })() }) });
+    mocks.create.mockReturnValueOnce({ withResponse: async () => ({
+      data: (async function* () {
+        yield { type: "response.output_text.delta", delta: "Search unavailable." };
+        yield { type: "response.completed", response: {} };
+      })() }) });
+    for await (const _ of new ResponsesChatProvider({ available: () => true, search }).generate([], [], new AbortController().signal)) {}
+    expect(mocks.create.mock.calls[1][0].tools.map(t => t.name)).toEqual(["propose_call_plan"]);
+    expect(search).toHaveBeenCalledOnce();
   });
 });

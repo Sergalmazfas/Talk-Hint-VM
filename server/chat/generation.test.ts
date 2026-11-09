@@ -38,7 +38,8 @@ describe("Chat 1A generation persistence", () => {
     await (s as any).run("alice", "chat", "reply", 1, []);
     expect(provider.generate.mock.calls[0][0]).toEqual([{ sequence: 1, text: "Hello", role: "user", status: "complete" }]);
     expect(r.save).toHaveBeenLastCalledWith("alice", "reply", "Hello there", "complete", null,
-      expect.objectContaining({ requestId: "req_test", usage: { output_tokens: 2 } }));
+      expect.objectContaining({ requestId: "req_test", usage: expect.objectContaining({ output_tokens: 2,
+        rounds: [{ requestId: "req_test", usage: { output_tokens: 2 } }] }) }));
     expect(r.save.mock.calls.some(c => c[3] === "generating")).toBe(true);
   });
   it("does not turn an incomplete/failed stream into a completed answer or retry it", async () => {

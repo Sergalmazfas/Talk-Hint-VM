@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { authMiddleware } from "../auth";
-import { verifySecretaryConfirmation } from "./confirmation";
+import { verifySecretaryConfirmation, confirmedChatSource } from "./confirmation";
+import { bindChatSecretaryTask } from "../chat/results";
 import { db } from "../db";
 import { phoneNumbers } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -130,6 +131,13 @@ export function registerSecretaryRoutes(app: Express, deps: SecretaryWorkerDepen
           outgoingContext,
         });
         let task = result.task;
+        try {
+          await bindChatSecretaryTask(userId,
+            confirmedChatSource(req.body?.confirmationToken, userId, req.body?.instruction), task);
+        } catch (error) {
+          if (result.created) await markSecretaryPreDialFailed(task.id);
+          throw error; // Never dial after a rejected source binding.
+        }
         if (!result.created) return res.status(200).json({ task: toSecretaryTaskReport(task) });
         try {
           // Live attempts are a single durable starting lease. Never send a

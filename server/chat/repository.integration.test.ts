@@ -59,6 +59,32 @@ describe.skipIf(process.env.CHAT_DB_TESTS !== "1")("Chat 1A PostgreSQL durabilit
     expect(await repo.claim(other, accepted.reply.id)).toBe(false);
     expect((await repo.accept(other, c.id, { ...input(), clientRequestId: accepted.message.clientRequestId }, true)).created).toBe(false);
   });
+  it("hides crew events from non-admin history and direct reads", async () => {
+    const c = await repo.create(owner, randomUUID());
+    const pair = await repo.accept(owner, c.id, input("Private review"), true);
+    await repo.claim(owner, pair.reply.id);
+    await repo.save(owner, pair.reply.id, "Internal crew report", "complete");
+    await pool.query(`UPDATE chat_messages SET usage=$2::jsonb WHERE id=$1`,
+      [pair.reply.id, JSON.stringify({ visibility: "admin", event: { kind: "crew_result", taskId: randomUUID(), sourcePath: "/api/private" } })]);
+    expect((await repo.messages(owner, c.id)).messages.map(m => m.id)).not.toContain(pair.reply.id);
+    const admin = (await repo.messages(owner, c.id, undefined, true)).messages.find(m => m.id === pair.reply.id)!;
+    expect(admin.event?.kind).toBe("crew_result");
+    expect((admin as any).usage).toBeUndefined();
+    await expect(repo.one(owner, c.id, pair.reply.id)).rejects.toThrow("NOT_FOUND");
+    expect((await repo.one(owner, c.id, pair.reply.id, true)).text).toBe("Internal crew report");
+    await expect(repo.messages(other, c.id, undefined, true)).rejects.toThrow("NOT_FOUND");
+  });
+  it("persists the exact phone snapshot and rejects changed-snapshot retries", async () => {
+    const c = await repo.create(owner, randomUUID());
+    const context = { localTime: new Date().toISOString(), timeZone: "America/Chicago" };
+    const body = { ...input("Find places"), context };
+    const pair = await repo.accept(owner, c.id, body, true);
+    expect((await repo.messages(owner, c.id)).messages[0].context).toEqual(context);
+    expect((await repo.accept(owner, c.id, body, true)).created).toBe(false);
+    await expect(repo.accept(owner, c.id, { ...body, context: { ...context, timeZone: "America/Denver" } }, true))
+      .rejects.toThrow("IDEMPOTENCY_CONFLICT");
+    await repo.claim(owner, pair.reply.id); await repo.save(owner, pair.reply.id, "Done", "complete");
+  });
   it("missing model does not acknowledge a user message as sent", async () => {
     const c = await repo.create(owner, randomUUID());
     await expect(repo.accept(owner, c.id, input(), false)).rejects.toThrow("MODEL_UNAVAILABLE");

@@ -15,6 +15,7 @@ struct ChatPendingSend: Codable, Equatable, Identifiable {
     let attachmentIds: [String]
     let language: String
     var state: State
+    var context: ChatPhoneContext? = nil
     enum State: String, Codable { case pending, sending, uncertain, failed }
 }
 
@@ -80,6 +81,13 @@ final class ChatOutbox {
         pendingSends = pendingSends.map { item in
             var updated = item
             if updated.id == id { updated.state = state }
+            return updated
+        }
+    }
+    func setContext(_ context: ChatPhoneContext?, for id: UUID) {
+        pendingSends = pendingSends.map { item in
+            var updated = item
+            if updated.id == id { updated.context = context }
             return updated
         }
     }

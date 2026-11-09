@@ -242,15 +242,16 @@ describe("Retell API migration/configuration boundary", () => {
     general_prompt: RETELL_PROMPT_VARIABLE, general_tools: [] });
   it("uses POST /v2/list-agents and reads/paginates items, never the removed GET method", async () => {
     vi.stubEnv("RETELL_API_KEY", "test-key");
-    const net = { fetch: vi.fn(async (_url: any, init: any) => new Response(JSON.stringify({
-      items: [{ agent_id: init.body.includes("next-page") ? "b" : "a" }],
-      has_more: !init.body.includes("next-page"), pagination_key: "next-page",
+    const net = { fetch: vi.fn(async (url: any, _init: any) => new Response(JSON.stringify({
+      items: [{ agent_id: url.includes("next-page") ? "b" : "a" }],
+      has_more: !url.includes("next-page"), pagination_key: "next-page",
     }), { status: 200 })), socket: vi.fn() };
     const api = new RetellApi(net as any);
     expect((await api.listAgents()).map(x => x.agent_id)).toEqual(["a", "b"]);
-    expect(net.fetch.mock.calls[0][0]).toBe("https://api.retellai.com/v2/list-agents");
+    expect(net.fetch.mock.calls[0][0]).toBe("https://api.retellai.com/v2/list-agents?limit=100");
     expect(net.fetch.mock.calls[0][1].method).toBe("POST");
-    expect(JSON.parse(net.fetch.mock.calls[1][1].body).pagination_key).toBe("next-page");
+    expect(new URL(net.fetch.mock.calls[1][0]).searchParams.get("pagination_key")).toBe("next-page");
+    expect(JSON.parse(net.fetch.mock.calls[1][1].body)).toEqual({ filter_criteria: { channel: { op: "eq", value: "voice" } } });
   });
   it.each([401, 402, 403, 429, 500])("categorizes HTTP %s without echoing raw provider secrets", async status => {
     vi.stubEnv("RETELL_API_KEY", "test-key");

@@ -1,4 +1,8 @@
 "copilot.disabled" = "Copilot no está disponible.";
+"chat.result.details" = "Abrir fuente guardada";
+"chat.result.followup" = "Guardar tarea pendiente";
+"chat.result.notCalendar" = "Solo se guarda en este chat. No se crea ningún evento ni recordatorio.";
+"chat.result.save" = "Guardar";
 "prepare.saved.title" = "Planes de llamada de ChatGPT";
 "prepare.saved.refresh" = "Actualizar planes";
 "prepare.saved.loading" = "Cargando planes guardados…";

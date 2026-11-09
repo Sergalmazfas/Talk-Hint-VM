@@ -34,7 +34,8 @@ try {
     filter_criteria: { agent: [{ agent_id: "agent_60783c2dbbc828060eb33f4b6c" }] },
     sort_order: "descending", limit: 4,
   });
-  const items = Array.isArray(list) ? list : list.calls ?? list.data ?? [];
+  if (!Array.isArray(list.items)) throw Error("Retell list-calls response must contain items");
+  const items = list.items;
   console.log("Provider recent:", JSON.stringify(items.map((c: any) => ({
     callId: c.call_id, start: c.start_timestamp, end: c.end_timestamp, status: c.call_status,
     durationMs: c.duration_ms, reason: c.disconnection_reason,

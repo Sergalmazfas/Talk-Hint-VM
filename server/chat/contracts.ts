@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ChatPlanAction } from "./plans";
+import { phoneContextSchema, type PhoneContext } from "./context";
+import type { ChatEvent } from "./results";
 
 export class ChatError extends Error {
   constructor(public code: string, public status = 409) { super(code); }
@@ -10,9 +12,10 @@ export const createConversation = z.object({
   clientRequestId: requestId, title: z.string().trim().min(1).max(100).optional(),
 }).strict();
 export const sendMessage = z.object({
-  clientRequestId: requestId, text: z.string().trim().max(8000),
+  clientRequestId: requestId, text: z.string().trim().max(16000),
   attachmentIds: z.array(requestId).max(3).default([]),
   language: z.string().max(24).default("en"),
+  context: phoneContextSchema.optional(),
 }).strict().refine(v => v.text.length > 0 || v.attachmentIds.length > 0);
 export const uploadAttachment = z.object({
   clientRequestId: requestId, name: z.string().min(1).max(180),
@@ -28,6 +31,8 @@ export type Message = {
   clientRequestId: string; role: string; text: string; status: string;
   attachmentIds: string[]; createdAt: string; errorCode?: string | null;
   action?: ChatPlanAction | null;
+  event?: ChatEvent;
+  context?: PhoneContext;
 };
 export type Attachment = {
   id: string; name: string; mimeType: string; size: number; status: string;

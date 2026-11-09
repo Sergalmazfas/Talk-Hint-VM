@@ -1,2 +1,3 @@
 "NSCameraUsageDescription" = "TalkHint использует камеру, чтобы вы могли сфотографировать задание для Секретаря.";
+"NSLocationWhenInUseUsageDescription" = "Использовать ваше местоположение для поиска мест по поручению в чате. Без фонового отслеживания.";
 "NSPhotoLibraryUsageDescription" = "TalkHint использует выбранные фото, чтобы помочь Секретарю понять ваше задание.";

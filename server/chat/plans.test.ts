@@ -31,8 +31,8 @@ describe("Native chat call-plan proposals", () => {
       .toThrow("SECRETARY_PHONE_REQUIRED");
     expect(() => proposedPlan({ ...planFixture, executor: "secretary", targetPhone: "+442012345678" }))
       .toThrow("SECRETARY_PHONE_REQUIRED");
-    expect(() => proposedPlan({ ...planFixture, executor: "secretary",
-      ownerFacts: Array(10).fill("a".repeat(400)) })).toThrow("SECRETARY_PLAN_TOO_LONG");
+    expect(proposedPlan({ ...planFixture, executor: "secretary",
+      ownerFacts: Array(10).fill("a".repeat(400)) }).plan.ownerFacts).toHaveLength(10);
     expect(() => proposedPlan({ ...planFixture, userId: "someone_else" })).toThrow("INVALID_CALL_PLAN");
   });
   it("bounds context including large plan payloads, not only visible text", () => {

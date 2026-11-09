@@ -25,6 +25,10 @@ function providerFor(environment: string): apn.Provider | null {
 
 export async function notifySecretaryResult(userId: string, taskId: string, incoming = false,
   menu?: { body: string; url: string }): Promise<void> {
+  if (!incoming && !menu) {
+    try { await (await import("../chat/results")).syncChatSecretaryResults(taskId); }
+    catch { console.warn("[Chat] saved Secretary result delivery unavailable; will reconcile on next chat read"); }
+  }
   const tokens = await db.select().from(deviceTokens).where(and(
     eq(deviceTokens.userId, userId),
     eq(deviceTokens.platform, "ios_alert"),
