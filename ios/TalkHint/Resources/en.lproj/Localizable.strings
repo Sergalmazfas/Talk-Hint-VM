@@ -455,6 +455,7 @@
 "login.button.login" = "Log In";
 "login.button.google" = "Continue with Google";
 "login.error.empty_fields" = "Enter your email and password.";
+"login.error.secure_storage" = "Could not securely save your sign-in. Please try again. If this continues, check the app's signing and device access.";
 "login.error.google_start" = "Could not start Google sign in.";
 "login.error.google_failed" = "Google sign in failed.";
 "login.error.google_failed_reason" = "Google sign in failed (%@).";

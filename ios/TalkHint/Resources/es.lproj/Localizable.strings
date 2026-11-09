@@ -458,6 +458,7 @@
 "login.error.google_start" = "No se pudo iniciar sesión con Google.";
 "login.error.google_failed" = "El inicio de sesión con Google falló.";
 "login.error.google_failed_reason" = "El inicio de sesión con Google falló (%@).";
+"login.error.secure_storage" = "No se pudo guardar el acceso de forma segura. Inténtalo de nuevo. Si continúa, revisa la firma de la app y el acceso del dispositivo.";
 "numbers.title" = "Números";
 "numbers.empty" = "Aún no hay números.\nToca + para añadir un número.";
 "numbers.load_error" = "No se pudieron cargar tus números.\nDesliza hacia abajo para reintentar.";

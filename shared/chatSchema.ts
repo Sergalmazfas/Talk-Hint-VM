@@ -1,4 +1,4 @@
-import { pgTable, varchar, text, integer, timestamp, jsonb, uniqueIndex, index, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, varchar, text, integer, timestamp, jsonb, uniqueIndex, unique, index, foreignKey } from "drizzle-orm/pg-core";
 
 // Additive 1A storage. No profile memory, phone actions or startup DDL.
 export const chatConversations = pgTable("chat_conversations", {
@@ -13,6 +13,8 @@ export const chatConversations = pgTable("chat_conversations", {
 }, t => [
   uniqueIndex("chat_conversations_request").on(t.userId, t.clientRequestId),
   uniqueIndex("chat_conversations_identity").on(t.id, t.userId),
+  // Table constraint survives publish introspection and precedes the composite FK.
+  unique("chat_conversations_owner_identity").on(t.id, t.userId),
   index("chat_conversations_owner").on(t.userId, t.updatedAt, t.id),
 ]);
 

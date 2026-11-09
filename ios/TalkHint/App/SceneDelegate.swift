@@ -68,12 +68,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     #if TALKHINT_CHAT_LIVE_DEV
     private func showAppDev(loggedIn: Bool) {
-        if loggedIn {
-            window?.rootViewController = makeMainTabController(chatFactory: {
-                guard let chat = ChatViewController.liveApprovedScreen() else {
-                    preconditionFailure("AppDev chat requires the authenticated Dev owner")
-                }
-                return chat
+        if loggedIn && SessionStore.shared.isLoggedIn {
+            window?.rootViewController = makeMainTabController(chatFactory: { [weak self] in
+                if let chat = ChatViewController.liveApprovedScreen() { return chat }
+                let login = LoginViewController()
+                login.onLoggedIn = { [weak self] in self?.showAppDev(loggedIn: true) }
+                return login
             })
         } else {
             let login = LoginViewController()
@@ -95,7 +95,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     #endif
 
     func showRoot(loggedIn: Bool) {
-        if loggedIn {
+        if loggedIn && SessionStore.shared.isLoggedIn {
             window?.rootViewController = makeMainTabController()
         } else {
             let login = LoginViewController()
@@ -120,8 +120,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     /// points, no refactoring — see task #274 scope).
     // Internal for hosted navigation regression tests; not an additional UI entry.
     func makeMainTabController(chatFactory: (() -> UIViewController)? = nil) -> UITabBarController {
-        let tabController = chatFactory.map { TalkHintTabBarController(chatFactory: $0) }
-            ?? TalkHintTabBarController()
+        let defaultFactory: () -> UIViewController = { [weak self] in
+            if let chat = ChatViewController.liveApprovedScreen() { return chat }
+            let login = LoginViewController()
+            login.onLoggedIn = { [weak self] in self?.showRoot(loggedIn: true) }
+            return login
+        }
+        let tabController = TalkHintTabBarController(chatFactory: chatFactory ?? defaultFactory)
         tabController.tabBar.tintColor = Theme.green
 
         let calls = HomeViewController()

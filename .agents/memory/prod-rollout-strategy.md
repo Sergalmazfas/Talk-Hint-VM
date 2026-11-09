@@ -5,6 +5,21 @@ description: How prod schema and Twilio signature trust are handled for the depl
 
 # Production rollout strategy
 
+## Composite foreign keys in the first Chat publication
+
+Verify that the actual Publish SQL contains table-level uniqueness for the
+referenced owner identity before adding its composite foreign key.
+
+**Why:** publish introspection omitted a redundant composite UNIQUE INDEX even
+though it existed in Dev and the schema source. The resulting initial-table SQL
+referenced an identity that production would not yet have declared unique.
+A table-level UNIQUE constraint was retained in the generated CREATE TABLE.
+
+**How to apply:** inspect the actual Dev→production diff, not only ORM definitions
+or a working Dev database. Rehearse that reviewed DDL in an isolated Dev schema
+inside a transaction ending in rollback. Production DDL still belongs to Publish;
+do not add migration scripts or startup self-healing.
+
 ## iPhone telephone checks after publication
 
 For the owner's real-call checks, connect the Xcode/Swift app to the verified

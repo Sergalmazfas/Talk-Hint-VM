@@ -43,6 +43,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.talkhint
         PRODUCT_NAME: TalkHint
         TALKHINT_OAUTH_SCHEME: talkhint
+        TALKHINT_DEV_ORIGIN: ""
         INFOPLIST_FILE: TalkHint/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: TalkHint/TalkHint.entitlements
@@ -52,10 +53,12 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: TalkHint/TalkHint-Bridging-Header.h
       configs:
         ChatLiveDev:
+          TALKHINT_DEV_ORIGIN: https://e62acc35-f5e5-43be-91ea-c3ad7b36be85-00-3l7jbsd7n4zci.janeway.replit.dev
           PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.chatdev
           PRODUCT_NAME: TalkHintChatDev
           TALKHINT_OAUTH_SCHEME: talkhint-chatdev
         AppDev:
+          TALKHINT_DEV_ORIGIN: https://e62acc35-f5e5-43be-91ea-c3ad7b36be85-00-3l7jbsd7n4zci.janeway.replit.dev
           PRODUCT_BUNDLE_IDENTIFIER: app.talkhint.chatdev
           PRODUCT_NAME: TalkHintAppDev
           TALKHINT_OAUTH_SCHEME: talkhint-chatdev
