@@ -43,6 +43,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var attachmentRetry: (name: String, mime: String, data: Data, requestId: UUID)?
     private var isUploadingAttachment = false
     private var previewURL: URL?
+    private var previewFiles: [ObjectIdentifier: URL] = [:]
     private var recordingLimitTask: Task<Void, Never>?
     private var recognitionTask: Task<Void, Never>?
     private var meterTimer: Timer?
@@ -128,7 +129,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             return token
         })
     }
-    #if TALKHINT_CHAT_LIVE_DEV
     static func liveApprovedScreen() -> ChatViewController? {
         guard let owner = SessionStore.shared.userId, SessionStore.shared.isLoggedIn else { return nil }
         let scope = ChatSessionScope(ownerId: owner)
@@ -137,7 +137,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                                   draftStore: ChatOutbox(owner: owner, origin: AppConfig.baseURL.absoluteString),
                                   appearance: .approvedReference)
     }
-    #endif
     private var isCurrentOwner: Bool {
         sessionScope.permits(currentUserId: currentOwnerId())
     }
@@ -1151,6 +1150,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 try data.write(to: url, options: .atomic)
                 previewURL = url
                 let preview = QLPreviewController()
+                previewFiles[ObjectIdentifier(preview)] = url
                 preview.dataSource = self
                 preview.delegate = self
                 present(preview, animated: true)
@@ -1161,9 +1161,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
         previewURL! as NSURL
     }
-    func previewControllerDidDismiss(_ controller: QLPreviewController) {
-        if let previewURL { try? FileManager.default.removeItem(at: previewURL) }
-        previewURL = nil
+    nonisolated func previewControllerDidDismiss(_ controller: QLPreviewController) {
+        let identifier = ObjectIdentifier(controller)
+        Task { @MainActor [weak self] in
+            guard let self = self, let url = self.previewFiles.removeValue(forKey: identifier) else { return }
+            try? FileManager.default.removeItem(at: url)
+            if self.previewURL == url { self.previewURL = nil }
+        }
     }
     @objc private func removeLastAttachment() {
         if attachmentRetry != nil {

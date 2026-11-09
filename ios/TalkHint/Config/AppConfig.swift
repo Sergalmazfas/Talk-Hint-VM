@@ -15,7 +15,8 @@ enum AppConfig {
     #elseif TALKHINT_CHAT_LIVE_DEV
     // Fail closed: this separately installed Dev client must never fall back to production.
     static let baseURL: URL = {
-        guard let raw = ProcessInfo.processInfo.environment["TALKHINT_API_BASE_URL"],
+        guard let raw = ProcessInfo.processInfo.environment["TALKHINT_API_BASE_URL"]
+                ?? (Bundle.main.object(forInfoDictionaryKey: "TalkHintDevOrigin") as? String),
               let url = URL(string: raw), url.scheme == "https",
               let host = url.host, host.hasSuffix(".replit.dev"),
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,

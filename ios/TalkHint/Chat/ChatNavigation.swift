@@ -33,7 +33,11 @@ final class TalkHintTabBarController: UITabBarController, UITabBarControllerDele
     private(set) var retainedChatNavigation: ChatNavigationController?
     private weak var chatOrigin: UIViewController?
 
-    init(chatFactory: @escaping () -> UIViewController = { ChatViewController() }) {
+    convenience init() {
+        self.init(chatFactory: { ChatViewController() })
+    }
+
+    init(chatFactory: @escaping () -> UIViewController) {
         self.chatFactory = chatFactory
         super.init(nibName: nil, bundle: nil)
         delegate = self

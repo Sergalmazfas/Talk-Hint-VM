@@ -67,7 +67,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func showRoot(loggedIn: Bool) {
-        if loggedIn {
+        if loggedIn && SessionStore.shared.isLoggedIn {
             window?.rootViewController = makeMainTabController()
         } else {
             let login = LoginViewController()
@@ -83,12 +83,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     #if TALKHINT_CHAT_LIVE_DEV
     private func showAppDev(loggedIn: Bool) {
-        if loggedIn {
-            window?.rootViewController = makeMainTabController(chatFactory: {
-                guard let chat = ChatViewController.liveApprovedScreen() else {
-                    preconditionFailure("AppDev chat requires the authenticated Dev owner")
-                }
-                return chat
+        if loggedIn && SessionStore.shared.isLoggedIn {
+            window?.rootViewController = makeMainTabController(chatFactory: { [weak self] in
+                if let chat = ChatViewController.liveApprovedScreen() { return chat }
+                let login = LoginViewController()
+                login.onLoggedIn = { [weak self] in self?.showAppDev(loggedIn: true) }
+                return login
             })
         } else {
             let login = LoginViewController()
@@ -118,12 +118,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     /// backend /tutor page are intentionally left in the codebase (no UI entry
     /// points, no refactoring — see task #274 scope).
     func makeMainTabController(chatFactory: (() -> UIViewController)? = nil) -> UITabBarController {
-        let tabController: UITabBarController
-        if let chatFactory = chatFactory {
-            tabController = TalkHintTabBarController(chatFactory: chatFactory)
-        } else {
-            tabController = UITabBarController()
+        let defaultFactory: () -> UIViewController = { [weak self] in
+            if let chat = ChatViewController.liveApprovedScreen() { return chat }
+            let login = LoginViewController()
+            login.onLoggedIn = { [weak self] in self?.showRoot(loggedIn: true) }
+            return login
         }
+        let tabController = TalkHintTabBarController(chatFactory: chatFactory ?? defaultFactory)
         tabController.tabBar.tintColor = Theme.green
 
         let calls = HomeViewController()
@@ -136,18 +137,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
-        let central: UIViewController
-        if chatFactory != nil {
-            central = ChatEntryViewController()
-            central.tabBarItem = UITabBarItem(
-                title: NSLocalizedString("tab.chat", comment: ""),
-                image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 2)
-        } else {
-            central = HomeViewController(mode: .copilot)
-            central.tabBarItem = UITabBarItem(
-                title: NSLocalizedString("tab.copilot", comment: ""),
-                image: UIImage(systemName: "mic.circle"), tag: 2)
-        }
+        let central = ChatEntryViewController()
+        central.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("tab.chat", comment: ""),
+            image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 2)
 
         let secretary = HomeViewController(secretary: true)
         secretary.tabBarItem = UITabBarItem(

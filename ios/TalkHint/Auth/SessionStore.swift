@@ -37,6 +37,7 @@ enum SecretaryVoiceProviderPreference: String, Codable, CaseIterable {
 /// sensitive) in UserDefaults.
 final class SessionStore {
     static let shared = SessionStore()
+    private let credentials = SessionCredentials()
 
     // One-shot, memory-only Prepare handoff. Never reused for a later goal/call.
     struct HintOpening {
@@ -135,9 +136,9 @@ final class SessionStore {
         }
     }
 
-    var token: String? { Keychain.get(tokenKey) }
-    var userId: String? { UserDefaults.standard.string(forKey: userIdKey) }
-    var email: String? { UserDefaults.standard.string(forKey: emailKey) }
+    var token: String? { credentials.token }
+    var userId: String? { credentials.userId }
+    var email: String? { credentials.email }
     var isLoggedIn: Bool { token != nil }
 
     var pendingSecretaryCall: SecretaryCallDraft? {
@@ -349,10 +350,9 @@ final class SessionStore {
         }
     }
 
-    func save(token: String, userId: String, email: String) {
-        Keychain.set(token, for: tokenKey)
-        UserDefaults.standard.set(userId, forKey: userIdKey)
-        UserDefaults.standard.set(email, forKey: emailKey)
+    @discardableResult
+    func save(token: String, userId: String, email: String) -> Bool {
+        credentials.save(token: token, userId: userId, email: email)
     }
 
     func clear() {
