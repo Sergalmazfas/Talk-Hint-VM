@@ -457,6 +457,7 @@
 "login.error.google_start" = "Could not start Google sign in.";
 "login.error.google_failed" = "Google sign in failed.";
 "login.error.google_failed_reason" = "Google sign in failed (%@).";
+"login.error.secure_storage" = "Could not securely save your sign-in. Please try again. If this continues, check the app's signing and device access.";
 "numbers.title" = "Numbers";
 "numbers.empty" = "No numbers yet.\nTap + to add a number.";
 "numbers.load_error" = "Couldn't load your numbers.\nPull down to try again.";

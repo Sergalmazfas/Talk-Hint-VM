@@ -74,7 +74,10 @@ final class LoginViewController: UIViewController {
         Task {
             do {
                 let result = try await APIClient.shared.login(email: email, password: password)
-                SessionStore.shared.save(token: result.token, userId: result.userId, email: result.email)
+                guard SessionStore.shared.save(token: result.token, userId: result.userId, email: result.email) else {
+                    throw NSError(domain: "TalkHint.Login", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("login.error.secure_storage", comment: "")])
+                }
                 setLoading(false)
                 onLoggedIn?()
             } catch {
@@ -134,7 +137,10 @@ final class LoginViewController: UIViewController {
         Task {
             do {
                 let me = try await APIClient.shared.me(token: token)
-                SessionStore.shared.save(token: token, userId: me.userId, email: me.email)
+                guard SessionStore.shared.save(token: token, userId: me.userId, email: me.email) else {
+                    throw NSError(domain: "TalkHint.Login", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("login.error.secure_storage", comment: "")])
+                }
                 setLoading(false)
                 onLoggedIn?()
             } catch {
