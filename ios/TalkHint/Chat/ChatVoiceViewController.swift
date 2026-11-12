@@ -2,7 +2,7 @@ import UIKit
 import SwiftUI
 import AVFoundation
 
-/// Dev voice on the EXISTING chat API. Flash output stays OFF until voice selection.
+/// Voice on the existing chat API; input requires explicit action and server access.
 @MainActor
 final class ChatVoiceViewController: UIViewController {
     private let api: APIClient
@@ -113,13 +113,12 @@ final class ChatVoiceViewController: UIViewController {
         let header = UIStackView(arrangedSubviews: [back, title, settings])
         header.spacing = 12; header.alignment = .center
         let orb = UIHostingController(rootView: ChatVoiceOrbView(phase: .idle))
-        addChild(orb); orb.didMove(toParent: self); orbHost = orb
+        addChild(orb); orbHost = orb
         orb.view.backgroundColor = .clear
         let orbHeight = orb.view.heightAnchor.constraint(equalToConstant: 220)
         orbHeight.priority = .defaultLow
         orbHeight.isActive = true
         orb.view.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
-        orb.view.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.32).isActive = true
         status.numberOfLines = 0; status.textAlignment = .center
         status.font = .preferredFont(forTextStyle: .body)
         status.adjustsFontForContentSizeCategory = true
@@ -152,11 +151,14 @@ final class ChatVoiceViewController: UIViewController {
         stack.axis = .vertical; stack.spacing = 12
         view.addSubview(stack); stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
+            // Both views must share an ancestor before activating this constraint.
+            orb.view.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.32),
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
             stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
         ])
+        orb.didMove(toParent: self)
         orb.view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
     }
     private func button(_ symbol: String, key: String, action: Selector) -> UIButton {

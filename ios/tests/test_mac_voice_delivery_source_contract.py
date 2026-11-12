@@ -18,6 +18,19 @@ def required_tests():
 
 
 class MacVoiceDeliverySourceContract(unittest.TestCase):
+    def test_voice_screen_activates_cross_view_constraint_after_insertion(self):
+        source = (ROOT / "ios/TalkHint/Chat/ChatVoiceViewController.swift").read_text()
+        insert = source.index("view.addSubview(stack)")
+        activate = source.index("NSLayoutConstraint.activate([", insert)
+        limit = source.index("orb.view.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor")
+        self.assertLess(insert, activate)
+        self.assertLess(activate, limit)
+        self.assertGreater(source.index("orb.didMove(toParent: self)"), insert)
+        fixture = (ROOT / "ios/TalkHintTests/ChatVoiceScreenTests.swift").read_text()
+        self.assertIn("controller.loadViewIfNeeded()", fixture)
+        self.assertIn("Loading a voice screen must not request the network", fixture)
+        self.assertIn("XCTAssertFalse(mic.isEnabled", fixture)
+
     def test_location_delegate_hops_to_main_actor_with_value_only_fix(self):
         source = (ROOT / "ios/TalkHint/Chat/ChatPhoneContext.swift").read_text()
         self.assertEqual(source.count("nonisolated func locationManager"), 3)

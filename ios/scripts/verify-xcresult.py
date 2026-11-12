@@ -5,6 +5,10 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatVoiceScreenTests": (
+        "testFullScreenLoadsWithoutNetworkOrMicrophone",
+        "testFullScreenLaysOutOnSmallAndLargeScreensInBothThemes",
+    ),
     "ChatVoiceClientPolicyTests": (
         "testOnlyExactHTTPSProductionOriginIsPermitted",
         "testProductionDoesNotTrustOtherOrigins",
