@@ -1,0 +1,30 @@
+{
+  "mac_base": "c997a2d794099b0c1c5805cf18b49eaf233eb1a6",
+  "prerequisite_source": "0300734a4335e3767fab63526ac1ed4ef25393b1",
+  "voice_source": "686e967dd09b63933ad76dfd64adf891c209db6f",
+  "prerequisite_commit": "649ff8a4f84c314f5d0fef2948de276627c9c357",
+  "code_commit": "2c3ff980da15550b5eef5b1b20f99ba532d350d7",
+  "native_tree": "1b496171f71be714901224ac457bca8f0058e755",
+  "branch": "xcode-chat-voice-sarah-2026-11-11",
+  "protected_native_paths": [
+    "ios/TalkHint/App/AppDelegate.swift",
+    "ios/TalkHint/Auth/SessionCredentials.swift",
+    "ios/TalkHintTests/SessionCredentialsTests.swift",
+    "ios/TalkHintTests/SceneLaunchTests.swift",
+    "ios/TalkHintTests/SecretaryPersonalityUITests.swift",
+    "ios/project.yml",
+    "ios/scripts/validate-native.sh"
+  ],
+  "permitted_support_paths": [
+    "docs/chat-voice-native-delta.json",
+    "docs/chat-voice-native-delta-audit.md",
+    "docs/claude-mac-chat-voice-sarah-handoff.md",
+    "scripts/verify-chat-voice-native-delta.py"
+  ],
+  "paid_tests_authorized": false,
+  "publish_authorized": false,
+  "tts": "eleven_flash_v2_5",
+  "voice": "Sarah",
+  "active_silence_seconds": 1.2,
+  "minimum_ios": "15.0"
+}
