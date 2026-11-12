@@ -22,10 +22,10 @@
 - Новая ветка: `xcode-chat-voice-sarah-2026-11-11`.
 - Принятая Mac-база: `c997a2d794099b0c1c5805cf18b49eaf233eb1a6`.
 - Первый слой зависимостей: `649ff8a4f84c314f5d0fef2948de276627c9c357`.
-- Коммит нативного кода: `394eb79cc91dc6d0ab544052b3a7520c7c7cdc19`.
+- Коммит нативного кода: `9a2b020ce5e0eb7098a87e6bd5c2696103056487`.
 - Последний HEAD ветки добавляет только документы и read-only валидатор;
   именно на нём запускать полный gate. Не тестировать вместо него один старый слой.
-- Точный hash дерева `ios/`: `eb5ddd4e177060bb86bf67662dd77b0812510774`.
+- Точный hash дерева `ios/`: `62c0863d7618c4b4fc784e3f879c263c5d9f3dc4`.
 - JSON: `docs/chat-voice-native-delta.json`.
 - Разбор состава: `docs/chat-voice-native-delta-audit.md`.
 
@@ -34,6 +34,40 @@
 не копировать весь ios из ZIP, не удалять или переписывать существующие ветки.
 
 ## 1. Preflight на существующем Mac checkout
+
+### Исправление по отчёту gate c9804f5
+
+Второй Mac gate скомпилирован и выполнен: **293 теста, 291 passed,
+2 failed, 0 skipped**. Упали только два render-теста ChatVoiceOrbTests:
+они требовали непустой `UIHostingController.view.subviews`.
+Диагностика Claude показала реальное изображение во всех 20 комбинациях,
+но UIKit subviews отсутствуют: это не публичный контракт SwiftUI.
+Общий verify-xcresult правильно отказал; 141 обязательный успех как полный
+набор не подтверждён. AppDev не собирался.
+
+Новая дельта `9a2b020c` меняет **только native-тест и его source-проверку**:
+- сохраняет 4 Orb-теста и все 141 required-success;
+- вместо UIKit subviews проверяет изображение из прозрачного UIWindow
+  с layout/flush и `drawHierarchy(afterScreenUpdates: true)`;
+- прозрачный контроль обязан дать 0 видимых пикселей, Orb — более 1000
+  в снимке 320×320. По диагностике Claude Orb давал около 50–61 тыс.;
+  порог не является точным эталоном внешнего вида;
+- RGBA преобразуется в явный формат, учитывается alpha > 16;
+- сохраняет снимки в xcresult, закрывает только своё окно, восстанавливает
+  прежнее ключевое окно. Аудио/API не запускаются.
+
+Код приложения, включая Reduce Motion override, не изменён этой дельтой.
+Это гипотеза исправленного теста до повторной проверки на Mac,
+не объявлять gate пройденным по Python.
+
+Сохранить `gate-c9804f5.log`, `TalkHintTests.xcresult` и orb-diag/orb-diag2.
+По последнему отчёту 12 GiB свободно; снова измерить, очистку не повторять.
+В полном gate было **15 “Unbalanced calls”**, происхождение не установлено.
+В отчёте нового gate указать полный текст предупреждений, соседние строки
+и активные тесты/время. Сравнивать только с уже имеющимися старыми логами:
+не объявлять их безвредными или вызванными Orb без доказательств.
+Если доступно — приложить эту же разметку из `gate-c9804f5.log`.
+Не скрывать предупреждения и не чинить другую навигацию самостоятельно.
 
 ### Исправление по отчёту gate 23ae646
 
@@ -148,13 +182,14 @@ GitHub Actions workflow не менялся и не включает push это
 Не создавать PR или вручную запускать Actions. Внешние webhooks не проверены.
 
 Для исправленной сборки — **новый отдельный worktree**:
-`~/Talk-Hint-VM-worktrees/chat-voice-sarah-reduce-motion`.
-Прежний `chat-voice-sarah-2026-11-11` с неуспешным gate оставить неизменным.
+`~/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check`.
+Прежние `chat-voice-sarah-2026-11-11` и `chat-voice-sarah-reduce-motion`
+с неуспешными gate оставить неизменными.
 Если путь существует, не перезаписывать: проверить HEAD/чистоту, при несовпадении стоп.
 
 ```bash
-git worktree add --detach "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-reduce-motion" "$TARGET"
-cd "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-reduce-motion"
+git worktree add --detach "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check" "$TARGET"
+cd "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check"
 python3 scripts/verify-chat-voice-native-delta.py
 python3 -m unittest discover -s ios/tests -p 'test_*source_contract.py'
 python3 -m unittest discover -s ios/scripts/tests
@@ -220,7 +255,7 @@ TalkHintDevOrigin совпадает с AppDev в неизменённом `ios/
 ## Что проверено Replit, а что ещё нет
 
 На извлечённом **конечном** нативном дереве:
-67 source-contract и 53 script-теста PASS. Проверен оригинальный родитель,
+68 source-contract и 53 script-теста PASS. Проверен оригинальный родитель,
 сохранены все 268 объявленных Mac test-методов (это не число выполненных XCTest).
 Все 121 именованное требование старого gate сохранены; новый список — 141.
 Исправлено устаревшее ожидание четырёх вкладок в Python-проверке на пять с Chat.

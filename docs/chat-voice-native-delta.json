@@ -3,8 +3,8 @@
   "prerequisite_source": "0300734a4335e3767fab63526ac1ed4ef25393b1",
   "voice_source": "686e967dd09b63933ad76dfd64adf891c209db6f",
   "prerequisite_commit": "649ff8a4f84c314f5d0fef2948de276627c9c357",
-  "code_commit": "394eb79cc91dc6d0ab544052b3a7520c7c7cdc19",
-  "native_tree": "eb5ddd4e177060bb86bf67662dd77b0812510774",
+  "code_commit": "9a2b020ce5e0eb7098a87e6bd5c2696103056487",
+  "native_tree": "62c0863d7618c4b4fc784e3f879c263c5d9f3dc4",
   "branch": "xcode-chat-voice-sarah-2026-11-11",
   "protected_native_paths": [
     "ios/TalkHint/App/AppDelegate.swift",

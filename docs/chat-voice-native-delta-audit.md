@@ -1,3 +1,16 @@
+# Дополнение: проверка изображения вместо внутренностей SwiftUI
+
+Mac gate `c9804f5`: 293 теста, 291 passed / 2 failed / 0 skipped.
+Два render-теста неверно требовали UIKit subviews; Claude подтвердил видимые
+пиксели во всех 20 состояниях/темах/fallback. Исправление компиляции прошло.
+Общий gate не пройден, AppDev не собирался; 15 Unbalanced calls не разобраны.
+
+Дельта `9a2b020ce5e0eb7098a87e6bd5c2696103056487` меняет только два test-пути:
+прозрачный контроль + реальный screenshot/alpha count вместо private subviews.
+Само приложение, protected Mac paths и required-success список не меняются.
+Актуальное дерево `ios/`: `62c0863d7618c4b4fc784e3f879c263c5d9f3dc4`.
+Старые сведения ниже — история пакета, а не текущий результат native gate.
+
 # Дополнение: блокер компиляции Reduce Motion
 
 Mac gate `23ae646` остановился до запуска XCTest: read-only
