@@ -3,8 +3,13 @@
   "prerequisite_source": "0300734a4335e3767fab63526ac1ed4ef25393b1",
   "voice_source": "686e967dd09b63933ad76dfd64adf891c209db6f",
   "prerequisite_commit": "649ff8a4f84c314f5d0fef2948de276627c9c357",
-  "code_commit": "8518c2f1f92d88c3be333f90d676e54c85df9ea8",
-  "native_tree": "ca7eae2c7f565efb4085ba07f7e1fd002c4448c7",
+  "code_commit": "ffdfca9df670c45ec9eaa0197db4bf0fcbba4527",
+  "native_tree": "6d7ffdb1f9c05c911145f137250eb62e4e1e1cb1",
+  "native_delivery_parent": "2071443fbc8c7ec6ab67d2996a9b36aeb2de52e3",
+  "phone_scheme": "TalkHint",
+  "phone_configuration": "Debug",
+  "phone_backend": "https://talkhint.app",
+  "verified_server_commit": "a2e4d3cdecb0094d802a0189d8efbd73eaaaa1f5",
   "branch": "xcode-chat-voice-sarah-2026-11-11",
   "protected_native_paths": [
     "ios/TalkHint/App/AppDelegate.swift",
@@ -19,6 +24,7 @@
     "docs/chat-voice-native-delta.json",
     "docs/chat-voice-native-delta-audit.md",
     "docs/claude-mac-chat-voice-sarah-handoff.md",
+    "docs/claude-mac-talkhint-production-voice.md",
     "scripts/verify-chat-voice-native-delta.py"
   ],
   "paid_tests_authorized": false,
