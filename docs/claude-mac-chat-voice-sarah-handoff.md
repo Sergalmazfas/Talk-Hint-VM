@@ -2,6 +2,54 @@
 
 ## Что разрешено
 
+### Текущий шаг после успешного gate 8c457e18
+
+По отчёту Claude **293 passed / 0 failed / 0 skipped, verify-xcresult PASS**
+на `8c457e18e4018df35d58fe1c2760df9407c75665`.
+Тесты не повторять: это обновление меняет только данный документ,
+native tree остаётся `62c0863d7618c4b4fc784e3f879c263c5d9f3dc4`.
+Предыдущие разделы о неуспешных gate ниже — история, а не текущий блокер.
+
+**Продолжить только шаг 4 в существующем чистом worktree**
+`~/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check` на `8c457e18`.
+Не переключать его на другую кодовую базу, не создавать новый worktree ради
+документальной поправки. Принятый `iphone-ready` оставить без изменений.
+Сначала проверить HEAD/чистоту и место (последний отчёт — 13 GiB);
+получить обновлённый документ через fetch и `git show`, не меняя checkout:
+
+```bash
+git fetch origin refs/heads/xcode-chat-voice-sarah-2026-11-11
+TARGET=$(git rev-parse FETCH_HEAD)
+git diff --name-only 8c457e18e4018df35d58fe1c2760df9407c75665 "$TARGET"
+git rev-parse "${TARGET}:ios"
+git show "${TARGET}:docs/claude-mac-chat-voice-sarah-handoff.md"
+```
+
+Diff должен содержать **только этот handoff**, native tree совпасть.
+Иначе остановиться и сообщить, не подтягивать неизвестные изменения.
+
+AppDev generic Simulator упал на x86_64: по отчёту, SPM TwilioVoice 6.13.8
+содержит simulator slice только arm64; отсутствовали TVOAudioFormat/TVOCall/
+TVOConnectOptions. Поправка Replit разрешает **только разовые build-аргументы**
+`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` в шаге 4. Сначала подтвердить Apple Silicon
+и нативный arm64-процесс (`uname -m`); при иной архитектуре остановиться.
+Не менять project.yml, xcconfig, Package.resolved, Twilio/SPM версию,
+EXCLUDED_ARCHS, подпись, bundle ID, Dev origin, backend или исходники.
+Это Simulator build, **не** сборка/установка на настоящий iPhone.
+
+Сохранить старый неуспешный `sarah-appdev.V3BiUH/build.log`, новый build
+писать в новый каталог. При успехе проверить Info.plist по шагу 4,
+сверить предупреждения по файлам с уже существующими логами и вернуть отчёт.
+Если сборка снова не проходит — остановиться, без самостоятельных обходов.
+Без нового gate, Run, установки, Archive, Publish и платных проб.
+
+**Предупреждения gate:** всего 36 Unbalanced calls. По типам контроллеров
+23 относятся к новым render-fixture окнам (21 Orb, 2 Color), 13 — к прежним
+навигационным тестам. Причина незавершённого appearance transition —
+пока гипотеза, не результат проверенного исправления. Предупреждения остаются
+открытыми, не скрывать/не чинить в этом шаге и не называть безвредными.
+Сам gate прошёл; это не доказательство работы голоса на настоящем телефоне.
+
 Владелец разрешил подготовить следующую дельту и передать её для проверки.
 Разрешены: сверка Git/исходников, отдельный worktree, **полный неплатный native gate**
 и сборка **TalkHintAppDev для Simulator без установки/Run**.
@@ -242,7 +290,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild -project ios/TalkHint.xcodeproj -scheme TalkHintAppDev \
   -configuration AppDev -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath "$OUT/DerivedData" CODE_SIGNING_ALLOWED=NO build \
+  -derivedDataPath "$OUT/DerivedData" \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build \
   2>&1 | tee "$OUT/build.log"
 ```
 
