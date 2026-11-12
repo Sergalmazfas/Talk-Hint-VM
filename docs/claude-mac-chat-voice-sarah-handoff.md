@@ -22,10 +22,10 @@
 - Новая ветка: `xcode-chat-voice-sarah-2026-11-11`.
 - Принятая Mac-база: `c997a2d794099b0c1c5805cf18b49eaf233eb1a6`.
 - Первый слой зависимостей: `649ff8a4f84c314f5d0fef2948de276627c9c357`.
-- Коммит нативного кода: `2c3ff980da15550b5eef5b1b20f99ba532d350d7`.
+- Коммит нативного кода: `394eb79cc91dc6d0ab544052b3a7520c7c7cdc19`.
 - Последний HEAD ветки добавляет только документы и read-only валидатор;
   именно на нём запускать полный gate. Не тестировать вместо него один старый слой.
-- Точный hash дерева `ios/`: `1b496171f71be714901224ac457bca8f0058e755`.
+- Точный hash дерева `ios/`: `eb5ddd4e177060bb86bf67662dd77b0812510774`.
 - JSON: `docs/chat-voice-native-delta.json`.
 - Разбор состава: `docs/chat-voice-native-delta-audit.md`.
 
@@ -34,6 +34,29 @@
 не копировать весь ios из ZIP, не удалять или переписывать существующие ветки.
 
 ## 1. Preflight на существующем Mac checkout
+
+### Исправление по отчёту gate 23ae646
+
+На `23ae646` test target не скомпилировался: `ChatVoiceOrbTests.swift:46`
+пытался записать read-only `EnvironmentValues.accessibilityReduceMotion`
+через `.environment`. Exit 65; XCTest не запущены, xcresult нет.
+AppDev не собирался. Это не успешный gate и не ошибка рабочего аудиотракта.
+
+Дельта `394eb79c`:
+- `ChatVoiceOrbView`: внутренний необязательный `reduceMotionOverride`,
+  по умолчанию nil → используется системная настройка, как раньше.
+  Все четыре решения об анимации используют одно эффективное значение.
+- `ChatVoiceOrbTests`: тот же обязательный тест рендеринга UIHostingController,
+  с override вместо записи в read-only environment; проверяет nil/true/false.
+- Source-проверка запрещает возврат ошибочной записи environment.
+  Тесты не удалены и required-success список не ослаблен.
+
+Разрешённая очистка уже выполнена по отчёту Claude: Preview-17 удалён,
+Preview-SE ранее удалён; удалены только разрешённые cache-подкаталоги.
+Логи, xcresult, SourcePackages, Корзина и принятые worktree сохранены.
+После неуспешного gate сообщено 14 GiB свободно. Повторно измерить перед сборкой;
+**не повторять очистку автоматически и не расширять её**.
+Сохранить неуспешный `gate-23ae646.log` и его generated-artifacts.
 
 Ранее принятый checkout: `~/Talk-Hint-VM-worktrees/iphone-ready`.
 Сначала проверить фактическое существование, repo, branch, полный HEAD,
@@ -124,13 +147,14 @@ GitHub Actions workflow не менялся и не включает push это
 (в исходном Mac workflow автоматический push — только main).
 Не создавать PR или вручную запускать Actions. Внешние webhooks не проверены.
 
-Для сборки — **новый отдельный worktree**, например
-`~/Talk-Hint-VM-worktrees/chat-voice-sarah-2026-11-11`.
+Для исправленной сборки — **новый отдельный worktree**:
+`~/Talk-Hint-VM-worktrees/chat-voice-sarah-reduce-motion`.
+Прежний `chat-voice-sarah-2026-11-11` с неуспешным gate оставить неизменным.
 Если путь существует, не перезаписывать: проверить HEAD/чистоту, при несовпадении стоп.
 
 ```bash
-git worktree add --detach "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-2026-11-11" "$TARGET"
-cd "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-2026-11-11"
+git worktree add --detach "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-reduce-motion" "$TARGET"
+cd "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-reduce-motion"
 python3 scripts/verify-chat-voice-native-delta.py
 python3 -m unittest discover -s ios/tests -p 'test_*source_contract.py'
 python3 -m unittest discover -s ios/scripts/tests
@@ -196,7 +220,7 @@ TalkHintDevOrigin совпадает с AppDev в неизменённом `ios/
 ## Что проверено Replit, а что ещё нет
 
 На извлечённом **конечном** нативном дереве:
-66 source-contract и 53 script-теста PASS. Проверен оригинальный родитель,
+67 source-contract и 53 script-теста PASS. Проверен оригинальный родитель,
 сохранены все 268 объявленных Mac test-методов (это не число выполненных XCTest).
 Все 121 именованное требование старого gate сохранены; новый список — 141.
 Исправлено устаревшее ожидание четырёх вкладок в Python-проверке на пять с Chat.
