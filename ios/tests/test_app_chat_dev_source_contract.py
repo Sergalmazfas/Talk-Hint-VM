@@ -41,6 +41,7 @@ class AppChatDevSourceContracts(unittest.TestCase):
             self.assertIn(entry, scene)
         calls = (ROOT / "ios/TalkHint/Calls/CallManager.swift").read_text()
         mode = calls.split("private static func selectedIncomingMode()", 1)[1].split("// MARK:", 1)[0]
+        # Main Dev has already frozen Copilot; Mac baseline has a narrow shell guard.
         if "selectedIndex == 2" in mode:
             self.assertLess(mode.index("tab is TalkHintTabBarController"),
                             mode.index("selectedIndex == 2"))

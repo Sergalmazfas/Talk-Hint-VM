@@ -197,6 +197,10 @@ final class APIClient {
     /// Accepts a pending call as an iOS client. Returns the conference room name
     /// (e.g. "call-{callSid}") that the outbound Twilio connect() must join.
     func acceptCall(callSid: String, copilot: Bool = false) async throws -> String {
+        guard !copilot || CallManager.copilotAvailable else {
+            throw NSError(domain: "Copilot", code: 410,
+                          userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("copilot.disabled", comment: "")])
+        }
         let body: [String: Any] = [
             "callSid": callSid,
             "clientType": copilot ? "ios_copilot" : "ios"
@@ -995,6 +999,10 @@ final class APIClient {
                             text: String, provider: VoiceProviderPreference = .elevenlabs) async throws -> Data {
         let maxAudioBytes = 8 * 1024 * 1024
         guard let token = SessionStore.shared.token else { throw APIError.notAuthenticated }
+        guard CallManager.copilotAvailable else {
+            throw NSError(domain: "Copilot", code: 410,
+                          userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("copilot.disabled", comment: "")])
+        }
         var req = URLRequest(url: AppConfig.baseURL.appendingPathComponent("/api/copilot/clone-speech"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -1085,7 +1093,13 @@ final class APIClient {
                    obj["code"] as? String == "SECRETARY_COOLDOWN" {
                     throw APIError.secretaryCooldown(max(1, obj["retryAfterSeconds"] as? Int ?? 1))
                 }
-                message = (obj["error"] as? String) ?? ""
+                if path.hasSuffix("/confirm-plan"),
+                   let code = obj["code"] as? String,
+                   ["PLAN_STALE", "PLAN_CHANGED"].contains(code) {
+                    message = code
+                } else {
+                    message = (obj["error"] as? String) ?? ""
+                }
             }
             throw APIError.http(http.statusCode, message)
         }

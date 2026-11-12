@@ -584,6 +584,7 @@ private final class SecretaryTaskComposerViewController: UIViewController, UITex
 final class SecretaryTaskReviewViewController: UIViewController {
     private let phoneNumber: String
     private let instruction: String
+    private let displayInstruction: String?
     private let confirmationToken: String
     private let phoneField = UITextField()
     private let startButton = UIButton(type: .system)
@@ -597,9 +598,10 @@ final class SecretaryTaskReviewViewController: UIViewController {
     private var activeDraft: SessionStore.SecretaryCallDraft?
 
     init(phoneNumber: String, instruction: String, confirmationToken: String,
-         api: APIClient = .shared) {
+         api: APIClient = .shared, displayInstruction: String? = nil) {
         self.phoneNumber = phoneNumber
         self.instruction = instruction
+        self.displayInstruction = displayInstruction
         self.confirmationToken = confirmationToken
         self.api = api
         super.init(nibName: nil, bundle: nil)
@@ -655,7 +657,7 @@ final class SecretaryTaskReviewViewController: UIViewController {
         stack.addArrangedSubview(sectionLabel("secretary.instruction.label"))
 
         let instructionCard = UILabel()
-        instructionCard.text = instruction
+        instructionCard.text = displayInstruction ?? instruction
         instructionCard.font = .preferredFont(forTextStyle: .body)
         instructionCard.numberOfLines = 0
         instructionCard.backgroundColor = Theme.purpleBg
@@ -1207,10 +1209,9 @@ private final class SecretaryTaskDetailViewController: UIViewController {
     @objc private func openHistoryTranscript() {
         guard let callId = task.callId,
               let tabs = tabBarController,
-              tabs.viewControllers?.indices.contains(4) == true,
-              let navigation = tabs.viewControllers?[4] as? UINavigationController,
+              let navigation = tabs.viewControllers?.first(where: { $0.tabBarItem.tag == 4 }) as? UINavigationController,
               let history = navigation.viewControllers.first as? CallHistoryViewController else { return }
-        tabs.selectedIndex = 4
+        tabs.selectedViewController = navigation
         navigation.popToRootViewController(animated: false)
         history.openCallTranscript(identifier: callId)
     }

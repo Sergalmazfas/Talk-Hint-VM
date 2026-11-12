@@ -156,8 +156,8 @@ enum SecretaryNotificationRouter {
                 guard let scene = scene as? UIWindowScene,
                       let window = scene.windows.first(where: { $0.isKeyWindow }),
                       let tabs = window.rootViewController as? UITabBarController,
-                      let navigation = tabs.viewControllers?.dropFirst(3).first as? UINavigationController else { continue }
-                tabs.selectedIndex = 3
+                      let navigation = tabs.viewControllers?.first(where: { $0.tabBarItem.tag == 3 }) as? UINavigationController else { continue }
+                tabs.selectedViewController = navigation
                 incomingPending = false
                 navigation.pushViewController(IncomingSecretaryViewController(), animated: true)
                 return true
@@ -169,10 +169,9 @@ enum SecretaryNotificationRouter {
             guard let windowScene = scene as? UIWindowScene,
                   let window = windowScene.windows.first(where: { $0.isKeyWindow }) ?? windowScene.windows.first,
                   let tabs = window.rootViewController as? UITabBarController,
-                  tabs.viewControllers?.indices.contains(3) == true,
-                  let navigation = tabs.viewControllers?[3] as? UINavigationController,
+                  let navigation = tabs.viewControllers?.first(where: { $0.tabBarItem.tag == 3 }) as? UINavigationController,
                   let secretary = navigation.viewControllers.first as? HomeViewController else { continue }
-            tabs.selectedIndex = 3
+            tabs.selectedViewController = navigation
             navigation.popToRootViewController(animated: false)
             pendingTaskID = nil
             secretary.openSecretaryTask(id: taskID)

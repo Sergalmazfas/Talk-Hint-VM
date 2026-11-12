@@ -17,7 +17,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         return
         #elseif TALKHINT_CHAT_PREVIEW
-        // Isolated native preview; the existing application tabs stay unchanged.
+        // Separate native design preview, not a change to working navigation.
         window.rootViewController = ChatApprovedPreviewHost()
         window.makeKeyAndVisible()
         return
@@ -66,21 +66,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #endif
     }
 
-    func showRoot(loggedIn: Bool) {
-        if loggedIn && SessionStore.shared.isLoggedIn {
-            window?.rootViewController = makeMainTabController()
-        } else {
-            let login = LoginViewController()
-            login.onLoggedIn = { [weak self] in
-                self?.showRoot(loggedIn: true)
-                PushManager.shared.registerCurrentTokenIfPossible()
-                SecretaryAlertManager.shared.registerCurrentTokenIfPossible()
-                _ = SecretaryNotificationRouter.openPendingIfPossible()
-            }
-            window?.rootViewController = UINavigationController(rootViewController: login)
-        }
-    }
-
     #if TALKHINT_CHAT_LIVE_DEV
     private func showAppDev(loggedIn: Bool) {
         if loggedIn && SessionStore.shared.isLoggedIn {
@@ -109,14 +94,31 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     #endif
 
-    /// Builds the main tab bar shown after login (Hint / Translator / Copilot /
-    /// Secretary / History). Settings opens from the gear on the Hint screen.
+    func showRoot(loggedIn: Bool) {
+        if loggedIn && SessionStore.shared.isLoggedIn {
+            window?.rootViewController = makeMainTabController()
+        } else {
+            let login = LoginViewController()
+            login.onLoggedIn = { [weak self] in
+                self?.showRoot(loggedIn: true)
+                PushManager.shared.registerCurrentTokenIfPossible()
+                SecretaryAlertManager.shared.registerCurrentTokenIfPossible()
+                _ = SecretaryNotificationRouter.openPendingIfPossible()
+            }
+            window?.rootViewController = UINavigationController(rootViewController: login)
+        }
+    }
+
+    /// Builds the main tab bar shown after login (Hint / Translator / Chat /
+    /// Secretary / History). Chat opens a retained full-screen stack; Settings
+    /// remains available from Hint and also from the chat drawer.
     ///
     /// The first tab is FUNCTIONALLY the same Calls flow (dialer, recents,
     /// live-hint calls) — only its user-facing name/icon changed to "Hint".
     /// The Tutor tab was replaced by Translator; TutorViewController and the
     /// backend /tutor page are intentionally left in the codebase (no UI entry
     /// points, no refactoring — see task #274 scope).
+    // Internal for hosted navigation regression tests; not an additional UI entry.
     func makeMainTabController(chatFactory: (() -> UIViewController)? = nil) -> UITabBarController {
         let defaultFactory: () -> UIViewController = { [weak self] in
             if let chat = ChatViewController.liveApprovedScreen() { return chat }
@@ -137,8 +139,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             title: NSLocalizedString("tab.translator", comment: ""),
             image: Self.tabIcon(badge: .translate), tag: 1)
 
-        let central = ChatEntryViewController()
-        central.tabBarItem = UITabBarItem(
+        let chat = ChatEntryViewController()
+        chat.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.chat", comment: ""),
             image: UIImage(systemName: "bubble.left.and.bubble.right"), tag: 2)
 
@@ -151,13 +153,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         history.tabBarItem = UITabBarItem(
             title: NSLocalizedString("tab.history", comment: ""), image: UIImage(systemName: "clock"), tag: 4)
 
-        tabController.viewControllers = [
-            UINavigationController(rootViewController: calls),
-            UINavigationController(rootViewController: translator),
-            UINavigationController(rootViewController: central),
-            UINavigationController(rootViewController: secretary),
-            UINavigationController(rootViewController: history),
-        ]
+        let roots: [UIViewController] = [calls, translator, chat, secretary, history]
+        tabController.viewControllers = roots.map { root in
+            let navigation = UINavigationController(rootViewController: root)
+            navigation.tabBarItem = root.tabBarItem
+            return navigation
+        }
+        // Preserve the original phone/Hint launch. Chat is an intercepted entry,
+        // not a selected tab containing a second bottom navigation bar.
         return tabController
     }
 

@@ -772,7 +772,9 @@ final class HomeViewController: UIViewController {
     }
 
     @objc private func seeAllTapped() {
-        tabBarController?.selectedIndex = 4 // History
+        guard let tabs = tabBarController,
+              let history = tabs.viewControllers?.first(where: { $0.tabBarItem.tag == 4 }) else { return }
+        tabs.selectedViewController = history
     }
 
     @objc private func secretaryHistoryTapped() {
@@ -865,6 +867,13 @@ final class HomeViewController: UIViewController {
     }
 
     private func startCall(to raw: String) {
+        guard callMode != .copilot || CallManager.copilotAvailable else {
+            let alert = UIAlertController(title: NSLocalizedString("tab.copilot", comment: ""),
+                message: NSLocalizedString("copilot.disabled", comment: ""), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
+            present(alert, animated: true)
+            return
+        }
         guard outgoingCallUUID == nil else { return }
         dismissDialKeyboard()
         let cleaned = raw.components(separatedBy: CharacterSet(charactersIn: " -()")).joined()
