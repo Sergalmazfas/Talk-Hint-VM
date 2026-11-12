@@ -1,5 +1,83 @@
 # Claude на Mac: одна обычная сборка TalkHint для talkhint.app
 
+## АКТУАЛЬНО: точечное исправление падения голосового экрана
+
+**Выполнять только этот раздел. Ниже — прежнее задание, уже выполненное
+на 79545ad4 (299/299, device build 15 с). Не повторять старый полный gate.**
+
+На iPhone зафиксировано NSGenericException: height constraint orb/root
+активировался до общего ancestor. Это ошибка сборки иерархии экрана,
+не Retell, не модель и не Twilio vendor warning.
+
+Новый код **8ba36d6d**, ios-tree **a01be2ed756653b1150b315798d757e934ab5912**,
+поверх 79545ad4. Только четыре native-пути:
+- ChatVoiceViewController.swift: активировать cross-view constraint после
+  добавления stack в root; завершить containment didMove после вставки.
+- ChatVoiceScreenTests.swift: два полных load/layout теста без сети, появления
+  в окне, аудиосессии и микрофона, два размера/две темы.
+- verify-xcresult.py: добавить оба теста в будущие обязательные полные gate.
+- test_mac_voice_delivery_source_contract.py: проверить порядок вставки/constraint.
+
+Сервер, подпись, существующие голос/модель/таймеры и API не менялись.
+Replit: 71 source-contract + 53 script-теста PASS. Это не нативный запуск.
+
+1. В прежнем чистом chat-voice-sarah-concurrency получить ту же GitHub-ветку,
+   проверить прямой diff от 79545ad4: ровно четыре native-пути и документы.
+   Fast-forward, без stash/reset/clean/нового worktree. Git-аудит по manifest.
+2. Переиспользовать прежний DerivedData/SPM. XcodeGen должен включить новый
+   ChatVoiceScreenTests.swift в target. Применить прежние NativeValidation/
+   ad-hoc/isolated .invalid параметры из успешного gate; build-for-testing
+   нового дерева, затем test-without-building **только**:
+   ```
+   -only-testing:TalkHintTests/ChatVoiceScreenTests
+   -only-testing:TalkHintTests/ChatVoiceOrbTests
+   -only-testing:TalkHintTests/ChatVoiceClientPolicyTests
+   ```
+   Всего ожидается **11** тестов (2+4+5), все успешны, 0 skipped.
+   Новый xcresult, старый не перезаписывать. Не вызывать viewDidAppear
+   вручную в fixture, не выдавать capture permission, не обращаться к API.
+   Общий verify-xcresult требует теперь 152 обязательных успеха и закономерно
+   не пройдёт на focused run; его не ослаблять/не изменять.
+   Для точной проверки scoped evidence разрешён такой отдельный read-only
+   вызов (BUNDLE — реальный новый xcresult):
+   ```bash
+   python3 - "$BUNDLE" <<'PY'
+   import runpy, sys
+   m = runpy.run_path("ios/scripts/verify-xcresult.py")
+   root = m["read_result"](sys.argv[1])
+   passed = set()
+   for action in root["actions"]["_values"]:
+       result = action["actionResult"]
+       assert result.get("status", {}).get("_value") == "succeeded"
+       ref = result.get("testsRef", {}).get("id", {}).get("_value")
+       if ref:
+           passed.update(m["successful_tests"](m["read_result"](sys.argv[1], ref)))
+   suites = ("ChatVoiceScreenTests", "ChatVoiceOrbTests", "ChatVoiceClientPolicyTests")
+   for suite in suites:
+       for method in m["REQUIRED_TESTS"][suite]:
+           assert any(suite in p and method + "()" in p for p in passed), (suite, method)
+   assert len(passed) == 11, len(passed)
+   print("SCOPED PASS: 11/11 voice-screen/orb/policy tests; not a full native gate")
+   PY
+   ```
+3. Если хотя бы один новый тест падает — остановиться с точным текстом,
+   без установки. Если всё проходит — одна incremental TalkHint/Debug/
+   iphoneos сборка с прежней подписью, app.talkhint/callback talkhint/
+   backend talkhint.app; без AppDev, clean, обновления SPM и Publish.
+4. Владелец уже разрешил установку/открытие обычного TalkHint. При отсутствии
+   активного звонка обновить то же приложение без удаления данных/Keychain
+   и без смены подписи; открыть обычный Chat. Только после успешных тестов
+   можно проверить открытие и закрытие экрана шара **без нажатия микрофона**.
+   Если открытие может восстановить старую pending voice-generation/озвучку,
+   не открывать автоматически: сообщить и дождаться решения владельца.
+   Отдельных платных STT/LLM/TTS, сообщений, звонков не запускать.
+5. Вернуть **фактический** scoped результат 11 тестов, exit code/xcresult,
+   длительность, device build и runtime opening если проверен. Не писать,
+   что прежние 299 доказали новое дерево. Для будущего полного gate ожидается
+   301 XCTest/152 required, но сейчас полный прогон не назначен.
+
+## ИСТОРИЯ: выполненное задание 79545ad4 (не запускать повторно)
+
 ## Разрешение и точная цель
 
 Владелец опубликовал сервер и выбрал «Обновить обычное TalkHint».

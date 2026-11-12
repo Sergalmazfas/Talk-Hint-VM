@@ -2,6 +2,15 @@
 
 ## Что разрешено
 
+### СРОЧНО: падение при открытии шара — только точечный патч
+
+На 79545ad4 gate прошёл, но реальный ChatVoiceViewController упал:
+height constraint был включён до общей иерархии view. Текущий код 8ba36d6d.
+**Выполнить только верхний HOTFIX-раздел
+docs/claude-mac-talkhint-production-voice.md: scoped 11 тестов, incremental
+обычная device-сборка. Старые полные gate/AppDev/планы ниже не повторять.**
+Никакого нового Publish или платных запросов.
+
 ### АКТУАЛЬНО: обычное TalkHint, не AppDev
 
 Владелец выполнил Publish и выбрал **«Обновить обычное TalkHint»**.
