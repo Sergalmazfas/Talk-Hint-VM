@@ -2,46 +2,55 @@
 
 ## Что разрешено
 
-### Текущий шаг после успешного gate 8c457e18
+### Текущий шаг: два согласованных предупреждения многопоточности
 
-По отчёту Claude **293 passed / 0 failed / 0 skipped, verify-xcresult PASS**
-на `8c457e18e4018df35d58fe1c2760df9407c75665`.
-Тесты не повторять: это обновление меняет только данный документ,
-native tree остаётся `62c0863d7618c4b4fc784e3f879c263c5d9f3dc4`.
-Предыдущие разделы о неуспешных gate ниже — история, а не текущий блокер.
+Владелец ответил **«Да, исправить в Dev»** только для двух новых предупреждений
+ChatPhoneContextCollector/CLLocationManagerDelegate и ChatVoiceCapture.
+На прежнем `8c457e18` было 293/293 XCTest PASS и AppDev arm64 BUILD SUCCEEDED,
+Info.plist проверен. Это принятые факты предыдущего дерева, не результат
+новой дельты. Старые логи/xcresult/успешный binary сохранить.
 
-**Продолжить только шаг 4 в существующем чистом worktree**
-`~/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check` на `8c457e18`.
-Не переключать его на другую кодовую базу, не создавать новый worktree ради
-документальной поправки. Принятый `iphone-ready` оставить без изменений.
-Сначала проверить HEAD/чистоту и место (последний отчёт — 13 GiB);
-получить обновлённый документ через fetch и `git show`, не меняя checkout:
+Новый код `8518c2f1`:
+- три CoreLocation delegate callback теперь nonisolated; они не трогают
+  actor-state, а переходят на MainActor;
+- location callback передаёт только Sendable-снимок чисел/времени,
+  CLLocation восстанавливается на MainActor; manager/Error не переносятся;
+- authorization callback читает актуальный статус собственного manager
+  уже на MainActor. Разрешения, точность и существующие 5 секунд не меняются;
+- microphone result — отдельный @Sendable callback с weak-владельцем.
+  Перед Task создаётся неизменяемая сильная локальная ссылка; только короткая
+  задача держит её живой. Нет цикла постоянного владения tap → capture.
+  На MainActor остаётся проверка recordingID; AVAudioPCMBuffer там не передаётся.
+  Порог, 1,2 с, аудиоформаты, AEC, отмена и обработка ошибок не меняются.
 
-```bash
-git fetch origin refs/heads/xcode-chat-voice-sarah-2026-11-11
-TARGET=$(git rev-parse FETCH_HEAD)
-git diff --name-only 8c457e18e4018df35d58fe1c2760df9407c75665 "$TARGET"
-git rev-parse "${TARGET}:ios"
-git show "${TARGET}:docs/claude-mac-chat-voice-sarah-handoff.md"
-```
+Пять нативных путей: два app-файла, ChatPhoneContextTests.swift,
+verify-xcresult.py и source-contract тест. Без @preconcurrency,
+новых @unchecked Sendable, отключения warnings или изменения Swift-режима.
+Новый XCTest проверяет точное сохранение координат/точности/времени/
+altitude/course/speed в снимке; нет запросов геолокации и доступа к микрофону.
+Теперь все четыре ChatPhoneContextTests обязательны: **145 required-success**.
+Ожидается 294 теста при прежнем составе остальных 293; сообщить фактические
+passed/failed/skipped, не заменять их этим ожиданием.
 
-Diff должен содержать **только этот handoff**, native tree совпасть.
-Иначе остановиться и сообщить, не подтягивать неизвестные изменения.
+**Это уже изменение native tree: нужен новый полный gate и AppDev build.**
+Выполнить шаги 1–4 на новом HEAD в отдельном worktree
+`~/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency`.
+Прежние принятые/тестовые worktree не менять. До запуска проверить чистоту,
+реальные версии и запас диска; новой очистки не разрешено.
+Сравнить app diff с `4e4714d8`: только два указанных app-файла.
+Отдельно убедиться, что параметры/модели/таймеры/Retell не изменялись.
 
-AppDev generic Simulator упал на x86_64: по отчёту, SPM TwilioVoice 6.13.8
-содержит simulator slice только arm64; отсутствовали TVOAudioFormat/TVOCall/
-TVOConnectOptions. Поправка Replit разрешает **только разовые build-аргументы**
-`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` в шаге 4. Сначала подтвердить Apple Silicon
-и нативный arm64-процесс (`uname -m`); при иной архитектуре остановиться.
-Не менять project.yml, xcconfig, Package.resolved, Twilio/SPM версию,
-EXCLUDED_ARCHS, подпись, bundle ID, Dev origin, backend или исходники.
-Это Simulator build, **не** сборка/установка на настоящий iPhone.
+В AppDev build оставить разовые `ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` —
+предыдущая сборка ими подтверждена на Apple M1. Не менять project.yml,
+xcconfig, Package.resolved, EXCLUDED_ARCHS, подпись, bundle или сервер.
+При иной архитектуре Mac остановиться. AppDev собирается для Simulator,
+не для физического iPhone. Установка/Run/Publish и платные пробы запрещены.
 
-Сохранить старый неуспешный `sarah-appdev.V3BiUH/build.log`, новый build
-писать в новый каталог. При успехе проверить Info.plist по шагу 4,
-сверить предупреждения по файлам с уже существующими логами и вернуть отчёт.
-Если сборка снова не проходит — остановиться, без самостоятельных обходов.
-Без нового gate, Run, установки, Archive, Publish и платных проб.
+Критерий проверки: полный gate PASS, AppDev BUILD SUCCEEDED, верный Info.plist
+и **отсутствие двух конкретных concurrency warning в свежих логах**.
+Если предупреждение осталось/изменилось — вернуть точный полный текст,
+файл/строку/режим сборки. Не утверждать, что исправлено, по Python-проверкам.
+Не повторять до зелёного и не маскировать аннотациями.
 
 **Предупреждения gate:** всего 36 Unbalanced calls. По типам контроллеров
 23 относятся к новым render-fixture окнам (21 Orb, 2 Color), 13 — к прежним
@@ -70,10 +79,10 @@ EXCLUDED_ARCHS, подпись, bundle ID, Dev origin, backend или исход
 - Новая ветка: `xcode-chat-voice-sarah-2026-11-11`.
 - Принятая Mac-база: `c997a2d794099b0c1c5805cf18b49eaf233eb1a6`.
 - Первый слой зависимостей: `649ff8a4f84c314f5d0fef2948de276627c9c357`.
-- Коммит нативного кода: `9a2b020ce5e0eb7098a87e6bd5c2696103056487`.
+- Коммит нативного кода: `8518c2f1f92d88c3be333f90d676e54c85df9ea8`.
 - Последний HEAD ветки добавляет только документы и read-only валидатор;
   именно на нём запускать полный gate. Не тестировать вместо него один старый слой.
-- Точный hash дерева `ios/`: `62c0863d7618c4b4fc784e3f879c263c5d9f3dc4`.
+- Точный hash дерева `ios/`: `ca7eae2c7f565efb4085ba07f7e1fd002c4448c7`.
 - JSON: `docs/chat-voice-native-delta.json`.
 - Разбор состава: `docs/chat-voice-native-delta-audit.md`.
 
@@ -230,14 +239,14 @@ GitHub Actions workflow не менялся и не включает push это
 Не создавать PR или вручную запускать Actions. Внешние webhooks не проверены.
 
 Для исправленной сборки — **новый отдельный worktree**:
-`~/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check`.
+`~/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency`.
 Прежние `chat-voice-sarah-2026-11-11` и `chat-voice-sarah-reduce-motion`
 с неуспешными gate оставить неизменными.
 Если путь существует, не перезаписывать: проверить HEAD/чистоту, при несовпадении стоп.
 
 ```bash
-git worktree add --detach "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check" "$TARGET"
-cd "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-render-check"
+git worktree add --detach "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency" "$TARGET"
+cd "$HOME/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency"
 python3 scripts/verify-chat-voice-native-delta.py
 python3 -m unittest discover -s ios/tests -p 'test_*source_contract.py'
 python3 -m unittest discover -s ios/scripts/tests
@@ -266,13 +275,14 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 - SceneLaunchTests: `testLoggedInRootLoadsCallsScreen`,
   `testLoggedInFlagWithoutStoredSessionShowsLogin`.
 - Все 3 ChatAPITests и все 4 ChatOutboxTests (точные имена в REQUIRED_TESTS).
+- Все 4 ChatPhoneContextTests, включая новый тест передачи снимка.
 - Все 4 ChatVoiceOrbTests, 6 ChatVoiceSessionTests и 6 ChatVoiceSpeechStateTests.
 - Полные ChatApprovedScreenTests, ChatNavigationTests, ChatDictationTests,
   ChatCallPlanModelTests, ChatPhoneContextTests, ChatAppShellTests.
 - CopilotFreezeNavigationTests, SessionCredentialsTests,
   SecretaryPersonalityUITests, CallAudioDeviceRouterTests.
 - `python3 ios/scripts/verify-xcresult.py <путь-к-новому-xcresult>`.
-  Gate требует 141 конкретный успех и не заменяет общий passed/failed/skipped.
+  Gate требует 145 конкретных успехов и не заменяет общий passed/failed/skipped.
 
 Если есть падение — не отключать тест и не ослаблять login/ожидания ради зелёного.
 Вернуть имя, файл/строку, фактическое условие, логи, предложение минимальной правки.
@@ -304,9 +314,9 @@ TalkHintDevOrigin совпадает с AppDev в неизменённом `ios/
 ## Что проверено Replit, а что ещё нет
 
 На извлечённом **конечном** нативном дереве:
-68 source-contract и 53 script-теста PASS. Проверен оригинальный родитель,
+70 source-contract и 53 script-теста PASS. Проверен оригинальный родитель,
 сохранены все 268 объявленных Mac test-методов (это не число выполненных XCTest).
-Все 121 именованное требование старого gate сохранены; новый список — 141.
+Все 121 именованное требование старого gate сохранены; новый список — 145.
 Исправлено устаревшее ожидание четырёх вкладок в Python-проверке на пять с Chat.
 
 Xcode/XCTest, физический iPhone, акустика/AEC, три полных замера и настоящее

@@ -1,3 +1,18 @@
+# Дополнение: согласованная изоляция двух callback-границ
+
+Владелец разрешил исправить два новых concurrency warning перед микрофоном.
+Дельта `8518c2f1f92d88c3be333f90d676e54c85df9ea8`:
+CoreLocation — nonisolated callbacks + Sendable числовой снимок → MainActor;
+микрофон — weak owner в одном callback, неизменяемый owner для короткого Task.
+Проверка recordingID сохранена, буферы не переносятся на MainActor.
+Таймеры, голос/модель, AEC/форматы, разрешения, Катя/Retell не менялись.
+
+Дополнен ChatPhoneContextTests и required-success (все четыре context-теста):
+145 обязательных успехов вместо 141. Нет ослабления старых проверок.
+Актуальный hash `ios/`: `ca7eae2c7f565efb4085ba07f7e1fd002c4448c7`.
+Предыдущие 293/293 и AppDev arm64 BUILD SUCCEEDED относятся к старому дереву;
+для нового требуется полный gate, AppDev и сверка отсутствия обоих warning.
+
 # Дополнение: проверка изображения вместо внутренностей SwiftUI
 
 Mac gate `c9804f5`: 293 теста, 291 passed / 2 failed / 0 skipped.
