@@ -49,7 +49,10 @@ class DictationSourceContracts(unittest.TestCase):
 
     def test_orb_cannot_launch_and_is_separate(self):
         self.assertIn("orbButton.isEnabled = false", self.controller)
-        self.assertNotRegex(self.controller, r"orbButton\.(?:addTarget|addAction)")
+        self.assertIn("if Self.devVoiceEnabled {", self.controller)
+        self.assertIn("#if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV", self.controller)
+        self.assertIn('AppConfig.baseURL.host?.hasSuffix(".replit.dev")', self.controller)
+        self.assertNotIn("orbButton.addAction", self.controller)
         self.assertIn('iconButton("mic"', self.controller)
         self.assertIn('orbButton.setImage(UIImage(systemName: "waveform")', self.controller)
 

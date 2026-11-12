@@ -16,6 +16,7 @@ struct ChatPendingSend: Codable, Equatable, Identifiable {
     let language: String
     var state: State
     var context: ChatPhoneContext? = nil
+    var mode: String? = nil
     enum State: String, Codable { case pending, sending, uncertain, failed }
 }
 
@@ -70,9 +71,10 @@ final class ChatOutbox {
         return id
     }
     func finishConversationRequest() { defaults.removeObject(forKey: conversationRequestKey) }
-    func enqueue(conversationId: String, text: String, attachmentIds: [String], language: String) -> ChatPendingSend {
-        let send = ChatPendingSend(id: UUID(), conversationId: conversationId, text: text,
-                                  attachmentIds: attachmentIds, language: language, state: .pending)
+    func enqueue(conversationId: String, text: String, attachmentIds: [String], language: String,
+                 requestId: UUID = UUID(), mode: String? = nil) -> ChatPendingSend {
+        let send = ChatPendingSend(id: requestId, conversationId: conversationId, text: text,
+                                  attachmentIds: attachmentIds, language: language, state: .pending, mode: mode)
         pendingSends.append(send)
         return send
     }

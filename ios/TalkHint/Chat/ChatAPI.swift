@@ -4,9 +4,15 @@ struct ChatCapabilities: Decodable {
     struct AI: Decodable { let available: Bool; let model: String? }
     struct Attachments: Decodable { let available: Bool; let mimeTypes: [String]; let maxBytes: Int }
     struct Voice: Decodable { let available: Bool }
+    struct VoiceMode: Decodable {
+        struct Speech: Decodable { let available: Bool; let model: String?; let reason: String? }
+        let available: Bool
+        let speech: Speech
+    }
     let ai: AI
     let attachments: Attachments
     let voice: Voice
+    let voiceMode: VoiceMode?
 }
 
 struct ChatConversation: Codable, Identifiable, Equatable {
@@ -170,15 +176,21 @@ extension APIClient {
     }
 
     func sendChatMessage(conversationId: String, requestId: UUID, text: String,
-                         attachmentIds: [String], language: String, context: ChatPhoneContext? = nil) async throws -> ChatMessagePair {
+                         attachmentIds: [String], language: String, context: ChatPhoneContext? = nil,
+                         mode: String? = nil) async throws -> ChatMessagePair {
         var body: [String: Any] = ["clientRequestId": requestId.uuidString.lowercased(), "text": text,
                                    "attachmentIds": attachmentIds, "language": language]
         if let context {
             body["context"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context))
         }
+        if let mode { body["mode"] = mode }
         let data = try await request("/api/chat-v1/conversations/\(conversationId)/messages",
                                      method: "POST", json: body, authenticated: true)
         return try JSONDecoder().decode(ChatMessagePair.self, from: data)
+    }
+    func cancelChatVoice(conversationId: String, messageId: String) async throws {
+        _ = try await request("/api/chat-v1/conversations/\(conversationId)/messages/\(messageId)/cancel-voice",
+                              method: "POST", json: [:], authenticated: true)
     }
     func chatResultDetails(path: String) async throws -> String {
         // Only same-origin authenticated endpoints built by this server.

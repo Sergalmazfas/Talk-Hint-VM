@@ -54,6 +54,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private let dictationBar = ChatDictationBar()
     private let inputControls = UIStackView()
     private let orbButton = UIButton(type: .system)
+    private static var devVoiceEnabled: Bool {
+        #if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV
+        return AppConfig.baseURL.host?.hasSuffix(".replit.dev") == true
+        #else
+        return false
+        #endif
+    }
     private var composerHeight: NSLayoutConstraint?
     private weak var referenceComposerCard: UIView?
     private weak var referenceMoreButton: UIButton?
@@ -366,12 +373,19 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         orbButton.accessibilityLabel = NSLocalizedString("chat.orb.unavailable", comment: "")
         orbButton.accessibilityHint = NSLocalizedString("chat.orb.hint", comment: "")
         orbButton.setImage(UIImage(systemName: "waveform"), for: .disabled)
+        if Self.devVoiceEnabled {
+            orbButton.isEnabled = false // server must confirm the sole owner's access first
+            orbButton.accessibilityIdentifier = "chat-voice-open"
+            orbButton.accessibilityLabel = NSLocalizedString("chat.voiceMode.open", comment: "")
+            orbButton.accessibilityHint = NSLocalizedString("chat.voiceMode.noOutput", comment: "")
+            orbButton.addTarget(self, action: #selector(openVoiceMode), for: .touchUpInside)
+        }
         if appearance.isApprovedReference {
             orbButton.setImage(UIImage(systemName: "waveform", withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold))?.withTintColor(.white, renderingMode: .alwaysOriginal), for: .disabled)
             orbButton.layer.borderWidth = 0
         }
         let orbCaption = UILabel()
-        orbCaption.text = NSLocalizedString("chat.orb.unavailable", comment: "")
+        orbCaption.text = NSLocalizedString(Self.devVoiceEnabled ? "chat.voiceMode.open" : "chat.orb.unavailable", comment: "")
         orbCaption.font = .preferredFont(forTextStyle: .caption2)
         orbCaption.adjustsFontForContentSizeCategory = true
         orbCaption.textColor = .secondaryLabel
@@ -400,7 +414,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composerHeight?.isActive = true
         view.addSubview(inputCard); inputCard.translatesAutoresizingMaskIntoConstraints = false
         // In the approved reference, the black Orb is OUTSIDE the input capsule.
-        // It remains disabled; there is no voice-mode engine or transition.
+        // Voice entry is Dev-only. Release keeps the unavailable button.
         let inputTrailing: NSLayoutConstraint
         if appearance.isApprovedReference {
             view.addSubview(orb)
@@ -468,6 +482,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             async let caps = api.chatCapabilities()
             async let recent = api.chatConversations()
             capabilities = try await caps
+            orbButton.isEnabled = Self.devVoiceEnabled && capabilities?.voiceMode?.available == true
             guard isCurrentOwner else { return }
             fileButton.isEnabled = (capabilities?.attachments.available ?? false) && attachments.count < 3
             voiceButton.isEnabled = capabilities?.voice.available ?? true
@@ -528,7 +543,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         persistDraft()
         createNewChat(preservingDraft: false)
     }
-    private func createNewChat(preservingDraft: Bool) {
+    private func createNewChat(preservingDraft: Bool, onCreated: (() -> Void)? = nil) {
         let draft = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text
         let draftAttachments = attachments
         let originDraftKey = currentConversation?.id ?? "_new"
@@ -558,6 +573,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                         outbox.composerDrafts = saved
                     }
                 }
+                if isCurrentOwner { onCreated?() }
             } catch {
                 if isCurrentOwner {
                     showError(error)
@@ -570,6 +586,63 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     @objc private func retryPendingConversation() {
         createNewChat(preservingDraft: pendingCreationPreservesDraft)
+    }
+    @objc private func openVoiceMode() {
+        guard Self.devVoiceEnabled, capabilities?.voiceMode?.available == true,
+              isCurrentOwner, presentedViewController == nil,
+              !dictation.isBusy, !isSending, !isUploadingAttachment,
+              !CallManager.shared.hasPhoneAudioSession else { return }
+        guard let conversation = currentConversation else {
+            createNewChat(preservingDraft: true, onCreated: { [weak self] in self?.openVoiceMode() })
+            return
+        }
+        persistDraft()
+        view.endEditing(true)
+        let id = conversation.id
+        let controller = ChatVoiceViewController(api: api, conversation: conversation,
+            validOwner: { [weak self] in
+                guard let self else { return false }
+                return self.isCurrentOwner && self.currentConversation?.id == id
+            }, submit: { [weak self] text, requestID in
+                guard let self, self.isCurrentOwner, self.currentConversation?.id == id else {
+                    throw APIError.decoding
+                }
+                return try await self.sendVoiceTurn(text: text, requestID: requestID, conversationID: id)
+            }, attachments: { [weak self] in self?.pickFile() })
+        present(controller, animated: true)
+    }
+
+    private func sendVoiceTurn(text: String, requestID: UUID, conversationID: String) async throws -> ChatMessagePair {
+        guard Self.devVoiceEnabled, isCurrentOwner, currentConversation?.id == conversationID,
+              let outbox else { throw APIError.decoding }
+        let pending = outbox.pendingSends.first(where: { $0.id == requestID })
+            ?? outbox.enqueue(conversationId: conversationID, text: text,
+                              attachmentIds: attachments.map(\.id),
+                              language: String((Bundle.main.preferredLocalizations.first ?? "en").prefix(2)),
+                              requestId: requestID, mode: "voice")
+        // Capture context once, before first send. Ambiguous retries reuse the same payload.
+        if pending.state == .pending {
+            let context = ChatPhoneContextCollector.isRelevant(text) ? await phoneContext.collect() : nil
+            guard isCurrentOwner, currentConversation?.id == conversationID else { throw APIError.decoding }
+            outbox.setContext(context, for: pending.id)
+        }
+        outbox.setState(.sending, for: pending.id)
+        let saved = outbox.pendingSends.first(where: { $0.id == pending.id }) ?? pending
+        do {
+            let pair = try await api.sendChatMessage(conversationId: conversationID, requestId: saved.id,
+                text: saved.text, attachmentIds: saved.attachmentIds, language: saved.language,
+                context: saved.context, mode: saved.mode)
+            guard isCurrentOwner, currentConversation?.id == conversationID else { throw APIError.decoding }
+            outbox.remove(saved.id)
+            messages = ChatOutbox.merge(messages, [pair.message] + (pair.reply.map { [$0] } ?? []))
+            // Only attachments actually sent by this turn are removed from the draft.
+            attachments.removeAll { saved.attachmentIds.contains($0.id) }
+            persistDraft()
+            return pair
+        } catch {
+            outbox.setState(.uncertain, for: pending.id)
+            throw error
+        }
     }
     private func open(_ conversation: ChatConversation) async {
         guard isCurrentOwner else { return }
@@ -1181,7 +1254,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 guard isCurrentOwner else { isSending = false; return }
                 outbox.setContext(context, for: pending.id)
                 let pair = try await api.sendChatMessage(conversationId: conversation.id, requestId: pending.id,
-                                                         text: text, attachmentIds: pending.attachmentIds, language: pending.language, context: context)
+                                                         text: text, attachmentIds: pending.attachmentIds, language: pending.language, context: context, mode: pending.mode)
                 guard isCurrentOwner else { isSending = false; return }
                 if currentConversation?.id == conversation.id {
                     messages = ChatOutbox.merge(messages, [pair.message] + (pair.reply.map { [$0] } ?? []))
@@ -1241,7 +1314,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             defer { isSending = false; updateComposerControls() }
             do {
                 let result = try await api.sendChatMessage(conversationId: item.conversationId, requestId: item.id,
-                    text: item.text, attachmentIds: item.attachmentIds, language: item.language, context: item.context)
+                    text: item.text, attachmentIds: item.attachmentIds, language: item.language, context: item.context, mode: item.mode)
                 guard isCurrentOwner else { return }
                 outbox.remove(item.id)
                 if currentConversation?.id == item.conversationId {

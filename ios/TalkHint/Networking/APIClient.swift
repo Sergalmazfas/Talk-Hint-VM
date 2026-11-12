@@ -1056,6 +1056,54 @@ final class APIClient {
         return url
     }
 
+    /// PCM arrives incrementally; no buffering of a whole sentence/audio file here.
+    /// The ElevenLabs key is NEVER sent to or stored on the phone.
+    func streamChatSpeech(conversationId: String, messageId: String, requestId: UUID,
+                          offset: Int, length: Int,
+                          chunk: @escaping (Data) async throws -> Void) async throws {
+        var req = URLRequest(url: try Self.requestURL("/api/chat-v1/conversations/\(conversationId)/messages/\(messageId)/speech"))
+        req.httpMethod = "POST"; req.timeoutInterval = 35
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        guard let token = tokenProvider() else { throw APIError.notAuthenticated }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "requestId": requestId.uuidString, "offset": offset, "length": length,
+        ])
+        func check(_ response: URLResponse, data: Data = Data()) throws {
+            guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
+            guard (200..<300).contains(http.statusCode) else {
+                let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                throw APIError.http(http.statusCode, value?["error"] as? String ?? "CHAT_SPEECH_UNAVAILABLE")
+            }
+            guard http.value(forHTTPHeaderField: "X-Voice-Format") == "pcm_s16le_24000_mono" else { throw APIError.decoding }
+        }
+        if let transport {
+            let (data, response) = try await transport(req)
+            try check(response, data: data); try Task.checkCancellation()
+            try await chunk(data)
+            return
+        }
+        let (bytes, response) = try await session.bytes(for: req)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            var errorData = Data()
+            for try await byte in bytes {
+                errorData.append(byte)
+                if errorData.count >= 2048 { break }
+            }
+            try check(response, data: errorData); return
+        }
+        try check(response)
+        var block = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            block.append(byte)
+            if block.count >= 1024 { try await chunk(block); block.removeAll(keepingCapacity: true) }
+        }
+        try Task.checkCancellation()
+        if !block.isEmpty { try await chunk(block) }
+    }
+
     func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool,
                          queryItems: [URLQueryItem] = []) async throws -> Data {
         var req = URLRequest(url: try Self.requestURL(path, queryItems: queryItems))

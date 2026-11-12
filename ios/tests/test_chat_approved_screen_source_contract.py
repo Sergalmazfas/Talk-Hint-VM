@@ -52,7 +52,9 @@ class ApprovedChatSourceContracts(unittest.TestCase):
     def test_orb_is_outside_capsule_and_never_launches(self):
         self.assertIn("inputCard.trailingAnchor.constraint(equalTo: orb.leadingAnchor, constant: -10)", self.chat)
         self.assertIn("orbButton.isEnabled = false", self.chat)
-        self.assertNotIn("orbButton.addTarget", self.chat)
+        self.assertIn("if Self.devVoiceEnabled {", self.chat)
+        self.assertIn("#if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV", self.chat)
+        self.assertIn('AppConfig.baseURL.host?.hasSuffix(".replit.dev")', self.chat)
         self.assertNotIn("orbButton.addAction", self.chat)
         self.assertIn("view.keyboardLayoutGuide.topAnchor", self.chat)
 

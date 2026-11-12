@@ -6,9 +6,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 
 class CopilotFreezeTests(unittest.TestCase):
-    def test_four_tabs_and_no_copilot_entry(self):
+    def test_five_tabs_include_chat_and_no_copilot_entry(self):
         source = (ROOT / "ios/TalkHint/App/SceneDelegate.swift").read_text()
-        self.assertIn("let roots: [UIViewController] = [calls, translator, secretary, history]", source)
+        self.assertIn("let roots: [UIViewController] = [calls, translator, chat, secretary, history]", source)
         self.assertIn("navigation.tabBarItem = root.tabBarItem", source)
         self.assertNotIn("HomeViewController(mode: .copilot)", source)
 

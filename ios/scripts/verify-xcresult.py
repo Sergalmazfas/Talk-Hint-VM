@@ -5,6 +5,43 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatVoiceOrbTests": (
+        "testLevelRejectsInvalidSamples",
+        "testAudioScaleUsesOnlyListeningAndSpeaking",
+        "testRenderAllStatesWithBothThemesAndFallback",
+        "testReduceMotionRendersWithoutAudio",
+    ),
+    "ChatVoiceSessionTests": (
+        "testYesAloneCannotAuthorizeAnything",
+        "testOnlyCompleteAudibleReadbackCanArmExactPlanOnce",
+        "testInterruptedAudioCannotArmApproval",
+        "testQueuedTextIsNotAnAudibleReadback",
+        "testCorrectionStaleCardAndNoNeverApprove",
+        "testCloseInvalidatesPermissionAndReadbackCallbacks",
+    ),
+    "ChatVoiceSpeechStateTests": (
+        "testPauseProposalDoesNotSilentlyChangeTheActiveTimer",
+        "testFirstSentenceIsAvailableBeforeTheWholeReply",
+        "testDecimalPriceIsNotCutAtTheDot",
+        "testUTF16OffsetsAndNoRepeatedSentence",
+        "testOneTurnTimingIncludesVadAndDeviceOutputEstimate",
+        "testNoTimingCanBeClaimedWithoutAudioRender",
+    ),
+    "SceneLaunchTests": (
+        "testLoggedInRootLoadsCallsScreen",
+        "testLoggedInFlagWithoutStoredSessionShowsLogin",
+    ),
+    "ChatAPITests": (
+        "testSendUsesAuthenticatedContractAndStableClientRequestId",
+        "testAttachmentInfoEnvelopeMatchesServerShape",
+        "testOwnerMismatchStopsBeforeTransport",
+    ),
+    "ChatOutboxTests": (
+        "testSessionScopeNeverAuthorizesAnotherOrMissingOwner",
+        "testOutboxIsOwnerAndOriginScopedAndKeepsIdempotencyKey",
+        "testMergeUpdatesExistingAndOrdersBySequence",
+        "testMergeReconcilesCanonicalLowercaseClientRequestId",
+    ),
     "ChatApprovedScreenTests": (
         "testApprovedTypographyIsOptInAndReadable",
         "testFullscreenHasBackButNoDrawerOrTabs",
@@ -22,6 +59,10 @@ REQUIRED_TESTS = {
         "testExternalTabSelectionDoesNotDismissCallOverlay",
         "testCompactDrawerScrollsAndFutureDestinationsAreDisabled",
     ),
+    "CopilotFreezeNavigationTests": (
+        "testFiveVisibleTabsPreserveStableIdentifiersAndNoCopilot",
+        "testSecretaryAndHistoryCanBeSelectedByIdentityAfterRemoval",
+    ),
     "ChatDictationTests": (
         "testPermissionAndRecordingAreSingleFlight",
         "testDeniedOrCancelledPermissionCannotStartLate",
@@ -36,17 +77,6 @@ REQUIRED_TESTS = {
         "testDraftAndAttachmentRestoreIsOwnerAndOriginScoped",
         "testBarCancelStopAndRetryAreSeparateWithoutAudio",
         "testOrbStaysDisabledAndComposerHasSeparateMicrophone",
-    ),
-    "ChatAPITests": (
-        "testSendUsesAuthenticatedContractAndStableClientRequestId",
-        "testAttachmentInfoEnvelopeMatchesServerShape",
-        "testOwnerMismatchStopsBeforeTransport",
-    ),
-    "ChatOutboxTests": (
-        "testSessionScopeNeverAuthorizesAnotherOrMissingOwner",
-        "testOutboxIsOwnerAndOriginScopedAndKeepsIdempotencyKey",
-        "testMergeUpdatesExistingAndOrdersBySequence",
-        "testMergeReconcilesCanonicalLowercaseClientRequestId",
     ),
     "HintDtmfTests": (
         "testAllTwelveKeysDispatchExactlyOnce",
