@@ -2,6 +2,114 @@
 
 ## Что разрешено
 
+### 0. Текущее задание: подготовить проверку на настоящем iPhone
+
+Владелец выбрал **«Подготовить проверку на iPhone»**. Разрешена подготовка,
+**не установка и не Run**. Выполнять только этот раздел; нижние этапы —
+история предыдущей передачи и не команда повторять уже успешные проверки.
+
+На коде `8d42c9f8d28bfc62618e7057026f5b3fbc79ec2f` Claude подтвердил:
+294/294 XCTest PASS, verify-xcresult PASS, AppDev arm64 Simulator BUILD SUCCEEDED,
+оба целевых concurrency warning отсутствуют в свежих логах.
+Текущее обновление меняет только этот документ; native tree должен остаться
+`ca7eae2c7f565efb4085ba07f7e1fd002c4448c7`. **Gate не повторять.**
+
+#### 0а. Получить задание и проверить неизменность кода
+
+В существующем чистом
+`~/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency`:
+
+```bash
+git status --short
+git rev-parse HEAD
+git fetch origin refs/heads/xcode-chat-voice-sarah-2026-11-11
+TARGET=$(git rev-parse FETCH_HEAD)
+git diff --name-only 8d42c9f8d28bfc62618e7057026f5b3fbc79ec2f "$TARGET"
+git rev-parse "${TARGET}:ios"
+git show "${TARGET}:docs/claude-mac-chat-voice-sarah-handoff.md"
+```
+
+Checkout остаётся на проверенном `8d42c9f8`, не переключать и не переписывать.
+Diff должен содержать только этот handoff, дерево ios совпасть.
+Иначе остановиться. Принятые worktree, предыдущие binary/логи/xcresult сохранить.
+Проверить свободное место (последний отчёт — 12 GiB), Xcode/iphoneos SDK,
+схему TalkHintAppDev и доступность существующего Package.resolved/SPM-кэша.
+Ничего не чистить и не обновлять.
+
+#### 0б. Подпись и устройство — только диагностика
+
+- Прочитать текущие effective build settings AppDev для iphoneos:
+  bundle ID, signing style, Team, entitlement path, deployment target.
+  Сравнить с неизменённым project.yml; не менять значения.
+- По доступным Xcode metadata проверить наличие подходящих **существующих**
+  signing identity/profile. Не создавать/скачивать профили, не перевыпускать
+  сертификаты, не входить заново в Apple ID, не экспортировать ключи.
+  Не показывать их содержимое; в отчёте достаточно «есть/нет/не удалось
+  установить» и конкретной причины. Unsigned build не доказывает готовность подписи.
+- Если iPhone уже подключён/доступен, установить модель, версию iOS,
+  совместимость с Xcode и текущее состояние подготовки устройства.
+  Можно прочитать `xcrun devicectl list devices`; в отчёте скрыть личное
+  имя/серийный номер/UDID. Не выполнять pair/install/launch и не менять
+  Developer Mode или доверие устройства.
+- Если iPhone не подключён, так и написать; это не мешает unsigned build.
+  Не менять существующее приложение или его данные. Bundle AppDev
+  `app.talkhint.chatdev` отличается от рабочего `app.talkhint`, но будущая
+  установка AppDev обновит уже установленную копию с тем же Dev bundle ID.
+  Не удалять старую Dev-копию, не сбрасывать Keychain/логин/историю.
+
+#### 0в. Сборка под iPhone без подписи, установки и Run
+
+Это **iphoneos**, не ранее собранный iphonesimulator. Использовать существующие
+зависимости без смены их разрешённых версий. Если pin/cache отсутствует —
+остановиться и сообщить; не брать другую TwilioVoice или инструменты.
+
+```bash
+set -o pipefail
+OUT=$(mktemp -d "$PWD/generated-artifacts/sarah-iphone-preflight.XXXXXX")
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -project ios/TalkHint.xcodeproj -scheme TalkHintAppDev \
+  -configuration AppDev -sdk iphoneos \
+  -destination 'generic/platform=iOS' \
+  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+  -derivedDataPath "$OUT/DerivedData" \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build \
+  2>&1 | tee "$OUT/build.log"
+```
+
+Не использовать `-allowProvisioningUpdates`, Archive, export/IPA, install,
+Run или upload. Не менять Apple Team, entitlements, APNs, signing style,
+bundle ID/URL/Dev origin, deployment target (iOS 15), project.yml или код.
+При ошибке — точный лог и остановка, без самостоятельного «лечения».
+
+У собранного **AppDev-iphoneos** проверить Info.plist:
+`app.talkhint.chatdev`, только `talkhint-chatdev`, тот же HTTPS `.replit.dev`,
+minimum iOS 15. Проверить arm64 и именно device platform IOS через
+Mach-O build metadata (`xcrun vtool -show-build`), не объявлять arm64 сам по
+себе доказательством device build. Unsigned .app пока **нельзя устанавливать**.
+Сверить отсутствие двух исправленных warning в свежем device build;
+прочие warning перечислить без подавления. 39 Unbalanced calls предыдущих
+тестов остаются открытым вопросом, в этом задании их не чинить.
+
+#### 0г. Отчёт владельцу и остановка
+
+Вернуть code HEAD/native tree и SHA прочитанного задания, Xcode/SDK/SPM,
+фактическую команду/exit code/лог, данные проверенного device Info.plist,
+Mach-O platform и результат read-only проверки существующей подписи.
+Указать подключён ли iPhone и что мешает следующему шагу, без идентификаторов.
+Сказать явно: «подготовка завершена» либо конкретный блокер, а не
+«установлено/голос работает». Тестов/звонков/API сверх этого не запускать.
+
+После отчёта **остановиться и ждать отдельного согласия на подпись,
+установку и запуск**. Подготовить короткий план: выбрать уже существующую
+схему TalkHintAppDev/AppDev и существующую подпись, установить только Dev
+bundle без удаления данных, проверить интерфейс и вход с участием владельца,
+сначала без микрофона/отправки сообщений/платных STT/AI/TTS.
+Секреты и пароль владельца не запрашивать; существующий Google-вход сохранить.
+Не открывать голосовой экран автоматически: пока не подтверждено обратное,
+считать его потенциальным запуском микрофона.
+Голос/геолокация/AEC/задержки и платные пробы — отдельное разрешение.
+Production, Катю и Retell не трогать, Publish запрещён.
+
 ### Текущий шаг: два согласованных предупреждения многопоточности
 
 Владелец ответил **«Да, исправить в Dev»** только для двух новых предупреждений
