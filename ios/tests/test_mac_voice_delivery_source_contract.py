@@ -18,6 +18,24 @@ def required_tests():
 
 
 class MacVoiceDeliverySourceContract(unittest.TestCase):
+    def test_location_delegate_hops_to_main_actor_with_value_only_fix(self):
+        source = (ROOT / "ios/TalkHint/Chat/ChatPhoneContext.swift").read_text()
+        self.assertEqual(source.count("nonisolated func locationManager"), 3)
+        self.assertIn("struct ChatPhoneLocationFix: Sendable", source)
+        self.assertIn("locations.last.map(ChatPhoneLocationFix.init)", source)
+        self.assertIn("Task { @MainActor [weak self] in self?.receivedLocation(fix) }", source)
+        for suppression in ("@preconcurrency", "@unchecked Sendable", "assumeIsolated", "nonisolated(unsafe)"):
+            self.assertNotIn(suppression, source)
+
+    def test_recording_callback_transfers_immutable_owner_and_scalar_values(self):
+        source = (ROOT / "ios/TalkHint/Chat/ChatVoiceCapture.swift").read_text()
+        callback = source.split("let deliverSample:", 1)[1].split("audio.inputNode.installTap", 1)[0]
+        self.assertIn("@Sendable (UUID, Float, Double, Bool) -> Void", callback)
+        self.assertLess(callback.index("guard let owner = self"), callback.index("Task { @MainActor"))
+        self.assertIn("guard id == owner.recordingID", callback)
+        self.assertNotIn("Task { @MainActor [weak self]", callback)
+        self.assertIn("result: deliverSample", source)
+
     def test_orb_render_fixture_checks_pixels_with_a_transparent_control(self):
         fixture = (ROOT / "ios/TalkHintTests/ChatVoiceOrbTests.swift").read_text()
         self.assertNotIn("host.view.subviews.isEmpty", fixture)

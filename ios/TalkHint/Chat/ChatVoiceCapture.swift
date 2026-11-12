@@ -51,16 +51,21 @@ final class ChatVoiceCapture {
             audio.attach(player)
             audio.connect(player, to: audio.mainMixerNode, format: outputFormat)
             let recorder = sink
-            audio.inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, when in
+            // The recording queue sends values only. Bind the weak reference once
+            // before creating the task, rather than sharing mutable weak storage
+            // between concurrent closures. No audio buffers cross to the main actor.
+            let deliverSample: @Sendable (UUID, Float, Double, Bool) -> Void = { [weak self] id, power, time, failed in
+                guard let owner = self else { return }
+                Task { @MainActor in
+                    guard id == owner.recordingID else { return }
+                    if failed { owner.stop(); owner.onError?() }
+                    else { owner.sample(power: power, at: time) }
+                }
+            }
+            audio.inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
                 let at = when.isHostTimeValid ? AVAudioTime.seconds(forHostTime: when.hostTime)
                     : ProcessInfo.processInfo.systemUptime
-                recorder.append(buffer, at: at) { id, power, time, failed in
-                    Task { @MainActor [weak self] in
-                        guard let self, id == self.recordingID else { return }
-                        if failed { self.stop(); self.onError?() }
-                        else { self.sample(power: power, at: time) }
-                    }
-                }
+                recorder.append(buffer, at: at, result: deliverSample)
             }
             engine = audio
             audio.prepare(); try audio.start()

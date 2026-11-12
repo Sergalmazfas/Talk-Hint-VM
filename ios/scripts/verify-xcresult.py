@@ -36,6 +36,12 @@ REQUIRED_TESTS = {
         "testAttachmentInfoEnvelopeMatchesServerShape",
         "testOwnerMismatchStopsBeforeTransport",
     ),
+    "ChatPhoneContextTests": (
+        "testLocationCallbackSnapshotPreservesFixWithoutSharingDelegateObjects",
+        "testActionContextDoesNotRequireAProfession",
+        "testOutboxPersistsExactPhoneSnapshotForIdempotentRetry",
+        "testLegacyOutboxWithoutContextStillDecodes",
+    ),
     "ChatOutboxTests": (
         "testSessionScopeNeverAuthorizesAnotherOrMissingOwner",
         "testOutboxIsOwnerAndOriginScopedAndKeepsIdempotencyKey",

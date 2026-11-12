@@ -1,8 +1,23 @@
 import XCTest
+import CoreLocation
 @testable import TalkHint
 
 @MainActor
 final class ChatPhoneContextTests: XCTestCase {
+    func testLocationCallbackSnapshotPreservesFixWithoutSharingDelegateObjects() {
+        let original = CLLocation(coordinate: .init(latitude: 37.2, longitude: -93.3),
+            altitude: 205, horizontalAccuracy: 900, verticalAccuracy: 15,
+            course: 90, speed: 12, timestamp: Date(timeIntervalSince1970: 1_794_247_200))
+        let restored = ChatPhoneLocationFix(original).location
+        XCTAssertEqual(restored.coordinate.latitude, original.coordinate.latitude)
+        XCTAssertEqual(restored.coordinate.longitude, original.coordinate.longitude)
+        XCTAssertEqual(restored.altitude, original.altitude)
+        XCTAssertEqual(restored.horizontalAccuracy, original.horizontalAccuracy)
+        XCTAssertEqual(restored.verticalAccuracy, original.verticalAccuracy)
+        XCTAssertEqual(restored.course, original.course)
+        XCTAssertEqual(restored.speed, original.speed)
+        XCTAssertEqual(restored.timestamp, original.timestamp)
+    }
     func testActionContextDoesNotRequireAProfession() {
         XCTAssertTrue(ChatPhoneContextCollector.isRelevant("Fontaine, I-44 E, only near the highway"))
         XCTAssertTrue(ChatPhoneContextCollector.isRelevant("Buy EarthLite Harmony DX, Missouri to Michigan"))

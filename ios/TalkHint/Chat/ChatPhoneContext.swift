@@ -14,6 +14,37 @@ struct ChatPhoneContext: Codable, Equatable {
     let location: Location?
 }
 
+/// Value-only boundary between a CoreLocation delegate callback and the main actor.
+/// Do not transfer a CLLocationManager, CLLocation or Error object in that task.
+struct ChatPhoneLocationFix: Sendable {
+    let latitude: Double
+    let longitude: Double
+    let altitude: Double
+    let horizontalAccuracy: Double
+    let verticalAccuracy: Double
+    let course: Double
+    let speed: Double
+    let timestamp: TimeInterval
+
+    init(_ location: CLLocation) {
+        latitude = location.coordinate.latitude
+        longitude = location.coordinate.longitude
+        altitude = location.altitude
+        horizontalAccuracy = location.horizontalAccuracy
+        verticalAccuracy = location.verticalAccuracy
+        course = location.course
+        speed = location.speed
+        timestamp = location.timestamp.timeIntervalSince1970
+    }
+
+    var location: CLLocation {
+        CLLocation(coordinate: .init(latitude: latitude, longitude: longitude),
+                   altitude: altitude, horizontalAccuracy: horizontalAccuracy,
+                   verticalAccuracy: verticalAccuracy, course: course, speed: speed,
+                   timestamp: Date(timeIntervalSince1970: timestamp))
+    }
+}
+
 /// Foreground only. No tracking, no per-send permission popup after denial.
 @MainActor
 final class ChatPhoneContextCollector: NSObject, CLLocationManagerDelegate {
@@ -75,7 +106,10 @@ final class ChatPhoneContextCollector: NSObject, CLLocationManagerDelegate {
         geocoder.cancelGeocode()
         continuation.resume(returning: context(location, label: label))
     }
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        Task { @MainActor [weak self] in self?.authorizationChanged() }
+    }
+    private func authorizationChanged() {
         guard pending != nil else { return }
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse: manager.requestLocation()
@@ -83,8 +117,12 @@ final class ChatPhoneContextCollector: NSObject, CLLocationManagerDelegate {
         default: break
         }
     }
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last, pending != nil else { finish(nil); return }
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let fix = locations.last.map(ChatPhoneLocationFix.init)
+        Task { @MainActor [weak self] in self?.receivedLocation(fix) }
+    }
+    private func receivedLocation(_ fix: ChatPhoneLocationFix?) {
+        guard let location = fix?.location, pending != nil else { finish(nil); return }
         capturedLocation = location
         Task {
             let place = (try? await geocoder.reverseGeocodeLocation(location))?.first
@@ -92,5 +130,7 @@ final class ChatPhoneContextCollector: NSObject, CLLocationManagerDelegate {
             finish(location, label: label.isEmpty ? nil : label)
         }
     }
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) { finish(nil) }
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor [weak self] in self?.finish(nil) }
+    }
 }
