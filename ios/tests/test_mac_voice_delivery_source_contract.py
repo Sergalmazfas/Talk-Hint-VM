@@ -18,6 +18,16 @@ def required_tests():
 
 
 class MacVoiceDeliverySourceContract(unittest.TestCase):
+    def test_orb_render_fixture_checks_pixels_with_a_transparent_control(self):
+        fixture = (ROOT / "ios/TalkHintTests/ChatVoiceOrbTests.swift").read_text()
+        self.assertNotIn("host.view.subviews.isEmpty", fixture)
+        self.assertIn("renderedPixelCount(Color.clear", fixture)
+        self.assertIn("format.opaque = false", fixture)
+        self.assertIn("afterScreenUpdates: true", fixture)
+        self.assertIn("CGImageAlphaInfo.premultipliedLast", fixture)
+        self.assertIn("window.rootViewController = nil", fixture)
+        self.assertIn("previousKeyWindow?.makeKey()", fixture)
+
     def test_reduce_motion_fixture_does_not_write_read_only_environment(self):
         view = (ROOT / "ios/TalkHint/Chat/ChatVoiceOrbView.swift").read_text()
         fixture = (ROOT / "ios/TalkHintTests/ChatVoiceOrbTests.swift").read_text()
