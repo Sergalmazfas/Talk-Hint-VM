@@ -18,6 +18,15 @@ def required_tests():
 
 
 class MacVoiceDeliverySourceContract(unittest.TestCase):
+    def test_reduce_motion_fixture_does_not_write_read_only_environment(self):
+        view = (ROOT / "ios/TalkHint/Chat/ChatVoiceOrbView.swift").read_text()
+        fixture = (ROOT / "ios/TalkHintTests/ChatVoiceOrbTests.swift").read_text()
+        self.assertIn("var reduceMotionOverride: Bool? = nil", view)
+        self.assertIn("reduceMotionOverride ?? reduceMotion", view)
+        self.assertIn("reduceMotionOverride: true", fixture)
+        self.assertNotIn(r".environment(\.accessibilityReduceMotion", fixture)
+        self.assertEqual(view.count("effectiveReduceMotion"), 5)
+
     def test_mac_scene_fixture_uses_real_session_and_cleans_up(self):
         source = (ROOT / "ios/TalkHintTests/SceneLaunchTests.swift").read_text()
         self.assertIn('save(token: "native-fixture"', source)

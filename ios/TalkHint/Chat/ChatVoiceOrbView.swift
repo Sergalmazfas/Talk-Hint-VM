@@ -11,9 +11,13 @@ struct ChatVoiceOrbView: View {
     var level: Double = 0
     // Allows the native tests and previews to exercise iOS 15's renderer on a newer OS.
     var forceFallback = false
+    // Render-fixture override: nil preserves the system accessibility setting in the app.
+    var reduceMotionOverride: Bool? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+
+    var effectiveReduceMotion: Bool { reduceMotionOverride ?? reduceMotion }
 
     static func boundedLevel(_ value: Double) -> Double {
         value.isFinite ? min(1, max(0, value)) : 0
@@ -31,15 +35,15 @@ struct ChatVoiceOrbView: View {
     var body: some View {
         artwork
             .aspectRatio(1, contentMode: .fit)
-            .scaleEffect(reduceMotion ? 0.92 : Self.scale(phase: phase, level: level))
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: Self.boundedLevel(level))
+            .scaleEffect(effectiveReduceMotion ? 0.92 : Self.scale(phase: phase, level: level))
+            .animation(effectiveReduceMotion ? nil : .easeOut(duration: 0.08), value: Self.boundedLevel(level))
             // The containing screen provides localized state text, not a second VoiceOver element.
             .accessibilityHidden(true)
             .allowsHitTesting(false)
     }
 
     @ViewBuilder private var artwork: some View {
-        if #available(iOS 17, *), !forceFallback, !reduceMotion,
+        if #available(iOS 17, *), !forceFallback, !effectiveReduceMotion,
            scenePhase == .active, phase != .idle, phase != .unavailable {
             OrbView(configuration: OrbConfiguration(
                 backgroundColors: colors,
@@ -53,7 +57,7 @@ struct ChatVoiceOrbView: View {
         } else {
             ChatVoiceFallbackCircle(
                 colors: colors,
-                pulsing: !reduceMotion && scenePhase == .active
+                pulsing: !effectiveReduceMotion && scenePhase == .active
                     && phase != .idle && phase != .unavailable,
                 thinking: phase == .thinking
             )

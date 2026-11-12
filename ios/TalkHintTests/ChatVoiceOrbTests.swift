@@ -41,9 +41,12 @@ final class ChatVoiceOrbTests: XCTestCase {
     }
 
     func testReduceMotionRendersWithoutAudio() {
-        let root = ChatVoiceOrbView(phase: .speaking, level: 0.8)
+        XCTAssertNil(ChatVoiceOrbView(phase: .speaking).reduceMotionOverride)
+        let fixture = ChatVoiceOrbView(phase: .speaking, level: 0.8, reduceMotionOverride: true)
+        XCTAssertTrue(fixture.effectiveReduceMotion)
+        XCTAssertFalse(ChatVoiceOrbView(phase: .speaking, reduceMotionOverride: false).effectiveReduceMotion)
+        let root = fixture
             .environment(\.scenePhase, .active)
-            .environment(\.accessibilityReduceMotion, true)
         let host = UIHostingController(rootView: root)
         host.loadViewIfNeeded()
         host.view.frame = CGRect(x: 0, y: 0, width: 320, height: 320)
