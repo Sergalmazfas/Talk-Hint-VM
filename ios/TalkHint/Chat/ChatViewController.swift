@@ -54,12 +54,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private let dictationBar = ChatDictationBar()
     private let inputControls = UIStackView()
     private let orbButton = UIButton(type: .system)
-    private static var devVoiceEnabled: Bool {
-        #if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV
-        return AppConfig.baseURL.host?.hasSuffix(".replit.dev") == true
-        #else
-        return false
-        #endif
+    private static var voiceClientEnabled: Bool {
+        ChatVoiceClientPolicy.allows(origin: AppConfig.baseURL,
+                                     build: ChatVoiceClientPolicy.currentBuild)
     }
     private var composerHeight: NSLayoutConstraint?
     private weak var referenceComposerCard: UIView?
@@ -373,7 +370,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         orbButton.accessibilityLabel = NSLocalizedString("chat.orb.unavailable", comment: "")
         orbButton.accessibilityHint = NSLocalizedString("chat.orb.hint", comment: "")
         orbButton.setImage(UIImage(systemName: "waveform"), for: .disabled)
-        if Self.devVoiceEnabled {
+        if Self.voiceClientEnabled {
             orbButton.isEnabled = false // server must confirm the sole owner's access first
             orbButton.accessibilityIdentifier = "chat-voice-open"
             orbButton.accessibilityLabel = NSLocalizedString("chat.voiceMode.open", comment: "")
@@ -385,7 +382,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             orbButton.layer.borderWidth = 0
         }
         let orbCaption = UILabel()
-        orbCaption.text = NSLocalizedString(Self.devVoiceEnabled ? "chat.voiceMode.open" : "chat.orb.unavailable", comment: "")
+        orbCaption.text = NSLocalizedString(Self.voiceClientEnabled ? "chat.voiceMode.open" : "chat.orb.unavailable", comment: "")
         orbCaption.font = .preferredFont(forTextStyle: .caption2)
         orbCaption.adjustsFontForContentSizeCategory = true
         orbCaption.textColor = .secondaryLabel
@@ -482,7 +479,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             async let caps = api.chatCapabilities()
             async let recent = api.chatConversations()
             capabilities = try await caps
-            orbButton.isEnabled = Self.devVoiceEnabled && capabilities?.voiceMode?.available == true
+            orbButton.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true
             guard isCurrentOwner else { return }
             fileButton.isEnabled = (capabilities?.attachments.available ?? false) && attachments.count < 3
             voiceButton.isEnabled = capabilities?.voice.available ?? true
@@ -588,7 +585,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         createNewChat(preservingDraft: pendingCreationPreservesDraft)
     }
     @objc private func openVoiceMode() {
-        guard Self.devVoiceEnabled, capabilities?.voiceMode?.available == true,
+        guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true,
               isCurrentOwner, presentedViewController == nil,
               !dictation.isBusy, !isSending, !isUploadingAttachment,
               !CallManager.shared.hasPhoneAudioSession else { return }
@@ -613,7 +610,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
 
     private func sendVoiceTurn(text: String, requestID: UUID, conversationID: String) async throws -> ChatMessagePair {
-        guard Self.devVoiceEnabled, isCurrentOwner, currentConversation?.id == conversationID,
+        guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true,
+              isCurrentOwner, currentConversation?.id == conversationID,
               let outbox else { throw APIError.decoding }
         let pending = outbox.pendingSends.first(where: { $0.id == requestID })
             ?? outbox.enqueue(conversationId: conversationID, text: text,

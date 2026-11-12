@@ -47,11 +47,11 @@ class DictationSourceContracts(unittest.TestCase):
         self.assertIn("phase == .recognizing && attemptId == id", self.state)
         self.assertIn("guard phase == .idle", self.state)
 
-    def test_orb_cannot_launch_and_is_separate(self):
+    def test_orb_is_separate_and_cannot_launch_without_server_permission(self):
         self.assertIn("orbButton.isEnabled = false", self.controller)
-        self.assertIn("if Self.devVoiceEnabled {", self.controller)
-        self.assertIn("#if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV", self.controller)
-        self.assertIn('AppConfig.baseURL.host?.hasSuffix(".replit.dev")', self.controller)
+        self.assertIn("if Self.voiceClientEnabled {", self.controller)
+        self.assertIn("ChatVoiceClientPolicy.allows(origin: AppConfig.baseURL", self.controller)
+        self.assertIn("orbButton.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true", self.controller)
         self.assertNotIn("orbButton.addAction", self.controller)
         self.assertIn('iconButton("mic"', self.controller)
         self.assertIn('orbButton.setImage(UIImage(systemName: "waveform")', self.controller)

@@ -8,12 +8,17 @@ CHAT = ROOT / "ios/TalkHint/Chat"
 
 
 class ChatVoiceSessionSourceContract(unittest.TestCase):
-    def test_entry_is_native_fullscreen_and_dev_only(self):
+    def test_entry_is_native_fullscreen_and_origin_and_server_gated(self):
         parent = (CHAT / "ChatViewController.swift").read_text()
         voice = (CHAT / "ChatVoiceViewController.swift").read_text()
-        self.assertIn("#if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV", parent)
-        self.assertIn('AppConfig.baseURL.host?.hasSuffix(".replit.dev")', parent)
-        self.assertIn("guard Self.devVoiceEnabled", parent)
+        policy = (CHAT / "ChatVoiceClientPolicy.swift").read_text()
+        self.assertIn("#if TALKHINT_NATIVE_VALIDATION || TALKHINT_CHAT_PREVIEW", policy)
+        self.assertIn("#elseif TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV", policy)
+        self.assertIn('host == "talkhint.app"', policy)
+        self.assertIn('host.hasSuffix(".replit.dev")', policy)
+        self.assertIn("ChatVoiceClientPolicy.allows(origin: AppConfig.baseURL", parent)
+        self.assertEqual(parent.count("guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true"), 2)
+        self.assertIn("orbButton.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true", parent)
         self.assertIn("modalPresentationStyle = .fullScreen", voice)
         self.assertIn('button("xmark"', voice)
         self.assertIn("dismiss(animated: true)", voice)

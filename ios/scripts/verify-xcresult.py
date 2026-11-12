@@ -5,6 +5,13 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatVoiceClientPolicyTests": (
+        "testOnlyExactHTTPSProductionOriginIsPermitted",
+        "testProductionDoesNotTrustOtherOrigins",
+        "testDevelopmentDoesNotEnableProduction",
+        "testIsolatedPreviewAndValidationNeverEnableVoice",
+        "testCompiledValidationBuildRemainsIsolated",
+    ),
     "ChatVoiceOrbTests": (
         "testLevelRejectsInvalidSamples",
         "testAudioScaleUsesOnlyListeningAndSpeaking",

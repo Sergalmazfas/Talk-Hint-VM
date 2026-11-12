@@ -49,12 +49,12 @@ class ApprovedChatSourceContracts(unittest.TestCase):
         self.assertIn("UIFontMetrics", self.style)
         self.assertIn("lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor", self.chat)
 
-    def test_orb_is_outside_capsule_and_never_launches(self):
+    def test_orb_is_outside_capsule_and_requires_origin_and_server(self):
         self.assertIn("inputCard.trailingAnchor.constraint(equalTo: orb.leadingAnchor, constant: -10)", self.chat)
         self.assertIn("orbButton.isEnabled = false", self.chat)
-        self.assertIn("if Self.devVoiceEnabled {", self.chat)
-        self.assertIn("#if TALKHINT_CHAT_LIVE_DEV || TALKHINT_APP_DEV", self.chat)
-        self.assertIn('AppConfig.baseURL.host?.hasSuffix(".replit.dev")', self.chat)
+        self.assertIn("if Self.voiceClientEnabled {", self.chat)
+        self.assertIn("ChatVoiceClientPolicy.allows(origin: AppConfig.baseURL", self.chat)
+        self.assertIn("orbButton.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true", self.chat)
         self.assertNotIn("orbButton.addAction", self.chat)
         self.assertIn("view.keyboardLayoutGuide.topAnchor", self.chat)
 
