@@ -73,6 +73,8 @@ class ChatVoiceCaptureRecoverySourceContract(unittest.TestCase):
             self.assertIn(item, source)
         for forbidden in ["AVAudioEngine()", "AVAudioSession.sharedInstance()", "APIClient("]:
             self.assertNotIn(forbidden, source)
+        # The restart closure refers back to this property; inference alone is circular in Swift.
+        self.assertIn("lazy var supervisor: ChatVoiceCaptureSupervisor =", source)
 
     def test_listening_animation_has_foreground_and_accessibility_guards(self):
         source = (CHAT / "ChatVoiceOrbView.swift").read_text()

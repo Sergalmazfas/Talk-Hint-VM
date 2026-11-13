@@ -135,7 +135,7 @@ private final class CaptureSupervisorFixture {
     var restarts = 0
     var failures = 0
     var restartThrows = false
-    lazy var supervisor = ChatVoiceCaptureSupervisor(center: center, object: engine,
+    lazy var supervisor: ChatVoiceCaptureSupervisor = ChatVoiceCaptureSupervisor(center: center, object: engine,
         name: .AVAudioEngineConfigurationChange,
         allowed: { [unowned self] in self.allowed }, recording: { true },
         playing: { [unowned self] in self.playing }, running: { [unowned self] in self.running },
