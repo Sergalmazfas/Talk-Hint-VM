@@ -64,6 +64,9 @@ final class ChatVoiceViewController: UIViewController {
             self?.trace = ChatVoiceLatencyTrace(speechEnd: at, vadFinished: ProcessInfo.processInfo.systemUptime)
         }
         capture.onError = { [weak self] in self?.fail("chat.voiceMode.captureError") }
+        capture.onInputRestarted = { [weak self] in
+            self?.status.text = NSLocalizedString("chat.voiceMode.inputRestarted", comment: "")
+        }
         capture.onFirstRender = { [weak self] at, latency in self?.firstSound(at: at, outputLatency: latency) }
         capture.onPlaybackFinished = { [weak self] in self?.outputFinished() }
         for name in [UIApplication.didEnterBackgroundNotification, AVAudioSession.interruptionNotification] {
@@ -71,14 +74,8 @@ final class ChatVoiceViewController: UIViewController {
                 Task { @MainActor in self?.pause() }
             })
         }
-        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification,
-            object: nil, queue: .main) { [weak self] note in
-            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue
-            // Our own setCategory posts categoryChange. Never pause our own startup.
-            guard reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-                || reason == AVAudioSession.RouteChangeReason.newDeviceAvailable.rawValue else { return }
-            Task { @MainActor in self?.pause() }
-        })
+        // Route/configuration recovery belongs to this screen's capture object.
+        // Do not race it by independently pausing on AirPods/Bluetooth changes.
         update()
     }
     override func viewDidAppear(_ animated: Bool) {
@@ -104,13 +101,22 @@ final class ChatVoiceViewController: UIViewController {
         let back = button("chevron.left", key: "chat.back", action: #selector(close))
         back.accessibilityIdentifier = "chat-voice-back"
         let title = UILabel()
-        title.text = conversation.title == "New chat"
-            ? NSLocalizedString("chat.screen.title", comment: "") : conversation.title
+        title.text = "TalkHint"
         title.font = .preferredFont(forTextStyle: .headline)
         title.adjustsFontForContentSizeCategory = true
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        title.textAlignment = .center
+        let subtitle = UILabel()
+        subtitle.text = NSLocalizedString("chat.voiceMode.open", comment: "")
+        subtitle.font = .preferredFont(forTextStyle: .subheadline)
+        subtitle.textColor = .secondaryLabel
+        subtitle.textAlignment = .center
+        subtitle.adjustsFontForContentSizeCategory = true
+        let heading = UIStackView(arrangedSubviews: [title, subtitle])
+        heading.axis = .vertical; heading.spacing = 2
+        heading.accessibilityIdentifier = "chat-voice-heading"
         let settings = button("gearshape", key: "chat.voiceMode.settings", action: #selector(showSettings))
-        let header = UIStackView(arrangedSubviews: [back, title, settings])
+        let header = UIStackView(arrangedSubviews: [back, heading, settings])
         header.spacing = 12; header.alignment = .center
         let orb = UIHostingController(rootView: ChatVoiceOrbView(phase: .idle))
         addChild(orb); orbHost = orb
@@ -120,16 +126,21 @@ final class ChatVoiceViewController: UIViewController {
         orbHeight.isActive = true
         orb.view.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).isActive = true
         status.numberOfLines = 0; status.textAlignment = .center
-        status.font = .preferredFont(forTextStyle: .body)
+        status.font = .preferredFont(forTextStyle: .title3)
+        status.accessibilityIdentifier = "chat-voice-status"
         status.adjustsFontForContentSizeCategory = true
         notice.text = NSLocalizedString("chat.voiceMode.noOutput", comment: "")
         notice.font = .preferredFont(forTextStyle: .footnote)
         notice.textColor = .secondaryLabel; notice.numberOfLines = 0
         notice.adjustsFontForContentSizeCategory = true
+        notice.textAlignment = .center
         transcript.isEditable = false
-        transcript.font = .preferredFont(forTextStyle: .body)
+        transcript.font = .preferredFont(forTextStyle: .title3)
         transcript.adjustsFontForContentSizeCategory = true
         transcript.accessibilityIdentifier = "chat-voice-transcript"
+        transcript.backgroundColor = .secondarySystemBackground
+        transcript.layer.cornerRadius = 18
+        transcript.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 16, right: 12)
         retry.setTitle(NSLocalizedString("chat.retry", comment: ""), for: .normal)
         retry.addTarget(self, action: #selector(retrySend), for: .touchUpInside)
         retry.isHidden = true
@@ -305,7 +316,12 @@ final class ChatVoiceViewController: UIViewController {
         do {
             let page = try await api.chatMessages(conversationId: conversation.id)
             guard !Task.isCancelled, validOwner(), session.phase != .closed else { return }
-            transcript.text = page.messages.map(\.text).filter { !$0.isEmpty }.joined(separator: "\n\n")
+            // Full history remains in the SAME chat; the voice screen shows one current utterance.
+            let latest = ChatVoicePresentation.latestUtterance(page.messages.map(\.text))
+            if transcript.text != latest {
+                transcript.text = latest
+                transcript.setContentOffset(.zero, animated: false)
+            }
         } catch {
             // Preserve rendered history, but never hide the fact that refresh failed.
             guard !Task.isCancelled, validOwner(), session.phase != .closed else { return }
@@ -340,6 +356,7 @@ final class ChatVoiceViewController: UIViewController {
         refresh?.cancel(); refresh = nil
     }
     private func fail(_ key: String) {
+        interruptResponse() // Cancel stale work before showing an audio/route failure.
         stopSpeech()
         capture.stop(); session.microphone(false); session.transition(.error)
         update()
@@ -459,6 +476,7 @@ final class ChatVoiceViewController: UIViewController {
         case .error, .closed: phase = .unavailable
         default: phase = .idle
         }
-        orbHost?.rootView = ChatVoiceOrbView(phase: phase, level: level)
+        orbHost?.rootView = ChatVoiceOrbView(phase: phase, level: level,
+            screenActive: viewIfLoaded?.window != nil && UIApplication.shared.applicationState == .active)
     }
 }

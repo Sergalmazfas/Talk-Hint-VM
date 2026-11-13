@@ -3,8 +3,9 @@
 "chat.voiceMode.settings" = "Voice settings";
 "chat.voiceMode.done" = "Done";
 "chat.voiceMode.attachment" = "Return to chat to attach a file";
-"chat.voiceMode.noOutput" = "Dev: Flash v2.5 is selected, but a voice has not been chosen. Replies remain text-only. Calls still require review in chat.";
-"chat.voiceMode.aiDisclosure" = "AI assistant · ElevenLabs Flash v2.5. This conversation is saved as text.";
+"chat.voiceMode.noOutput" = "Voice is currently unavailable. You can continue in text chat.";
+"chat.voiceMode.aiDisclosure" = "You are speaking with AI. This conversation is saved in this chat.";
+"chat.voiceMode.inputRestarted" = "Microphone reconnected. Please repeat your phrase.";
 "chat.voiceMode.budgetReached" = "Today's voice budget is reached. Voice output is paused; text chat still works. Email delivery status is available in the voice budget.";
 "chat.voiceMode.ownerOnly" = "Voice chat is currently available only to the owner.";
 "chat.voiceMode.metricsError" = "The response played, but its timing could not be saved.";
@@ -23,7 +24,7 @@
 "chat.voiceMode.closed" = "Voice chat closed";
 "chat.voiceMode.mute" = "Mute microphone";
 "chat.voiceMode.unmute" = "Turn on microphone";
-"chat.voiceMode.captureError" = "Could not record. Check the microphone, other audio and active calls, then try again.";
+"chat.voiceMode.captureError" = "No microphone audio or the audio route changed. Check your headset connection and tap the microphone again.";
 "chat.voiceMode.permissionDenied" = "Microphone access is off. Allow it in iPhone Settings, then try again.";
 "chat.voiceMode.noSpeech" = "No speech was detected. Turn on the microphone and try again.";
 "chat.voiceMode.networkError" = "The request did not finish. Check your connection. A retry uses the same message, not a duplicate.";

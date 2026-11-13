@@ -12,6 +12,10 @@ final class ChatVoiceOrbTests: XCTestCase {
         XCTAssertEqual(ChatVoiceOrbView.boundedLevel(-1), 0)
         XCTAssertEqual(ChatVoiceOrbView.boundedLevel(2), 1)
         XCTAssertEqual(ChatVoiceOrbView.boundedLevel(0.5), 0.5)
+        XCTAssertTrue(ChatVoiceOrbView(phase: .listening, screenActive: true).active)
+        XCTAssertFalse(ChatVoiceOrbView(phase: .listening, screenActive: false).active)
+        XCTAssertTrue(ChatVoiceOrbView(phase: .listening, reduceMotionOverride: true,
+                                      screenActive: true).effectiveReduceMotion)
     }
 
     func testAudioScaleUsesOnlyListeningAndSpeaking() {

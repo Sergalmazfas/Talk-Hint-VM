@@ -1,5 +1,12 @@
 import Foundation
 
+enum ChatVoicePresentation {
+    /// Keep full history on the server/text screen, not in the voice screen's viewport.
+    static func latestUtterance(_ texts: [String]) -> String {
+        texts.reversed().first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? ""
+    }
+}
+
 /// Chat-only proposal. The active value stays 1.2 until device testing/approval.
 /// No Katya/Retell timers reference this type.
 enum ChatVoicePausePolicy {

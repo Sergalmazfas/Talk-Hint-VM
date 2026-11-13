@@ -3,8 +3,9 @@
 "chat.voiceMode.settings" = "Ajustes de voz";
 "chat.voiceMode.done" = "Listo";
 "chat.voiceMode.attachment" = "Volver al chat para adjuntar un archivo";
-"chat.voiceMode.noOutput" = "Dev: Flash v2.5 está seleccionado, pero falta elegir la voz. Las respuestas siguen en texto. Las llamadas requieren revisión en el chat.";
-"chat.voiceMode.aiDisclosure" = "Asistente de IA · ElevenLabs Flash v2.5. La conversación se guarda como texto.";
+"chat.voiceMode.noOutput" = "La voz no está disponible ahora. Puedes continuar en el chat de texto.";
+"chat.voiceMode.aiDisclosure" = "Estás hablando con IA. La conversación se guarda en este chat.";
+"chat.voiceMode.inputRestarted" = "Micrófono reconectado. Repite la frase, por favor.";
 "chat.voiceMode.budgetReached" = "Se alcanzó el presupuesto diario de voz. El chat de texto sigue funcionando. El estado del correo aparece en el presupuesto de voz.";
 "chat.voiceMode.ownerOnly" = "Por ahora, el chat de voz solo está disponible para el propietario.";
 "chat.voiceMode.metricsError" = "Se reprodujo la respuesta, pero no se pudo guardar la medición.";
@@ -23,7 +24,7 @@
 "chat.voiceMode.closed" = "Chat de voz cerrado";
 "chat.voiceMode.mute" = "Apagar micrófono";
 "chat.voiceMode.unmute" = "Encender micrófono";
-"chat.voiceMode.captureError" = "No se pudo grabar. Revisa el micrófono, otros audios y llamadas activas e inténtalo de nuevo.";
+"chat.voiceMode.captureError" = "No llega audio del micrófono o cambió la ruta de audio. Revisa los auriculares y vuelve a tocar el micrófono.";
 "chat.voiceMode.permissionDenied" = "El acceso al micrófono está desactivado. Permítelo en Ajustes del iPhone e inténtalo de nuevo.";
 "chat.voiceMode.noSpeech" = "No se detectó voz. Enciende el micrófono e inténtalo de nuevo.";
 "chat.voiceMode.networkError" = "La solicitud no terminó. Revisa la conexión. Al reintentar se usa el mismo mensaje, sin duplicarlo.";

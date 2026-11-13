@@ -82,7 +82,7 @@ class ChatVoiceSessionSourceContract(unittest.TestCase):
             text = (ROOT / f"ios/TalkHint/Resources/{language}.lproj/Localizable.strings").read_text()
             values = re.findall(r'^"(chat\.voiceMode\.[^"]+)"\s*=', text, re.M)
             self.assertEqual(len(values), len(set(values)), language)
-            self.assertEqual(len(values), 29, language)
+            self.assertEqual(len(values), 30, language)
             keys.append(set(values))
         for other in keys[1:]:
             self.assertEqual(keys[0], other)

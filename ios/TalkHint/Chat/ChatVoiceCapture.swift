@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import OSLog
 
 /// One foreground engine for input AND streamed output. No CallKit/Twilio ownership.
 /// Voice-processing I/O provides acoustic echo cancellation; real-device validation required.
@@ -11,6 +12,7 @@ final class ChatVoiceCapture {
     var onSpeechEnded: ((Double) -> Void)?
     var onUtterance: ((Data) -> Void)?
     var onError: (() -> Void)?
+    var onInputRestarted: (() -> Void)?
     var onFirstRender: ((Double, Double) -> Void)?
     var onPlaybackFinished: (() -> Void)?
     var isAllowed: () -> Bool = { false }
@@ -23,18 +25,23 @@ final class ChatVoiceCapture {
     private var started = 0.0
     private var lastSpeech = 0.0
     private var heardSpeech = false
+    private var receivedInput = false
     private var previous: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
     private var playRevision = UUID()
     private var queuedBuffers = 0
     private var outputEnded = false
     private var firstRenderTimer: Timer?
-    private var safetyTimer: Timer?
+    private var supervisor: ChatVoiceCaptureSupervisor?
+    private var routeObserver: NSObjectProtocol?
+    private var inputTapID = UUID()
+    private var inputTapInstalled = false
     private var renderedFirst = false
     private var scheduledFrames: AVAudioFramePosition = 0
     private var firstAudibleFrame: AVAudioFramePosition?
     var isRecording: Bool { recordingID != nil }
     var isPlaying: Bool { queuedBuffers > 0 }
     private let outputFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
+    private let log = Logger(subsystem: "app.talkhint", category: "ChatVoiceCapture")
 
     private func ensureEngine() throws {
         guard isAllowed(), !CallManager.shared.hasPhoneAudioSession else { throw APIError.decoding }
@@ -44,55 +51,129 @@ final class ChatVoiceCapture {
         guard !session.isOtherAudioPlaying, !session.secondaryAudioShouldBeSilencedHint else { throw APIError.decoding }
         previous = (session.category, session.mode, session.categoryOptions)
         do {
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+            // HFP input for AirPods/car Bluetooth, not output-only A2DP.
+            // defaultToSpeaker is a fallback, never a forced override of a car/headset route.
+            try session.setCategory(.playAndRecord, mode: .voiceChat,
+                                    options: [.defaultToSpeaker, .allowBluetooth])
             try session.setActive(true)
             let audio = AVAudioEngine()
             try audio.inputNode.setVoiceProcessingEnabled(true) // fail closed; no false "AEC enabled"
             audio.attach(player)
             audio.connect(player, to: audio.mainMixerNode, format: outputFormat)
-            let recorder = sink
-            // The recording queue sends values only. Bind the weak reference once
-            // before creating the task, rather than sharing mutable weak storage
-            // between concurrent closures. No audio buffers cross to the main actor.
-            let deliverSample: @Sendable (UUID, Float, Double, Bool) -> Void = { [weak self] id, power, time, failed in
-                guard let owner = self else { return }
-                Task { @MainActor in
-                    guard id == owner.recordingID else { return }
-                    if failed { owner.stop(); owner.onError?() }
-                    else { owner.sample(power: power, at: time) }
-                }
-            }
-            audio.inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, when in
-                let at = when.isHostTimeValid ? AVAudioTime.seconds(forHostTime: when.hostTime)
-                    : ProcessInfo.processInfo.systemUptime
-                recorder.append(buffer, at: at, result: deliverSample)
-            }
             engine = audio
-            audio.prepare(); try audio.start()
-            safetyTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    guard let self, self.engine != nil else { return }
-                    if CallManager.shared.hasPhoneAudioSession || !self.isAllowed() {
-                        self.stop(); self.onError?()
-                    }
-                }
+            let monitor = ChatVoiceCaptureSupervisor(object: audio, name: .AVAudioEngineConfigurationChange,
+                allowed: { [weak self] in self?.captureAllowed == true },
+                recording: { [weak self] in self?.isRecording == true },
+                playing: { [weak self] in self?.isPlaying == true },
+                running: { [weak self] in self?.engine?.isRunning == true },
+                restart: { [weak self] in
+                    guard let self else { throw APIError.decoding }
+                    try self.restartInput()
+                }, failed: { [weak self] in
+                    self?.log.error("Capture stopped: engine, route, input watchdog or permission failure")
+                    self?.stop(); self?.onError?()
+                })
+            supervisor = monitor
+            monitor.start()
+            routeObserver = NotificationCenter.default.addObserver(
+                forName: AVAudioSession.routeChangeNotification, object: session, queue: .main
+            ) { [weak monitor] note in
+                let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue
+                // Our own setCategory can post categoryChange during startup.
+                // Hardware/override changes use the SAME bounded recovery as engine changes.
+                guard reason == AVAudioSession.RouteChangeReason.newDeviceAvailable.rawValue
+                    || reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
+                    || reason == AVAudioSession.RouteChangeReason.override.rawValue
+                    || reason == AVAudioSession.RouteChangeReason.routeConfigurationChange.rawValue
+                    || reason == AVAudioSession.RouteChangeReason.noSuitableRouteForCategory.rawValue
+                    || reason == AVAudioSession.RouteChangeReason.wakeFromSleep.rawValue else { return }
+                guard let owner = monitor else { return }
+                Task { @MainActor in owner.configurationChanged() }
             }
-            if let timer = safetyTimer { RunLoop.main.add(timer, forMode: .common) }
+            try installInputTap(audio)
+            audio.prepare(); try audio.start()
+            log.info("Voice engine started; waiting for microphone buffers")
         } catch { stop(); throw error }
     }
+
+    private var captureAllowed: Bool {
+        isAllowed() && !CallManager.shared.hasPhoneAudioSession
+    }
+
+    private func installInputTap(_ audio: AVAudioEngine) throws {
+        let format = audio.inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate.isFinite, format.sampleRate > 0, format.channelCount > 0 else {
+            throw APIError.decoding
+        }
+        let recorder = sink
+        let tapID = UUID()
+        inputTapID = tapID
+        // The recording queue sends values only. Bind the weak reference once
+        // before creating the task, rather than sharing mutable weak storage
+        // between concurrent closures. No audio buffers cross to the main actor.
+        let deliverSample: @Sendable (UUID, Float, Double, Bool) -> Void = { [weak self] id, power, time, failed in
+            guard let owner = self else { return }
+            Task { @MainActor in
+                guard id == owner.recordingID else { return }
+                if failed { owner.stop(); owner.onError?() }
+                else { owner.sample(power: power, at: time) }
+            }
+        }
+        audio.inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, when in
+            let at = when.isHostTimeValid ? AVAudioTime.seconds(forHostTime: when.hostTime)
+                : ProcessInfo.processInfo.systemUptime
+            recorder.append(buffer, tapID: tapID, at: at, result: deliverSample)
+        }
+        inputTapInstalled = true
+    }
+
+    private func restartInput() throws {
+        guard captureAllowed, isRecording, !isPlaying, let audio = engine else { throw APIError.decoding }
+        log.notice("Recovering input once after engine or route configuration change")
+        // Discard partial input; never resend/replay text or TTS during recovery.
+        sink.end(); recordingID = nil
+        if let file { try? FileManager.default.removeItem(at: file) }
+        file = nil
+        if inputTapInstalled { audio.inputNode.removeTap(onBus: 0); inputTapInstalled = false }
+        audio.stop()
+        if !audio.inputNode.isVoiceProcessingEnabled {
+            try audio.inputNode.setVoiceProcessingEnabled(true)
+        }
+        audio.disconnectNodeOutput(player)
+        audio.connect(player, to: audio.mainMixerNode, format: outputFormat)
+        try installInputTap(audio)
+        try beginRecording(audio)
+        audio.prepare(); try audio.start()
+        onInputRestarted?()
+    }
+
     func start() throws {
         if isRecording { return }
         try ensureEngine()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("talkhint-chat-voice-\(UUID().uuidString).wav")
         do {
-            recordingID = try sink.begin(url: url, format: engine!.inputNode.outputFormat(forBus: 0))
-            file = url; heardSpeech = false
-            started = ProcessInfo.processInfo.systemUptime; lastSpeech = started
+            try beginRecording(engine!)
         } catch { stop(); throw error }
+    }
+    private func beginRecording(_ audio: AVAudioEngine) throws {
+        let format = audio.inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate.isFinite, format.sampleRate > 0, format.channelCount > 0 else {
+            throw APIError.decoding
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("talkhint-chat-voice-\(UUID().uuidString).wav")
+        file = url
+        recordingID = try sink.begin(url: url, format: format, tapID: inputTapID)
+        heardSpeech = false; receivedInput = false
+        started = ProcessInfo.processInfo.systemUptime; lastSpeech = started
+        supervisor?.awaitInput()
     }
     private func sample(power: Float, at: Double) {
         guard isAllowed(), !CallManager.shared.hasPhoneAudioSession else { stop(); onError?(); return }
         guard isRecording else { return }
+        if !receivedInput {
+            receivedInput = true
+            log.info("Microphone buffers received")
+        }
+        supervisor?.receivedBuffer()
         onLevel?(min(1, max(0, Double(power + 60) / 60)))
         if power > -38 {
             lastSpeech = at
@@ -174,10 +255,12 @@ final class ChatVoiceCapture {
         onOutputLevel?(0)
     }
     func stop() {
-        safetyTimer?.invalidate(); safetyTimer = nil
+        supervisor?.stop(); supervisor = nil
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
+        routeObserver = nil
         stopPlayback()
         sink.end(); recordingID = nil
-        engine?.inputNode.removeTap(onBus: 0)
+        if inputTapInstalled { engine?.inputNode.removeTap(onBus: 0); inputTapInstalled = false }
         engine?.stop(); engine?.detach(player); engine = nil
         if let file { try? FileManager.default.removeItem(at: file) }
         file = nil
@@ -199,8 +282,9 @@ private final class ChatVoiceRecordingSink: @unchecked Sendable {
     private var file: AVAudioFile?
     private var converter: AVAudioConverter?
     private var id: UUID?
+    private var tapID: UUID?
     private let target = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
-    func begin(url: URL, format: AVAudioFormat) throws -> UUID {
+    func begin(url: URL, format: AVAudioFormat, tapID: UUID) throws -> UUID {
         try queue.sync {
             file = try AVAudioFile(forWriting: url, settings: [
                 AVFormatIDKey: Int(kAudioFormatLinearPCM), AVSampleRateKey: 16000,
@@ -208,11 +292,12 @@ private final class ChatVoiceRecordingSink: @unchecked Sendable {
                 AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
             ], commonFormat: .pcmFormatFloat32, interleaved: false)
             guard let newConverter = AVAudioConverter(from: format, to: target) else { throw APIError.decoding }
-            converter = newConverter; let next = UUID(); id = next; return next
+            converter = newConverter; self.tapID = tapID
+            let next = UUID(); id = next; return next
         }
     }
-    func end() { queue.sync { id = nil; file = nil; converter = nil } }
-    func append(_ input: AVAudioPCMBuffer, at: Double,
+    func end() { queue.sync { id = nil; file = nil; converter = nil; tapID = nil } }
+    func append(_ input: AVAudioPCMBuffer, tapID: UUID, at: Double,
                 result: @escaping @Sendable (UUID, Float, Double, Bool) -> Void) {
         guard let copy = AVAudioPCMBuffer(pcmFormat: input.format, frameCapacity: input.frameLength) else { return }
         copy.frameLength = input.frameLength
@@ -224,7 +309,7 @@ private final class ChatVoiceRecordingSink: @unchecked Sendable {
             }
         }
         queue.async { [self] in
-            guard let id, let file, let converter else { return }
+            guard self.tapID == tapID, let id, let file, let converter else { return }
             guard let samples = copy.floatChannelData?[0] else { result(id, -100, at, true); return }
             let count = Int(copy.frameLength)
             guard count > 0 else { return }

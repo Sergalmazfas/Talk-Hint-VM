@@ -5,6 +5,24 @@ import subprocess
 import sys
 
 REQUIRED_TESTS = {
+    "ChatVoiceCaptureHealthTests": (
+        "testConfigurationChangeAllowsExactlyOneRecovery",
+        "testStoppedEngineRecoversButFailedRestartFails",
+        "testNoBuffersTimesOutWithoutAnySampleCallback",
+        "testBuffersKeepWatchdogAliveAndStallFails",
+        "testRevokedAccessPlaybackOrNoRecordingNeverRestarts",
+        "testIdleBetweenUtterancesDoesNotHaveInputTimeout",
+        "testOwnEngineNotificationRestartsAndForeignEngineIsIgnored",
+        "testRestartErrorTerminatesAndDoesNotLoop",
+        "testClosingCancelsQueuedRecoveryAndRemovesObserver",
+        "testWatchdogFailsWithoutAnyNotificationOrAudioCallback",
+        "testRouteHandoverDuringPlaybackFailsWithoutReplayingOutput",
+        "testLostOwnershipDuringRecoveryNeverRestartsInput",
+    ),
+    "ChatVoicePresentationTests": (
+        "testVoiceViewportShowsOnlyLatestNonemptyUtterance",
+        "testRussianEnglishAndSpanishVoiceStringsAreLocalizedAndProviderFree",
+    ),
     "ChatVoiceScreenTests": (
         "testFullScreenLoadsWithoutNetworkOrMicrophone",
         "testFullScreenLaysOutOnSmallAndLargeScreensInBothThemes",

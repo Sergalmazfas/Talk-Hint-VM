@@ -13,11 +13,15 @@ struct ChatVoiceOrbView: View {
     var forceFallback = false
     // Render-fixture override: nil preserves the system accessibility setting in the app.
     var reduceMotionOverride: Bool? = nil
+    // UIKit hosting does not always inherit the window scene's active environment.
+    // The real controller provides foreground visibility, not synthetic audio levels.
+    var screenActive: Bool? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     var effectiveReduceMotion: Bool { reduceMotionOverride ?? reduceMotion }
+    var active: Bool { screenActive ?? (scenePhase == .active) }
 
     static func boundedLevel(_ value: Double) -> Double {
         value.isFinite ? min(1, max(0, value)) : 0
@@ -33,10 +37,15 @@ struct ChatVoiceOrbView: View {
     }
 
     var body: some View {
-        artwork
-            .aspectRatio(1, contentMode: .fit)
-            .scaleEffect(effectiveReduceMotion ? 0.92 : Self.scale(phase: phase, level: level))
-            .animation(effectiveReduceMotion ? nil : .easeOut(duration: 0.08), value: Self.boundedLevel(level))
+        // A quiet listening pulse is a state indicator, NOT a simulated microphone level.
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                paused: effectiveReduceMotion || !active || phase != .listening)) { context in
+            let pulse = active && !effectiveReduceMotion && phase == .listening
+                ? CGFloat((sin(context.date.timeIntervalSinceReferenceDate * 3) + 1) * 0.012) : 0
+            artwork
+                .aspectRatio(1, contentMode: .fit)
+                .scaleEffect(effectiveReduceMotion ? 0.92 : Self.scale(phase: phase, level: level) + pulse)
+        }
             // The containing screen provides localized state text, not a second VoiceOver element.
             .accessibilityHidden(true)
             .allowsHitTesting(false)
@@ -44,7 +53,7 @@ struct ChatVoiceOrbView: View {
 
     @ViewBuilder private var artwork: some View {
         if #available(iOS 17, *), !forceFallback, !effectiveReduceMotion,
-           scenePhase == .active, phase != .idle, phase != .unavailable {
+           active, phase != .idle, phase != .unavailable {
             OrbView(configuration: OrbConfiguration(
                 backgroundColors: colors,
                 glowColor: .blue,
@@ -57,7 +66,7 @@ struct ChatVoiceOrbView: View {
         } else {
             ChatVoiceFallbackCircle(
                 colors: colors,
-                pulsing: !effectiveReduceMotion && scenePhase == .active
+                pulsing: !effectiveReduceMotion && active
                     && phase != .idle && phase != .unavailable,
                 thinking: phase == .thinking
             )

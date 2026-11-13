@@ -41,6 +41,14 @@ final class ChatVoiceScreenTests: XCTestCase {
             $0.accessibilityIdentifier == "chat-voice-microphone"
         }, file: file, line: line)
         XCTAssertFalse(mic.isEnabled, file: file, line: line)
+        let labels = allViews(root).compactMap { ($0 as? UILabel)?.text }
+        XCTAssertTrue(labels.contains("TalkHint"), file: file, line: line)
+        XCTAssertTrue(labels.contains(NSLocalizedString("chat.voiceMode.open", comment: "")),
+                      file: file, line: line)
+        XCTAssertTrue(labels.contains(NSLocalizedString("chat.voiceMode.ready", comment: "")),
+                      file: file, line: line)
+        XCTAssertFalse(labels.contains { $0.contains("ElevenLabs") || $0.contains("Flash") || $0.contains("Dev:") },
+                       file: file, line: line)
     }
 
     func testFullScreenLoadsWithoutNetworkOrMicrophone() async throws {

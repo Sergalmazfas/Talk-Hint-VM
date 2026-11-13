@@ -48,6 +48,8 @@ class MacVoiceDeliverySourceContract(unittest.TestCase):
         self.assertIn("guard id == owner.recordingID", callback)
         self.assertNotIn("Task { @MainActor [weak self]", callback)
         self.assertIn("result: deliverSample", source)
+        self.assertIn("recorder.append(buffer, tapID: tapID", source)
+        self.assertIn("self.tapID == tapID", source)
 
     def test_orb_render_fixture_checks_pixels_with_a_transparent_control(self):
         fixture = (ROOT / "ios/TalkHintTests/ChatVoiceOrbTests.swift").read_text()
@@ -66,7 +68,7 @@ class MacVoiceDeliverySourceContract(unittest.TestCase):
         self.assertIn("reduceMotionOverride ?? reduceMotion", view)
         self.assertIn("reduceMotionOverride: true", fixture)
         self.assertNotIn(r".environment(\.accessibilityReduceMotion", fixture)
-        self.assertEqual(view.count("effectiveReduceMotion"), 5)
+        self.assertIn("paused: effectiveReduceMotion || !active", view)
 
     def test_mac_scene_fixture_uses_real_session_and_cleans_up(self):
         source = (ROOT / "ios/TalkHintTests/SceneLaunchTests.swift").read_text()
