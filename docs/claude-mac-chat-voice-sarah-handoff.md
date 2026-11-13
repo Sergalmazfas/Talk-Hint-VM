@@ -2,6 +2,11 @@
 
 ## ЕДИНСТВЕННОЕ ТЕКУЩЕЕ ЗАДАНИЕ: микрофон и голосовой экран
 
+Продолжение после circular-reference ошибки Mac: взять новую вершину
+ветки с f65ba85d (одна строка явного типа в XCTest fixture). 37 тестов пока
+не запускались. Следовать верхнему подразделу «Продолжение после ошибки
+компиляции теста» в docs/claude-mac-talkhint-production-voice.md.
+
 Владелец разрешил recovery configuration/route + watchdog + пять UI-правок.
 Выполнить только верхний раздел docs/claude-mac-talkhint-production-voice.md:
 37 scoped XCTest → incremental обычная TalkHint/Debug → установка в ту же
