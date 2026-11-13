@@ -1,5 +1,117 @@
 # Claude на Mac: одна обычная сборка TalkHint для talkhint.app
 
+## ЕДИНСТВЕННОЕ АКТУАЛЬНОЕ ЗАДАНИЕ: восстановление микрофона + UI
+
+**Выполнить только этот раздел. ВСЁ ниже раздела «ИСТОРИЯ ПАТЧА ЭКРАНА» —
+архив прежних заданий, не запускать их последовательно.**
+
+База этой дельты: **7da52ecfcc1e3b73e573207cce3e804d6b883b55**.
+Код исправления: **829b16d7b63466e37033d6069f109c2d3b0e3f9b**,
+ios-tree **9f531e7746758291e0cec0a2a386900e6e16e0e9**.
+Новые точные code commit / ios-tree указаны в docs/chat-voice-native-delta.json.
+Получить ту же ветку **xcode-chat-voice-sarah-2026-11-11**; не переносить
+сервер из этой native-ветки в production.
+
+### Что исправлено и что пока не доказано
+
+- Собственный AVAudioEngineConfigurationChange и смена маршрута идут через
+  один supervisor: максимум один restart на период владения движком.
+- Незавершённая запись удаляется; новый tap/converter/recording ID не принимают
+  старые буферы. После restart UI просит повторить фразу. Playback при смене
+  маршрута не проигрывается заново: безопасная остановка с ошибкой.
+- Watchdog на отдельном main-run-loop таймере, не на audio callback: 2 с без
+  первого/следующего буфера — ошибка вместо вечного Listening. При restart
+  время ожидания сбрасывается один раз. После закрытия/потери доступа/звонка
+  recovery не стартует. Старые timer/notification tasks защищены epoch.
+- Session category/mode, activation и voice processing настраиваются до tap
+  и prepare/start. Формат tap читается после настройки и повторно после
+  смены конфигурации; нулевые/невалидные форматы отклоняются. Порядок был
+  правильным и раньше: первичный hardware/AEC-триггер не объявлять доказанным.
+- HFP input разрешён для AirPods/автомобильного Bluetooth. Не форсируется
+  speaker поверх внешнего маршрута; CarPlay остаётся выбором iOS. Реальный
+  HFP/CarPlay/microphone пока НЕ проверен; не писать, что все машины поддержаны.
+- Пять UI-правок: переводы по языку приложения (RU: «Слушаю»), убрать TTS/Dev
+  названия, шапка TalkHint / локализованный голосовой чат, статус + последняя
+  реплика вместо истории, живой listening pulse и реальные уровни отдельно.
+  UIKit foreground передаётся Orb явно, системный Reduce Motion соблюдается.
+- История, разговор, backend, Sarah, Flash, модели, voice consent, VAD 1.2,
+  телефония/Катя/Retell, минимум iOS 15 и подпись не меняются.
+- Replit: **77 source-contract + 53 script-теста PASS**; это не Swift/XCTest
+  и не hardware test. Новых XCTest 14, будущий required gate 166.
+
+### Один последовательный запуск на Mac
+
+1. В прежнем чистом chat-voice-sarah-concurrency проверить HEAD/status,
+   fast-forward до новой вершины ветки. Если есть локальные изменения или
+   непереданные Mac-коммиты — остановиться и сообщить; не reset/stash/clean.
+   Проверить diff от базы 7da52ecf и Git-аудит manifest. Включить новые Swift
+   файлы штатным неизменённым XcodeGen. Не делать новый worktree, не удалять
+   DerivedData/SPM/симуляторы, не менять signing, URL, bundle или AppConfig.
+2. Переиспользовать успешные NativeValidation/ad-hoc/.invalid параметры и
+   тёплый DerivedData. Один build-for-testing нового дерева, затем один
+   test-without-building с семью ограничениями:
+   ```
+   -only-testing:TalkHintTests/ChatVoiceCaptureHealthTests
+   -only-testing:TalkHintTests/ChatVoicePresentationTests
+   -only-testing:TalkHintTests/ChatVoiceScreenTests
+   -only-testing:TalkHintTests/ChatVoiceOrbTests
+   -only-testing:TalkHintTests/ChatVoiceClientPolicyTests
+   -only-testing:TalkHintTests/ChatVoiceSessionTests
+   -only-testing:TalkHintTests/ChatVoiceSpeechStateTests
+   ```
+   Ожидается **37 = 12+2+2+4+5+6+6**, 0 failed, 0 skipped. Новый xcresult,
+   старые результаты сохранить. Новый fixture действительно доставляет
+   AVAudioEngineConfigurationChange своему NSObject через NotificationCenter,
+   но restart/clock/engine-state — fake. Не выдавать это за работу AVAudioEngine
+   на железе. Ни один тест не должен просить микрофон/сеть/TTS/модель.
+   Для scoped receipt использовать ниже приведённую отдельную проверку.
+   Полный gate не повторять и общую verify-xcresult.py не ослаблять.
+   ```bash
+   python3 - "$BUNDLE" <<'PY'
+   import runpy, sys
+   m = runpy.run_path("ios/scripts/verify-xcresult.py")
+   root = m["read_result"](sys.argv[1])
+   passed = set()
+   for action in root["actions"]["_values"]:
+       result = action["actionResult"]
+       assert result.get("status", {}).get("_value") == "succeeded"
+       ref = result.get("testsRef", {}).get("id", {}).get("_value")
+       if ref:
+           passed.update(m["successful_tests"](m["read_result"](sys.argv[1], ref)))
+   suites = ("ChatVoiceCaptureHealthTests", "ChatVoicePresentationTests",
+             "ChatVoiceScreenTests", "ChatVoiceOrbTests", "ChatVoiceClientPolicyTests",
+             "ChatVoiceSessionTests", "ChatVoiceSpeechStateTests")
+   for suite in suites:
+       for method in m["REQUIRED_TESTS"][suite]:
+           assert any(suite in p and method + "()" in p for p in passed), (suite, method)
+   assert len(passed) == 37, len(passed)
+   print("SCOPED PASS: 37/37; not a full native gate or microphone test")
+   PY
+   ```
+3. Только при PASS — одна incremental **TalkHint / Debug / iphoneos** сборка.
+   Сохранить **app.talkhint**, callback **talkhint**, backend **talkhint.app**,
+   прежнюю Apple Team/signing/APNs. Не делать AppDev, Archive/TestFlight,
+   dependency update, серверный build/Publish. Новые compiler warnings от
+   дельты перечислить отдельно (в частности SDK deprecation allowBluetooth);
+   не скрывать их аннотациями или сменой Swift mode.
+4. Владелец разрешил установку: убедиться, что нет активного звонка, обновить
+   существующее приложение, НЕ удаляя данные/Keychain/само приложение, открыть
+   обычный Chat. Не отправлять сообщения/не нажимать микрофон и не запускать
+   платные пробы. Экран шара можно открыть/закрыть только если это не возобновит
+   старую pending-озвучку; иначе оставить проверку владельцу. На безопасном
+   открытом экране сделать крупный реальный скриншот, не HTML/коллаж.
+5. Вернуть коротко: commit/tree, **фактический** результат 37 тестов и xcresult,
+   длительность test/build, новые warnings, identity/origin signed app,
+   установлено ли без потери данных, что проверено визуально. Явно оставить
+   микрофон/AirPods/Bluetooth/CarPlay непроверенными до ручного теста владельца.
+   Если тест/build не проходит — остановиться с точной ошибкой, не устанавливать
+   и не начинать второй полный gate. Исправления Claude вернуть отдельным
+   commit/patch, не смешивать с чужими файлами. Откат — предыдущая 7da52ecf
+   через ту же обычную сборку с сохранением данных; её голосовой capture сломан,
+   поэтому voice до этого отката не рекомендовать.
+
+## ИСТОРИЯ ПАТЧА ЭКРАНА — не выполнять повторно
+
 ## АКТУАЛЬНО: точечное исправление падения голосового экрана
 
 **Выполнять только этот раздел. Ниже — прежнее задание, уже выполненное
