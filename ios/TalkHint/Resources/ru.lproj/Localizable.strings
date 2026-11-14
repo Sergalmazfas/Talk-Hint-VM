@@ -17,7 +17,7 @@
 "chat.voiceMode.permission" = "Ожидаем разрешение на микрофон…";
 "chat.voiceMode.listening" = "Слушаю";
 "chat.voiceMode.recognizing" = "Распознаю речь…";
-"chat.voiceMode.thinking" = "Готовлю ответ…";
+"chat.voiceMode.thinking" = "Думаю";
 "chat.voiceMode.speaking" = "Говорю";
 "chat.voiceMode.muted" = "Микрофон выключен";
 "chat.voiceMode.error" = "Голосовой ввод недоступен";
@@ -28,6 +28,9 @@
 "chat.voiceMode.permissionDenied" = "Доступ к микрофону выключен. Разрешите его в настройках iPhone и повторите.";
 "chat.voiceMode.noSpeech" = "Речь не обнаружена. Включите микрофон и повторите.";
 "chat.voiceMode.networkError" = "Запрос не завершён. Проверьте сеть. Повтор использует то же сообщение, не создавая копию.";
+"chat.voiceMode.saved" = "Разговор сохраняется в чате";
+"chat.voiceMode.stop" = "Остановить ответ";
+"chat.voiceMode.serverUpdate" = "Нужна новая версия сервера. Сначала опубликуйте подготовленное обновление.";
 "copilot.disabled" = "Copilot недоступен.";
 "chat.result.details" = "Открыть сохранённый источник";
 "chat.result.followup" = "Сохранить задачу на потом";

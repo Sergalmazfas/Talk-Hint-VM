@@ -27,6 +27,20 @@ REQUIRED_TESTS = {
         "testFullScreenLoadsWithoutNetworkOrMicrophone",
         "testFullScreenLaysOutOnSmallAndLargeScreensInBothThemes",
     ),
+    "ChatVoiceInputPolicyTests": (
+        "testSpeakerEchoNeverInterruptsOrSubmits",
+        "testLoudTransientAndBrokenCandidateDoNotInterrupt",
+        "testSustainedVoiceInterruptsOnceAndNeedsHalfSecondBeforeSubmission",
+        "testQuietUserAfterPlaybackUsesNormalThresholdAndSilenceCannotSubmit",
+        "testShortYesAndInvalidLevelsAreNotSubmitted",
+        "testLastReliableUserLanguageOverridesInterfaceButUnknownDoesNot",
+        "testHistoryRetriesOnlyNetworkAndAtMostTwice",
+    ),
+    "ChatVoiceRequestTests": (
+        "testTranscriptionPassesHintWithoutChangingEndpointOrModel",
+        "testOldServerCapabilitiesDoNotImplyNewVoiceSupport",
+        "testPlanRunnerCannotStartAfterScreenOwnershipIsLost",
+    ),
     "ChatVoiceClientPolicyTests": (
         "testOnlyExactHTTPSProductionOriginIsPermitted",
         "testProductionDoesNotTrustOtherOrigins",

@@ -818,11 +818,12 @@ final class APIClient {
     /// `/api/prepare/stt` (OpenAI gpt-4o-transcribe; auto language RU/EN/ES).
     /// Returns the recognized text (possibly empty when nothing was heard).
     /// Errors are honest server messages — no silent fallback to another STT.
-    func prepareTranscribe(audio: Data, mimeType: String) async throws -> String {
-        let body: [String: Any] = [
+    func prepareTranscribe(audio: Data, mimeType: String, language: String? = nil) async throws -> String {
+        var body: [String: Any] = [
             "audio": audio.base64EncodedString(),
             "mimeType": mimeType,
         ]
+        if let language { body["language"] = language }
         let data = try await request("/api/prepare/stt", method: "POST", json: body, authenticated: true)
         guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw APIError.decoding

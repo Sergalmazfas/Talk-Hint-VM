@@ -16,6 +16,9 @@
 "chat.voiceMode.ready" = "Бастау үшін микрофонды басыңыз";
 "chat.voiceMode.permission" = "Микрофонға рұқсат күтілуде…";
 "chat.voiceMode.listening" = "Тыңдап тұрмын";
+"chat.voiceMode.saved" = "Әңгіме чатта сақталады";
+"chat.voiceMode.stop" = "Жауапты тоқтату";
+"chat.voiceMode.serverUpdate" = "Серверді жаңарту қажет. Алдымен дайын жаңартуды жариялаңыз.";
 "chat.voiceMode.recognizing" = "Сөйлеуді тануда…";
 "chat.voiceMode.thinking" = "Жауап дайындауда…";
 "chat.voiceMode.speaking" = "Сөйлеп тұрмын";

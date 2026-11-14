@@ -52,7 +52,7 @@ final class TalkHintTabBarController: UITabBarController, UITabBarControllerDele
         return false
     }
 
-    func openChat(animated: Bool = true) {
+    func openChat(animated: Bool = true, newVoice: Bool = false) {
         guard presentedViewController == nil, viewIfLoaded?.window != nil else { return }
         if retainedChatNavigation == nil {
             let chat = chatFactory()
@@ -63,7 +63,9 @@ final class TalkHintTabBarController: UITabBarController, UITabBarControllerDele
         }
         guard let navigation = retainedChatNavigation else { return }
         chatOrigin = selectedViewController
-        present(navigation, animated: animated)
+        present(navigation, animated: animated) {
+            if newVoice { (navigation.viewControllers.first as? ChatViewController)?.beginNewVoiceConversation() }
+        }
     }
 
     func closeChat(animated: Bool = true) {

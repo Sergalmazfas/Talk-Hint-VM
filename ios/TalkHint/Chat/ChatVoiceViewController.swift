@@ -1,6 +1,8 @@
 import UIKit
 import SwiftUI
 import AVFoundation
+import NaturalLanguage
+import OSLog
 
 /// Voice on the existing chat API; input requires explicit action and server access.
 @MainActor
@@ -33,6 +35,15 @@ final class ChatVoiceViewController: UIViewController {
     private var replyFinished = false
     private var trace: ChatVoiceLatencyTrace?
     private var measuredFirstSound = false
+    private var languageHint = ChatVoiceLanguageHint()
+    private let log = Logger(subsystem: "app.talkhint", category: "ChatVoice")
+    private var planMessage: ChatMessage?
+    private let planCard = UIButton(type: .system)
+    private var approvalInFlight = false
+    private lazy var planRunner = ChatVoicePlanRunner(api: api)
+    private var resultBaseline: Set<String>?
+    private var announcedResults = Set<String>()
+    private var resultOutput = false
 
     init(api: APIClient, conversation: ChatConversation, validOwner: @escaping () -> Bool,
          submit: @escaping (String, UUID) async throws -> ChatMessagePair,
@@ -58,7 +69,13 @@ final class ChatVoiceViewController: UIViewController {
             self.level = value; self.renderOrb()
         }
         capture.onOutputLevel = { [weak self] value in self?.level = value; self?.renderOrb() }
-        capture.onSpeechBegan = { [weak self] in self?.interruptResponse() }
+        capture.onSpeechBegan = { [weak self] in
+            guard let self else { return }
+            // A fresh "yes" AFTER complete playback must retain its one-shot consent.
+            if self.replyID != nil || self.speechTask != nil || self.capture.isPlaying {
+                self.interruptResponse()
+            }
+        }
         capture.onUtterance = { [weak self] data in self?.recognize(data) }
         capture.onSpeechEnded = { [weak self] at in
             self?.trace = ChatVoiceLatencyTrace(speechEnd: at, vadFinished: ProcessInfo.processInfo.systemUptime)
@@ -118,9 +135,13 @@ final class ChatVoiceViewController: UIViewController {
         let settings = button("gearshape", key: "chat.voiceMode.settings", action: #selector(showSettings))
         let header = UIStackView(arrangedSubviews: [back, heading, settings])
         header.spacing = 12; header.alignment = .center
+        back.widthAnchor.constraint(equalTo: settings.widthAnchor).isActive = true
         let orb = UIHostingController(rootView: ChatVoiceOrbView(phase: .idle))
         addChild(orb); orbHost = orb
         orb.view.backgroundColor = .clear
+        orb.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(stopByTap)))
+        orb.view.accessibilityLabel = NSLocalizedString("chat.voiceMode.stop", comment: "")
+        orb.view.accessibilityTraits.insert(.button)
         let orbHeight = orb.view.heightAnchor.constraint(equalToConstant: 220)
         orbHeight.priority = .defaultLow
         orbHeight.isActive = true
@@ -129,18 +150,32 @@ final class ChatVoiceViewController: UIViewController {
         status.font = .preferredFont(forTextStyle: .title3)
         status.accessibilityIdentifier = "chat-voice-status"
         status.adjustsFontForContentSizeCategory = true
-        notice.text = NSLocalizedString("chat.voiceMode.noOutput", comment: "")
+        notice.text = NSLocalizedString("chat.voiceMode.saved", comment: "")
         notice.font = .preferredFont(forTextStyle: .footnote)
         notice.textColor = .secondaryLabel; notice.numberOfLines = 0
         notice.adjustsFontForContentSizeCategory = true
         notice.textAlignment = .center
+        notice.accessibilityHint = NSLocalizedString("chat.voiceMode.aiDisclosure", comment: "")
         transcript.isEditable = false
-        transcript.font = .preferredFont(forTextStyle: .title3)
+        transcript.font = .preferredFont(forTextStyle: .footnote)
         transcript.adjustsFontForContentSizeCategory = true
         transcript.accessibilityIdentifier = "chat-voice-transcript"
-        transcript.backgroundColor = .secondarySystemBackground
-        transcript.layer.cornerRadius = 18
-        transcript.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 16, right: 12)
+        transcript.backgroundColor = .clear
+        transcript.isScrollEnabled = false
+        transcript.textContainer.maximumNumberOfLines = 2
+        transcript.textContainer.lineBreakMode = .byTruncatingTail
+        transcript.textContainerInset = .zero
+        transcript.textAlignment = .center
+        transcript.setContentCompressionResistancePriority(.required, for: .vertical)
+        planCard.isHidden = true
+        planCard.titleLabel?.numberOfLines = 3
+        planCard.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        planCard.backgroundColor = .secondarySystemBackground
+        planCard.layer.cornerRadius = 14
+        planCard.contentEdgeInsets = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        planCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        planCard.accessibilityIdentifier = "chat-voice-plan-confirm"
+        planCard.addTarget(self, action: #selector(confirmCardByTap), for: .touchUpInside)
         retry.setTitle(NSLocalizedString("chat.retry", comment: ""), for: .normal)
         retry.addTarget(self, action: #selector(retrySend), for: .touchUpInside)
         retry.isHidden = true
@@ -158,7 +193,9 @@ final class ChatVoiceViewController: UIViewController {
             control.widthAnchor.constraint(equalToConstant: 56).isActive = true
             control.heightAnchor.constraint(equalToConstant: 56).isActive = true
         }
-        let stack = UIStackView(arrangedSubviews: [header, orb.view, status, notice, transcript, retry, controls])
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let stack = UIStackView(arrangedSubviews: [header, orb.view, status, transcript, planCard, spacer, notice, retry, controls])
         stack.axis = .vertical; stack.spacing = 12
         view.addSubview(stack); stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -166,8 +203,8 @@ final class ChatVoiceViewController: UIViewController {
             orb.view.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.32),
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
         ])
         orb.didMove(toParent: self)
         orb.view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -182,6 +219,12 @@ final class ChatVoiceViewController: UIViewController {
         return button
     }
     @objc private func close() { shutdown(); dismiss(animated: true) }
+    @objc private func stopByTap() {
+        guard !approvalInFlight else { return }
+        interruptResponse()
+        capture.discardInput()
+        if session.microphoneEnabled { listen() }
+    }
     @objc private func pickAttachment() {
         shutdown()
         dismiss(animated: true) { [attachments] in attachments() }
@@ -246,15 +289,29 @@ final class ChatVoiceViewController: UIViewController {
                 }
                 try Task.checkCancellation()
                 self.trace?.sttStarted = ProcessInfo.processInfo.systemUptime
-                let text = try await self.api.prepareTranscribe(audio: data, mimeType: "audio/wav")
+                let hint = self.languageHint.hint(interface: Bundle.main.preferredLocalizations.first ?? "en")
+                let text = try await self.api.prepareTranscribe(audio: data, mimeType: "audio/wav", language: hint)
                 self.trace?.sttFinished = ProcessInfo.processInfo.systemUptime
                 try Task.checkCancellation()
                 guard self.validOwner(), self.session.revision == revision else { return }
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     self.fail("chat.voiceMode.noSpeech"); return
                 }
-                // No model text/ordinary voice "yes" can invoke confirm-plan.
-                // A model response is never itself proof of a completed plan readback.
+                let detector = NLLanguageRecognizer()
+                detector.processString(text)
+                let guess = detector.languageHypotheses(withMaximum: 1).first
+                if text.count >= 8, let guess, guess.value >= 0.75 {
+                    self.languageHint.detected(guess.key.rawValue)
+                }
+                let language = self.languageHint.hint(interface: hint)
+                self.log.info("STT completed; hint=\(hint, privacy: .public) language=\(language, privacy: .public) characters=\(text.count, privacy: .public)")
+                if let message = self.planMessage, let action = message.action,
+                   self.session.takeApproval(text: text, messageID: message.id, planHash: action.planHash) {
+                    await self.confirmPlan(message, approvalText: text)
+                    return
+                }
+                self.session.invalidateReadback()
+                self.planMessage = nil; self.planCard.isHidden = true
                 self.pendingSend = (text, UUID())
                 await self.sendPending()
             } catch {
@@ -284,6 +341,10 @@ final class ChatVoiceViewController: UIViewController {
                 guard validOwner(), session.revision == revision else { return }
                 let reply = try await api.chatMessage(conversationId: conversation.id, messageId: id)
                 await refreshHistory()
+                if reply.status == "complete", reply.action != nil {
+                    planMessage = reply
+                    showPlanCard()
+                }
                 if speechEnabled { enqueueSpeech(reply) }
                 if !["queued", "generating"].contains(reply.status) {
                     if reply.status != "complete" { fail("chat.voiceMode.networkError"); return }
@@ -313,7 +374,8 @@ final class ChatVoiceViewController: UIViewController {
         operation = Task { [weak self] in await self?.sendPending() }
     }
     private func refreshHistory() async {
-        do {
+        for attempt in 0...2 {
+          do {
             let page = try await api.chatMessages(conversationId: conversation.id)
             guard !Task.isCancelled, validOwner(), session.phase != .closed else { return }
             // Full history remains in the SAME chat; the voice screen shows one current utterance.
@@ -322,10 +384,92 @@ final class ChatVoiceViewController: UIViewController {
                 transcript.text = latest
                 transcript.setContentOffset(.zero, animated: false)
             }
-        } catch {
-            // Preserve rendered history, but never hide the fact that refresh failed.
+            if resultBaseline == nil {
+                resultBaseline = Set(page.messages.filter { $0.event?.kind == "call_result" }.map(\.id))
+            } else if replyID == nil, !approvalInFlight, session.microphoneEnabled,
+                      session.phase == .listening, !capture.isPlaying,
+                      let result = page.messages.first(where: {
+                          $0.event?.kind == "call_result" && !(resultBaseline?.contains($0.id) ?? true)
+                              && !announcedResults.contains($0.id)
+                      }) {
+                announcedResults.insert(result.id) // Never replay after an ambiguous/billed stream.
+                resultOutput = true; replyFinished = true; replyID = result.id
+                measuredFirstSound = false; trace = nil
+                cursor = ChatVoiceSentenceCursor()
+                // Only the first short sentence; the full result remains in this chat.
+                if let part = cursor.next(result.text, complete: true) {
+                    speechQueue.append((result.id, part.offset, min(part.length, 400)))
+                    pumpSpeech()
+                }
+            }
+            return
+          } catch {
             guard !Task.isCancelled, validOwner(), session.phase != .closed else { return }
-            status.text = NSLocalizedString("chat.voiceMode.networkError", comment: "")
+            if ChatVoiceHistoryRetryPolicy.shouldRetry(error, attempt: attempt) {
+                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 350_000_000)
+                continue
+            }
+            log.notice("Background history refresh deferred; no user message was lost")
+            return
+          }
+        }
+    }
+    private func showPlanCard() {
+        guard let message = planMessage, let action = message.action else { planCard.isHidden = true; return }
+        let buttonKey = action.plan.executor == "hint" ? "chat.plan.saveHint" : "secretary.start_call"
+        planCard.setTitle("\(action.plan.targetPhone ?? "")\n\(action.plan.goal)\n\(NSLocalizedString(buttonKey, comment: ""))", for: .normal)
+        planCard.isHidden = action.result?.taskId != nil || (action.plan.executor == "hint" && action.status == "confirmed")
+        planCard.isEnabled = !approvalInFlight
+    }
+    @objc private func confirmCardByTap() {
+        guard let message = planMessage, !approvalInFlight, validOwner() else { return }
+        // The visible button explicitly names the action; tap is independent of voice readback.
+        let alert = UIAlertController(title: NSLocalizedString("chat.plan.confirm.title", comment: ""),
+            message: "\(message.action?.plan.targetPhone ?? "")\n\(message.action?.plan.goal ?? "")",
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("chat.plan.confirm.action", comment: ""), style: .default) {
+            [weak self] _ in
+            guard let self else { return }
+            self.interruptResponse()
+            self.operation = Task { [weak self] in await self?.confirmPlan(message) }
+        })
+        present(alert, animated: true)
+    }
+    private func confirmPlan(_ message: ChatMessage, approvalText: String? = nil) async {
+        guard !approvalInFlight, let action = message.action, validOwner(), session.phase != .closed else { return }
+        approvalInFlight = true; planCard.isEnabled = false
+        stopSpeech(); capture.stop()
+        session.microphone(false); session.transition(.thinking); update()
+        defer { approvalInFlight = false; showPlanCard() }
+        do {
+            let confirmation = try await api.confirmChatPlan(conversationId: conversation.id,
+                messageId: message.id, planHash: action.planHash, approvalText: approvalText)
+            try Task.checkCancellation()
+            guard validOwner(), session.phase != .closed, confirmation.dialed == false,
+                  confirmation.message.id == message.id,
+                  confirmation.message.conversationId == conversation.id,
+                  confirmation.message.action?.planHash == action.planHash else { throw APIError.decoding }
+            planMessage = confirmation.message
+            if confirmation.message.action?.result?.taskId != nil { planRunner.reconcileCreatedTask() }
+            if action.plan.executor == "secretary", confirmation.message.action?.result?.taskId == nil {
+                guard let review = confirmation.review,
+                      review.phoneNumber == action.plan.targetPhone else { throw APIError.decoding }
+                let task = try await planRunner.start(review, valid: { [weak self] in
+                    guard let self else { return false }
+                    return self.validOwner() && self.session.phase != .closed && !Task.isCancelled
+                })
+                guard validOwner(), session.phase != .closed else { return }
+                // A successful task POST, not generated text, is the acceptance evidence.
+                if task.status == "failed" { throw APIError.decoding }
+                planMessage = nil
+            }
+            session.microphone(true)
+            listen()
+            await refreshHistory()
+        } catch {
+            guard !Task.isCancelled, validOwner(), session.phase != .closed else { return }
+            fail(error is SecretaryOutgoingSetupUnavailable ? "secretary.review.setup_unavailable" : "chat.plan.requestFailed")
         }
     }
     private func pause() {
@@ -369,9 +513,12 @@ final class ChatVoiceViewController: UIViewController {
             guard caps.voiceMode?.available == true else {
                 mic.isEnabled = false; fail("chat.voiceMode.ownerOnly"); return
             }
+            guard (caps.voiceRevision ?? 0) >= 2 else {
+                mic.isEnabled = false; fail("chat.voiceMode.serverUpdate"); return
+            }
             speechEnabled = caps.voiceMode?.speech.available == true
             mic.isEnabled = speechEnabled
-            notice.text = NSLocalizedString(speechEnabled ? "chat.voiceMode.aiDisclosure" : "chat.voiceMode.noOutput", comment: "")
+            notice.text = NSLocalizedString(speechEnabled ? "chat.voiceMode.saved" : "chat.voiceMode.noOutput", comment: "")
         } catch {
             guard validOwner(), session.phase != .closed else { return }
             mic.isEnabled = false; fail("chat.voiceMode.networkError")
@@ -433,6 +580,11 @@ final class ChatVoiceViewController: UIViewController {
     }
     private func outputFinished() {
         guard replyFinished, speechTask == nil, speechQueue.isEmpty, session.phase != .closed else { return }
+        if speechEnabled, !resultOutput, measuredFirstSound, let message = planMessage, let action = message.action,
+           action.voiceReadback != nil, message.id == replyID {
+            session.didFinishAudibleReadback(messageID: message.id, planHash: action.planHash, revision: session.revision)
+        }
+        resultOutput = false
         replyID = nil
         if session.microphoneEnabled { session.transition(.listening) }
         else { session.transition(.muted) }
@@ -456,7 +608,7 @@ final class ChatVoiceViewController: UIViewController {
                     method: "POST", json: body, authenticated: true)
             } catch {
                 guard self.validOwner(), self.session.phase != .closed, self.session.revision == revision else { return }
-                self.status.text = NSLocalizedString("chat.voiceMode.metricsError", comment: "")
+                self.log.notice("Latency metric could not be saved")
             }
         }
     }

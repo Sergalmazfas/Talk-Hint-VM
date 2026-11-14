@@ -25,6 +25,11 @@ final class ChatVoiceCapture {
     private var started = 0.0
     private var lastSpeech = 0.0
     private var heardSpeech = false
+    private var inputPolicy = ChatVoiceInputPolicy()
+    private var outputActive = false
+    private var playbackTailUntil = 0.0
+    private var playbackInputPeak: Float = -100
+    private var playbackInputSamples = 0
     private var receivedInput = false
     private var previous: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
     private var playRevision = UUID()
@@ -163,6 +168,7 @@ final class ChatVoiceCapture {
         file = url
         recordingID = try sink.begin(url: url, format: format, tapID: inputTapID)
         heardSpeech = false; receivedInput = false
+        inputPolicy.reset(playback: outputActive || ProcessInfo.processInfo.systemUptime < playbackTailUntil)
         started = ProcessInfo.processInfo.systemUptime; lastSpeech = started
         supervisor?.awaitInput()
     }
@@ -175,9 +181,30 @@ final class ChatVoiceCapture {
         }
         supervisor?.receivedBuffer()
         onLevel?(min(1, max(0, Double(power + 60) / 60)))
-        if power > -38 {
-            lastSpeech = at
-            if !heardSpeech { heardSpeech = true; onSpeechBegan?() }
+        if outputActive {
+            playbackInputPeak = max(playbackInputPeak, power)
+            playbackInputSamples += 1
+        }
+        if inputPolicy.playback && !outputActive && at >= playbackTailUntil && !inputPolicy.accepted {
+            discardRecording()
+            return
+        }
+        let event = inputPolicy.sample(db: power, at: at)
+        if event == .candidate || event == .rejected {
+            // Drop the accumulated loudspeaker audio before retaining a candidate.
+            // Keep the policy's 400 ms clock, but replace WAV and recording identity.
+            discardRecording(preservingPolicy: true)
+            return
+        }
+        if inputPolicy.accepted {
+            lastSpeech = inputPolicy.lastSpeech ?? at
+            if !heardSpeech {
+                heardSpeech = true
+                if outputActive {
+                    log.info("Barge-in accepted; micDB=\(power, privacy: .public) sustainedMs=400")
+                }
+                onSpeechBegan?()
+            }
         }
         if heardSpeech && ChatVoicePausePolicy.wouldEnd(silence: at - lastSpeech,
             threshold: ChatVoicePausePolicy.currentSeconds) { finish() }
@@ -187,6 +214,12 @@ final class ChatVoiceCapture {
     }
     func finish() {
         guard heardSpeech, let url = file else { stop(); onError?(); return }
+        guard inputPolicy.canSubmit else {
+            log.info("Input discarded; speechMs=\(self.inputPolicy.speechDuration * 1000, privacy: .public)")
+            discardRecording()
+            return
+        }
+        log.info("Utterance ready; recordingMs=\((ProcessInfo.processInfo.systemUptime - self.started) * 1000, privacy: .public) speechMs=\(self.inputPolicy.speechDuration * 1000, privacy: .public)")
         let end = lastSpeech
         sink.end(); recordingID = nil; file = nil
         let bytes = try? Data(contentsOf: url)
@@ -196,10 +229,29 @@ final class ChatVoiceCapture {
         onUtterance?(bytes)
     }
 
+    private func discardRecording(preservingPolicy: Bool = false) {
+        guard let audio = engine, isRecording else { return }
+        let policy = inputPolicy
+        sink.end(); recordingID = nil
+        if let file { try? FileManager.default.removeItem(at: file) }
+        file = nil
+        do {
+            try beginRecording(audio)
+            if preservingPolicy { inputPolicy = policy }
+        } catch { stop(); onError?() }
+    }
+    func discardInput() { discardRecording() }
+
     /// Raw provider PCM s16le / 24k mono. It is NEVER buffered until a whole answer.
     func play(_ data: Data) throws {
         try ensureEngine()
         guard data.count % 2 == 0, data.count > 0 else { throw APIError.decoding }
+        if !outputActive {
+            outputActive = true
+            playbackInputPeak = -100; playbackInputSamples = 0
+            // A pre-output WAV must not later submit the assistant's own speech.
+            discardRecording()
+        }
         let frames = data.count / 2
         guard let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(frames)),
               let values = buffer.floatChannelData?[0] else { throw APIError.decoding }
@@ -223,7 +275,7 @@ final class ChatVoiceCapture {
             Task { @MainActor in
                 guard let self, self.playRevision == revision else { return }
                 self.queuedBuffers = max(0, self.queuedBuffers - 1)
-                if self.queuedBuffers == 0 && self.outputEnded { self.onPlaybackFinished?() }
+                if self.queuedBuffers == 0 && self.outputEnded { self.completeOutput() }
             }
         }
         if !player.isPlaying { player.play() }
@@ -245,14 +297,33 @@ final class ChatVoiceCapture {
     }
     func endOutput() {
         outputEnded = true
-        if queuedBuffers == 0 { onPlaybackFinished?() }
+        if queuedBuffers == 0 { completeOutput() }
+    }
+    private func completeOutput() {
+        logPlaybackInput()
+        outputActive = false
+        playbackTailUntil = ProcessInfo.processInfo.systemUptime + 0.25
+        if !inputPolicy.accepted { discardRecording() }
+        onPlaybackFinished?()
     }
     func stopPlayback() {
+        if outputActive { logPlaybackInput() }
         // Synchronous node.stop clears queued sound BEFORE cancellation/network awaits.
         playRevision = UUID(); player.stop(); queuedBuffers = 0; outputEnded = false
         firstRenderTimer?.invalidate(); firstRenderTimer = nil; renderedFirst = false
         scheduledFrames = 0; firstAudibleFrame = nil
+        if outputActive {
+            outputActive = false
+            playbackTailUntil = ProcessInfo.processInfo.systemUptime + 0.25
+            if !inputPolicy.accepted { discardRecording() }
+        }
         onOutputLevel?(0)
+    }
+    private func logPlaybackInput() {
+        // This is INPUT during output, not proof of "echo" versus a real user.
+        // Used by device diagnostics to calibrate, never automatic model text logging.
+        guard playbackInputSamples > 0 else { return }
+        log.info("Playback input; peakMicDB=\(self.playbackInputPeak, privacy: .public) buffers=\(self.playbackInputSamples, privacy: .public) gateDB=-25 gateMs=400")
     }
     func stop() {
         supervisor?.stop(); supervisor = nil

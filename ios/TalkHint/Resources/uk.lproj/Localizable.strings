@@ -16,6 +16,9 @@
 "chat.voiceMode.ready" = "Натисніть мікрофон, щоб почати";
 "chat.voiceMode.permission" = "Очікуємо дозвіл на мікрофон…";
 "chat.voiceMode.listening" = "Слухаю";
+"chat.voiceMode.saved" = "Розмова зберігається в чаті";
+"chat.voiceMode.stop" = "Зупинити відповідь";
+"chat.voiceMode.serverUpdate" = "Потрібне оновлення сервера. Спочатку опублікуйте підготовлене оновлення.";
 "chat.voiceMode.recognizing" = "Розпізнаю мовлення…";
 "chat.voiceMode.thinking" = "Готую відповідь…";
 "chat.voiceMode.speaking" = "Говорю";

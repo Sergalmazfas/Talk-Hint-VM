@@ -30,6 +30,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var attachmentCache: [String: ChatAttachment] = [:]
     private var capabilities: ChatCapabilities?
     private var currentConversation: ChatConversation?
+    private var pendingNewVoice = false
     private var outbox: ChatOutbox?
     private var pollTask: Task<Void, Never>?
     private var recorder: AVAudioRecorder?
@@ -487,6 +488,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             conversations = try await recent
             guard isCurrentOwner, !Task.isCancelled else { return }
             hasLoadedChat = true
+            if pendingNewVoice {
+                pendingNewVoice = false
+                beginNewVoiceConversation()
+                return
+            }
             if let selected = outbox?.selectedConversationId,
                let conversation = conversations.first(where: { $0.id == selected }) {
                 await open(conversation)
@@ -607,6 +613,15 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 return try await self.sendVoiceTurn(text: text, requestID: requestID, conversationID: id)
             }, attachments: { [weak self] in self?.pickFile() })
         present(controller, animated: true)
+    }
+
+    /// Main-screen voice always starts a NEW conversation. In-chat Orb keeps this one.
+    func beginNewVoiceConversation() {
+        guard isCurrentOwner, !CallManager.shared.hasPhoneAudioSession else { return }
+        guard hasLoadedChat else { pendingNewVoice = true; return }
+        guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true,
+              presentedViewController == nil, !dictation.isBusy, !isSending, !isUploadingAttachment else { return }
+        createNewChat(preservingDraft: false, onCreated: { [weak self] in self?.openVoiceMode() })
     }
 
     private func sendVoiceTurn(text: String, requestID: UUID, conversationID: String) async throws -> ChatMessagePair {

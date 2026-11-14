@@ -41,6 +41,11 @@ final class ChatVoiceScreenTests: XCTestCase {
             $0.accessibilityIdentifier == "chat-voice-microphone"
         }, file: file, line: line)
         XCTAssertFalse(mic.isEnabled, file: file, line: line)
+        let transcript = try XCTUnwrap(allViews(root).compactMap { $0 as? UITextView }.first {
+            $0.accessibilityIdentifier == "chat-voice-transcript"
+        }, file: file, line: line)
+        XCTAssertEqual(transcript.textContainer.maximumNumberOfLines, 2, file: file, line: line)
+        XCTAssertFalse(transcript.isScrollEnabled, file: file, line: line)
         let labels = allViews(root).compactMap { ($0 as? UILabel)?.text }
         XCTAssertTrue(labels.contains("TalkHint"), file: file, line: line)
         XCTAssertTrue(labels.contains(NSLocalizedString("chat.voiceMode.open", comment: "")),

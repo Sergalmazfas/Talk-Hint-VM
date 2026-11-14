@@ -17,7 +17,7 @@ class ChatVoiceSessionSourceContract(unittest.TestCase):
         self.assertIn('host == "talkhint.app"', policy)
         self.assertIn('host.hasSuffix(".replit.dev")', policy)
         self.assertIn("ChatVoiceClientPolicy.allows(origin: AppConfig.baseURL", parent)
-        self.assertEqual(parent.count("guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true"), 2)
+        self.assertEqual(parent.count("guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true"), 3)
         self.assertIn("orbButton.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true", parent)
         self.assertIn("modalPresentationStyle = .fullScreen", voice)
         self.assertIn('button("xmark"', voice)
@@ -50,9 +50,11 @@ class ChatVoiceSessionSourceContract(unittest.TestCase):
 
     def test_speech_is_capability_gated_and_cannot_start_a_call(self):
         voice = (CHAT / "ChatVoiceViewController.swift").read_text()
-        for term in ["audio.speech", "streamSpeech(", "AVSpeechSynthesizer",
-                     "confirmChatPlan(", "createSecretaryTask(", "didFinishAudibleReadback("]:
+        for term in ["audio.speech", "streamSpeech(", "AVSpeechSynthesizer", "createSecretaryTask("]:
             self.assertNotIn(term, voice)
+        self.assertIn("session.takeApproval(text:", voice)
+        self.assertIn("didFinishAudibleReadback(", voice)
+        self.assertIn("speechEnabled, !resultOutput, measuredFirstSound", voice)
         self.assertIn("chat.voiceMode.noOutput", voice)
         self.assertIn("caps.voiceMode?.speech.available == true", voice)
         self.assertIn("streamChatSpeech(", voice)
@@ -82,7 +84,7 @@ class ChatVoiceSessionSourceContract(unittest.TestCase):
             text = (ROOT / f"ios/TalkHint/Resources/{language}.lproj/Localizable.strings").read_text()
             values = re.findall(r'^"(chat\.voiceMode\.[^"]+)"\s*=', text, re.M)
             self.assertEqual(len(values), len(set(values)), language)
-            self.assertEqual(len(values), 30, language)
+            self.assertEqual(len(values), 33, language)
             keys.append(set(values))
         for other in keys[1:]:
             self.assertEqual(keys[0], other)

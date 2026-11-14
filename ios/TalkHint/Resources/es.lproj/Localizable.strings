@@ -16,6 +16,9 @@
 "chat.voiceMode.ready" = "Toca el micrófono para empezar";
 "chat.voiceMode.permission" = "Esperando permiso del micrófono…";
 "chat.voiceMode.listening" = "Escuchando";
+"chat.voiceMode.saved" = "La conversación se guarda en el chat";
+"chat.voiceMode.stop" = "Detener respuesta";
+"chat.voiceMode.serverUpdate" = "Se necesita actualizar el servidor. Publique primero la actualización preparada.";
 "chat.voiceMode.recognizing" = "Reconociendo tu voz…";
 "chat.voiceMode.thinking" = "Preparando una respuesta…";
 "chat.voiceMode.speaking" = "Hablando";

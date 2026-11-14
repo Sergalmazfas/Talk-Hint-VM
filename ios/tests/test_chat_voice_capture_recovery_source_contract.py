@@ -59,7 +59,7 @@ class ChatVoiceCaptureRecoverySourceContract(unittest.TestCase):
         for language in ["ru", "en", "es", "kk", "uk"]:
             raw = (ROOT / f"ios/TalkHint/Resources/{language}.lproj/Localizable.strings").read_text()
             voice = re.findall(r'^"chat\.voiceMode\.[^"]+"\s*=\s*"([^"]*)";', raw, re.M)
-            self.assertEqual(len(voice), 30, language)
+            self.assertEqual(len(voice), 33, language)
             self.assertFalse(any("ElevenLabs" in text or "Flash" in text or "Dev:" in text for text in voice), language)
 
     def test_native_recovery_fixture_uses_notifications_and_fake_operations(self):

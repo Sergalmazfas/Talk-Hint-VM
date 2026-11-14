@@ -1,6 +1,7 @@
 import Foundation
 
 struct ChatCapabilities: Decodable {
+    let voiceRevision: Int?
     struct AI: Decodable { let available: Bool; let model: String? }
     struct Attachments: Decodable { let available: Bool; let mimeTypes: [String]; let maxBytes: Int }
     struct Voice: Decodable { let available: Bool }
@@ -60,6 +61,8 @@ struct ChatCallPlan: Codable, Equatable {
 }
 
 struct ChatMessageAction: Codable, Equatable {
+    struct VoiceReadback: Codable, Equatable { let offset: Int; let length: Int }
+    var voiceReadback: VoiceReadback? = nil
     struct Result: Codable, Equatable {
         let id: String?
         let status: String?
@@ -215,9 +218,12 @@ extension APIClient {
         return message
     }
 
-    func confirmChatPlan(conversationId: String, messageId: String, planHash: String) async throws -> ChatPlanConfirmation {
+    func confirmChatPlan(conversationId: String, messageId: String, planHash: String,
+                         approvalText: String? = nil) async throws -> ChatPlanConfirmation {
+        var body: [String: Any] = ["planHash": planHash]
+        if let approvalText { body["approvalText"] = approvalText }
         let data = try await request("/api/chat-v1/conversations/\(conversationId)/messages/\(messageId)/confirm-plan",
-                                     method: "POST", json: ["planHash": planHash], authenticated: true)
+                                     method: "POST", json: body, authenticated: true)
         return try JSONDecoder().decode(ChatPlanConfirmation.self, from: data)
     }
 

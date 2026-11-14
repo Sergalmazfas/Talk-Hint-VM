@@ -85,6 +85,11 @@ final class HomeViewController: UIViewController {
 
     // MARK: - Layout
 
+    @objc private func newVoiceChatTapped() {
+        guard !CallManager.shared.hasPhoneAudioSession else { return }
+        (tabBarController as? TalkHintTabBarController)?.openChat(newVoice: true)
+    }
+
     private func buildUI() {
         // Header: "Calls" + gear.
         let titleLabel = UILabel()
@@ -127,6 +132,14 @@ final class HomeViewController: UIViewController {
         taskHistory.isHidden = !secretaryMode
         let spacerL = UIView()
         let spacerR = UIView()
+        let voiceChat = UIButton(type: .system)
+        voiceChat.setImage(UIImage(systemName: "waveform.circle"), for: .normal)
+        voiceChat.setTitle(NSLocalizedString("chat.voiceMode.open", comment: ""), for: .normal)
+        voiceChat.accessibilityLabel = NSLocalizedString("chat.voiceMode.open", comment: "")
+        voiceChat.accessibilityIdentifier = "home-new-voice-chat"
+        voiceChat.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        voiceChat.isHidden = callMode != .hint || secretaryMode
+        voiceChat.addTarget(self, action: #selector(newVoiceChatTapped), for: .touchUpInside)
         let header = UIStackView(arrangedSubviews: [titleLabel, spacerL, headerPrepare, spacerR, taskHistory, gear])
         header.axis = .horizontal
         header.alignment = .center
@@ -290,7 +303,7 @@ final class HomeViewController: UIViewController {
         let goalRow = UIStackView(arrangedSubviews: [UIView(), goalBadge])
         goalRow.isHidden = callMode != .hint && !secretaryMode
         let root = UIStackView(arrangedSubviews: [
-            header, fieldCard, goalRow, resumeSecretaryButton, secretaryLanguageButton, copilotLanguageButton,
+            header, voiceChat, fieldCard, goalRow, resumeSecretaryButton, secretaryLanguageButton, copilotLanguageButton,
             keypad, recentsHeader, recentsStack
         ])
         root.axis = .vertical
