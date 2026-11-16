@@ -727,6 +727,7 @@
 "chat.plan.reviewSecretary" = "Переглянути з Катею";
 "chat.plan.saved" = "Збережено для Hint";
 "chat.plan.confirm.title" = "Перевірте саме цей план";
+"chat.plan.missing" = "Бракує: %@";
 "chat.plan.confirm.message" = "Перегляньте повний план нижче. Підтвердження не починає дзвінок.\n\n%@";
 "chat.plan.confirm.action" = "Підтвердити план";
 "chat.plan.stale" = "План змінився або застарів. Попросіть асистента підготувати його знову та перевірте оновлену версію.";

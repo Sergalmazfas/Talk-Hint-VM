@@ -1111,7 +1111,8 @@ final class HomeViewController: UIViewController {
                 format: NSLocalizedString("secretary.review.environment", comment: ""),
                 NSLocalizedString(environmentKey, comment: "")),
             String(format: NSLocalizedString("secretary.review.destination", comment: ""), destination),
-            String(format: NSLocalizedString("secretary.review.instruction", comment: ""), draft.instruction),
+            String(format: NSLocalizedString("secretary.review.instruction", comment: ""),
+                   ChatPlanPresentation.instruction(draft.instruction)),
         ]
         if draft.voiceProvider == .retell, let setup {
             let persona = setup.assignment.map {

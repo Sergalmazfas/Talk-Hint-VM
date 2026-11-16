@@ -1034,6 +1034,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         state.textColor = .secondaryLabel
         state.adjustsFontForContentSizeCategory = true
         content.addArrangedSubview(state)
+        if let missing = ChatPlanPresentation.missing(action.warnings) {
+            let advisory = UILabel()
+            advisory.font = .preferredFont(forTextStyle: .footnote)
+            advisory.adjustsFontForContentSizeCategory = true
+            advisory.textColor = .secondaryLabel
+            advisory.numberOfLines = 0
+            advisory.text = String(format: NSLocalizedString("chat.plan.missing", comment: ""), missing)
+            advisory.accessibilityIdentifier = "chat-plan-missing-\(message.id)"
+            content.addArrangedSubview(advisory)
+        }
         addPlanSection(NSLocalizedString("chat.plan.goal", comment: ""), values: [action.plan.goal], to: content)
         addPlanSection(NSLocalizedString("chat.plan.checklist", comment: ""),
                        values: action.plan.sayAsk.enumerated().map { "\($0.offset + 1). \($0.element)" },

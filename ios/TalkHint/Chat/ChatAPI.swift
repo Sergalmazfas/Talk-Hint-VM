@@ -61,6 +61,12 @@ struct ChatCallPlan: Codable, Equatable {
 }
 
 struct ChatMessageAction: Codable, Equatable {
+    struct Warning: Codable, Equatable {
+        let field: String
+        let labels: [String: String]
+        let reason: String
+    }
+    var warnings: [Warning]? = nil
     struct VoiceReadback: Codable, Equatable { let offset: Int; let length: Int }
     var voiceReadback: VoiceReadback? = nil
     struct Result: Codable, Equatable {

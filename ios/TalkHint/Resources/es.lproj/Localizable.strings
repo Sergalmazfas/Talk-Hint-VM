@@ -727,6 +727,7 @@
 "chat.plan.reviewSecretary" = "Revisar con Katya";
 "chat.plan.saved" = "Guardado para Hint";
 "chat.plan.confirm.title" = "Revisa este plan exacto";
+"chat.plan.missing" = "Falta: %@";
 "chat.plan.confirm.message" = "Revisa el plan completo a continuación. Confirmarlo no inicia una llamada.\n\n%@";
 "chat.plan.confirm.action" = "Confirmar plan";
 "chat.plan.stale" = "El plan cambió o ya no está vigente. Pide al asistente que lo prepare de nuevo y revisa la versión actualizada.";
