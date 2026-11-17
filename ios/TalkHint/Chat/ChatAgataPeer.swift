@@ -12,6 +12,7 @@ final class ChatAgataPeer {
     private var previousEnergy = 0.0
     private var previousDuration = 0.0
     private var disconnected: Task<Void, Never>?
+    private let audioRouting = ChatAgataAudioRouting()
     var onFailure: (() -> Void)?
     var onLevels: ((Double, Double) -> Void)?
     var onCandidate: ((ChatAgataIceCandidate) -> Void)?
@@ -46,6 +47,7 @@ final class ChatAgataPeer {
         diagnostic.record(.offer_start)
         guard !CallManager.shared.hasPhoneAudioSession else { throw APIError.decoding }
         _ = Self.ssl
+        audioRouting.start()
         let audio = RTCAudioSession.sharedInstance()
         audio.lockForConfiguration()
         do {
@@ -57,7 +59,11 @@ final class ChatAgataPeer {
             // WebRTC owns activation/deactivation. A second manual activation
             // would leak its activation counter or later deactivate CallKit.
             audio.unlockForConfiguration()
-        } catch { audio.unlockForConfiguration(); throw error }
+        } catch {
+            audio.unlockForConfiguration()
+            audioRouting.stop()
+            throw error
+        }
         // Category/mode are settled BEFORE WebRTC creates its audio device.
         factory = RTCPeerConnectionFactory()
         let config = RTCConfiguration()
@@ -143,6 +149,7 @@ final class ChatAgataPeer {
         let dt = v.1 - previousDuration, de = v.0 - previousEnergy
         previousEnergy = v.0; previousDuration = v.1
         let output = dt > 0 && de >= 0 ? sqrt(de / dt) : 0
+        audioRouting.sample(receivedLevel: output)
         onLevels?(v.2.isFinite ? v.2 : 0, output.isFinite ? output : 0)
     }
     func close() {
@@ -152,6 +159,7 @@ final class ChatAgataPeer {
         channel?.close(); channel = nil
         connection?.close(); connection = nil
         track = nil; factory = nil
+        audioRouting.stop()
         // No application-level setActive(false): do not deactivate CallKit.
     }
 }
