@@ -25,6 +25,8 @@ final class ChatAgataSession {
     private let conversationId: String
     private let validOwner: () -> Bool
     private let peer = ChatAgataPeer()
+    private let trickle = ChatAgataTrickle()
+    private var diagnostic = ChatAgataDiagnostics()
     private var ticket: ChatAgataTicket?
     private var signalId: String?
     private var monitor: Task<Void, Never>?
@@ -56,12 +58,17 @@ final class ChatAgataSession {
             try await api.createChatAgata(conversationId: conversationId, requestId: requestId, language: language)
         }.value
         ticket = created
+        diagnostic = ChatAgataDiagnostics(sessionId: created.sessionId, callId: created.callId)
+        peer.diagnostic = diagnostic
+        diagnostic.record(.admission_complete)
         guard validOwner(), !closed, !Task.isCancelled else {
             try? await api.chatAgataOperation("stop", sessionId: created.sessionId)
             ticket = nil
             throw CancellationError()
         }
         peer.onFailure = { [weak self] in self?.failed() }
+        peer.onCandidate = { [weak self] candidate in self?.trickle.enqueue(candidate) }
+        trickle.onFailure = { [weak self] error in self?.diagnostic.record(.candidate_failed, error: error) }
         peer.onLevels = { [weak self] input, output in
             guard let self, !self.closed else { return }
             let state = self.audioState.sample(input: input, output: output,
@@ -70,23 +77,46 @@ final class ChatAgataSession {
         }
         do {
             let offer = try await peer.offer(ice: created.iceServers)
+            guard validOwner(), !closed, !Task.isCancelled else { throw CancellationError() }
             let request = try ChatAgataSignaling.request(ticket: created, sdp: offer)
+            diagnostic.record(.sdp_post_start)
             // Finish a late signaling receipt so closing the screen can delete it.
             let network = network
             let (data, response) = try await Task { try await network.data(for: request) }.value
-            guard let http = response as? HTTPURLResponse, http.statusCode == 201, data.count < 262_144,
+            diagnostic.record(.sdp_post_response, httpStatus: (response as? HTTPURLResponse)?.statusCode ?? 0)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 201 else {
+                throw ChatAgataConnectionError.signalingHTTP
+            }
+            guard data.count < 262_144,
                   let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let id = body["session_id"] as? String, APIClient.validAgataComponent(id),
-                  let sdp = body["sdp"] as? String, sdp.hasPrefix("v=0") else { throw APIError.decoding }
+                  let sdp = body["sdp"] as? String, sdp.hasPrefix("v=0") else {
+                throw ChatAgataConnectionError.signalingPayload
+            }
             signalId = id
             guard validOwner(), !closed, !Task.isCancelled else {
                 cleanRemote(created, signal: id); signalId = nil
                 throw CancellationError()
             }
-            try await peer.answer(sdp)
+            try await peer.setAnswer(sdp)
+            guard validOwner(), !closed, !Task.isCancelled else { throw CancellationError() }
+            trickle.activate { [weak self] candidate in
+                guard let self, !self.closed, self.validOwner(), !Task.isCancelled,
+                      self.signalId == id else { throw CancellationError() }
+                let r = try ChatAgataSignaling.candidateRequest(ticket: created, sessionId: id, candidate: candidate)
+                let (_, result) = try await self.network.data(for: r)
+                guard !self.closed, self.validOwner(), !Task.isCancelled else { throw CancellationError() }
+                let code = (result as? HTTPURLResponse)?.statusCode ?? 0
+                self.diagnostic.record(.candidate_patch_response, httpStatus: code)
+                guard (200..<300).contains(code) else { throw ChatAgataConnectionError.candidateHTTP }
+            }
+            try await peer.waitUntilConnected()
+            guard validOwner(), !closed, !Task.isCancelled else { throw CancellationError() }
+            diagnostic.record(.joined_start)
             try await api.chatAgataOperation("joined", sessionId: created.sessionId)
             guard validOwner(), !closed, !Task.isCancelled else { throw CancellationError() }
             peer.microphone(true)
+            diagnostic.record(.joined_complete)
             onState?(.listening, 0)
             meter = Task { [weak self] in
                 while !Task.isCancelled {
@@ -101,7 +131,10 @@ final class ChatAgataSession {
                 guard !Task.isCancelled else { return }
                 self?.stop(); self?.onEnded?(false)
             }
-        } catch { stop(); throw error }
+        } catch {
+            diagnostic.record(.connect_failed, error: error)
+            stop(); throw error
+        }
     }
     private func poll() async {
         var misses = 0, tick = 0
@@ -130,10 +163,16 @@ final class ChatAgataSession {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }
-    private func failed() { guard !closed else { return }; stop(); onError?() }
+    private func failed() {
+        guard !closed else { return }
+        diagnostic.record(.peer_failed)
+        stop(); onError?()
+    }
     func stop() {
         guard !closed else { return }
         closed = true
+        diagnostic.record(.stop)
+        trickle.stop()
         peer.close() // Immediate local microphone/playback stop, BEFORE HTTP cleanup.
         monitor?.cancel(); meter?.cancel(); deadline?.cancel()
         monitor = nil; meter = nil; deadline = nil

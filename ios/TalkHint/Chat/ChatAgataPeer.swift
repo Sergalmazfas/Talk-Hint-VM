@@ -14,7 +14,9 @@ final class ChatAgataPeer {
     private var disconnected: Task<Void, Never>?
     var onFailure: (() -> Void)?
     var onLevels: ((Double, Double) -> Void)?
-    private lazy var delegate = AgataPeerDelegate { [weak self] failed, lost in
+    var onCandidate: ((ChatAgataIceCandidate) -> Void)?
+    var diagnostic = ChatAgataDiagnostics()
+    private lazy var delegate = AgataPeerDelegate(changed: { [weak self] failed, lost in
         Task { @MainActor in
             guard let self, self.connection != nil else { return }
             self.disconnected?.cancel()
@@ -27,9 +29,21 @@ final class ChatAgataPeer {
                 }
             }
         }
-    }
+    }, candidate: { [weak self] value in
+        Task { @MainActor in
+            guard let self, self.connection != nil else { return }
+            self.diagnostic.record(.candidate_received)
+            self.onCandidate?(value)
+        }
+    }, state: { [weak self] stage, state in
+        Task { @MainActor in
+            guard let self, self.connection != nil else { return }
+            self.diagnostic.record(stage, state: state)
+        }
+    })
 
     func offer(ice: [ChatAgataTicket.IceServer]) async throws -> String {
+        diagnostic.record(.offer_start)
         guard !CallManager.shared.hasPhoneAudioSession else { throw APIError.decoding }
         _ = Self.ssl
         let audio = RTCAudioSession.sharedInstance()
@@ -75,32 +89,37 @@ final class ChatAgataPeer {
                 if let e { c.resume(throwing: e) } else { c.resume() }
             }
         }
-        // Non-trickle initial offer: the same gateway contract already exercised in Dev.
-        for _ in 0..<80 {
-            try Task.checkCancellation()
-            if pc.iceGatheringState == .complete { break }
-            try await Task.sleep(nanoseconds: 100_000_000)
-        }
-        guard connection === pc, pc.iceGatheringState == .complete,
+        // Retell's gateway uses trickle ICE. Do not wait for every STUN/TURN
+        // route before POSTing: cellular gathering can exceed eight seconds.
+        try Task.checkCancellation()
+        guard connection === pc,
               let sdp = pc.localDescription?.sdp else { throw APIError.decoding }
+        diagnostic.record(.local_sdp_ready, state: Int(pc.iceGatheringState.rawValue))
         return sdp
     }
 
-    func answer(_ sdp: String) async throws {
+    func setAnswer(_ sdp: String) async throws {
         guard let pc = connection else { throw APIError.decoding }
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
             pc.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { e in
                 if let e { c.resume(throwing: e) } else { c.resume() }
             }
         }
+        diagnostic.record(.remote_sdp_ready)
+    }
+    func waitUntilConnected() async throws {
+        guard let pc = connection else { throw CancellationError() }
         for _ in 0..<120 {
             try Task.checkCancellation()
             guard connection === pc else { throw CancellationError() }
             if pc.iceConnectionState == .connected || pc.iceConnectionState == .completed { return }
-            if pc.iceConnectionState == .failed || pc.iceConnectionState == .closed { break }
+            if pc.iceConnectionState == .failed || pc.iceConnectionState == .closed {
+                throw ChatAgataConnectionError.iceFailed
+            }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
-        throw APIError.decoding
+        diagnostic.record(.ice_timeout, state: Int(pc.iceConnectionState.rawValue))
+        throw ChatAgataConnectionError.iceTimeout
     }
     func microphone(_ enabled: Bool) { track?.isEnabled = enabled }
 
@@ -127,6 +146,7 @@ final class ChatAgataPeer {
         onLevels?(v.2.isFinite ? v.2 : 0, output.isFinite ? output : 0)
     }
     func close() {
+        onCandidate = nil
         disconnected?.cancel(); disconnected = nil
         track?.isEnabled = false
         channel?.close(); channel = nil
@@ -139,18 +159,29 @@ final class ChatAgataPeer {
 /// RTC callbacks stay off the UI actor; only a value crosses to the main actor.
 private final class AgataPeerDelegate: NSObject, RTCPeerConnectionDelegate {
     let changed: @Sendable (Bool, Bool) -> Void
-    init(_ changed: @escaping @Sendable (Bool, Bool) -> Void) { self.changed = changed }
+    let candidate: @Sendable (ChatAgataIceCandidate) -> Void
+    let state: @Sendable (ChatAgataDiagnostics.Stage, Int) -> Void
+    init(changed: @escaping @Sendable (Bool, Bool) -> Void,
+         candidate: @escaping @Sendable (ChatAgataIceCandidate) -> Void,
+         state: @escaping @Sendable (ChatAgataDiagnostics.Stage, Int) -> Void) {
+        self.changed = changed; self.candidate = candidate; self.state = state
+    }
     func peerConnection(_ p: RTCPeerConnection, didChange s: RTCSignalingState) {}
     func peerConnection(_ p: RTCPeerConnection, didAdd s: RTCMediaStream) {}
     func peerConnection(_ p: RTCPeerConnection, didRemove s: RTCMediaStream) {}
     func peerConnectionShouldNegotiate(_ p: RTCPeerConnection) {}
     func peerConnection(_ p: RTCPeerConnection, didChange s: RTCIceConnectionState) {
+        state(.ice_connection, Int(s.rawValue))
         if s == .failed { changed(true, false) }
         else if s == .disconnected { changed(false, true) }
         else if s == .connected || s == .completed { changed(false, false) }
     }
-    func peerConnection(_ p: RTCPeerConnection, didChange s: RTCIceGatheringState) {}
-    func peerConnection(_ p: RTCPeerConnection, didGenerate c: RTCIceCandidate) {}
+    func peerConnection(_ p: RTCPeerConnection, didChange s: RTCIceGatheringState) {
+        state(.ice_gathering, Int(s.rawValue))
+    }
+    func peerConnection(_ p: RTCPeerConnection, didGenerate c: RTCIceCandidate) {
+        candidate(ChatAgataIceCandidate(candidate: c.sdp, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex))
+    }
     func peerConnection(_ p: RTCPeerConnection, didRemove c: [RTCIceCandidate]) {}
     func peerConnection(_ p: RTCPeerConnection, didOpen d: RTCDataChannel) {}
 }

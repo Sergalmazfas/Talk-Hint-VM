@@ -70,6 +70,17 @@ extension APIClient {
 
 /// The short-lived token is sent ONLY to Retell, never persisted or logged.
 enum ChatAgataSignaling {
+    static func candidateRequest(ticket: ChatAgataTicket, sessionId: String,
+                                 candidate: ChatAgataIceCandidate) throws -> URLRequest {
+        guard candidate.isValid else { throw ChatAgataConnectionError.invalidCandidate }
+        var r = try request(ticket: ticket, sdp: "", sessionId: sessionId)
+        r.httpMethod = "PATCH"
+        r.timeoutInterval = 5
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        struct Envelope: Encodable { let candidate: ChatAgataIceCandidate }
+        r.httpBody = try JSONEncoder().encode(Envelope(candidate: candidate))
+        return r
+    }
     static func request(ticket: ChatAgataTicket, sdp: String, sessionId: String? = nil) throws -> URLRequest {
         guard APIClient.validAgataComponent(ticket.callId),
               sessionId.map(APIClient.validAgataComponent) ?? true else { throw APIError.decoding }
