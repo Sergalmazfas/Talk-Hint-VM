@@ -112,11 +112,12 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let createdAt: String
     let errorCode: String?
     var action: ChatMessageAction?
+    var memoryAction: ChatMemoryAction? = nil
     var event: Event? = nil
 
     init(id: String, conversationId: String, sequence: Int, role: String, text: String, status: String,
          clientRequestId: String?, attachmentIds: [String], createdAt: String, errorCode: String?,
-         action: ChatMessageAction? = nil) {
+         action: ChatMessageAction? = nil, memoryAction: ChatMemoryAction? = nil) {
         self.id = id
         self.conversationId = conversationId
         self.sequence = sequence
@@ -128,6 +129,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
         self.createdAt = createdAt
         self.errorCode = errorCode
         self.action = action
+        self.memoryAction = memoryAction
     }
 }
 

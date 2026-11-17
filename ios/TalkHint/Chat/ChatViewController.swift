@@ -46,6 +46,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var attachmentRetry: (name: String, mime: String, data: Data, requestId: UUID)?
     private var isUploadingAttachment = false
     private var confirmingPlanMessageIDs = Set<String>()
+    private var decidingMemoryMessageIDs = Set<String>()
     private var previewURL: URL?
     private var previewFiles: [ObjectIdentifier: URL] = [:]
     private var recordingLimitTask: Task<Void, Never>?
@@ -73,6 +74,14 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var pendingScrollRestore: CGPoint?
     private var resumeTask: Task<Void, Never>?
     #if DEBUG
+    /// Offline native test fixture: loading this never sends, saves or starts audio.
+    func applyOfflineMemoryFixture(conversation: ChatConversation, messages: [ChatMessage]) {
+        loadViewIfNeeded()
+        currentConversation = conversation
+        self.messages = messages
+        renderMessages()
+    }
+
     var onOfflinePreviewLoaded: (() -> Void)?
     private(set) var offlinePreviewReady = false
 
@@ -975,6 +984,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             if message.role == "assistant", isCompleteAssistantMessage(message), let action = message.action {
                 messagesStack.addArrangedSubview(callPlanCard(for: message, action: action))
             }
+            if message.role == "assistant", isCompleteAssistantMessage(message), let memory = message.memoryAction {
+                messagesStack.addArrangedSubview(ChatMemoryCardView(action: memory,
+                    pending: decidingMemoryMessageIDs.contains(message.id),
+                    onSave: { [weak self] in self?.decideMemory(message, decision: .save) },
+                    onCancel: { [weak self] in self?.decideMemory(message, decision: .cancel) }))
+            }
             if ["failed", "interrupted"].contains(message.status) {
                 let label = UILabel(); label.text = NSLocalizedString("chat.reply.incomplete", comment: "")
                 label.textColor = .secondaryLabel; label.font = .preferredFont(forTextStyle: .caption1)
@@ -1193,6 +1208,60 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 } else {
                     showPlanError(NSLocalizedString("chat.plan.requestFailed", comment: ""))
                 }
+            }
+        }
+    }
+
+    private func decideMemory(_ message: ChatMessage, decision: ChatMemoryDecision) {
+        guard isCurrentOwner, currentConversation?.id == message.conversationId,
+              let index = messages.firstIndex(where: { $0.id == message.id }),
+              isCompleteAssistantMessage(messages[index]),
+              let action = messages[index].memoryAction,
+              action.memoryHash == message.memoryAction?.memoryHash,
+              !decidingMemoryMessageIDs.contains(message.id) else { return }
+        guard action.canDecide() else { renderMessages(); return }
+        decidingMemoryMessageIDs.insert(message.id)
+        renderMessages()
+        Task {
+            defer {
+                decidingMemoryMessageIDs.remove(message.id)
+                if isCurrentOwner, currentConversation?.id == message.conversationId { renderMessages() }
+            }
+            guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+            do {
+                let response = try await api.decideChatMemory(conversationId: message.conversationId,
+                    messageId: message.id, memoryHash: action.memoryHash, decision: decision)
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                guard response.dialed == false,
+                      response.message.id == message.id, response.message.conversationId == message.conversationId,
+                      response.message.memoryAction?.memoryHash == action.memoryHash,
+                      response.message.memoryAction?.status == (decision == .save ? "saved" : "cancelled"),
+                      let current = messages.firstIndex(where: { $0.id == message.id }),
+                      messages[current].memoryAction?.memoryHash == action.memoryHash else {
+                    showPlanError(NSLocalizedString("chat.memory.failed", comment: "")); return
+                }
+                messages[current] = response.message
+            } catch {
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                // The server persists stale/expired before returning 409. Refresh even after
+                // a lost Save response: an idempotent applied Save may already have succeeded.
+                if let fresh = try? await api.chatMessage(conversationId: message.conversationId, messageId: message.id),
+                   isCurrentOwner, currentConversation?.id == message.conversationId,
+                   fresh.id == message.id, fresh.conversationId == message.conversationId,
+                   fresh.memoryAction?.memoryHash == action.memoryHash,
+                   let current = messages.firstIndex(where: { $0.id == message.id }) {
+                    messages[current] = fresh
+                    if ["saved", "cancelled", "expired", "stale"].contains(fresh.memoryAction?.status ?? "") { return }
+                }
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                if let apiError = error as? APIError, case .http(_, let detail) = apiError,
+                   let status = ChatMemoryAction.rejectionStatus(for: detail),
+                   let current = messages.firstIndex(where: { $0.id == message.id }),
+                   messages[current].memoryAction?.memoryHash == action.memoryHash {
+                    messages[current].memoryAction?.status = status
+                    return
+                }
+                showPlanError(NSLocalizedString("chat.memory.failed", comment: ""))
             }
         }
     }
