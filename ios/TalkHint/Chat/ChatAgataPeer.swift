@@ -52,8 +52,8 @@ final class ChatAgataPeer {
             var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker]
             if #available(iOS 26.0, *) { options.insert(.allowBluetoothHFP) }
             else { options.insert(.allowBluetooth) }
-            try audio.setCategory(AVAudioSession.Category.playAndRecord.rawValue, with: options)
-            try audio.setMode(AVAudioSession.Mode.voiceChat.rawValue)
+            try audio.setCategory(.playAndRecord, with: options)
+            try audio.setMode(.voiceChat)
             // WebRTC owns activation/deactivation. A second manual activation
             // would leak its activation counter or later deactivate CallKit.
             audio.unlockForConfiguration()
