@@ -1,0 +1,6 @@
+"title" = "Ágata";
+"connecting" = "Conectando…";
+"error" = "Conversación de voz interrumpida. Comprueba la conexión y vuelve a abrirla.";
+"budget" = "Límite diario de voz alcanzado. El chat de texto sigue disponible.";
+"ended" = "Conversación de voz finalizada";
+"stop" = "Detener conversación";

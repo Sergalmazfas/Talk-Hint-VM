@@ -602,16 +602,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         persistDraft()
         view.endEditing(true)
         let id = conversation.id
-        let controller = ChatVoiceViewController(api: api, conversation: conversation,
+        // Retell transport only; the old ChatVoiceViewController remains for rollback.
+        let controller = ChatAgataViewController(api: api, conversation: conversation,
             validOwner: { [weak self] in
                 guard let self else { return false }
                 return self.isCurrentOwner && self.currentConversation?.id == id
-            }, submit: { [weak self] text, requestID in
-                guard let self, self.isCurrentOwner, self.currentConversation?.id == id else {
-                    throw APIError.decoding
-                }
-                return try await self.sendVoiceTurn(text: text, requestID: requestID, conversationID: id)
-            }, attachments: { [weak self] in self?.pickFile() })
+            })
         present(controller, animated: true)
     }
 

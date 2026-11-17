@@ -29,6 +29,9 @@ settings:
     AppDev:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG TALKHINT_CHAT_LIVE_DEV TALKHINT_APP_DEV"
 packages:
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: "156.0.0"
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
     from: "6.11.0"
@@ -63,6 +66,8 @@ targets:
           PRODUCT_NAME: TalkHintAppDev
           TALKHINT_OAUTH_SCHEME: talkhint-chatdev
     dependencies:
+      - package: WebRTC
+        product: WebRTC
       - package: TwilioVoice
         product: TwilioVoice
   TalkHintTests:

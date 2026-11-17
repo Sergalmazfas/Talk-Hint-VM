@@ -1,0 +1,6 @@
+"title" = "Agata";
+"connecting" = "Connecting…";
+"error" = "Voice conversation interrupted. Check your connection and reopen it.";
+"budget" = "Daily voice limit reached. Text chat is still available.";
+"ended" = "Voice conversation ended";
+"stop" = "Stop conversation";
