@@ -52,6 +52,19 @@ final class ChatMemoryCardView: UIView {
                 }
                 stack.addArrangedSubview(label(header, .caption1))
                 let text = label(snapshot.displayText)
+                if patch.after.state["documentOnly"] == .bool(true) {
+                    let attributed = NSMutableAttributedString(string: snapshot.displayText)
+                    var location = 0
+                    for line in snapshot.displayText.components(separatedBy: "\n") {
+                        let length = (line as NSString).length
+                        if line.hasPrefix("⚠") {
+                            attributed.addAttribute(.foregroundColor, value: UIColor.systemOrange,
+                                range: NSRange(location: location, length: length))
+                        }
+                        location += length + 1
+                    }
+                    text.attributedText = attributed
+                }
                 text.accessibilityIdentifier = "chat.memory.\(key)"
                 stack.addArrangedSubview(text)
             }
@@ -62,7 +75,7 @@ final class ChatMemoryCardView: UIView {
             let date = sourceDate.flatMap(ChatMemoryAction.date)
             let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .short
             let dateText = date.map { formatter.string(from: $0) } ?? Self.tr("unknown")
-            let sourceText = ["user", "chat", "call", "user_form"].contains(kind) ? Self.tr("source.\(kind)") : Self.tr("unknown")
+            let sourceText = ["user", "chat", "call", "user_form", "document"].contains(kind) ? Self.tr("source.\(kind)") : Self.tr("unknown")
             stack.addArrangedSubview(label("\(Self.tr("source")): \(sourceText) · \(dateText)", .caption1))
             let certainty = state["certainty"]?.string ?? "unknown"
             stack.addArrangedSubview(label(Self.tr(["confirmed", "assumed"].contains(certainty) ? certainty : "unknown"), .caption1))

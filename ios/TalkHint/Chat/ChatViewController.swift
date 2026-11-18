@@ -491,7 +491,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             capabilities = try await caps
             orbButton.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true
             guard isCurrentOwner else { return }
-            fileButton.isEnabled = (capabilities?.attachments.available ?? false) && attachments.count < 3
+            fileButton.isEnabled = (capabilities?.attachments.available ?? false)
             voiceButton.isEnabled = capabilities?.voice.available ?? true
             updateComposerControls()
             conversations = try await recent
@@ -672,7 +672,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             cancelDictation()
             persistDraft()
             attachmentRetry = nil
-            fileButton.isEnabled = (capabilities?.attachments.available ?? false) && attachments.count < 3
+            fileButton.isEnabled = (capabilities?.attachments.available ?? false)
             retryButton.isHidden = true
         }
         let changedConversation = currentConversation?.id != conversation.id
@@ -1450,16 +1450,20 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     @objc private func pickFile() {
         guard isCurrentOwner, !dictation.isBusy else { return }
-        guard attachments.count < 3 else {
-            statusLabel.text = NSLocalizedString("chat.file.limit", comment: "")
-            return
-        }
         guard !isUploadingAttachment else { return }
         if let pending = attachmentRetry {
             uploadAttachment(name: pending.name, mime: pending.mime, data: pending.data, requestId: pending.requestId)
             return
         }
         let menu = UIAlertController(title: NSLocalizedString("chat.attach", comment: ""), message: NSLocalizedString("chat.attach.sourcesNote", comment: ""), preferredStyle: .actionSheet)
+        menu.addAction(UIAlertAction(title: NSLocalizedString("chat.documents.title", comment: ""), style: .default) { [weak self] _ in
+            self?.openDocuments()
+        })
+        if !attachments.isEmpty, attachments.allSatisfy({ $0.mimeType != "text/plain" }) {
+            menu.addAction(UIAlertAction(title: NSLocalizedString("chat.documents.recognize", comment: ""), style: .default) { [weak self] _ in
+                self?.recognizeDocuments()
+            })
+        }
         for key in ["chat.attach.camera", "chat.attach.photos"] {
             let action = UIAlertAction(title: NSLocalizedString(key, comment: "") + " — " + NSLocalizedString("chat.attach.notAvailable", comment: ""), style: .default, handler: nil)
             action.isEnabled = false
@@ -1476,9 +1480,43 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         menu.popoverPresentationController?.sourceRect = fileButton.bounds
         present(menu, animated: true)
     }
+    private func openDocuments() {
+        guard isCurrentOwner else { return }
+        guard let conversation = currentConversation else {
+            createNewChat(preservingDraft: true) { [weak self] in self?.openDocuments() }; return
+        }
+        let panel = ChatDocumentsViewController(api: api, conversation: conversation.id,
+            validOwner: { [weak self] in self?.isCurrentOwner == true },
+            download: { [weak self] id in self?.openAttachment(id: id) })
+        present(UINavigationController(rootViewController: panel), animated: true)
+    }
+    private func recognizeDocuments() {
+        guard isCurrentOwner, !isSending, !isUploadingAttachment, !attachments.isEmpty else { return }
+        guard let conversation = currentConversation else {
+            createNewChat(preservingDraft: true) { [weak self] in self?.recognizeDocuments() }; return
+        }
+        let ids = attachments.map(\.id)
+        let requestId = UUID()
+        isSending = true
+        Task {
+            defer { isSending = false; updateComposerControls() }
+            do {
+                let pair = try await api.startChatDocuments(conversation: conversation.id, ids: ids, requestId: requestId)
+                guard isCurrentOwner, currentConversation?.id == conversation.id else { return }
+                attachments.forEach { attachmentCache[$0.id] = $0 }
+                attachments.removeAll(where: { ids.contains($0.id) })
+                draftRevision += 1; persistDraft(); renderAttachmentStatus()
+                messages = ChatOutbox.merge(messages, [pair.message] + (pair.reply.map { [$0] } ?? []))
+                renderMessages(); updatePolling()
+            } catch {
+                guard isCurrentOwner else { return }
+                showError(error) // attachments remain; no automatic paid retry
+            }
+        }
+    }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard isCurrentOwner else { return }
-        guard attachments.count < 3, !isUploadingAttachment else {
+        guard attachments.count < 10, !isUploadingAttachment else {
             statusLabel.text = NSLocalizedString("chat.file.limit", comment: "")
             return
         }
@@ -1504,7 +1542,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         } catch { statusLabel.text = NSLocalizedString("chat.file.error", comment: "") }
     }
     private func uploadAttachment(name: String, mime: String, data: Data, requestId: UUID) {
-        guard isCurrentOwner, attachments.count < 3, !isUploadingAttachment else { return }
+        guard isCurrentOwner, attachments.count < 10, !isUploadingAttachment else { return }
         let uploadConversationId = currentConversation?.id
         isUploadingAttachment = true
         fileButton.isEnabled = false
@@ -1521,7 +1559,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 attachments.append(attachment)
                 isUploadingAttachment = false
                 attachmentRetry = nil
-                fileButton.isEnabled = attachments.count < 3 && (capabilities?.attachments.available ?? false)
+                fileButton.isEnabled = (capabilities?.attachments.available ?? false)
                 statusLabel.text = "\(attachment.name) · " + NSLocalizedString("chat.file.ready", comment: "")
                 statusLabel.textColor = .secondaryLabel
                 retryButton.removeTarget(self, action: #selector(retryUploadAttachment), for: .touchUpInside)
@@ -1563,7 +1601,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private func renderAttachmentStatus() {
         removeAttachmentButton.isHidden = attachments.isEmpty && attachmentRetry == nil
         fileButton.isEnabled = (capabilities?.attachments.available ?? false)
-            && attachments.count < 3 && !isUploadingAttachment && attachmentRetry == nil
+            && !isUploadingAttachment && attachmentRetry == nil
         statusLabel.text = attachments.isEmpty
             ? (appearance.isApprovedReference ? nil : NSLocalizedString("chat.disclaimer", comment: ""))
             : attachments.map { "\($0.name) · " + NSLocalizedString("chat.file.ready", comment: "") }.joined(separator: "   ")
@@ -1632,7 +1670,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             isUploadingAttachment = false
             retryButton.isHidden = true
             retryButton.removeTarget(self, action: #selector(retryUploadAttachment), for: .touchUpInside)
-            fileButton.isEnabled = attachments.count < 3 && (capabilities?.attachments.available ?? false)
+            fileButton.isEnabled = (capabilities?.attachments.available ?? false)
         } else {
             guard !attachments.isEmpty else { return }
             attachments.removeLast()
