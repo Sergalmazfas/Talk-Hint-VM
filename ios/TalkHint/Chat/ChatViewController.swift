@@ -45,6 +45,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var isLoadingOlder = false
     private var attachmentRetry: (name: String, mime: String, data: Data, requestId: UUID)?
     private var isUploadingAttachment = false
+    private var imageAttachmentPicker: ChatAttachmentImagePicker?
+    private var attachmentContextID = UUID()
     private var confirmingPlanMessageIDs = Set<String>()
     private var decidingMemoryMessageIDs = Set<String>()
     private var previewURL: URL?
@@ -534,6 +536,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         scroll.setContentOffset(CGPoint(x: 0, y: min(maxY, max(minY, position.y))), animated: false)
     }
     @objc private func closeChat() {
+        attachmentContextID = UUID()
         closeDrawer()
         cancelDictation()
         persistDraft()
@@ -541,6 +544,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         onClose?()
     }
     private func showWelcome() {
+        attachmentContextID = UUID()
         currentConversation = nil
         messages = []
         hasMoreMessages = false
@@ -679,6 +683,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         // Text typed while the first conversation was still loading belongs to "_new";
         // keep it on screen instead of replacing it with the placeholder.
         let unopenedDraft = currentConversation == nil && hasRestoredComposer ? (text: draftText, files: attachments) : nil
+        attachmentContextID = UUID()
         currentConversation = conversation
         if changedConversation {
             draftRevision += 1
@@ -1464,10 +1469,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 self?.recognizeDocuments()
             })
         }
-        for key in ["chat.attach.camera", "chat.attach.photos"] {
-            let action = UIAlertAction(title: NSLocalizedString(key, comment: "") + " — " + NSLocalizedString("chat.attach.notAvailable", comment: ""), style: .default, handler: nil)
-            action.isEnabled = false
-            menu.addAction(action)
+        for (key, camera) in [("chat.attach.camera", true), ("chat.attach.photos", false)] {
+            menu.addAction(UIAlertAction(title: NSLocalizedString(key, comment: ""), style: .default) { [weak self, weak menu] _ in
+                menu?.dismiss(animated: true) { self?.pickAttachmentImage(camera: camera) }
+            })
         }
         menu.addAction(UIAlertAction(title: NSLocalizedString("chat.attach.files", comment: ""), style: .default) { [weak self] _ in
             guard let self, self.isCurrentOwner, !self.dictation.isBusy else { return }
@@ -1479,6 +1484,47 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         menu.popoverPresentationController?.sourceView = fileButton
         menu.popoverPresentationController?.sourceRect = fileButton.bounds
         present(menu, animated: true)
+    }
+    private func pickAttachmentImage(camera: Bool) {
+        guard isCurrentOwner, !dictation.isBusy, !isSending, !isUploadingAttachment,
+              imageAttachmentPicker == nil, attachmentRetry == nil else { return }
+        guard attachments.count < 10 else {
+            statusLabel.text = NSLocalizedString("chat.file.limit", comment: ""); return
+        }
+        guard capabilities?.attachments.available == true,
+              capabilities?.attachments.mimeTypes.contains("image/jpeg") == true else {
+            statusLabel.text = NSLocalizedString("chat.error.attachmentsUnavailable", comment: ""); return
+        }
+        let conversation = currentConversation?.id
+        let contextID = attachmentContextID
+        let picker = ChatAttachmentImagePicker(presenter: self,
+            maxBytes: capabilities?.attachments.maxBytes ?? ChatAttachmentImageEncoding.maximumBytes,
+            validContext: { [weak self] in
+                guard let self else { return false }
+                return self.isCurrentOwner && self.currentConversation?.id == conversation &&
+                    self.attachmentContextID == contextID && !self.dictation.isBusy
+            }, completion: { [weak self] result in
+                guard let self else { return }
+                self.imageAttachmentPicker = nil
+                guard let result else { return } // cancel, owner or conversation changed
+                switch result {
+                case .success(let data):
+                    guard !self.isSending, !self.isUploadingAttachment, self.attachmentRetry == nil,
+                          self.attachments.count < 10 else { return }
+                    let id = UUID(), name = "document-\(UUID().uuidString.lowercased()).jpg"
+                    self.attachmentRetry = (name, "image/jpeg", data, id)
+                    self.uploadAttachment(name: name, mime: "image/jpeg", data: data, requestId: id)
+                case .failure(let error):
+                    self.statusLabel.text = error.localizedDescription
+                    self.statusLabel.textColor = .systemRed
+                    let alert = UIAlertController(title: NSLocalizedString("chat.attach", comment: ""),
+                        message: error.localizedDescription, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+                    self.present(alert, animated: true)
+                }
+            })
+        imageAttachmentPicker = picker
+        if camera { picker.showCamera() } else { picker.showPhotos() }
     }
     private func openDocuments() {
         guard isCurrentOwner else { return }

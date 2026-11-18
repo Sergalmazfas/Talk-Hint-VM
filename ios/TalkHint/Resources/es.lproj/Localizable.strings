@@ -626,7 +626,11 @@
 "chat.attach.photos" = "Fotos";
 "chat.attach.files" = "Archivos";
 "chat.attach.notAvailable" = "aún no disponible";
-"chat.attach.sourcesNote" = "Usa Archivos para documentos e imágenes. Cámara y Fotos no están conectadas en esta versión.";
+"chat.attach.sourcesNote" = "Fotografía el documento o elige Fotos / Archivos. Las imágenes se convierten a JPEG de hasta 2 MB.";
+"chat.image.unavailable" = "La cámara no está disponible. Elige Fotos o Archivos.";
+"chat.image.permissionDenied" = "Sin acceso a la cámara. Actívalo en Ajustes del iPhone → TalkHint → Cámara o elige Fotos.";
+"chat.image.invalid" = "No se pudo preparar la foto. Elige otra imagen o vuelve a fotografiar el documento.";
+"chat.image.tooLarge" = "No se pudo reducir la foto a 2 MB. Fotografía solo el documento de cerca o elige otro archivo.";
 "chat.coming" = "Próximamente";
 "chat.calendar" = "Calendario";
 "chat.notebook" = "Cuaderno";

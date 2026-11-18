@@ -626,7 +626,11 @@
 "chat.attach.photos" = "Photos";
 "chat.attach.files" = "Files";
 "chat.attach.notAvailable" = "not available yet";
-"chat.attach.sourcesNote" = "Use Files for documents and images. Camera and Photos are not connected in this version.";
+"chat.attach.sourcesNote" = "Photograph a document or choose Photos / Files. Images are converted to JPEG up to 2 MB.";
+"chat.image.unavailable" = "The camera is unavailable on this device. Choose Photos or Files.";
+"chat.image.permissionDenied" = "Camera access is denied. Enable it in iPhone Settings → TalkHint → Camera or choose Photos.";
+"chat.image.invalid" = "Could not prepare this photo. Choose another image or photograph the document again.";
+"chat.image.tooLarge" = "Could not reduce this photo to 2 MB. Photograph only the document close up or choose another file.";
 "chat.coming" = "Coming later";
 "chat.calendar" = "Calendar";
 "chat.notebook" = "Notebook";
