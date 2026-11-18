@@ -41,7 +41,8 @@ final class ChatAttachmentImageTests: XCTestCase {
         let p = try properties(ChatAttachmentImageEncoding.prepare(cameraImage: rotated))
         XCTAssertEqual(p[kCGImagePropertyPixelWidth] as? Int, 1500)
         XCTAssertEqual(p[kCGImagePropertyPixelHeight] as? Int, 2000)
-        XCTAssertEqual(p[kCGImagePropertyOrientation] as? Int, 1)
+        // ImageIO omits the EXIF tag for the default "up" value; absent means 1.
+        XCTAssertEqual((p[kCGImagePropertyOrientation] as? Int) ?? 1, 1)
     }
 
     @MainActor
