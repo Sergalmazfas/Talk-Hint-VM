@@ -83,6 +83,11 @@ Save памяти нет.
 - TypeScript проверен. XCTest, Swift-компиляция и установка на iPhone в Replit
   **не выполнялись**: требуется Mac по единому заданию. Скриншот веб-входа
   не подтверждает работу нативного экрана документов.
+- Offline release-подготовка `script/build.ts --prepare-only` прошла:
+  клиент, сервер и MCP inclusion gate. Результат — отдельно в
+  `generated-artifacts/document-specialist-build`, без запуска production
+  bundle, изменения рабочего dist или Publish. Dev-сервер после перезапуска
+  доступен и сообщает отсутствие расхождений по всем таблицам, включая документы.
 
 ## SQL перед Publish
 
