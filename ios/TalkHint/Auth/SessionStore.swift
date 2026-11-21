@@ -54,8 +54,13 @@ final class SessionStore {
     }
 
     func takeHintOpening() -> HintOpening? {
-        let opening = pendingHintOpening
+        let opening = peekHintOpening()
         pendingHintOpening = nil
+        return opening
+    }
+
+    func peekHintOpening() -> HintOpening? {
+        let opening = pendingHintOpening
         guard let opening = opening, opening.goal == callGoal,
               Date().timeIntervalSince(opening.createdAt) < 15 * 60 else { return nil }
         return opening

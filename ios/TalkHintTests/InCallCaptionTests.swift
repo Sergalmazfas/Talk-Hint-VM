@@ -207,6 +207,17 @@ final class InCallCaptionTests: XCTestCase {
 
     /// The pinned SUGGESTION banner is hidden until the first suggestion, then
     /// becomes visible and updates in place — never adding cards to the feed.
+    func testFastPhraseReusesPinnedBannerInsteadOfAddingFeedCards() {
+        let vc = makeLoadedViewController()
+        let stream = CallHintStream()
+        vc.callHintStream(stream, didReceive: .fastPhrase(text: "Sure, I'll wait.", translation: "Хорошо, подожду."))
+        XCTAssertEqual(suggestionText(vc), "Sure, I'll wait.")
+        XCTAssertEqual(feedCards(vc).count, 0)
+        vc.callHintStream(stream, didReceive: .suggestion(en: "Sergey.", translation: "Сергей.", options: nil))
+        XCTAssertEqual(suggestionText(vc), "Sergey.")
+        XCTAssertEqual(feedCards(vc).count, 0)
+    }
+
     func testSuggestionBannerShowsAndUpdatesWithoutAddingFeedCards() {
         let vc = makeLoadedViewController()
         let stream = CallHintStream()
@@ -784,7 +795,7 @@ final class InCallCaptionTests: XCTestCase {
     /// label collapses to height 0 under constraint pressure.
     /// Regression: the Prepare opening's height cap used to be activated before the
     /// scroll view joined the hierarchy, throwing NSGenericException on screen load.
-    func testPrepareOpeningShowsOnSmallScreenAndTogglesCollapse() throws {
+    func testPrepareOpeningUsesOnlyBottomBannerAndTranslationStaysCollapsed() throws {
         let store = SessionStore.shared
         let oldGoal = store.callGoal
         defer { store.callGoal = oldGoal; _ = store.takeHintOpening() }
@@ -794,26 +805,30 @@ final class InCallCaptionTests: XCTestCase {
             translation: "Здравствуйте, я звоню по поводу активации новой SIM-карты: мобильный интернет всё ещё не работает.",
             goal: "fixture-opening-goal")
         let vc = makeLoadedViewControllerWithSize(CGSize(width: 320, height: 568))
-        let scroll = try XCTUnwrap(view(withIdentifier: "scroll-opening", in: vc.view) as? UIScrollView)
-        let button = try XCTUnwrap(view(withIdentifier: "button-opening-dismiss", in: vc.view) as? HintChoiceButton)
+        let scroll = try XCTUnwrap(view(withIdentifier: "card-suggestion", in: vc.view) as? UIScrollView)
+        let button = try XCTUnwrap(view(withIdentifier: "button-hint-translation", in: vc.view) as? UIButton)
+        let english = try XCTUnwrap(label(withIdentifier: "text-suggestion", in: vc.view))
+        let translated = try XCTUnwrap(label(withIdentifier: "text-suggestion-translation", in: vc.view))
+        XCTAssertNil(view(withIdentifier: "scroll-opening", in: vc.view))
         XCTAssertFalse(scroll.isHidden)
         XCTAssertGreaterThan(scroll.bounds.height, 0)
-        XCTAssertLessThanOrEqual(scroll.bounds.height, vc.view.safeAreaLayoutGuide.layoutFrame.height * 0.22 + 0.5)
-        XCTAssertLessThan(button.englishLabel.frame.minY, button.translationLabel.frame.minY)
+        XCTAssertFalse(english.isHidden)
+        XCTAssertFalse(translated.isHidden)
         button.sendActions(for: .touchUpInside)
         vc.view.layoutIfNeeded()
         XCTAssertFalse(scroll.isHidden)
-        XCTAssertTrue(button.translationLabel.isHidden)
-        XCTAssertEqual(button.englishLabel.numberOfLines, 1)
-        XCTAssertEqual(button.englishLabel.lineBreakMode, .byTruncatingTail)
+        XCTAssertTrue(translated.isHidden)
+        let stream = CallHintStream()
+        vc.callHintStream(stream, didReceive: .suggestion(en: "A white charging case.",
+            translation: "Белый зарядный кейс.", options: nil))
+        XCTAssertTrue(translated.isHidden, "New hints must preserve the collapsed-translation preference")
+        XCTAssertEqual(english.text, "A white charging case.")
         button.sendActions(for: .touchUpInside)
         vc.view.layoutIfNeeded()
         XCTAssertFalse(scroll.isHidden)
-        XCTAssertFalse(button.translationLabel.isHidden)
-        XCTAssertEqual(button.englishLabel.numberOfLines, 0)
-        XCTAssertEqual(button.englishLabel.lineBreakMode, .byWordWrapping)
+        XCTAssertFalse(translated.isHidden)
+        XCTAssertEqual(english.numberOfLines, 0, "Never truncate the spoken phrase to collapse its translation")
         XCTAssertGreaterThan(scroll.bounds.height, 0)
-        XCTAssertLessThanOrEqual(scroll.bounds.height, vc.view.safeAreaLayoutGuide.layoutFrame.height * 0.22 + 0.5)
         // Single use: a later call screen for the same goal does not bring it back.
         let next = makeLoadedViewControllerWithSize(CGSize(width: 320, height: 568))
         XCTAssertNil(view(withIdentifier: "scroll-opening", in: next.view))

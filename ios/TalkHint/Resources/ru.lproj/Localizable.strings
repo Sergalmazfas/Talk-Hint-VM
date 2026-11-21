@@ -1,3 +1,5 @@
+"incall.translation.show" = "Показать перевод";
+"incall.translation.hide" = "Скрыть перевод";
 "chat.voiceMode.open" = "Голосовой чат";
 "chat.voiceMode.close" = "Закрыть голосовой чат";
 "chat.voiceMode.settings" = "Настройки голоса";

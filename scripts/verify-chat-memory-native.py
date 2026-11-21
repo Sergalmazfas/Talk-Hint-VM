@@ -44,8 +44,10 @@ class MemorySourceChecks(unittest.TestCase):
                 reference = keys
             self.assertEqual(keys, reference, lang)
             memory = [(k, v) for k, v in pairs if k.startswith("chat.memory.")]
-            self.assertEqual(len(memory), 29)
-            self.assertEqual(len(set(k for k, _ in memory)), 29)
+            # Documents added the explicit source label after the memory-only build.
+            self.assertIn("chat.memory.source.document", {k for k, _ in memory})
+            self.assertEqual(len(memory), 30)
+            self.assertEqual(len(set(k for k, _ in memory)), 30)
             for key, value in memory:
                 self.assertTrue(json.loads('"' + value + '"').strip(), (lang, key))
 

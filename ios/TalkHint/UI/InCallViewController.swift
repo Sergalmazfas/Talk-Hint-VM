@@ -23,12 +23,15 @@ final class InCallViewController: UIViewController {
 
     // Pinned suggestion banner — always visible above the controls.
     private let suggestionBanner = HintBannerScrollView()
-    private var openingButton: HintChoiceButton?
     private let telemetryCallSid: String?
     private let openingPresentationId = UUID().uuidString
     private var openingVisibleAt: Date?
     private let suggestionPrimaryLabel = UILabel()
     private let suggestionSecondaryLabel = UILabel()
+    private let translationToggle = UIButton(type: .system)
+    private var translationCollapsed = false
+    private var hasHintTranslation = false
+    private var localOpeningVisible = false
     /// Vertical stack of tappable pill buttons shown for CHOICE-type hints;
     /// hidden for every other hint type.
     private let choiceButtonsStack = UIStackView()
@@ -59,8 +62,6 @@ final class InCallViewController: UIViewController {
     // (re)connect (persisted selections are re-sent), so without this a mid-call
     // reconnect would duplicate the "GOAL" card in the conversation history.
     private var lastGoalShownInFeed: String?
-    private var openingCollapsed = false
-    private var firstOwnerTurnSeen = false
 
     init(callerName: String, hintStream: CallHintStream = CallHintStream(), callSid: String? = nil,
          dtmfSender: ((String) -> Bool)? = nil) {
@@ -78,6 +79,10 @@ final class InCallViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .white
         buildUI()
+        if let opening = SessionStore.shared.takeHintOpening() {
+            showSuggestion(en: opening.english, translation: opening.translation, options: nil)
+            localOpeningVisible = true
+        }
 
         stream.delegate = self
         stream.connect()
@@ -97,12 +102,12 @@ final class InCallViewController: UIViewController {
 
     private func reportOpeningPresentation() {
         guard presentedViewController == nil,
-              let button = openingButton, let sid = telemetryCallSid,
-              HintVisibility.isVisible(button.englishLabel)
+              localOpeningVisible, let sid = telemetryCallSid,
+              HintVisibility.isVisible(suggestionPrimaryLabel)
         else { return }
         if openingVisibleAt == nil { openingVisibleAt = Date() }
         let translated = SessionStore.shared.language == "ru" &&
-            HintVisibility.isVisible(button.translationLabel)
+            HintVisibility.isVisible(suggestionSecondaryLabel)
         stream.reportOpeningVisible(callSid: sid, presentationId: openingPresentationId,
                                     at: openingVisibleAt!, translationVisible: translated)
     }
@@ -115,7 +120,7 @@ final class InCallViewController: UIViewController {
         // stream, where the server-side end-of-call cleanup never runs).
         stream.setGoal("")
         SessionStore.shared.callGoal = ""
-        openingButton?.superview?.isHidden = true
+        localOpeningVisible = false
         stream.disconnect()
         if let presenter = presentingViewController {
             // Dismiss the whole call stack, including an open keypad sheet.
@@ -172,30 +177,6 @@ final class InCallViewController: UIViewController {
         let header = UIStackView(arrangedSubviews: [statusRow, retryButton, goalCard])
         // Constraints against the view's safe area are activated below, once the
         // views share the view hierarchy (activating earlier throws NSGenericException).
-        var openingScrollView: UIScrollView?
-        if let opening = SessionStore.shared.takeHintOpening() {
-            let button = HintChoiceButton(english: opening.english, translation: opening.translation,
-                                          primary: false)
-            button.accessibilityIdentifier = "button-opening-dismiss"
-            button.accessibilityHint = NSLocalizedString("incall.opening.hide", comment: "")
-            button.addTarget(self, action: #selector(dismissOpening), for: .touchUpInside)
-            let openingScroll = HintBannerScrollView()
-            openingScroll.delegate = self
-            openingScroll.accessibilityIdentifier = "scroll-opening"
-            openingScroll.translatesAutoresizingMaskIntoConstraints = false
-            button.translatesAutoresizingMaskIntoConstraints = false
-            openingScroll.addSubview(button)
-            NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.leadingAnchor),
-                button.trailingAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.trailingAnchor),
-                button.topAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.topAnchor),
-                button.bottomAnchor.constraint(equalTo: openingScroll.contentLayoutGuide.bottomAnchor),
-                button.widthAnchor.constraint(equalTo: openingScroll.frameLayoutGuide.widthAnchor),
-            ])
-            openingScrollView = openingScroll
-            openingButton = button
-            header.addArrangedSubview(openingScroll)
-        }
         header.axis = .vertical
         header.spacing = 4
         header.setCustomSpacing(8, after: retryButton)
@@ -240,7 +221,6 @@ final class InCallViewController: UIViewController {
 
             suggestionBanner.heightAnchor.constraint(lessThanOrEqualTo: guide.heightAnchor, multiplier: 0.38),
         ])
-        openingScrollView?.heightAnchor.constraint(lessThanOrEqualTo: guide.heightAnchor, multiplier: 0.22).isActive = true
 
         observeKeyboard()
         observeAudioRoute()
@@ -410,7 +390,11 @@ final class InCallViewController: UIViewController {
         liveLabel.textColor = Theme.sub
         liveLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let tagRow = UIStackView(arrangedSubviews: [sparkles, tag, UIView(), liveDot, liveLabel])
+        translationToggle.titleLabel?.font = .systemFont(ofSize: 12)
+        translationToggle.accessibilityIdentifier = "button-hint-translation"
+        translationToggle.addTarget(self, action: #selector(toggleHintTranslation), for: .touchUpInside)
+        translationToggle.isHidden = true
+        let tagRow = UIStackView(arrangedSubviews: [sparkles, tag, UIView(), translationToggle, liveDot, liveLabel])
         tagRow.axis = .horizontal
         tagRow.spacing = 6
         tagRow.alignment = .center
@@ -467,20 +451,6 @@ final class InCallViewController: UIViewController {
         return btn
     }
 
-    @objc private func dismissOpening() {
-        // This is only a presentation preference, never evidence of using a hint.
-        setOpeningCollapsed(!openingCollapsed)
-    }
-
-    private func setOpeningCollapsed(_ collapsed: Bool) {
-        openingCollapsed = collapsed
-        openingButton?.englishLabel.numberOfLines = collapsed ? 1 : 0
-        openingButton?.englishLabel.lineBreakMode = collapsed ? .byTruncatingTail : .byWordWrapping
-        openingButton?.translationLabel.isHidden = collapsed
-        openingButton?.invalidateIntrinsicContentSize()
-        openingButton?.superview?.invalidateIntrinsicContentSize()
-        view.setNeedsLayout()
-    }
 
     /// The circular Mute / End / Audio controls per the approved mockup —
     /// round buttons with small captions beneath. The mockup's third slot shows
@@ -963,6 +933,8 @@ final class InCallViewController: UIViewController {
     /// When `options` contains ≥ 2 entries the banner renders CHOICE pill
     /// buttons instead of plain text; the primary label is hidden in that mode.
     private func showSuggestion(en: String, translation: String?, options: [ChoiceOption]?) {
+        hasHintTranslation = !(translation ?? "").isEmpty ||
+            (options?.contains { !$0.translation.isEmpty } ?? false)
         // CHOICE path: hide the plain-text label and show tappable pill buttons.
         if let options = options, options.count >= 2 {
             suggestionPrimaryLabel.isHidden = true
@@ -990,11 +962,29 @@ final class InCallViewController: UIViewController {
             choiceButtonsStack.isHidden = true
         }
         suggestionBanner.isHidden = false
+        updateHintTranslation()
         // A new hint starts at its first line, never at the previous CHOICE's
         // scroll position. Stop any old scrolling animation before replacement.
         suggestionBanner.setContentOffset(.zero, animated: false)
         view.layoutIfNeeded()
         suggestionBanner.setContentOffset(.zero, animated: false)
+    }
+
+    @objc private func toggleHintTranslation() {
+        translationCollapsed.toggle()
+        updateHintTranslation()
+        view.layoutIfNeeded()
+    }
+
+    private func updateHintTranslation() {
+        translationToggle.isHidden = !hasHintTranslation
+        translationToggle.setTitle(NSLocalizedString(translationCollapsed ?
+            "incall.translation.show" : "incall.translation.hide", comment: ""), for: .normal)
+        suggestionSecondaryLabel.isHidden = translationCollapsed ||
+            (suggestionSecondaryLabel.text ?? "").isEmpty || !choiceButtonsStack.isHidden
+        for button in choiceButtonsStack.arrangedSubviews.compactMap({ $0 as? HintChoiceButton }) {
+            button.translationLabel.isHidden = translationCollapsed || (button.translationLabel.text ?? "").isEmpty
+        }
     }
 
     /// Copies the tapped CHOICE option's English phrase into the question field
@@ -1070,21 +1060,16 @@ extension InCallViewController: CallHintStreamDelegate {
             if isFinal && isGarbageSTT(text, confidence: confidence) {
                 return
             }
-            if isFinal && !firstOwnerTurnSeen && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                firstOwnerTurnSeen = true
-                setOpeningCollapsed(true)
-            }
             upsertTranscript(card: &currentYouCard,
                              title: NSLocalizedString("incall.card.you", comment: ""), titleColor: Theme.sub,
                              primary: text, secondary: nil,
                              testIdSuffix: "owner", isFinal: isFinal)
         case .suggestion(let en, let translation, let options):
+            localOpeningVisible = false
             showSuggestion(en: en, translation: translation, options: options)
         case .fastPhrase(let text, let translation):
-            appendCard(title: NSLocalizedString("incall.card.quick_phrase", comment: ""), titleColor: Theme.purple,
-                       primary: text, secondary: translation,
-                       background: Theme.purpleBg,
-                       testIdSuffix: "fast-phrase")
+            localOpeningVisible = false
+            showSuggestion(en: text, translation: translation, options: nil)
         case .aiResponse(let text, let isError):
             appendCard(title: isError ? NSLocalizedString("common.error", comment: "") : NSLocalizedString("incall.card.assistant", comment: ""),
                        titleColor: isError ? .systemRed : Theme.purple,

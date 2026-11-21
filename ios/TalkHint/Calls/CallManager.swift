@@ -66,6 +66,7 @@ final class CallManager: NSObject {
         let translatorVoice: TranslatorVoicePreference
         let translatorPlayback: TranslatorPlaybackPreference
         let voiceProvider: VoiceProviderPreference
+        var hintGoal = ""
     }
 
     private var sessions: [UUID: CallSession] = [:]
@@ -184,6 +185,7 @@ final class CallManager: NSObject {
                                       translatorVoice: translatorVoice,
                                       translatorPlayback: translatorPlayback,
                                       voiceProvider: voiceProvider)
+        sessions[uuid]?.hintGoal = mode == .hint ? SessionStore.shared.callGoal : ""
 
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
@@ -422,6 +424,15 @@ extension CallManager: CXProviderDelegate {
 
         Task { @MainActor in
             do {
+                // Prepare before Twilio connects; never substitute a stale/unrelated plan.
+                var hintPreparation: HintCallPreparation?
+                if session.mode == .hint {
+                    let goal = session.hintGoal
+                    let cached = SessionStore.shared.peekHintOpening().flatMap { $0.goal == goal ? $0 : nil }
+                    let response = try await APIClient.shared.preparedHintPlans()
+                    hintPreparation = HintCallPreparation(number: number, goal: goal, response: response,
+                        localOpening: cached.map { .init(phraseEn: $0.english, translation: $0.translation) })
+                }
                 let accessToken = try await APIClient.shared.fetchTwilioAccessToken()
 
                 // The call may have been canceled (CXEndCallAction) while we
@@ -433,11 +444,20 @@ extension CallManager: CXProviderDelegate {
                     return
                 }
 
+                if let preparation = hintPreparation {
+                    SessionStore.shared.callGoal = preparation.goal
+                    SessionStore.shared.stageHintOpening(english: preparation.opening.phraseEn,
+                        translation: preparation.opening.translation, goal: preparation.goal)
+                }
                 let connectOptions = ConnectOptions(accessToken: accessToken) { builder in
-                    builder.params = Self.connectParameters(to: number, mode: session.mode,
+                    var params = Self.connectParameters(to: number, mode: session.mode,
                                                             translatorVoice: session.translatorVoice,
                                                             translatorPlayback: session.translatorPlayback,
                                                             voiceProvider: session.voiceProvider)
+                    if let preparation = hintPreparation {
+                        params.merge(preparation.parameters) { _, selected in selected }
+                    }
+                    builder.params = params
                     builder.uuid = uuid
                 }
                 let call = TwilioVoiceSDK.connect(options: connectOptions, delegate: self)
