@@ -25,6 +25,28 @@ final class CallManager: NSObject {
     }
     static let shared = CallManager()
 
+    /// Testable without creating a CallKit provider or opening the call screen.
+    /// An old terminal callback must not erase a newer call's goal.
+    @MainActor
+    struct GoalLifetime {
+        private(set) var callID: UUID?
+        private let clear: @MainActor () -> Void
+        init(clear: @escaping @MainActor () -> Void = { SessionStore.shared.callGoal = "" }) {
+            self.clear = clear
+        }
+        mutating func begin(_ uuid: UUID) { callID = uuid }
+        mutating func finish(_ uuid: UUID) {
+            guard callID == uuid else { return }
+            callID = nil
+            clear()
+        }
+        mutating func reset() {
+            callID = nil
+            clear()
+        }
+    }
+    private var goalLifetime = GoalLifetime()
+
     private let provider: CXProvider
     private let callController = CXCallController()
     private let standardAudioDevice = DefaultAudioDevice()
@@ -120,6 +142,7 @@ final class CallManager: NSObject {
                                       isOutgoing: false, translatorVoice: .female,
                                       translatorPlayback: .voice,
                                       voiceProvider: SessionStore.shared.voiceProvider)
+        goalLifetime.begin(uuid)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -133,7 +156,7 @@ final class CallManager: NSObject {
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
             Task { @MainActor in
                 if error != nil {
-                    self?.sessions[uuid] = nil
+                    self?.endSession(uuid)
                 }
                 completion()
             }
@@ -172,6 +195,7 @@ final class CallManager: NSObject {
     func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
         guard mode != .copilot || Self.copilotAvailable else {
+            if sessions.isEmpty { goalLifetime.reset() }
             postOutgoingCallState(.failed, uuid: uuid)
             return uuid
         }
@@ -188,6 +212,7 @@ final class CallManager: NSObject {
                                       translatorPlayback: translatorPlayback,
                                       voiceProvider: voiceProvider)
         sessions[uuid]?.hintGoal = mode == .hint ? SessionStore.shared.callGoal : ""
+        goalLifetime.begin(uuid)
 
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
@@ -197,7 +222,7 @@ final class CallManager: NSObject {
             guard let error = error else { return }
             print("[CallManager] startOutgoingCall request failed: \(error.localizedDescription)")
             Task { @MainActor in
-                self?.sessions[uuid] = nil
+                self?.endSession(uuid)
                 self?.postOutgoingCallState(.failed, uuid: uuid)
             }
         }
@@ -205,6 +230,8 @@ final class CallManager: NSObject {
     }
 
     private func postOutgoingCallState(_ state: OutgoingCallState, uuid: UUID) {
+        // Clear before synchronous observers can offer/redial the next number.
+        if state == .failed || state == .ended { goalLifetime.finish(uuid) }
         NotificationCenter.default.post(
             name: Self.outgoingCallStateDidChange,
             object: self,
@@ -244,7 +271,12 @@ final class CallManager: NSObject {
         // Prefer a connected call; fall back to any tracked session.
         let uuid = sessions.first(where: { $0.value.twilioCall != nil })?.key
             ?? sessions.keys.first
-        guard let callUUID = uuid else { return }
+        guard let callUUID = uuid else {
+            goalLifetime.reset()
+            return
+        }
+        // Cancel intent immediately, including while preflight/token is pending.
+        goalLifetime.finish(callUUID)
 
         let endAction = CXEndCallAction(call: callUUID)
         let transaction = CXTransaction(action: endAction)
@@ -256,9 +288,10 @@ final class CallManager: NSObject {
     }
 
     private func endSession(_ uuid: UUID) {
-        sessions[uuid] = nil
+        let removed = sessions.removeValue(forKey: uuid)
+        goalLifetime.finish(uuid)
         answerActions[uuid] = nil
-        tearDownInCallScreen()
+        if removed != nil && sessions.isEmpty { tearDownInCallScreen() }
     }
 
     // MARK: - Mute
@@ -391,6 +424,7 @@ final class CallManager: NSObject {
 
 extension CallManager: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
+        goalLifetime.reset()
         for session in sessions.values {
             if let call = session.twilioCall {
                 disconnectingCalls[session.uuid] = call
@@ -408,8 +442,24 @@ extension CallManager: CXProviderDelegate {
         tearDownInCallScreen()
     }
 
+    func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
+        guard action is CXStartCallAction || action is CXAnswerCallAction || action is CXEndCallAction,
+              let callAction = action as? CXCallAction else { return }
+        let uuid = callAction.callUUID
+        if let call = sessions[uuid]?.twilioCall {
+            disconnectingCalls[uuid] = call
+            call.disconnect()
+        }
+        if sessions[uuid]?.isOutgoing == true {
+            postOutgoingCallState(.failed, uuid: uuid)
+        }
+        provider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
+        endSession(uuid)
+    }
+
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
         guard var session = sessions[action.callUUID] else {
+            goalLifetime.finish(action.callUUID)
             action.fail()
             return
         }
@@ -441,8 +491,9 @@ extension CallManager: CXProviderDelegate {
                 // awaited the token. If so, the session is gone — abort instead
                 // of resurrecting it / connecting a ghost Twilio call. Safe
                 // because @MainActor means no interleaving past this point.
-                guard self.sessions[uuid] != nil else {
+                guard self.sessions[uuid] != nil, self.goalLifetime.callID == uuid else {
                     action.fail()
+                    self.endSession(uuid)
                     return
                 }
 
@@ -480,6 +531,7 @@ extension CallManager: CXProviderDelegate {
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         guard var session = sessions[action.callUUID] else {
+            goalLifetime.finish(action.callUUID)
             action.fail()
             return
         }
@@ -492,6 +544,7 @@ extension CallManager: CXProviderDelegate {
             // Incoming calls always carry a callSid; bail safely if missing.
             answerActions[action.callUUID] = nil
             action.fail()
+            endSession(action.callUUID)
             return
         }
         let uuid = action.callUUID
@@ -525,6 +578,7 @@ extension CallManager: CXProviderDelegate {
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         guard let session = sessions[action.callUUID] else {
+            goalLifetime.finish(action.callUUID)
             action.fulfill()
             return
         }

@@ -64,6 +64,10 @@
 "chat.read.error.busy" = "El audio está ocupado por una llamada u otra reproducción. Deténla primero.";
 "chat.read.error.limit" = "Se alcanzó el límite de lectura en voz alta. Inténtalo más tarde.";
 "chat.read.error.unavailable" = "La lectura en voz alta no está disponible temporalmente. Inténtalo más tarde.";
+"chat.read.unavailable.owner" = "La lectura en voz alta no está disponible para esta cuenta.";
+"chat.read.unavailable.disabled" = "La lectura en voz alta está desactivada en el servidor.";
+"chat.read.unavailable.voice" = "Aún no se ha seleccionado una voz.";
+"chat.read.unavailable.configuration" = "La lectura en voz alta aún no está configurada.";
 "chat.read.error.failed" = "No se pudo reproducir la respuesta. Se detuvo la reproducción; no se reintentará automáticamente.";
 "chat.tables.error.stale" = "La tabla ha cambiado. Actualiza la lista y vuelve a exportar.";
 "chat.tables.error.hidden" = "La tabla está oculta o no disponible. Actualiza la lista.";

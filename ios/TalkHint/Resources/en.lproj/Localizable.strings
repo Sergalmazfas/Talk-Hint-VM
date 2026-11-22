@@ -64,6 +64,10 @@
 "chat.read.error.busy" = "Audio is busy with a call or another playback. Stop it first.";
 "chat.read.error.limit" = "The playback limit has been reached. Try again later.";
 "chat.read.error.unavailable" = "Read aloud is temporarily unavailable. Try again later.";
+"chat.read.unavailable.owner" = "Read aloud is not available for this account.";
+"chat.read.unavailable.disabled" = "Read aloud is turned off on the server.";
+"chat.read.unavailable.voice" = "No read-aloud voice has been selected.";
+"chat.read.unavailable.configuration" = "Read aloud has not been configured yet.";
 "chat.read.error.failed" = "Could not play this answer. Playback was stopped; it will not retry automatically.";
 "chat.tables.error.stale" = "The table has changed. Refresh the list and export again.";
 "chat.tables.error.hidden" = "This table is hidden or unavailable. Refresh the list.";

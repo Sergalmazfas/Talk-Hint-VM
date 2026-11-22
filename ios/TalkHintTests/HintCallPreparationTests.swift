@@ -2,6 +2,55 @@ import XCTest
 @testable import TalkHint
 
 final class HintCallPreparationTests: XCTestCase {
+    @MainActor
+    func testTerminationBeforeScreenClearsGoalAndOpeningForNextNumber() throws {
+        let store = SessionStore.shared
+        let oldGoal = store.callGoal
+        let oldOpening = store.peekHintOpening()
+        defer {
+            store.callGoal = oldGoal
+            if let opening = oldOpening {
+                store.stageHintOpening(english: opening.english, translation: opening.translation, goal: opening.goal)
+            }
+        }
+        store.callGoal = "Find my case"
+        store.stageHintOpening(english: "Has anyone found my case?", translation: "", goal: store.callGoal)
+        var lifetime = CallManager.GoalLifetime()
+        let uuid = UUID()
+        lifetime.begin(uuid)
+        // CallManager's terminal path is independent of InCallViewController.
+        lifetime.finish(uuid)
+        XCTAssertEqual(store.callGoal, "")
+        XCTAssertNil(store.peekHintOpening())
+        let next = HintCallPreparation(number: "+12025550124", goal: store.callGoal, response: try response())
+        XCTAssertEqual(next.goal, "")
+        XCTAssertEqual(next.parameters, ["HintPrepared": "1"])
+        XCTAssertNil(next.parameters["HintPlanId"])
+    }
+
+    @MainActor
+    func testOldTerminalCallbackCannotClearNewCallGoalAndResetClearsOnce() {
+        var goal = "first"
+        var clears = 0
+        var lifetime = CallManager.GoalLifetime(clear: { goal = ""; clears += 1 })
+        let first = UUID(), second = UUID()
+        lifetime.begin(first)
+        lifetime.finish(first) // Cancellation while preflight/token is pending.
+        XCTAssertNil(lifetime.callID)
+        XCTAssertEqual(goal, "")
+        lifetime.begin(second)
+        goal = "second"
+        lifetime.finish(first) // Late failure/disconnect from the cancelled call.
+        XCTAssertEqual(goal, "second")
+        XCTAssertEqual(lifetime.callID, second)
+        XCTAssertEqual(clears, 1)
+        lifetime.reset() // CallKit provider reset, even without a screen.
+        XCTAssertNil(lifetime.callID)
+        XCTAssertEqual(goal, "")
+        lifetime.finish(second)
+        XCTAssertEqual(clears, 2)
+    }
+
     func testBrokenPlanDoesNotDiscardOtherValidPlans() throws {
         let plan = try response()
         // Preserve the actual wire structure while prepending malformed entries.

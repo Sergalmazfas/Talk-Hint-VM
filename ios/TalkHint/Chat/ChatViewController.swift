@@ -1048,7 +1048,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             UIAccessibility.post(notification: .announcement, argument: NSLocalizedString("chat.copy.done", comment: ""))
         }, for: .touchUpInside)
         actions.addArrangedSubview(copy)
-        if message.status == "complete", capabilities?.readAloud?.available == true {
+        if message.status == "complete", let speech = capabilities?.readAloud {
             let play = UIButton(type: .system)
             let active = readAloud.messageId == message.id
             play.setImage(UIImage(systemName: active ? "stop.fill" : "play"), for: .normal)
@@ -1056,9 +1056,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             play.accessibilityLabel = NSLocalizedString(active ? "chat.read.stop" : "chat.read.play", comment: "")
             play.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             play.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-            play.isEnabled = active || (ChatAudioOwnership.shared.owner == nil && !dictation.isBusy)
+            play.isEnabled = active ||
+                (speech.available && ChatAudioOwnership.shared.owner == nil && !dictation.isBusy)
+            play.accessibilityHint = speech.available ? nil :
+                NSLocalizedString(ChatFeatureErrors.readAloudUnavailableKey(speech.reason), comment: "")
             play.addAction(UIAction { [weak self] _ in
-                guard let self, !self.dictation.isBusy else { return }
+                guard let self, active || (speech.available && !self.dictation.isBusy) else { return }
                 self.readAloud.onChange = { [weak self] in self?.renderMessages() }
                 self.readAloud.onError = { [weak self] error in
                     self?.showPlanError(ChatFeatureErrors.message(error, feature: .speech))
@@ -1068,6 +1071,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             actions.addArrangedSubview(play)
         }
         actions.addArrangedSubview(UIView()); content.addArrangedSubview(actions)
+        if message.status == "complete", let speech = capabilities?.readAloud, !speech.available {
+            let reason = UILabel()
+            reason.accessibilityIdentifier = "chat-read-aloud-unavailable"
+            reason.text = NSLocalizedString(ChatFeatureErrors.readAloudUnavailableKey(speech.reason), comment: "")
+            reason.font = .preferredFont(forTextStyle: .caption1)
+            reason.adjustsFontForContentSizeCategory = true
+            reason.textColor = .secondaryLabel
+            reason.numberOfLines = 0
+            content.addArrangedSubview(reason)
+        }
         let items = message.presentation?.copyItems ?? []
         for item in items.prefix(2) {
             let button = UIButton(type: .system)

@@ -1,4 +1,51 @@
-# Исправления аудита Claude Mac по a0a772b
+# Перед итоговой сборкой: цель звонка и недоступная озвучка
+
+База: `b4c799358fbb5444ae8f54645bfe5a762ca00859`. Предыдущие десять
+исправлений приняты владельцем по независимому Mac-аудиту; ниже — новая узкая дельта.
+
+## Production Hint
+
+Read-only GET https://talkhint.app/api/build вернул
+`3749bfa821d8934306a9d2d7081db6e9f44213de`, dirty=false,
+build `2026-11-22T06:47:54.208Z`. Команда
+`git merge-base --is-ancestor 45d8b0f18dcd65aa4900c5cfaa265be009752593 3749bfa821d8934306a9d2d7081db6e9f44213de`
+вернула 0. В production-дереве server/websocket.ts сохранены SavedPlanOpening,
+нейтральная первая фраза и инвалидирование opening речью владельца.
+
+## Исправления
+
+- CallManager владеет сроком жизни цели по UUID, независимо от открытия экрана.
+  Очистка callGoal одновременно очищает staged opening штатным setter SessionStore.
+  Покрыты terminal delegate/endSession, отказ запроса CallKit, отмена до токена,
+  provider reset, timeout start/answer/end и ранний отказ недоступного режима.
+  Цель очищается до публикации terminal notification. Поздний callback старого
+  UUID не стирает цель нового звонка. Отменённый preflight не восстанавливает цель.
+- InCallViewController больше не владеет локальной очисткой; его уведомление
+  серверу setGoal("") при teardown сохранено.
+- При readAloud.available=false неактивная Play остаётся видимой; под действиями
+  короткая локализованная причина по server reason. Известные причины: доступ
+  аккаунта, выключено сервером, голос не выбран, озвучка не настроена; неизвестная
+  причина — понятный общий текст. Технические коды и секреты не выводятся.
+  Остановить уже начавшееся воспроизведение можно и после отключения capability.
+
+## Проверки и передача
+
+Добавлены XCTest: очистка настоящего SessionStore без открытия экрана и
+следующий номер без чужого HintGoal/plan; поздний callback и reset; локализация
+причин; offline UI с видимой неактивной Play и объяснением.
+В Linux XCTest не исполнены: нет Xcode/iOS SDK. Claude на Mac выполняет
+HintCallPreparationTests, ChatReadAloudTests, ChatApprovedScreenTests,
+затем одну итоговую сборку после зелёного результата.
+Локально прошли 6/6 статических проверок native memory, равенство ключей и
+placeholders пяти локализаций, проверка связей терминальной очистки и
+git diff --check. Это не результат компиляции Swift или выполнения XCTest.
+
+Серверных изменений, SQL, Publish, платных вызовов нет. Откат: revert только
+этой native-дельты поверх b4c79935; production и данные не менять.
+
+---
+
+# Предыдущий принятый аудит: исправления по a0a772b
 
 Постоянная ветка: `xcode-chat-voice-sarah-2026-11-11`.
 База: `a0a772b692166b7aaa2d0eab1056b72bef2e72b4`.

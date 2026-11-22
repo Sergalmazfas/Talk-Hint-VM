@@ -3,6 +3,28 @@ import XCTest
 
 @MainActor
 final class ChatReadAloudTests: XCTestCase {
+    func testUnavailableCapabilityReasonsAreReadableAndLocalized() throws {
+        let cases: [(String?, String)] = [
+            ("VOICE_OWNER_ONLY", "chat.read.unavailable.owner"),
+            ("READ_ALOUD_DISABLED", "chat.read.unavailable.disabled"),
+            ("VOICE_NOT_SELECTED", "chat.read.unavailable.voice"),
+            ("ELEVENLABS_KEY_MISSING", "chat.read.unavailable.configuration"),
+            ("NEW_SERVER_REASON", "chat.read.error.unavailable"),
+            (nil, "chat.read.error.unavailable")
+        ]
+        for (reason, expected) in cases {
+            XCTAssertEqual(ChatFeatureErrors.readAloudUnavailableKey(reason), expected)
+            for language in ["en", "ru", "es", "kk", "uk"] {
+                let path = try XCTUnwrap(Bundle.main.path(forResource: language, ofType: "lproj"))
+                let bundle = try XCTUnwrap(Bundle(path: path))
+                let text = bundle.localizedString(forKey: expected, value: nil, table: nil)
+                XCTAssertFalse(text.hasPrefix("chat."))
+                XCTAssertFalse(text.isEmpty)
+                if let reason { XCTAssertNotEqual(text, reason) }
+            }
+        }
+    }
+
     func testManifestCoversOriginalFencesAndWhitespaceAsServerDoes() throws {
         let text = "\n```swift\nline1\n  line2\n```\n \n"
         let data = try JSONSerialization.data(withJSONObject: [

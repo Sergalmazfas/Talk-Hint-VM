@@ -9,7 +9,7 @@ enum ChatApprovedPreview {
         case dialogue, empty, editing, recording, recognizing
     }
 
-    static func make(state: State = .dialogue) -> ChatViewController {
+    static func make(state: State = .dialogue, readAloudUnavailableReason: String? = nil) -> ChatViewController {
         let owner = "chat-reference-offline"
         let defaults = UserDefaults(suiteName: "app.talkhint.chat-reference-preview")!
         let store = ChatOutbox(owner: owner, origin: "https://offline-preview.invalid", defaults: defaults)
@@ -17,7 +17,7 @@ enum ChatApprovedPreview {
         let conversationID = "reference-\(state.rawValue)"
         store.selectedConversationId = state == .empty ? nil : conversationID
         let api = APIClient(transport: { request in
-            let object: [String: Any]
+            var object: [String: Any]
             var code = 200
             let date = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: Date()) ?? Date()
             let timestamp = ISO8601DateFormatter().string(from: date)
@@ -29,6 +29,9 @@ enum ChatApprovedPreview {
             case "/api/chat-v1/capabilities":
                 object = ["ai": ["available": false], "voice": ["available": false],
                           "attachments": ["available": false, "mimeTypes": [], "maxBytes": 2097152]]
+                if let reason = readAloudUnavailableReason {
+                    object["readAloud"] = ["available": false, "reason": reason]
+                }
             case "/api/chat-v1/conversations":
                 object = ["conversations": state == .empty ? [] : [
                     ["id": conversationID, "title": NSLocalizedString("chat.screen.title", comment: ""),

@@ -119,7 +119,8 @@ final class InCallViewController: UIViewController {
         // Clear it server-side too (covers calls that never opened a media
         // stream, where the server-side end-of-call cleanup never runs).
         stream.setGoal("")
-        SessionStore.shared.callGoal = ""
+        // Local goal/opening cleanup belongs to CallManager, even if this
+        // screen was never presented. Keep only the live server notification here.
         localOpeningVisible = false
         stream.disconnect()
         if let presenter = presentingViewController {

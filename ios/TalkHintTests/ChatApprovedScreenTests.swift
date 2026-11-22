@@ -18,10 +18,11 @@ final class ChatApprovedScreenTests: XCTestCase {
     }
 
     private func fixture(_ state: ChatApprovedPreview.State = .dialogue,
-                         width: CGFloat = 390, dark: Bool = false) throws -> ChatViewController {
+                         width: CGFloat = 390, dark: Bool = false,
+                         readAloudUnavailableReason: String? = nil) throws -> ChatViewController {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         previousKeyWindow = scene.windows.first { $0.isKeyWindow }
-        let chat = ChatApprovedPreview.make(state: state)
+        let chat = ChatApprovedPreview.make(state: state, readAloudUnavailableReason: readAloudUnavailableReason)
         let nav = ChatNavigationController(chat: chat)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: width, height: 844)
@@ -71,6 +72,17 @@ final class ChatApprovedScreenTests: XCTestCase {
                        UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 20)).pointSize)
         XCTAssertEqual(ChatScreenAppearance.existing.messageFont, UIFont.preferredFont(forTextStyle: .body))
         XCTAssertEqual(ChatScreenAppearance.approvedReference.orbSize, 48)
+    }
+    func testUnavailableReadAloudKeepsDisabledButtonAndVisibleReason() async throws {
+        let chat = try fixture(readAloudUnavailableReason: "READ_ALOUD_DISABLED")
+        try await loaded(chat)
+        let play = try control("chat-read-aloud", chat)
+        XCTAssertFalse(play.isEnabled)
+        let reason = try XCTUnwrap(all(chat.view, UILabel.self).first {
+            $0.accessibilityIdentifier == "chat-read-aloud-unavailable"
+        })
+        XCTAssertEqual(reason.text, NSLocalizedString("chat.read.unavailable.disabled", comment: ""))
+        XCTAssertFalse(reason.isHidden)
     }
     func testFullscreenHasBackButNoDrawerOrTabs() async throws {
         let chat = try fixture()

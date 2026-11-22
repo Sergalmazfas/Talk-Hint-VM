@@ -2,6 +2,15 @@ import Foundation
 
 enum ChatFeatureErrors {
     enum Feature: Equatable { case speech, tables }
+    static func readAloudUnavailableKey(_ reason: String?) -> String {
+        switch reason {
+        case "VOICE_OWNER_ONLY": return "chat.read.unavailable.owner"
+        case "READ_ALOUD_DISABLED": return "chat.read.unavailable.disabled"
+        case "VOICE_NOT_SELECTED": return "chat.read.unavailable.voice"
+        case "ELEVENLABS_KEY_MISSING": return "chat.read.unavailable.configuration"
+        default: return "chat.read.error.unavailable"
+        }
+    }
     static func key(_ error: Error, feature: Feature) -> String {
         if error is URLError { return "chat.feature.error.network" }
         guard case let APIError.http(status, code) = error else {
