@@ -92,6 +92,8 @@ extension CallHintStreamDelegate {
 /// `disconnect()` on call end. The task auto-reconnects while it is supposed to
 /// be running, so a brief network blip during a call does not lose the feed.
 final class CallHintStream: NSObject {
+    /// Incoming calls use their own goal field, not the pending outgoing PREP.
+    var callGoalOverride: String?
     private var lastVisibilityFrame: (text: String, event: CallHintEvent)?
 
     func reportCurrentHintVisibility() {
@@ -155,6 +157,7 @@ final class CallHintStream: NSObject {
 
     /// Sets (or updates) the goal for the active call.
     func setGoal(_ goal: String) {
+        if callGoalOverride != nil { callGoalOverride = goal }
         send(CallHintStream.setGoalPayload(goal: goal))
     }
 
@@ -302,8 +305,8 @@ final class CallHintStream: NSObject {
         let store = SessionStore.shared
         setMode(store.activeMode)
         setLanguage(store.language)
-        let goal = store.callGoal.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !goal.isEmpty {
+        let goal = (callGoalOverride ?? store.callGoal).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !goal.isEmpty || callGoalOverride != nil {
             setGoal(goal)
         }
     }

@@ -4,13 +4,18 @@
 памяти, голосу и предыдущий черновик Hint — справка, не отдельные очереди сборок.
 Аудит Claude Mac на `9c3341b`, 92/92 XCTest, принят владельцем.
 Владелец принял независимый Mac-аудит всех 10 исправлений по `b4c79935`.
-Текущая узкая дельта: очистка цели в CallManager на всех терминальных путях,
-защита от позднего callback старого звонка и видимая причина readAloud.available=false.
+Последний Mac-аудит `abd1a749`: 126/127; блокер
+ChatNavigationTests.testDraftAndReadingPositionSurviveExitAndReopen (263 vs 250 ±2).
+Текущая узкая дельта: точный composer selector; восстановление позиции после
+стабилизации self-sizing текста и refresh; владение PREP-целью только исходящим
+UUID, без сброса входящим звонком или недоступным Copilot.
 Сначала новые целевые XCTest; затем одна итоговая сборка. Подробности:
 `docs/ios-chat-audit-fixes.md` (новый первый раздел).
 Replit добавил исправления Hint и native B–D; новые XCTest написаны, но
 НЕ исполнены в Linux. Сейчас Claude независимо проверяет дельту и выполняет
-целевые XCTest, включая три новых набора и ChatApprovedScreenTests.
+целевые XCTest: сначала ChatNavigationTests и HintCallPreparationTests, затем
+связанные ChatMessagePresentationTests, InCallCaptionTests и CallHintStreamReconnectTests.
+Старые 126/127 не считать новым результатом.
 Код продукта исправляет Replit, не проверяющий. ОДНА конечная сборка всего списка —
 после успешных проверок и повторной read-only проверки уже опубликованного сервера.
 
@@ -19,7 +24,7 @@ Replit добавил исправления Hint и native B–D; новые XC
 - Репозиторий: https://github.com/Sergalmazfas/Talk-Hint-VM
 - Ветка: `xcode-chat-voice-sarah-2026-11-11`.
 - Рабочая копия Mac: `~/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency`.
-- База текущих исправлений: `b4c799358fbb5444ae8f54645bfe5a762ca00859`.
+- База текущих исправлений: `abd1a749c9b3a51adcc55f23ccdba59b51d24606`.
 - Получить верхушку той же ветки, записать фактический HEAD.
 - Серверная исходная дельта Hint: `45d8b0f18dcd65aa4900c5cfaa265be009752593`.
   Это НЕ разрешение переносить весь `ios/` из серверной ветки.
@@ -36,7 +41,7 @@ git status --short
 # При чужих изменениях остановиться, ничего не прятать и не удалять.
 git fetch origin xcode-chat-voice-sarah-2026-11-11
 git merge --ff-only origin/xcode-chat-voice-sarah-2026-11-11
-git merge-base --is-ancestor b4c799358fbb5444ae8f54645bfe5a762ca00859 HEAD
+git merge-base --is-ancestor abd1a749c9b3a51adcc55f23ccdba59b51d24606 HEAD
 ```
 
 Без stash/reset/clean/force/rebase, новой датированной ветки или worktree.
@@ -259,7 +264,7 @@ Publish делает только владелец. Сервер из native-в�
 Не просить владельца делать git-операции. Не создавать параллельное задание:
 после новой дельты продолжить это же, в существующей рабочей копии.
 
-Обязательные существующие XCTest:
+Ниже — исторический состав уже пройденной проверки, не команда повторить всё:
 `HintCallPreparationTests`, `PreparedHintPlansTests`, `InCallCaptionTests`,
 `ChatAPITests`, `ChatOutboxTests`, `ChatNavigationTests`,
 `ChatMemoryTests`, `ChatMemoryScreenTests`, `ChatDocumentsTests`,
@@ -267,6 +272,8 @@ Publish делает только владелец. Сервер из native-в�
 Добавлены и требуют первого исполнения: `ChatMessagePresentationTests`,
 `ChatReadAloudTests`, `ChatTablesTests`. Изменены HintCallPreparationTests,
 ChatApprovedScreenTests; повторить связанные suites, не полный gate.
+Для текущей дельты повторить только пять suites из команды ниже. Остальные
+не менялись после результата 126/127 и не требуют автоматического повторения.
 
 Новые тесты: старое сообщение без presentation, неизвестный kind, точное
 копирование адреса/000123/code-блока, отсутствие автодействия/платного запроса;
@@ -282,22 +289,11 @@ xcodebuild -project TalkHint.xcodeproj -scheme TalkHint -showdestinations
 # SIMULATOR_UDID и IPHONE_UDID — реальные доступные устройства, не примеры.
 xcodebuild -project TalkHint.xcodeproj -scheme TalkHint \
   -configuration NativeValidation -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+  -only-testing:TalkHintTests/ChatNavigationTests \
   -only-testing:TalkHintTests/HintCallPreparationTests \
   -only-testing:TalkHintTests/ChatMessagePresentationTests \
-  -only-testing:TalkHintTests/ChatReadAloudTests \
-  -only-testing:TalkHintTests/ChatTablesTests \
-  -only-testing:TalkHintTests/ChatApprovedScreenTests \
-  -only-testing:TalkHintTests/PreparedHintPlansTests \
   -only-testing:TalkHintTests/InCallCaptionTests \
-  -only-testing:TalkHintTests/ChatAPITests \
-  -only-testing:TalkHintTests/ChatOutboxTests \
-  -only-testing:TalkHintTests/ChatNavigationTests \
-  -only-testing:TalkHintTests/ChatMemoryTests \
-  -only-testing:TalkHintTests/ChatMemoryScreenTests \
-  -only-testing:TalkHintTests/ChatDocumentsTests \
-  -only-testing:TalkHintTests/ChatAttachmentImageTests \
-  -only-testing:TalkHintTests/CallAudioDeviceRouterTests \
-  -only-testing:TalkHintTests/ChatAgataAudioRoutingTests test
+  -only-testing:TalkHintTests/CallHintStreamReconnectTests test
 ```
 
 Новые Swift-файлы включать существующим XcodeGen/project.yml, если генерация
@@ -328,9 +324,8 @@ xcrun devicectl device process launch --device "$IPHONE_UDID" app.talkhint
 Вернуть: ветка, точные база/проверенный HEAD, что есть и что надо дописать; список
 passed/failed/skipped по целевым suites; длительность тестов и одной сборки;
 установка и build/version stamp; новые предупреждения; пути сохранённых логов;
-что не проверено на устройстве. Приложить фактический результат новых трёх suites,
-HintCallPreparationTests и ChatApprovedScreenTests, не повторять старые 92/92
-как результат нового кода.
+что не проверено на устройстве. Приложить фактический результат текущих пяти suites,
+не повторять старые 92/92 или 126/127 как результат нового кода.
 «Готово к ручной проверке» — только после закрытия B–D и реальной установки.
 Если сервер ещё старый — дополнительно «ожидаем Publish», не «готово/установлено».
 Не считать применение патча проверкой аудио. Publish сам iOS-бинарник не обновляет.
@@ -347,3 +342,13 @@ HintCallPreparationTests и ChatApprovedScreenTests, не повторять с�
 3. В разрешённом владельцем Hint-звонке: фраза видна до ответа, приветствие её
    не убирает, следующая заменяет тот же нижний блок, перевод можно свернуть.
    Без цели нет темы из профессии. Реальный звонок — только владелец, не Claude.
+
+## 8. Текущая дельта — три ручные проверки после установки
+
+1. Пролистать чат вверх, оставить недописанный текст, выйти и вернуться:
+   текст и место чтения сохраняются, после подгрузки нет сдвига.
+2. При подготовленном PREP-плане входящий звонок не подменяет цель/первую фразу;
+   отказ недоступного Copilot тоже не расходует подготовку.
+3. После отмены/ошибки своего исходящего следующий другой номер без нового
+   поручения не получает прежнюю цель. Любой реальный звонок — только владелец
+   при его отдельной готовности, не автоматический XCTest.

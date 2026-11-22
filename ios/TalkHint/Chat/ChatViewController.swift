@@ -77,6 +77,15 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var hasLoadedChat = false
     private var savedScrollPosition: CGPoint?
     private var pendingScrollRestore: CGPoint?
+    private struct ReadingLayout: Equatable {
+        let content: CGSize
+        let viewport: CGSize
+        let insets: UIEdgeInsets
+        let composerHeight: CGFloat
+    }
+    private var restoredReadingLayout: ReadingLayout?
+    private var readingRestoreScheduled = false
+    private var readingRestoreGeneration = 0
     private var resumeTask: Task<Void, Never>?
     #if DEBUG
     /// Offline native test fixture: loading this never sends, saves or starts audio.
@@ -181,6 +190,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         guard isCurrentOwner else { return }
+        cancelReadingRestore()
         pendingScrollRestore = savedScrollPosition
         if hasLoadedChat {
             updatePolling()
@@ -191,7 +201,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        savedScrollPosition = scroll.contentOffset
+        savedScrollPosition = pendingScrollRestore ?? scroll.contentOffset
+        cancelReadingRestore()
         resumeTask?.cancel()
         pollTask?.cancel()
         cancelDictation()
@@ -201,10 +212,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateComposerControls()
-        if let position = pendingScrollRestore {
-            restoreScrollPosition(position)
-            pendingScrollRestore = nil
-        }
+        scheduleReadingRestore()
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        scheduleReadingRestore()
     }
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
@@ -527,8 +539,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         do {
             let page = try await api.chatMessages(conversationId: conversation.id)
             guard !Task.isCancelled, isCurrentOwner, currentConversation?.id == conversation.id else { return }
+            // Rebuilding self-sizing message views can need another layout pass.
+            pendingScrollRestore = pendingScrollRestore ?? scroll.contentOffset
+            restoredReadingLayout = nil
             messages = ChatOutbox.merge(messages, page.messages)
             renderMessages()
+            view.setNeedsLayout()
+            scheduleReadingRestore()
             updatePolling()
         } catch {
             if !Task.isCancelled, isCurrentOwner { statusLabel.text = NSLocalizedString("chat.error.network", comment: "") }
@@ -538,6 +555,46 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         let minY = -scroll.adjustedContentInset.top
         let maxY = max(minY, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
         scroll.setContentOffset(CGPoint(x: 0, y: min(maxY, max(minY, position.y))), animated: false)
+    }
+    private func cancelReadingRestore() {
+        readingRestoreGeneration += 1
+        readingRestoreScheduled = false
+        pendingScrollRestore = nil
+        restoredReadingLayout = nil
+    }
+    private func scheduleReadingRestore() {
+        guard pendingScrollRestore != nil, !readingRestoreScheduled else { return }
+        readingRestoreScheduled = true
+        let generation = readingRestoreGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.readingRestoreGeneration == generation else { return }
+            guard self.isCurrentOwner, self.viewIfLoaded?.window != nil,
+                  let position = self.pendingScrollRestore else {
+                self.readingRestoreScheduled = false
+                return
+            }
+            guard !self.scroll.isDragging, !self.scroll.isDecelerating else {
+                self.cancelReadingRestore()
+                return
+            }
+            // A child's width measurement can invalidate intrinsic height AFTER
+            // viewDidLayoutSubviews. Consume the anchor only on stable geometry
+            // across layout turns, not on the first (possibly provisional) pass.
+            self.view.layoutIfNeeded()
+            self.messagesStack.layoutIfNeeded()
+            self.scroll.layoutIfNeeded()
+            let layout = ReadingLayout(content: self.scroll.contentSize, viewport: self.scroll.bounds.size,
+                insets: self.scroll.adjustedContentInset, composerHeight: self.composer.bounds.height)
+            self.restoreScrollPosition(position)
+            self.readingRestoreScheduled = false
+            if self.restoredReadingLayout == layout {
+                self.pendingScrollRestore = nil
+                self.restoredReadingLayout = nil
+            } else {
+                self.restoredReadingLayout = layout
+                self.scheduleReadingRestore()
+            }
+        }
     }
     @objc private func closeChat() {
         attachmentContextID = UUID()
@@ -861,7 +918,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     @objc private func retryLoad() { Task { await load() } }
     private func renderMessages() {
-        let shouldStickToBottom = scroll.contentOffset.y + scroll.bounds.height >= scroll.contentSize.height - 80
+        let shouldStickToBottom = pendingScrollRestore == nil &&
+            scroll.contentOffset.y + scroll.bounds.height >= scroll.contentSize.height - 80
         messagesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if messages.isEmpty {
             let welcome = UILabel(); welcome.text = NSLocalizedString("chat.welcome", comment: "")
@@ -1023,8 +1081,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 messagesStack.addArrangedSubview(retry)
             }
         }
+        let generation = readingRestoreGeneration
         DispatchQueue.main.async {
-            if shouldStickToBottom {
+            if shouldStickToBottom, self.readingRestoreGeneration == generation,
+               self.pendingScrollRestore == nil, self.viewIfLoaded?.window != nil {
                 self.scroll.scrollRectToVisible(CGRect(x: 0, y: self.scroll.contentSize.height - 1, width: 1, height: 1), animated: true)
             }
         }
@@ -1405,6 +1465,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             hitView = candidate.superview
         }
         return hitView === scroll || hitView?.isDescendant(of: scroll) == true
+    }
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        if scrollView === scroll { cancelReadingRestore() }
     }
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView.panGestureRecognizer.state == .changed,

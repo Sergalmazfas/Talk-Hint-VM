@@ -834,6 +834,36 @@ final class InCallCaptionTests: XCTestCase {
         XCTAssertNil(view(withIdentifier: "scroll-opening", in: next.view))
     }
 
+    func testIncomingScreenDoesNotConsumePreparedOutgoingGoalOrOpening() throws {
+        let store = SessionStore.shared
+        let oldGoal = store.callGoal
+        let oldOpening = store.peekHintOpening()
+        defer {
+            store.callGoal = oldGoal
+            if let opening = oldOpening {
+                store.stageHintOpening(english: opening.english, translation: opening.translation, goal: opening.goal)
+            }
+        }
+        store.callGoal = "Prepared tire question"
+        store.stageHintOpening(english: "Do you have these tires?", translation: "", goal: store.callGoal)
+        let stream = CallHintStream(tokenProvider: { nil }, socketFactory: { _ in
+            XCTFail("Incoming goal fixture must not open a socket without a token")
+            return CaptionSocket()
+        })
+        let vc = InCallViewController(callerName: "Incoming", hintStream: stream, usesPreparedGoal: false)
+        vc.loadViewIfNeeded()
+        let field = try XCTUnwrap(view(withIdentifier: "input-goal", in: vc.view) as? UITextField)
+        XCTAssertEqual(field.text, "")
+        XCTAssertEqual(stream.callGoalOverride, "")
+        stream.setGoal("Incoming-only question")
+        XCTAssertEqual(stream.callGoalOverride, "Incoming-only question")
+        XCTAssertEqual(store.callGoal, "Prepared tire question")
+        XCTAssertEqual(store.peekHintOpening()?.english, "Do you have these tires?")
+        vc.teardown()
+        XCTAssertEqual(store.callGoal, "Prepared tire question")
+        XCTAssertEqual(store.peekHintOpening()?.english, "Do you have these tires?")
+    }
+
     func testSuggestionLabelsHavePositiveHeightOnSELayout() {
         let vc = makeLoadedViewControllerWithSize(CGSize(width: 375, height: 667))
         let stream = CallHintStream()

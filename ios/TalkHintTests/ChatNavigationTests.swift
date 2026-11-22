@@ -153,9 +153,9 @@ final class ChatNavigationTests: XCTestCase {
         let (tabs, chat) = try fixture()
         tabs.openChat(animated: false)
         try await chatShown(tabs)
-        let composer = try XCTUnwrap(descendants(chat.view, as: UITextView.self).first)
-        composer.text = "Do not lose this unfinished text"
-        chat.textViewDidChange(composer)
+        let composer = try XCTUnwrap(descendants(chat.view, as: UITextView.self).first {
+            $0.accessibilityIdentifier == "chat-composer"
+        })
         let scroll = try XCTUnwrap(descendants(chat.view, as: UIScrollView.self).first { $0.accessibilityIdentifier == "chat-messages" })
         // The transcript arrives through the async offline load started on appearance.
         try await waitUntil("offline transcript to render") {
@@ -163,13 +163,40 @@ final class ChatNavigationTests: XCTestCase {
             return scroll.contentSize.height > 1000
         }
         XCTAssertGreaterThan(scroll.contentSize.height, 1000)
+        composer.text = "Do not lose this unfinished text"
+        chat.textViewDidChange(composer)
+        for _ in 0..<8 {
+            chat.view.layoutIfNeeded()
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let oldMessage = try XCTUnwrap(descendants(chat.view, as: ChatMessageTextView.self).first)
         scroll.setContentOffset(CGPoint(x: 0, y: 250), animated: false)
+        XCTAssertEqual(scroll.contentOffset.y, 250, accuracy: 2)
         tabs.closeChat(animated: false)
         try await chatHidden(tabs)
         tabs.openChat(animated: false)
         try await chatShown(tabs)
+        try await waitUntil("reopened transcript refresh and self-sizing layout") {
+            chat.view.layoutIfNeeded()
+            let textViews = self.descendants(chat.view, as: ChatMessageTextView.self)
+            return !textViews.isEmpty && !textViews.contains(where: { $0 === oldMessage })
+        }
+        // Let width-dependent intrinsic-size invalidation finish; do not widen
+        // the tolerance or assert only before the delayed +13 pt reflow.
+        for _ in 0..<8 {
+            descendants(chat.view, as: ChatMessageTextView.self).forEach { $0.setNeedsLayout() }
+            chat.view.layoutIfNeeded()
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
         XCTAssertEqual(composer.text, "Do not lose this unfinished text")
         XCTAssertEqual(scroll.contentOffset.y, 250, accuracy: 2)
+        // Subsequent ordinary layouts must not keep moving the reading position.
+        for _ in 0..<4 {
+            chat.view.setNeedsLayout()
+            chat.view.layoutIfNeeded()
+            try await Task.sleep(nanoseconds: 1_000_000)
+            XCTAssertEqual(scroll.contentOffset.y, 250, accuracy: 2)
+        }
     }
     func testExternalTabSelectionDoesNotDismissCallOverlay() async throws {
         let (tabs, _) = try fixture()

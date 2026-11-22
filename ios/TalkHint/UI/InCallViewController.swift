@@ -45,6 +45,7 @@ final class InCallViewController: UIViewController {
     private let routeCaption = UILabel()
     private let muteCaption = UILabel()
     private let dtmfSender: ((String) -> Bool)?
+    private let usesPreparedGoal: Bool
 
     // Live (non-finalized) transcript card per speaker, kept independently —
     // like `interimMessages['guest']` / `interimMessages['you']` in the web.
@@ -64,11 +65,12 @@ final class InCallViewController: UIViewController {
     private var lastGoalShownInFeed: String?
 
     init(callerName: String, hintStream: CallHintStream = CallHintStream(), callSid: String? = nil,
-         dtmfSender: ((String) -> Bool)? = nil) {
+         dtmfSender: ((String) -> Bool)? = nil, usesPreparedGoal: Bool = true) {
         self.callerName = callerName
         self.stream = hintStream
         self.telemetryCallSid = callSid
         self.dtmfSender = dtmfSender
+        self.usesPreparedGoal = usesPreparedGoal
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -79,7 +81,10 @@ final class InCallViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .white
         buildUI()
-        if let opening = SessionStore.shared.takeHintOpening() {
+        if !usesPreparedGoal {
+            stream.callGoalOverride = ""
+        }
+        if usesPreparedGoal, let opening = SessionStore.shared.takeHintOpening() {
             showSuggestion(en: opening.english, translation: opening.translation, options: nil)
             localOpeningVisible = true
         }
@@ -269,7 +274,7 @@ final class InCallViewController: UIViewController {
         captionRow.alignment = .center
 
         goalField.placeholder = NSLocalizedString("incall.goal.placeholder", comment: "")
-        goalField.text = SessionStore.shared.callGoal
+        goalField.text = usesPreparedGoal ? SessionStore.shared.callGoal : ""
         goalField.borderStyle = .none
         goalField.font = .systemFont(ofSize: 14)
         goalField.textColor = Theme.ink
@@ -747,7 +752,7 @@ final class InCallViewController: UIViewController {
         let goal = goalField.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !goal.isEmpty else { return }
         stream.setGoal(goal)
-        SessionStore.shared.callGoal = goal
+        if usesPreparedGoal { SessionStore.shared.callGoal = goal }
         // The goal shows up as a compact event in the conversation feed (via the
         // server's goal_set echo) — never as a persistent banner/status line.
         goalField.resignFirstResponder()
@@ -1093,7 +1098,8 @@ extension InCallViewController: CallHintStreamDelegate {
             lastGoalShownInFeed = text
             // Keep local state in sync so reconnects and Ask-AI requests carry
             // the new goal, and the goal field reflects what Brain now targets.
-            SessionStore.shared.callGoal = text
+            if usesPreparedGoal { SessionStore.shared.callGoal = text }
+            else { stream.callGoalOverride = text }
             goalField.text = text
             appendCard(title: NSLocalizedString("incall.card.goal_updated", comment: ""), titleColor: Theme.greenDark,
                        primary: text, secondary: nil,

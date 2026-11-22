@@ -34,13 +34,18 @@ final class CallManager: NSObject {
         init(clear: @escaping @MainActor () -> Void = { SessionStore.shared.callGoal = "" }) {
             self.clear = clear
         }
-        mutating func begin(_ uuid: UUID) { callID = uuid }
+        mutating func begin(_ uuid: UUID, isOutgoing: Bool) {
+            guard isOutgoing else { return }
+            callID = uuid
+        }
         mutating func finish(_ uuid: UUID) {
             guard callID == uuid else { return }
             callID = nil
             clear()
         }
         mutating func reset() {
+            // A provider reset with only incoming calls must preserve unused PREP.
+            guard callID != nil else { return }
             callID = nil
             clear()
         }
@@ -142,7 +147,7 @@ final class CallManager: NSObject {
                                       isOutgoing: false, translatorVoice: .female,
                                       translatorPlayback: .voice,
                                       voiceProvider: SessionStore.shared.voiceProvider)
-        goalLifetime.begin(uuid)
+        goalLifetime.begin(uuid, isOutgoing: false)
 
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: fromNumber)
@@ -195,7 +200,6 @@ final class CallManager: NSObject {
     func startOutgoingCall(to number: String, mode: CallMode) -> UUID {
         let uuid = UUID()
         guard mode != .copilot || Self.copilotAvailable else {
-            if sessions.isEmpty { goalLifetime.reset() }
             postOutgoingCallState(.failed, uuid: uuid)
             return uuid
         }
@@ -212,7 +216,7 @@ final class CallManager: NSObject {
                                       translatorPlayback: translatorPlayback,
                                       voiceProvider: voiceProvider)
         sessions[uuid]?.hintGoal = mode == .hint ? SessionStore.shared.callGoal : ""
-        goalLifetime.begin(uuid)
+        goalLifetime.begin(uuid, isOutgoing: true)
 
         let handle = CXHandle(type: .phoneNumber, value: number)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
@@ -271,10 +275,7 @@ final class CallManager: NSObject {
         // Prefer a connected call; fall back to any tracked session.
         let uuid = sessions.first(where: { $0.value.twilioCall != nil })?.key
             ?? sessions.keys.first
-        guard let callUUID = uuid else {
-            goalLifetime.reset()
-            return
-        }
+        guard let callUUID = uuid else { return }
         // Cancel intent immediately, including while preflight/token is pending.
         goalLifetime.finish(callUUID)
 
@@ -382,7 +383,7 @@ final class CallManager: NSObject {
                                           callSid: session.callSid ?? twilioCallSid,
                                           dtmfSender: session.isOutgoing ? { [weak self] digits in
                                               self?.sendHintDigits(digits, for: uuid) ?? false
-                                          } : nil)
+                                          } : nil, usesPreparedGoal: session.isOutgoing)
         inCallScreen = screen
         top.present(screen, animated: true)
     }
@@ -458,7 +459,7 @@ extension CallManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
-        guard var session = sessions[action.callUUID] else {
+        guard var session = sessions[action.callUUID], session.isOutgoing else {
             goalLifetime.finish(action.callUUID)
             action.fail()
             return

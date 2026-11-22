@@ -17,7 +17,7 @@ final class HintCallPreparationTests: XCTestCase {
         store.stageHintOpening(english: "Has anyone found my case?", translation: "", goal: store.callGoal)
         var lifetime = CallManager.GoalLifetime()
         let uuid = UUID()
-        lifetime.begin(uuid)
+        lifetime.begin(uuid, isOutgoing: true)
         // CallManager's terminal path is independent of InCallViewController.
         lifetime.finish(uuid)
         XCTAssertEqual(store.callGoal, "")
@@ -34,11 +34,11 @@ final class HintCallPreparationTests: XCTestCase {
         var clears = 0
         var lifetime = CallManager.GoalLifetime(clear: { goal = ""; clears += 1 })
         let first = UUID(), second = UUID()
-        lifetime.begin(first)
+        lifetime.begin(first, isOutgoing: true)
         lifetime.finish(first) // Cancellation while preflight/token is pending.
         XCTAssertNil(lifetime.callID)
         XCTAssertEqual(goal, "")
-        lifetime.begin(second)
+        lifetime.begin(second, isOutgoing: true)
         goal = "second"
         lifetime.finish(first) // Late failure/disconnect from the cancelled call.
         XCTAssertEqual(goal, "second")
@@ -49,6 +49,54 @@ final class HintCallPreparationTests: XCTestCase {
         XCTAssertEqual(goal, "")
         lifetime.finish(second)
         XCTAssertEqual(clears, 2)
+    }
+
+    @MainActor
+    func testIncomingCallCannotReplaceOutgoingGoalOwner() {
+        var goal = "Outgoing case search"
+        var lifetime = CallManager.GoalLifetime(clear: { goal = "" })
+        let outgoing = UUID(), incoming = UUID()
+        lifetime.begin(outgoing, isOutgoing: true)
+        lifetime.begin(incoming, isOutgoing: false)
+        XCTAssertEqual(lifetime.callID, outgoing)
+        lifetime.finish(incoming) // Rejected, failed or ended incoming call.
+        XCTAssertEqual(lifetime.callID, outgoing)
+        XCTAssertEqual(goal, "Outgoing case search")
+        lifetime.finish(outgoing)
+        XCTAssertNil(lifetime.callID)
+        XCTAssertEqual(goal, "")
+    }
+
+    @MainActor
+    func testIncomingOnlyTerminationPreservesUnusedPREPGoal() {
+        var goal = "Prepared tire question"
+        var lifetime = CallManager.GoalLifetime(clear: { goal = "" })
+        let incoming = UUID()
+        lifetime.begin(incoming, isOutgoing: false)
+        lifetime.finish(incoming)
+        lifetime.reset()
+        XCTAssertNil(lifetime.callID)
+        XCTAssertEqual(goal, "Prepared tire question")
+    }
+
+    @MainActor
+    func testUnavailableCopilotDoesNotConsumePREPGoalOrOpening() {
+        let store = SessionStore.shared
+        let oldGoal = store.callGoal
+        let oldOpening = store.peekHintOpening()
+        defer {
+            store.callGoal = oldGoal
+            if let opening = oldOpening {
+                store.stageHintOpening(english: opening.english, translation: opening.translation, goal: opening.goal)
+            }
+        }
+        store.callGoal = "Ask about tires"
+        store.stageHintOpening(english: "Do you have these tires?", translation: "", goal: store.callGoal)
+        XCTAssertFalse(CallManager.copilotAvailable)
+        // The real rejected-mode path exits before any CallKit request or network.
+        CallManager.shared.startOutgoingCall(to: "+12025550123", mode: .copilot)
+        XCTAssertEqual(store.callGoal, "Ask about tires")
+        XCTAssertEqual(store.peekHintOpening()?.english, "Do you have these tires?")
     }
 
     func testBrokenPlanDoesNotDiscardOtherValidPlans() throws {
