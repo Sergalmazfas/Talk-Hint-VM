@@ -2,6 +2,38 @@ import XCTest
 @testable import TalkHint
 
 final class ChatTablesTests: XCTestCase {
+    func testFailedExportAllowsNewAttemptButUnknownOutcomeKeepsIdentity() {
+        var attempts = ChatTableExportAttempts()
+        let first = attempts.request(for: "book:1")
+        attempts.remember(job: "job-1", for: "book:1")
+        attempts.observed(status: "running", for: "book:1")
+        XCTAssertEqual(attempts.request(for: "book:1"), first)
+        XCTAssertEqual(attempts.job(for: "book:1"), "job-1")
+        attempts.observed(status: "unknown", for: "book:1")
+        XCTAssertEqual(attempts.request(for: "book:1"), first)
+        attempts.observed(status: "failed", for: "book:1")
+        XCTAssertNil(attempts.job(for: "book:1"))
+        XCTAssertNotEqual(attempts.request(for: "book:1"), first)
+    }
+    func testExportFilenameUsesSafeTableTitle() {
+        XCTAssertEqual(ChatTableExportAttempts.filename("Grace Personal Savings"), "Grace Personal Savings.xlsx")
+        XCTAssertEqual(ChatTableExportAttempts.filename("Budget.xlsx"), "Budget.xlsx")
+        let safe = ChatTableExportAttempts.filename("../Trip\\Costs:\n2026")
+        XCTAssertFalse(safe.contains("/")); XCTAssertFalse(safe.contains("\\")); XCTAssertFalse(safe.contains("\n"))
+        XCTAssertFalse(safe.hasPrefix("."))
+        XCTAssertLessThan(ChatTableExportAttempts.filename(String(repeating: "🚛", count: 300)).utf8.count, 255)
+    }
+    func testTableErrorsHaveReadableLocalizedMessages() throws {
+        for locale in ["ru", "es", "en"] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: locale, ofType: "lproj"))
+            let bundle = try XCTUnwrap(Bundle(path: path))
+            for code in ["TABLE_STALE_READ_AGAIN", "TABLE_HIDDEN", "TABLE_EXPORT_NOT_READY", "TABLE_EXPORT_FAILED"] {
+                let text = ChatFeatureErrors.message(APIError.http(409, code), feature: .tables, bundle: bundle)
+                XCTAssertFalse(text.contains("TABLE_")); XCTAssertFalse(text.hasPrefix("chat."))
+                XCTAssertFalse(text.isEmpty)
+            }
+        }
+    }
     private func caps() throws -> ChatCapabilities {
         try JSONDecoder().decode(ChatCapabilities.self, from: Data(#"{"ai":{"available":true},"attachments":{"available":true,"mimeTypes":["application/pdf"],"maxBytes":2097152},"voice":{"available":false},"tables":{"available":true,"limits":{"bytes":10485760,"sheets":20,"columns":100,"rows":50000}},"readAloud":{"available":true}}"#.utf8))
     }

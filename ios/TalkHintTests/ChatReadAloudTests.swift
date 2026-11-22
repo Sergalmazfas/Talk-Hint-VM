@@ -3,6 +3,39 @@ import XCTest
 
 @MainActor
 final class ChatReadAloudTests: XCTestCase {
+    func testManifestCoversOriginalFencesAndWhitespaceAsServerDoes() throws {
+        let text = "\n```swift\nline1\n  line2\n```\n \n"
+        let data = try JSONSerialization.data(withJSONObject: [
+            "revision": 1, "offsetEncoding": "utf-16", "textHash": "h",
+            "segments": [["offset": 0, "length": text.utf16.count]]
+        ])
+        let manifest = try JSONDecoder().decode(ChatReadAloudManifest.self, from: data)
+        XCTAssertNoThrow(try manifest.validate(text: text))
+    }
+    func testBinaryPreservesServerCodeAndSpeechErrorsAreLocalized() async throws {
+        let api = APIClient(transport: { request in
+            (Data(#"{"error":"READ_ALOUD_BUSY"}"#.utf8),
+             HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil,
+                             headerFields: ["Content-Type": "application/json"])!)
+        }, tokenProvider: { "offline" })
+        do {
+            _ = try await api.chatBinary("/api/chat-v1/conversations/c/messages/m/read-aloud", audio: true)
+            XCTFail("Expected busy")
+        } catch let APIError.http(status, code) {
+            XCTAssertEqual(status, 409); XCTAssertEqual(code, "READ_ALOUD_BUSY")
+        }
+        for locale in ["ru", "es", "en"] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: locale, ofType: "lproj"))
+            let bundle = try XCTUnwrap(Bundle(path: path))
+            for error in [APIError.http(409, "AUDIO_BUSY"), .http(409, "READ_ALOUD_BUSY"),
+                          .http(429, "VOICE_DAILY_LIMIT"), .http(503, "CHAT_SPEECH_UNAVAILABLE"),
+                          .http(502, "CHAT_BINARY_REQUEST_FAILED")] {
+                let text = ChatFeatureErrors.message(error, feature: .speech, bundle: bundle)
+                XCTAssertFalse(text.hasPrefix("chat.")); XCTAssertFalse(text.contains("AUDIO_BUSY"))
+                XCTAssertFalse(text.contains("CHAT_BINARY")); XCTAssertFalse(text.isEmpty)
+            }
+        }
+    }
     func testManifestUsesUTF16NotCharactersAndRejectsOutOfRange() throws {
         let manifest = try JSONDecoder().decode(ChatReadAloudManifest.self, from:
             Data(#"{"revision":1,"offsetEncoding":"utf-16","textHash":"hash","segments":[{"offset":0,"length":4}]}"#.utf8))

@@ -139,7 +139,9 @@ final class ChatApprovedScreenTests: XCTestCase {
     func testKeyboardEditingScreenshotAndDraftRemainEditable() async throws {
         let chat = try fixture(.editing)
         try await loaded(chat)
-        let editor = try XCTUnwrap(all(chat.view, UITextView.self).first)
+        let editor = try XCTUnwrap(all(chat.view, UITextView.self).first {
+            $0.accessibilityIdentifier == "chat-composer"
+        })
         XCTAssertTrue(editor.isEditable)
         XCTAssertFalse(editor.text.isEmpty)
         XCTAssertTrue(editor.isFirstResponder)

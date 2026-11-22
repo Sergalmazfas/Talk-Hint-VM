@@ -30,11 +30,27 @@ final class ChatMessagePresentationTests: XCTestCase {
         XCTAssertGreaterThan(view.intrinsicContentSize.height, 0)
     }
     func testTapCopiesPhoneWithoutOpeningURL() {
-        let view = ChatMessageTextView(text: "+1 202 555 0123", font: .systemFont(ofSize: 17))
-        let before = UIPasteboard.general.string
-        defer { UIPasteboard.general.string = before }
+        var clipboard: String?
+        let view = ChatMessageTextView(text: "+1 202 555 0123", font: .systemFont(ofSize: 17),
+                                       copyText: { clipboard = $0 })
         XCTAssertFalse(view.textView(view, shouldInteractWith: URL(string: "tel:+12025550123")!,
             in: NSRange(location: 0, length: view.text.utf16.count), interaction: .invokeDefaultAction))
-        XCTAssertEqual(UIPasteboard.general.string, "+1 202 555 0123")
+        XCTAssertEqual(clipboard, "+1 202 555 0123")
+    }
+    func testFencedMultilineCodeIsVerbatimInDisplayAndWholeCopy() {
+        let raw = "**Result:**\n```swift\nline1\n   line2\n\n  line3\n```\nEnd"
+        let expected = "Result:\nline1\n   line2\n\n  line3\nEnd"
+        XCTAssertEqual(ChatMarkdown.plain(raw), expected)
+        XCTAssertEqual(ChatMessageTextView(text: raw, font: .systemFont(ofSize: 17)).text, expected)
+        let user = ChatMessageTextView(text: raw, font: .systemFont(ofSize: 17), markdown: false)
+        XCTAssertEqual(user.text, raw)
+        XCTAssertEqual(ChatMarkdown.plain("```txt\r\nline1\r\n  line2\r\n```\r\n"), "line1\r\n  line2\r\n")
+    }
+    func testCopyItemsUseShortLabelsWithoutDuplicatingLongCode() {
+        let code = ChatMessagePresentation.Item(kind: "code", value: String(repeating: "long code\n", count: 100))
+        XCTAssertEqual(ChatCopyItemLabel.text(code), NSLocalizedString("chat.copy.code", comment: ""))
+        let address = ChatMessagePresentation.Item(kind: "address", value: String(repeating: "Address ", count: 100))
+        XCTAssertLessThanOrEqual(ChatCopyItemLabel.text(address).count, 52)
+        XCTAssertTrue(address.value.hasSuffix("Address "))
     }
 }

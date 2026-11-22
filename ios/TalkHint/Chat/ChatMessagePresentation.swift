@@ -20,8 +20,48 @@ struct ChatMessagePresentation: Codable, Equatable {
     }
 }
 
+enum ChatCopyItemLabel {
+    static func text(_ item: ChatMessagePresentation.Item) -> String {
+        if item.kind == "code" { return NSLocalizedString("chat.copy.code", comment: "") }
+        let line = item.value.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        return line.count > 52 ? String(line.prefix(49)) + "…" : line
+    }
+}
+
 enum ChatMarkdown {
     static func render(_ text: String, font: UIFont) -> NSAttributedString {
+        // Parse prose one physical line at a time. Foundation's inline Markdown
+        // parser normalizes code/newline whitespace; fenced code must bypass it.
+        let result = NSMutableAttributedString(string: "")
+        let lines = text.components(separatedBy: "\n")
+        var fence: (character: Character, length: Int)?
+        for (index, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let marker = trimmed.first
+            let count = marker.map { c in trimmed.prefix(while: { $0 == c }).count } ?? 0
+            let indentation = line.prefix(while: { $0 == " " }).count
+            if indentation <= 3, let marker, (marker == "`" || marker == "~"), count >= 3 {
+                if let active = fence {
+                    if marker == active.character, count >= active.length,
+                       trimmed.dropFirst(count).trimmingCharacters(in: .whitespaces).isEmpty {
+                        fence = nil; continue
+                    }
+                } else {
+                    fence = (marker, count); continue
+                }
+            }
+            if fence != nil {
+                result.append(NSAttributedString(string: line, attributes: [
+                    .font: UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular),
+                    .foregroundColor: UIColor.label]))
+            } else { result.append(renderInline(line, font: font)) }
+            if index < lines.count - 1 {
+                result.append(NSAttributedString(string: "\n", attributes: [.font: font]))
+            }
+        }
+        return result
+    }
+    private static func renderInline(_ text: String, font: UIFont) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         guard let markdown = try? AttributedString(markdown: text, options: options) else {
             return NSAttributedString(string: text, attributes: [.font: font])
@@ -56,13 +96,17 @@ enum ChatMarkdown {
 /// copies verbatim and returns false (no dial, mail composer or Maps).
 final class ChatMessageTextView: UITextView, UITextViewDelegate {
     private var measuredWidth: CGFloat = -1
-    init(text: String, font: UIFont) {
+    private let copyText: (String) -> Void
+    init(text: String, font: UIFont, markdown: Bool = true,
+         copyText: @escaping (String) -> Void = { UIPasteboard.general.string = $0 }) {
+        self.copyText = copyText
         super.init(frame: .zero, textContainer: nil)
         isEditable = false; isSelectable = true; isScrollEnabled = false
         backgroundColor = .clear; textContainerInset = .zero
         textContainer.lineFragmentPadding = 0
         adjustsFontForContentSizeCategory = true
-        attributedText = ChatMarkdown.render(text, font: font)
+        attributedText = markdown ? ChatMarkdown.render(text, font: font)
+            : NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: UIColor.label])
         dataDetectorTypes = [.address, .phoneNumber, .link]
         delegate = self
         accessibilityIdentifier = "chat-message-text"
@@ -85,7 +129,7 @@ final class ChatMessageTextView: UITextView, UITextViewDelegate {
     func textView(_ textView: UITextView, shouldInteractWith URL: URL,
                   in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
         let value = (textView.text as NSString).substring(with: characterRange)
-        UIPasteboard.general.string = value
+        copyText(value)
         UIAccessibility.post(notification: .announcement, argument: NSLocalizedString("chat.copy.done", comment: ""))
         return false
     }

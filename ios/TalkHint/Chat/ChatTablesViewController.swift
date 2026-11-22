@@ -11,8 +11,7 @@ final class ChatTablesViewController: UITableViewController, UISearchBarDelegate
     private var loadTask: Task<Void, Never>?
     private var exportTask: Task<Void, Never>?
     private var generation = UUID()
-    private var exportIDs: [String: UUID] = [:]
-    private var pendingJobs: [String: String] = [:]
+    private var attempts = ChatTableExportAttempts()
     private var exportedFiles: [URL] = []
     private var busy = false
     init(api: APIClient, conversationId: String, valid: @escaping () -> Bool) {
@@ -38,7 +37,7 @@ final class ChatTablesViewController: UITableViewController, UISearchBarDelegate
             generation = UUID(); loadTask?.cancel(); exportTask?.cancel()
         }
     }
-    deinit { exportedFiles.forEach { try? FileManager.default.removeItem(at: $0) } }
+    deinit { exportedFiles.forEach { try? FileManager.default.removeItem(at: $0.deletingLastPathComponent()) } }
     @objc private func close() {
         generation = UUID(); loadTask?.cancel(); exportTask?.cancel()
         dismiss(animated: true)
@@ -97,15 +96,15 @@ final class ChatTablesViewController: UITableViewController, UISearchBarDelegate
         guard valid(), !busy else { return }
         busy = true; title = NSLocalizedString("chat.tables.exporting", comment: "")
         let key = "\(book.id):\(book.revision)"
-        let requestId = exportIDs[key] ?? UUID(); exportIDs[key] = requestId
+        let requestId = attempts.request(for: key)
         exportTask = Task {
             defer { busy = false; title = NSLocalizedString("chat.tables.title", comment: "") }
             do {
                 let jobId: String
-                if let known = pendingJobs[key] { jobId = known }
+                if let known = attempts.job(for: key) { jobId = known }
                 else {
                     let receipt = try await api.chatExportTable(book, conversationId: conversationId, requestId: requestId)
-                    jobId = receipt.jobId; pendingJobs[key] = jobId
+                    jobId = receipt.jobId; attempts.remember(job: jobId, for: key)
                 }
                 for _ in 0..<120 {
                     try Task.checkCancellation()
@@ -116,7 +115,9 @@ final class ChatTablesViewController: UITableViewController, UISearchBarDelegate
                         let data = try await api.chatBinary(path)
                         try Task.checkCancellation()
                         guard valid() else { throw CancellationError() }
-                        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".xlsx")
+                        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        let url = directory.appendingPathComponent(ChatTableExportAttempts.filename(book.name))
                         try data.write(to: url, options: .atomic); exportedFiles.append(url)
                         let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
                         share.popoverPresentationController?.sourceView = view
@@ -125,19 +126,25 @@ final class ChatTablesViewController: UITableViewController, UISearchBarDelegate
                         return
                     }
                     guard ["queued", "running"].contains(job.status) else {
-                        throw APIError.http(409, job.error_code ?? "TABLE_EXPORT_NOT_READY")
+                        attempts.observed(status: job.status, for: key)
+                        throw APIError.http(409, job.error_code ?? (job.status == "purged" ? "TABLE_PURGED" : "TABLE_EXPORT_FAILED"))
                     }
                     try await Task.sleep(nanoseconds: 1_000_000_000)
                 }
                 throw APIError.http(202, "TABLE_EXPORT_NOT_READY")
             } catch {
-                if !(error is CancellationError), valid() { showError(error) }
+                if !(error is CancellationError), valid() {
+                    showError(error, retry: { [weak self] in self?.export(book) })
+                }
             }
         }
     }
-    private func showError(_ error: Error) {
+    private func showError(_ error: Error, retry: (() -> Void)? = nil) {
         let alert = UIAlertController(title: NSLocalizedString("chat.tables.title", comment: ""),
-                                      message: error.localizedDescription, preferredStyle: .alert)
+                                      message: ChatFeatureErrors.message(error, feature: .tables), preferredStyle: .alert)
+        if let retry {
+            alert.addAction(UIAlertAction(title: NSLocalizedString("chat.tables.retry", comment: ""), style: .default) { _ in retry() })
+        }
         alert.addAction(UIAlertAction(title: NSLocalizedString("common.ok", comment: ""), style: .default))
         present(alert, animated: true)
     }

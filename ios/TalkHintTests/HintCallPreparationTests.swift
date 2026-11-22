@@ -29,9 +29,23 @@ final class HintCallPreparationTests: XCTestCase {
                 return (body, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
             }, tokenProvider: { "offline" })
             let ready = await api.prepareHintCall(number: "+12025550123", goal: "",
-                localOpening: .init(phraseEn: "Never reuse stale phrase", translation: ""))
+                localOpening: nil)
             XCTAssertEqual(ready.opening.phraseEn, "Hi, may I ask you a quick question?")
             XCTAssertEqual(ready.parameters, ["HintPrepared": "1"])
+        }
+    }
+    func testGoalFilteredPREPOpeningSurvivesEmptyOrFailedPreflight() async throws {
+        for body in [nil, Data(), Data(#"{"plans":[],"serverTime":""}"#.utf8)] as [Data?] {
+            let api = APIClient(transport: { req in
+                guard let body else { throw URLError(.notConnectedToInternet) }
+                return (body, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }, tokenProvider: { "offline" })
+            let ready = await api.prepareHintCall(number: "+12025550123", goal: "Find case",
+                localOpening: .init(phraseEn: "Has anyone found my case?", translation: "Кейс не находили?"))
+            XCTAssertEqual(ready.goal, "Find case")
+            XCTAssertEqual(ready.opening.phraseEn, "Has anyone found my case?")
+            XCTAssertEqual(ready.opening.translation, "Кейс не находили?")
+            XCTAssertNil(ready.parameters["HintPlanId"])
         }
     }
     func testLongMultilingualGoalFitsConservativeTwilioWireLimit() {

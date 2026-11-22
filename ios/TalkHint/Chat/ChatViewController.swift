@@ -906,7 +906,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -appearance.bubbleVerticalInset),
             ])
             if !message.text.isEmpty {
-                let text = ChatMessageTextView(text: message.text, font: appearance.messageFont)
+                let text = ChatMessageTextView(text: message.text, font: appearance.messageFont,
+                                               markdown: message.role == "assistant")
                 content.addArrangedSubview(text)
                 if !isUser {
                     addMessageControls(message, to: content)
@@ -1059,16 +1060,20 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             play.addAction(UIAction { [weak self] _ in
                 guard let self, !self.dictation.isBusy else { return }
                 self.readAloud.onChange = { [weak self] in self?.renderMessages() }
-                self.readAloud.onError = { [weak self] in self?.showError($0) }
+                self.readAloud.onError = { [weak self] error in
+                    self?.showPlanError(ChatFeatureErrors.message(error, feature: .speech))
+                }
                 self.readAloud.play(message)
             }, for: .touchUpInside)
             actions.addArrangedSubview(play)
         }
         actions.addArrangedSubview(UIView()); content.addArrangedSubview(actions)
-        for item in message.presentation?.copyItems ?? [] {
+        let items = message.presentation?.copyItems ?? []
+        for item in items.prefix(2) {
             let button = UIButton(type: .system)
-            button.setTitle(item.value, for: .normal)
-            button.titleLabel?.numberOfLines = 0
+            button.setTitle(ChatCopyItemLabel.text(item), for: .normal)
+            button.titleLabel?.numberOfLines = 1
+            button.titleLabel?.lineBreakMode = .byTruncatingMiddle
             button.contentHorizontalAlignment = .leading
             button.accessibilityIdentifier = "chat-copy-\(item.kind)"
             button.accessibilityHint = NSLocalizedString("chat.copy.all", comment: "")
@@ -1079,6 +1084,21 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 UIAccessibility.post(notification: .announcement, argument: NSLocalizedString("chat.copy.done", comment: ""))
             }, for: .touchUpInside)
             content.addArrangedSubview(button)
+        }
+        if items.count > 2 {
+            let more = UIButton(type: .system)
+            more.contentHorizontalAlignment = .leading
+            more.accessibilityIdentifier = "chat-copy-more"
+            more.setTitle(String(format: NSLocalizedString("chat.copy.more", comment: ""), items.count - 2), for: .normal)
+            more.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            more.showsMenuAsPrimaryAction = true
+            more.menu = UIMenu(children: items.dropFirst(2).map { item in
+                UIAction(title: ChatCopyItemLabel.text(item), image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                    guard self?.isCurrentOwner == true else { return }
+                    UIPasteboard.general.string = item.value
+                }
+            })
+            content.addArrangedSubview(more)
         }
     }
 

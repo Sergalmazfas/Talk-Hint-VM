@@ -97,7 +97,7 @@ final class APIClient {
                          localOpening: PreparedHintPlan.Opening? = nil) async -> HintCallPreparation {
         let response = (try? await preparedHintPlans()) ?? .init()
         return HintCallPreparation(number: number, goal: goal, response: response,
-                                   localOpening: response.plans.isEmpty ? nil : localOpening)
+                                   localOpening: localOpening)
     }
 
     /// Private binary routes only: prohibit redirects (including same-origin
@@ -124,7 +124,9 @@ final class APIClient {
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
         guard (200..<300).contains(http.statusCode) else {
-            throw APIError.http(http.statusCode, "CHAT_BINARY_REQUEST_FAILED")
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let code = (json?["code"] as? String) ?? (json?["error"] as? String)
+            throw APIError.http(http.statusCode, code ?? "CHAT_BINARY_REQUEST_FAILED")
         }
         let mime = http.mimeType?.lowercased() ?? ""
         if audio {

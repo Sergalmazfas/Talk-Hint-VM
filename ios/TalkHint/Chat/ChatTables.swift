@@ -35,6 +35,34 @@ struct ChatTableJob: Decodable {
     let error_code: String?
 }
 
+struct ChatTableExportAttempts {
+    private var requests: [String: UUID] = [:]
+    private var jobs: [String: String] = [:]
+    mutating func request(for key: String) -> UUID {
+        if let known = requests[key] { return known }
+        let id = UUID(); requests[key] = id; return id
+    }
+    func job(for key: String) -> String? { jobs[key] }
+    mutating func remember(job: String, for key: String) { jobs[key] = job }
+    mutating func observed(status: String, for key: String) {
+        // Only a definite terminal result allows a new export request.
+        if ["failed", "purged"].contains(status) {
+            requests[key] = nil; jobs[key] = nil
+        }
+    }
+    static func filename(_ title: String) -> String {
+        let forbidden = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "/\\:*?\"<>|"))
+        let clean = title.unicodeScalars.map { forbidden.contains($0) ? " " : String($0) }.joined()
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+        var stem = clean.lowercased().hasSuffix(".xlsx") ? String(clean.dropLast(5)) : clean
+        while stem.utf8.count > 180 { stem.removeLast() }
+        if stem.trimmingCharacters(in: .whitespaces).isEmpty {
+            stem = NSLocalizedString("chat.tables.filename", comment: "")
+        }
+        return stem + ".xlsx"
+    }
+}
+
 extension APIClient {
     static func tableID(_ value: String) throws -> String {
         guard !value.isEmpty, value.count <= 80,
