@@ -14,6 +14,17 @@ struct ChatCapabilities: Decodable {
     let attachments: Attachments
     let voice: Voice
     let voiceMode: VoiceMode?
+    struct ReadAloud: Decodable {
+        let available: Bool
+        let reason: String?
+    }
+    struct Tables: Decodable {
+        struct Limits: Decodable { let bytes: Int; let sheets: Int; let columns: Int; let rows: Int }
+        let available: Bool
+        let limits: Limits
+    }
+    var readAloud: ReadAloud? = nil
+    var tables: Tables? = nil
 }
 
 struct ChatConversation: Codable, Identifiable, Equatable {
@@ -114,6 +125,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     var action: ChatMessageAction?
     var memoryAction: ChatMemoryAction? = nil
     var event: Event? = nil
+    var presentation: ChatMessagePresentation? = nil
 
     init(id: String, conversationId: String, sequence: Int, role: String, text: String, status: String,
          clientRequestId: String?, attachmentIds: [String], createdAt: String, errorCode: String?,
@@ -236,6 +248,11 @@ extension APIClient {
     }
 
     func uploadChatAttachment(requestId: UUID, name: String, mimeType: String, data fileData: Data) async throws -> ChatAttachment {
+        let caps = try await chatCapabilities()
+        guard fileData.count <= ChatTableAttachmentPolicy.limit(mime: mimeType, capabilities: caps),
+              !ChatTableAttachmentPolicy.isTable(mimeType) || caps.tables?.available == true else {
+            throw APIError.http(413, "ATTACHMENT_TOO_LARGE_OR_UNAVAILABLE")
+        }
         let body: [String: Any] = ["clientRequestId": requestId.uuidString.lowercased(), "name": name,
                                    "mimeType": mimeType, "dataBase64": fileData.base64EncodedString()]
         let data = try await request("/api/chat-v1/attachments", method: "POST", json: body, authenticated: true)

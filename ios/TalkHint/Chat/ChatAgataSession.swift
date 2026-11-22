@@ -21,6 +21,7 @@ private final class AgataNoRedirect: NSObject, URLSessionTaskDelegate {
 
 @MainActor
 final class ChatAgataSession {
+    private var audioLease: UUID?
     private let api: APIClient
     private let conversationId: String
     private let validOwner: () -> Bool
@@ -51,6 +52,9 @@ final class ChatAgataSession {
     }
     func start(language: String) async throws {
         guard validOwner(), !closed else { throw CancellationError() }
+        guard !CallManager.shared.hasPhoneAudioSession else { throw APIError.http(409, "AUDIO_BUSY") }
+        guard let lease = ChatAudioOwnership.shared.beginAgata() else { throw APIError.http(409, "AUDIO_BUSY") }
+        audioLease = lease
         // An unstructured creation finishes even if the screen closes while HTTP is in flight.
         // Its late receipt is stopped, not abandoned or retried with a new request ID.
         let api = api, conversationId = conversationId, requestId = UUID()
@@ -174,6 +178,8 @@ final class ChatAgataSession {
         diagnostic.record(.stop)
         trickle.stop()
         peer.close() // Immediate local microphone/playback stop, BEFORE HTTP cleanup.
+        ChatAudioOwnership.shared.endAgata(audioLease)
+        audioLease = nil
         monitor?.cancel(); meter?.cancel(); deadline?.cancel()
         monitor = nil; meter = nil; deadline = nil
         if let ticket { cleanRemote(ticket, signal: signalId) }

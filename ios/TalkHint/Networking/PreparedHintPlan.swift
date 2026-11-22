@@ -3,6 +3,20 @@ import Foundation
 struct PreparedHintPlansResponse: Decodable {
     let plans: [PreparedHintPlan]
     let serverTime: String
+
+    init(plans: [PreparedHintPlan] = [], serverTime: String = "") {
+        self.plans = plans; self.serverTime = serverTime
+    }
+    private struct Element: Decodable {
+        let value: PreparedHintPlan?
+        init(from decoder: Decoder) throws { value = try? PreparedHintPlan(from: decoder) }
+    }
+    private enum CodingKeys: CodingKey { case plans, serverTime }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        plans = (try? c.decode([Element].self, forKey: .plans))?.compactMap(\.value) ?? []
+        serverTime = (try? c.decode(String.self, forKey: .serverTime)) ?? ""
+    }
 }
 
 struct PreparedHintPlan: Decodable {
@@ -70,6 +84,40 @@ struct HintCallPreparation {
             params["HintOpening"] = self.opening.phraseEn
             params["HintOpeningTranslation"] = self.opening.translation
         }
-        self.parameters = params
+        self.parameters = Self.bounded(params, number: number)
+    }
+
+    /// Twilio documents 800 bytes for JS params (31103); iOS documents no
+    /// separate number. Use the same conservative bound INCLUDING To and keys,
+    /// URL-encoded, not character count. Never truncate a saved plan id/hash.
+    static func bounded(_ input: [String: String], number: String) -> [String: String] {
+        var result = input
+        for (key, bytes) in [("HintGoal", 160), ("HintOpening", 100), ("HintOpeningTranslation", 80)] {
+            if let value = result[key] { result[key] = utf8Prefix(value, bytes: bytes) }
+        }
+        for key in ["HintOpeningTranslation", "HintOpening", "HintGoal"] {
+            while encodedSize(result.merging(["To": number]) { _, new in new }) > 800,
+                  let value = result[key], !value.isEmpty {
+                result[key] = String(value.dropLast())
+            }
+        }
+        // Malformed server ids must not make a call impossible.
+        if encodedSize(result.merging(["To": number]) { _, new in new }) > 800 {
+            return ["HintPrepared": "1"]
+        }
+        return result
+    }
+    static func encodedSize(_ params: [String: String]) -> Int {
+        var c = URLComponents()
+        c.queryItems = params.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return c.percentEncodedQuery?.utf8.count ?? 0
+    }
+    private static func utf8Prefix(_ value: String, bytes: Int) -> String {
+        var result = ""
+        for character in value {
+            guard result.utf8.count + String(character).utf8.count <= bytes else { break }
+            result.append(character)
+        }
+        return result
     }
 }

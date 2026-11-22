@@ -88,8 +88,59 @@ final class APIClient {
 
     /// Read-only preview; no goal activation, TTL extension or call reservation.
     func preparedHintPlans() async throws -> PreparedHintPlansResponse {
-        let data = try await request("/api/prepare/hint-plans", method: "GET", json: nil, authenticated: true)
+        let data = try await request("/api/prepare/hint-plans", method: "GET", json: nil, authenticated: true,
+                                     timeout: 1)
         return try JSONDecoder().decode(PreparedHintPlansResponse.self, from: data)
+    }
+
+    func prepareHintCall(number: String, goal: String,
+                         localOpening: PreparedHintPlan.Opening? = nil) async -> HintCallPreparation {
+        let response = (try? await preparedHintPlans()) ?? .init()
+        return HintCallPreparation(number: number, goal: goal, response: response,
+                                   localOpening: response.plans.isEmpty ? nil : localOpening)
+    }
+
+    /// Private binary routes only: prohibit redirects (including same-origin
+    /// redirects) so a Bearer token can never follow a provider/storage URL.
+    func chatBinary(_ path: String, method: String = "GET", body: [String: Any]? = nil,
+                    audio: Bool = false) async throws -> Data {
+        let url = try Self.chatPrivateURL(path, origin: AppConfig.baseURL)
+        guard let token = tokenProvider() else { throw APIError.notAuthenticated }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response): (Data, URLResponse)
+        if let transport { (data, response) = try await transport(req) }
+        else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.httpCookieStorage = nil
+            let client = URLSession(configuration: configuration, delegate: ChatNoRedirect(), delegateQueue: nil)
+            defer { client.finishTasksAndInvalidate() }
+            (data, response) = try await client.data(for: req)
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError.http(http.statusCode, "CHAT_BINARY_REQUEST_FAILED")
+        }
+        let mime = http.mimeType?.lowercased() ?? ""
+        if audio {
+            guard ["audio/pcm", "audio/x-pcm", "application/octet-stream"].contains(mime) else { throw APIError.decoding }
+        } else {
+            guard mime == ChatTableAttachmentPolicy.xlsx || mime == "application/octet-stream" else { throw APIError.decoding }
+        }
+        return data
+    }
+    static func chatPrivateURL(_ path: String, origin: URL) throws -> URL {
+        guard let url = URL(string: path, relativeTo: origin)?.absoluteURL,
+              url.scheme == origin.scheme, url.host == origin.host, url.port == origin.port,
+              url.user == nil, url.password == nil, url.fragment == nil,
+              !url.path.contains(".."), url.path.hasPrefix("/api/chat-v1/"),
+              !path.contains("%"), !path.contains("\\") else { throw APIError.decoding }
+        return url
     }
 
     // MARK: - Auth
@@ -1106,14 +1157,17 @@ final class APIClient {
     }
 
     func request(_ path: String, method: String, json: [String: Any]?, authenticated: Bool,
-                         queryItems: [URLQueryItem] = []) async throws -> Data {
+                         queryItems: [URLQueryItem] = [], timeout: TimeInterval = 60) async throws -> Data {
         var req = URLRequest(url: try Self.requestURL(path, queryItems: queryItems))
+        req.timeoutInterval = timeout
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
         if let json = json {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try JSONSerialization.data(withJSONObject: json)
+            // Base64 spreadsheet uploads must fit the dedicated 14 MiB parser:
+            // escaping "/" can otherwise double an adversarial 10 MiB payload.
+            req.httpBody = try JSONSerialization.data(withJSONObject: json, options: [.withoutEscapingSlashes])
         }
 
         if authenticated {

@@ -29,6 +29,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var attachments: [ChatAttachment] = []
     private var attachmentCache: [String: ChatAttachment] = [:]
     private var capabilities: ChatCapabilities?
+    private lazy var readAloud = ChatReadAloudPlayer(api: api, valid: { [weak self] in
+        self?.isCurrentOwner == true
+    })
     private var currentConversation: ChatConversation?
     private var pendingNewVoice = false
     private var outbox: ChatOutbox?
@@ -192,6 +195,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         resumeTask?.cancel()
         pollTask?.cancel()
         cancelDictation()
+        readAloud.stop()
         persistDraft()
     }
     override func viewDidLayoutSubviews() {
@@ -560,6 +564,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         createNewChat(preservingDraft: false)
     }
     private func createNewChat(preservingDraft: Bool, onCreated: (() -> Void)? = nil) {
+        readAloud.stop()
         let draft = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text
         let draftAttachments = attachments
         let originDraftKey = currentConversation?.id ?? "_new"
@@ -604,6 +609,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         createNewChat(preservingDraft: pendingCreationPreservesDraft)
     }
     @objc private func openVoiceMode() {
+        readAloud.stop()
         guard Self.voiceClientEnabled, capabilities?.voiceMode?.available == true,
               isCurrentOwner, presentedViewController == nil,
               !dictation.isBusy, !isSending, !isUploadingAttachment,
@@ -667,6 +673,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         }
     }
     private func open(_ conversation: ChatConversation) async {
+        readAloud.stop()
         guard isCurrentOwner else { return }
         if currentConversation?.id != conversation.id && isUploadingAttachment {
             statusLabel.text = NSLocalizedString("chat.file.uploading", comment: "")
@@ -764,6 +771,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         note.adjustsFontForContentSizeCategory = true
         note.numberOfLines = 0
         list.addArrangedSubview(note)
+        let tables = UIButton(type: .system)
+        tables.setTitle(NSLocalizedString("chat.tables.title", comment: ""), for: .normal)
+        tables.accessibilityIdentifier = "chat-tables"
+        tables.contentHorizontalAlignment = .leading
+        tables.isEnabled = capabilities?.tables?.available == true
+        tables.addAction(UIAction { [weak self] _ in self?.openTables() }, for: .touchUpInside)
+        list.addArrangedSubview(tables)
         for future in ["chat.calendar", "chat.tasks", "chat.notebook", "chat.contacts", "chat.files", "chat.mail", "chat.card", "chat.connections", "chat.tariff", "chat.help", "chat.about"] {
             let item = UIButton(type: .system)
             item.setTitle(NSLocalizedString(future, comment: ""), for: .normal)
@@ -892,12 +906,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 content.bottomAnchor.constraint(equalTo: bubble.bottomAnchor, constant: -appearance.bubbleVerticalInset),
             ])
             if !message.text.isEmpty {
-                let text = UILabel()
-                text.text = message.text; text.font = appearance.messageFont
-                text.textColor = .label
-                text.accessibilityIdentifier = "chat-message-text"
-                text.adjustsFontForContentSizeCategory = true; text.numberOfLines = 0
+                let text = ChatMessageTextView(text: message.text, font: appearance.messageFont)
                 content.addArrangedSubview(text)
+                if !isUser {
+                    addMessageControls(message, to: content)
+                }
             }
             if let event = message.event {
                 let details = UIButton(type: .system)
@@ -1018,6 +1031,67 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
 
     private func isCompleteAssistantMessage(_ message: ChatMessage) -> Bool {
         message.status == "complete"
+    }
+
+    private func addMessageControls(_ message: ChatMessage, to content: UIStackView) {
+        let actions = UIStackView(); actions.axis = .horizontal; actions.spacing = 16
+        let copy = UIButton(type: .system)
+        copy.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
+        copy.accessibilityIdentifier = "chat-copy-message"
+        copy.accessibilityLabel = NSLocalizedString("chat.copy.all", comment: "")
+        copy.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        copy.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        copy.addAction(UIAction { [weak self] _ in
+            guard self?.isCurrentOwner == true else { return }
+            UIPasteboard.general.string = ChatMarkdown.plain(message.text)
+            UIAccessibility.post(notification: .announcement, argument: NSLocalizedString("chat.copy.done", comment: ""))
+        }, for: .touchUpInside)
+        actions.addArrangedSubview(copy)
+        if message.status == "complete", capabilities?.readAloud?.available == true {
+            let play = UIButton(type: .system)
+            let active = readAloud.messageId == message.id
+            play.setImage(UIImage(systemName: active ? "stop.fill" : "play"), for: .normal)
+            play.accessibilityIdentifier = "chat-read-aloud"
+            play.accessibilityLabel = NSLocalizedString(active ? "chat.read.stop" : "chat.read.play", comment: "")
+            play.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            play.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            play.isEnabled = active || (ChatAudioOwnership.shared.owner == nil && !dictation.isBusy)
+            play.addAction(UIAction { [weak self] _ in
+                guard let self, !self.dictation.isBusy else { return }
+                self.readAloud.onChange = { [weak self] in self?.renderMessages() }
+                self.readAloud.onError = { [weak self] in self?.showError($0) }
+                self.readAloud.play(message)
+            }, for: .touchUpInside)
+            actions.addArrangedSubview(play)
+        }
+        actions.addArrangedSubview(UIView()); content.addArrangedSubview(actions)
+        for item in message.presentation?.copyItems ?? [] {
+            let button = UIButton(type: .system)
+            button.setTitle(item.value, for: .normal)
+            button.titleLabel?.numberOfLines = 0
+            button.contentHorizontalAlignment = .leading
+            button.accessibilityIdentifier = "chat-copy-\(item.kind)"
+            button.accessibilityHint = NSLocalizedString("chat.copy.all", comment: "")
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            button.addAction(UIAction { [weak self] _ in
+                guard self?.isCurrentOwner == true else { return }
+                UIPasteboard.general.string = item.value
+                UIAccessibility.post(notification: .announcement, argument: NSLocalizedString("chat.copy.done", comment: ""))
+            }, for: .touchUpInside)
+            content.addArrangedSubview(button)
+        }
+    }
+
+    private func openTables() {
+        guard isCurrentOwner, capabilities?.tables?.available == true else { return }
+        closeDrawer()
+        guard let conversation = currentConversation else {
+            createNewChat(preservingDraft: true, onCreated: { [weak self] in self?.openTables() })
+            return
+        }
+        let screen = ChatTablesViewController(api: api, conversationId: conversation.id,
+            valid: { [weak self] in self?.isCurrentOwner == true })
+        present(UINavigationController(rootViewController: screen), animated: true)
     }
 
     private func callPlanCard(for message: ChatMessage, action: ChatMessageAction) -> UIView {
@@ -1476,7 +1550,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         }
         menu.addAction(UIAlertAction(title: NSLocalizedString("chat.attach.files", comment: ""), style: .default) { [weak self] _ in
             guard let self, self.isCurrentOwner, !self.dictation.isBusy else { return }
-            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.plainText, .png, .jpeg, .pdf], asCopy: true)
+            var types: [UTType] = [.plainText, .png, .jpeg, .pdf]
+            if self.capabilities?.tables?.available == true {
+                types += [.commaSeparatedText]
+                if let xlsx = UTType(filenameExtension: "xlsx") { types.append(xlsx) }
+            }
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
             picker.delegate = self
             self.present(picker, animated: true)
         })
@@ -1573,14 +1652,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let values = try url.resourceValues(forKeys: [.fileSizeKey])
-            let maxBytes = capabilities?.attachments.maxBytes ?? 2 * 1024 * 1024
+            guard let mime = Self.mimeType(url),
+                  capabilities?.attachments.mimeTypes.contains(mime) == true ||
+                    (ChatTableAttachmentPolicy.isTable(mime) && capabilities?.tables?.available == true) else {
+                statusLabel.text = NSLocalizedString("chat.file.error", comment: ""); return
+            }
+            let maxBytes = ChatTableAttachmentPolicy.limit(mime: mime, capabilities: capabilities)
             guard let size = values.fileSize, size <= maxBytes else {
                 statusLabel.text = NSLocalizedString("chat.file.too_large", comment: ""); return
             }
             let data = try Data(contentsOf: url)
-            guard let mime = Self.mimeType(url),
-                  capabilities?.attachments.mimeTypes.contains(mime) != false else {
-                statusLabel.text = NSLocalizedString("chat.file.error", comment: ""); return
+            guard data.count <= maxBytes else {
+                statusLabel.text = NSLocalizedString("chat.file.too_large", comment: ""); return
             }
             let requestId = UUID()
             attachmentRetry = (url.lastPathComponent, mime, data, requestId)
@@ -1641,6 +1724,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         case "png": return "image/png"
         case "jpg", "jpeg": return "image/jpeg"
         case "pdf": return "application/pdf"
+        case "xlsx": return ChatTableAttachmentPolicy.xlsx
+        case "csv": return ChatTableAttachmentPolicy.csv
         default: return nil
         }
     }
@@ -1759,6 +1844,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         }
     }
     private func startRecording() {
+        readAloud.stop()
         let audioSession = AVAudioSession.sharedInstance()
         guard isCurrentOwner, !CallManager.shared.hasPhoneAudioSession,
               !audioSession.isOtherAudioPlaying, !audioSession.secondaryAudioShouldBeSilencedHint else {

@@ -55,7 +55,16 @@
 "prepare.saved.allowed" = "May disclose";
 "prepare.saved.forbidden" = "Must not disclose";
 "prepare.saved.automatic" = "Read-only preview. Used automatically for one matching Hint call. Opening or refreshing this screen does not start a call or consume a plan. Manual dialog reset does not delete saved plans.";
-"incall.opening.hide" = "Tap to collapse or expand the opening phrase.";
+"chat.copy.all" = "Copy text";
+"chat.copy.done" = "Copied";
+"chat.read.play" = "Read aloud";
+"chat.read.stop" = "Stop playback";
+"chat.tables.title" = "Tables";
+"chat.tables.search" = "Search tables";
+"chat.tables.empty" = "No tables found";
+"chat.tables.more" = "Load more";
+"chat.tables.share" = "Download XLSX · Share";
+"chat.tables.exporting" = "Preparing XLSX…";
 "secretary.personality.origin_changed" = "This assignment belongs to another server. Return to the original Dev build. No call request was sent.";
 "secretary.personality.provider_note" = "Retell + Engine uses Merritt; GPT uses Marin. Personality, outgoing line and approved cards are currently supported in Dev with Retell. Choosing GPT disables this setup for new assignments without deleting server settings.";
 "secretary.personality.title" = "Personality and outgoing number";

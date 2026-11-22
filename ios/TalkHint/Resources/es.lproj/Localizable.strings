@@ -55,7 +55,16 @@
 "prepare.saved.allowed" = "Se puede comunicar";
 "prepare.saved.forbidden" = "No se puede comunicar";
 "prepare.saved.automatic" = "Solo lectura. Se usa automáticamente en una llamada Hint compatible. Abrir o actualizar no inicia llamadas ni consume el plan. Reiniciar el diálogo manual no elimina los planes guardados.";
-"incall.opening.hide" = "Toca para contraer o expandir la frase inicial.";
+"chat.copy.all" = "Copiar texto";
+"chat.copy.done" = "Copiado";
+"chat.read.play" = "Escuchar";
+"chat.read.stop" = "Detener reproducción";
+"chat.tables.title" = "Tablas";
+"chat.tables.search" = "Buscar tablas";
+"chat.tables.empty" = "No se encontraron tablas";
+"chat.tables.more" = "Cargar más";
+"chat.tables.share" = "Descargar XLSX · Compartir";
+"chat.tables.exporting" = "Preparando XLSX…";
 "secretary.personality.origin_changed" = "Este encargo pertenece a otro servidor. Vuelva a la compilación Dev original. No se envió ninguna llamada.";
 "secretary.personality.provider_note" = "Retell + Engine usa Merritt; GPT usa Marin. La personalidad, línea saliente y fichas autorizadas funcionan por ahora en Dev con Retell. Elegir GPT desactiva esta configuración para nuevos encargos sin borrar los ajustes del servidor.";
 "secretary.personality.title" = "Personalidad y número saliente";

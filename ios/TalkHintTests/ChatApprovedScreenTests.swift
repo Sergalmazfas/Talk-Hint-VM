@@ -43,7 +43,7 @@ final class ChatApprovedScreenTests: XCTestCase {
         // stalled main thread can finish it while this loop sleeps past the deadline.
         while true {
             if chat.offlinePreviewReady,
-               all(chat.view, UILabel.self).contains(where: { $0.accessibilityIdentifier == "chat-message-text" }) {
+               all(chat.view, UITextView.self).contains(where: { $0.accessibilityIdentifier == "chat-message-text" }) {
                 chat.view.layoutIfNeeded()
                 return
             }
@@ -107,7 +107,15 @@ final class ChatApprovedScreenTests: XCTestCase {
     func testNativeLightAndDarkScreenshots() async throws {
         let chat = try fixture()
         try await loaded(chat)
-        XCTAssertEqual(all(chat.view, UILabel.self).filter { $0.accessibilityIdentifier == "chat-message-text" }.count, 5)
+        XCTAssertEqual(all(chat.view, UITextView.self).filter { $0.accessibilityIdentifier == "chat-message-text" }.count, 5)
+        for text in all(chat.view, UITextView.self) where text.accessibilityIdentifier == "chat-message-text" {
+            XCTAssertTrue(text.isSelectable)
+            XCTAssertFalse(text.isEditable)
+            XCTAssertFalse(text.isScrollEnabled)
+        }
+        let copies = all(chat.view, UIButton.self).filter { $0.accessibilityIdentifier == "chat-copy-message" }
+        XCTAssertFalse(copies.isEmpty)
+        XCTAssertTrue(copies.allSatisfy { $0.bounds.height >= 44 })
         snapshot("Chat-approved-light-native")
         window?.overrideUserInterfaceStyle = .dark
         try await Task.sleep(nanoseconds: 100_000_000)

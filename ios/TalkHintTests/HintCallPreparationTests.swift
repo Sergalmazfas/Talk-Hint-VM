@@ -2,6 +2,47 @@ import XCTest
 @testable import TalkHint
 
 final class HintCallPreparationTests: XCTestCase {
+    func testBrokenPlanDoesNotDiscardOtherValidPlans() throws {
+        let plan = try response()
+        // Preserve the actual wire structure while prepending malformed entries.
+        let json: [String: Any] = [
+            "serverTime": plan.serverTime,
+            "plans": [NSNull(), ["id": "broken"], [
+                "id": "valid", "planHash": "hash", "createdAt": plan.serverTime,
+                "expiresAt": "2036-11-03T00:00:00.000Z",
+                "plan": ["goal": "Find case", "executor": "hint", "language": "en",
+                         "targetPhone": "+12025550123", "ownerFacts": [], "sayAsk": [],
+                         "expectedQuestions": [], "unknowns": [],
+                         "disclosurePolicy": ["allowed": [], "forbidden": []]]
+            ]]
+        ]
+        let decoded = try JSONDecoder().decode(PreparedHintPlansResponse.self,
+                                               from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.plans.map(\.id), ["valid"])
+    }
+
+    func testNetworkOrEmptyPreflightStillReturnsNeutralPreparation() async throws {
+        for body in [nil, Data(), Data(#"{"plans":[],"serverTime":""}"#.utf8)] as [Data?] {
+            let api = APIClient(transport: { req in
+                XCTAssertEqual(req.timeoutInterval, 1)
+                guard let body else { throw URLError(.timedOut) }
+                return (body, HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }, tokenProvider: { "offline" })
+            let ready = await api.prepareHintCall(number: "+12025550123", goal: "",
+                localOpening: .init(phraseEn: "Never reuse stale phrase", translation: ""))
+            XCTAssertEqual(ready.opening.phraseEn, "Hi, may I ask you a quick question?")
+            XCTAssertEqual(ready.parameters, ["HintPrepared": "1"])
+        }
+    }
+    func testLongMultilingualGoalFitsConservativeTwilioWireLimit() {
+        let ready = HintCallPreparation(number: "+12025550123", goal: String(repeating: "Шины🚛 ", count: 10_000),
+            response: .init(plans: []),
+            localOpening: .init(phraseEn: String(repeating: "Ask? ", count: 1000),
+                                translation: String(repeating: "Вопрос? ", count: 1000)))
+        XCTAssertLessThanOrEqual(HintCallPreparation.encodedSize(ready.parameters.merging(["To": "+12025550123"]) { _, n in n }), 800)
+        XCTAssertLessThanOrEqual(ready.parameters["HintGoal"]?.utf8.count ?? 0, 160)
+        XCTAssertFalse(ready.parameters.values.contains(where: { $0.contains("\u{FFFD}") }))
+    }
     private func response(target: String? = "+12025550123", expires: String = "2036-11-03T00:00:00.000Z") throws -> PreparedHintPlansResponse {
         let object: [String: Any] = [
             "serverTime": "2026-11-02T00:00:00.000Z",

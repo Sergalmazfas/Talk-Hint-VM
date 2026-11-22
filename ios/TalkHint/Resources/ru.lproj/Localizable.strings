@@ -55,7 +55,16 @@
 "prepare.saved.allowed" = "Можно сообщать";
 "prepare.saved.forbidden" = "Нельзя сообщать";
 "prepare.saved.automatic" = "Только просмотр. План автоматически используется для одного подходящего звонка Hint. Открытие и обновление экрана не запускает звонок и не расходует план. Сброс ручного диалога не удаляет сохранённые планы.";
-"incall.opening.hide" = "Коснитесь, чтобы свернуть или развернуть первую фразу.";
+"chat.copy.all" = "Скопировать текст";
+"chat.copy.done" = "Скопировано";
+"chat.read.play" = "Прослушать";
+"chat.read.stop" = "Остановить озвучку";
+"chat.tables.title" = "Таблицы";
+"chat.tables.search" = "Поиск таблиц";
+"chat.tables.empty" = "Таблицы не найдены";
+"chat.tables.more" = "Загрузить ещё";
+"chat.tables.share" = "Скачать XLSX · Поделиться";
+"chat.tables.exporting" = "Подготовка XLSX…";
 "secretary.personality.origin_changed" = "Это поручение сохранено для другого сервера. Вернитесь к исходной Dev-сборке. Звонок не отправлен.";
 "secretary.personality.provider_note" = "Retell + Engine использует Merritt; GPT — Marin. Связка личности, исходящего номера и разрешённых карточек пока доступна в Dev через Retell. Выбор GPT отключает её для новых поручений, не удаляя серверные настройки.";
 "secretary.personality.title" = "Личность и исходящий номер";

@@ -109,6 +109,7 @@ final class CallManager: NSObject {
     /// requires a call to be reported for every received VoIP push, and the
     /// PushKit completion handler must run only after `reportNewIncomingCall`.
     func reportIncomingCall(callSid: String, fromNumber: String, completion: @escaping () -> Void) {
+        ChatAudioOwnership.shared.interruptPlayback()
         let uuid = UUID()
         // The ringing tab is the explicit incoming-mode selection. Do not
         // turn every incoming call into Copilot.
@@ -174,6 +175,7 @@ final class CallManager: NSObject {
             postOutgoingCallState(.failed, uuid: uuid)
             return uuid
         }
+        ChatAudioOwnership.shared.interruptPlayback()
         prepareAudioDevice(for: mode)
         // Snapshot before CallKit/Twilio starts. Later Settings changes apply
         // to the next call, including owner clone speech in Copilot.
@@ -429,8 +431,8 @@ extension CallManager: CXProviderDelegate {
                 if session.mode == .hint {
                     let goal = session.hintGoal
                     let cached = SessionStore.shared.peekHintOpening().flatMap { $0.goal == goal ? $0 : nil }
-                    let response = try await APIClient.shared.preparedHintPlans()
-                    hintPreparation = HintCallPreparation(number: number, goal: goal, response: response,
+                    // Optional preflight must never enter the call-failed path.
+                    hintPreparation = await APIClient.shared.prepareHintCall(number: number, goal: goal,
                         localOpening: cached.map { .init(phraseEn: $0.english, translation: $0.translation) })
                 }
                 let accessToken = try await APIClient.shared.fetchTwilioAccessToken()
@@ -563,6 +565,7 @@ extension CallManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        ChatAudioOwnership.shared.interruptPlayback()
         audioRouter.setEnabled(true)
     }
 
