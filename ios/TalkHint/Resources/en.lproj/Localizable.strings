@@ -833,6 +833,7 @@
 "chat.reply.retryUnknown" = "Could not confirm the retry. Tap again to check the same request; actions will not repeat.";
 "chat.plan.details" = "Details";
 "chat.plan.less" = "Less";
+"chat.plan.replaced" = "This task is being updated or has been replaced.";
 "chat.plan.edit" = "Edit";
 "chat.plan.editDraft" = "Change in the task: ";
 "chat.dictation.local" = "Words appear here. You can edit before sending.";

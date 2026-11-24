@@ -126,6 +126,7 @@ final class ChatApprovedScreenTests: XCTestCase {
         let hiddenDetails = all(chat.view, UILabel.self).filter { $0.text?.contains("When do you open?") == true }
         XCTAssertEqual(hiddenDetails.count, 1)
         XCTAssertTrue(hiddenDetails.allSatisfy(\.isHidden))
+        let oldButton = try control("chat-plan-action-old-plan", chat)
         snapshot("chat-689-card-compact")
         try control("chat-plan-details-old-plan", chat).sendActions(for: .touchUpInside)
         chat.view.layoutIfNeeded()
@@ -136,8 +137,10 @@ final class ChatApprovedScreenTests: XCTestCase {
         let yes = ChatMessage(id: "yes", conversationId: "usability", sequence: 4, role: "user", text: "да",
             status: "complete", clientRequestId: nil, attachmentIds: [], createdAt: "", errorCode: nil)
         chat.applyOfflineMemoryFixture(conversation: conv, messages: [old, replacement, yes])
-        XCTAssertFalse(try control("chat-plan-action-old-plan", chat).isEnabled)
+        XCTAssertFalse(all(chat.view, UIButton.self).contains { $0.accessibilityIdentifier == "chat-plan-action-old-plan" })
+        XCTAssertTrue(all(chat.view, UILabel.self).contains { $0.accessibilityIdentifier == "chat-plan-superseded-old-plan" })
         XCTAssertTrue(try control("chat-plan-action-new-plan", chat).isEnabled)
+        oldButton.sendActions(for: .touchUpInside) // A retained, detached button cannot launch either.
         XCTAssertNil(chat.presentedViewController) // A "yes" did not open review/start.
         snapshot("chat-689-card-replaced")
     }

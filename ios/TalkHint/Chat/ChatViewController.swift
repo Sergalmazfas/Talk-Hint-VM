@@ -1297,6 +1297,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         state.textColor = .secondaryLabel
         state.adjustsFontForContentSizeCategory = true
         content.addArrangedSubview(state)
+        let current = isCurrentPlan(message)
+        if !current {
+            state.text = NSLocalizedString("chat.plan.replaced", comment: "")
+            state.numberOfLines = 0
+            state.accessibilityIdentifier = "chat-plan-superseded-\(message.id)"
+            return card // Keep the history, not a second task form/start button.
+        }
         if let missing = ChatPlanPresentation.missing(action.warnings) {
             let advisory = UILabel()
             advisory.font = .preferredFont(forTextStyle: .footnote)
@@ -1355,7 +1362,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                        } ?? NSLocalizedString("chat.plan.notProvided", comment: "")], to: content)
 
         for detail in content.arrangedSubviews.dropFirst(firstDetail) { detail.isHidden = !expanded }
-        let current = isCurrentPlan(message)
         let edit = UIButton(type: .system)
         edit.setTitle(NSLocalizedString("chat.plan.edit", comment: ""), for: .normal)
         edit.accessibilityIdentifier = "chat-plan-edit-\(message.id)"

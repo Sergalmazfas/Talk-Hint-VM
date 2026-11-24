@@ -833,6 +833,7 @@
 "chat.reply.retryUnknown" = "Reintento sin confirmar. Pulsa otra vez para comprobar la misma solicitud. No se repetirán acciones.";
 "chat.plan.details" = "Detalles";
 "chat.plan.less" = "Contraer";
+"chat.plan.replaced" = "Esta tarea se está corrigiendo o se ha reemplazado.";
 "chat.plan.edit" = "Corregir";
 "chat.plan.editDraft" = "Corregir en la tarea: ";
 "chat.dictation.local" = "Las palabras aparecen aquí. Puedes editarlas antes de enviar.";
