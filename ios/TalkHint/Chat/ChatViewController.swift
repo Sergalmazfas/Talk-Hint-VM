@@ -1464,7 +1464,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             do {
                 let result = try await api.confirmChatPlan(conversationId: message.conversationId,
                                                            messageId: message.id, planHash: planHash)
-                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                guard isCurrentOwner, isCurrentPlan(message), currentConversation?.id == message.conversationId else { return }
                 guard let index = messages.firstIndex(where: { $0.id == message.id }),
                       messages[index].action?.planHash == planHash,
                       result.message.id == message.id,

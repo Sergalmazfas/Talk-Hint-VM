@@ -7,6 +7,7 @@ import Speech
 final class ChatLocalDictation {
     struct Capture { let text: String?; let file: URL }
     private let engine = AVAudioEngine()
+    private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var sink: DictationAudioSink?
@@ -46,6 +47,7 @@ final class ChatLocalDictation {
         req.taskHint = .dictation
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("chat-local-\(UUID()).wav")
         let output = try DictationAudioSink(input: format, request: req, file: url)
+        self.recognizer = recognizer
         file = url; sink = output; request = req
         task = recognizer.recognitionTask(with: req) { [weak self] result, error in
             // Pass values to the UI actor, never capture the mutable Speech result.
@@ -92,7 +94,7 @@ final class ChatLocalDictation {
             if gotFinal || !healthy || Task.isCancelled { break }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
-        task?.cancel(); task = nil; request = nil; finishing = false
+        task?.cancel(); task = nil; request = nil; recognizer = nil; finishing = false
         let saved = sink?.finish() == true; sink = nil
         self.file = nil
         guard saved else { try? FileManager.default.removeItem(at: file); throw Failure.unavailable }
@@ -102,6 +104,7 @@ final class ChatLocalDictation {
         finishing = false; stopInput()
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
+        recognizer = nil
         _ = sink?.finish(); sink = nil
         if let file { try? FileManager.default.removeItem(at: file) }
         file = nil
