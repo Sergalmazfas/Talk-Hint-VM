@@ -27,9 +27,8 @@ class ChatVoiceSessionSourceContract(unittest.TestCase):
     def test_same_conversation_stt_outbox_and_retry_payload(self):
         parent = (CHAT / "ChatViewController.swift").read_text()
         voice = (CHAT / "ChatVoiceViewController.swift").read_text()
-        self.assertIn("conversationID: id", parent)
-        self.assertIn('requestId: requestID, mode: "voice"', parent)
-        self.assertIn("context: saved.context, mode: saved.mode", parent)
+        self.assertIn("ChatAgataViewController(api: api, conversation: conversation", parent)
+        self.assertIn("api.prepareTranscribe(audio: data, mimeType: pendingDictationMime)", parent)
         self.assertIn("context: item.context, mode: item.mode", parent)
         self.assertIn("api.prepareTranscribe(audio: data", voice)
         self.assertIn("pendingSend = (text, UUID())", voice)

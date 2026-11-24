@@ -22,6 +22,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private let removeAttachmentButton = UIButton(type: .system)
     private let statusLabel = UILabel()
     private let retryButton = UIButton(type: .system)
+    private let newMessagesButton = UIButton(type: .system)
+    private var readingMessageAnchor: (id: String, offset: CGFloat)?
+    private var expandedPlans = Set<String>()
+    private var retryingAnswers = Set<String>()
     private let topTitle = UILabel()
     private var drawer: UIView?
     private var conversations: [ChatConversation] = []
@@ -71,6 +75,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var draftRevision = 0
     private var hasRestoredComposer = false
     private var pendingDictationAudio: Data?
+    private var pendingDictationMime = "audio/m4a"
+    private var localDictation: ChatLocalDictation?
+    private var localOriginalDraft: String?
+    private var localDraftEdited = false
+    private var dictationAudioLease: UUID?
     private var heardAudio = false
     private var dictationStartedAt: Date?
     private var observers: [NSObjectProtocol] = []
@@ -348,8 +357,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composer.delegate = self
         let keyboardToolbar = UIToolbar()
         keyboardToolbar.sizeToFit()
-        let keyboardDoneButton = UIBarButtonItem(title: NSLocalizedString("chat.keyboard.done", comment: ""),
-                                                 style: .done, target: self, action: #selector(dismissKeyboard))
+        let keyboardDoneButton = UIBarButtonItem(image: UIImage(systemName: "keyboard.chevron.compact.down"),
+                                                 style: .plain, target: self, action: #selector(dismissKeyboard))
         keyboardDoneButton.accessibilityLabel = NSLocalizedString("chat.keyboard.done", comment: "")
         keyboardToolbar.items = [
             UIBarButtonItem.flexibleSpace(),
@@ -422,14 +431,13 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         orbCaption.isHidden = appearance.isApprovedReference
         orbButton.widthAnchor.constraint(equalToConstant: appearance.orbSize).isActive = true
         orbButton.heightAnchor.constraint(equalToConstant: appearance.orbSize).isActive = true
-        let composerItems: [UIView] = appearance.isApprovedReference
-            ? [fileButton, composer, voiceButton, sendButton]
-            : [fileButton, composer, voiceButton, sendButton, orb]
+        let composerItems: [UIView] = [fileButton, UIView(), voiceButton, sendButton, orb]
         composerItems.forEach { inputControls.addArrangedSubview($0) }
         inputControls.axis = .horizontal; inputControls.alignment = .center; inputControls.spacing = 2
         composer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let inputStack = UIStackView(arrangedSubviews: [inputControls, dictationBar])
+        let inputStack = UIStackView(arrangedSubviews: [composer, inputControls, dictationBar])
         inputStack.axis = .vertical
+        inputStack.alignment = .fill
         inputCard.addSubview(inputStack); inputStack.translatesAutoresizingMaskIntoConstraints = false
         dictationBar.isHidden = true
         dictationBar.onCancel = { [weak self] in self?.cancelDictation() }
@@ -438,20 +446,10 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composerHeight = composer.heightAnchor.constraint(equalToConstant: 44)
         composerHeight?.isActive = true
         view.addSubview(inputCard); inputCard.translatesAutoresizingMaskIntoConstraints = false
-        // In the approved reference, the black Orb is OUTSIDE the input capsule.
-        // Voice entry is Dev-only. Release keeps the unavailable button.
+        // The text occupies the full first row. Buttons never compete with it
+        // for width; voice retains the existing origin/capability gates.
         let inputTrailing: NSLayoutConstraint
-        if appearance.isApprovedReference {
-            view.addSubview(orb)
-            orb.translatesAutoresizingMaskIntoConstraints = false
-            inputTrailing = inputCard.trailingAnchor.constraint(equalTo: orb.leadingAnchor, constant: -10)
-            NSLayoutConstraint.activate([
-                orb.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-                orb.bottomAnchor.constraint(equalTo: inputCard.bottomAnchor, constant: -4),
-            ])
-        } else {
-            inputTrailing = inputCard.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14)
-        }
+        inputTrailing = inputCard.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14)
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -481,6 +479,20 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             messagesStack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -16),
             messagesStack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
             messagesStack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+        ])
+        newMessagesButton.setTitle(NSLocalizedString("chat.messages.new", comment: ""), for: .normal)
+        newMessagesButton.titleLabel?.font = .preferredFont(forTextStyle: .callout)
+        newMessagesButton.backgroundColor = .secondarySystemBackground
+        newMessagesButton.layer.cornerRadius = 16
+        newMessagesButton.accessibilityIdentifier = "chat-new-messages"
+        newMessagesButton.addTarget(self, action: #selector(showNewestMessages), for: .touchUpInside)
+        newMessagesButton.isHidden = true
+        view.addSubview(newMessagesButton)
+        newMessagesButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            newMessagesButton.trailingAnchor.constraint(equalTo: scroll.trailingAnchor, constant: -4),
+            newMessagesButton.bottomAnchor.constraint(equalTo: scroll.bottomAnchor, constant: -4),
+            newMessagesButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
         statusLabel.text = appearance.isApprovedReference ? nil : NSLocalizedString("chat.disclaimer", comment: "")
         updateComposerControls()
@@ -561,6 +573,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         readingRestoreScheduled = false
         pendingScrollRestore = nil
         restoredReadingLayout = nil
+        readingMessageAnchor = nil
     }
     private func scheduleReadingRestore() {
         guard pendingScrollRestore != nil, !readingRestoreScheduled else { return }
@@ -569,7 +582,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         DispatchQueue.main.async { [weak self] in
             guard let self, self.readingRestoreGeneration == generation else { return }
             guard self.isCurrentOwner, self.viewIfLoaded?.window != nil,
-                  let position = self.pendingScrollRestore else {
+                  let savedPosition = self.pendingScrollRestore else {
                 self.readingRestoreScheduled = false
                 return
             }
@@ -585,11 +598,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             self.scroll.layoutIfNeeded()
             let layout = ReadingLayout(content: self.scroll.contentSize, viewport: self.scroll.bounds.size,
                 insets: self.scroll.adjustedContentInset, composerHeight: self.composer.bounds.height)
-            self.restoreScrollPosition(position)
+            let anchorY = self.readingMessageAnchor.flatMap { anchor in
+                self.messagesStack.arrangedSubviews.first { $0.accessibilityIdentifier == anchor.id }
+                    .map { $0.convert(.zero, to: self.scroll).y - anchor.offset }
+            }
+            self.restoreScrollPosition(CGPoint(x: 0, y: anchorY ?? savedPosition.y))
             self.readingRestoreScheduled = false
             if self.restoredReadingLayout == layout {
                 self.pendingScrollRestore = nil
                 self.restoredReadingLayout = nil
+                self.readingMessageAnchor = nil
             } else {
                 self.restoredReadingLayout = layout
                 self.scheduleReadingRestore()
@@ -920,6 +938,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private func renderMessages() {
         let shouldStickToBottom = pendingScrollRestore == nil &&
             scroll.contentOffset.y + scroll.bounds.height >= scroll.contentSize.height - 80
+        if !shouldStickToBottom, pendingScrollRestore == nil {
+            if let row = messagesStack.arrangedSubviews.first(where: {
+                $0.accessibilityIdentifier?.hasPrefix("chat-message-row-") == true &&
+                $0.convert(.zero, to: scroll).y + $0.bounds.height > scroll.contentOffset.y
+            }), let id = row.accessibilityIdentifier {
+                readingMessageAnchor = (id, row.convert(.zero, to: scroll).y - scroll.contentOffset.y)
+            }
+            pendingScrollRestore = scroll.contentOffset
+            restoredReadingLayout = nil
+        }
         messagesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if messages.isEmpty {
             let welcome = UILabel(); welcome.text = NSLocalizedString("chat.welcome", comment: "")
@@ -1030,6 +1058,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 progress.font = .preferredFont(forTextStyle: .caption1)
                 progress.textColor = .secondaryLabel
                 progress.numberOfLines = 0
+                progress.accessibilityIdentifier = "chat-reply-progress-\(message.id)"
                 content.addArrangedSubview(progress)
             }
             for attachmentId in message.attachmentIds {
@@ -1045,18 +1074,19 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 content.addArrangedSubview(file)
             }
             let row = UIStackView(arrangedSubviews: isUser ? [UIView(), bubble] : [bubble, UIView()])
-            row.axis = .horizontal; row.alignment = .top; row.spacing = appearance.isApprovedReference ? 12 : 32
-            messagesStack.addArrangedSubview(row)
+            row.axis = .horizontal; row.alignment = .top; row.spacing = 4
+            row.accessibilityIdentifier = "chat-message-row-\(message.id)"
+            if !content.arrangedSubviews.isEmpty { messagesStack.addArrangedSubview(row) }
             // The bubble and the scroll view only share an ancestor once the row is in the
             // stack; activating this earlier throws NSGenericException ("no common ancestor").
-            bubble.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor,
-                                          multiplier: appearance.maxBubbleWidth(isUser: isUser, isFinal: message.id == messages.last?.id)).isActive = true
-            if message.role == "assistant", message.status == "queued" || message.status == "generating" {
-                let progress = UILabel()
-                progress.text = NSLocalizedString(message.status == "queued" ? "chat.reply.queued" : "chat.reply.generating", comment: "")
-                progress.font = .preferredFont(forTextStyle: .caption1)
-                progress.textColor = UIColor(red: 0.48, green: 0.52, blue: 0.48, alpha: 1)
-                messagesStack.addArrangedSubview(progress)
+            if !content.arrangedSubviews.isEmpty {
+                if isUser {
+                    bubble.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor,
+                                                  multiplier: 0.85).isActive = true
+                } else {
+                    bubble.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor,
+                                                  multiplier: 0.96).isActive = true
+                }
             }
             if message.role == "assistant", isCompleteAssistantMessage(message), let action = message.action {
                 messagesStack.addArrangedSubview(callPlanCard(for: message, action: action))
@@ -1070,7 +1100,18 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             if ["failed", "interrupted"].contains(message.status) {
                 let label = UILabel(); label.text = NSLocalizedString("chat.reply.incomplete", comment: "")
                 label.textColor = .secondaryLabel; label.font = .preferredFont(forTextStyle: .caption1)
+                label.numberOfLines = 0
+                label.adjustsFontForContentSizeCategory = true
                 messagesStack.addArrangedSubview(label)
+                if message.role == "assistant", message.id == messages.last?.id,
+                   capabilities?.answerRetry?.revision == 1, capabilities?.answerRetry?.responseOnly == true {
+                    let retry = UIButton(type: .system)
+                    retry.setTitle(NSLocalizedString("chat.reply.retryAnswer", comment: ""), for: .normal)
+                    retry.accessibilityIdentifier = "chat-answer-retry-\(message.id)"
+                    retry.isEnabled = !retryingAnswers.contains(message.id)
+                    retry.addAction(UIAction { [weak self] _ in self?.retryAnswer(message) }, for: .touchUpInside)
+                    messagesStack.addArrangedSubview(retry)
+                }
             }
             if message.status == "queued", let pendingId = UUID(uuidString: message.id),
                outbox?.pendingSends.contains(where: { $0.id == pendingId }) == true {
@@ -1081,11 +1122,50 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 messagesStack.addArrangedSubview(retry)
             }
         }
+        if !shouldStickToBottom { scheduleReadingRestore() }
+        newMessagesButton.isHidden = shouldStickToBottom
         let generation = readingRestoreGeneration
         DispatchQueue.main.async {
             if shouldStickToBottom, self.readingRestoreGeneration == generation,
                self.pendingScrollRestore == nil, self.viewIfLoaded?.window != nil {
                 self.scroll.scrollRectToVisible(CGRect(x: 0, y: self.scroll.contentSize.height - 1, width: 1, height: 1), animated: true)
+            }
+        }
+    }
+
+    @objc private func showNewestMessages() {
+        cancelReadingRestore()
+        view.layoutIfNeeded()
+        scroll.setContentOffset(CGPoint(x: 0, y: max(-scroll.adjustedContentInset.top,
+            scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)), animated: false)
+        newMessagesButton.isHidden = true
+    }
+
+    private func retryAnswer(_ message: ChatMessage) {
+        guard isCurrentOwner, message.id == messages.last?.id, capabilities?.answerRetry?.revision == 1,
+              capabilities?.answerRetry?.responseOnly == true,
+              !retryingAnswers.contains(message.id) else { return }
+        // Persist the id BEFORE transport: a lost HTTP response is reconciled with
+        // the same id, even after reopening. Never replay a normal send or its tools.
+        let key = "chat.answer-only.\(AppConfig.baseURL.absoluteString).\(sessionScope.ownerId ?? "").\(message.conversationId).\(message.id)"
+        let request = UserDefaults.standard.string(forKey: key).flatMap(UUID.init(uuidString:)) ?? UUID()
+        UserDefaults.standard.set(request.uuidString, forKey: key)
+        retryingAnswers.insert(message.id)
+        renderMessages()
+        Task {
+            defer { retryingAnswers.remove(message.id) }
+            do {
+                let reply = try await api.retryChatAnswer(conversationId: message.conversationId,
+                    messageId: message.id, requestId: request)
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                messages = ChatOutbox.merge(messages, [reply])
+                renderMessages()
+                updatePolling()
+            } catch {
+                guard isCurrentOwner, currentConversation?.id == message.conversationId else { return }
+                statusLabel.text = NSLocalizedString("chat.reply.retryUnknown", comment: "")
+                retryingAnswers.remove(message.id)
+                renderMessages()
             }
         }
     }
@@ -1228,6 +1308,26 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             content.addArrangedSubview(advisory)
         }
         addPlanSection(NSLocalizedString("chat.plan.goal", comment: ""), values: [action.plan.goal], to: content)
+        if let summary = content.arrangedSubviews.last as? UILabel {
+            summary.numberOfLines = 3; summary.lineBreakMode = .byTruncatingTail
+        }
+        addPlanSection(NSLocalizedString("chat.plan.phone", comment: ""),
+            values: [action.plan.targetPhone ?? NSLocalizedString("chat.plan.notProvided", comment: "")], to: content)
+        addPlanSection(NSLocalizedString("chat.plan.checklist", comment: ""),
+            values: Array(action.plan.sayAsk.prefix(1)), to: content)
+        let toggle = UIButton(type: .system)
+        let expanded = expandedPlans.contains(message.id)
+        toggle.setTitle(NSLocalizedString(expanded ? "chat.plan.less" : "chat.plan.details", comment: ""), for: .normal)
+        toggle.accessibilityIdentifier = "chat-plan-details-\(message.id)"
+        toggle.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            if self.expandedPlans.contains(message.id) { self.expandedPlans.remove(message.id) }
+            else { self.expandedPlans.insert(message.id) }
+            self.renderMessages()
+        }, for: .touchUpInside)
+        content.addArrangedSubview(toggle)
+        let firstDetail = content.arrangedSubviews.count
+        addPlanSection(NSLocalizedString("chat.plan.goal", comment: ""), values: [action.plan.goal], to: content)
         addPlanSection(NSLocalizedString("chat.plan.checklist", comment: ""),
                        values: action.plan.sayAsk.enumerated().map { "\($0.offset + 1). \($0.element)" },
                        to: content)
@@ -1254,6 +1354,20 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                            NSLocalizedString("chat.plan.voicemail.\($0)", comment: "")
                        } ?? NSLocalizedString("chat.plan.notProvided", comment: "")], to: content)
 
+        for detail in content.arrangedSubviews.dropFirst(firstDetail) { detail.isHidden = !expanded }
+        let current = isCurrentPlan(message)
+        let edit = UIButton(type: .system)
+        edit.setTitle(NSLocalizedString("chat.plan.edit", comment: ""), for: .normal)
+        edit.accessibilityIdentifier = "chat-plan-edit-\(message.id)"
+        edit.isEnabled = current
+        edit.addAction(UIAction { [weak self] _ in
+            guard let self, self.isCurrentPlan(message) else { return }
+            self.composer.text = NSLocalizedString("chat.plan.editDraft", comment: "")
+            self.composer.textColor = .label
+            self.textViewDidChange(self.composer)
+            self.composer.becomeFirstResponder()
+        }, for: .touchUpInside)
+        content.addArrangedSubview(edit)
         let button = UIButton(type: .system)
         let isHint = action.plan.executor == "hint"
         let savedHint = isHint && action.status == "confirmed"
@@ -1266,7 +1380,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         button.titleLabel?.lineBreakMode = .byWordWrapping
         button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         button.accessibilityIdentifier = "chat-plan-action-\(message.id)"
-        button.isEnabled = !savedHint && !confirmingPlanMessageIDs.contains(message.id)
+        button.isEnabled = current && !savedHint && !confirmingPlanMessageIDs.contains(message.id)
+        if !current { state.text = NSLocalizedString("chat.plan.stale", comment: "") }
         button.alpha = button.isEnabled ? 1 : 0.65
         button.addAction(UIAction { [weak self] _ in self?.reviewPlan(message: message) }, for: .touchUpInside)
         content.addArrangedSubview(button)
@@ -1285,7 +1400,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
 
     private func reviewPlan(message: ChatMessage) {
-        guard isCurrentOwner, currentConversation?.id == message.conversationId,
+        guard isCurrentOwner, isCurrentPlan(message), currentConversation?.id == message.conversationId,
               let action = message.action, ["proposed", "confirmed"].contains(action.status),
               !confirmingPlanMessageIDs.contains(message.id) else { return }
         if action.plan.executor == "secretary", navigationController == nil {
@@ -1301,6 +1416,14 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             [weak self] _ in self?.confirmPlan(message: message, planHash: action.planHash)
         })
         present(alert, animated: true)
+    }
+    private func isCurrentPlan(_ message: ChatMessage) -> Bool {
+        guard let current = messages.last(where: { $0.action != nil }), current.id == message.id else { return false }
+        return !messages.contains { later in
+            later.sequence > message.sequence && later.role == "user" &&
+                !["да", "yes", "ok", "okay", "хорошо", "sí", "si"].contains(
+                    later.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
     }
 
     private func planReviewSummary(_ plan: ChatCallPlan) -> String {
@@ -1324,7 +1447,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
 
     private func confirmPlan(message: ChatMessage, planHash: String) {
-        guard isCurrentOwner, currentConversation?.id == message.conversationId,
+        guard isCurrentOwner, isCurrentPlan(message), currentConversation?.id == message.conversationId,
               let current = messages.first(where: { $0.id == message.id }),
               !confirmingPlanMessageIDs.contains(message.id) else { return }
         guard let currentAction = current.action, currentAction.planHash == planHash else {
@@ -1603,7 +1726,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 do {
                     let page = try await api.chatMessages(conversationId: conversation.id)
                     if isCurrentOwner, currentConversation?.id == conversation.id {
-                        messages = ChatOutbox.merge(messages, page.messages); renderMessages()
+                        let merged = ChatOutbox.merge(messages, page.messages)
+                        if merged != messages { messages = merged; renderMessages() }
                         loadAttachmentMetadata(in: page.messages, conversationId: conversation.id)
                     }
                     guard isCurrentOwner, currentConversation?.id == conversation.id else { break }
@@ -1615,6 +1739,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         if textView.text == NSLocalizedString("chat.message.placeholder", comment: "") { textView.text = ""; textView.textColor = .label }
     }
     func textViewDidChange(_ textView: UITextView) {
+        if localDictation != nil { localDraftEdited = true }
         hasRestoredComposer = true
         draftRevision += 1
         persistDraft()
@@ -1926,7 +2051,16 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                       self.dictation.capture?.context == self.dictationContext,
                       self.dictation.capture?.id == id else { return }
                 if allowed, self.dictation.allow(id) {
-                    self.startRecording()
+                    self.recognitionTask = Task { [weak self] in
+                        let code = Bundle.main.preferredLocalizations.first ?? "en"
+                        let locale = Locale(identifier: ["ru": "ru-RU", "en": "en-US", "es": "es-ES",
+                                                        "uk": "uk-UA", "kk": "kk-KZ"][code] ?? code)
+                        let permitted = await ChatLocalDictation.permitted(locale: locale)
+                        guard let self, !Task.isCancelled, self.isCurrentOwner,
+                              self.dictation.capture?.id == id,
+                              self.dictation.capture?.context == self.dictationContext else { return }
+                        self.startRecording(localLocale: permitted ? locale : nil)
+                    }
                 } else {
                     self.cancelDictation()
                     let alert = UIAlertController(title: NSLocalizedString("chat.voice.permission", comment: ""), message: nil, preferredStyle: .alert)
@@ -1939,7 +2073,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             }
         }
     }
-    private func startRecording() {
+    private func startRecording(localLocale: Locale? = nil) {
         readAloud.stop()
         let audioSession = AVAudioSession.sharedInstance()
         guard isCurrentOwner, !CallManager.shared.hasPhoneAudioSession,
@@ -1948,6 +2082,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             statusLabel.text = NSLocalizedString("chat.voice.call_busy", comment: "")
             return
         }
+        guard let lease = ChatAudioOwnership.shared.beginDictation() else {
+            cancelDictation()
+            statusLabel.text = NSLocalizedString("chat.voice.call_busy", comment: "")
+            return
+        }
+        dictationAudioLease = lease
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("talkhint-chat-\(UUID().uuidString).m4a")
         do {
             let session = audioSession
@@ -1956,6 +2096,45 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             previousAudioOptions = session.categoryOptions
             try session.setCategory(.record, mode: .default)
             try session.setActive(true)
+            if let locale = localLocale {
+                let local = ChatLocalDictation()
+                heardAudio = false
+                localOriginalDraft = draftText
+                localDraftEdited = false
+                localDictation = local
+                local.onPartial = { [weak self] text in
+                    guard let self, self.isCurrentOwner, !self.localDraftEdited,
+                          let result = self.dictation.preview(transcript: text) else { return }
+                    self.composer.text = result.text; self.composer.textColor = .label
+                    self.updateComposerControls()
+                }
+                local.onLevel = { [weak self] level in
+                    guard let self else { return }
+                    if level > 0.025 { self.heardAudio = true }
+                    self.dictationBar.update(level: level)
+                    self.dictationBar.configure(mode: .recording,
+                        elapsed: Date().timeIntervalSince(self.dictationStartedAt ?? Date()))
+                }
+                local.onFallback = { [weak self] in
+                    self?.statusLabel.text = NSLocalizedString("chat.dictation.fallback", comment: "")
+                }
+                local.onStop = { [weak self] in self?.stopRecording(discard: false) }
+                local.onCaptureFailure = { [weak self] in
+                    self?.cancelDictation()
+                    self?.statusLabel.text = NSLocalizedString("chat.voice.error", comment: "")
+                }
+                do {
+                    try local.start(locale: locale)
+                    dictationStartedAt = Date()
+                    statusLabel.text = NSLocalizedString("chat.dictation.local", comment: "")
+                    updateDictationUI()
+                    return
+                } catch {
+                    local.discard(); localDictation = nil; localOriginalDraft = nil
+                    // No network call: start the existing recorder instead.
+                }
+            }
+            statusLabel.text = NSLocalizedString("chat.dictation.fallback", comment: "")
             recordingURL = url
             recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: Int(kAudioFormatMPEG4AAC), AVSampleRateKey: 16000, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue])
             recorder?.isMeteringEnabled = true
@@ -1966,7 +2145,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 Task { @MainActor in self?.sampleDictationLevel() }
             }
             if let meterTimer { RunLoop.main.add(meterTimer, forMode: .common) }
-            statusLabel.text = NSLocalizedString("chat.voice.recording", comment: "")
+            statusLabel.text = NSLocalizedString("chat.dictation.fallback", comment: "")
             updateDictationUI()
             recordingLimitTask?.cancel()
             recordingLimitTask = Task { [weak self] in
@@ -1991,6 +2170,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private func stopRecording(discard: Bool) {
         if discard { cancelDictation(); return }
+        if localDictation != nil { stopLocalDictation(); return }
         guard let recorder else { return }
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
@@ -2010,7 +2190,55 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             return
         }
         pendingDictationAudio = data
+        pendingDictationMime = "audio/m4a"
         transcribeDictation()
+    }
+    private func stopLocalDictation() {
+        guard let local = localDictation, let attempt = dictation.recognize() else { return }
+        updateDictationUI()
+        if localDraftEdited {
+            // User edits win over all later Speech callbacks, even if the
+            // recognizer would produce a newer hypothesis.
+            local.discard(); localDictation = nil; localOriginalDraft = nil
+            dictation.cancel(); draftRevision += 1
+            restoreAudioSession(); persistDraft(); updateDictationUI()
+            statusLabel.text = NSLocalizedString("chat.dictation.review", comment: "")
+            return
+        }
+        recognitionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let captured = try await local.finish()
+                defer { try? FileManager.default.removeItem(at: captured.file) }
+                guard !Task.isCancelled, isCurrentOwner, dictation.accepts(attempt, context: dictationContext) else { return }
+                localDictation = nil
+                restoreAudioSession()
+                if let text = captured.text,
+                   let result = dictation.finish(attempt, context: dictationContext, transcript: text) {
+                    localOriginalDraft = nil
+                    composer.text = result.text; composer.textColor = .label
+                    composer.selectedRange = NSRange(location: result.caret, length: 0)
+                    draftRevision += 1
+                    persistDraft(); updateDictationUI()
+                    statusLabel.text = NSLocalizedString("chat.dictation.review", comment: "")
+                } else {
+                    guard heardAudio else {
+                        cancelDictation()
+                        statusLabel.text = NSLocalizedString("chat.dictation.noSpeech", comment: "")
+                        return
+                    }
+                    let data = try Data(contentsOf: captured.file)
+                    guard !data.isEmpty, data.count <= 4 * 1024 * 1024 else { throw APIError.decoding }
+                    pendingDictationAudio = data; pendingDictationMime = "audio/wav"
+                    dictation.fail(attempt)
+                    transcribeDictation() // Existing fallback, once, only AFTER explicit Stop.
+                }
+            } catch {
+                guard !Task.isCancelled, isCurrentOwner else { return }
+                cancelDictation()
+                statusLabel.text = NSLocalizedString("chat.voice.error", comment: "")
+            }
+        }
     }
     private func sampleDictationLevel() {
         guard let recorder, recorder.isRecording else { return }
@@ -2036,7 +2264,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             guard let self else { return }
             do {
                 try Task.checkCancellation()
-                let transcript = try await api.prepareTranscribe(audio: data, mimeType: "audio/m4a")
+                let transcript = try await api.prepareTranscribe(audio: data, mimeType: pendingDictationMime)
                 try Task.checkCancellation()
                 guard isCurrentOwner, dictation.accepts(attempt, context: dictationContext) else { return }
                 guard let result = dictation.finish(attempt, context: dictationContext, transcript: transcript) else {
@@ -2045,6 +2273,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                     return
                 }
                 pendingDictationAudio = nil
+                localOriginalDraft = nil
                 composer.text = result.text
                 composer.textColor = .label
                 composer.selectedRange = NSRange(location: result.caret, length: 0)
@@ -2062,6 +2291,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         }
     }
     private func cancelDictation() {
+        localDictation?.discard(); localDictation = nil
+        if let original = localOriginalDraft {
+            composer.text = original; composer.textColor = original.isEmpty ? .secondaryLabel : .label
+        }
+        localOriginalDraft = nil
         recognitionTask?.cancel(); recognitionTask = nil
         recordingLimitTask?.cancel(); recordingLimitTask = nil
         meterTimer?.invalidate(); meterTimer = nil
@@ -2077,6 +2311,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private func updateDictationUI() {
         inputControls.isHidden = dictation.isBusy
+        composer.isEditable = !dictation.isBusy || (localDictation != nil && dictation.phase == .recording)
         dictationBar.isHidden = !dictation.isBusy
         switch dictation.phase {
         case .permission: dictationBar.configure(mode: .permission)
@@ -2091,7 +2326,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         sendButton.isEnabled = isCurrentOwner && !dictation.isBusy && !isSending && !isUploadingAttachment && attachmentRetry == nil
         voiceButton.isEnabled = isCurrentOwner && !dictation.isBusy && !isSending && !isUploadingAttachment && capabilities?.voice.available != false
         if composer.bounds.width > 0 {
-            let height = min(120, max(44, composer.sizeThatFits(CGSize(width: composer.bounds.width, height: .greatestFiniteMagnitude)).height))
+            let maxHeight = ceil((composer.font?.lineHeight ?? 20) * 6 + composer.textContainerInset.top + composer.textContainerInset.bottom)
+            let height = min(maxHeight, max(44, composer.sizeThatFits(CGSize(width: composer.bounds.width, height: .greatestFiniteMagnitude)).height))
+            composer.isScrollEnabled = height >= maxHeight
             if abs((composerHeight?.constant ?? 0) - height) > 0.5 { composerHeight?.constant = height }
         }
     }
@@ -2111,6 +2348,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         renderAttachmentStatus()
     }
     private func restoreAudioSession() {
+        ChatAudioOwnership.shared.endDictation(dictationAudioLease)
+        dictationAudioLease = nil
         // Never deactivate another feature's audio when no recording was begun.
         guard previousAudioCategory != nil else { return }
         let session = AVAudioSession.sharedInstance()

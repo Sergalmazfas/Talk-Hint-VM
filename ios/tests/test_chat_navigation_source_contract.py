@@ -48,8 +48,9 @@ class ChatNavigationSourceContracts(unittest.TestCase):
     def test_return_does_not_reload_and_replace_composer(self):
         self.assertIn("if hasLoadedChat {", self.chat)
         self.assertIn("refreshVisibleConversation()", self.chat)
-        self.assertIn("savedScrollPosition = scroll.contentOffset", self.chat)
-        self.assertIn("restoreScrollPosition(position)", self.chat)
+        self.assertIn("savedScrollPosition = pendingScrollRestore ?? scroll.contentOffset", self.chat)
+        self.assertIn("scheduleReadingRestore()", self.chat)
+        self.assertIn("anchorY ?? savedPosition.y", self.chat)
 
     def test_drawer_is_scrollable_future_sections_are_disabled(self):
         self.assertIn("let menuScroll = UIScrollView()", self.chat)

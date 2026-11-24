@@ -5,22 +5,33 @@ import UIKit
 @MainActor
 final class ChatAudioOwnership {
     static let shared = ChatAudioOwnership()
-    enum Owner: Equatable { case phone, agata, readAloud }
+    enum Owner: Equatable { case phone, agata, readAloud, dictation }
     private var agataLease: UUID?
+    private var dictationLease: UUID?
     private var playback: (() -> Void)?
     var owner: Owner? {
         if CallManager.shared.hasPhoneAudioSession { return .phone }
         if agataLease != nil { return .agata }
+        if dictationLease != nil { return .dictation }
         return playback == nil ? nil : .readAloud
     }
     func beginAgata() -> UUID? {
-        guard !CallManager.shared.hasPhoneAudioSession, agataLease == nil else { return nil }
+        guard !CallManager.shared.hasPhoneAudioSession, agataLease == nil, dictationLease == nil else { return nil }
         playback?()
         let lease = UUID(); agataLease = lease
         return lease
     }
     func endAgata(_ lease: UUID?) {
         if let lease, agataLease == lease { agataLease = nil }
+    }
+    func beginDictation() -> UUID? {
+        guard !CallManager.shared.hasPhoneAudioSession, agataLease == nil, dictationLease == nil else { return nil }
+        playback?()
+        let lease = UUID(); dictationLease = lease
+        return lease
+    }
+    func endDictation(_ lease: UUID?) {
+        if let lease, dictationLease == lease { dictationLease = nil }
     }
     func interruptPlayback() { playback?() }
     func claimPlayback(stop: @escaping () -> Void) -> Bool {

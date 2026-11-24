@@ -1,8 +1,48 @@
 import XCTest
 import UIKit
+import AVFoundation
+import Speech
 @testable import TalkHint
 
 final class ChatDictationTests: XCTestCase {
+    func testFallbackWavIsMono16kAndContainsAllCaptureBuffersWithoutMicrophone() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("offline-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.requiresOnDeviceRecognition = true // No recognition task / authorization / microphone.
+        let sink = try DictationAudioSink(input: format, request: request, file: url)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800))
+        buffer.frameLength = 4800
+        let channel = try XCTUnwrap(buffer.floatChannelData?[0])
+        for i in 0..<4800 { channel[i] = sin(Float(i) * 0.05) * 0.1 }
+        for _ in 0..<10 { XCTAssertGreaterThan(sink.append(buffer), 0) }
+        XCTAssertTrue(sink.finish())
+        let file = try AVAudioFile(forReading: url)
+        XCTAssertEqual(file.fileFormat.sampleRate, 16000)
+        XCTAssertEqual(file.fileFormat.channelCount, 1)
+        // Converter priming may retain a bounded tail, never most of the utterance.
+        XCTAssertGreaterThan(file.length, 15000)
+        XCTAssertLessThan(try Data(contentsOf: url).count, 100000)
+    }
+    func testPartialHypothesisReplacesOnlyCapturedSelectionWithoutSending() throws {
+        var state = try recording("Позвони Тому завтра", selection: NSRange(location: 8, length: 4))
+        XCTAssertEqual(state.preview(transcript: "Анне")?.text, "Позвони Анне завтра")
+        XCTAssertEqual(state.preview(transcript: "Анне Ивановой")?.text, "Позвони Анне Ивановой завтра")
+        XCTAssertEqual(state.phase, .recording)
+        XCTAssertNil(state.attemptId)
+        state.cancel()
+        XCTAssertNil(state.preview(transcript: "late callback"))
+    }
+    func testPartialDoesNotChangeOriginalDraftOrAcceptFinalWithoutStop() throws {
+        var state = try recording("draft")
+        _ = state.preview(transcript: "partial")
+        XCTAssertEqual(state.capture?.text, "draft")
+        XCTAssertNil(state.finish(UUID(), context: context, transcript: "must not send"))
+        let attempt = try XCTUnwrap(state.recognize())
+        XCTAssertEqual(state.finish(attempt, context: context, transcript: "final")?.text, "draft final")
+        XCTAssertEqual(state.phase, .idle)
+    }
     private let context = ChatDictationState.Context(ownerId: "alice", conversationId: "chat", draftRevision: 7)
 
     private func recording(_ text: String = "", selection: NSRange? = nil) throws -> ChatDictationState {

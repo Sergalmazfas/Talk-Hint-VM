@@ -3,6 +3,22 @@ import XCTest
 
 @MainActor
 final class ChatReadAloudTests: XCTestCase {
+    func testDictationOwnsAudioWithoutAllowingAgataOrPlayback() throws {
+        let audio = ChatAudioOwnership()
+        let lease = try XCTUnwrap(audio.beginDictation())
+        XCTAssertEqual(audio.owner, .dictation)
+        XCTAssertNil(audio.beginAgata())
+        XCTAssertNil(audio.beginDictation())
+        XCTAssertFalse(audio.claimPlayback(stop: {}))
+        audio.endDictation(UUID())
+        XCTAssertEqual(audio.owner, .dictation)
+        audio.endDictation(lease)
+        XCTAssertNil(audio.owner)
+        let agata = try XCTUnwrap(audio.beginAgata())
+        XCTAssertNil(audio.beginDictation())
+        audio.endAgata(agata)
+        XCTAssertNil(audio.owner)
+    }
     func testUnavailableCapabilityReasonsAreReadableAndLocalized() throws {
         let cases: [(String?, String)] = [
             ("VOICE_OWNER_ONLY", "chat.read.unavailable.owner"),

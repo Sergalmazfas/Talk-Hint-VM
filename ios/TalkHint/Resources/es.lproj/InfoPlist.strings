@@ -1,3 +1,4 @@
+"NSSpeechRecognitionUsageDescription" = "Mostrar las palabras dictadas en este iPhone antes de enviarlas. Si el idioma no es compatible, se reconoce al detener.";
 "NSCameraUsageDescription" = "TalkHint usa la cámara para que puedas fotografiar una tarea para el Secretario.";
 "NSLocationWhenInUseUsageDescription" = "Usar tu ubicación para buscar lugares para la tarea del chat. Sin seguimiento en segundo plano.";
 "NSPhotoLibraryUsageDescription" = "TalkHint usa las fotos seleccionadas para ayudar al Secretario a entender tu tarea.";

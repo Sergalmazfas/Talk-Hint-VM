@@ -49,9 +49,17 @@ struct ChatDictationState {
     /// Inserts at the original UTF-16 selection, preserving existing draft text.
     /// Whitespace separates dictation from existing words without erasing them.
     mutating func finish(_ id: UUID, context: Context, transcript: String) -> (text: String, caret: Int)? {
-        guard accepts(id, context: context), let capture else { return nil }
+        guard accepts(id, context: context) else { return nil }
+        guard let result = preview(transcript: transcript) else { fail(id); return nil }
+        cancel()
+        return result
+    }
+    /// Local partial hypotheses replace the same captured selection, never append
+    /// to an earlier hypothesis and never send or change the draft revision.
+    func preview(transcript: String) -> (text: String, caret: Int)? {
+        guard let capture else { return nil }
         let spoken = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !spoken.isEmpty else { fail(id); return nil }
+        guard !spoken.isEmpty else { return nil }
         let original = capture.text as NSString
         let start = min(max(0, capture.selection.location), original.length)
         let length = min(max(0, capture.selection.length), original.length - start)
@@ -61,7 +69,6 @@ struct ChatDictationState {
         let suffix = after.first.map { $0.isWhitespace ? "" : " " } ?? ""
         let insertion = prefix + spoken + suffix
         let result = original.replacingCharacters(in: NSRange(location: start, length: length), with: insertion)
-        cancel()
         return (result, start + (prefix + spoken).utf16.count)
     }
     mutating func cancel() {

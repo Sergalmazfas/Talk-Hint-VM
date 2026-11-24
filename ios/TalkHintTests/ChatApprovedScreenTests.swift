@@ -53,6 +53,120 @@ final class ChatApprovedScreenTests: XCTestCase {
         }
         XCTFail("Local fixture did not render before deadline")
     }
+    func testComposerFullWidthAndControlsBelowAt320() async throws {
+        let chat = try fixture(width: 320)
+        try await loaded(chat)
+        let composer = try XCTUnwrap(all(chat.view, UITextView.self).first {
+            $0.accessibilityIdentifier == "chat-composer"
+        })
+        let mic = try control("chat-dictation", chat)
+        XCTAssertGreaterThan(composer.bounds.width, 250)
+        XCTAssertGreaterThanOrEqual(mic.convert(.zero, to: chat.view).y,
+                                    composer.convert(.zero, to: chat.view).y + composer.bounds.height - 1)
+        let toolbar = try XCTUnwrap(composer.inputAccessoryView as? UIToolbar)
+        XCTAssertNil(toolbar.items?.last?.title) // Not a giant text Done control.
+        snapshot("chat-689-composer-320")
+    }
+    private func usabilityMessage(_ id: String, _ sequence: Int, text: String, status: String = "generating") -> ChatMessage {
+        ChatMessage(id: id, conversationId: "usability", sequence: sequence, role: "assistant",
+            text: text, status: status, clientRequestId: nil, attachmentIds: [], createdAt: "", errorCode: nil)
+    }
+    func testStreamingWidthIsStableAndProgressIsNotDuplicated() async throws {
+        let chat = try fixture()
+        try await loaded(chat)
+        let conv = ChatConversation(id: "usability", title: "Offline", createdAt: "", updatedAt: "")
+        chat.applyOfflineMemoryFixture(conversation: conv, messages: [usabilityMessage("r", 1, text: "Да")])
+        chat.view.layoutIfNeeded()
+        let first = try XCTUnwrap(all(chat.view, UITextView.self).first {
+            $0.accessibilityIdentifier == "chat-message-text"
+        })
+        let width = first.bounds.width
+        XCTAssertGreaterThan(width, 280)
+        XCTAssertEqual(all(chat.view, UILabel.self).filter {
+            $0.accessibilityIdentifier == "chat-reply-progress-r"
+        }.count, 1)
+        snapshot("chat-689-stream-short")
+        chat.applyOfflineMemoryFixture(conversation: conv, messages: [
+            usabilityMessage("r", 1, text: String(repeating: "Уточни время. ", count: 20))
+        ])
+        chat.view.layoutIfNeeded()
+        let second = try XCTUnwrap(all(chat.view, UITextView.self).first {
+            $0.accessibilityIdentifier == "chat-message-text"
+        })
+        XCTAssertEqual(second.bounds.width, width, accuracy: 1)
+        snapshot("chat-689-stream-long")
+    }
+    func testEmptyFailedReplyHasNoEmptyBubble() async throws {
+        let chat = try fixture()
+        try await loaded(chat)
+        chat.applyOfflineMemoryFixture(conversation: .init(id: "usability", title: "Offline", createdAt: "", updatedAt: ""),
+            messages: [usabilityMessage("failed", 1, text: "", status: "failed")])
+        chat.view.layoutIfNeeded()
+        XCTAssertFalse(all(chat.view, UIStackView.self).contains {
+            $0.accessibilityIdentifier == "chat-message-row-failed"
+        })
+        let error = try XCTUnwrap(all(chat.view, UILabel.self).first {
+            $0.text == NSLocalizedString("chat.reply.incomplete", comment: "")
+        })
+        XCTAssertEqual(error.numberOfLines, 0)
+        snapshot("chat-689-interrupted")
+    }
+    func testPlanStartsCompactAndReplacementDisablesOldCard() async throws {
+        let chat = try fixture()
+        try await loaded(chat)
+        let plan = ChatCallPlan(goal: "Узнать про кейс.", ownerFacts: ["Не оплачивать"],
+            sayAsk: ["Is the AirPods case there?", "When do you open?"], expectedQuestions: [],
+            unknowns: ["Часы"], disclosurePolicy: .init(allowed: [], forbidden: ["Не платить"]),
+            language: "en", executor: "secretary", targetPhone: "+14055550123", voicemail: "skip")
+        var old = usabilityMessage("old-plan", 1, text: "Готово.", status: "complete")
+        old.action = .init(plan: plan, planHash: String(repeating: "a", count: 64), status: "proposed")
+        let conv = ChatConversation(id: "usability", title: "Offline", createdAt: "", updatedAt: "")
+        chat.applyOfflineMemoryFixture(conversation: conv, messages: [old])
+        chat.view.layoutIfNeeded()
+        let hiddenDetails = all(chat.view, UILabel.self).filter { $0.text?.contains("When do you open?") == true }
+        XCTAssertEqual(hiddenDetails.count, 1)
+        XCTAssertTrue(hiddenDetails.allSatisfy(\.isHidden))
+        snapshot("chat-689-card-compact")
+        try control("chat-plan-details-old-plan", chat).sendActions(for: .touchUpInside)
+        chat.view.layoutIfNeeded()
+        XCTAssertFalse(try XCTUnwrap(all(chat.view, UILabel.self).first { $0.text?.contains("When do you open?") == true }).isHidden)
+        snapshot("chat-689-card-expanded")
+        var replacement = usabilityMessage("new-plan", 3, text: "Исправлено.", status: "complete")
+        replacement.action = .init(plan: plan, planHash: String(repeating: "b", count: 64), status: "proposed")
+        let yes = ChatMessage(id: "yes", conversationId: "usability", sequence: 4, role: "user", text: "да",
+            status: "complete", clientRequestId: nil, attachmentIds: [], createdAt: "", errorCode: nil)
+        chat.applyOfflineMemoryFixture(conversation: conv, messages: [old, replacement, yes])
+        XCTAssertFalse(try control("chat-plan-action-old-plan", chat).isEnabled)
+        XCTAssertTrue(try control("chat-plan-action-new-plan", chat).isEnabled)
+        XCTAssertNil(chat.presentedViewController) // A "yes" did not open review/start.
+        snapshot("chat-689-card-replaced")
+    }
+    func testReadingAnchorSurvivesGrowthAboveIt() async throws {
+        let chat = try fixture(width: 320)
+        try await loaded(chat)
+        let conv = ChatConversation(id: "usability", title: "Offline", createdAt: "", updatedAt: "")
+        var list = (1...25).map { usabilityMessage("r\($0)", $0, text: "Строка \($0). Сохранить позицию чтения.", status: "complete") }
+        chat.applyOfflineMemoryFixture(conversation: conv, messages: list)
+        chat.view.layoutIfNeeded()
+        let scroll = try XCTUnwrap(all(chat.view, UIScrollView.self).first { $0.accessibilityIdentifier == "chat-messages" })
+        scroll.setContentOffset(CGPoint(x: 0, y: 500), animated: false)
+        let rows = all(chat.view, UIStackView.self).filter { $0.accessibilityIdentifier?.hasPrefix("chat-message-row-") == true }
+        let anchor = try XCTUnwrap(rows.first {
+            $0.convert(.zero, to: scroll).y + $0.bounds.height > scroll.contentOffset.y
+        })
+        let id = anchor.accessibilityIdentifier
+        let offset = anchor.convert(.zero, to: scroll).y - scroll.contentOffset.y
+        list[0].text = String(repeating: "Добавленный текст выше. ", count: 30)
+        chat.applyOfflineMemoryFixture(conversation: conv, messages: list)
+        for _ in 0..<12 { await Task.yield(); chat.view.layoutIfNeeded() }
+        let restored = try XCTUnwrap(all(chat.view, UIStackView.self).first { $0.accessibilityIdentifier == id })
+        XCTAssertEqual(restored.convert(.zero, to: scroll).y - scroll.contentOffset.y, offset, accuracy: 2)
+        XCTAssertFalse(try control("chat-new-messages", chat).isHidden)
+        try control("chat-new-messages", chat).sendActions(for: .touchUpInside)
+        XCTAssertTrue(try control("chat-new-messages", chat).isHidden)
+        snapshot("chat-689-reading-anchor")
+    }
+
     private func snapshot(_ name: String) {
         guard let window else { return XCTFail("Missing native fixture window") }
         window.layoutIfNeeded()

@@ -61,10 +61,10 @@ class DictationSourceContracts(unittest.TestCase):
             self.assertIn(name, self.controller)
         self.assertIn("self?.cancelDictation()", self.controller)
 
-    def test_camera_and_photos_honestly_disabled(self):
+    def test_camera_and_photos_use_existing_image_picker(self):
         menu = self.controller.split("let menu = UIAlertController", 1)[1].split("func documentPicker", 1)[0]
-        self.assertIn('["chat.attach.camera", "chat.attach.photos"]', menu)
-        self.assertIn("action.isEnabled = false", menu)
+        self.assertIn('[("chat.attach.camera", true), ("chat.attach.photos", false)]', menu)
+        self.assertIn("pickAttachmentImage(camera:", menu)
         self.assertIn("UIDocumentPickerViewController", menu)
         self.assertNotIn("requestAuthorization", menu)
 

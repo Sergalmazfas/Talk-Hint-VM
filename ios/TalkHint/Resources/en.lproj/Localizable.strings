@@ -828,3 +828,12 @@
 "chat.memory.pending" = "Checking with the server…";
 "chat.memory.unavailable" = "This memory card is unavailable. Ask for a new one.";
 "chat.memory.failed" = "Could not confirm the memory change. Check the connection and try again.";
+"chat.messages.new" = "↓ New";
+"chat.reply.retryAnswer" = "Retry answer only";
+"chat.reply.retryUnknown" = "Could not confirm the retry. Tap again to check the same request; actions will not repeat.";
+"chat.plan.details" = "Details";
+"chat.plan.less" = "Less";
+"chat.plan.edit" = "Edit";
+"chat.plan.editDraft" = "Change in the task: ";
+"chat.dictation.local" = "Words appear here. You can edit before sending.";
+"chat.dictation.fallback" = "Recognition after Stop on this language or device. Nothing is sent to the chat automatically.";

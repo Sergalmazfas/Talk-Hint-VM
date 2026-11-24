@@ -25,6 +25,8 @@ struct ChatCapabilities: Decodable {
     }
     var readAloud: ReadAloud? = nil
     var tables: Tables? = nil
+    struct AnswerRetry: Decodable { let revision: Int; let responseOnly: Bool }
+    var answerRetry: AnswerRetry? = nil
 }
 
 struct ChatConversation: Codable, Identifiable, Equatable {
@@ -236,6 +238,13 @@ extension APIClient {
         let result = try JSONDecoder().decode([String: ChatMessage].self, from: data)
         guard let message = result["message"] else { throw APIError.decoding }
         return message
+    }
+    func retryChatAnswer(conversationId: String, messageId: String, requestId: UUID) async throws -> ChatMessage {
+        let data = try await request("/api/chat-v1/conversations/\(conversationId)/messages/\(messageId)/retry-answer",
+            method: "POST", json: ["clientRequestId": requestId.uuidString.lowercased(),
+                                  "language": Bundle.main.preferredLocalizations.first ?? "en"], authenticated: true)
+        struct Reply: Decodable { let reply: ChatMessage }
+        return try JSONDecoder().decode(Reply.self, from: data).reply
     }
 
     func confirmChatPlan(conversationId: String, messageId: String, planHash: String,

@@ -45,6 +45,8 @@
         <true/>
         <key>NSLocationWhenInUseUsageDescription</key>
         <string>TalkHint uses your current location while preparing nearby or route-based tasks in chat. No background tracking.</string>
+        <key>NSSpeechRecognitionUsageDescription</key>
+        <string>Show your dictated words on this iPhone before you send them.</string>
         <key>NSMicrophoneUsageDescription</key>
         <string>TalkHint needs the microphone so you can talk during phone calls.</string>
         <key>NSCameraUsageDescription</key>

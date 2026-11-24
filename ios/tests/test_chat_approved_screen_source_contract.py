@@ -43,14 +43,16 @@ class ApprovedChatSourceContracts(unittest.TestCase):
         self.assertIn('menu.accessibilityIdentifier = "chat-more-unavailable"', block)
 
     def test_readable_fonts_and_large_orb_are_concrete(self):
-        self.assertIn("systemFont(ofSize: 20)", self.style)
-        self.assertIn("systemFont(ofSize: 19)", self.style)
+        self.assertGreaterEqual(self.style.count(".preferredFont(forTextStyle: .body)"), 2)
+        self.assertNotIn("systemFont(ofSize: 19)", self.style)
         self.assertIn("isApprovedReference ? 48 : 44", self.style)
         self.assertIn("UIFontMetrics", self.style)
         self.assertIn("lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor", self.chat)
 
-    def test_orb_is_outside_capsule_and_requires_origin_and_server(self):
-        self.assertIn("inputCard.trailingAnchor.constraint(equalTo: orb.leadingAnchor, constant: -10)", self.chat)
+    def test_composer_is_full_width_above_controls_and_orb_stays_gated(self):
+        self.assertIn("[composer, inputControls, dictationBar]", self.chat)
+        self.assertIn("[fileButton, UIView(), voiceButton, sendButton, orb]", self.chat)
+        self.assertNotIn("equalTo: orb.leadingAnchor", self.chat)
         self.assertIn("orbButton.isEnabled = false", self.chat)
         self.assertIn("if Self.voiceClientEnabled {", self.chat)
         self.assertIn("ChatVoiceClientPolicy.allows(origin: AppConfig.baseURL", self.chat)

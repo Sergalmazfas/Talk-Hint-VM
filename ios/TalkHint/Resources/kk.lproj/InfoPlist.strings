@@ -1,3 +1,4 @@
+"NSSpeechRecognitionUsageDescription" = "Жібермес бұрын диктовка сөздерін iPhone-да көрсету. Тіл қолдау таппаса, тоқтатқаннан кейін танылады.";
 "NSCameraUsageDescription" = "TalkHint Хатшыға арналған тапсырманы суретке түсіру үшін камераны пайдаланады.";
 "NSLocationWhenInUseUsageDescription" = "Чаттағы тапсырма үшін орындарды іздеуге орналасқан жеріңізді пайдалану. Фондық бақылау жоқ.";
 "NSPhotoLibraryUsageDescription" = "TalkHint Хатшыға тапсырмаңызды түсінуге көмектесу үшін таңдалған фотосуреттерді пайдаланады.";

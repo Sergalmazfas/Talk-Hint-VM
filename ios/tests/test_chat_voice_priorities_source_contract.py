@@ -46,7 +46,7 @@ class VoicePrioritiesContract(unittest.TestCase):
         main = (ROOT / "ios/TalkHint/UI/HomeViewController.swift").read_text()
         self.assertIn("openChat(newVoice: true)", main)
         self.assertIn("createNewChat(preservingDraft: false, onCreated:", screen)
-        self.assertIn("ChatVoiceViewController(api: api, conversation: conversation", screen)
+        self.assertIn("ChatAgataViewController(api: api, conversation: conversation", screen)
         self.assertIn("caps.voiceRevision ?? 0", (CHAT / "ChatVoiceViewController.swift").read_text())
 
 if __name__ == "__main__":

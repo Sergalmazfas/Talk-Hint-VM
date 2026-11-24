@@ -9,9 +9,7 @@ enum ChatScreenAppearance {
     var isApprovedReference: Bool { self == .approvedReference }
 
     var messageFont: UIFont {
-        isApprovedReference
-            ? UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 20))
-            : .preferredFont(forTextStyle: .body)
+        .preferredFont(forTextStyle: .body)
     }
     var titleFont: UIFont {
         isApprovedReference
@@ -19,9 +17,7 @@ enum ChatScreenAppearance {
             : .preferredFont(forTextStyle: .headline)
     }
     var composerFont: UIFont {
-        isApprovedReference
-            ? UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 19))
-            : .preferredFont(forTextStyle: .body)
+        .preferredFont(forTextStyle: .body)
     }
     var messageSpacing: CGFloat { isApprovedReference ? 14 : 12 }
     var bubbleRadius: CGFloat { isApprovedReference ? 22 : 18 }
