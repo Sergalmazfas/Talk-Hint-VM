@@ -197,7 +197,8 @@ REQUIRED_TESTS = {
         "testRealKeychainCanStoreReadAndDeleteSessionToken",
     ),
     "InCallCaptionTests": (
-        "testPrepareOpeningShowsOnSmallScreenAndTogglesCollapse",
+        "testPrepareOpeningUsesOnlyBottomBannerAndTranslationStaysCollapsed",
+        "testIncomingScreenDoesNotConsumePreparedOutgoingGoalOrOpening",
         "testGuestAndOwnerLiveCardsAreIndependent",
         "testReconnectIndicatorAcrossFullRetryCycle",
         "testManualReconnectButtonReArmsStreamAfterTerminalFailure",
