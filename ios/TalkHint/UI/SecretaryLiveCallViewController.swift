@@ -9,12 +9,19 @@ final class SecretaryLiveCallViewController: UIViewController {
     private let feed = UIStackView()
     private let statusLabel = UILabel()
     private let sourceStatusLabel = UILabel()
+    private let audioDiagnosticLabel = UILabel()
     private let routeButton = UIButton(type: .system)
     private let endButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
     private let routeCaption = UILabel()
     private var monitorState = SecretaryMonitorState()
     private var monitorError: String?
+    private var audioRecovery = SecretaryMonitorRecovery()
+    private var isAudioInterrupted = false
+    private var manualAudioResumeRequired = false
+    private var lastRenderedAt = Date()
+    private var receivedFrames = 0
+    private var playedBuffers = 0
     private var hasSourceMonitoring = false
     private var sourceConnected: Bool?
     private var sourceReconnectSupported: Bool?
@@ -37,6 +44,9 @@ final class SecretaryLiveCallViewController: UIViewController {
     private var turnCardsByID: [String: SecretaryTurnCard] = [:]
     var onFeedSubscriptionRequested: (() -> Void)?
     var audioPlaybackConfigurationForTesting: (() -> Bool)?
+    var audioPlaybackIsReadyForTesting: (() -> Bool)?
+    var audioEnqueueForTesting: ((Data, String) -> Bool)?
+    var feedConnectionForTesting: (() -> Void)?
     var onCallEnded: (() -> Void)?
 
     init(task: APIClient.SecretaryTask) {
@@ -135,6 +145,13 @@ final class SecretaryLiveCallViewController: UIViewController {
         sourceStatusLabel.isHidden = true
         sourceStatusLabel.accessibilityIdentifier = "text-secretary-source-status"
 
+        audioDiagnosticLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        audioDiagnosticLabel.textColor = .secondaryLabel
+        audioDiagnosticLabel.numberOfLines = 0
+        audioDiagnosticLabel.textAlignment = .center
+        audioDiagnosticLabel.isHidden = true
+        audioDiagnosticLabel.accessibilityIdentifier = "text-secretary-audio-diagnostic"
+
         feed.axis = .vertical
         feed.spacing = 10
         feed.accessibilityIdentifier = "feed-secretary-live-transcript"
@@ -170,7 +187,9 @@ final class SecretaryLiveCallViewController: UIViewController {
         controls.distribution = .equalCentering
         controls.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = UIStackView(arrangedSubviews: [heading, description, statusRow, sourceStatusLabel])
+        let header = UIStackView(arrangedSubviews: [
+            heading, description, statusRow, sourceStatusLabel, audioDiagnosticLabel,
+        ])
         header.axis = .vertical
         header.alignment = .fill
         header.spacing = 10
@@ -217,39 +236,43 @@ final class SecretaryLiveCallViewController: UIViewController {
     }
 
     private func configureAudioPlayback() -> Bool {
-        guard isMonitorVisible, !didEnd else { return false }
+        guard isMonitorVisible, !didEnd, !isAudioInterrupted,
+              !manualAudioResumeRequired else { return false }
         if let audioPlaybackConfigurationForTesting {
             return audioPlaybackConfigurationForTesting()
         }
         guard !CallManager.shared.hasPhoneAudioSession else {
             stopPlayback()
+            reportAudioFailure("phone_audio_busy")
             setConnectionFailure(NSLocalizedString("secretary.live.audio_interrupted", comment: ""))
             return false
         }
+        var stage = "session_category"
         do {
             let session = AVAudioSession.sharedInstance()
             // playAndRecord supplies a controllable receiver/speaker route. No
             // input node, tap, recorder, or microphone permission is used.
             try session.setCategory(.playAndRecord, mode: .default,
                                     options: [.allowBluetooth])
+            stage = "session_activation"
             try session.setActive(true)
             audioSessionActive = true
+            stage = "output_route"
             try session.overrideOutputAudioPort(isSpeaker ? .speaker : .none)
             guard SecretaryAudioPlayer.shared.start() else {
+                let code = SecretaryAudioPlayer.shared.lastFailure ?? "engine_start"
                 stopPlayback()
-                setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+                reportAudioFailure(code)
                 return false
             }
             monitorState.resetAudio()
-            monitorError = nil
             lastAudioAt = Date()
+            lastRenderedAt = Date()
             NSLog("[SecretaryMonitor] route=%@ rate=%.0f volume=%.2f",
                   session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","),
                   session.sampleRate, session.outputVolume)
             SecretaryAudioPlayer.shared.onPlayed = { [weak self] in
-                guard let self, self.isMonitorVisible, !self.didEnd else { return }
-                self.monitorState.renderAudio()
-                self.refreshMonitorStatus()
+                self?.recordAudioPlayback()
             }
             updateRouteControl()
             startAudioWatchdog()
@@ -258,7 +281,7 @@ final class SecretaryLiveCallViewController: UIViewController {
             let failure = error as NSError
             NSLog("[SecretaryAudio] session failed (%@:%ld)", failure.domain, failure.code)
             stopPlayback()
-            setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+            reportAudioFailure("\(stage):\(SecretaryAudioPlayer.safeErrorCode(failure))")
             return false
         }
     }
@@ -267,9 +290,18 @@ final class SecretaryLiveCallViewController: UIViewController {
         audioWatchdog?.invalidate()
         audioWatchdog = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self, self.isMonitorVisible, !self.didEnd,
-                  self.monitorState.connected, self.canPlaySourceAudio else { return }
+                  self.monitorState.connected, self.canPlaySourceAudio,
+                  !self.isAudioInterrupted else { return }
+            if !self.isLocalAudioReady {
+                self.attemptLocalAudioRecovery()
+                return
+            }
             if Date().timeIntervalSince(self.lastAudioAt) > 8 {
                 self.setConnectionFailure(NSLocalizedString("secretary.live.audio_missing", comment: ""))
+            } else if self.monitorState.received,
+                      Date().timeIntervalSince(self.lastRenderedAt) > 8 {
+                self.reportAudioFailure("playback_stalled")
+                self.attemptLocalAudioRecovery()
             }
         }
     }
@@ -294,13 +326,13 @@ final class SecretaryLiveCallViewController: UIViewController {
             DispatchQueue.main.async { [weak self] in self?.audioConfigurationChanged() }
             return
         }
-        guard isMonitorVisible, !didEnd, audioSessionActive else { return }
+        guard isMonitorVisible, !didEnd, audioSessionActive, !isAudioInterrupted else { return }
         audioRecoveryWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.isMonitorVisible, !self.didEnd, self.audioSessionActive else { return }
-            SecretaryAudioPlayer.shared.stop()
-            guard self.configureAudioPlayback() else { return }
-            self.refreshMonitorStatus()
+            guard let self, self.isMonitorVisible, !self.didEnd, self.audioSessionActive,
+                  !self.isAudioInterrupted else { return }
+            self.reportAudioFailure("audio_configuration_changed")
+            self.attemptLocalAudioRecovery()
         }
         audioRecoveryWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
@@ -309,13 +341,17 @@ final class SecretaryLiveCallViewController: UIViewController {
     private func connectStream() {
         guard isMonitorVisible, !didEnd, UIApplication.shared.applicationState == .active else { return }
         onFeedSubscriptionRequested?()
+        if let feedConnectionForTesting {
+            resetFeedObservation()
+            feedConnectionForTesting()
+            return
+        }
         guard let token = SessionStore.shared.token, !token.isEmpty else {
             setConnectionFailure(NSLocalizedString("secretary.live.sign_in", comment: ""))
             return
         }
         stream?.disconnect()
-        monitorState.reset()
-        monitorError = nil
+        resetFeedObservation()
         lastAudioAt = Date()
         startAudioWatchdog()
         let liveStream = SecretaryLiveCallStream(taskID: task.id, token: token)
@@ -330,11 +366,13 @@ final class SecretaryLiveCallViewController: UIViewController {
         }
         liveStream.connect()
         spinner.startAnimating()
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.text = NSLocalizedString(
-            hasSourceMonitoring ? "secretary.live.feed_connecting" : "secretary.live.connecting",
-            comment: "")
-        retryButton.isHidden = true
+        if monitorError == nil {
+            statusLabel.textColor = .secondaryLabel
+            statusLabel.text = NSLocalizedString(
+                hasSourceMonitoring ? "secretary.live.feed_connecting" : "secretary.live.connecting",
+                comment: "")
+            retryButton.isHidden = true
+        } else { refreshMonitorStatus() }
         let timeout = DispatchWorkItem { [weak self, weak liveStream] in
             guard let self, let liveStream, self.stream === liveStream, !self.didEnd else { return }
             liveStream.disconnect()
@@ -345,7 +383,7 @@ final class SecretaryLiveCallViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
     }
 
-    private func receive(_ message: [String: Any]) {
+    func receive(_ message: [String: Any]) {
         guard isMonitorVisible, !didEnd, let type = message["type"] as? String else { return }
         if let monitoring = message["monitoring"] as? [String: Any] {
             applyMonitoring(monitoring)
@@ -381,25 +419,29 @@ final class SecretaryLiveCallViewController: UIViewController {
             break // Historical servers may still send these. Secretary shows original speech only.
         case "audio":
             if hasSourceMonitoring, sourceConnected != true { return }
+            guard !isAudioInterrupted, !manualAudioResumeRequired,
+                  !CallManager.shared.hasPhoneAudioSession else { return }
             guard let role = message["role"] as? String,
+                  ["guest", "secretary"].contains(role),
                   let payload = message["payload"] as? String,
-                  let data = Data(base64Encoded: payload), !data.isEmpty else {
-                setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+                  payload.count <= 32_000,
+                  let data = Data(base64Encoded: payload), !data.isEmpty,
+                  data.count <= 24_000 else {
+                reportAudioFailure("invalid_audio_frame")
                 return
             }
-            guard SecretaryAudioPlayer.shared.isReady else {
-                setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+            receivedFrames += 1
+            guard isLocalAudioReady else {
+                reportAudioFailure(audioRecovery.failure ?? "player_not_ready")
+                attemptLocalAudioRecovery()
                 return
             }
-            guard SecretaryAudioPlayer.shared.enqueue(muLaw: data, role: role) else {
-                setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+            guard audioEnqueueForTesting?(data, role) ??
+                    SecretaryAudioPlayer.shared.enqueue(muLaw: data, role: role) else {
+                reportAudioFailure(SecretaryAudioPlayer.shared.lastFailure ?? "enqueue_failed")
                 return
             }
             lastAudioAt = Date()
-            if monitorError == NSLocalizedString("secretary.live.audio_missing", comment: "") {
-                monitorError = nil
-                retryButton.isHidden = true
-            }
             monitorState.receiveAudio()
             refreshMonitorStatus()
         case "status":
@@ -416,6 +458,25 @@ final class SecretaryLiveCallViewController: UIViewController {
         // Missing metadata is the legacy GPT behavior. For the Retell source
         // protocol, wait for server confirmation before opening playback.
         !hasSourceMonitoring || sourceConnected == true
+    }
+
+    private var isLocalAudioReady: Bool {
+        audioPlaybackIsReadyForTesting?() ?? SecretaryAudioPlayer.shared.isReady
+    }
+
+    func recordAudioPlayback() {
+        guard isMonitorVisible, !didEnd, !isAudioInterrupted, !manualAudioResumeRequired,
+              !CallManager.shared.hasPhoneAudioSession else { return }
+        lastRenderedAt = Date()
+        playedBuffers += 1
+        monitorState.renderAudio()
+        if monitorState.played {
+            audioRecovery.rendered()
+            monitorError = nil
+            audioDiagnosticLabel.isHidden = true
+            retryButton.isHidden = true
+        }
+        refreshMonitorStatus()
     }
 
     /// Server track receipt is intentionally separate from local playback:
@@ -482,11 +543,8 @@ final class SecretaryLiveCallViewController: UIViewController {
         // remains subscribed for transcript, status, and later source updates.
         monitorState.resetAudio()
         stopPlayback()
-        let sourceDependentAudioErrors = [
-            NSLocalizedString("secretary.live.audio_missing", comment: ""),
-            NSLocalizedString("secretary.live.audio_failed", comment: ""),
-        ]
-        if let monitorError, sourceDependentAudioErrors.contains(monitorError) {
+        if monitorError == NSLocalizedString("secretary.live.audio_missing", comment: ""),
+           audioRecovery.failure == nil {
             self.monitorError = nil
         }
         if monitorState.connected { refreshMonitorStatus() }
@@ -650,6 +708,7 @@ final class SecretaryLiveCallViewController: UIViewController {
             : "secretary.live.reconnecting"
         statusLabel.text = String(format: NSLocalizedString(reconnectKey, comment: ""),
                                   reconnectAttempt, 5)
+        if audioRecovery.failure != nil { refreshMonitorStatus() }
         let delay = min(Double(reconnectAttempt) * 1.5, 6)
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -674,6 +733,42 @@ final class SecretaryLiveCallViewController: UIViewController {
         retryButton.isHidden = didEnd
     }
 
+    /// Testable without opening a socket or reading credentials.
+    func resetFeedObservation() {
+        monitorState.reset()
+        // Feed reconnection cannot repair or erase a local audio failure.
+        if audioRecovery.failure == nil { monitorError = nil }
+        refreshMonitorStatus()
+    }
+
+    func reportAudioFailure(_ code: String) {
+        let changed = audioRecovery.failure != code
+        audioRecovery.recordFailure(code)
+        setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+        let session = AVAudioSession.sharedInstance()
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        // Only codes and counters: never phone, transcript, payload, token or URL.
+        audioDiagnosticLabel.text = "\(code) · retry \(audioRecovery.attempts)/3\n" +
+            "rx \(receivedFrames) · played \(playedBuffers) · \(version)(\(build)) · iOS \(UIDevice.current.systemVersion)\n" +
+            "\(session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")) · " +
+            "\(Int(session.sampleRate)) Hz · volume \(Int(session.outputVolume * 100))%"
+        audioDiagnosticLabel.isHidden = false
+        if changed { NSLog("[SecretaryMonitor] local failure=%@", code) }
+        if isMonitorVisible, !didEnd, audioWatchdog?.isValid != true { startAudioWatchdog() }
+    }
+
+    private func attemptLocalAudioRecovery() {
+        guard isMonitorVisible, !didEnd, canPlaySourceAudio, !isAudioInterrupted,
+              !manualAudioResumeRequired,
+              !CallManager.shared.hasPhoneAudioSession,
+              audioRecovery.requestAttempt(now: ProcessInfo.processInfo.systemUptime) else { return }
+        SecretaryAudioPlayer.shared.stop()
+        _ = configureAudioPlayback()
+        // Keep an earlier failure visible until a real playback callback.
+        if let failure = audioRecovery.failure { reportAudioFailure(failure) }
+    }
+
     private func refreshMonitorStatus() {
         guard !didEnd else { return }
         if let monitorError {
@@ -687,8 +782,10 @@ final class SecretaryLiveCallViewController: UIViewController {
     }
 
     @objc private func retryConnection() {
-        guard !didEnd else { return }
+        guard isMonitorVisible, !didEnd, !isAudioInterrupted else { return }
         reconnectAttempt = 0
+        audioRecovery.retryByOwner()
+        manualAudioResumeRequired = false // Explicit owner retry, unlike auto-resume.
         statusLabel.textColor = .secondaryLabel
         if canPlaySourceAudio { _ = configureAudioPlayback() }
         else { showSourceUnavailable() }
@@ -721,13 +818,16 @@ final class SecretaryLiveCallViewController: UIViewController {
     }
 
     @objc private func toggleSpeaker() {
+        guard isMonitorVisible, !didEnd, !isAudioInterrupted,
+              !manualAudioResumeRequired,
+              !CallManager.shared.hasPhoneAudioSession else { return }
         isSpeaker.toggle()
         do {
             try AVAudioSession.sharedInstance().overrideOutputAudioPort(isSpeaker ? .speaker : .none)
             updateRouteControl()
         } catch {
             isSpeaker.toggle()
-            setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+            reportAudioFailure("output_route:\(SecretaryAudioPlayer.safeErrorCode(error as NSError))")
         }
     }
 
@@ -790,18 +890,28 @@ final class SecretaryLiveCallViewController: UIViewController {
     }
 
     @objc private func audioInterrupted(_ notification: Notification) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.audioInterrupted(notification) }
+            return
+        }
         guard isMonitorVisible, !didEnd else { return }
         guard let info = notification.userInfo,
               let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         if type == .began {
+            isAudioInterrupted = true
             SecretaryAudioPlayer.shared.pause()
-            statusLabel.text = NSLocalizedString("secretary.live.audio_interrupted", comment: "")
+            monitorState.resetAudio()
+            audioRecovery.recordFailure("audio_interrupted")
+            setConnectionFailure(NSLocalizedString("secretary.live.audio_interrupted", comment: ""))
         } else {
+            isAudioInterrupted = false
             let rawOptions = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
             let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
             guard options.contains(.shouldResume) else {
-                setConnectionFailure(NSLocalizedString("secretary.live.audio_failed", comment: ""))
+                // No implicit restart when iOS denies automatic resumption.
+                manualAudioResumeRequired = true
+                reportAudioFailure("interruption_resume_denied")
                 return
             }
             if canPlaySourceAudio { _ = configureAudioPlayback() }

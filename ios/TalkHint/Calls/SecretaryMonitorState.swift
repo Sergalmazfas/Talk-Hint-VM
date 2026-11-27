@@ -1,5 +1,25 @@
 import Foundation
 
+/// Bounded local-only recovery. A successful engine start is not proof of
+/// playback and must not replenish the retry budget.
+struct SecretaryMonitorRecovery {
+    private(set) var attempts = 0
+    private var lastAttempt: TimeInterval?
+    private(set) var failure: String?
+
+    mutating func recordFailure(_ code: String) { failure = code }
+
+    mutating func requestAttempt(now: TimeInterval) -> Bool {
+        guard attempts < 3, lastAttempt.map({ now - $0 >= 2 }) ?? true else { return false }
+        attempts += 1
+        lastAttempt = now
+        return true
+    }
+
+    mutating func rendered() { self = SecretaryMonitorRecovery() }
+    mutating func retryByOwner() { attempts = 0; lastAttempt = nil }
+}
+
 /// Transport and text never imply successful audio rendering.
 struct SecretaryMonitorState {
     private(set) var connected = false

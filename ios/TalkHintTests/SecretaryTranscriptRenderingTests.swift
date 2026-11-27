@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import AVFoundation
 @testable import TalkHint
 
 /// These exercise the production rendering methods used by live turns and
@@ -206,5 +207,150 @@ final class SecretaryTranscriptRenderingTests: XCTestCase {
         } as? UIButton)
         XCTAssertTrue(end.isEnabled)
         controller.viewWillDisappear(false)
+    }
+
+    func testFeedResetKeepsLocalAudioFailureAndDiagnosticVisible() throws {
+        let controller = makeController()
+        controller.reportAudioFailure("engine_start:NSOSStatusErrorDomain:-10868")
+        controller.resetFeedObservation()
+        let status = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "text-secretary-live-status"
+        } as? UILabel)
+        let diagnostic = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "text-secretary-audio-diagnostic"
+        } as? UILabel)
+        XCTAssertEqual(status.text, NSLocalizedString("secretary.live.audio_failed", comment: ""))
+        XCTAssertEqual(status.textColor, .systemRed)
+        XCTAssertFalse(diagnostic.isHidden)
+        XCTAssertTrue(diagnostic.text?.contains("engine_start:NSOSStatusErrorDomain:-10868") == true)
+        XCTAssertFalse(diagnostic.text?.contains("+15555550100") == true)
+        XCTAssertFalse(diagnostic.text?.contains("Rendering fixture") == true)
+    }
+
+    func testSourceLossDoesNotEraseLocalFailureOrDisableHangup() throws {
+        let controller = makeController()
+        controller.reportAudioFailure("buffer_allocation")
+        controller.applyMonitoring([
+            "transport": "twilio-both-tracks", "sourceConnected": false,
+            "sourceReconnectSupported": false,
+        ])
+        controller.renderSnapshot([
+            "status": "connected",
+            "transcriptTurns": [["id": "g1", "role": "guest", "text": "Still here"]],
+        ])
+        controller.resetFeedObservation()
+        let diagnostic = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "text-secretary-audio-diagnostic"
+        } as? UILabel)
+        let end = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "button-secretary-live-end"
+        } as? UIButton)
+        XCTAssertTrue(diagnostic.text?.contains("buffer_allocation") == true)
+        XCTAssertTrue(end.isEnabled)
+        XCTAssertTrue(texts(controller).contains("Still here"))
+    }
+
+    func testPacketsAndFeedResetCannotClearFailureBeforePlayback() throws {
+        let controller = makeController()
+        controller.audioPlaybackConfigurationForTesting = { true }
+        controller.audioPlaybackIsReadyForTesting = { true }
+        controller.audioEnqueueForTesting = { _, _ in true }
+        controller.feedConnectionForTesting = {}
+        controller.viewDidAppear(false)
+        defer { controller.viewWillDisappear(false) }
+        controller.reportAudioFailure("playback_stalled")
+        let status = try XCTUnwrap(descendants(controller.view).first {
+            $0.accessibilityIdentifier == "text-secretary-live-status"
+        } as? UILabel)
+        let frame: [String: Any] = [
+            "type": "audio", "role": "guest",
+            "payload": Data(repeating: 0xff, count: 160).base64EncodedString(),
+        ]
+        controller.receive(frame)
+        XCTAssertEqual(status.text, NSLocalizedString("secretary.live.audio_failed", comment: ""))
+        controller.resetFeedObservation()
+        controller.recordAudioPlayback()
+        XCTAssertEqual(status.text, NSLocalizedString("secretary.live.audio_failed", comment: ""),
+                       "An old playback callback after feed reset is not current playback evidence")
+        // Failure must remain: no current frame was received after reset.
+        XCTAssertEqual(status.textColor, .systemRed)
+        controller.receive(frame)
+        controller.recordAudioPlayback()
+        XCTAssertEqual(status.text, NSLocalizedString("secretary.live.audio_playing", comment: ""))
+    }
+
+    func testBadPacketsNeverEnqueueAndHiddenScreenCannotRecoverOrRender() throws {
+        let controller = makeController()
+        var starts = 0
+        var enqueued = 0
+        controller.audioPlaybackConfigurationForTesting = { starts += 1; return true }
+        controller.audioPlaybackIsReadyForTesting = { true }
+        controller.audioEnqueueForTesting = { _, _ in enqueued += 1; return true }
+        controller.feedConnectionForTesting = {}
+        controller.viewDidAppear(false)
+        let initialStarts = starts
+        for role in ["guest", "owner", "secretary"] {
+            controller.receive(["type": "audio", "role": role, "payload": "not base64!"])
+        }
+        XCTAssertEqual(enqueued, 0)
+        XCTAssertEqual(starts, initialStarts, "Malformed frames must not trigger restart loops")
+        controller.viewWillDisappear(false)
+        controller.receive(["type": "audio", "role": "guest",
+                            "payload": Data(repeating: 0xff, count: 160).base64EncodedString()])
+        controller.recordAudioPlayback()
+        XCTAssertEqual(enqueued, 0)
+        XCTAssertEqual(starts, initialStarts)
+    }
+
+    func testNotReadyPlayerRetriesLocallyWithoutAnotherFeedSubscription() {
+        let controller = makeController()
+        var starts = 0
+        var subscriptions = 0
+        controller.audioPlaybackConfigurationForTesting = { [weak controller] in
+            starts += 1
+            controller?.reportAudioFailure("engine_start:NSOSStatusErrorDomain:-50")
+            return false
+        }
+        controller.audioPlaybackIsReadyForTesting = { false }
+        controller.feedConnectionForTesting = { subscriptions += 1 }
+        controller.viewDidAppear(false)
+        defer { controller.viewWillDisappear(false) }
+        let initialStarts = starts
+        let frame: [String: Any] = [
+            "type": "audio", "role": "guest",
+            "payload": Data(repeating: 0xff, count: 160).base64EncodedString(),
+        ]
+        controller.receive(frame)
+        XCTAssertEqual(starts, initialStarts + 1)
+        controller.receive(frame)
+        XCTAssertEqual(starts, initialStarts + 1, "A second frame cannot immediately restart again")
+        XCTAssertEqual(subscriptions, 1, "Player recovery never restarts the network feed or call")
+    }
+
+    func testInterruptionWithoutResumePermissionCannotRestartOnPackets() {
+        let controller = makeController()
+        var starts = 0
+        var enqueued = 0
+        controller.audioPlaybackConfigurationForTesting = { starts += 1; return true }
+        controller.audioPlaybackIsReadyForTesting = { true }
+        controller.audioEnqueueForTesting = { _, _ in enqueued += 1; return true }
+        controller.feedConnectionForTesting = {}
+        controller.viewDidAppear(false)
+        defer { controller.viewWillDisappear(false) }
+        let initialStarts = starts
+        let center = NotificationCenter.default
+        center.post(name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(),
+                    userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue])
+        center.post(name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(),
+                    userInfo: [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.ended.rawValue,
+                               AVAudioSessionInterruptionOptionKey: UInt(0)])
+        controller.receive(["type": "audio", "role": "guest",
+                            "payload": Data(repeating: 0xff, count: 160).base64EncodedString()])
+        controller.recordAudioPlayback()
+        XCTAssertEqual(enqueued, 0)
+        XCTAssertEqual(starts, initialStarts)
+        XCTAssertTrue(texts(controller).contains {
+            $0.contains("interruption_resume_denied")
+        })
     }
 }

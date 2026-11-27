@@ -12,7 +12,11 @@ final class SecretaryAudioPlayer {
     private let lock = NSLock()
     private var pending = [String: Int]()
     private var epochs = [String: Int]()
-    private(set) var isReady = false
+    private var prepared = false
+    var isReady: Bool {
+        prepared && engine.isRunning && players.values.allSatisfy { $0.isPlaying }
+    }
+    private(set) var lastFailure: String?
     var onPlayed: (() -> Void)?
     var channelCount: Int { players.count }
 
@@ -29,19 +33,25 @@ final class SecretaryAudioPlayer {
         do {
             if !engine.isRunning { try engine.start() }
             for player in players.values where !player.isPlaying { player.play() }
-            isReady = true
+            prepared = true
+            lastFailure = nil
             return true
         } catch {
             let failure = error as NSError
             NSLog("[SecretaryAudio] engine failed (%@:%ld)", failure.domain, failure.code)
-            isReady = false
+            lastFailure = "engine_start:\(Self.safeErrorCode(failure))"
+            prepared = false
             return false
         }
     }
 
     func enqueue(muLaw: Data, role: String) -> Bool {
-        guard isReady, let player = players[role],
-              !muLaw.isEmpty, muLaw.count <= 24_000 else { return false }
+        guard isReady else { lastFailure = "player_not_ready"; return false }
+        guard let player = players[role],
+              !muLaw.isEmpty, muLaw.count <= 24_000 else {
+            lastFailure = "invalid_audio_frame"
+            return false
+        }
         lock.lock()
         // A stalled monitor drops only its local old audio, never the call.
         let reset = (pending[role] ?? 0) + muLaw.count > 24_000
@@ -51,7 +61,11 @@ final class SecretaryAudioPlayer {
         lock.unlock()
         if reset { player.stop(); player.play() }
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(muLaw.count)),
-              let channel = buffer.floatChannelData?[0] else { release(muLaw.count, role: role, epoch: epoch); return false }
+              let channel = buffer.floatChannelData?[0] else {
+            release(muLaw.count, role: role, epoch: epoch)
+            lastFailure = "buffer_allocation"
+            return false
+        }
         buffer.frameLength = AVAudioFrameCount(muLaw.count)
         for (index, byte) in muLaw.enumerated() {
             channel[index] = Float(Self.decodeMuLaw(byte)) / 32_768
@@ -77,7 +91,7 @@ final class SecretaryAudioPlayer {
 
     func pause() { stop() }
     func stop() {
-        isReady = false
+        prepared = false
         onPlayed = nil
         lock.lock()
         for role in players.keys { epochs[role, default: 0] += 1 }
@@ -91,5 +105,12 @@ final class SecretaryAudioPlayer {
         let value = ~byte
         let magnitude = ((Int(value & 0x0f) << 3) + 0x84) << Int((value & 0x70) >> 4)
         return Int16((value & 0x80) != 0 ? 0x84 - magnitude : magnitude - 0x84)
+    }
+
+    /// Do not display localizedDescription/userInfo: they may contain content.
+    static func safeErrorCode(_ error: NSError) -> String {
+        let allowed = ["NSOSStatusErrorDomain", "AVFoundationErrorDomain", "NSCocoaErrorDomain"]
+        let domain = allowed.contains(error.domain) ? error.domain : "Other"
+        return "\(domain):\(error.code)"
     }
 }
