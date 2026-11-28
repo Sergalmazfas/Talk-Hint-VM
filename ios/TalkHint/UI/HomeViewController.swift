@@ -1,7 +1,7 @@
 import UIKit
 
 /// "Calls" tab — the landing screen after login, redesigned per the approved
-/// canvas mockups: big "Calls" title with a settings gear, a number field with
+/// canvas mockups: big "Calls" title, a number field with
 /// an AI-prepare entry point (and a compact "Goal ready ✓" badge once a goal is
 /// confirmed), an in-app keypad, a green Call pill, and the two most recent
 /// calls with one-tap redial. Prepare opens as a bottom sheet over this screen.
@@ -91,18 +91,12 @@ final class HomeViewController: UIViewController {
     }
 
     private func buildUI() {
-        // Header: "Calls" + gear.
+        // Settings live only in Chat's drawer; phone tabs do not duplicate them.
         let titleLabel = UILabel()
         titleLabel.text = NSLocalizedString(secretaryMode ? "secretary.title" : (callMode == .hint ? "home.title" :
                                             (callMode == .copilot ? "copilot.title" : "translator.title")), comment: "")
         titleLabel.font = .systemFont(ofSize: 32, weight: .bold)
         titleLabel.textColor = .label
-
-        let gear = UIButton(type: .system)
-        gear.setImage(UIImage(systemName: "gearshape"), for: .normal)
-        gear.tintColor = Theme.sub
-        gear.accessibilityIdentifier = "button-open-settings"
-        gear.addTarget(self, action: #selector(settingsTapped), for: .touchUpInside)
 
         // Always-visible Prepare entry in the header (centered pill): the
         // in-field sparkle can get replaced/squeezed while dialing, so this is
@@ -140,12 +134,12 @@ final class HomeViewController: UIViewController {
         voiceChat.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         voiceChat.isHidden = callMode != .hint || secretaryMode
         voiceChat.addTarget(self, action: #selector(newVoiceChatTapped), for: .touchUpInside)
-        let header = UIStackView(arrangedSubviews: [titleLabel, spacerL, headerPrepare, spacerR, taskHistory, gear])
+        let header = UIStackView(arrangedSubviews: [titleLabel, spacerL, headerPrepare, spacerR, taskHistory])
         header.axis = .horizontal
         header.alignment = .center
         header.spacing = 8
         // Equal-width spacers keep the pill visually centered between the
-        // title and the gear (a plain .fill stack splits them arbitrarily).
+        // title and the trailing history entry.
         spacerL.widthAnchor.constraint(equalTo: spacerR.widthAnchor).isActive = true
         headerPrepare.isHidden = callMode != .hint && !secretaryMode
 
@@ -667,10 +661,6 @@ final class HomeViewController: UIViewController {
     }()
 
     // MARK: - Actions
-
-    @objc private func settingsTapped() {
-        navigationController?.pushViewController(SettingsViewController(api: api), animated: true)
-    }
 
     private func copilotLanguageTitle() -> String {
         let code = SessionStore.shared.copilotLanguage

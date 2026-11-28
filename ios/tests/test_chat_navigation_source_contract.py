@@ -41,7 +41,20 @@ class ChatNavigationSourceContracts(unittest.TestCase):
     def test_back_and_menu_are_distinct(self):
         self.assertIn('action: #selector(closeChat)', self.chat)
         self.assertIn('action: #selector(toggleDrawer)', self.chat)
-        self.assertIn("[back, topTitle, menu]", self.chat)
+        self.assertIn("[menu, topTitle, back]", self.chat)
+
+    def test_settings_entry_is_only_in_chat_and_reference_glyph_has_no_fake_badge(self):
+        home = (ROOT / "ios/TalkHint/UI/HomeViewController.swift").read_text()
+        self.assertNotIn("SettingsViewController", home)
+        self.assertNotIn("button-open-settings", home)
+        self.assertNotIn("settingsTapped", home)
+        glyph = (ROOT / "ios/TalkHint/Chat/ChatMenuButton.swift").read_text()
+        self.assertIn("Two short lines and an accent dot", glyph)
+        self.assertIn("not an unread/status indicator", glyph)
+        self.assertIn("UIColor.systemBlue.setFill()", glyph)
+        self.assertIn("UIColor.label.setStroke()", glyph)
+        self.assertIn("override func traitCollectionDidChange", glyph)
+        self.assertIn("UIAccessibility.isReduceMotionEnabled", self.chat)
 
     def test_existing_settings_reused_without_migration(self):
         self.assertIn("SettingsViewController(api: api)", self.chat)
@@ -88,9 +101,14 @@ class ChatNavigationSourceContracts(unittest.TestCase):
 
     def test_drawer_is_scrollable_future_sections_are_disabled(self):
         self.assertIn("let menuScroll = UIScrollView()", self.chat)
-        block = self.chat.split('for future in [', 1)[1].split("let settings =", 1)[0]
-        self.assertIn("item.isEnabled = false", block)
-        self.assertIn('"chat.contacts"', block)
+        helper = self.chat.split('func unavailable(', 1)[1].split('// Menu destinations', 1)[0]
+        self.assertIn("item.isEnabled = false", helper)
+        self.assertIn('NSLocalizedString("chat.coming"', helper)
+        block = self.chat.split('// Menu destinations', 1)[1].split("let settings =", 1)[0]
+        for key in ("calendar", "tasks", "notebook", "contacts", "files", "mail",
+                    "connections", "card", "tariff", "help", "about"):
+            self.assertIn(f'"chat.{key}"', block)
+        self.assertEqual(block.count("unavailable(key, symbol)"), 2)
         self.assertNotIn("chat.projects", self.chat)
         self.assertIn('NSLocalizedString("chat.futureNote"', self.chat)
 

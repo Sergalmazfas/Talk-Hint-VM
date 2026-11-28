@@ -218,7 +218,7 @@ final class ChatApprovedScreenTests: XCTestCase {
         XCTAssertEqual(reason.text, NSLocalizedString("chat.read.unavailable.disabled", comment: ""))
         XCTAssertFalse(reason.isHidden)
     }
-    func testFullscreenHasBackButNoDrawerOrTabs() async throws {
+    func testFullscreenHasLeadingMenuAndExitWithoutTabs() async throws {
         let chat = try fixture()
         try await loaded(chat)
         XCTAssertNil(chat.tabBarController)
@@ -228,14 +228,25 @@ final class ChatApprovedScreenTests: XCTestCase {
         })
         XCTAssertNotNil(title.window)
         XCTAssertFalse(try control("chat-back", chat).allTargets.isEmpty)
-        XCTAssertFalse(try control("chat-more-unavailable", chat).isEnabled)
-        XCTAssertTrue(try control("chat-more-unavailable", chat).allTargets.isEmpty)
+        let menu = try control("chat-menu", chat)
+        let exit = try control("chat-back", chat)
+        XCTAssertTrue(menu.isEnabled)
+        XCTAssertFalse(menu.allTargets.isEmpty)
+        XCTAssertTrue(menu is ChatMenuButton)
+        XCTAssertLessThan(menu.convert(menu.bounds, to: chat.view).midX,
+                          exit.convert(exit.bounds, to: chat.view).midX)
+        XCTAssertFalse(all(chat.view, UIView.self).contains { $0.accessibilityIdentifier == "chat-drawer" })
+        menu.sendActions(for: .touchUpInside)
+        chat.view.layoutIfNeeded()
+        XCTAssertTrue(all(chat.view, UIView.self).contains { $0.accessibilityIdentifier == "chat-drawer" })
+        XCTAssertTrue(try control("chat-settings", chat).isEnabled)
+        try control("chat-drawer-dismiss", chat).sendActions(for: .touchUpInside)
         XCTAssertFalse(all(chat.view, UIView.self).contains { $0.accessibilityIdentifier == "chat-drawer" })
     }
     func testSeparateOrbAndLargeControlsFitSmallScreen() async throws {
         let chat = try fixture(width: 320)
         try await loaded(chat)
-        for id in ["chat-back", "chat-more-unavailable", "chat-attachment", "chat-dictation", "chat-orb-unavailable"] {
+        for id in ["chat-back", "chat-menu", "chat-attachment", "chat-dictation", "chat-orb-unavailable"] {
             let button = try control(id, chat)
             XCTAssertGreaterThanOrEqual(button.bounds.width, 44, id)
             XCTAssertGreaterThanOrEqual(button.bounds.height, 44, id)
@@ -266,6 +277,12 @@ final class ChatApprovedScreenTests: XCTestCase {
         window?.overrideUserInterfaceStyle = .dark
         try await Task.sleep(nanoseconds: 100_000_000)
         snapshot("Chat-approved-dark-native")
+        try control("chat-menu", chat).sendActions(for: .touchUpInside)
+        chat.view.layoutIfNeeded()
+        snapshot("Chat-menu-dark-native")
+        window?.overrideUserInterfaceStyle = .light
+        try await Task.sleep(nanoseconds: 100_000_000)
+        snapshot("Chat-menu-light-native")
     }
     func testRecordingAndRecognitionUseExistingBarWithoutAudio() async throws {
         let chat = try fixture(.recording)

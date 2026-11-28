@@ -36,11 +36,12 @@ class ApprovedChatSourceContracts(unittest.TestCase):
         self.assertIn('"ai": ["available": false]', self.preview)
         self.assertIn("app.talkhint.chat-reference-preview", self.preview)
 
-    def test_menu_has_no_action_in_reference_screen(self):
-        block = self.chat.split("// Match the reference's more glyph", 1)[1].split("for button in [back, menu]", 1)[0]
-        self.assertIn("menu.removeTarget", block)
-        self.assertIn("menu.isEnabled = false", block)
-        self.assertIn('menu.accessibilityIdentifier = "chat-more-unavailable"', block)
+    def test_menu_is_enabled_in_both_appearances_after_owner_approval(self):
+        block = self.chat.split("private func build()", 1)[1].split("for button in [back, menu]", 1)[0]
+        self.assertIn("let menu = ChatMenuButton", block)
+        self.assertIn("menu.addTarget(self, action: #selector(toggleDrawer)", block)
+        self.assertNotIn("menu.removeTarget", block)
+        self.assertNotIn("menu.isEnabled = false", block)
 
     def test_readable_fonts_and_large_orb_are_concrete(self):
         self.assertGreaterEqual(self.style.count(".preferredFont(forTextStyle: .body)"), 2)

@@ -93,7 +93,7 @@ REQUIRED_TESTS = {
     ),
     "ChatApprovedScreenTests": (
         "testApprovedTypographyIsOptInAndReadable",
-        "testFullscreenHasBackButNoDrawerOrTabs",
+        "testFullscreenHasLeadingMenuAndExitWithoutTabs",
         "testSeparateOrbAndLargeControlsFitSmallScreen",
         "testNativeLightAndDarkScreenshots",
         "testRecordingAndRecognitionUseExistingBarWithoutAudio",
@@ -108,6 +108,8 @@ REQUIRED_TESTS = {
         "testReadingAnchorSurvivesGrowthDuringReopen",
         "testExternalTabSelectionDoesNotDismissCallOverlay",
         "testCompactDrawerScrollsAndFutureDestinationsAreDisabled",
+        "testPhoneScreensDoNotDuplicateSettingsOrChatMenu",
+        "testDrawerDismissKeepsDraftAndSameChat",
     ),
     "CopilotFreezeNavigationTests": (
         "testFiveVisibleTabsPreserveStableIdentifiersAndNoCopilot",

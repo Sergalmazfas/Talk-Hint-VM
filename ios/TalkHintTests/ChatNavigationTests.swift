@@ -269,9 +269,47 @@ final class ChatNavigationTests: XCTestCase {
         try await chatShown(tabs)
         try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
         let drawer = try XCTUnwrap(chat.view.subviews.first { $0.accessibilityIdentifier == "chat-drawer" })
+        chat.view.layoutIfNeeded()
+        let settings = try button("chat-settings", in: drawer)
+        let settingsFrame = settings.convert(settings.bounds, to: chat.view)
+        XCTAssertGreaterThanOrEqual(settings.bounds.height, 44)
+        XCTAssertLessThanOrEqual(settingsFrame.maxY, chat.view.safeAreaLayoutGuide.layoutFrame.maxY)
+        let panel = try XCTUnwrap(descendants(drawer, as: UIView.self).first { $0.accessibilityIdentifier == "chat-drawer-panel" })
+        XCTAssertLessThanOrEqual(panel.bounds.width, chat.view.bounds.width * 0.88 + 1)
+        XCTAssertTrue(drawer.accessibilityViewIsModal)
         XCTAssertFalse(descendants(drawer, as: UIScrollView.self).isEmpty)
         for id in ["chat.calendar", "chat.tasks", "chat.contacts", "chat.files", "chat.mail", "chat.card"] {
             XCTAssertFalse(try button(id, in: drawer).isEnabled)
         }
+    }
+    func testPhoneScreensDoNotDuplicateSettingsOrChatMenu() {
+        let api = APIClient(transport: { _ in
+            XCTFail("Loading the phone header must not start network work")
+            throw APIError.decoding
+        }, tokenProvider: { nil })
+        for home in [HomeViewController(api: api), HomeViewController(mode: .translator, api: api),
+                     HomeViewController(secretary: true, api: api)] {
+            home.loadViewIfNeeded()
+            let ids = descendants(home.view, as: UIButton.self).compactMap(\.accessibilityIdentifier)
+            XCTAssertFalse(ids.contains("button-open-settings"))
+            XCTAssertFalse(ids.contains("chat-menu"))
+        }
+    }
+    func testDrawerDismissKeepsDraftAndSameChat() async throws {
+        let (tabs, chat) = try fixture()
+        tabs.openChat(animated: false)
+        try await chatShown(tabs)
+        let composer = try XCTUnwrap(descendants(chat.view, as: UITextView.self).first {
+            $0.accessibilityIdentifier == "chat-composer"
+        })
+        composer.text = "Unsent offline draft"
+        try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
+        try button("chat-drawer-dismiss", in: chat.view).sendActions(for: .touchUpInside)
+        XCTAssertEqual(composer.text, "Unsent offline draft")
+        XCTAssertTrue(tabs.retainedChatNavigation?.topViewController === chat)
+        XCTAssertFalse(chat.view.subviews.contains { $0.accessibilityIdentifier == "chat-drawer" })
+        try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
+        try button("chat-drawer-close", in: chat.view).sendActions(for: .touchUpInside)
+        XCTAssertFalse(chat.view.subviews.contains { $0.accessibilityIdentifier == "chat-drawer" })
     }
 }

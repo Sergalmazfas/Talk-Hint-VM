@@ -28,6 +28,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var retryingAnswers = Set<String>()
     private let topTitle = UILabel()
     private var drawer: UIView?
+    private weak var drawerMenuButton: UIButton?
     private var conversations: [ChatConversation] = []
     private var messages: [ChatMessage] = []
     private var attachments: [ChatAttachment] = []
@@ -71,7 +72,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private var composerHeight: NSLayoutConstraint?
     private weak var referenceComposerCard: UIView?
-    private weak var referenceMoreButton: UIButton?
     private var draftRevision = 0
     private var hasRestoredComposer = false
     private var pendingDictationAudio: Data?
@@ -241,8 +241,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .regular))?.withTintColor(
                 UIColor.label.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal), for: .disabled)
         }
-        referenceMoreButton?.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .semibold))?.withTintColor(
-            UIColor.label.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal), for: .disabled)
     }
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
@@ -258,22 +256,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private func build() {
         let header = UIView()
-        let back = iconButton("chevron.left", title: NSLocalizedString("chat.back", comment: ""), action: #selector(closeChat))
+        let back = iconButton("xmark", title: NSLocalizedString("chat.back", comment: ""), action: #selector(closeChat))
         back.accessibilityIdentifier = "chat-back"
-        let menu = iconButton("line.3.horizontal", title: NSLocalizedString("chat.menu", comment: ""), action: #selector(toggleDrawer))
-        menu.accessibilityIdentifier = "chat-menu"
-        if appearance.isApprovedReference {
-            // Match the reference's more glyph, without implementing a menu.
-            menu.removeTarget(self, action: #selector(toggleDrawer), for: .touchUpInside)
-            menu.setImage(UIImage(systemName: "ellipsis"), for: .normal)
-            menu.setImage(UIImage(systemName: "ellipsis"), for: .disabled)
-            menu.setImage(UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .semibold))?.withTintColor(.label, renderingMode: .alwaysOriginal), for: .disabled)
-            referenceMoreButton = menu
-            menu.isEnabled = false
-            menu.accessibilityIdentifier = "chat-more-unavailable"
-            menu.accessibilityLabel = NSLocalizedString("chat.more.unavailable", comment: "")
-            menu.accessibilityHint = NSLocalizedString("chat.more.hint", comment: "")
-        }
+        let menu = ChatMenuButton(title: NSLocalizedString("chat.menu", comment: ""))
+        drawerMenuButton = menu
+        menu.addTarget(self, action: #selector(toggleDrawer), for: .touchUpInside)
         for button in [back, menu] {
             button.setTitle(nil, for: .normal)
             button.widthAnchor.constraint(equalToConstant: 44).isActive = true
@@ -283,7 +270,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         topTitle.font = appearance.titleFont
         topTitle.adjustsFontForContentSizeCategory = true
         topTitle.textColor = .label
-        let headerStack = UIStackView(arrangedSubviews: [back, topTitle, menu])
+        let headerStack = UIStackView(arrangedSubviews: [menu, topTitle, back])
         headerStack.axis = .horizontal; headerStack.alignment = .center
         headerStack.distribution = .fill
         headerStack.spacing = 8
@@ -818,8 +805,12 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             ? NSLocalizedString("chat.new", comment: "") : conversation.title
     }
     @objc private func closeDrawer() {
+        let wasOpen = drawer != nil
         drawer?.removeFromSuperview()
         drawer = nil
+        if wasOpen, viewIfLoaded?.window != nil {
+            UIAccessibility.post(notification: .screenChanged, argument: drawerMenuButton)
+        }
     }
     @objc private func toggleDrawer() {
         if drawer != nil { closeDrawer(); return }
@@ -828,27 +819,66 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         let overlay = UIView()
         overlay.accessibilityViewIsModal = true
         overlay.accessibilityIdentifier = "chat-drawer"
+        overlay.accessibilityViewIsModal = true
         overlay.translatesAutoresizingMaskIntoConstraints = false
         let dim = UIButton(type: .custom)
         dim.backgroundColor = UIColor.black.withAlphaComponent(0.2)
         dim.accessibilityLabel = NSLocalizedString("chat.close", comment: "")
+        dim.accessibilityIdentifier = "chat-drawer-dismiss"
         dim.addTarget(self, action: #selector(closeDrawer), for: .touchUpInside)
         dim.translatesAutoresizingMaskIntoConstraints = false
         overlay.addSubview(dim)
-        let panel = UIView(); panel.backgroundColor = .secondarySystemBackground
+        let panel = UIView(); panel.backgroundColor = .systemBackground
+        panel.accessibilityIdentifier = "chat-drawer-panel"
+        let swipe = UISwipeGestureRecognizer(target: self, action: #selector(closeDrawer))
+        swipe.direction = .left
+        panel.addGestureRecognizer(swipe)
         panel.translatesAutoresizingMaskIntoConstraints = false
         let menuScroll = UIScrollView()
         menuScroll.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(menuScroll)
         let list = UIStackView(); list.axis = .vertical; list.spacing = 6
-        let title = UILabel(); title.text = NSLocalizedString("chat.recent", comment: ""); title.font = .preferredFont(forTextStyle: .title2)
+        let title = UILabel(); title.text = NSLocalizedString("chat.screen.title", comment: ""); title.font = .preferredFont(forTextStyle: .headline)
         title.adjustsFontForContentSizeCategory = true
         list.addArrangedSubview(title)
-        let create = UIButton(type: .system); create.setTitle(NSLocalizedString("chat.new", comment: ""), for: .normal)
+        let create = ChatDrawerButton(title: NSLocalizedString("chat.new", comment: ""), symbol: "square.and.pencil")
+        create.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.1)
+        create.layer.cornerRadius = 12
         create.accessibilityIdentifier = "chat-new"
         create.contentHorizontalAlignment = .leading; create.addTarget(self, action: #selector(newChat), for: .touchUpInside); list.addArrangedSubview(create)
+        let note = UILabel()
+        note.text = NSLocalizedString("chat.futureNote", comment: "")
+        note.textColor = .secondaryLabel
+        note.font = .preferredFont(forTextStyle: .footnote)
+        note.adjustsFontForContentSizeCategory = true
+        note.numberOfLines = 0
+        let tables = ChatDrawerButton(title: NSLocalizedString("chat.tables.title", comment: ""), symbol: "tablecells")
+        tables.accessibilityIdentifier = "chat-tables"
+        tables.contentHorizontalAlignment = .leading
+        tables.isEnabled = capabilities?.tables?.available == true
+        tables.addAction(UIAction { [weak self] _ in self?.openTables() }, for: .touchUpInside)
+        list.addArrangedSubview(tables)
+        func unavailable(_ key: String, _ symbol: String) {
+            let item = ChatDrawerButton(title: NSLocalizedString(key, comment: ""), symbol: symbol)
+            item.isEnabled = false
+            item.accessibilityHint = NSLocalizedString("chat.coming", comment: "")
+            item.accessibilityIdentifier = key
+            list.addArrangedSubview(item)
+        }
+        // Menu destinations are not authorization to connect Calendar/Mail.
+        for (key, symbol) in [("chat.calendar", "calendar"), ("chat.tasks", "checklist"),
+                              ("chat.notebook", "note.text"), ("chat.contacts", "person.crop.circle"),
+                              ("chat.files", "folder"), ("chat.mail", "envelope"),
+                              ("chat.connections", "link")] { unavailable(key, symbol) }
+        list.addArrangedSubview(note)
+        let recent = UILabel()
+        recent.text = NSLocalizedString("chat.recent", comment: "")
+        recent.font = .preferredFont(forTextStyle: .footnote)
+        recent.adjustsFontForContentSizeCategory = true
+        recent.textColor = .secondaryLabel
+        list.addArrangedSubview(recent)
         for conversation in conversations {
-            let item = UIButton(type: .system); item.setTitle(displayTitle(conversation), for: .normal); item.contentHorizontalAlignment = .leading
+            let item = ChatDrawerButton(title: displayTitle(conversation), symbol: "bubble.left")
             item.titleLabel?.numberOfLines = 2
             item.addAction(UIAction { [weak self] _ in
                 guard let self else { return }
@@ -857,30 +887,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             }, for: .touchUpInside)
             list.addArrangedSubview(item)
         }
-        let note = UILabel()
-        note.text = NSLocalizedString("chat.futureNote", comment: "")
-        note.textColor = .secondaryLabel
-        note.font = .preferredFont(forTextStyle: .footnote)
-        note.adjustsFontForContentSizeCategory = true
-        note.numberOfLines = 0
-        list.addArrangedSubview(note)
-        let tables = UIButton(type: .system)
-        tables.setTitle(NSLocalizedString("chat.tables.title", comment: ""), for: .normal)
-        tables.accessibilityIdentifier = "chat-tables"
-        tables.contentHorizontalAlignment = .leading
-        tables.isEnabled = capabilities?.tables?.available == true
-        tables.addAction(UIAction { [weak self] _ in self?.openTables() }, for: .touchUpInside)
-        list.addArrangedSubview(tables)
-        for future in ["chat.calendar", "chat.tasks", "chat.notebook", "chat.contacts", "chat.files", "chat.mail", "chat.card", "chat.connections", "chat.tariff", "chat.help", "chat.about"] {
-            let item = UIButton(type: .system)
-            item.setTitle(NSLocalizedString(future, comment: ""), for: .normal)
-            item.isEnabled = false
-            item.accessibilityHint = NSLocalizedString("chat.coming", comment: "")
-            item.accessibilityIdentifier = future
-            item.contentHorizontalAlignment = .leading
-            list.addArrangedSubview(item)
-        }
-        let settings = UIButton(type: .system); settings.setTitle(NSLocalizedString("chat.settings", comment: ""), for: .normal)
+        for (key, symbol) in [("chat.card", "person.crop.rectangle"), ("chat.tariff", "creditcard"),
+                              ("chat.help", "questionmark.circle"), ("chat.about", "info.circle")] { unavailable(key, symbol) }
+        let settings = ChatDrawerButton(title: NSLocalizedString("chat.settings", comment: ""), symbol: "gearshape")
         settings.accessibilityIdentifier = "chat-settings"
         settings.contentHorizontalAlignment = .leading
         settings.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
@@ -889,7 +898,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         settings.titleLabel?.numberOfLines = 0
         settings.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(settings)
-        let close = UIButton(type: .system); close.setTitle(NSLocalizedString("chat.close", comment: ""), for: .normal)
+        let close = ChatDrawerButton(title: NSLocalizedString("chat.close", comment: ""), symbol: "xmark")
+        close.accessibilityIdentifier = "chat-drawer-close"
         close.addTarget(self, action: #selector(closeDrawer), for: .touchUpInside); list.addArrangedSubview(close)
         for case let item as UIButton in list.arrangedSubviews {
             item.titleLabel?.font = .preferredFont(forTextStyle: .body)
@@ -902,6 +912,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         overlay.addSubview(panel)
         view.addSubview(overlay)
         drawer = overlay
+        let preferredWidth = panel.widthAnchor.constraint(equalToConstant: 320)
+        preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor), overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             overlay.topAnchor.constraint(equalTo: view.topAnchor), overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -909,7 +921,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             dim.topAnchor.constraint(equalTo: overlay.topAnchor), dim.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
             panel.leadingAnchor.constraint(equalTo: overlay.leadingAnchor), panel.topAnchor.constraint(equalTo: overlay.topAnchor),
             panel.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
-            panel.widthAnchor.constraint(equalToConstant: min(320, max(240, view.bounds.width - 40))),
+            preferredWidth,
+            panel.widthAnchor.constraint(lessThanOrEqualTo: overlay.widthAnchor, multiplier: 0.88),
             menuScroll.leadingAnchor.constraint(equalTo: panel.leadingAnchor), menuScroll.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
             menuScroll.topAnchor.constraint(equalTo: panel.safeAreaLayoutGuide.topAnchor), menuScroll.bottomAnchor.constraint(equalTo: settings.topAnchor, constant: -8),
             settings.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 16),
@@ -923,7 +936,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             list.widthAnchor.constraint(equalTo: menuScroll.frameLayoutGuide.widthAnchor, constant: -32),
         ])
         panel.transform = CGAffineTransform(translationX: -320, y: 0); panel.alpha = 0
-        UIView.animate(withDuration: 0.28, delay: 0, usingSpringWithDamping: 0.88, initialSpringVelocity: 0.2) { panel.transform = .identity; panel.alpha = 1 }
+        UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.28, delay: 0, usingSpringWithDamping: 0.88, initialSpringVelocity: 0.2) { panel.transform = .identity; panel.alpha = 1 }
+        UIAccessibility.post(notification: .screenChanged, argument: create)
     }
     @objc private func openSettings() {
         guard isCurrentOwner else { return }
