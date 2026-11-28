@@ -376,15 +376,21 @@ final class ChatNavigationTests: XCTestCase {
                 XCTAssertEqual(control.accessibilityLabel, label.text)
             }
             try await Task.sleep(nanoseconds: 100_000_000)
-            snapshot("Settings-full-labels-\(style.rawValue)")
+            snapshot("Settings-full-labels-\(style.rawValue)", screenUpdates: true)
         }
     }
 
-    private func snapshot(_ name: String) {
+    private func snapshot(_ name: String, screenUpdates: Bool = false) {
         guard let window else { return XCTFail("No fixture window") }
         window.layoutIfNeeded()
         let image = UIGraphicsImageRenderer(bounds: window.bounds).image { context in
-            window.layer.render(in: context.cgContext)
+            // The pushed Settings table renders blank through layer.render; draw the
+            // committed on-screen hierarchy for it. Menu keeps the model-layer render.
+            if screenUpdates {
+                _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            } else {
+                window.layer.render(in: context.cgContext)
+            }
         }
         let attachment = XCTAttachment(image: image)
         attachment.name = name
