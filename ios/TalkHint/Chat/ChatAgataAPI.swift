@@ -29,7 +29,31 @@ struct ChatAgataStatus: Decodable {
     let voiceErrorCode: String?
 }
 
+struct ChatAgataRecovery: Decodable {
+    enum State: String, Decodable { case ready, blocked, reviewRequired = "review_required" }
+    let state: State
+}
+
+enum ChatAgataFailure {
+    static func messageKey(_ error: Error) -> String {
+        guard case APIError.http(let status, let code) = error else { return "error" }
+        switch code {
+        case "AGATA_SESSION_UNRECONCILED": return "unreconciled"
+        case "AGATA_MODEL_SPEND_UNRECONCILED", "AGATA_ADMISSION_UNKNOWN_NO_RETRY": return "reviewRequired"
+        case "AUDIO_BUSY": return "audioBusy"
+        case "AGATA_SESSION_ALREADY_CREATED": return "alreadyCreated"
+        default: return status == 429 ? "budget" : "error"
+        }
+    }
+}
+
 extension APIClient {
+    /// Explicit receipt check; never creates a new voice session.
+    func recoverChatAgata() async throws -> ChatAgataRecovery {
+        let data = try await request("/api/chat-v1/agata/recovery", method: "POST",
+                                     json: [:], authenticated: true)
+        return try JSONDecoder().decode(ChatAgataRecovery.self, from: data)
+    }
     func createChatAgata(conversationId: String, requestId: UUID, language: String) async throws -> ChatAgataTicket {
         let data = try await request("/api/chat-v1/conversations/\(conversationId)/agata", method: "POST",
             json: ["clientRequestId": requestId.uuidString.lowercased(),

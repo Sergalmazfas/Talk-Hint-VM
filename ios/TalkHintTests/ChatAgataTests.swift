@@ -5,6 +5,48 @@ import SwiftUI
 final class ChatAgataTests: XCTestCase {
     private let conversation = "11111111-1111-4111-8111-111111111111"
     private let sessionId = "22222222-2222-4222-8222-222222222222"
+    func testAdmissionErrorsAreNotMisreportedAsNetworkFailures() {
+        for (code, key) in [
+            ("AGATA_SESSION_UNRECONCILED", "unreconciled"),
+            ("AGATA_MODEL_SPEND_UNRECONCILED", "reviewRequired"),
+            ("AGATA_ADMISSION_UNKNOWN_NO_RETRY", "reviewRequired"),
+            ("AUDIO_BUSY", "audioBusy"),
+            ("AGATA_SESSION_ALREADY_CREATED", "alreadyCreated")
+        ] {
+            XCTAssertEqual(ChatAgataFailure.messageKey(APIError.http(409, code)), key)
+        }
+        XCTAssertEqual(ChatAgataFailure.messageKey(APIError.http(429, "AGATA_DAILY_BUDGET_REACHED")), "budget")
+        XCTAssertEqual(ChatAgataFailure.messageKey(APIError.http(503, "UNAVAILABLE")), "error")
+        XCTAssertEqual(ChatAgataFailure.messageKey(APIError.decoding), "error")
+    }
+    func testRecoveryUsesOwnerAuthenticationAndNeverCreatesVoice() async throws {
+        for state in ["ready", "blocked", "review_required"] {
+            let client = APIClient(transport: { r in
+                XCTAssertEqual(r.url?.path, "/api/chat-v1/agata/recovery")
+                XCTAssertEqual(r.httpMethod, "POST")
+                XCTAssertEqual(r.value(forHTTPHeaderField: "Authorization"), "Bearer owner")
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: r.httpBody!) as? [String: Any])
+                XCTAssertTrue(body.isEmpty)
+                return (Data("{\"state\":\"\(state)\"}".utf8),
+                        HTTPURLResponse(url: r.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }, tokenProvider: { "owner" })
+            let result = try await client.recoverChatAgata()
+            XCTAssertEqual(result.state.rawValue, state)
+        }
+    }
+    func testRecoveryRejectsUnknownStateAndDoesNotRetryOnOldServer() async {
+        for (status, body) in [(200, #"{"state":"unexpected"}"#), (404, #"{"error":"NOT_FOUND"}"#)] {
+            var calls = 0
+            let client = APIClient(transport: { r in
+                calls += 1
+                return (Data(body.utf8),
+                        HTTPURLResponse(url: r.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+            }, tokenProvider: { "owner" })
+            do { _ = try await client.recoverChatAgata(); XCTFail("Invalid recovery accepted") }
+            catch {}
+            XCTAssertEqual(calls, 1)
+        }
+    }
     private func ticket(_ edits: [String: Any] = [:]) throws -> Data {
         var value: [String: Any] = [
             "sessionId": sessionId, "conversationId": conversation, "callId": "call_fixture",

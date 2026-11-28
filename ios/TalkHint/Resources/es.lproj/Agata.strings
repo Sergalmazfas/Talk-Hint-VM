@@ -1,6 +1,14 @@
 "title" = "Ágata";
 "connecting" = "Conectando…";
-"error" = "Conversación de voz interrumpida. Comprueba la conexión y vuelve a abrirla.";
+"error" = "La conversación de voz no está disponible. El chat de texto sigue disponible.";
+"unreconciled" = "No se ha confirmado el fin de una sesión anterior. Comprueba su estado antes de iniciar otra.";
+"reviewRequired" = "No se pudo confirmar el consumo anterior. Se conserva la reserva. Hace falta una revisión; el chat de texto está disponible.";
+"audioBusy" = "Otra conversación está usando el audio. Finalízala antes de abrir Agata.";
+"alreadyCreated" = "Esta solicitud de sesión ya fue aceptada. No se inició otra sesión.";
+"checkPrevious" = "Comprobar sesión anterior";
+"checkingPrevious" = "Comprobando la sesión anterior…";
+"recoveryReady" = "Se confirmó el fin de la sesión anterior. Cierra y abre Agata cuando quieras empezar. No se ha iniciado otra sesión.";
+"recoveryUnavailable" = "No se pudo comprobar la sesión anterior. No se inició otra sesión ni se liberó una reserva desconocida.";
 "budget" = "Límite diario de voz alcanzado. El chat de texto sigue disponible.";
 "ended" = "Conversación de voz finalizada";
 "stop" = "Detener conversación";

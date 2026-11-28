@@ -10,6 +10,7 @@ final class ChatAgataViewController: UIViewController {
     private let validOwner: () -> Bool
     private let status = UILabel()
     private let lastLine = UILabel()
+    private let recoveryButton = UIButton(type: .system)
     private var orb: UIHostingController<ChatVoiceOrbView>?
     private var operation: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
@@ -67,7 +68,15 @@ final class ChatAgataViewController: UIViewController {
         let controls = UIStackView(arrangedSubviews: [left, stop, right])
         left.widthAnchor.constraint(equalTo: right.widthAnchor).isActive = true
         let spacer = UIView()
-        let stack = UIStackView(arrangedSubviews: [header, host.view, status, lastLine, spacer, notice, controls])
+        recoveryButton.setTitle(text("checkPrevious"), for: .normal)
+        recoveryButton.titleLabel?.font = .preferredFont(forTextStyle: .body)
+        recoveryButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        recoveryButton.titleLabel?.numberOfLines = 0
+        recoveryButton.accessibilityIdentifier = "chat-agata-recovery"
+        recoveryButton.isHidden = true
+        recoveryButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        recoveryButton.addTarget(self, action: #selector(checkPrevious), for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [header, host.view, status, recoveryButton, lastLine, spacer, notice, controls])
         stack.axis = .vertical; stack.spacing = 12
         view.addSubview(stack); stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -103,7 +112,8 @@ final class ChatAgataViewController: UIViewController {
         operation = Task { [weak self] in await self?.start() }
     }
     private func start() async {
-        guard validOwner(), !CallManager.shared.hasPhoneAudioSession else { showEnd("error"); return }
+        guard validOwner() else { showEnd("error"); return }
+        guard !CallManager.shared.hasPhoneAudioSession else { showEnd("audioBusy"); return }
         let granted = await withCheckedContinuation { c in
             if #available(iOS 17.0, *) {
                 AVAudioApplication.requestRecordPermission { c.resume(returning: $0) }
@@ -125,13 +135,36 @@ final class ChatAgataViewController: UIViewController {
         } catch {
             voice.stop()
             guard !Task.isCancelled else { return }
-            if case APIError.http(429, _) = error { showEnd("budget") }
-            else { showEnd("error") }
+            showEnd(ChatAgataFailure.messageKey(error))
         }
     }
     private func showEnd(_ key: String) {
         status.text = text(key)
+        recoveryButton.isHidden = key != "unreconciled"
         orb?.rootView = ChatVoiceOrbView(phase: .unavailable)
+    }
+    @objc private func checkPrevious() {
+        guard validOwner(), recoveryButton.isEnabled else { return }
+        recoveryButton.isEnabled = false
+        status.text = text("checkingPrevious")
+        operation = Task { [weak self] in
+            guard let self else { return }
+            defer { self.recoveryButton.isEnabled = true }
+            do {
+                let result = try await self.api.recoverChatAgata()
+                guard !Task.isCancelled, self.validOwner(), self.viewIfLoaded?.window != nil else { return }
+                switch result.state {
+                case .ready: self.showEnd("recoveryReady")
+                case .blocked: self.showEnd("unreconciled")
+                case .reviewRequired: self.showEnd("reviewRequired")
+                }
+            } catch {
+                guard !Task.isCancelled, self.validOwner(), self.viewIfLoaded?.window != nil else { return }
+                self.showEnd("recoveryUnavailable")
+                self.recoveryButton.isHidden = false
+            }
+            // No start(), microphone request, or automatic paid retry here.
+        }
     }
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
