@@ -72,3 +72,31 @@ class ChatMenuPolishContracts(unittest.TestCase):
             self.assertLess(len(value), 28, lang)
         english = (ROOT / "ios/TalkHint/Resources/en.lproj/Localizable.strings").read_text()
         self.assertIn('"chat.futureNote" = "Not connected yet";', english)
+
+    def test_mac_capture_fix_keeps_settings_on_screen_and_menu_on_model_layer(self):
+        tests = (ROOT / "ios/TalkHintTests/ChatNavigationTests.swift").read_text()
+        self.assertIn('snapshot("Settings-full-labels-\\(style.rawValue)", screenUpdates: true)', tests)
+        self.assertIn("window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)", tests)
+        self.assertIn("window.layer.render(in: context.cgContext)", tests)
+
+    def test_disabled_tables_share_the_unavailable_group_but_enabled_tables_do_not(self):
+        chat = (ROOT / "ios/TalkHint/Chat/ChatViewController.swift").read_text()
+        branch = chat.split("if tables.isEnabled {", 1)[1].split("func unavailable(", 1)[0]
+        enabled, disabled = branch.split("} else {", 1)
+        self.assertIn("list.addArrangedSubview(tables)", enabled)
+        self.assertIn("unavailableGroup.addArrangedSubview(tables)", disabled)
+        self.assertIn("tables.isEnabled = capabilities?.tables?.available == true", chat)
+        native = (ROOT / "ios/TalkHintTests/ChatNavigationTests.swift").read_text()
+        self.assertIn("func testEnabledTablesStayOutsideUnavailableGroup()", native)
+        registry = (ROOT / "ios/scripts/verify-xcresult.py").read_text()
+        self.assertIn('"testEnabledTablesStayOutsideUnavailableGroup"', registry)
+
+    def test_chat_stack_uses_semantic_navigation_colors_in_all_bar_states(self):
+        nav = (ROOT / "ios/TalkHint/Chat/ChatNavigation.swift").read_text()
+        self.assertIn("appearance.titleTextAttributes = [.foregroundColor: UIColor.label]", nav)
+        self.assertIn("appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]", nav)
+        self.assertIn("appearance.backgroundColor = .systemBackground", nav)
+        for state in ("standard", "scrollEdge", "compact", "compactScrollEdge"):
+            self.assertIn(f"navigationBar.{state}Appearance = appearance", nav)
+        self.assertNotIn("UINavigationBar.appearance()", nav)
+        self.assertNotIn("overrideUserInterfaceStyle =", nav)

@@ -19,7 +19,8 @@ final class ChatNavigationTests: XCTestCase {
         try await super.tearDown()
     }
 
-    private func fixture(growFirstMessageOnRefresh: Bool = false, conversationTitle: String = "Fixture") throws -> (TalkHintTabBarController, ChatViewController) {
+    private func fixture(growFirstMessageOnRefresh: Bool = false, conversationTitle: String = "Fixture",
+                         tablesAvailable: Bool = false) throws -> (TalkHintTabBarController, ChatViewController) {
         let suite = "chat-navigation-\(UUID())"
         suites.append(suite)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -29,7 +30,9 @@ final class ChatNavigationTests: XCTestCase {
             switch request.url!.path {
             case "/api/chat-v1/capabilities":
                 object = ["ai": ["available": false], "voice": ["available": false],
-                          "attachments": ["available": false, "mimeTypes": [], "maxBytes": 2097152]]
+                          "attachments": ["available": false, "mimeTypes": [], "maxBytes": 2097152],
+                          "tables": ["available": tablesAvailable,
+                                     "limits": ["bytes": 2097152, "sheets": 10, "columns": 50, "rows": 200]]]
             case "/api/chat-v1/conversations":
                 object = ["conversations": [["id": "c1", "title": conversationTitle, "createdAt": "", "updatedAt": ""]]]
             case "/api/chat-v1/conversations/c1/messages":
@@ -305,7 +308,7 @@ final class ChatNavigationTests: XCTestCase {
         let unavailable = try XCTUnwrap(groups.first { $0.accessibilityIdentifier == "chat-unavailable-group" })
         let recent = try XCTUnwrap(groups.first { $0.accessibilityIdentifier == "chat-recent-group" })
         XCTAssertEqual(unavailable.arrangedSubviews.first?.accessibilityIdentifier, "chat-unavailable-note")
-        for id in ["chat.calendar", "chat.tasks", "chat.card", "chat.tariff", "chat.help", "chat.about"] {
+        for id in ["chat-tables", "chat.calendar", "chat.tasks", "chat.card", "chat.tariff", "chat.help", "chat.about"] {
             let row = try button(id, in: unavailable)
             XCTAssertFalse(row.isEnabled)
             XCTAssertTrue(row.superview === unavailable)
@@ -331,6 +334,19 @@ final class ChatNavigationTests: XCTestCase {
         // Deliberately typing the hint is real user input, not an empty draft.
         composer.text = composer.placeholder
         XCTAssertEqual(composer.text, composer.placeholder)
+    }
+
+    func testEnabledTablesStayOutsideUnavailableGroup() async throws {
+        let (tabs, chat) = try fixture(tablesAvailable: true)
+        try await openChat(tabs)
+        try await loaded(chat)
+        try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
+        let unavailable = try XCTUnwrap(descendants(chat.view, as: UIStackView.self).first {
+            $0.accessibilityIdentifier == "chat-unavailable-group"
+        })
+        let tables = try button("chat-tables", in: chat.view)
+        XCTAssertTrue(tables.isEnabled)
+        XCTAssertFalse(tables.isDescendant(of: unavailable))
     }
 
     func testOldConversationTitlesLoseOnlyLeadingHint() {
@@ -361,6 +377,22 @@ final class ChatNavigationTests: XCTestCase {
         }
         for style in [UIUserInterfaceStyle.light, .dark] {
             window?.overrideUserInterfaceStyle = style
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let appearances = [navigation.navigationBar.standardAppearance,
+                               navigation.navigationBar.scrollEdgeAppearance,
+                               navigation.navigationBar.compactAppearance,
+                               navigation.navigationBar.compactScrollEdgeAppearance].compactMap { $0 }
+            XCTAssertEqual(appearances.count, 4)
+            for appearance in appearances {
+                let titleColor = try XCTUnwrap(appearance.titleTextAttributes[.foregroundColor] as? UIColor)
+                let largeColor = try XCTUnwrap(appearance.largeTitleTextAttributes[.foregroundColor] as? UIColor)
+                XCTAssertEqual(titleColor.resolvedColor(with: traits).cgColor,
+                               UIColor.label.resolvedColor(with: traits).cgColor)
+                XCTAssertEqual(largeColor.resolvedColor(with: traits).cgColor,
+                               UIColor.label.resolvedColor(with: traits).cgColor)
+                XCTAssertEqual(try XCTUnwrap(appearance.backgroundColor).resolvedColor(with: traits).cgColor,
+                               UIColor.systemBackground.resolvedColor(with: traits).cgColor)
+            }
             settings.tableView.scrollToRow(at: IndexPath(row: 1, section: 2), at: .middle, animated: false)
             settings.tableView.layoutIfNeeded()
             for row in 0...2 {

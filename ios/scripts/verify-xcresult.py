@@ -114,6 +114,7 @@ REQUIRED_TESTS = {
         "testComposerPlaceholderIsNotEditableTextOrDraft",
         "testOldConversationTitlesLoseOnlyLeadingHint",
         "testSettingsFullWidthLabelsAndLightDarkSnapshots",
+        "testEnabledTablesStayOutsideUnavailableGroup",
     ),
     "CopilotFreezeNavigationTests": (
         "testFiveVisibleTabsPreserveStableIdentifiersAndNoCopilot",

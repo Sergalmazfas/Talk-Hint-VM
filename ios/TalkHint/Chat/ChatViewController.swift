@@ -857,12 +857,17 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         tables.contentHorizontalAlignment = .leading
         tables.isEnabled = capabilities?.tables?.available == true
         tables.addAction(UIAction { [weak self] _ in self?.openTables() }, for: .touchUpInside)
-        list.addArrangedSubview(tables)
         let unavailableGroup = UIStackView()
         unavailableGroup.axis = .vertical
         unavailableGroup.spacing = 6
         unavailableGroup.accessibilityIdentifier = "chat-unavailable-group"
         unavailableGroup.addArrangedSubview(note)
+        if tables.isEnabled {
+            list.addArrangedSubview(tables)
+        } else {
+            tables.accessibilityHint = NSLocalizedString("chat.coming", comment: "")
+            unavailableGroup.addArrangedSubview(tables)
+        }
         func unavailable(_ key: String, _ symbol: String) {
             let item = ChatDrawerButton(title: NSLocalizedString(key, comment: ""), symbol: symbol)
             item.isEnabled = false

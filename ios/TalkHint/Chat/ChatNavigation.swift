@@ -14,6 +14,18 @@ final class ChatNavigationController: UINavigationController, UINavigationContro
         modalPresentationStyle = .fullScreen
         isModalInPresentation = true
         delegate = self
+        // Scope semantic navigation colors to the chat stack, including pushed
+        // Settings. Never inherit a light title from a dark/transparent state.
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithDefaultBackground()
+        appearance.backgroundColor = .systemBackground
+        appearance.titleTextAttributes = [.foregroundColor: UIColor.label]
+        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
+        navigationBar.standardAppearance = appearance
+        navigationBar.scrollEdgeAppearance = appearance
+        navigationBar.compactAppearance = appearance
+        navigationBar.compactScrollEdgeAppearance = appearance
+        navigationBar.tintColor = .label
         setNavigationBarHidden(true, animated: false)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
