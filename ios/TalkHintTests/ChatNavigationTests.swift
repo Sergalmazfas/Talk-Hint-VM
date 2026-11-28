@@ -67,7 +67,7 @@ final class ChatNavigationTests: XCTestCase {
     }
 
     private func descendants<T: UIView>(_ view: UIView, as type: T.Type) -> [T] {
-        (view as? T).map { [$0] } ?? view.subviews.flatMap { descendants($0, as: type) }
+        ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { descendants($0, as: type) }
     }
     private func button(_ id: String, in view: UIView) throws -> UIButton {
         try XCTUnwrap(descendants(view, as: UIButton.self).first { $0.accessibilityIdentifier == id })

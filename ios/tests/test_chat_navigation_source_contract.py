@@ -11,6 +11,14 @@ class ChatNavigationSourceContracts(unittest.TestCase):
         self.nav = (ROOT / "ios/TalkHint/Chat/ChatNavigation.swift").read_text()
         self.chat = (ROOT / "ios/TalkHint/Chat/ChatViewController.swift").read_text()
 
+    def test_native_view_search_keeps_descending_after_a_container_matches(self):
+        native = (ROOT / "ios/TalkHintTests/ChatNavigationTests.swift").read_text()
+        helper = native.split("private func descendants<T: UIView>", 1)[1].split(
+            "private func button", 1)[0]
+        self.assertIn("((view as? T).map { [$0] } ?? []) +", helper)
+        self.assertIn("view.subviews.flatMap { descendants($0, as: type) }", helper)
+        self.assertNotIn("?? view.subviews", helper)
+
     def test_existing_shell_keeps_all_five_identifiers_and_phone_roots(self):
         for tag in range(5):
             self.assertIn(f"tag: {tag}", self.scene)
