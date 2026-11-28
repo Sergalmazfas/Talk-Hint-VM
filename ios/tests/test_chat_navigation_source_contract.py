@@ -105,7 +105,7 @@ class ChatNavigationSourceContracts(unittest.TestCase):
         self.assertIn("item.isEnabled = false", helper)
         self.assertIn('NSLocalizedString("chat.coming"', helper)
         block = self.chat.split('// Menu destinations', 1)[1].split("let settings =", 1)[0]
-        for key in ("calendar", "tasks", "notebook", "contacts", "files", "mail",
+        for key in ("notebook", "contacts", "files", "mail",
                     "connections", "card", "tariff", "help", "about"):
             self.assertIn(f'"chat.{key}"', block)
         self.assertEqual(block.count("unavailable(key, symbol)"), 2)

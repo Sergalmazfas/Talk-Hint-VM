@@ -1,4 +1,8 @@
 "NSSpeechRecognitionUsageDescription" = "Mostrar las palabras dictadas en este iPhone antes de enviarlas. Si el idioma no es compatible, se reconoce al detener.";
 "NSCameraUsageDescription" = "TalkHint usa la cámara para que puedas fotografiar una tarea para el Secretario.";
+"NSCalendarsUsageDescription" = "Ver y editar el calendario del iPhone. Los eventos no se envían al servidor de TalkHint ni a la IA.";
+"NSCalendarsFullAccessUsageDescription" = "Ver y editar el calendario del iPhone. Los eventos no se envían al servidor de TalkHint ni a la IA.";
+"NSRemindersUsageDescription" = "Ver y editar recordatorios del iPhone en Tareas. No se envían al servidor de TalkHint ni a la IA.";
+"NSRemindersFullAccessUsageDescription" = "Ver y editar recordatorios del iPhone en Tareas. No se envían al servidor de TalkHint ni a la IA.";
 "NSLocationWhenInUseUsageDescription" = "Usar tu ubicación para buscar lugares para la tarea del chat. Sin seguimiento en segundo plano.";
 "NSPhotoLibraryUsageDescription" = "TalkHint usa las fotos seleccionadas para ayudar al Secretario a entender tu tarea.";

@@ -45,6 +45,14 @@
         <true/>
         <key>NSLocationWhenInUseUsageDescription</key>
         <string>TalkHint uses your current location while preparing nearby or route-based tasks in chat. No background tracking.</string>
+        <key>NSCalendarsUsageDescription</key>
+        <string>View and edit your iPhone calendar only when you open Calendar. Entries are not sent to TalkHint servers or AI.</string>
+        <key>NSCalendarsFullAccessUsageDescription</key>
+        <string>View and edit your iPhone calendar only when you open Calendar. Entries are not sent to TalkHint servers or AI.</string>
+        <key>NSRemindersUsageDescription</key>
+        <string>View and edit your iPhone reminders in Tasks. Reminders are not sent to TalkHint servers or AI.</string>
+        <key>NSRemindersFullAccessUsageDescription</key>
+        <string>View and edit your iPhone reminders in Tasks. Reminders are not sent to TalkHint servers or AI.</string>
         <key>NSSpeechRecognitionUsageDescription</key>
         <string>Show your dictated words on this iPhone before you send them.</string>
         <key>NSMicrophoneUsageDescription</key>

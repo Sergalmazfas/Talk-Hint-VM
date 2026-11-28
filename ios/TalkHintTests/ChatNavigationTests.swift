@@ -281,8 +281,11 @@ final class ChatNavigationTests: XCTestCase {
         XCTAssertLessThanOrEqual(panel.bounds.width, chat.view.bounds.width * 0.88 + 1)
         XCTAssertTrue(drawer.accessibilityViewIsModal)
         XCTAssertFalse(descendants(drawer, as: UIScrollView.self).isEmpty)
-        for id in ["chat.calendar", "chat.tasks", "chat.contacts", "chat.files", "chat.mail", "chat.card"] {
+        for id in ["chat.contacts", "chat.files", "chat.mail", "chat.card"] {
             XCTAssertFalse(try button(id, in: drawer).isEnabled)
+        }
+        for id in ["chat.calendar", "chat.tasks"] {
+            XCTAssertTrue(try button(id, in: drawer).isEnabled)
         }
     }
     private func openChat(_ tabs: TalkHintTabBarController) async throws {
@@ -308,7 +311,7 @@ final class ChatNavigationTests: XCTestCase {
         let unavailable = try XCTUnwrap(groups.first { $0.accessibilityIdentifier == "chat-unavailable-group" })
         let recent = try XCTUnwrap(groups.first { $0.accessibilityIdentifier == "chat-recent-group" })
         XCTAssertEqual(unavailable.arrangedSubviews.first?.accessibilityIdentifier, "chat-unavailable-note")
-        for id in ["chat-tables", "chat.calendar", "chat.tasks", "chat.card", "chat.tariff", "chat.help", "chat.about"] {
+        for id in ["chat-tables", "chat.card", "chat.tariff", "chat.help", "chat.about"] {
             let row = try button(id, in: unavailable)
             XCTAssertFalse(row.isEnabled)
             XCTAssertTrue(row.superview === unavailable)
@@ -369,6 +372,9 @@ final class ChatNavigationTests: XCTestCase {
             try await Task.sleep(nanoseconds: 100_000_000)
             snapshot("Menu-grouping-\(style.rawValue)")
         }
+        // Establish light mode before presentation, not 100ms before capture.
+        window?.overrideUserInterfaceStyle = .light
+        try await Task.sleep(nanoseconds: 1_500_000_000)
         try button("chat-settings", in: chat.view).sendActions(for: .touchUpInside)
         let navigation = try XCTUnwrap(tabs.retainedChatNavigation)
         let settings = try XCTUnwrap(navigation.topViewController as? SettingsViewController)
@@ -408,6 +414,9 @@ final class ChatNavigationTests: XCTestCase {
                 XCTAssertEqual(control.accessibilityLabel, label.text)
             }
             try await Task.sleep(nanoseconds: 100_000_000)
+            // Mac reproduction showed that a theme transition is not settled
+            // after 100ms even when the model trait value is already updated.
+            try await Task.sleep(nanoseconds: 1_500_000_000)
             snapshot("Settings-full-labels-\(style.rawValue)", screenUpdates: true)
         }
     }

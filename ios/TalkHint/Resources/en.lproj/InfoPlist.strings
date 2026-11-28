@@ -1,4 +1,8 @@
 "NSSpeechRecognitionUsageDescription" = "Show dictated words on this iPhone before you send them. Unsupported languages use recognition after Stop.";
 "NSCameraUsageDescription" = "TalkHint uses the camera so you can photograph a task for the Secretary to understand.";
+"NSCalendarsUsageDescription" = "View and edit your iPhone calendar. Entries are not sent to TalkHint servers or AI.";
+"NSCalendarsFullAccessUsageDescription" = "View and edit your iPhone calendar. Entries are not sent to TalkHint servers or AI.";
+"NSRemindersUsageDescription" = "View and edit iPhone reminders in Tasks. Reminders are not sent to TalkHint servers or AI.";
+"NSRemindersFullAccessUsageDescription" = "View and edit iPhone reminders in Tasks. Reminders are not sent to TalkHint servers or AI.";
 "NSLocationWhenInUseUsageDescription" = "Use your current location to find places for your chat task. No background tracking.";
 "NSPhotoLibraryUsageDescription" = "TalkHint uses selected photos to help the Secretary understand your task.";

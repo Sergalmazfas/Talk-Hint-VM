@@ -1,4 +1,8 @@
 "NSSpeechRecognitionUsageDescription" = "Показувати слова диктування на iPhone до надсилання. Якщо мова не підтримується — розпізнавання після «Стоп».";
 "NSCameraUsageDescription" = "TalkHint використовує камеру, щоб ви могли сфотографувати завдання для Секретаря.";
+"NSCalendarsUsageDescription" = "Перегляд і зміна календаря iPhone. Записи не передаються серверу TalkHint або ШІ.";
+"NSCalendarsFullAccessUsageDescription" = "Перегляд і зміна календаря iPhone. Записи не передаються серверу TalkHint або ШІ.";
+"NSRemindersUsageDescription" = "Перегляд і зміна нагадувань iPhone в завданнях. Вони не передаються серверу TalkHint або ШІ.";
+"NSRemindersFullAccessUsageDescription" = "Перегляд і зміна нагадувань iPhone в завданнях. Вони не передаються серверу TalkHint або ШІ.";
 "NSLocationWhenInUseUsageDescription" = "Використовувати ваше місцезнаходження для пошуку місць за дорученням у чаті. Без фонового відстеження.";
 "NSPhotoLibraryUsageDescription" = "TalkHint використовує вибрані фото, щоб допомогти Секретарю зрозуміти ваше завдання.";

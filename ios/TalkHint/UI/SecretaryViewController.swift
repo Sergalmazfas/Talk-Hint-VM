@@ -944,7 +944,7 @@ private enum SecretaryPhoneNumber {
     }
 }
 
-private final class SecretaryTaskDetailViewController: UIViewController {
+final class SecretaryTaskDetailViewController: UIViewController {
     private var task: APIClient.SecretaryTask
     private var isRefreshingReport = false
     var taskID: String { task.id }

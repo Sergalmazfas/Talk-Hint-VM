@@ -711,6 +711,34 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         present(controller, animated: true)
     }
 
+    /// A menu destination is not permission to start a paid Retell session.
+    func showAgataMenuConfirmation() {
+        guard isCurrentOwner, presentedViewController == nil else { return }
+        closeDrawer()
+        guard !CallManager.shared.hasPhoneAudioSession else {
+            statusLabel.text = NSLocalizedString("chat.voice.call_busy", comment: "")
+            return
+        }
+        let alert = UIAlertController(title: NSLocalizedString("chat.agata", comment: ""),
+            message: NSLocalizedString("agenda.agata.confirm", comment: ""), preferredStyle: .alert)
+        alert.view.accessibilityIdentifier = "chat-agata-confirmation"
+        alert.addAction(UIAlertAction(title: NSLocalizedString("common.cancel", comment: ""), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("agenda.agata.start", comment: ""), style: .default) { [weak self, weak alert] _ in
+            // Recheck the existing owner/capability/audio/admission guards at Start.
+            alert?.dismiss(animated: true) { [weak self] in self?.openVoiceMode() }
+        })
+        present(alert, animated: true)
+    }
+
+    private func openDeviceAgenda(_ kind: ChatAgendaKind) {
+        guard isCurrentOwner, navigationController != nil else { return }
+        closeDrawer()
+        persistDraft()
+        let controller = ChatDeviceAgendaViewController(kind: kind, api: api,
+            validOwner: { [weak self] in self?.isCurrentOwner == true })
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
     /// Main-screen voice always starts a NEW conversation. In-chat Orb keeps this one.
     func beginNewVoiceConversation() {
         guard isCurrentOwner, !CallManager.shared.hasPhoneAudioSession else { return }
@@ -845,6 +873,17 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         create.layer.cornerRadius = 12
         create.accessibilityIdentifier = "chat-new"
         create.contentHorizontalAlignment = .leading; create.addTarget(self, action: #selector(newChat), for: .touchUpInside); list.addArrangedSubview(create)
+        for (key, symbol, kind) in [("chat.calendar", "calendar", ChatAgendaKind.calendar),
+                                    ("chat.tasks", "checklist", ChatAgendaKind.reminders)] {
+            let item = ChatDrawerButton(title: NSLocalizedString(key, comment: ""), symbol: symbol)
+            item.accessibilityIdentifier = key
+            item.addAction(UIAction { [weak self] _ in self?.openDeviceAgenda(kind) }, for: .touchUpInside)
+            list.addArrangedSubview(item)
+        }
+        let agata = ChatDrawerButton(title: NSLocalizedString("chat.agata", comment: ""), symbol: "waveform")
+        agata.accessibilityIdentifier = "chat-agata"
+        agata.isEnabled = Self.voiceClientEnabled && capabilities?.voiceMode?.available == true
+        agata.addAction(UIAction { [weak self] _ in self?.showAgataMenuConfirmation() }, for: .touchUpInside)
         let note = UILabel()
         note.text = NSLocalizedString("chat.futureNote", comment: "")
         note.textColor = .secondaryLabel
@@ -862,6 +901,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         unavailableGroup.spacing = 6
         unavailableGroup.accessibilityIdentifier = "chat-unavailable-group"
         unavailableGroup.addArrangedSubview(note)
+        if agata.isEnabled { list.addArrangedSubview(agata) }
+        else {
+            agata.accessibilityHint = NSLocalizedString("chat.coming", comment: "")
+            unavailableGroup.addArrangedSubview(agata)
+        }
         if tables.isEnabled {
             list.addArrangedSubview(tables)
         } else {
@@ -876,8 +920,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             unavailableGroup.addArrangedSubview(item)
         }
         // Menu destinations are not authorization to connect Calendar/Mail.
-        for (key, symbol) in [("chat.calendar", "calendar"), ("chat.tasks", "checklist"),
-                              ("chat.notebook", "note.text"), ("chat.contacts", "person.crop.circle"),
+        for (key, symbol) in [("chat.notebook", "note.text"), ("chat.contacts", "person.crop.circle"),
                               ("chat.files", "folder"), ("chat.mail", "envelope"),
                               ("chat.connections", "link")] { unavailable(key, symbol) }
         for (key, symbol) in [("chat.card", "person.crop.rectangle"), ("chat.tariff", "creditcard"),
