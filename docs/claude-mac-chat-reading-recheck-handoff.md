@@ -1,8 +1,11 @@
-# Claude Mac: повтор после 227/229 — позиция чтения и системный шрифт
+# Claude Mac: после 66/67 — исправлен поиск вложенных views, повторить 8 тестов
 
 **Это единственное текущее задание.** Предыдущий общий проход не повторять.
-Независимый отчёт владельца: на `ecce1d3a` прошли 227/229, два теста
-ChatApprovedScreenTests упали, device-сборка/установка/запуск НЕ выполнялись.
+Последний независимый отчёт владельца: на `00e77dc1` прошли 66/67;
+оба прежних красных теста теперь зелёные. Новый
+`testReadingAnchorSurvivesGrowthDuringReopen` остановился на поиске m1
+из-за ошибки обхода view-дерева, ДО проверки положения строки.
+Device-сборка/установка/запуск НЕ выполнялись.
 На iPhone остался прежний `6a4fe3a`. Сохранить данные, логи и 47 UIKit-снимков
 первого прохода. Старые результаты не называть тестами нового снимка.
 
@@ -11,10 +14,10 @@ ChatApprovedScreenTests упали, device-сборка/установка/за�
 - Repo: https://github.com/Sergalmazfas/Talk-Hint-VM
 - Постоянная ветка: `xcode-chat-voice-sarah-2026-11-11`.
 - Та же рабочая копия: `~/Talk-Hint-VM-worktrees/chat-voice-sarah-concurrency`.
-- База: `ecce1d3a03ae189cb98ce535de7048bbedd2bc72`.
-- **Код: `213c32022bbd45ab8c10530d319721046667e835`.**
+- База: `00e77dc1e907b1851ea81cbbfc91a2a0d12e2ed2`.
+- **Код тестов: `389960e9bd07a9614da856fa4a85d5f4b07140c8`.**
 - Последующие коммиты этой передачи — только docs.
-- [Точные 67 методов, 8 suites, SHA-256 исходников](ios-chat-reading-recheck-scope.json).
+- [Точные 8 методов ChatNavigationTests и SHA-256 исходника](ios-chat-reading-recheck-scope.json).
 
 Никаких новых worktree/очисток/зависимостей/смен Xcode, Team или подписи.
 Не stash/reset/clean/rebase/force. При нечистой копии или непереданных
@@ -27,31 +30,20 @@ Mac-коммитах остановиться и сообщить пути/ко�
 в production/БД, OAuth, телефонии, голосах, моделях, бюджетах и 682.
 Без реальных сообщений, писем, STT/TTS/LLM/OCR, Агата-сеансов или звонков.
 
-## Изменения — не объявлять их успешно проверенными до XCTest
+## Единственная правка
 
-1. **Код:** refresh после возвращения в чат прежде сохранял только число
-   `contentOffset`, поэтому render пропускал захват читаемой строки.
-   Теперь refresh и render используют общий capture **до** замены старых rows.
-   Существующий pending offset тоже получает message-relative anchor, если его
-   ещё не было. Перетаскивание и «↓ Новое» по-прежнему отменяют восстановление.
-2. **Тест роста сообщения:** вместо 12 `Task.yield` ждёт фактического завершения
-   асинхронного восстановления с трёхсекундным пределом. UIKit/main-queue не
-   обязаны закончить работу за 12 yield. Исходная причина именно первого падения
-   ещё требует проверки на Mac; это не доказательство, что виноват только fixture.
-   Допуск **2 pt не увеличен**; рост проверяется дважды — 30 и 60 повторов.
-   Исходное ручное перемещение теперь посылает обычное событие начала drag,
-   отменяя отложенное следование за концом начальной переписки.
-3. **Новая регрессия:** `ChatNavigationTests/testReadingAnchorSurvivesGrowthDuringReopen`
-   проходит настоящий close/reopen и refresh с подставным GET: первое сообщение
-   увеличивается вне открытого чата. После reflow проверяется та же строка ±2 pt
-   на четырёх дальнейших layout-проходах. Никакой сети или API модели.
-   Тест добавлен в обязательный registry, старые проверки не удалены.
-4. **Шрифт:** продукт остаётся системным `.preferredFont(forTextStyle: .body)`
-   с Dynamic Type, а не фиксированным 20 pt. Устаревшее ожидание 20 исправлено.
-   Это соответствует просьбе владельца убрать огромный шрифт, а не повод
-   увеличивать его обратно. Другие размеры и дизайн не менялись.
+`descendants<T>` в ChatNavigationTests раньше прекращал обход, если сам
+контейнер соответствовал T. Для UIStackView поиск возвращал messagesStack,
+но не его строки. Теперь найденный view добавляется к результату И обходятся
+дочерние — как в уже существующем helper `all` в ChatApprovedScreenTests.
+Добавлена source-проверка, защищающая этот обход.
 
-Replit реально выполнил **90 source + 66 helper = 156 проверок**, все прошли.
+**Приложение, прокрутка, шрифт, аудио и другие XCTest не менялись.**
+Прежние assertions, fixture GET, таймауты, ID и допуск ±2 pt сохранены.
+Новая регрессия обязана дойти до проверок ПОСЛЕ reopen и проверить положение
+на всех четырёх layout-проходах, не только найти m1.
+
+Replit реально выполнил **91 source + 66 helper = 157 проверок**, все прошли.
 Swift/XCTest/device не запускались: Replit работает на Linux.
 
 ## Получить дельту
@@ -66,12 +58,13 @@ git rev-parse HEAD
 # Продолжать только при чистой правильной ветке и ожидаемой истории.
 git fetch --no-tags origin refs/heads/xcode-chat-voice-sarah-2026-11-11
 git merge --ff-only FETCH_HEAD
-git merge-base --is-ancestor ecce1d3a03ae189cb98ce535de7048bbedd2bc72 HEAD
-git merge-base --is-ancestor 213c32022bbd45ab8c10530d319721046667e835 HEAD
-git diff --exit-code 213c32022bbd45ab8c10530d319721046667e835 HEAD -- ios
+git merge-base --is-ancestor 00e77dc1e907b1851ea81cbbfc91a2a0d12e2ed2 HEAD
+git merge-base --is-ancestor 389960e9bd07a9614da856fa4a85d5f4b07140c8 HEAD
+git diff --exit-code 389960e9bd07a9614da856fa4a85d5f4b07140c8 HEAD -- ios
+git diff --exit-code 00e77dc1e907b1851ea81cbbfc91a2a0d12e2ed2 HEAD -- ios/TalkHint
 ```
 
-## Один повтор 67 связанных XCTest
+## Один повтор 8 XCTest навигации
 
 Сохранить действующие Xcode и тёплые DerivedData из первого прохода.
 Первый отчёт говорит, что временный simulator удалён, потому что постоянных
@@ -104,8 +97,8 @@ while IFS= read -r flag; do TEST_FLAGS+=("$flag"); done < <(
 import hashlib, json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 m = json.loads((root / "docs/ios-chat-reading-recheck-scope.json").read_text())
-assert len(m["suites"]) == m["suiteCount"] == 8
-assert sum(len(s["methods"]) for s in m["suites"]) == m["methodCount"] == 67
+assert len(m["suites"]) == m["suiteCount"] == 1
+assert sum(len(s["methods"]) for s in m["suites"]) == m["methodCount"] == 8
 for s in m["suites"]:
     raw = (root / s["source"]).read_bytes()
     assert hashlib.sha256(raw).hexdigest() == s["sourceSha256"], s["source"]
@@ -114,32 +107,36 @@ for s in m["suites"]:
     print("-only-testing:TalkHintTests/" + s["suite"])
 PY
 )
-test "${#TEST_FLAGS[@]}" -eq 8 || exit 1
+test "${#TEST_FLAGS[@]}" -eq 1 || exit 1
 xcodebuild "${COMMON[@]}" test-without-building -parallel-testing-enabled NO \
   -testLanguage en -testRegion US "${TEST_FLAGS[@]}" \
   -resultBundlePath "$OUT/ChatReadingRecheck.xcresult" 2>&1 | tee "$OUT/tests.log"
 ```
 
-В `.xcresult` сверить все 67 методов manifest поимённо. Обязательны оба
-прежних красных, новая регрессия reopen, прежняя проверка draft/scroll после
-возврата, остальные tests выбранных suites. Никаких skip/ослабления допусков.
+В `.xcresult` сверить все 8 методов manifest поимённо: новая регрессия reopen,
+прежняя проверка draft/scroll после возврата и остальные тесты навигации,
+поскольку helper общий для этого класса. Никаких skip/ослабления допусков.
 Не запускать полный `verify-xcresult.py` на частичном прогоне и не менять
 registry ради зелёного результата.
 
-Границы повтора: chat approved 12, navigation 8, message presentation 5,
-read-aloud 10, tables 8, memory screen 5, documents 3, dictation 16 = **67**.
+Граница повтора — только **ChatNavigationTests: 8 методов**.
+Остальные 59 успешных тестов последнего прогона не затронуты этой test-only
+правкой и повторения не требуют. Их прошлый результат хранить отдельно,
+не выдавать за новый прогон. Внутри класса навигации повторяются все 8,
+а не только один упавший тест, поскольку изменён их общий helper.
 Код звука Кати, Агаты, Keychain и телефонной сессии не изменён; их результаты
 первого прохода сохранить отдельно, повторять 80-секундный engine-тест не нужно.
 Он доказал callbacks обоих синтетических каналов, не слышимость на iPhone.
 
 Любой failed/missing/skipped или ошибка компиляции — остановка до установки,
 вернуть ошибку/stack и fixture-снимок. Не объявлять исправление готовым.
-Для якоря сохранить UIKit-снимки до/после обоих увеличений и после reopen,
-с offset/ID читаемой строки. Сохранить snapshot шрифта/composer на 320 pt.
+Если для новой регрессии есть UIKit-снимки, приложить их; если нет — явно
+указать это, не менять тест ради снимков. При падении вернуть доступные
+offset/ID и stack из журнала. Прежние снимки сохранить без пересоздания.
 
 ## Одна обычная device-сборка, обновление поверх и запуск
 
-Только после **67/67**: одна инкрементальная `TalkHint / Debug`, не AppDev.
+Только после **8/8**: одна инкрементальная `TalkHint / Debug`, не AppDev.
 Использовать прежние `DEVICE_DD` и подключённое устройство `DEVICE_ID`.
 Никаких `-allowProvisioningUpdates`, Archive/TestFlight/Publish.
 
@@ -165,11 +162,11 @@ xcrun devicectl device process launch --device "$DEVICE_ID" app.talkhint
 
 ## Вернуть отчёт
 
-Ветка/полный SHA, поимённая сверка 67, passed/failed/skipped, длительности
+Ветка/полный SHA, поимённая сверка 8, passed/failed/skipped, длительности
 тестов и device-сборки, UIKit-снимки, установка/запуск и версия binary,
 новые предупреждения. Если исходное смещение 1116 pt повторилось —
 конкретная геометрия/момент, не утверждение «это fixture» без доказательств.
-Не считать прошлые 227 тестами этого коммита. Реальную речь/Bluetooth/слышимость
+Не считать прошлые 66 или 227 тестами этого коммита. Реальную речь/Bluetooth/слышимость
 и фото HEIC на устройстве не объявлять проверенными.
 
 Последние проверки владельцу:
