@@ -1,5 +1,9 @@
 # Claude на Mac: контраст Settings и Tables
 
+> Этот пакет уже установлен и принят по Mac-отчёту. Следующее задание:
+> [Календарь, задачи и вход в Агату](claude-mac-device-agenda-handoff.md).
+> Не запускать старое задание параллельно с новым.
+
 ## Одна актуальная передача
 
 Репозиторий: https://github.com/Sergalmazfas/Talk-Hint-VM.
