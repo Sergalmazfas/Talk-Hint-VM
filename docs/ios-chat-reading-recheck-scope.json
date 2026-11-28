@@ -1,0 +1,159 @@
+{
+  "formatVersion": 1,
+  "purpose": "Targeted recheck after the independent Mac report: chat reading anchors and system typography",
+  "nativeCodeCommit": "213c32022bbd45ab8c10530d319721046667e835",
+  "previousNativeHead": "ecce1d3a03ae189cb98ce535de7048bbedd2bc72",
+  "executionStatus": "not_run_on_mac",
+  "sourceChecks": {
+    "iosTests": 90,
+    "helperTests": 66,
+    "result": "passed"
+  },
+  "priorMacResult": {
+    "commit": "ecce1d3a03ae189cb98ce535de7048bbedd2bc72",
+    "source": "Owner-provided independent Claude Mac report",
+    "passed": 227,
+    "failed": 2,
+    "skipped": 0,
+    "failedMethods": [
+      "ChatApprovedScreenTests/testReadingAnchorSurvivesGrowthAboveIt",
+      "ChatApprovedScreenTests/testApprovedTypographyIsOptInAndReadable"
+    ],
+    "installed": false
+  },
+  "suiteCount": 8,
+  "methodCount": 67,
+  "suites": [
+    {
+      "suite": "ChatApprovedScreenTests",
+      "source": "ios/TalkHintTests/ChatApprovedScreenTests.swift",
+      "sourceSha256": "5029550618770b1129256307125918e024ec2a25fe1c53fb730e25a5b57ad1af",
+      "methodCount": 12,
+      "methods": [
+        "testComposerFullWidthAndControlsBelowAt320",
+        "testStreamingWidthIsStableAndProgressIsNotDuplicated",
+        "testEmptyFailedReplyHasNoEmptyBubble",
+        "testPlanStartsCompactAndReplacementDisablesOldCard",
+        "testReadingAnchorSurvivesGrowthAboveIt",
+        "testApprovedTypographyIsOptInAndReadable",
+        "testUnavailableReadAloudKeepsDisabledButtonAndVisibleReason",
+        "testFullscreenHasBackButNoDrawerOrTabs",
+        "testSeparateOrbAndLargeControlsFitSmallScreen",
+        "testNativeLightAndDarkScreenshots",
+        "testRecordingAndRecognitionUseExistingBarWithoutAudio",
+        "testKeyboardEditingScreenshotAndDraftRemainEditable"
+      ]
+    },
+    {
+      "suite": "ChatNavigationTests",
+      "source": "ios/TalkHintTests/ChatNavigationTests.swift",
+      "sourceSha256": "e3a996dfa6f1c95f1b5a538bf3c288e6ad4fae5143513d488169544be407efb3",
+      "methodCount": 8,
+      "methods": [
+        "testEntryInterceptsWithoutChangingPhoneTab",
+        "testFullscreenChatIsRetainedAcrossExitAndReopen",
+        "testBackAndDrawerUseDifferentActions",
+        "testDrawerOpensExistingSettingsAndNativeBackReturns",
+        "testDraftAndReadingPositionSurviveExitAndReopen",
+        "testReadingAnchorSurvivesGrowthDuringReopen",
+        "testExternalTabSelectionDoesNotDismissCallOverlay",
+        "testCompactDrawerScrollsAndFutureDestinationsAreDisabled"
+      ]
+    },
+    {
+      "suite": "ChatMessagePresentationTests",
+      "source": "ios/TalkHintTests/ChatMessagePresentationTests.swift",
+      "sourceSha256": "714f7702e767995165729a277f0205a223cca90212dad4166e1c0f650ed77959",
+      "methodCount": 5,
+      "methods": [
+        "testUnknownKindIsSkippedNotWholeMessage",
+        "testMarkdownIsRenderedAndCopyPreservesNewlinesAndLeadingZero",
+        "testTapCopiesPhoneWithoutOpeningURL",
+        "testFencedMultilineCodeIsVerbatimInDisplayAndWholeCopy",
+        "testCopyItemsUseShortLabelsWithoutDuplicatingLongCode"
+      ]
+    },
+    {
+      "suite": "ChatReadAloudTests",
+      "source": "ios/TalkHintTests/ChatReadAloudTests.swift",
+      "sourceSha256": "291b10d6cc0b8add612c67536d7862d586a8f8c3a6d5cafa5598175d807e38bd",
+      "methodCount": 10,
+      "methods": [
+        "testDictationOwnsAudioWithoutAllowingAgataOrPlayback",
+        "testUnavailableCapabilityReasonsAreReadableAndLocalized",
+        "testManifestCoversOriginalFencesAndWhitespaceAsServerDoes",
+        "testBinaryPreservesServerCodeAndSpeechErrorsAreLocalized",
+        "testManifestUsesUTF16NotCharactersAndRejectsOutOfRange",
+        "testPCMIsWrappedAs24kMono16BitWAVAndOddLengthFails",
+        "testSpeechPOSTHasOnlyServerContractFieldsAndRejectsJSONOrRedirect",
+        "testAgataPreemptsPlaybackAndBlocksAnotherPlayer",
+        "testBusyAgataDoesNotRequestSpeechOrMicrophone",
+        "testStopIgnoresLateManifestWithoutPaidPOST"
+      ]
+    },
+    {
+      "suite": "ChatTablesTests",
+      "source": "ios/TalkHintTests/ChatTablesTests.swift",
+      "sourceSha256": "41fdfd9cbe84b6e20c53718550d7e15d75815666448062585e1fd7882a6edf86",
+      "methodCount": 8,
+      "methods": [
+        "testFailedExportAllowsNewAttemptButUnknownOutcomeKeepsIdentity",
+        "testExportFilenameUsesSafeTableTitle",
+        "testTableErrorsHaveReadableLocalizedMessages",
+        "testTableLimitIsSeparateFromPDFAndImages",
+        "testTenMiBBase64JSONFitsDedicatedFourteenMiBParser",
+        "testRealUploadBodyFitsAndOversizePDFNeverPosts",
+        "testBearerDownloadRejectsOtherOriginsAndTraversalBeforeTransport",
+        "testSearchAndExportUseAuthenticatedRevisionAndStableRequestId"
+      ]
+    },
+    {
+      "suite": "ChatMemoryScreenTests",
+      "source": "ios/TalkHintTests/ChatMemoryScreenTests.swift",
+      "sourceSha256": "39220c754ef3aa3db8364d01f6984819b14f883b3fcc3893872005ff6c0e37be",
+      "methodCount": 5,
+      "methods": [
+        "testCardShowsBeforeAfterProvenanceAndAssumptionWithoutSideEffects",
+        "testExpiredStaleSavedAndPendingButtonsCannotSubmitEvenProgrammatically",
+        "testFullChatSaveIsButtonOnlyAndDoubleTapSendsOneRequest",
+        "testFullChatCancelAndServerStaleRefreshAreIndependentOfCallPlan",
+        "testOwnerChangeRejectsOldCardBeforeTransport"
+      ]
+    },
+    {
+      "suite": "ChatDocumentsTests",
+      "source": "ios/TalkHintTests/ChatDocumentsTests.swift",
+      "sourceSha256": "ac77ea58c9a72091400f2ee9eb4f51931109ce485d73669c55b63c844694401c",
+      "methodCount": 3,
+      "methods": [
+        "testDocumentListKeepsUnknownTypesAndHiddenOrDeletedStatuses",
+        "testBatchUsesDocumentEndpointAndDoesNotConfirmOrDial",
+        "testWholeDocumentCardHasOneSaveAndOneCancelDespiteMultipleParts"
+      ]
+    },
+    {
+      "suite": "ChatDictationTests",
+      "source": "ios/TalkHintTests/ChatDictationTests.swift",
+      "sourceSha256": "0ee11e3ccffc9b045a0b68924ddfdf01c41cdab0762c20d247b21b42bfdc1364",
+      "methodCount": 16,
+      "methods": [
+        "testFallbackWavIsMono16kAndContainsAllCaptureBuffersWithoutMicrophone",
+        "testPartialHypothesisReplacesOnlyCapturedSelectionWithoutSending",
+        "testPartialDoesNotChangeOriginalDraftOrAcceptFinalWithoutStop",
+        "testPermissionAndRecordingAreSingleFlight",
+        "testDeniedOrCancelledPermissionCannotStartLate",
+        "testStopAndRetryCannotDuplicateActiveRecognition",
+        "testRecognitionOnlyProducesEditableTextNotSend",
+        "testExistingDraftIsNotOverwritten",
+        "testSelectedTextAndUTF16AreHandled",
+        "testSilencePreservesCaptureAndRequiresExplicitRetry",
+        "testErrorDoesNotAutomaticallyRetry",
+        "testCancelMakesLateNetworkResultInert",
+        "testDifferentOwnerConversationOrDraftRevisionCannotReceiveResult",
+        "testDraftAndAttachmentRestoreIsOwnerAndOriginScoped",
+        "testBarCancelStopAndRetryAreSeparateWithoutAudio",
+        "testOrbStaysDisabledAndComposerHasSeparateMicrophone"
+      ]
+    }
+  ]
+}
