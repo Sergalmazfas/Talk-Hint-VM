@@ -618,7 +618,7 @@
 "chat.back" = "Назад до TalkHint";
 "chat.menu" = "Відкрити меню чату";
 "chat.contacts" = "Контакти";
-"chat.futureNote" = "Розділи нижче поки не підключені до чату.";
+"chat.futureNote" = "Ще не підключено";
 "chat.help" = "Допомога";
 "chat.about" = "Про застосунок";
 "chat.screen.title" = "TalkHint Chat";

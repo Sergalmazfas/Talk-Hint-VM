@@ -618,7 +618,7 @@
 "chat.back" = "TalkHint-ке оралу";
 "chat.menu" = "Чат мәзірін ашу";
 "chat.contacts" = "Контактілер";
-"chat.futureNote" = "Төмендегі бөлімдер чатқа әлі қосылмаған.";
+"chat.futureNote" = "Әлі қосылмаған";
 "chat.help" = "Көмек";
 "chat.about" = "Қолданба туралы";
 "chat.screen.title" = "TalkHint Chat";

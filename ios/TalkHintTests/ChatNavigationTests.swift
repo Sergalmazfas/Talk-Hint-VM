@@ -19,7 +19,7 @@ final class ChatNavigationTests: XCTestCase {
         try await super.tearDown()
     }
 
-    private func fixture(growFirstMessageOnRefresh: Bool = false) throws -> (TalkHintTabBarController, ChatViewController) {
+    private func fixture(growFirstMessageOnRefresh: Bool = false, conversationTitle: String = "Fixture") throws -> (TalkHintTabBarController, ChatViewController) {
         let suite = "chat-navigation-\(UUID())"
         suites.append(suite)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -31,7 +31,7 @@ final class ChatNavigationTests: XCTestCase {
                 object = ["ai": ["available": false], "voice": ["available": false],
                           "attachments": ["available": false, "mimeTypes": [], "maxBytes": 2097152]]
             case "/api/chat-v1/conversations":
-                object = ["conversations": [["id": "c1", "title": "Fixture", "createdAt": "", "updatedAt": ""]]]
+                object = ["conversations": [["id": "c1", "title": conversationTitle, "createdAt": "", "updatedAt": ""]]]
             case "/api/chat-v1/conversations/c1/messages":
                 messageReads += 1
                 object = ["messages": (1...35).map { i in
@@ -282,6 +282,116 @@ final class ChatNavigationTests: XCTestCase {
             XCTAssertFalse(try button(id, in: drawer).isEnabled)
         }
     }
+    private func openChat(_ tabs: TalkHintTabBarController) async throws {
+        tabs.openChat(animated: false)
+        try await chatShown(tabs)
+    }
+
+    private func loaded(_ chat: ChatViewController) async throws {
+        try await waitUntil("offline conversation messages") {
+            self.descendants(chat.view, as: UITextView.self).contains {
+                $0.accessibilityIdentifier == "chat-message-text"
+            }
+        }
+    }
+
+    func testDrawerSeparatesUnavailableGroupAndRecentChats() async throws {
+        let (tabs, chat) = try fixture(conversationTitle: "Write a message… прикк век но")
+        try await openChat(tabs)
+        try await loaded(chat)
+        try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
+        chat.view.layoutIfNeeded()
+        let groups = descendants(chat.view, as: UIStackView.self)
+        let unavailable = try XCTUnwrap(groups.first { $0.accessibilityIdentifier == "chat-unavailable-group" })
+        let recent = try XCTUnwrap(groups.first { $0.accessibilityIdentifier == "chat-recent-group" })
+        XCTAssertEqual(unavailable.arrangedSubviews.first?.accessibilityIdentifier, "chat-unavailable-note")
+        for id in ["chat.calendar", "chat.tasks", "chat.card", "chat.tariff", "chat.help", "chat.about"] {
+            let row = try button(id, in: unavailable)
+            XCTAssertFalse(row.isEnabled)
+            XCTAssertTrue(row.superview === unavailable)
+            XCTAssertFalse(row.isDescendant(of: recent))
+        }
+        let title = try XCTUnwrap(descendants(recent, as: UIButton.self).first)
+        XCTAssertEqual(title.configuration?.title, "прикк век но")
+        XCTAssertTrue(unavailable.superview === recent.superview)
+        let parent = try XCTUnwrap(unavailable.superview as? UIStackView)
+        XCTAssertLessThan(try XCTUnwrap(parent.arrangedSubviews.firstIndex(of: unavailable)),
+                          try XCTUnwrap(parent.arrangedSubviews.firstIndex(of: recent)))
+    }
+
+    func testComposerPlaceholderIsNotEditableTextOrDraft() {
+        let composer = ChatComposerTextView()
+        composer.placeholder = NSLocalizedString("chat.message.placeholder", comment: "")
+        XCTAssertEqual(composer.text, "")
+        composer.text = "прикк век но"
+        XCTAssertEqual(composer.text, "прикк век но")
+        composer.text = ""
+        composer.refreshPlaceholder()
+        XCTAssertEqual(composer.text, "")
+        // Deliberately typing the hint is real user input, not an empty draft.
+        composer.text = composer.placeholder
+        XCTAssertEqual(composer.text, composer.placeholder)
+    }
+
+    func testOldConversationTitlesLoseOnlyLeadingHint() {
+        for hint in ["Write a message…", "Напишите сообщение…", "Escribe un mensaje…",
+                     "Хабарлама жазыңыз…", "Напишіть повідомлення…"] {
+            XCTAssertEqual(ChatConversationTitle.display(hint + "  Диспетчер Том"), "Диспетчер Том")
+            XCTAssertEqual(ChatConversationTitle.display(hint), NSLocalizedString("chat.new", comment: ""))
+        }
+        XCTAssertEqual(ChatConversationTitle.display("Текст Write a message… внутри"), "Текст Write a message… внутри")
+        XCTAssertEqual(ChatConversationTitle.display("  Диспетчер Том  "), "Диспетчер Том")
+    }
+
+    func testSettingsFullWidthLabelsAndLightDarkSnapshots() async throws {
+        let (tabs, chat) = try fixture()
+        try await openChat(tabs)
+        try await loaded(chat)
+        try button("chat-menu", in: chat.view).sendActions(for: .touchUpInside)
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            window?.overrideUserInterfaceStyle = style
+            try await Task.sleep(nanoseconds: 100_000_000)
+            snapshot("Menu-grouping-\(style.rawValue)")
+        }
+        try button("chat-settings", in: chat.view).sendActions(for: .touchUpInside)
+        let navigation = try XCTUnwrap(tabs.retainedChatNavigation)
+        let settings = try XCTUnwrap(navigation.topViewController as? SettingsViewController)
+        try await waitUntil("Settings push to finish") {
+            chat.viewIfLoaded?.window == nil && navigation.transitionCoordinator == nil
+        }
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            window?.overrideUserInterfaceStyle = style
+            settings.tableView.scrollToRow(at: IndexPath(row: 1, section: 2), at: .middle, animated: false)
+            settings.tableView.layoutIfNeeded()
+            for row in 0...2 {
+                let cell = settings.tableView(settings.tableView, cellForRowAt: IndexPath(row: row, section: 2))
+                cell.frame = CGRect(x: 0, y: 0, width: 288, height: 140)
+                cell.layoutIfNeeded()
+                let label = try XCTUnwrap(descendants(cell, as: UILabel.self).first { $0.text?.isEmpty == false })
+                let control = try XCTUnwrap(descendants(cell, as: UISegmentedControl.self).first)
+                XCTAssertEqual(label.numberOfLines, 0)
+                XCTAssertEqual(label.lineBreakMode, .byWordWrapping)
+                XCTAssertLessThanOrEqual(label.convert(label.bounds, to: cell).maxY,
+                                         control.convert(control.bounds, to: cell).minY)
+                XCTAssertEqual(control.accessibilityLabel, label.text)
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+            snapshot("Settings-full-labels-\(style.rawValue)")
+        }
+    }
+
+    private func snapshot(_ name: String) {
+        guard let window else { return XCTFail("No fixture window") }
+        window.layoutIfNeeded()
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { context in
+            window.layer.render(in: context.cgContext)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func testPhoneScreensDoNotDuplicateSettingsOrChatMenu() {
         let api = APIClient(transport: { _ in
             XCTFail("Loading the phone header must not start network work")

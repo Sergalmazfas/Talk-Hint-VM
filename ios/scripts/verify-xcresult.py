@@ -110,6 +110,10 @@ REQUIRED_TESTS = {
         "testCompactDrawerScrollsAndFutureDestinationsAreDisabled",
         "testPhoneScreensDoNotDuplicateSettingsOrChatMenu",
         "testDrawerDismissKeepsDraftAndSameChat",
+        "testDrawerSeparatesUnavailableGroupAndRecentChats",
+        "testComposerPlaceholderIsNotEditableTextOrDraft",
+        "testOldConversationTitlesLoseOnlyLeadingHint",
+        "testSettingsFullWidthLabelsAndLightDarkSnapshots",
     ),
     "CopilotFreezeNavigationTests": (
         "testFiveVisibleTabsPreserveStableIdentifiersAndNoCopilot",

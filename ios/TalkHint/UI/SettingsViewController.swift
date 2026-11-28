@@ -61,6 +61,8 @@ final class SettingsViewController: UITableViewController {
         super.viewDidLoad()
         title = NSLocalizedString("settings.title", comment: "")
         tableView.accessibilityIdentifier = "table-settings"
+        tableView.rowHeight = UITableView.automaticDimension
+        tableView.estimatedRowHeight = 72
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -177,7 +179,7 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = SessionStore.shared.translatorVoice == .male ? 0 : 1
                 control.accessibilityIdentifier = "segmented-translator-voice"
                 control.addTarget(self, action: #selector(translatorVoiceChanged(_:)), for: .valueChanged)
-                cell.accessoryView = control
+                layoutSegmentedControl(control, in: cell)
             case .playback:
                 cell.textLabel?.text = NSLocalizedString("settings.translator.playback", comment: "")
                 let control = UISegmentedControl(items: [
@@ -187,7 +189,7 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = SessionStore.shared.translatorPlayback == .voice ? 0 : 1
                 control.accessibilityIdentifier = "segmented-translator-playback"
                 control.addTarget(self, action: #selector(translatorPlaybackChanged(_:)), for: .valueChanged)
-                cell.accessoryView = control
+                layoutSegmentedControl(control, in: cell)
             case .provider:
                 cell.textLabel?.text = NSLocalizedString("settings.voice_provider.title", comment: "")
                 let control = UISegmentedControl(items: [
@@ -197,7 +199,7 @@ final class SettingsViewController: UITableViewController {
                 control.selectedSegmentIndex = SessionStore.shared.voiceProvider == .elevenlabs ? 0 : 1
                 control.accessibilityIdentifier = "segmented-voice-provider"
                 control.addTarget(self, action: #selector(voiceProviderChanged(_:)), for: .valueChanged)
-                cell.accessoryView = control
+                layoutSegmentedControl(control, in: cell)
             }
             return cell
 
@@ -345,6 +347,31 @@ final class SettingsViewController: UITableViewController {
         toggle.addTarget(self, action: action, for: .valueChanged)
         cell.accessoryView = toggle
         return cell
+    }
+
+    /// A full-width label above the control avoids accessoryView squeezing the
+    /// title to "Translatio…" / "Voice…" on compact phones and larger type.
+    private func layoutSegmentedControl(_ control: UISegmentedControl, in cell: UITableViewCell) {
+        let label = UILabel()
+        label.text = cell.textLabel?.text
+        cell.textLabel?.text = nil
+        label.font = .preferredFont(forTextStyle: .body)
+        label.adjustsFontForContentSizeCategory = true
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        control.accessibilityLabel = label.text
+        let stack = UIStackView(arrangedSubviews: [label, control])
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        cell.contentView.addSubview(stack)
+        let margins = cell.contentView.layoutMarginsGuide
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: margins.topAnchor, constant: 4),
+            stack.bottomAnchor.constraint(equalTo: margins.bottomAnchor, constant: -4),
+        ])
     }
 
     @objc private func liveHintsChanged(_ sender: UISwitch) {

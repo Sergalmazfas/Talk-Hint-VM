@@ -15,7 +15,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var currentOwnerId: () -> String? = { SessionStore.shared.userId }
     private let scroll = UIScrollView()
     private let messagesStack = UIStackView()
-    private let composer = UITextView()
+    private let composer = ChatComposerTextView()
     private let sendButton = UIButton(type: .system)
     private var fileButton = UIButton(type: .system)
     private var voiceButton = UIButton(type: .system)
@@ -137,7 +137,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     #endif
 
     private var draftText: String {
-        composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : (composer.text ?? "")
+        composer.text ?? ""
     }
     private var dictationContext: ChatDictationState.Context {
         .init(ownerId: sessionScope.ownerId ?? "", conversationId: currentConversation?.id, draftRevision: draftRevision)
@@ -360,7 +360,8 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         composer.accessibilityLabel = NSLocalizedString("chat.message.placeholder", comment: "")
         composer.accessibilityIdentifier = "chat-composer"
         composer.backgroundColor = .clear
-        composer.text = NSLocalizedString("chat.message.placeholder", comment: "")
+        composer.placeholder = NSLocalizedString("chat.message.placeholder", comment: "")
+        composer.text = ""
         composer.textColor = UIColor.secondaryLabel
         composer.textContainerInset = UIEdgeInsets(top: 11, left: 2, bottom: 10, right: 2)
         composer.translatesAutoresizingMaskIntoConstraints = false
@@ -645,7 +646,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private func createNewChat(preservingDraft: Bool, onCreated: (() -> Void)? = nil) {
         readAloud.stop()
-        let draft = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text
+        let draft = composer.text
         let draftAttachments = attachments
         let originDraftKey = currentConversation?.id ?? "_new"
         guard let outbox, !isCreatingConversation, !isUploadingAttachment else { return }
@@ -777,7 +778,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             restoreDraft()
             if let unopenedDraft, !unopenedDraft.text.isEmpty || !unopenedDraft.files.isEmpty,
                draftText.isEmpty, attachments.isEmpty, let outbox {
-                composer.text = unopenedDraft.text.isEmpty ? NSLocalizedString("chat.message.placeholder", comment: "") : unopenedDraft.text
+                composer.text = unopenedDraft.text
                 composer.textColor = unopenedDraft.text.isEmpty ? .secondaryLabel : .label
                 attachments = unopenedDraft.files
                 renderAttachmentStatus()
@@ -801,8 +802,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         } catch { if !Task.isCancelled, isCurrentOwner, currentConversation?.id == conversation.id { showError(error) } }
     }
     private func displayTitle(_ conversation: ChatConversation) -> String {
-        conversation.title.isEmpty || conversation.title == "New chat"
-            ? NSLocalizedString("chat.new", comment: "") : conversation.title
+        ChatConversationTitle.display(conversation.title)
     }
     @objc private func closeDrawer() {
         let wasOpen = drawer != nil
@@ -817,7 +817,6 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         cancelDictation()
         view.endEditing(true)
         let overlay = UIView()
-        overlay.accessibilityViewIsModal = true
         overlay.accessibilityIdentifier = "chat-drawer"
         overlay.accessibilityViewIsModal = true
         overlay.translatesAutoresizingMaskIntoConstraints = false
@@ -852,31 +851,43 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         note.font = .preferredFont(forTextStyle: .footnote)
         note.adjustsFontForContentSizeCategory = true
         note.numberOfLines = 0
+        note.accessibilityIdentifier = "chat-unavailable-note"
         let tables = ChatDrawerButton(title: NSLocalizedString("chat.tables.title", comment: ""), symbol: "tablecells")
         tables.accessibilityIdentifier = "chat-tables"
         tables.contentHorizontalAlignment = .leading
         tables.isEnabled = capabilities?.tables?.available == true
         tables.addAction(UIAction { [weak self] _ in self?.openTables() }, for: .touchUpInside)
         list.addArrangedSubview(tables)
+        let unavailableGroup = UIStackView()
+        unavailableGroup.axis = .vertical
+        unavailableGroup.spacing = 6
+        unavailableGroup.accessibilityIdentifier = "chat-unavailable-group"
+        unavailableGroup.addArrangedSubview(note)
         func unavailable(_ key: String, _ symbol: String) {
             let item = ChatDrawerButton(title: NSLocalizedString(key, comment: ""), symbol: symbol)
             item.isEnabled = false
             item.accessibilityHint = NSLocalizedString("chat.coming", comment: "")
             item.accessibilityIdentifier = key
-            list.addArrangedSubview(item)
+            unavailableGroup.addArrangedSubview(item)
         }
         // Menu destinations are not authorization to connect Calendar/Mail.
         for (key, symbol) in [("chat.calendar", "calendar"), ("chat.tasks", "checklist"),
                               ("chat.notebook", "note.text"), ("chat.contacts", "person.crop.circle"),
                               ("chat.files", "folder"), ("chat.mail", "envelope"),
                               ("chat.connections", "link")] { unavailable(key, symbol) }
-        list.addArrangedSubview(note)
+        for (key, symbol) in [("chat.card", "person.crop.rectangle"), ("chat.tariff", "creditcard"),
+                              ("chat.help", "questionmark.circle"), ("chat.about", "info.circle")] { unavailable(key, symbol) }
+        list.addArrangedSubview(unavailableGroup)
+        let recentGroup = UIStackView()
+        recentGroup.axis = .vertical
+        recentGroup.spacing = 6
+        recentGroup.accessibilityIdentifier = "chat-recent-group"
         let recent = UILabel()
         recent.text = NSLocalizedString("chat.recent", comment: "")
         recent.font = .preferredFont(forTextStyle: .footnote)
         recent.adjustsFontForContentSizeCategory = true
         recent.textColor = .secondaryLabel
-        list.addArrangedSubview(recent)
+        recentGroup.addArrangedSubview(recent)
         for conversation in conversations {
             let item = ChatDrawerButton(title: displayTitle(conversation), symbol: "bubble.left")
             item.titleLabel?.numberOfLines = 2
@@ -885,10 +896,9 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
                 self.closeDrawer()
                 Task { await self.open(conversation) }
             }, for: .touchUpInside)
-            list.addArrangedSubview(item)
+            recentGroup.addArrangedSubview(item)
         }
-        for (key, symbol) in [("chat.card", "person.crop.rectangle"), ("chat.tariff", "creditcard"),
-                              ("chat.help", "questionmark.circle"), ("chat.about", "info.circle")] { unavailable(key, symbol) }
+        list.addArrangedSubview(recentGroup)
         let settings = ChatDrawerButton(title: NSLocalizedString("chat.settings", comment: ""), symbol: "gearshape")
         settings.accessibilityIdentifier = "chat-settings"
         settings.contentHorizontalAlignment = .leading
@@ -1647,7 +1657,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     @objc private func send() {
         guard isCurrentOwner, !dictation.isBusy else { return }
-        let text = composer.text == NSLocalizedString("chat.message.placeholder", comment: "") ? "" : composer.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (!text.isEmpty || !attachments.isEmpty), !isSending,
               !isUploadingAttachment, attachmentRetry == nil else { return }
         guard let conversation = currentConversation else { createNewChat(preservingDraft: true); return }
@@ -1765,7 +1775,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         }
     }
     func textViewDidBeginEditing(_ textView: UITextView) {
-        if textView.text == NSLocalizedString("chat.message.placeholder", comment: "") { textView.text = ""; textView.textColor = .label }
+        textView.textColor = .label
     }
     func textViewDidChange(_ textView: UITextView) {
         if localDictation != nil { localDraftEdited = true }
@@ -1775,7 +1785,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         updateComposerControls()
     }
     func textViewDidEndEditing(_ textView: UITextView) {
-        if textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { textView.text = NSLocalizedString("chat.message.placeholder", comment: ""); textView.textColor = .secondaryLabel }
+        composer.refreshPlaceholder()
     }
     @objc private func pickFile() {
         guard isCurrentOwner, !dictation.isBusy else { return }
@@ -2369,7 +2379,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     }
     private func restoreDraft() {
         let saved = outbox?.composerDrafts[currentConversation?.id ?? "_new"]
-        composer.text = saved?.text.isEmpty == false ? saved?.text : NSLocalizedString("chat.message.placeholder", comment: "")
+        composer.text = saved?.text ?? ""
         composer.textColor = saved?.text.isEmpty == false ? .label : .secondaryLabel
         attachments = saved?.attachments ?? []
         hasRestoredComposer = true
