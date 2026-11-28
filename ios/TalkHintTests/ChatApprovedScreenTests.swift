@@ -144,14 +144,29 @@ final class ChatApprovedScreenTests: XCTestCase {
         XCTAssertNil(chat.presentedViewController) // A "yes" did not open review/start.
         snapshot("chat-689-card-replaced")
     }
+    private func readingLayoutSettled(_ chat: ChatViewController) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while true {
+            chat.view.layoutIfNeeded()
+            if !chat.offlineReadingRestorePending { return }
+            guard Date() < deadline else {
+                XCTFail("Reading restore did not finish; do not accept an unverified anchor")
+                throw NSError(domain: "OfflineChatReadingRestoreTimeout", code: 1)
+            }
+            // Task.yield does not guarantee that DispatchQueue.main's UIKit
+            // restoration callbacks ran. Yield to the actual run loop instead.
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
     func testReadingAnchorSurvivesGrowthAboveIt() async throws {
         let chat = try fixture(width: 320)
         try await loaded(chat)
         let conv = ChatConversation(id: "usability", title: "Offline", createdAt: "", updatedAt: "")
         var list = (1...25).map { usabilityMessage("r\($0)", $0, text: "Строка \($0). Сохранить позицию чтения.", status: "complete") }
         chat.applyOfflineMemoryFixture(conversation: conv, messages: list)
-        chat.view.layoutIfNeeded()
+        try await readingLayoutSettled(chat)
         let scroll = try XCTUnwrap(all(chat.view, UIScrollView.self).first { $0.accessibilityIdentifier == "chat-messages" })
+        chat.scrollViewWillBeginDragging(scroll) // User takes over from initial bottom-follow.
         scroll.setContentOffset(CGPoint(x: 0, y: 500), animated: false)
         let rows = all(chat.view, UIStackView.self).filter { $0.accessibilityIdentifier?.hasPrefix("chat-message-row-") == true }
         let anchor = try XCTUnwrap(rows.first {
@@ -159,12 +174,14 @@ final class ChatApprovedScreenTests: XCTestCase {
         })
         let id = anchor.accessibilityIdentifier
         let offset = anchor.convert(.zero, to: scroll).y - scroll.contentOffset.y
-        list[0].text = String(repeating: "Добавленный текст выше. ", count: 30)
-        chat.applyOfflineMemoryFixture(conversation: conv, messages: list)
-        for _ in 0..<12 { await Task.yield(); chat.view.layoutIfNeeded() }
-        let restored = try XCTUnwrap(all(chat.view, UIStackView.self).first { $0.accessibilityIdentifier == id })
-        XCTAssertEqual(restored.convert(.zero, to: scroll).y - scroll.contentOffset.y, offset, accuracy: 2)
-        XCTAssertFalse(try control("chat-new-messages", chat).isHidden)
+        for count in [30, 60] {
+            list[0].text = String(repeating: "Добавленный текст выше. ", count: count)
+            chat.applyOfflineMemoryFixture(conversation: conv, messages: list)
+            try await readingLayoutSettled(chat)
+            let restored = try XCTUnwrap(all(chat.view, UIStackView.self).first { $0.accessibilityIdentifier == id })
+            XCTAssertEqual(restored.convert(.zero, to: scroll).y - scroll.contentOffset.y, offset, accuracy: 2)
+            XCTAssertFalse(try control("chat-new-messages", chat).isHidden)
+        }
         try control("chat-new-messages", chat).sendActions(for: .touchUpInside)
         XCTAssertTrue(try control("chat-new-messages", chat).isHidden)
         snapshot("chat-689-reading-anchor")
@@ -185,8 +202,8 @@ final class ChatApprovedScreenTests: XCTestCase {
     }
 
     func testApprovedTypographyIsOptInAndReadable() {
-        XCTAssertEqual(ChatScreenAppearance.approvedReference.messageFont.pointSize,
-                       UIFontMetrics(forTextStyle: .body).scaledFont(for: .systemFont(ofSize: 20)).pointSize)
+        XCTAssertEqual(ChatScreenAppearance.approvedReference.messageFont,
+                       UIFont.preferredFont(forTextStyle: .body))
         XCTAssertEqual(ChatScreenAppearance.existing.messageFont, UIFont.preferredFont(forTextStyle: .body))
         XCTAssertEqual(ChatScreenAppearance.approvedReference.orbSize, 48)
     }

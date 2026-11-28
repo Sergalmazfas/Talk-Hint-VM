@@ -97,6 +97,11 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private var readingRestoreGeneration = 0
     private var resumeTask: Task<Void, Never>?
     #if DEBUG
+    /// Observe the real asynchronous restore; tests must not guess run-loop timing.
+    var offlineReadingRestorePending: Bool {
+        pendingScrollRestore != nil || readingRestoreScheduled
+    }
+
     /// Offline native test fixture: loading this never sends, saves or starts audio.
     func applyOfflineMemoryFixture(conversation: ChatConversation, messages: [ChatMessage]) {
         loadViewIfNeeded()
@@ -552,8 +557,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
             let page = try await api.chatMessages(conversationId: conversation.id)
             guard !Task.isCancelled, isCurrentOwner, currentConversation?.id == conversation.id else { return }
             // Rebuilding self-sizing message views can need another layout pass.
-            pendingScrollRestore = pendingScrollRestore ?? scroll.contentOffset
-            restoredReadingLayout = nil
+            captureReadingPosition()
             messages = ChatOutbox.merge(messages, page.messages)
             renderMessages()
             view.setNeedsLayout()
@@ -574,6 +578,20 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
         pendingScrollRestore = nil
         restoredReadingLayout = nil
         readingMessageAnchor = nil
+    }
+    private func captureReadingPosition() {
+        guard readingMessageAnchor == nil else { return }
+        let position = pendingScrollRestore ?? scroll.contentOffset
+        // Capture against the OLD rows, before replacing messages or their views.
+        // Resume/refresh and streaming must preserve the same message-relative anchor.
+        if let row = messagesStack.arrangedSubviews.first(where: {
+            $0.accessibilityIdentifier?.hasPrefix("chat-message-row-") == true &&
+            $0.convert(.zero, to: scroll).y + $0.bounds.height > position.y
+        }), let id = row.accessibilityIdentifier {
+            readingMessageAnchor = (id, row.convert(.zero, to: scroll).y - position.y)
+        }
+        pendingScrollRestore = position
+        restoredReadingLayout = nil
     }
     private func scheduleReadingRestore() {
         guard pendingScrollRestore != nil, !readingRestoreScheduled else { return }
@@ -938,16 +956,7 @@ final class ChatViewController: UIViewController, UITextViewDelegate, UIDocument
     private func renderMessages() {
         let shouldStickToBottom = pendingScrollRestore == nil &&
             scroll.contentOffset.y + scroll.bounds.height >= scroll.contentSize.height - 80
-        if !shouldStickToBottom, pendingScrollRestore == nil {
-            if let row = messagesStack.arrangedSubviews.first(where: {
-                $0.accessibilityIdentifier?.hasPrefix("chat-message-row-") == true &&
-                $0.convert(.zero, to: scroll).y + $0.bounds.height > scroll.contentOffset.y
-            }), let id = row.accessibilityIdentifier {
-                readingMessageAnchor = (id, row.convert(.zero, to: scroll).y - scroll.contentOffset.y)
-            }
-            pendingScrollRestore = scroll.contentOffset
-            restoredReadingLayout = nil
-        }
+        if !shouldStickToBottom { captureReadingPosition() }
         messagesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if messages.isEmpty {
             let welcome = UILabel(); welcome.text = NSLocalizedString("chat.welcome", comment: "")

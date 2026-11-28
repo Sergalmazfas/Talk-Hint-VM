@@ -105,6 +105,7 @@ REQUIRED_TESTS = {
         "testBackAndDrawerUseDifferentActions",
         "testDrawerOpensExistingSettingsAndNativeBackReturns",
         "testDraftAndReadingPositionSurviveExitAndReopen",
+        "testReadingAnchorSurvivesGrowthDuringReopen",
         "testExternalTabSelectionDoesNotDismissCallOverlay",
         "testCompactDrawerScrollsAndFutureDestinationsAreDisabled",
     ),

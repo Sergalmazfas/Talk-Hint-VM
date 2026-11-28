@@ -19,10 +19,11 @@ final class ChatNavigationTests: XCTestCase {
         try await super.tearDown()
     }
 
-    private func fixture() throws -> (TalkHintTabBarController, ChatViewController) {
+    private func fixture(growFirstMessageOnRefresh: Bool = false) throws -> (TalkHintTabBarController, ChatViewController) {
         let suite = "chat-navigation-\(UUID())"
         suites.append(suite)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        var messageReads = 0
         let api = APIClient(transport: { request in
             let object: [String: Any]
             switch request.url!.path {
@@ -32,9 +33,12 @@ final class ChatNavigationTests: XCTestCase {
             case "/api/chat-v1/conversations":
                 object = ["conversations": [["id": "c1", "title": "Fixture", "createdAt": "", "updatedAt": ""]]]
             case "/api/chat-v1/conversations/c1/messages":
+                messageReads += 1
                 object = ["messages": (1...35).map { i in
                     ["id": "m\(i)", "conversationId": "c1", "sequence": i, "role": i % 2 == 0 ? "user" : "assistant",
-                     "text": "Offline fixture \(i). This is enough text to exercise a scrollable conversation.",
+                     "text": growFirstMessageOnRefresh && messageReads > 1 && i == 1
+                        ? String(repeating: "Offline growth above the reader. ", count: 60)
+                        : "Offline fixture \(i). This is enough text to exercise a scrollable conversation.",
                      "status": "complete", "attachmentIds": [], "createdAt": ""] as [String: Any]
                 }, "hasMore": false]
             default: object = [:] // Settings GET fixtures; never external transport.
@@ -196,6 +200,51 @@ final class ChatNavigationTests: XCTestCase {
             chat.view.layoutIfNeeded()
             try await Task.sleep(nanoseconds: 1_000_000)
             XCTAssertEqual(scroll.contentOffset.y, 250, accuracy: 2)
+        }
+    }
+    func testReadingAnchorSurvivesGrowthDuringReopen() async throws {
+        let (tabs, chat) = try fixture(growFirstMessageOnRefresh: true)
+        tabs.openChat(animated: false)
+        try await chatShown(tabs)
+        let scroll = try XCTUnwrap(descendants(chat.view, as: UIScrollView.self).first {
+            $0.accessibilityIdentifier == "chat-messages"
+        })
+        try await waitUntil("initial transcript layout") {
+            chat.view.layoutIfNeeded()
+            return scroll.contentSize.height > 1000 && !chat.offlineReadingRestorePending
+        }
+        let firstRow = try XCTUnwrap(descendants(chat.view, as: UIStackView.self).first {
+            $0.accessibilityIdentifier == "chat-message-row-m1"
+        })
+        let oldHeight = firstRow.bounds.height
+        chat.scrollViewWillBeginDragging(scroll)
+        scroll.setContentOffset(CGPoint(x: 0, y: 500), animated: false)
+        let anchor = try XCTUnwrap(descendants(chat.view, as: UIStackView.self).first {
+            $0.accessibilityIdentifier?.hasPrefix("chat-message-row-") == true &&
+                $0.convert(.zero, to: scroll).y + $0.bounds.height > scroll.contentOffset.y
+        })
+        let id = anchor.accessibilityIdentifier
+        let offset = anchor.convert(.zero, to: scroll).y - scroll.contentOffset.y
+        tabs.closeChat(animated: false)
+        try await chatHidden(tabs)
+        tabs.openChat(animated: false)
+        try await chatShown(tabs)
+        try await waitUntil("grown refresh and message-relative restore") {
+            chat.view.layoutIfNeeded()
+            let row = self.descendants(chat.view, as: UIStackView.self).first {
+                $0.accessibilityIdentifier == "chat-message-row-m1"
+            }
+            return (row?.bounds.height ?? 0) > oldHeight + 200 && !chat.offlineReadingRestorePending
+        }
+        for _ in 0..<4 {
+            chat.view.setNeedsLayout()
+            chat.view.layoutIfNeeded()
+            try await Task.sleep(nanoseconds: 1_000_000)
+            let restored = try XCTUnwrap(descendants(chat.view, as: UIStackView.self).first {
+                $0.accessibilityIdentifier == id
+            })
+            XCTAssertEqual(restored.convert(.zero, to: scroll).y - scroll.contentOffset.y,
+                           offset, accuracy: 2)
         }
     }
     func testExternalTabSelectionDoesNotDismissCallOverlay() async throws {

@@ -52,6 +52,32 @@ class ChatNavigationSourceContracts(unittest.TestCase):
         self.assertIn("scheduleReadingRestore()", self.chat)
         self.assertIn("anchorY ?? savedPosition.y", self.chat)
 
+    def test_refresh_captures_message_anchor_before_replacing_rows(self):
+        refresh = self.chat.split("private func refreshVisibleConversation()", 1)[1].split(
+            "private func restoreScrollPosition", 1)[0]
+        self.assertLess(refresh.index("captureReadingPosition()"),
+                        refresh.index("messages = ChatOutbox.merge"))
+        capture = self.chat.split("private func captureReadingPosition()", 1)[1].split(
+            "private func scheduleReadingRestore()", 1)[0]
+        self.assertIn("guard readingMessageAnchor == nil else { return }", capture)
+        self.assertIn("let position = pendingScrollRestore ?? scroll.contentOffset", capture)
+        self.assertIn("to: scroll).y - position.y", capture)
+        self.assertIn("if !shouldStickToBottom { captureReadingPosition() }", self.chat)
+
+    def test_native_anchor_regression_waits_for_real_restore_without_relaxing_assertion(self):
+        native = (ROOT / "ios/TalkHintTests/ChatApprovedScreenTests.swift").read_text()
+        helper = native.split("private func readingLayoutSettled", 1)[1].split(
+            "func testReadingAnchorSurvivesGrowthAboveIt", 1)[0]
+        self.assertIn("offlineReadingRestorePending", helper)
+        self.assertIn("Task.sleep", helper)
+        self.assertIn('throw NSError(domain: "OfflineChatReadingRestoreTimeout"', helper)
+        anchor = native.split("func testReadingAnchorSurvivesGrowthAboveIt", 1)[1].split(
+            "private func snapshot", 1)[0]
+        self.assertIn("for count in [30, 60]", anchor)
+        self.assertIn("try await readingLayoutSettled(chat)", anchor)
+        self.assertIn("offset, accuracy: 2)", anchor)
+        self.assertNotIn("await Task.yield()", anchor)
+
     def test_drawer_is_scrollable_future_sections_are_disabled(self):
         self.assertIn("let menuScroll = UIScrollView()", self.chat)
         block = self.chat.split('for future in [', 1)[1].split("let settings =", 1)[0]
